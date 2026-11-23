@@ -904,9 +904,18 @@ impl Frames {
 /// The variables of frames that are bound to a tensor without a Python
 /// object (see `Compiled::obj`): the frame, the variable's place in it, which
 /// is empty meanwhile, and a reference to the tensor. Each gets its object,
-/// and the frame the object, before anything runs that can look at a frame:
-/// a call, an exception, a signal check. So there are none whenever the
-/// function is not the one that is running.
+/// and the frame the object, before anything runs that can look at a frame.
+/// That is asked where it would run: at a call; at any other instruction
+/// that is not shown, on what it is given, to run C code that reads its
+/// operands and nothing else (`Compiled::looks`), and at the truth of a
+/// branch; where a register or a variable lets go of an object whose end
+/// is not shown to run nothing (`Compiled::let_go`); at an exception; and
+/// where the interpreter starts the frame of a Python function, whatever
+/// made it start one (`take_frame`: a kernel under a mode, a finalizer
+/// that C++ reached, a signal handler). Where no frame is offered
+/// (`Options::hook`), pending signals are not looked for behind a kernel
+/// while a variable waits. So there are none whenever the function is not
+/// the one that is running.
 struct Unbound {
     list: std::cell::RefCell<Vec<(*mut std::ffi::c_void, *mut Obj, Obj)>>,
     any: std::cell::Cell<bool>,
@@ -1165,6 +1174,11 @@ unsafe fn tick() -> bool {
             }
         }
     }
+    // A signal handler is given the frame that is running: the function's,
+    // not that of the function that is called here for the rest.
+    if ffi::PyErr_CheckSignals() != 0 {
+        return false;
+    }
     // The interpreter is to run it: the VM would not look at what is pending.
     let _nobody = Hooked::nobody();
     let result = ffi::PyObject_CallNoArgs(nothing);
@@ -1193,6 +1207,10 @@ thread_local! {
     /// code but the runtime's: a pass, a region, an import, a call that is
     /// measured in the interpreter.
     static HOOKED: std::cell::Cell<*const Compiled> = const { std::cell::Cell::new(std::ptr::null()) };
+    /// The compiled function that has variables waiting for their objects
+    /// on this thread (`Unbound`): the one that is running. Null when none
+    /// has.
+    static WAITS: std::cell::Cell<*const Compiled> = const { std::cell::Cell::new(std::ptr::null()) };
 }
 
 thread_local! {
@@ -1608,6 +1626,13 @@ pub fn frames_offered() -> bool {
 /// (what it calls is offered in turn) or it was measured to run faster
 /// there (with all it calls). Returns 0 if no compiled function is running.
 pub unsafe extern "C" fn take_frame(function: Obj, frame: *mut std::ffi::c_void, result: *mut Obj) -> i32 {
+    // What the frame runs can look at the frames above it, whatever made
+    // the interpreter start it: an instruction, a kernel, the end of an
+    // object, a signal.
+    let waits = WAITS.with(|waits| waits.get());
+    if !waits.is_null() {
+        (*waits).bind();
+    }
     let owner = HOOKED.with(|h| h.get());
     if owner.is_null() {
         return 0;
@@ -1714,6 +1739,9 @@ pub struct Compiled {
     /// Python object after all.
     pub unboxed_results: AtomicU64,
     pub boxed_later: AtomicU64,
+    /// The variables that got their object because something could look
+    /// at the frame (`bind`).
+    pub bound_later: AtomicU64,
     /// Function name and file name of each origin, for traceback entries.
     origin_c: Vec<(CString, CString)>,
     /// Per handler block: the registers that survive entering it, which are
@@ -1964,7 +1992,12 @@ impl Compiled {
             o
         };
         // The slot first: letting go of what it held can run a finalizer.
-        xdecref(frame_owned(std::mem::replace(&mut *place, frame_ref(bound))));
+        let held = frame_owned(std::mem::replace(&mut *place, frame_ref(bound)));
+        if self.unbound.any.get() {
+            self.let_go(held);
+        } else {
+            xdecref(held);
+        }
     }
 
     #[inline(never)]
@@ -1972,6 +2005,35 @@ impl Compiled {
         capi::retain(tensor);
         self.unbound.list.borrow_mut().push((frame.ptr, place, tensor));
         self.unbound.any.set(true);
+        WAITS.with(|waits| waits.set(self));
+    }
+
+    /// None of this function's variables waits any more.
+    unsafe fn waits_no_more(&self) {
+        WAITS.with(|waits| {
+            if std::ptr::eq(waits.get(), self) {
+                waits.set(std::ptr::null());
+            }
+        });
+    }
+
+    /// Lets go of a reference that a register or a variable of the function
+    /// held. Where that can end an object whose end is not shown to run
+    /// nothing, what runs finds the variables bound.
+    #[inline(never)]
+    unsafe fn let_go(&self, o: Obj) {
+        if self.unbound.any.get() && !graph::lets_go_quietly(o) {
+            self.bind();
+        }
+        capi::release(o);
+    }
+
+    /// `let_go` for the registers that an instruction or an edge kills.
+    #[inline(never)]
+    unsafe fn let_go_all(&self, regs: &mut [Obj], kills: &[V]) {
+        for v in kills {
+            self.let_go(take(regs, *v));
+        }
     }
 
     /// Gives the tensors that variables are bound to their Python objects,
@@ -1980,8 +2042,10 @@ impl Compiled {
     unsafe fn bind(&self) {
         let list = std::mem::take(&mut *self.unbound.list.borrow_mut());
         self.unbound.any.set(false);
+        self.waits_no_more();
         let raised = ffi::PyErr_GetRaisedException();
         let api = capi::api().unwrap_unchecked();
+        self.bound_later.fetch_add(list.len() as u64, Ordering::Relaxed);
         for (_, place, tensor) in list {
             // Consumes the reference.
             let boxed = (api.tensor_box)(tensor);
@@ -2000,16 +2064,23 @@ impl Compiled {
     /// unbound.
     #[cold]
     unsafe fn forget(&self, which: impl Fn(&(*mut std::ffi::c_void, *mut Obj, Obj)) -> bool) {
-        let mut list = self.unbound.list.borrow_mut();
-        let mut i = 0;
-        while i < list.len() {
-            if which(&list[i]) {
-                capi::release(list.swap_remove(i).2);
-            } else {
-                i += 1;
+        loop {
+            let gone = {
+                let mut list = self.unbound.list.borrow_mut();
+                let gone = list.iter().position(&which).map(|at| list.swap_remove(at).2);
+                self.unbound.any.set(!list.is_empty());
+                gone
+            };
+            // Not while the list is held: the end of a tensor can run
+            // code, which finds the others bound (`take_frame`).
+            match gone {
+                Some(tensor) => capi::release(tensor),
+                None => break,
             }
         }
-        self.unbound.any.set(!list.is_empty());
+        if !self.unbound.any.get() {
+            self.waits_no_more();
+        }
     }
 
     /// For a frame that is about to be popped. What holds on to the frame
@@ -2148,6 +2219,7 @@ impl Compiled {
             unbound: Unbound { list: std::cell::RefCell::new(Vec::new()), any: std::cell::Cell::new(false) },
             unboxed_results: AtomicU64::new(0),
             boxed_later: AtomicU64::new(0),
+            bound_later: AtomicU64::new(0),
         }
     }
 
@@ -4539,6 +4611,51 @@ impl Compiled {
         };
         let flags = if self.options.unboxed { capi::TCFG_UNBOXED_RESULT } else { 0 };
         self.exec_slot(regs, slot, ptr, flags, fallback, api)
+    }
+
+    /// Whether an instruction of the function, on what it is about to run
+    /// on, can run code that looks at the frames: asked while a variable
+    /// waits for its object, in front of every instruction but a kernel
+    /// (whose Python code, under a mode, is met where its frame starts).
+    /// A call can. Any other instruction that calls out (`Op::calls_out`)
+    /// can unless it is shown not to: `quiet` says for which operands it
+    /// is C code of the interpreter that reads them and nothing else. Not
+    /// taken from `quiet`, which is for the instructions of a path: what
+    /// draws on an iterator (only one of the interpreter's own over a
+    /// list, a tuple, a range, a dict or a text draws in C), and what
+    /// stores into an object, a dict or the globals (what was there ends).
+    /// Of the instructions that call nothing, those that let go of what a
+    /// cell or a slot held, or of the exception that was being handled, can
+    /// end an object.
+    #[inline(never)]
+    unsafe fn looks(&self, regs: &[Obj], op: &Op) -> bool {
+        let at = |v: V| reg(regs, v);
+        match op {
+            Op::Dispatch(_) | Op::Graph(_) => false,
+            Op::CellSet(cell, _) => {
+                let cell = at(*cell);
+                if cell.is_null() || capi::is_unboxed(cell) || ffi::Py_TYPE(cell) != std::ptr::addr_of_mut!(pyffi::PyCell_Type) {
+                    return true;
+                }
+                let held = pyffi::PyCell_Get(cell);
+                // One reference is this one's.
+                let quiet = held.is_null() || ffi::Py_REFCNT(held) > 2 || graph::ends_quietly(held);
+                xdecref(held);
+                !quiet
+            }
+            Op::StoreDeref(..) | Op::PopExcInfo(_) => true,
+            Op::StoreSlot(slot, _) => !graph::lets_go_quietly(at(*slot)),
+            op if !op.calls_out() => false,
+            op if op.is_call() => true,
+            Op::IterNext(it) => !graph::draws_quietly(at(*it)),
+            Op::StoreAttr { .. } | Op::MapAdd(..) => true,
+            // A tensor that is indexed: kernels.
+            Op::GetItem(a, k) if graph::own_tensor(at(*a)) => !(graph::own_tensor(at(*k)) || graph::is_plain_key(at(*k))),
+            op => match capi::api() {
+                Some(api) => !self.quiet(regs, op, api),
+                None => true,
+            },
+        }
     }
 
     /// `ptr` points at the operands, which may be unboxed tensors. With
@@ -7445,7 +7562,7 @@ impl Compiled {
         }
         // It runs as the block loop runs it.
         frames.top().at(inst.bc & OFFSET_MASK);
-        if self.unbound.any.get() && inst.op.is_call() && !matches!(inst.op, Op::Dispatch(_)) {
+        if self.unbound.any.get() && !matches!(inst.op, Op::Dispatch(_)) && self.looks(regs, &inst.op) {
             self.bind();
         }
         let result = match (&inst.op, kind) {
@@ -7511,7 +7628,7 @@ impl Compiled {
             (op, _) => self.exec_op(regs, op).map(|obj| (obj, null_mut())),
         };
         let result = match result {
-            Ok((obj, _)) if inst.op.is_call() && ffi::PyErr_CheckSignals() != 0 => {
+            Ok((obj, _)) if inst.op.is_call() && (self.options.hook || !self.unbound.any.get()) && ffi::PyErr_CheckSignals() != 0 => {
                 capi::release(obj);
                 Err(())
             }
@@ -10615,13 +10732,25 @@ impl Compiled {
                         capi::retain(o);
                         vals[i] = o;
                     }
-                    for (i, (dst, _)) in moves.iter().enumerate() {
-                        let old = std::mem::replace(regs.get_unchecked_mut(*dst as usize), vals[i]);
-                        capi::release(old);
+                    // What a register held ends here: see `let_go`.
+                    if self.unbound.any.get() {
+                        for (i, (dst, _)) in moves.iter().enumerate() {
+                            self.let_go(std::mem::replace(regs.get_unchecked_mut(*dst as usize), vals[i]));
+                        }
+                    } else {
+                        for (i, (dst, _)) in moves.iter().enumerate() {
+                            let old = std::mem::replace(regs.get_unchecked_mut(*dst as usize), vals[i]);
+                            capi::release(old);
+                        }
                     }
                 }
-                for v in self.analysis.edge_kills.get_unchecked(cur).get_unchecked(pi) {
-                    capi::release(take(regs, *v));
+                let kills = self.analysis.edge_kills.get_unchecked(cur).get_unchecked(pi);
+                if self.unbound.any.get() {
+                    self.let_go_all(regs, kills);
+                } else {
+                    for v in kills {
+                        capi::release(take(regs, *v));
+                    }
                 }
                 if cur <= pred {
                     back_edges = back_edges.wrapping_add(1);
@@ -10749,8 +10878,9 @@ impl Compiled {
                             Op::CaughtLasti => Ok(frames.top().lasti()),
                             op => {
                                 frames.top().at(inst.bc & OFFSET_MASK);
-                                // What is called can look at the frames.
-                                if self.unbound.any.get() && op.is_call() && !matches!(op, Op::Dispatch(_)) {
+                                // What is called can look at the frames, and
+                                // so can what any other instruction runs.
+                                if self.unbound.any.get() && !matches!(op, Op::Dispatch(_)) && self.looks(regs, op) {
                                     self.bind();
                                 }
                                 if mode == Mode::Profile {
@@ -10762,15 +10892,26 @@ impl Compiled {
                         };
                         // The interpreter looks for pending signals when a
                         // call returns; a handler runs there, and what it
-                        // raises is raised by the call.
+                        // raises is raised by the call. A handler that is
+                        // a Python function starts a frame, where a variable
+                        // that waits gets its object (`take_frame`); where
+                        // no frame is offered it would find the variable
+                        // unbound, and pending signals are left to the next
+                        // call, to the loop (`tick`) or to the return.
                         let result = match result {
-                            Ok(obj) if inst.op.is_call() && ffi::PyErr_CheckSignals() != 0 => {
+                            Ok(obj) if inst.op.is_call() && (self.options.hook || !self.unbound.any.get()) && ffi::PyErr_CheckSignals() != 0 => {
                                 capi::release(obj);
                                 Err(())
                             }
                             other => other,
                         };
                         match result {
+                            Ok(obj) if self.unbound.any.get() => {
+                                if inst.dst != NONE {
+                                    self.let_go(std::mem::replace(regs.get_unchecked_mut(inst.dst as usize), obj));
+                                }
+                                self.let_go_all(regs, &inst.kills);
+                            }
                             Ok(obj) => {
                                 if inst.dst != NONE {
                                     let old = std::mem::replace(
@@ -10809,6 +10950,11 @@ impl Compiled {
                                 } else if c == ffi::Py_False() {
                                     false
                                 } else {
+                                    // What says whether it is true can look
+                                    // at the frames.
+                                    if self.unbound.any.get() && !graph::quiet_truth(c) && !graph::own_tensor(c) {
+                                        self.bind();
+                                    }
                                     let r = ffi::PyObject_IsTrue(c);
                                     if r < 0 {
                                         self.fail(frames, term_bc);
@@ -10857,8 +11003,12 @@ impl Compiled {
                                 raised!('blocks, cur);
                             }
                         };
-                        for v in &code_ref.term_kills {
-                            capi::release(take(regs, *v));
+                        if self.unbound.any.get() {
+                            self.let_go_all(regs, &code_ref.term_kills);
+                        } else {
+                            for v in &code_ref.term_kills {
+                                capi::release(take(regs, *v));
+                            }
                         }
                         break next;
                     }
