@@ -4451,8 +4451,19 @@ impl Compiled {
     /// not where the function has it, and again when the call turns out to
     /// be one the path is not for. A read of a variable; arithmetic on
     /// numbers; an attribute that is found without a property or a
-    /// `__getattr__` of Python; an item of a list, a tuple or a dict.
+    /// `__getattr__` of Python; an item of a list, a tuple or a dict; a list
+    /// or a dict that is made; a loop over a list, a tuple or a range.
     unsafe fn quiet(&self, regs: &[Obj], op: &Op, api: &TcfgApi) -> bool {
+        self.quiet_of(regs, op, &|_| true, api)
+    }
+
+    /// `quiet` where a path is run: `own` says of a register whether the
+    /// path made what it holds. What goes over an iterator uses it up,
+    /// and may do that to one the path made at this call and to no other:
+    /// a value that was a list when the path was taken down may be an
+    /// iterator of the caller's now. (While a path is taken down, `record`
+    /// asks that of the trace itself.)
+    unsafe fn quiet_of(&self, regs: &[Obj], op: &Op, own: &dyn Fn(V) -> bool, api: &TcfgApi) -> bool {
         let at = |v: V| reg(regs, v);
         match op {
             Op::Const(_)
@@ -4465,10 +4476,18 @@ impl Compiled {
             | Op::IsNone(..)
             | Op::Is(..)
             | Op::IsFunction { .. }
-            | Op::BuildTuple(_)
-            | Op::BuildList(_)
-            | Op::BuildSlice(..)
             | Op::CheckBound(..) => true,
+            // Of what is there: a register that is empty is nothing to
+            // build of.
+            Op::BuildTuple(vs) | Op::BuildList(vs) => vs.iter().all(|v| !at(*v).is_null()),
+            Op::BuildSlice(a, b, c) => [a, b, c].into_iter().all(|v| *v == NONE || !at(*v).is_null()),
+            // What changes a list, or draws on an iterator, does so to one
+            // the path made: `record` takes down no other.
+            Op::ListAppend(..) | Op::IterNext(_) => true,
+            Op::ListToTuple(l) => !at(*l).is_null() && ffi::PyList_CheckExact(at(*l)) != 0,
+            Op::BuildMap(vs) => vs.iter().step_by(2).all(|k| !at(*k).is_null() && graph::is_plain_key(at(*k))),
+            Op::MapAdd(_, k, _) => !at(*k).is_null() && graph::is_plain_key(at(*k)),
+            Op::GetIter(v) => !at(*v).is_null() && graph::quiet_iter(at(*v)).is_some_and(|used_up| !used_up || own(*v)),
             Op::Binary(_, a, b) => [a, b].iter().all(|v| !at(**v).is_null() && graph::is_number(at(**v))),
             Op::Unary(UnaryKind::Not, a) | Op::ToBool(a) => !at(*a).is_null() && graph::quiet_truth(at(*a)),
             Op::Unary(_, a) => !at(*a).is_null() && graph::is_number(at(*a)),
@@ -4481,6 +4500,10 @@ impl Compiled {
                 !at(*item).is_null() && !at(*container).is_null() && graph::quiet_contains(at(*item), at(*container))
             }
             Op::GetLen(v) | Op::Unpack(v, _) => !at(*v).is_null() && graph::quiet_sized(at(*v)),
+            Op::Call { callee, args, kwnames } => {
+                let given: Vec<Obj> = args.iter().map(|v| at(*v)).collect();
+                *kwnames == NONE && graph::pure_call(at(*callee), &given, api).is_some()
+            }
             _ => false,
         }
     }
@@ -4517,7 +4540,7 @@ impl Compiled {
                     let held = if there { pyffi::PyCell_Get(ffi::PyTuple_GET_ITEM(closure, *i as isize)) } else { null_mut() };
                     checked(held)
                 }
-                op if self.quiet(own, op, api) => self.exec_op(own, op),
+                op if self.quiet_of(own, op, &|v| path.made.get(v as usize).is_some_and(|made| *made), api) => self.exec_op(own, op),
                 // An attribute that the path read is not there at this
                 // call, and `object` says so itself: the read raises and
                 // does nothing else, where the instructions get to it.
@@ -5150,10 +5173,56 @@ impl Compiled {
             _ => {}
         }
         // What the instruction is to a path, or why it is no part of one.
+        let made = |t: &Trace, v: V| t.map[v as usize] != NONE && t.defs[t.map[v as usize] as usize].made;
+        if let Some((list, item)) = self.appends(t, inst, regs).filter(|(list, _)| made(t, *list)) {
+            // `list.append(item)` on a list the path made: the list gets
+            // the item, and the call gives None.
+            let (list, item) = (self.path_value(t, regs, list), self.path_value(t, regs, item));
+            frames.top().at(inst.bc & OFFSET_MASK);
+            let Ok(nothing) = self.exec_op(regs, &inst.op) else {
+                return Taken::Raised;
+            };
+            // What is read of a list that holds what an operation gave is
+            // read behind the graph, and so is what is put into it later
+            // (`Trace::note`).
+            let append = Op::ListAppend(list, item);
+            t.note(&append, NONE, Kind::Residual);
+            t.body.push(PathInst { op: append, dst: NONE, kind: Kind::Residual, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None });
+            ffi::Py_XINCREF(nothing);
+            let dst = t.define(inst.dst, Def::default(), nothing);
+            let none = Op::Const(self.func.const_none);
+            t.note(&none, dst, Kind::Pure);
+            t.body.push(PathInst { op: none, dst, kind: Kind::Pure, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None });
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], nothing));
+            kill(t, regs);
+            return Taken::Went;
+        }
         let operators = self.operation(block, origin, inst, regs, api);
+        let mut makes = false;
         let kind = match &inst.op {
             Op::Dispatch(d) if d.slot.traits() == 0 && d.slot.len() > 0 => Some(Kind::Node),
             Op::Call { .. } | Op::CallMethod { .. } | Op::GetItem(..) if operators.is_some() => Some(Kind::Node),
+            Op::Call { callee, args, kwnames } if *kwnames == NONE => {
+                let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
+                graph::pure_call(reg(regs, *callee), &given, api).map(|iterable| {
+                    makes = iterable;
+                    Kind::Pure
+                })
+            }
+            Op::BuildList(_) | Op::BuildMap(_) if self.quiet(regs, &inst.op, api) => {
+                makes = true;
+                Some(Kind::Pure)
+            }
+            Op::ListAppend(target, _) | Op::MapAdd(target, ..) | Op::IterNext(target) => {
+                (made(t, *target) && self.quiet(regs, &inst.op, api)).then_some(Kind::Residual)
+            }
+            Op::GetIter(v) => match graph::quiet_iter(reg(regs, *v)) {
+                Some(of_path) if !of_path || made(t, *v) => {
+                    makes = true;
+                    Some(Kind::Residual)
+                }
+                _ => None,
+            },
             Op::LoadGlobal(_) | Op::LoadDeref(_) | Op::CellGet(..) => Some(Kind::Read),
             Op::LoadAttr(..) | Op::GetItem(..) | Op::Contains(..) | Op::GetLen(_) | Op::Unpack(..) => {
                 self.quiet(regs, &inst.op, api).then_some(Kind::Read)
@@ -5170,10 +5239,37 @@ impl Compiled {
         let Some(kind) = kind else {
             return ends();
         };
-        let Some(renamed) = graph::renamed(&inst.op, &mut |v| self.path_value(t, regs, v)) else {
+        let Some(mut renamed) = graph::renamed(&inst.op, &mut |v| self.path_value(t, regs, v)) else {
             return ends();
         };
         if kind == Kind::Node {
+            // A list the path made and filled is handed over as what it
+            // holds: the graph has those values, not the list.
+            let mut lists: Vec<(PathValue, PathValue)> = Vec::new();
+            graph::reads(&renamed, |v| {
+                if let Some(items) = self.listed(t, v) {
+                    let late = items.iter().any(|item| t.defs[*item as usize].late);
+                    let op = Op::BuildList(items);
+                    let graph = late && graph::computed(&op, &t.defs, |_| false);
+                    let kept = t.rec.values[v as usize];
+                    ffi::Py_XINCREF(kept);
+                    let list = t.defs.len() as PathValue;
+                    t.defs.push(Def { node: false, late, graph, made: false });
+                    t.source.push(t.source[v as usize]);
+                    t.rec.values.push(kept);
+                    if !kept.is_null() && !capi::is_unboxed(kept) {
+                        t.rec.kept.entry(kept as usize).or_insert((0, list)).0 += 1;
+                    }
+                    let inst = PathInst { op, dst: list, kind: Kind::Pure, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None };
+                    t.note(&inst.op, inst.dst, inst.kind);
+                    t.body.push(inst);
+                    lists.push((v, list));
+                }
+            });
+            if !lists.is_empty() {
+                let again = graph::renamed(&renamed, &mut |v| lists.iter().find(|(l, _)| *l == v).map_or(v, |(_, to)| *to));
+                renamed = again.unwrap_or(renamed);
+            }
             // A node takes nothing that was computed from a node and that
             // the graph cannot compute itself.
             let mut fits = true;
@@ -5243,7 +5339,7 @@ impl Compiled {
             let node = kind == Kind::Node;
             let graph = late && !node && graph::computed(&renamed, &t.defs, int);
             ffi::Py_XINCREF(obj);
-            dst = t.define(inst.dst, Def { node, late, graph }, obj);
+            dst = t.define(inst.dst, Def { node, late, graph, made: makes }, obj);
             capi::release(std::mem::replace(&mut regs[inst.dst as usize], obj));
         } else {
             capi::release(obj);
@@ -5268,9 +5364,67 @@ impl Compiled {
             }
         }
         let taken = PathInst { op: renamed, dst, kind, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None };
+        t.note(&taken.op, taken.dst, taken.kind);
         t.body.push(taken);
         kill(t, regs);
         Taken::Went
+    }
+
+    /// For `list.append(item)` on an exact list, however the code has it:
+    /// the list and the item.
+    unsafe fn appends(&self, t: &Trace, inst: &Inst, regs: &[Obj]) -> Option<(V, V)> {
+        let (list, name, args, held) = self.method_of(t, inst, regs)?;
+        let named = pyffi::str_to_string(self.func.consts[name as usize].as_ptr()) == "append";
+        let exact = !held.is_null() && !capi::is_unboxed(held) && ffi::PyList_CheckExact(held) != 0;
+        (named && exact && args.len() == 1 && inst.dst != NONE).then(|| (list, args[0]))
+    }
+
+    /// A call of a method without names, as the two ways a function has
+    /// of writing it: the register the method is called on, its name,
+    /// what it is handed, and the value it is called on. `a.append(item)`
+    /// is one instruction; `add = a.append` and `add(item)` later are a
+    /// read of the method and a call of what was read. For the second
+    /// the method is one written in C that has exactly the value it was
+    /// read off, which the path has taken down (the register may be
+    /// empty by now): a method that an object merely holds,
+    /// `o.append = other.append`, is a method of the other value, and no
+    /// method of the object.
+    unsafe fn method_of<'a>(&self, t: &Trace, inst: &'a Inst, regs: &[Obj]) -> Option<(V, u32, &'a [V], Obj)> {
+        match &inst.op {
+            Op::CallMethod { recv, name, args, kwnames: NONE } => Some((*recv, *name, args.as_slice(), reg(regs, *recv))),
+            Op::Call { callee, args, kwnames: NONE } => {
+                let bound = reg(regs, *callee);
+                if bound.is_null() || capi::is_unboxed(bound) || ffi::PyCFunction_Check(bound) == 0 {
+                    return None;
+                }
+                let Some(Op::LoadAttr(recv, name)) = self.analysis.def_op(&self.func, *callee) else {
+                    return None;
+                };
+                let (held, read_off) = (ffi::PyCFunction_GetSelf(bound), t.map[*recv as usize]);
+                let same = read_off != NONE && !held.is_null() && t.rec.values[read_off as usize] == held;
+                same.then(|| (*recv, *name, args.as_slice(), held))
+            }
+            _ => None,
+        }
+    }
+
+    /// For a list that a path made: the values it holds where the trace has
+    /// got to, if the path filled it by nothing but appending. None for any
+    /// other value, and for a list that is as its instruction built it.
+    fn listed(&self, t: &Trace, list: PathValue) -> Option<Vec<PathValue>> {
+        let mut items: Option<Vec<PathValue>> = None;
+        let mut appended = false;
+        for inst in &t.body {
+            match &inst.op {
+                Op::BuildList(vs) if inst.dst == list => items = Some(vs.clone()),
+                Op::ListAppend(target, v) if *target == list => {
+                    items.as_mut()?.push(*v);
+                    appended = true;
+                }
+                _ => {}
+            }
+        }
+        items.filter(|_| appended)
     }
 
     /// Takes a path down: runs the instructions of the function from

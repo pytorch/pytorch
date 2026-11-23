@@ -5778,6 +5778,20 @@ def graph_optional(x, bias=None):
     return y.cos().tanh().sum()
 
 
+def graph_loops(x, n):
+    y = x.sin()
+    for i in range(n):
+        y = y * 0.5 + i
+    return y.cos().sum()
+
+
+def graph_collects(xs):
+    out = []
+    for x in xs:
+        out.append(x.sin() * 2)
+    return torch.cat(out).tanh().sum()
+
+
 def graph_on_data(x):
     y = x.sin() * 2 + 1
     if y.sum() > 0:
@@ -5872,6 +5886,11 @@ def graph_paths(case, device):
     if case == "branches":
         flags = (True, True, True, False, False, True)
         return graph_branches, [(make(4), flag) for flag in flags]
+    if case == "loops":
+        return graph_loops, [(make(4), n) for n in (20, 20, 20, 12, 12, 20)]
+    if case == "collects":
+        counts = (3, 3, 3, 2, 2, 3)
+        return graph_collects, [([make(3) for _ in range(n)],) for n in counts]
     return graph_on_a_size, [(make(n),) for n in (4, 4, 4, 2, 2, 4)]
 
 
@@ -6765,6 +6784,74 @@ print(json.dumps(found))
         (graph,) = self.graphs(compiled)
         self.assertEqual((graph["paths"], graph["branches"], graph["hits"]), (2, 1, 3))
 
+    def test_a_graph_goes_round_a_loop(self):
+        graphs = []
+
+        def keep(gm, input_types):
+            graphs.append(gm)
+            return gm
+
+        for behind in ((), (keep,)):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(graph_loops, passes=passes, fallback=False)
+            x = torch.randn(4)
+            for _ in range(4):
+                self.assertEqual(compiled(x, 100), graph_loops(x, 100), atol=0, rtol=0)
+            # Sine, a hundred times round, cosine and sum; the test of the
+            # loop a hundred and one times.
+            (graph,) = self.graphs(compiled)
+            shape = (graph["ops"], graph["branches"], graph["paths"])
+            self.assertEqual(shape, (203, 101, 1))
+            if not behind:
+                continue
+            counts = (graph["variants"], graph["hits"], graph["misses"])
+            self.assertEqual(counts, (1, 2, 1))
+            # The number of times round is no input: it is the path. Another
+            # number is another path, taken down at the call that has it.
+            for _ in range(3):
+                self.assertEqual(compiled(x, 7), graph_loops(x, 7), atol=0, rtol=0)
+            (graph,) = self.graphs(compiled)
+            shape = (graph["ops"], graph["paths"], graph["variants"])
+            self.assertEqual(shape, (17, 2, 2))
+            self.assertEqual((graph["hits"], graph["misses"]), (4, 2))
+            self.assertEqual(compiled(x, 100), graph_loops(x, 100), atol=0, rtol=0)
+            self.assertEqual(self.graphs(compiled)[0]["hits"], 5)
+            self.assertEqual([len(self.targets(gm)) for gm in graphs], [203, 17])
+
+    def test_a_loop_over_a_list_of_tensors_is_one_graph(self):
+        graphs = []
+
+        def keep(gm, input_types):
+            graphs.append(gm)
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_collects, passes=passes, fallback=False)
+        for n in (3, 3, 3, 2, 2, 3):
+            xs = [torch.randn(3) for _ in range(n)]
+            self.assertEqual(compiled(xs), graph_collects(xs), atol=0, rtol=0)
+        # From the first instruction of the function: the list it fills is
+        # one the graph makes, and what is concatenated is what the loop
+        # appended to it.
+        (graph,) = self.graphs(compiled)
+        self.assertEqual((graph["ops"], graph["paths"], graph["variants"]), (9, 2, 2))
+        self.assertEqual((graph["inputs"], graph["hits"]), (1, 3))
+        nodes = graphs[0].graph.nodes
+        placeholders = [n.target for n in nodes if n.op == "placeholder"]
+        self.assertEqual(placeholders, ["x", "x_2", "x_3"])
+        (cat,) = [n for n in graphs[0].graph.nodes if n.target is torch.cat]
+        parts = [p.target for p in cat.args[0]]
+        self.assertEqual(parts, [torch.ops.aten.mul.Tensor] * 3)
+        self.assertEqual(len(self.targets(graphs[1])), 7)
+        # The engine's own graph is the same one.
+        compiled = torch.vm(graph_collects, passes=GRAPHS, fallback=False)
+        xs = [torch.randn(3) for _ in range(3)]
+        for _ in range(3):
+            self.assertEqual(compiled(xs), graph_collects(xs), atol=0, rtol=0)
+        (graph,) = self.graphs(compiled)
+        self.assertEqual((graph["state"], graph["ops"]), ("built", 9))
+        self.assertIn("aten::cat", graph["operators"])
+
     def test_a_branch_on_the_data_of_a_tensor_ends_a_graph(self):
         def keep(gm, input_types):
             return gm
@@ -7272,6 +7359,167 @@ def graph_unused_count(obj, x):
 GRAPH_UNUSED_NAME = 1
 
 
+class GraphChangeBox:
+    pass
+
+
+class GraphChangeThing:
+    def __init__(self):
+        self.value = 0
+
+
+GRAPH_CHANGE_BOX = GraphChangeBox()
+GRAPH_CHANGE_SEEN = []
+GRAPH_CHANGE_TABLE = {}
+
+
+def graph_change_tail(h):
+    return (torch.tanh(h * 2) * 2 - 1).sum()
+
+
+# Functions that change something they made after something else took it.
+def graph_change_appends_behind_a_store(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_BOX.items = made
+    made.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_behind_a_list_from_outside(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_SEEN.append(made)
+    made.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_behind_a_dict_from_outside(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_TABLE["made"] = made
+    made.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_to_an_item_of_a_list(x, given):
+    h = torch.relu(x) + 1
+    inner = []
+    outer = [inner]
+    GRAPH_CHANGE_BOX.items = outer
+    inner.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_to_an_item_of_a_tuple(x, given):
+    h = torch.relu(x) + 1
+    inner = []
+    GRAPH_CHANGE_BOX.items = (inner, 1)
+    inner.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_to_what_an_object_holds(x, given):
+    h = torch.relu(x) + 1
+    inner = []
+    thing = GraphChangeThing()
+    thing.value = inner
+    GRAPH_CHANGE_BOX.items = thing
+    inner.append(given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_around_a_store(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    made.append(given)
+    GRAPH_CHANGE_BOX.items = made
+    made.append(given + 1)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_a_size(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_BOX.items = made
+    made.append(h.shape[0] + given)
+    return graph_change_tail(h)
+
+
+def graph_change_appends_a_result(x, given):
+    h = torch.relu(x) + 1
+    made = []
+    GRAPH_CHANGE_BOX.items = made
+    made.append(h * given)
+    return graph_change_tail(h)
+
+
+def graph_change_stores_behind_a_store(x, given):
+    h = torch.relu(x) + 1
+    thing = GraphChangeThing()
+    GRAPH_CHANGE_BOX.items = thing
+    thing.value = given
+    return graph_change_tail(h)
+
+
+def graph_change_stores_behind_a_list_from_outside(x, given):
+    h = torch.relu(x) + 1
+    thing = GraphChangeThing()
+    GRAPH_CHANGE_SEEN.append([thing])
+    thing.value = given
+    thing.other = given + 1
+    return graph_change_tail(h)
+
+
+def graph_change_ends_an_iterator(x, given):
+    h = torch.relu(x) + 1
+    going = iter((h.shape[0], h.shape[1]))
+    GRAPH_CHANGE_BOX.items = going
+    for step in going:
+        pass
+    return graph_change_tail(h)
+
+
+def graph_change_goes_over_a_tuple(x, given):
+    h = torch.relu(x) + 1
+    for step in (given, given + 1.0):
+        h = h + step
+    return graph_change_tail(h)
+
+
+# Functions that go over what they are given.
+def graph_goes_over(x, given):
+    h = torch.relu(x) + 1
+    for step in given:
+        h = h + step
+    return graph_change_tail(h)
+
+
+def graph_goes_over_two(x, given):
+    h = torch.relu(x) + 1
+    for step, scale in zip(given, (1.0, 2.0, 3.0)):
+        h = h + step * scale
+    return graph_change_tail(h)
+
+
+def graph_goes_over_under_tuple(x, given):
+    h = torch.relu(x) + 1
+    got = tuple(given)
+    return graph_change_tail(h * got[0] + len(got))
+
+
+def graph_gives_loudly():
+    for step in (1.0, 2.0, 3.0):
+        GRAPH_CHANGE_SEEN.append(step)
+        yield step
+
+
+def graph_key_dict_of_a_comprehension(x, given):
+    h = torch.relu(x) + 1
+    made = {key: 1 for key in (given,)}  # noqa: C420, F841
+    return (torch.tanh(h * 2) * 2 - 1).sum()
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -7377,7 +7625,7 @@ class TestVmGraphResults(TestCase):
         (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
         self.assertEqual((graph["state"], graph["hits"]), ("compiled", 2))
 
-    @parametrize("case", ("branches", "size"))
+    @parametrize("case", ("branches", "loops", "collects", "size"))
     def test_a_path_computes_what_the_function_computes(self, device, case):
         def keep(gm, input_types):
             return gm
@@ -8211,6 +8459,204 @@ class TestVmGraphResults(TestCase):
         finally:
             del GRAPH_END_HELD[:], GRAPH_END_LOG[:], GRAPH_END_REFS[:]
             GRAPH_END_STATE[0] = 0.5
+
+    def graph_change_calls(self, run, graded, device, makes=()):
+        # Twelve calls from the same state: what each gave or raised, and
+        # what it left outside (as plain values; of an iterator, what is
+        # left). The calls are given what the first of `makes` makes, the
+        # eighth and the eleventh what the second makes.
+        def plain(value):
+            if isinstance(value, (list, tuple)):
+                return [plain(item) for item in value]
+            if isinstance(value, dict):
+                return {key: plain(item) for key, item in value.items()}
+            if isinstance(value, GraphChangeThing):
+                return plain(vars(value))
+            if type(value).__name__.endswith("iterator"):
+                return ["left", *value]
+            if isinstance(value, torch.Tensor):
+                return (value.tolist(), value.requires_grad, value.grad_fn is None)
+            return value
+
+        def one():
+            return 1.0
+
+        def two():
+            return 2.0
+
+        usual, other = makes or (one, two)
+        GRAPH_CHANGE_BOX.items = None
+        del GRAPH_CHANGE_SEEN[:]
+        GRAPH_CHANGE_TABLE.clear()
+        GRAPH_CHANGE_TABLE["row"] = []
+        found = []
+        for at in range(12):
+            given = other() if at in (7, 10) else usual()
+            x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+            x.requires_grad_(graded)
+            try:
+                out = run(x, given)
+                rest = plain(out[1:]) if isinstance(out, tuple) else []
+                out = out[0] if isinstance(out, tuple) else out
+                if graded:
+                    out.backward()
+                gave = (out.item(), rest)
+            except (TypeError, IndexError) as error:
+                gave = type(error).__name__
+            box, seen = plain(GRAPH_CHANGE_BOX.items), plain(GRAPH_CHANGE_SEEN)
+            found.append((gave, box, seen, plain(GRAPH_CHANGE_TABLE)))
+        return found
+
+    def graph_change_as_eager(self, fns, device, makes=()):
+        def keep(gm, input_types):
+            return gm
+
+        try:
+            for fn in fns:
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    got = self.graph_change_calls(compiled, graded, device, makes)
+                    expected = self.graph_change_calls(fn, graded, device, makes)
+                    pairs = enumerate(zip(got, expected))
+                    differ = [(at, a, b) for at, (a, b) in pairs if a != b]
+                    msg = f"{fn.__name__}, a pass: {bool(behind)}, a gradient: {graded}"
+                    self.assertEqual(differ[:1], [], msg=msg)
+                    if behind:
+                        listed = torch.vm.regions(compiled)
+                        graphs = [g for g in listed if "ops" in g and "within" not in g]
+                        hits = sum(g["hits"] for g in graphs)
+                        self.assertGreaterEqual(hits, 6, msg=f"{msg}: {graphs}")
+        finally:
+            GRAPH_CHANGE_BOX.items = None
+            del GRAPH_CHANGE_SEEN[:]
+            GRAPH_CHANGE_TABLE.clear()
+
+    def test_a_change_to_what_a_path_made_runs_where_the_thing_was_taken(self, device):
+        # What changes something the function made between its operations
+        # (an append to a list, a store into an object of a class it
+        # called, the next item of an iterator) is seen by whatever took
+        # the thing, in front of the change or behind it: a list that was
+        # stored into an object, put into a list or a dict from outside,
+        # or into another list, a tuple or an object the function made
+        # that was, has the item (a number, a size, what the graph
+        # gives), and an iterator whose last item is asked for has given
+        # every item in front of it. A path leaves such a change out of a
+        # run only together with the thing.
+        fns = [
+            graph_change_appends_behind_a_store,
+            graph_change_appends_behind_a_list_from_outside,
+            graph_change_appends_behind_a_dict_from_outside,
+            graph_change_appends_to_an_item_of_a_list,
+            graph_change_appends_to_an_item_of_a_tuple,
+            graph_change_appends_to_what_an_object_holds,
+            graph_change_appends_around_a_store,
+            graph_change_appends_a_size,
+            graph_change_appends_a_result,
+            graph_change_stores_behind_a_store,
+            graph_change_stores_behind_a_list_from_outside,
+            graph_change_ends_an_iterator,
+            graph_change_goes_over_a_tuple,
+        ]
+        self.graph_change_as_eager(fns, device)
+
+    def test_a_method_read_off_a_list_the_path_made_keeps_nothing_back(self, device):
+        # A loop that fills a list of its own reads `out.append` off the
+        # list each time round. The read is of a method of the builtin
+        # class, off a list the path made: it cannot fail and nothing sees
+        # it, so it is left out where nothing uses what it gives (the
+        # append is the path's own instruction). With it kept, it would
+        # run behind the graph, the appends with it, and the graph would
+        # have to give every item of the list back as a result.
+        graphs = []
+
+        def keep(gm, input_types):
+            graphs.append(gm)
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(), keep)
+        for fn in (graph_collects,):
+            del graphs[:]
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            xs = [torch.randn(3, device=device) for _ in range(3)]
+            for _ in range(6):
+                self.assertEqual(compiled(xs), fn(xs), atol=0, rtol=0)
+            listed = torch.vm.regions(compiled)
+            (found,) = [g for g in listed if "ops" in g and "within" not in g]
+            self.assertGreaterEqual(found["hits"], 3, msg=str(found))
+            nodes = graphs[0].graph.nodes
+            (given,) = [n.args[0] for n in nodes if n.op == "output"]
+            self.assertEqual(len(given), 1, msg=f"{fn.__name__}: {graphs[0].code}")
+
+    def test_a_path_goes_over_no_iterator_but_its_own(self, device):
+        # What goes over an iterator uses it up. A value that is a list
+        # when the path is taken down may be an iterator of the caller's
+        # at a later call: the instructions of the path do not go over
+        # it (a path that then turned out not to be for the call would
+        # leave the instructions an iterator that is used up, and a `zip`
+        # over a generator runs the generator). Every call is eager's:
+        # the result or what is raised, and what the generator logged.
+        def row():
+            return [1.0, 2.0]
+
+        def three():
+            return iter([1.0, 2.0, 3.0])
+
+        def two():
+            return iter([1.0, 2.0])
+
+        def zipped():
+            return zip(graph_gives_loudly())
+
+        def generated():
+            return (b for a, b in enumerate(graph_gives_loudly()))
+
+        fns = [graph_goes_over, graph_goes_over_two, graph_goes_over_under_tuple]
+        for other in (three, two, zipped, generated):
+            self.graph_change_as_eager(fns, device, makes=(row, other))
+
+    def test_a_change_that_can_fail_is_not_left_out_with_what_it_changes(self, device):
+        # What changes something the function made is left out of a run
+        # together with the thing where nothing uses it, but only if it
+        # cannot fail. An entry that is put into a dict under a key that
+        # is no constant can: the key may be one that cannot be hashed.
+        # So it runs in every run, the call in which it fails is not the
+        # path's, and the instructions run and raise.
+        def keep(gm, input_types):
+            return gm
+
+        cases = ((graph_key_dict_of_a_comprehension, lambda: 1, lambda: [1]),)
+
+        def calls(run, usual, other, graded):
+            found = []
+            for at in range(14):
+                x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                x.requires_grad_(graded)
+                given = other() if at in (7, 10) else usual()
+                try:
+                    out = run(x, given)
+                    if graded:
+                        out.backward()
+                    grad = None if x.grad is None else x.grad.sum().item()
+                    found.append((out.item(), grad))
+                except (TypeError, KeyError) as error:
+                    found.append(f"{type(error).__name__}: {error}")
+            return found
+
+        for fn, usual, other in cases:
+            for behind, graded in (((), False), ((keep,), False)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                msg = f"{fn.__name__} with {usual()!r} and {other()!r}"
+                msg += f", a pass: {bool(behind)}, a gradient: {graded}"
+                got = calls(compiled, usual, other, graded)
+                expected = calls(fn, usual, other, graded)
+                self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
+                if behind or graded:
+                    # With the usual value the graph runs.
+                    found = torch.vm.regions(compiled)
+                    ran = sum(g["hits"] for g in found if "ops" in g)
+                    self.assertGreaterEqual(ran, 4, msg=f"{msg}: {found}")
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())

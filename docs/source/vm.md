@@ -20,7 +20,7 @@ stride and padding.
 A graph starts at the first operation of such a run, and one starts with the
 function. From there the engine takes a path down while a call runs:
 the instructions of the function in the order that call runs them, through
-the branches as they go,
+the branches as they go and round the loops as often as they go round,
 up to the first instruction that can be no part of a graph. A path of fewer
 than `min_ops` operations (4 unless the pass is made with another number) is
 no graph.
@@ -124,19 +124,24 @@ the function goes on behind it, once for paths that end at the same place.
 The first call that goes a new way runs a block for the first time, which
 the engine watches as it watches every block, and the path is taken down at
 the call after it.
-A `while` loop on a count is its iterations one after the other, with the
-test of the loop as a branch each time round.
 
 What runs of a path, once a pass has made something of its graph, is what
 the function ran on that way, less the operations: the reads, the tests and
 the other instructions that take nothing the graph gives run in front of
 it, at every call, and those that do run behind it. An instruction whose
 value nothing uses is left out only if it cannot fail whatever it is given
-(a tuple that is built, a constant, a test for `None`). An attribute or an
+(a tuple that is built, a constant, a test for `None`; the `append` that a
+loop reads off a list the function made, each time round). An attribute or an
 item that is read for nothing, a call whose answer is dropped, a division
 stay: they are what shows that the call gets as far as the path does. In a
 call in which one of them raises, the path is not taken: the instructions
-run, and raise where they stand.
+run, and raise where they stand. What changes something the path made
+itself (an append to a list it built, the next item of an iterator it
+made) is left out only together with the thing ("What a function makes"),
+and only where it cannot fail either: an entry that is put into a dict under
+a key that is no constant of the function runs in every run, used or not, so
+that a call in which the key cannot be hashed runs the instructions, which
+raise.
 
 ```python
 class Settings:
@@ -165,6 +170,56 @@ except AttributeError as error:
     print(error)  # 'Settings' object has no attribute 'ready'
 ```
 
+A loop is its iterations one after the other: a path goes round a loop over
+a list, a tuple or a `range` as often as the call does (and round a `while`
+loop on a count), with the test of the loop as a branch each time round. The
+number of times round is no input of the graph: it is the path. The calls of
+`len`, `range`, `enumerate`, `zip` and `isinstance` that such loops are
+written with are part of a path.
+
+Going over an iterator uses it up, so a path goes over an iterator only if
+it made it itself, of a list, a tuple, a dict or a `range` (`enumerate`,
+`zip`, the loop's own). Where the value that was a list when
+the path was taken down is an iterator of the caller's at a later call,
+that call runs the instructions, which use the iterator up once.
+
+```python
+def loop(x, n):
+    y = x.sin()
+    for i in range(n):
+        y = y * 0.5 + i
+    return y.cos().sum()
+
+
+g = torch.vm(loop, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+for _ in range(3):
+    same = torch.equal(g(x, 3), loop(x, 3))
+(found,) = torch.vm.regions(g)
+found["ops"], found["branches"]  # (9, 4): sin, three times round, cos and sum; four tests of the loop
+```
+
+A list that the function makes and fills by appending is the path's own, so
+a path that starts with the function goes on through the loop that fills it,
+and the operation that is handed the list takes the values that were
+appended:
+
+```python
+def collect(xs):
+    out = []
+    for x in xs:
+        out.append(x.sin() * 2)
+    return torch.cat(out).tanh().sum()
+
+
+g = torch.vm(collect, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+xs = [torch.randn(3) for _ in range(3)]
+for _ in range(3):
+    same = torch.equal(g(xs), collect(xs))
+(found,) = torch.vm.regions(g)
+found["where"], found["ops"], found["inputs"]  # ('collect (block 3)[4]', 9, 1)
+found["operators"][-3:]  # ['aten::cat', 'aten::tanh', 'aten::sum']
+```
+
 What ends a path:
 
 - a call of a Python function, which has graphs of its own, or of
@@ -176,8 +231,6 @@ What ends a path:
   on the data of a tensor;
 - an instruction that could run Python code on the values of this call: a
   read of an attribute that is a property, an iterator that is unpacked;
-- a `for` loop: neither `range` nor taking the iterator of a value is part
-  of a path;
 - in a function with a `try`, a read or a write of a variable that one of
   its handlers may read: such a function keeps them where the handlers find
   them;
@@ -225,6 +278,64 @@ for _ in range(3):
 sorted((found["where"], found["operators"]) for found in torch.vm.regions(g))
 # [('Linear.forward (block 0)[4]', ['aten::linear']), ('relu (block 4)[2]', ['aten::relu'])]
 ```
+
+### What a function makes
+
+A list, a dict, an iterator: what the instructions of a path make between
+its operations is the path's own. One model says what a path does with such
+a thing.
+
+**Which values are the thing.** A thing is known by the instruction that
+made it. Other values of the function may be that thing, or hold it: an item
+or an attribute that is taken out of something that holds it, what an
+iterator over such a holder gives, a method that is bound to it, a tuple, a
+list or a dict that is built of it. Such a value counts as the thing
+wherever it may be it at some call. What the function had before the path,
+and what it reads of objects from outside, is never one: nothing of the
+path's is stored there before the path ends. So what an iterator of the path
+gives is from outside where what it goes over is: `for i, layer in
+enumerate(self.layers)` gives the layers.
+
+**What runs.** What changes a thing (an append, `[*a, b]`, an entry of a
+dict it builds, the next item of an iterator) runs in a run of the path
+whenever anything that runs takes the thing, or what may be it or hold it,
+in front of the change or behind it. It is left out only together with the
+thing.
+
+**On which side of the graph.** The instructions that take nothing the graph
+gives run in front of what stands for the graph, the others behind it
+("Paths"). A thing begins in front. It moves behind the graph at the first
+instruction that takes it, or what may be it or hold it, and has to run
+there: a result of the graph is appended to it. From that instruction on
+everything that takes the thing runs behind the graph, also what takes
+nothing else of the graph's; everything in front of it ran in front. So what
+reads and what changes one thing runs in the order the function has it, on
+both sides: a list that is counted, sliced or put into a tuple before a
+result is appended to it is counted, sliced and held as it was then, and an
+item that is appended behind a read is not seen by the read.
+
+```python
+def kept(x, n):
+    y = x.sin() * 2
+    made = [n]
+    holder = (made, len(made))  # in front of the graph: the list has one item
+    made.append(y)  # behind the graph: it takes what the graph gives
+    made.append(n + 1)  # behind that append in the function, so behind the graph too
+    return (y.cos() + 1).exp().sum(), holder
+
+
+g = torch.vm(kept, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    out, holder = g(x, 3)
+len(holder[0]), holder[1], holder[0][2]  # (3, 1, 4)
+found = torch.vm.regions(g)[0]
+found["ops"], found["hits"]  # (6, 2)
+```
+
+**What ends a path instead.** A path ends in front of an operation that is
+handed something of a thing that has moved behind the graph, other than
+tensors and sizes of the graph's own (a list of those is handed over item by
+item).
 
 ### Passes over graphs
 
@@ -312,8 +423,10 @@ torch.vm.regions(g)[0]["operators"][5:8]
 
 Every path of a graph is exported by itself. The graph a pass is given has
 the operations of one way through the function and no branch,
+a loop as many times as the call went round,
 and it takes as inputs only what its operations take: a flag that a branch
 is on is none.
+A variable of a loop names one input per time round (`x`, `x_2`, `x_3`).
 On a later call the engine first runs what the path has in front of its
 operations (the reads, the arithmetic on numbers), on registers of the
 path's own, and checks that the branches go the way they went. Then what was
@@ -810,9 +923,10 @@ torch.vm(f, passes=(*default, keep, P.Inductor())).passes
 What graphs do not do at this stage:
 
 - One function. A graph does not go on through a call of a Python function,
-  as said above, and a `for` loop ends a path.
+  as said above.
 - A path per way. A function whose calls go many ways through it has a path
   and an export for each, and they share the `max_variants` of the graph.
+  So does a loop that goes round another number of times on every call.
 - No effects. An operation that writes to one of its arguments is in no
   graph, and a call whose operations turn out to write when they are taken
   down is not exported: a batch norm in training, which updates its running
@@ -902,6 +1016,10 @@ What graphs do not do at this stage:
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
+- A dict whose keys are not all texts, spread into a call (`f(**d)`), raises
+  `TypeError` as it does without the engine, but the engine has compared such
+  a key with the names of the parameters by then: an `__eq__` of the key's
+  class that is written in Python runs where the interpreter runs none.
 
 ## API Reference
 

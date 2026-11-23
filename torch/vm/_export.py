@@ -88,8 +88,15 @@ def graph_module(description: dict[str, Any]) -> torch.fx.GraphModule:
             node.meta[_types._TYPE] = found
         return node
 
+    taken: set[str] = set()
     for value, name in zip(description["input_ids"], description["input_names"]):
-        values[value] = graph.placeholder(name)
+        # A variable of a loop names one input per time round.
+        unique, k = name, 1
+        while unique in taken:
+            k += 1
+            unique = f"{name}_{k}"
+        taken.add(unique)
+        values[value] = graph.placeholder(unique)
     for kind, *parts in description["nodes"]:
         if kind == "aten":
             site, operands, value, meta = parts
