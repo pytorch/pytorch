@@ -11,6 +11,49 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
 
+def _has_canonical_fields(test: TestRun) -> bool:
+    return (
+        type(test) is TestRun
+        and type(vars(test)) is dict
+        and vars(test).keys() == {"test_file", "_included", "_excluded"}
+    )
+
+
+def _test_runs_intersect(left: TestRun, right: TestRun) -> bool:
+    if (
+        _has_canonical_fields(left)
+        and _has_canonical_fields(right)
+        and type(left.test_file) is str
+        and type(right.test_file) is str
+        and left.test_file != right.test_file
+    ):
+        return False
+    return bool(left & right)
+
+
+def _can_reference_test_run(test: TestRun) -> bool:
+    if not _has_canonical_fields(test):
+        return False
+    try:
+        return (
+            type(test.test_file) is str
+            and "::" not in test.test_file
+            and type(test._included) is frozenset
+            and type(test._excluded) is frozenset
+            and not (test._included and test._excluded)
+            and (
+                not test._included
+                or all(type(value) is str for value in test._included)
+            )
+            and (
+                not test._excluded
+                or all(type(value) is str for value in test._excluded)
+            )
+        )
+    except AttributeError:
+        return False
+
+
 class TestPrioritizations:
     """
     Describes the results of whether heuristics consider a test relevant or not.
@@ -41,12 +84,15 @@ class TestPrioritizations:
         self.validate()
 
     def validate(self) -> None:
+        can_reference = type(self._test_scores) is dict and all(
+            _can_reference_test_run(test) for test in self._test_scores
+        )
         # Union all TestRuns that contain include/exclude pairs
         all_tests = self._test_scores.keys()
         files = {}
         for test in all_tests:
             if test.test_file not in files:
-                files[test.test_file] = copy(test)
+                files[test.test_file] = test if can_reference else copy(test)
             else:
                 if not (files[test.test_file] & test).is_empty():
                     raise AssertionError(
@@ -80,7 +126,9 @@ class TestPrioritizations:
             return  # We don't need this test
 
         relevant_test_runs: list[TestRun] = [
-            tr for tr in self._test_scores if tr & test_run and tr != test_run
+            tr
+            for tr in self._test_scores
+            if _test_runs_intersect(tr, test_run) and tr != test_run
         ]
 
         # Set the score of all the tests that are covered by test_run to the same score
@@ -100,7 +148,7 @@ class TestPrioritizations:
             return
 
         relevant_test_runs: list[TestRun] = [
-            tr for tr in self._test_scores if tr & test_run
+            tr for tr in self._test_scores if _test_runs_intersect(tr, test_run)
         ]
 
         for relevant_test_run in relevant_test_runs:

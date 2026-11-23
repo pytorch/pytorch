@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from tools.testing.target_determination.heuristics.interface import HeuristicInterface
 
 from tools.testing.target_determination.heuristics import (
     AggregatedHeuristics,
@@ -11,7 +16,10 @@ from tools.testing.target_determination.heuristics import (
 
 
 def get_test_prioritizations(
-    tests: list[str], file: Any = sys.stdout
+    tests: list[str],
+    file: Any = sys.stdout,
+    *,
+    capture: Callable[[HeuristicInterface, TestPrioritizations], None] | None = None,
 ) -> AggregatedHeuristics:
     aggregated_results = AggregatedHeuristics(tests)
     print(f"Received {len(tests)} tests to prioritize", file=file)
@@ -23,6 +31,8 @@ def get_test_prioritizations(
             new_rankings: TestPrioritizations = heuristic.get_prediction_confidence(
                 tests
             )
+            if capture is not None:
+                capture(heuristic, new_rankings)
             aggregated_results.add_heuristic_results(heuristic, new_rankings)
 
             print(f"Results from {heuristic.__class__.__name__}")
