@@ -6221,9 +6221,8 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertFalse(meta["CUDAGRAPH_CONFIG"]["triton.cudagraph_trees"])
 
     def test_a_graph_compiled_without_cudagraphs_loads_with_the_flag_on(self):
-        # Load post-compiles each graph under the loading process's
-        # triton.cudagraphs; one compiled without CUDA graphs has nothing to be
-        # wrapped with, and runs as it compiled.
+        # Load post-compiles the graphs under the artifact's CUDAGRAPH_CONFIG,
+        # not the loading process's triton.cudagraphs, so nothing is skipped.
         from torch._dynamo.utils import counters
 
         single = self.mod.single
@@ -6231,12 +6230,11 @@ class TestPrecompileDynamoCapture(TestCase):
             with self._capture(single) as cap:
                 y = cap(self.model, self.x2)
         counters.clear()
-        with torch._inductor.config.patch({"triton.cudagraphs": True}):
+        flags = {"triton.cudagraphs": True, "triton.cudagraph_or_error": True}
+        with torch._inductor.config.patch(flags):
             f = load(self.artifact, self.cache)
             self.assertEqual(f(self.model, self.x2), y)
-        # Counted, as a graph with a reason against CUDA graphs is; a CPU graph
-        # is not logged, and does not raise under cudagraph_or_error.
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):
