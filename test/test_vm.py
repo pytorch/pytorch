@@ -15804,6 +15804,61 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                 whole = sum(hits for ops, hits in graphs if ops >= 7)
                 self.assertGreaterEqual(whole, 6, msg=f"{name}, {way}: {graphs}")
 
+    def test_a_take_that_writes_to_an_outside_tensor_is_a_path_of_its_own(self, device):
+        # Two takes of the same instructions, one that writes to a tensor
+        # from outside (a batch norm that trains) and one that does not,
+        # are a path each: what was made of a take runs as what that take
+        # is. Where what was made of the one that writes raises behind the
+        # write at its first run, the instructions would write a second
+        # time: the exception goes out, and the statistics were updated
+        # once. Where what was made of the one that does not write raises
+        # at its first run, the instructions run in its place, and no call
+        # raises. Whichever of the two takes came first.
+        def failing(writes):
+            def compiler(gm, input_types):
+                batch_norm = torch.ops.aten.batch_norm.default
+                norms = [node for node in gm.graph.nodes if node.target is batch_norm]
+                trains = any(node.args[5] is True for node in norms)
+                inner, ran = gm.forward, []
+
+                def forward(*args):
+                    out = inner(*args)
+                    if trains == writes and not ran:
+                        ran.append(True)
+                        raise RuntimeError("fails behind the graph")
+                    return out
+
+                gm.forward = forward
+                return gm
+
+            return compiler
+
+        orders = ((True, True), (True, False), (False, True), (False, False))
+        for writes, first in orders:
+            passes = (*DEFAULT, P.Graphs(), failing(writes))
+            run = torch.vm(graph_normed, passes=passes, fallback=False, demote=False)
+            ours = (torch.zeros(4, device=device), torch.ones(4, device=device))
+            theirs = (torch.zeros(4, device=device), torch.ones(4, device=device))
+            raised = 0
+            for at in range(12):
+                training = first if at < 5 else not first
+                x = torch.full((2, 4, 5, 5), 0.5 * (at + 1), device=device)
+                x[0] += 1
+                expected = graph_normed(x, *theirs, training)
+                msg = f"what writes fails: {writes}, the first calls train: {first}"
+                said = f"{msg}, call {at}"
+                try:
+                    got = run(x, *ours, training)
+                    self.assertEqual(got, expected, atol=0, rtol=0, msg=said)
+                except RuntimeError as error:
+                    self.assertEqual(str(error), "fails behind the graph", msg=said)
+                    raised += 1
+                self.assertEqual(ours, theirs, atol=0, rtol=0, msg=said)
+            if writes:
+                self.assertGreaterEqual(raised, 1, msg=msg)
+            else:
+                self.assertEqual(raised, 0, msg=msg)
+
     def test_a_key_that_compares_in_python_is_compared_once_per_lookup(self, device):
         # A dict that the engine looks a name up in (the dict of an object,
         # of a module, of a class behind `super()`, the globals of the

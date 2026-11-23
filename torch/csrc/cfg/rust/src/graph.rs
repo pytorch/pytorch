@@ -861,10 +861,16 @@ impl GraphSite {
         }
         let mut paths = self.variants.borrow_mut();
         // The same path: the same instructions, taken down with the same
-        // pinned values. A form runs under the checks of the path it is
-        // kept with, so the form of a trace with other pinned values is
-        // kept with a path of its own.
-        let known = paths.iter().position(|other| other.shape == path.shape && other.provisional == path.provisional && other.pinned_as(&path));
+        // pinned values, and writing to a tensor from outside or not as
+        // this one does. A form runs under the checks of the path it is
+        // kept with, and as what that path is (`Path::mutates`: what wrote
+        // is not run a second time), so the form of a trace with other
+        // pinned values, or of one that writes where the other did not (a
+        // batch norm that trains at one call and not at another), is kept
+        // with a path of its own.
+        let known = paths.iter().position(|other| {
+            other.shape == path.shape && other.provisional == path.provisional && other.mutates == path.mutates && other.pinned_as(&path)
+        });
         let at = known.unwrap_or_else(|| {
             // A path that was not final makes way for the ones that are.
             paths.retain(|other| !other.provisional);
