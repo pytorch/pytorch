@@ -1811,6 +1811,13 @@ void framePop(void* popped, PyObject* kept) {
   THP_PyThreadState_PopFrame(tstate, frame);
   ++tstate->py_recursion_remaining;
 }
+
+void* frameSwap(void* frame) {
+  PyThreadState* tstate = PyThreadState_Get();
+  _PyInterpreterFrame* previous = tstate->cframe->current_frame;
+  tstate->cframe->current_frame = static_cast<_PyInterpreterFrame*>(frame);
+  return previous;
+}
 #endif
 
 int32_t isTracing() {
@@ -1841,8 +1848,9 @@ const TcfgApi api_table = {
     &siteInfo,        &tensorInfo,        &tensorBox,         &tensorRetain,
     &tensorRelease,
 #ifdef TCFG_HAS_FRAMES
-    &framePush,       &framePop,          &frameHeld,
+    &framePush,       &framePop,          &frameHeld,         &frameSwap,
 #else
+    nullptr,
     nullptr,
     nullptr,
     nullptr,

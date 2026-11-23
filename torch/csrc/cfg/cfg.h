@@ -97,7 +97,7 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 7
+#define TCFG_API_VERSION 8
 
 struct TcfgApi {
   uint32_t version;
@@ -160,6 +160,11 @@ struct TcfgApi {
   void (*frame_pop)(void* frame, PyObject* kept);
   // Whether something other than the stack refers to the frame.
   int32_t (*frame_held)(void* frame);
+  // Makes a frame that is on the stack of the thread the current one and
+  // returns the one that was, for the same call to put back: what runs in
+  // between finds itself called by the function of that frame, whatever
+  // frames were pushed since.
+  void* (*frame_swap)(void* frame);
 
   // Whether torch.jit.trace is recording on this thread: one of the things
   // nn.Module.__call__ looks at before it calls forward.
