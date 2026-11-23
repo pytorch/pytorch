@@ -95,6 +95,7 @@ void philox_distribution_kernel(
         op_name, ": key batch shape ", key_batch,
         " is not broadcastable with output shape ", self.sizes());
   }
+  at::assert_no_internal_overlap(self);
 
   if (self.numel() == 0) {
     return;
@@ -128,7 +129,7 @@ void philox_distribution_kernel(
   }
 
   // Generate values; each chunk is one Philox call producing epc elements.
-  auto output = self.contiguous();
+  Tensor output = self.is_contiguous() ? self : at::empty(self.sizes(), self.options());
   scalar_t* out_ptr = output.mutable_data_ptr<scalar_t>();
   const uint64_t* keys_ptr = key_flat.const_data_ptr<uint64_t>();
   constexpr int epc = elems_per_call<scalar_t>;
@@ -261,13 +262,16 @@ Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double
 
 Tensor& _philox_uniform_tensor_cpu_(
     Tensor& self, const Tensor& key, const Tensor& low, const Tensor& high) {
-  philox_check_bound("_philox_uniform_", "low", low, self);
-  philox_check_bound("_philox_uniform_", "high", high, self);
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_uniform_: self must be a floating point tensor, got ",
+      self.scalar_type());
+  auto lo = philox_prepare_bound("_philox_uniform_", "low", low, self, self.scalar_type());
+  auto hi = philox_prepare_bound("_philox_uniform_", "high", high, self, self.scalar_type());
   auto iter = TensorIteratorConfig()
       .add_output(self)
       .add_const_input(self)
-      .add_owned_const_input(low.to(self.scalar_type()))
-      .add_owned_const_input(high.to(self.scalar_type()))
+      .add_const_input(lo)
+      .add_const_input(hi)
       .build();
   // Sample with the default [0, 1) bounds, then rescale in a second pass.
   _philox_uniform_cpu_(self, key, 0.0, 1.0);
@@ -300,6 +304,37 @@ Tensor& _philox_normal_cpu_(Tensor& self, const Tensor& key, double mean, double
 
     philox_distribution_kernel<scalar_t>(
         "_philox_normal_", self, key, sample_func, param_func);
+  });
+  return self;
+}
+
+Tensor& _philox_normal_tensor_cpu_(
+    Tensor& self, const Tensor& key, const Tensor& mean, const Tensor& std) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_normal_: self must be a floating point tensor, got ",
+      self.scalar_type());
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
+    using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
+    constexpr auto compute_dtype = c10::CppTypeToScalarType<compute_t>::value;
+    auto mu = philox_prepare_bound("_philox_normal_", "mean", mean, self, compute_dtype);
+    auto sigma = philox_prepare_bound("_philox_normal_", "std", std, self, compute_dtype);
+    // Sample in compute_t so that half and bfloat16 samples aren't rounded
+    // before scaling, then rescale in a second pass.
+    Tensor z = self.scalar_type() == compute_dtype
+        ? self
+        : at::empty(self.sizes(), self.options().dtype(compute_dtype));
+    _philox_normal_cpu_(z, key, 0.0, 1.0);
+    auto iter = TensorIteratorConfig()
+        .check_all_same_dtype(false)
+        .add_output(self)
+        .add_const_input(z)
+        .add_const_input(mu)
+        .add_const_input(sigma)
+        .build();
+    cpu_kernel(iter, [](compute_t z, compute_t mu, compute_t sigma) -> scalar_t {
+      return static_cast<scalar_t>(z * sigma + mu);
+    });
   });
   return self;
 }

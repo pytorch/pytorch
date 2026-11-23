@@ -9050,4 +9050,49 @@ std::tuple<Tensor, Tensor> philox_uniform_bounds_backward(
       grad_input_mask[1] ? at::sum_to(grad * u, high.sym_sizes()) : Tensor()};
 }
 
+Tensor philox_uniform_bounds_jvp(
+    const Tensor& low_t,
+    const Tensor& high_t,
+    const Tensor& key,
+    const Tensor& result) {
+  // The standard sample is regenerated from the key rather than saved.
+  auto u = at::empty_like(result)._philox_uniform_(key);
+  return (low_t + (high_t - low_t) * u).to(result.scalar_type());
+}
+
+std::tuple<Tensor, Tensor> philox_normal_params_backward(
+    const Tensor& grad,
+    const Tensor& key,
+    const Tensor& mean,
+    const Tensor& std,
+    std::array<bool, 2> grad_input_mask) {
+  if (!grad.defined()) {
+    return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
+  }
+  Tensor grad_std;
+  if (grad_input_mask[1]) {
+    // The standard sample is regenerated from the key rather than saved.
+    // Note: For half/bf16, z is rounded to grad's dtype, as is grad * z.
+    auto z = at::empty_like(grad)._philox_normal_(key);
+    grad_std = at::sum_to(grad * z, std.sym_sizes());
+  }
+  return {
+      grad_input_mask[0] ? at::sum_to(grad, mean.sym_sizes()) : Tensor(),
+      grad_std};
+}
+
+Tensor philox_normal_params_jvp(
+    const Tensor& mean_t,
+    const Tensor& std_t,
+    const Tensor& key,
+    const Tensor& result) {
+  if (std_t._is_zerotensor()) {
+    return mean_t.expand_symint(result.sym_sizes()).to(result.scalar_type());
+  }
+  // The standard sample is regenerated from the key rather than saved.
+  // Note: For half/bf16, z is rounded to result's dtype, as is the tangent.
+  auto z = at::empty_like(result)._philox_normal_(key);
+  return (mean_t + std_t * z).to(result.scalar_type());
+}
+
 } // namespace torch::autograd::generated::details

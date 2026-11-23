@@ -3,6 +3,7 @@
 import contextlib
 
 import torch
+import torch.autograd.forward_ad as fwAD
 import torch.func._random as random
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.autograd import gradcheck, gradgradcheck
@@ -39,6 +40,12 @@ all_int_dtypes = [
 ]
 int_limits = {dt: (torch.iinfo(dt).min, torch.iinfo(dt).max) for dt in all_int_dtypes}
 int_bits = {dt: torch.iinfo(dt).bits for dt in all_int_dtypes}
+
+# Bound names and per-row test values for each distribution.
+bound_test_values = {
+    "uniform": (("low", "high"), ([-1000.0, -3.0, 2.5], [0.001, 5.5, 2.5000001])),
+    "normal": (("mean", "std"), ([-1000.0, 0.1, 2.5], [0.001, 3.0, 0.0])),
+}
 
 
 class TestStatelessRNGKey(TestCase):
@@ -615,68 +622,76 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertTrue(result.min().item() >= 2.0)
         self.assertTrue(result.max().item() <= 5.0)
 
-    @parametrize("inplace", [False, True])
+    @parametrize("op", ["uniform", "normal"])
     @dtypes(*all_floating_dtypes)
-    def test_uniform_tensor_bounds_match_scalar(self, device, dtype, inplace):
+    def test_tensor_bounds_match_scalar(self, device, dtype, op):
         # Tensor bounds must reproduce scalar bounds bit for bit.
         key = random.key(42, device=device)
-        shape = (8, 33)
+        (name0, name1), (vals0, vals1) = bound_test_values[op]
+        v0, v1 = vals0[1], vals1[1]
+        gen_fn = getattr(random, op)
 
-        def gen(**bounds):
-            if inplace:
-                result = torch.empty(shape, dtype=dtype, device=device)
-                return random.uniform_(key, result, **bounds)
-            return random.uniform(key, shape, dtype=dtype, **bounds)
+        def gen(p0, p1):
+            return gen_fn(key, (8, 33), dtype=dtype, **{name0: p0, name1: p1})
 
-        expected = gen(low=-3.0, high=5.5)
-        high = torch.full((8, 1), 5.5, device=device)
-        for low in (torch.full((8, 1), -3.0, device=device), -3.0):
-            self.assertEqual(gen(low=low, high=high), expected, atol=0, rtol=0)
+        expected = gen(v0, v1)
+        p1 = torch.full((8, 1), v1, device=device)
+        # float64 keeps the scalar overload's value for a bound no dtype represents.
+        for p0 in (torch.full((8, 1), v0, dtype=torch.float64, device=device), v0):
+            self.assertEqual(gen(p0, p1), expected, atol=0, rtol=0)
 
+    @parametrize("op", ["uniform", "normal"])
     @parametrize("keys", ["single", "batched"])
     @parametrize("cols", [subtest(36, name="aligned"), subtest(37, name="unaligned")])
     @dtypes(*all_floating_dtypes)
-    def test_uniform_tensor_bounds_rows_vary(self, device, dtype, keys, cols):
-        low_vals, high_vals = [-1000.0, -3.0, 2.5], [0.001, 5.5, 2.5000001]
+    def test_tensor_bounds_rows_vary(self, device, dtype, op, keys, cols):
+        (name0, name1), (vals0, vals1) = bound_test_values[op]
         shape = (3, cols)
         key = random.key(42, device=device)
         if keys == "batched":
             key = random.split(key, 3).unsqueeze(-2)
-        low = torch.tensor(low_vals, dtype=torch.float64, device=device).view(3, 1)
-        high = torch.tensor(high_vals, dtype=torch.float64, device=device).view(3, 1)
-        actual = random.uniform(key, shape, low=low, high=high, dtype=dtype)
-        for i, (lo, hi) in enumerate(zip(low_vals, high_vals)):
-            expected = random.uniform(key, shape, low=lo, high=hi, dtype=dtype)
+        p0 = torch.tensor(vals0, dtype=torch.float64, device=device).view(3, 1)
+        p1 = torch.tensor(vals1, dtype=torch.float64, device=device).view(3, 1)
+        gen = getattr(random, op)
+        actual = gen(key, shape, dtype=dtype, **{name0: p0, name1: p1})
+        for i, (v0, v1) in enumerate(zip(vals0, vals1)):
+            expected = gen(key, shape, dtype=dtype, **{name0: v0, name1: v1})
             self.assertEqual(actual[i], expected[i], atol=0, rtol=0)
 
+    @parametrize("op", ["uniform", "normal"])
     @parametrize("keys", ["single", "batched"])
     @dtypes(*all_floating_dtypes)
-    def test_uniform_tensor_bounds_cols_vary(self, device, dtype, keys):
-        low_vals, high_vals = [-1000.0, -3.0, 2.5], [0.001, 5.5, 2.5000001]
+    def test_tensor_bounds_cols_vary(self, device, dtype, op, keys):
+        (name0, name1), (vals0, vals1) = bound_test_values[op]
         shape = (37, 3)
         key = random.key(42, device=device)
         if keys == "batched":
             key = random.split(key, 37).unsqueeze(-2)
-        low = torch.tensor(low_vals, dtype=torch.float64, device=device).view(1, 3)
-        high = torch.tensor(high_vals, dtype=torch.float64, device=device).view(1, 3)
-        actual = random.uniform(key, shape, low=low, high=high, dtype=dtype)
-        for i, (lo, hi) in enumerate(zip(low_vals, high_vals)):
-            expected = random.uniform(key, shape, low=lo, high=hi, dtype=dtype)
+        p0 = torch.tensor(vals0, dtype=torch.float64, device=device).view(1, 3)
+        p1 = torch.tensor(vals1, dtype=torch.float64, device=device).view(1, 3)
+        gen = getattr(random, op)
+        actual = gen(key, shape, dtype=dtype, **{name0: p0, name1: p1})
+        for i, (v0, v1) in enumerate(zip(vals0, vals1)):
+            expected = gen(key, shape, dtype=dtype, **{name0: v0, name1: v1})
             self.assertEqual(actual[:, i], expected[:, i], atol=0, rtol=0)
 
+    @parametrize("op", ["uniform", "normal"])
     @dtypes(*all_floating_dtypes)
-    def test_uniform_tensor_bounds_noncontig(self, device, dtype):
+    def test_tensor_bounds_noncontig(self, device, dtype, op):
         # Results must not depend on the memory layout of the bounds or output.
+        (name0, name1), (vals0, vals1) = bound_test_values[op]
         shape = (3, 37)
         key = random.key(42, device=device)
-        low = torch.tensor([[-1000.0], [-3.0], [2.5]], device=device)
-        high = torch.tensor([[0.001], [5.5], [2.5000001]], device=device)
-        expected = random.uniform(key, shape, low=low, high=high, dtype=dtype)
+        gen, gen_ = getattr(random, op), getattr(random, f"{op}_")
+        p0 = torch.tensor(vals0, device=device).view(3, 1)
+        p1 = torch.tensor(vals1, device=device).view(3, 1)
+        params = {name0: p0, name1: p1}
+        expected = gen(key, shape, dtype=dtype, **params)
 
-        full = low.expand(shape).contiguous(), high.expand(shape).contiguous()
-        transposed = tuple(b.t().contiguous().t() for b in full)
-        for lo, hi in (full, transposed):
-            actual = random.uniform(key, shape, low=lo, high=hi, dtype=dtype)
+        full = {n: p.expand(shape).contiguous() for n, p in params.items()}
+        transposed = {n: p.t().contiguous().t() for n, p in full.items()}
+        for layout in (full, transposed):
+            actual = gen(key, shape, dtype=dtype, **layout)
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
         opts = {"dtype": dtype, "device": device}
@@ -684,61 +699,133 @@ class TestStatelessRNGDistribution(TestCase):
         # Misaligned for the CUDA kernel's vector stores.
         unaligned = torch.empty(3 * 37 + 1, **opts)[1:].view(shape)
         for out in (noncontiguous, unaligned):
-            actual = random.uniform_(key, out, low=low, high=high)
+            actual = gen_(key, out, **params)
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
-    def test_uniform_tensor_bounds_empty(self, device):
+    @parametrize("op", ["uniform", "normal"])
+    def test_tensor_bounds_empty(self, device, op):
         key = random.key(42, device=device)
+        name0 = bound_test_values[op][0][0]
+        gen = getattr(random, op)
         for shape in ((0, 3), (3, 0)):
-            low = torch.zeros(shape, device=device)
-            self.assertEqual(random.uniform(key, shape, low=low).shape, shape)
+            p0 = torch.zeros(shape, device=device)
+            self.assertEqual(gen(key, shape, **{name0: p0}).shape, shape)
 
-    def test_uniform_tensor_bounds_grad(self, device):
+    @parametrize("op", ["uniform", "normal"])
+    def test_tensor_bounds_grad(self, device, op):
         key = random.key(42, device=device)
-        low = torch.zeros(8, 1, device=device, requires_grad=True)
-        high = torch.full((8, 1), 2.0, device=device, requires_grad=True)
-        grad = torch.randn(8, 33, device=device)
-        random.uniform(key, (8, 33), low=low, high=high).backward(grad)
-        u = random.uniform(key, (8, 33))
-        self.assertEqual(low.grad, (grad * (1 - u)).sum(1, keepdim=True))
-        self.assertEqual(high.grad, (grad * u).sum(1, keepdim=True))
+        name0, name1 = bound_test_values[op][0]
+        gen = getattr(random, op)
 
-        def f(low, high):
-            return random.uniform(key, (8, 5), low=low, high=high, dtype=torch.float64)
+        def f(p0, p1):
+            return gen(key, (8, 5), dtype=torch.float64, **{name0: p0, name1: p1})
 
         f64 = {"dtype": torch.float64, "device": device, "requires_grad": True}
-        bounds = (torch.zeros(8, 1, **f64), torch.ones(1, 5, **f64))
-        self.assertTrue(gradcheck(f, bounds, check_forward_ad=True))
-        self.assertTrue(gradgradcheck(f, bounds))
+        params = (torch.zeros(8, 1, **f64), torch.ones(1, 5, **f64))
+        self.assertTrue(gradcheck(f, params, check_forward_ad=True))
+        self.assertTrue(gradgradcheck(f, params))
 
-    @dtypes(*all_floating_dtypes)
-    def test_uniform_tensor_bounds_dtype(self, device, dtype):
+    @parametrize("op", ["uniform", "normal"])
+    @parametrize("inplace", [False, True])
+    def test_tensor_bounds_forward_ad(self, device, op, inplace):
+        # Covers the functional overload and non-dual bounds, which gradcheck can't reach.
         key = random.key(42, device=device)
-        low = torch.zeros(4, 1, dtype=dtype, device=device)
-        high = torch.ones(4, 1, dtype=dtype, device=device)
-        actual = random.uniform(key, (4, 3), low=low, high=high)
-        self.assertEqual(actual.dtype, torch.float32)
-        self.assertEqual(actual, random.uniform(key, (4, 3)), atol=0, rtol=0)
+        p0 = torch.zeros(8, 1, device=device)
+        p1 = torch.full((8, 1), 2.0, device=device)
+        t0 = torch.randn(8, 1, device=device)
+        t1 = torch.randn(8, 1, device=device)
+        # d(result) / d(param): (1 - u, u) for uniform, (1, z) for normal.
+        d1 = getattr(random, op)(key, (8, 33))
+        d0 = 1 - d1 if op == "uniform" else torch.ones_like(d1)
+        suffix = "_" if inplace else ""
+        aten_op = getattr(torch.ops.aten, f"_philox_{op}{suffix}").Tensor
+        for dual0, dual1 in ((True, False), (False, True), (True, True)):
+            with fwAD.dual_level():
+                a0 = fwAD.make_dual(p0, t0) if dual0 else p0
+                a1 = fwAD.make_dual(p1, t1) if dual1 else p1
+                out = aten_op(torch.empty(8, 33, device=device), key, a0, a1)
+                tangent = fwAD.unpack_dual(out).tangent
+            expected = torch.zeros(8, 33, device=device)
+            if dual0:
+                expected = expected + t0 * d0
+            if dual1:
+                expected = expected + t1 * d1
+            self.assertEqual(tangent, expected)
 
-    def test_uniform_tensor_bounds_errors(self, device):
+    @parametrize("op", ["uniform", "normal"])
+    @dtypes(*all_floating_dtypes)
+    def test_tensor_bounds_dtype(self, device, dtype, op):
+        # The bound dtype doesn't affect the output dtype.
+        key = random.key(42, device=device)
+        name0, name1 = bound_test_values[op][0]
+        p0 = torch.zeros(4, 1, dtype=dtype, device=device)
+        p1 = torch.ones(4, 1, dtype=dtype, device=device)
+        actual = getattr(random, op)(key, (4, 3), **{name0: p0, name1: p1})
+        self.assertEqual(actual.dtype, torch.float32)
+        self.assertEqual(actual, getattr(random, op)(key, (4, 3)), atol=0, rtol=0)
+
+    @parametrize("op", ["uniform", "normal"])
+    def test_tensor_bounds_errors(self, device, op):
+        name0 = bound_test_values[op][0][0]
+        gen, gen_ = getattr(random, op), getattr(random, f"{op}_")
         for mode in (contextlib.nullcontext(), FakeTensorMode()):
             with mode:
                 key = random.key(42, device=device)
-                low = torch.zeros(4, 1, device=device)
+                p0 = torch.zeros(4, 1, device=device)
                 with self.assertRaisesRegex(RuntimeError, "not broadcastable"):
-                    random.uniform(key, (4, 3), low=torch.zeros(5, device=device))
+                    gen(key, (4, 3), **{name0: torch.zeros(5, device=device)})
                 for bad_dtype in (torch.complex64, torch.int64, torch.bool):
                     with self.assertRaisesRegex(RuntimeError, "must be a floating"):
-                        random.uniform(key, (4, 3), low=low.to(bad_dtype))
+                        gen(key, (4, 3), **{name0: p0.to(bad_dtype)})
                 int_out = torch.empty(4, 3, dtype=torch.int64, device=device)
-                with self.assertRaises(RuntimeError):
-                    random.uniform_(key, int_out, low=low)
+                with self.assertRaisesRegex(RuntimeError, "self must be a floating"):
+                    gen_(key, int_out, **{name0: p0})
                 if torch.device(device).type == "cuda":
                     with self.assertRaisesRegex(RuntimeError, "on the same device"):
-                        random.uniform(key, (4, 3), low=torch.zeros(4, 1))
+                        gen(key, (4, 3), **{name0: torch.zeros(4, 1)})
         out = torch.zeros(4, 3, device=device)
         with self.assertRaisesRegex(RuntimeError, "refer to a single memory location"):
-            random.uniform_(random.key(42, device=device), out, low=out)
+            gen_(random.key(42, device=device), out, **{name0: out})
+
+    @parametrize("arg", ["low", "high", "mean", "std"])
+    @dtypes(*all_floating_dtypes)
+    def test_tensor_bounds_alias_output(self, device, dtype, arg):
+        # A non-dense view of the output escapes the overlap check, so the kernel
+        # must read the bound before sampling overwrites it.
+        op = "uniform" if arg in ("low", "high") else "normal"
+        key = random.key(42, device=device)
+        # 0.5 is valid for every bound, e.g. low=0.5 < default high=1.
+        out = torch.full((4, 3), 0.5, dtype=dtype, device=device)
+        param = torch.full((4, 1), 0.5, dtype=dtype, device=device)
+        expected = getattr(random, op)(key, (4, 3), dtype=dtype, **{arg: param})
+        actual = getattr(random, f"{op}_")(key, out, **{arg: out[:, :1]})
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @parametrize("op", ["uniform", "normal", "randint"])
+    def test_noncontig_key(self, device, op):
+        # A strided or 8-byte-aligned key must give the same values as a contiguous one.
+        gen = getattr(random, op)
+        kwargs = {"low": 0, "high": 100} if op == "randint" else {}
+        keys = random.split(random.key(42, device=device), 4)
+        strided = torch.stack([keys, keys], -1)[..., 0].unsqueeze(1)
+        expected = gen(keys.unsqueeze(1), (4, 33), **kwargs)
+        self.assertEqual(gen(strided, (4, 33), **kwargs), expected, atol=0, rtol=0)
+        misaligned = keys.view(-1)[1:3]
+        expected = gen(misaligned.clone(), (33,), **kwargs)
+        self.assertEqual(gen(misaligned, (33,), **kwargs), expected, atol=0, rtol=0)
+
+    @parametrize("op", ["uniform", "normal", "randint"])
+    def test_internal_overlap_output(self, device, op):
+        # Eager and fake must both reject an output whose elements share memory.
+        gen_ = getattr(random, f"{op}_")
+        kwargs = {"low": 0, "high": 100} if op == "randint" else {}
+        dtype = torch.int64 if op == "randint" else torch.float32
+        for mode in (contextlib.nullcontext(), FakeTensorMode()):
+            with mode:
+                key = random.key(42, device=device)
+                out = torch.zeros(1, 3, dtype=dtype, device=device).expand(4, 3)
+                with self.assertRaisesRegex(RuntimeError, "single memory location"):
+                    gen_(key, out, **kwargs)
 
     @dtypes(*all_floating_dtypes)
     @parametrize("batched", [False, True])
@@ -913,7 +1000,7 @@ class TestStatelessRNGCompile(TestCase):
         # ensure peak ~= output size).
         if torch.device(device).type == "cuda" and not HAS_TRITON:
             self.skipTest("CUDA inductor codegen requires triton")
-        if tensor_bounds and op not in ("uniform",):
+        if tensor_bounds and op not in ("uniform", "normal"):
             self.skipTest(f"{op} doesn't support tensor bounds yet")
         shape = (2048, 2048)  # 16 MiB fp32; an extra clone would ~double peak
         gen_fn = getattr(random, op)
@@ -1004,36 +1091,41 @@ class TestStatelessRNGCompile(TestCase):
             key = random.key(seed, device=device)
             self.assertEqual(compiled(key), f(key))
 
-    def test_uniform_tensor_bounds_backward(self, device):
+    @parametrize("op", ["uniform", "normal"])
+    def test_tensor_bounds_backward(self, device, op):
         if torch.device(device).type == "cuda" and not HAS_TRITON:
             self.skipTest("CUDA inductor codegen requires triton")
+        name0, name1 = bound_test_values[op][0]
 
-        def f(key, low, high):
-            return random.uniform(key, (8, 33), low=low, high=high)
+        def f(key, p0, p1):
+            return getattr(random, op)(key, (8, 33), **{name0: p0, name1: p1})
 
         key = random.key(42, device=device)
         grad = torch.randn(8, 33, device=device)
         results = []
         for fn in (f, torch.compile(f, fullgraph=True)):
-            low = torch.zeros(8, 1, device=device, requires_grad=True)
-            high = torch.full((8, 1), 2.0, device=device, requires_grad=True)
-            out = fn(key, low, high)
+            p0 = torch.zeros(8, 1, device=device, requires_grad=True)
+            p1 = torch.full((8, 1), 2.0, device=device, requires_grad=True)
+            out = fn(key, p0, p1)
             out.backward(grad)
-            results.append((out, low.grad, high.grad))
+            results.append((out, p0.grad, p1.grad))
         self.assertEqual(results[1], results[0])
 
+    @parametrize("op", ["uniform", "normal"])
     @dtypes(*all_floating_dtypes)
-    def test_uniform_tensor_bounds_match_scalar(self, device, dtype):
+    def test_tensor_bounds_match_eager(self, device, dtype, op):
         if torch.device(device).type == "cuda" and not HAS_TRITON:
             self.skipTest("CUDA inductor codegen requires triton")
+        name0, name1 = bound_test_values[op][0]
+        gen = getattr(random, op)
 
-        def f(key, low, high):
-            return random.uniform(key, (8, 33), low=low, high=high, dtype=dtype)
+        def f(key, p0, p1):
+            return gen(key, (8, 33), dtype=dtype, **{name0: p0, name1: p1})
 
         key = random.key(42, device=device)
-        low, high = (torch.full((8, 1), v, device=device) for v in (-3.0, 5.5))
-        expected = random.uniform(key, (8, 33), low=-3.0, high=5.5, dtype=dtype)
-        actual = torch.compile(f, fullgraph=True)(key, low, high)
+        p0, p1 = (torch.full((8, 1), v, device=device) for v in (-3.0, 5.5))
+        expected = f(key, p0, p1)
+        actual = torch.compile(f, fullgraph=True)(key, p0, p1)
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
 
