@@ -123,7 +123,7 @@ from .common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
-from .multi_kernel import MultiKernel
+from .multi_kernel import BenchmarkedMultiKernel
 from .simd import (
     constant_repr,
     DerivedIterationRangesRoot,
@@ -9431,7 +9431,7 @@ class TritonScheduling(SIMDScheduling):
         kernel_features: SIMDKernelFeatures,
         kernel_args: list[Any],
         kernel_kwargs: dict[str, Any],
-    ) -> TritonKernel | MultiKernel:
+    ) -> TritonKernel | BenchmarkedMultiKernel:
         is_scan = kernel_features.contains_op("scan")
         is_split_scan = is_scan and any(
             node.is_split_scan() for node in kernel_features.scheduler_nodes()
@@ -9459,8 +9459,8 @@ class TritonScheduling(SIMDScheduling):
         kernel: TritonKernel,
         kernel_args: list[Any],
         kernel_kwargs: dict[str, Any],
-    ) -> TritonKernel | MultiKernel:
-        """Return kernel, or a MultiKernel that benchmarks it against variants with
+    ) -> TritonKernel | BenchmarkedMultiKernel:
+        """Return kernel, or a BenchmarkedMultiKernel that benchmarks it against variants with
         a different persistent/cooperative reduction choice."""
         kernels: list[TritonKernel] = [kernel]
         if not config.triton.multi_kernel:
@@ -9509,7 +9509,7 @@ class TritonScheduling(SIMDScheduling):
                 kernel2.must_keep_buffers = kernel.must_keep_buffers
             # persistent kernels must be generated last so must_keep_buffers works right
             kernels.sort(key=lambda k: k.persistent_reduction)
-            return MultiKernel(kernels)
+            return BenchmarkedMultiKernel(kernels)
         return kernel
 
     @triton_heuristics.disable_caching_autotuner_plugins()

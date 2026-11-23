@@ -81,7 +81,6 @@ from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import (
     ConditionalMultiKernel,
     leaf_kernels,
-    MultiKernel,
     MultiKernelBase,
     SizeHintMultiKernel,
 )
@@ -4098,7 +4097,7 @@ class SIMDScheduling(BaseScheduling):
         config_patch_schedule=None,
     ) -> None:
         kernels = leaf_kernels(final_kernel)
-        MultiKernel.merge_workspaces_inplace(kernels)
+        MultiKernelBase.merge_workspaces_inplace(kernels)
         config_patches = self._collect_config_patches(
             config_patch_schedule or combined_schedule
         )
@@ -4708,9 +4707,6 @@ class SIMDScheduling(BaseScheduling):
             # ConditionalMultiKernel emits Triton launches.
             "a non-Triton backend"
             if not isinstance(self, TritonScheduling)
-            # TODO: remove to cover all kernels, with tests for them.
-            else "a non-reduction kernel"
-            if not kernel_features.is_reduction()
             # TODO: support the cpp and FX wrappers (they cannot emit the conditional
             # launch yet).
             else "the cpp wrapper"
@@ -4865,7 +4861,7 @@ class SIMDScheduling(BaseScheduling):
         Runs once, after all the leaves exist: the merged workspace size is part of
         each source.
         """
-        MultiKernel.merge_workspaces_inplace(kernels)
+        MultiKernelBase.merge_workspaces_inplace(kernels)
 
         # Collect config_patches from operations (e.g., decomposition ops with
         # coordinate_descent_tuning) and apply during kernel codegen
@@ -5192,7 +5188,7 @@ class SIMDScheduling(BaseScheduling):
             if only_gen_src_code:
                 return "\n\n".join(src_codes)
 
-            MultiKernel.merge_workspaces_inplace(list(kernels.values()))
+            MultiKernelBase.merge_workspaces_inplace(list(kernels.values()))
             multi_kernel = SizeHintMultiKernel(kernels)
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
             self.codegen_comment(node_schedule, multi_kernel.kernel_name)
