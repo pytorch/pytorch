@@ -4635,7 +4635,7 @@ def upsample_linear1d(
     [aten.upsample_bilinear2d.default, aten.upsample_bilinear2d.out]
 )
 @aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True)
 def upsample_bilinear2d(
     input: Tensor,
     output_size: list[int],
@@ -5527,7 +5527,7 @@ def matmul(tensor1, tensor2, *, is_out=False):
 
 @register_decomposition([aten.upsample_bicubic2d.default, aten.upsample_bicubic2d.out])
 @aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True)
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
     input: Tensor,

@@ -2891,6 +2891,36 @@ class TestFakeTensorDevice(_TestFakeTensorHelpers, TestCase):
                 out.append(op(x, *args))
         self.checkMetaProps(out[0], out[1])
 
+    @parametrize(
+        "op_name",
+        [
+            "upsample_bilinear2d",
+            "upsample_bicubic2d",
+            "_upsample_bilinear2d_aa",
+            "_upsample_bicubic2d_aa",
+            "_upsample_lanczos2d_aa",
+        ],
+    )
+    @parametrize("resize_out", [True, False])
+    def test_upsample_channels_last_view_out(self, device, op_name, resize_out):
+        if torch.device(device).type != "cpu":
+            self.skipTest("The singleton-batch uint8 layout rule is CPU only")
+
+        op = getattr(torch.ops.aten, op_name).out
+        x = torch.zeros((8, 12, 3), dtype=torch.uint8, device=device)
+        x = x.movedim(-1, 0)[None]
+        shape = (0,) if resize_out else (1, 3, 4, 6)
+        out = x.new_empty(shape)
+        self.assertIs(op(x, [4, 6], False, out=out), out)
+        expected_format = torch.channels_last if resize_out else torch.contiguous_format
+        self.assertTrue(out.is_contiguous(memory_format=expected_format))
+
+        with FakeTensorMode() as mode:
+            fake_x = mode.from_tensor(x)
+            fake_out = fake_x.new_empty(shape)
+            self.assertIs(op(fake_x, [4, 6], False, out=fake_out), fake_out)
+        self.checkMetaProps(out, fake_out)
+
     @onlyAccelerator
     def test_cpu_fallback(self, device):
         with FakeTensorMode(allow_fallback_kernels=False):
