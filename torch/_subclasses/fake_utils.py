@@ -7,7 +7,6 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.utils._pytree as pytree
 from torch._subclasses.fake_tensor import (
-    FakeTensor,
     FakeTensorMode,
     is_fake_tensor,
     maybe_get_fake_mode,
@@ -112,12 +111,18 @@ def is_sdpa_error(func: OpOverload, idx: int, e: Exception) -> bool:
         and "Devices" in repr(e)
     ):
         return True
+    if (
+        func is aten._scaled_dot_product_fused_attention_overrideable.default
+        and idx in (6, 7)
+        and "Devices" in repr(e)
+    ):
+        return True
     return False
 
 
 def try_convert_fake_to_real(
-    ten_list: list[FakeTensor | Any],
-) -> list[FakeTensor | torch.Tensor | Any]:
+    ten_list: list[torch.Tensor | Any],
+) -> list[torch.Tensor | Any]:
     """
     Attempt to convert fake tensors to a corresponding real tensor with the correct underlying storage by looking up
     the FakeTensorMode meta to real storage mapping. On failure to find the storage mapping, the FakeTensor will
@@ -188,7 +193,7 @@ def try_convert_fake_to_real(
 
 def _check_fake_real_tensors(
     real_out: torch.Tensor,
-    fake_out: FakeTensor,
+    fake_out: torch.Tensor,
     context: str = "",
     sizes: bool = True,
     strides: bool = False,

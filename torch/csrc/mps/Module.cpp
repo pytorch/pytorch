@@ -16,6 +16,7 @@
 #ifdef USE_MPS
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/mps/MPSSleep.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <torch/csrc/mps/Stream.h>
 #endif
@@ -458,11 +459,7 @@ struct OptionalArgCaster {
         /* List of tensors, most often to overcome the limits of 32-args per
          * kernel */
         auto tensorlist = py::cast<std::vector<at::Tensor>>(arg);
-        std::vector<void*> tl_ptrs;
-        for (auto& t : tensorlist) {
-          tl_ptrs.push_back(at::native::mps::get_tensor_gpu_address(t));
-        }
-        f.setArg(idx, tl_ptrs);
+        f.setTensorListArg(idx, tensorlist);
       } else {
         TORCH_CHECK(false, "Unexpected argument types");
       }
@@ -620,6 +617,10 @@ void initModule(PyObject* module) {
   });
   m.def("_mps_get_core_count", []() {
     return at::mps::MPSDevice::getInstance()->getCoreCount();
+  });
+  m.def("_mps_sleep", [](int64_t cycles) {
+    pybind11::gil_scoped_release no_gil;
+    at::mps::sleep(cycles);
   });
   m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
     PyObject* obj = py_storage.ptr();

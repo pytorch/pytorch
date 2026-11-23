@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import gc
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -30,7 +31,11 @@ from torch.export.pt2_archive._package import (
     load_weights_to_pt2_contents,
 )
 from torch.testing._internal.common_cuda import requires_triton_ptxas_compat
-from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE
+from torch.testing._internal.common_utils import (
+    add_skip_condition,
+    HardwareClassification,
+    IS_FBCODE,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils import _pytree as pytree
 
@@ -54,6 +59,11 @@ def skipif(predicate: Callable[[str, bool], bool], reason: str):
                 self.skipTest(reason)
             return func(self, *args, **kwargs)
 
+        add_skip_condition(
+            wrapper,
+            lambda cls: predicate(cls.device, cls.package_cpp_only),
+            reason,
+        )
         return wrapper
 
     return decorator
@@ -254,6 +264,7 @@ class TestAOTInductorPackage(TestCase):
         )
         self.check_model(Model(), example_inputs)
 
+    @skipif(lambda device, package_cpp_only: device != GPU_TYPE, f"requires {GPU_TYPE}")
     def test_int64_floor_divide_tensor_constant_divisor(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
@@ -271,6 +282,10 @@ class TestAOTInductorPackage(TestCase):
         )
         self.check_model(Model(), example_inputs)
 
+    @skipif(
+        lambda device, package_cpp_only: device != "cpu" or package_cpp_only,
+        "Only needs one CPU Python package variant",
+    )
     @unittest.skipIf(
         IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
     )
@@ -369,6 +384,61 @@ model(torch.ones(2))
 
             self.assertEqual(actual, expected)
 
+    @skipif(
+        lambda device, package_cpp_only: device != "cpu" or package_cpp_only,
+        "Only needs one CPU Python package variant",
+    )
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
+    def test_load_package_removes_extraction_dir(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package_path = str(Path(tmpdir) / "model.pt2")
+            ep = torch.export.export(Model(), (torch.ones(2),), strict=True)
+            torch._inductor.aoti_compile_and_package(ep, package_path=package_path)
+
+            # Load in a fresh process so the loader sees the isolated temp directory.
+            extract_root = str(Path(tmpdir) / "extract")
+            os.mkdir(extract_root)
+            script = f"""
+import json
+import os
+import torch
+
+root = {extract_root!r}
+before = sorted(os.listdir(root))
+model = torch._inductor.aoti_load_package({package_path!r})
+model(torch.ones(2))
+loaded = sorted(os.listdir(root))
+del model
+print(json.dumps([before, loaded, sorted(os.listdir(root))]))
+"""
+            env = os.environ.copy()
+            env.update(TMPDIR=extract_root, TMP=extract_root, TEMP=extract_root)
+            proc = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        before, loaded, after = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertNotEqual(
+            loaded, before, msg="package was not extracted under the temp directory"
+        )
+        leftover = sorted(set(after) - set(before))
+        self.assertFalse(leftover, msg="extraction directory was not removed")
+
+    @skipif(
+        lambda device, package_cpp_only: device == "cpu",
+        "stream affinity requires an accelerator",
+    )
     def test_load_package_with_stream_affinity(self):
         if self.device == "cpu":
             self.skipTest("stream affinity requires an accelerator")
@@ -505,6 +575,10 @@ model(torch.ones(2))
         )
         self.check_model(Model(), example_inputs)
 
+    @skipif(
+        lambda device, package_cpp_only: not package_cpp_only,
+        "Only meant to test cpp package",
+    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
     def test_compile_after_package(self):
@@ -554,6 +628,14 @@ model(torch.ones(2))
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
+    @skipif(
+        lambda device, package_cpp_only: not package_cpp_only,
+        "Only meant to test cpp package",
+    )
+    @skipif(
+        lambda device, package_cpp_only: device != GPU_TYPE,
+        f"Only meant to test {GPU_TYPE}",
+    )
     @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     def test_compile_after_package_multi_arch(self):
@@ -597,6 +679,10 @@ model(torch.ones(2))
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
+    @skipif(
+        lambda device, package_cpp_only: not package_cpp_only,
+        "Only meant to test cpp package",
+    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
@@ -656,6 +742,10 @@ model(torch.ones(2))
             with self.assertRaisesRegex(Exception, "Invalid AOTI model name"):
                 self.cmake_compile(model, example_inputs, options, "")
 
+    @skipif(
+        lambda device, package_cpp_only: not package_cpp_only,
+        "Only meant to test cpp package",
+    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
@@ -689,6 +779,10 @@ model(torch.ones(2))
                 a_path = build_path / "libcos.a"
                 self.assertTrue(a_path.exists())
 
+    @skipif(
+        lambda device, package_cpp_only: not package_cpp_only,
+        "Only meant to test cpp package",
+    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
@@ -739,6 +833,10 @@ model(torch.ones(2))
                     )
                     self.assertTrue(expected_result in out_str)
 
+    @skipif(
+        lambda device, package_cpp_only: not package_cpp_only,
+        "Only meant to test cpp package",
+    )
     @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
@@ -775,10 +873,7 @@ model(torch.ones(2))
 
             # Test compiling generated files
             self.cmake_compile_and_run(tmp_dir)
-            tensor_model = torch.load(
-                tmp_dir + "/output_tensor1.pt", weights_only=False
-            )
-            true_res = next(iter(tensor_model.parameters()))
+            true_res = torch.load(tmp_dir + "/output_tensor1.pt", weights_only=True)
             self.assertEqual(expected_res, true_res)
 
     def test_metadata(self):

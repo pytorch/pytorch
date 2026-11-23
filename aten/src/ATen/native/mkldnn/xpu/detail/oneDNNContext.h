@@ -76,15 +76,25 @@ struct GpuStreamManager {
   dnnl::stream& get_stream(
       DeviceIndex device_index = c10::xpu::current_device()) {
     auto stream = c10::xpu::getCurrentXPUStream(device_index);
-    auto priority = stream.priority();
-    if (stream_pool[device_index][priority].find(stream) ==
-        stream_pool[device_index][priority].end()) {
-      stream_pool[device_index][priority][stream] =
+    // A lower priority has a larger priority number, so the lowest priority
+    // maps to index 0. See Note [XPU Stream priorities].
+    const auto lowest_priority =
+        std::get<0>(c10::xpu::XPUStream::priority_range());
+    const auto priority_idx = lowest_priority - stream.priority();
+    TORCH_CHECK(
+        priority_idx >= 0 &&
+            priority_idx < c10::xpu::max_compile_time_stream_priorities,
+        "Unsupported XPU stream priority: ",
+        stream.priority());
+
+    auto& pool = stream_pool[device_index][priority_idx];
+    if (pool.find(stream) == pool.end()) {
+      pool[stream] =
           std::make_shared<dnnl::stream>(dnnl::sycl_interop::make_stream(
               GpuEngineManager::Instance().get_engine(device_index),
               stream.queue()));
     }
-    return *stream_pool[device_index][priority][stream];
+    return *pool[stream];
   }
 
   GpuStreamManager(GpuStreamManager const&) = delete;

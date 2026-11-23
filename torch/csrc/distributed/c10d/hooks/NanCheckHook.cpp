@@ -28,7 +28,7 @@ std::shared_ptr<NanCheckHook> NanCheckHook::attach(
 }
 
 NanCheckHook::NanCheckHook(const c10::intrusive_ptr<ProcessGroup>& pg)
-    : pg_(pg), rank_(pg->getRank()), hook_id_(next_hook_id++) {
+    : pg_(pg), hook_id_(next_hook_id++) {
   TORCH_CHECK(pg, "NanCheckHook: null process group");
 }
 
@@ -47,10 +47,12 @@ void NanCheckHook::onPre(const PreHookArgs& args) const {
   // uninitialized data. For broadcast and scatter the in-place / input buffer
   // is a send buffer on the root only, matching ProcessGroupNCCL's native
   // rank filtering.
-  if ((args.name == HookOpName::BROADCAST ||
-       args.name == HookOpName::SCATTER) &&
-      args.root != rank_) {
-    return;
+  if (args.name == HookOpName::BROADCAST || args.name == HookOpName::SCATTER) {
+    // Not cached: reconfigure can change this rank.
+    auto pg = pg_.lock();
+    if (!pg || args.root != pg->getRank()) {
+      return;
+    }
   }
   for (const auto& tensor : args.input_tensors) {
     if (tensor.is_floating_point()) {

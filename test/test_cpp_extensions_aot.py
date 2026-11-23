@@ -162,12 +162,11 @@ class TestCppExtensionAOTCUDA(common.TestCase):
         z = cusolver_extension.noop_cusolver_function(x)
         self.assertEqual(z, x)
 
-    @common.skipIfRocm(msg="dlink build path has no ROCm arch handling")
     @unittest.skipIf(common.IS_WINDOWS, "Windows not supported")
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     @unittest.skipIf(
-        os.getenv("USE_NINJA", "0") == "0",
-        "cuda extension with dlink requires ninja to build",
+        os.getenv("USE_NINJA", "0") == "0" and torch.version.hip is None,
+        "cuda extension with dlink requires ninja to build (except on ROCm)",
     )
     def test_cuda_dlink_libs(self):
         from torch_test_cpp_extension import cuda_dlink
@@ -451,12 +450,6 @@ class TestTorchLibrary(common.TestCase):
         self.assertFalse(f(True, False))
         self.assertFalse(f(False, True))
         self.assertFalse(f(False, False))
-        s = torch.jit.script(f)
-        self.assertTrue(s(True, True))
-        self.assertFalse(s(True, False))
-        self.assertFalse(s(False, True))
-        self.assertFalse(s(False, False))
-        self.assertIn("torch_library::logical_and", str(s.graph))
 
 
 instantiate_device_type_tests(

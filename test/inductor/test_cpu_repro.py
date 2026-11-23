@@ -33,6 +33,7 @@ from torch._inductor.codegen.cpp import (
     LoopNest,
 )
 from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor.cpp_builder import CppTorchDeviceOptions
 from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import fresh_cache, timed
@@ -593,8 +594,10 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             opt_fn = torch.compile(fn, backend="inductor")
             actual, code = run_and_get_cpp_code(opt_fn, v)
-        FileCheck().check("transpose_mxn").run(code)
-        FileCheck().check("atomic_add_vec").run(code)
+        if not config.avoid_modular_indexing:
+            # the realized permute + reshape changes the generated kernels
+            FileCheck().check("transpose_mxn").run(code)
+            FileCheck().check("atomic_add_vec").run(code)
         self.assertEqual(fn(v), actual, atol=1e-4, rtol=1e-4)
 
     def test_conv_max_pool_where_backward_mutation_dep(self):
@@ -1697,6 +1700,19 @@ class CPUReproTests(TestCase):
                 self.assertEqual("simd_vec_reduce_all" in code, enabled)
 
     @requires_vectorization
+    def test_vec_exp_u20(self):
+        def fn(x):
+            return torch.softmax(x, -1)
+
+        x = torch.randn(3, 24) * 10
+        for enabled in (False, True):
+            with config.patch({"cpp.vec_exp_u20": enabled}):
+                torch._dynamo.reset()
+                actual, code = run_and_get_cpp_code(torch.compile(fn), x)
+            self.assertEqual(".exp_u20()" in code, enabled)
+            self.assertEqual(actual, fn(x), atol=1e-6, rtol=1e-5)
+
+    @requires_vectorization
     def test_max_parallel_depth_sub_vector_width_loop(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/190757
         # A vectorized loop smaller than the vector width runs 1 iteration, not
@@ -2774,7 +2790,9 @@ class CPUReproTests(TestCase):
                 channel_shuffle,
                 (x, 2, output_scale, output_zero_point, quant_min, quant_max, dtype),
             )
-            check_metrics_vec_kernel_count(2)
+            if not config.avoid_modular_indexing:
+                # the realized channel shuffle changes the vectorized kernels
+                check_metrics_vec_kernel_count(2)
 
     @requires_vectorization
     def test_tile2d_store_channel_shuffle_cl_quant_output_uint8(self):
@@ -3734,6 +3752,20 @@ class CPUReproTests(TestCase):
                 self.assertTrue(
                     torch.allclose(output_eager, output_compiled, atol=1e-4, rtol=1e-4)
                 )
+
+    @parametrize("enabled", (False, True))
+    def test_force_inline_welford(self, enabled):
+        # use_two_step_variance keeps Welford for a single row. The flag only
+        # changes how the Welford helpers in cpp_prefix.h are compiled.
+        mod = torch.nn.LayerNorm(57).eval()
+        x = torch.randn(1, 57)
+        with config.patch({"cpp.force_inline_welford": enabled}), torch.no_grad():
+            torch._dynamo.reset()
+            actual, code = run_and_get_cpp_code(torch.compile(mod), x)
+            definitions = CppTorchDeviceOptions(device_type="cpu").get_definitions()
+        self.assertEqual(actual, mod(x))
+        self.assertIn("welford_combine", code)
+        self.assertEqual("TORCH_INDUCTOR_FORCE_INLINE_WELFORD" in definitions, enabled)
 
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @requires_vectorization
@@ -4854,7 +4886,9 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 x = torch.randn(64, 58, 28, 28)
                 self.common(channel_shuffle, (x, 2))
-                check_metrics_vec_kernel_count(2)
+                if not config.avoid_modular_indexing:
+                    # the realized channel shuffle changes the vectorized kernels
+                    check_metrics_vec_kernel_count(2)
 
     @slowTest
     @requires_vectorization
@@ -5479,6 +5513,20 @@ class CPUReproTests(TestCase):
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
+    @config.patch(inplace_buffers=True)
+    def test_no_inplace_reuse_of_indirect_index_buffer(self):
+        # The topk indices die at the gather, but must not be overwritten by
+        # its output: the gather uses their values as addresses.
+        def fn(scores, ids):
+            idx = torch.topk(scores, 5, dim=1).indices
+            return torch.gather(ids, 1, idx)
+
+        inps = [torch.randn(8, 200), torch.randint(0, 2**40, (8, 200))]
+        fn_opt = torch.compile(fn, backend="inductor")
+        out, code = run_and_get_cpp_code(fn_opt, *inps)
+        self.assertNotIn("in_out_ptr", code)
+        self.assertEqual(out, fn(*inps))
+
     def test_eliminate_meaningless_copy(self):
         def fn(x1, x2):
             permute = torch.ops.aten.permute.default(x2, [0, 2, 1, 3])
@@ -5860,8 +5908,11 @@ class CPUReproTests(TestCase):
                 compiled_m = torch.compile(mod, dynamic=dynamic)
                 actual, code = run_and_get_cpp_code(compiled_m, x)
                 self.assertEqual(expected, actual)
-                # 3 generated kernels (first one for var_mean, last two for result)
-                check_metrics_vec_kernel_count(3)
+                # 3 generated kernels (first one for var_mean, last two for
+                # result); the realized view of the low-precision input's
+                # float32 cast adds kernels
+                if dtype == torch.float32 or not config.avoid_modular_indexing:
+                    check_metrics_vec_kernel_count(3)
 
                 # check loop split optimization
                 if fmt == torch.channels_last:
@@ -6426,8 +6477,10 @@ class CPUReproTests(TestCase):
             metrics.reset()
             _, code = run_and_get_cpp_code(opt_m, x)
             self.assertTrue(same(m(x), opt_m(x)))
-            # Two kernels: one for reduction, one pointwises
-            check_metrics_vec_kernel_count(4)
+            # Two kernels: one for reduction, one pointwises; the realized
+            # window merge adds one
+            if not config.avoid_modular_indexing:
+                check_metrics_vec_kernel_count(4)
             FileCheck().check_count(
                 "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
             ).run(code)
@@ -6921,7 +6974,9 @@ class CPUReproTests(TestCase):
 
         metrics.reset()
         self.common(fn, ())
-        check_metrics_vec_kernel_count(1)
+        if not config.avoid_modular_indexing:
+            # the realized window partition changes the vectorized kernels
+            check_metrics_vec_kernel_count(1)
 
     def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
