@@ -103,7 +103,7 @@ class TestKernelRowTile(TestCase):
         op = ops[name](acc=cutlass.Float32)
         x = -torch.zeros(65536, 128, device="cuda")
         kw = {"threads_per_row": 1, "use_tma": True}
-        (got,) = rt.reduce_row_tile(op, "tma_nz", x, [x.dtype], **kw)
+        (got,) = rt.reduce_row_tile(op, f"tma_nz_{name}", x, [x.dtype], **kw)
         self.assertEqual(got.view(torch.int32), torch.zeros(65536, dtype=torch.int32))
 
     def test_narrow_one_thread_row_chains(self):
