@@ -9,9 +9,11 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch.distributed._tools import MemoryTracker
-from torch.testing._internal.common_device_type import instantiate_device_type_tests,
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    HardwareClassification, run_tests, TestCase,
+    HardwareClassification,
+    run_tests,
+    TestCase,
 )
 
 
