@@ -1018,6 +1018,8 @@ def with_fresh_cache_if_config() -> Generator[None, None, None]:
 
 class _CompileFxKwargs(TypedDict, total=False):
     cudagraphs: BoxedBool | None
+    # Only in AOTAutograd's fx config: CompilerConfigExtra.cudagraphs_bwd_override.
+    cudagraphs_bwd_override: bool | None
     static_input_idxs: Sequence[int]
     is_backward: bool
     graph_id: int | None
