@@ -1073,6 +1073,23 @@ impl Region {
     }
 }
 
+/// What a builtin that goes over an object is handed in place of the object
+/// where a path has called the `__iter__` of the object already: asked for
+/// an iterator it gives what that call returned, as it is, so the builtin
+/// does with it what it does with what an `__iter__` returns (it raises
+/// for what is no iterator, and does not ask the iterator for one again).
+#[pyclass(module = "torch._cfg_rs", name = "Iterated", frozen)]
+pub struct Iterated {
+    pub returned: Py<PyAny>,
+}
+
+#[pymethods]
+impl Iterated {
+    fn __iter__(&self, py: Python<'_>) -> Py<PyAny> {
+        self.returned.clone_ref(py)
+    }
+}
+
 /// A range of the generic instructions of a block, to be run again on other
 /// values. Made by `Region.replayer`.
 #[pyclass(module = "torch._cfg_rs", name = "Replay", frozen)]

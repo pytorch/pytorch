@@ -78,6 +78,16 @@ pub enum Assert {
     /// call that the path goes into enters, and how it binds what it is
     /// not handed.
     Enters(PathValue, *const Compiled, usize),
+    /// What an `__iter__` returned is an iterator, what a `__len__`
+    /// returned is a count: the interpreter raises for anything else.
+    Iterator(PathValue),
+    Count(PathValue),
+    /// The object has no attribute of the name (`absent`): reading it
+    /// comes down to the `__getattr__` of its class.
+    Absent(PathValue, PyObj),
+    /// The class of the object has nothing under the name: no `__len__`
+    /// and no `__length_hint__`, which `list` and `tuple` would ask.
+    Lacks(PathValue, PyObj),
     /// What a call hands on with `*`: exactly of this class, a tuple or a
     /// list, with this many items. With `**`: an exact dict with these
     /// names, in this order.
@@ -91,6 +101,10 @@ impl Assert {
             Assert::Truth(v, _)
             | Assert::Null(v, _)
             | Assert::Enters(v, ..)
+            | Assert::Iterator(v)
+            | Assert::Count(v)
+            | Assert::Absent(v, _)
+            | Assert::Lacks(v, _)
             | Assert::Sequence(v, ..)
             | Assert::Keys(v, _) => *v,
             Assert::Guard(cond) => cond.value(),
@@ -1017,6 +1031,20 @@ unsafe fn plainly_checkable(o: Obj) -> bool {
     }
     let sequence = ffi::PyTuple_CheckExact(o) != 0 || ffi::PyList_CheckExact(o) != 0;
     sequence && (0..ffi::PyObject_Size(o)).all(|i| plainly_checkable(sequence_item(o, i)))
+}
+
+/// What `len` may be given by a `__len__`: an exact int that is not
+/// negative.
+pub unsafe fn is_count(o: Obj) -> bool {
+    if capi::is_unboxed(o) || ffi::PyLong_CheckExact(o) == 0 {
+        return false;
+    }
+    let count = ffi::PyLong_AsSsize_t(o);
+    if count == -1 && !ffi::PyErr_Occurred().is_null() {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    count >= 0
 }
 
 /// An exact int, float or bool.
@@ -2244,6 +2272,56 @@ unsafe fn builtin_named(which: Builtin) -> usize {
     found[BUILTINS.iter().position(|(_, other)| *other == which).unwrap()]
 }
 
+/// Whether a callee is the builtin `len`.
+pub unsafe fn is_len(callee: Obj) -> bool {
+    builtin_named(Builtin::Len) == callee as usize
+}
+
+/// For a call of a builtin that asks its arguments for an iterator and for
+/// nothing else, in their order, before it does anything with them: how
+/// many of the arguments it asks, from the first on; 0 for any other call.
+/// `iter(x)` (not `iter(x, sentinel)`, which calls `x`), `enumerate(x)` and
+/// `enumerate(x, n)` with an int (which is asked for its index first),
+/// `zip(...)`, and `list(x)` and `tuple(x)` of an object whose class has
+/// neither `__len__` nor `__length_hint__`, which those ask of the object
+/// itself.
+pub unsafe fn goes_over(callee: Obj, args: &[Obj]) -> usize {
+    const TAKE: [Builtin; 5] = [Builtin::Enumerate, Builtin::Zip, Builtin::Iter, Builtin::List, Builtin::Tuple];
+    static HINT: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
+    let Some(which) = TAKE.iter().copied().find(|which| builtin_named(*which) == callee as usize) else {
+        return 0;
+    };
+    if args.is_empty() || args.iter().any(|o| o.is_null()) {
+        return 0;
+    }
+    let one = args.len() == 1;
+    let plain = |o: Obj| {
+        let hint = HINT.get_or_init(|| PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__length_hint__".as_ptr())));
+        let ty = ffi::Py_TYPE(o);
+        !capi::is_unboxed(o)
+            && pyffi::_PyType_Lookup(ty, specials().len.as_ptr()).is_null()
+            && pyffi::_PyType_Lookup(ty, hint.as_ptr()).is_null()
+    };
+    match which {
+        Builtin::Iter => one as usize,
+        Builtin::Enumerate => {
+            (one || (args.len() == 2 && !capi::is_unboxed(args[1]) && ffi::PyLong_CheckExact(args[1]) != 0)) as usize
+        }
+        Builtin::List | Builtin::Tuple => (one && plain(args[0])) as usize,
+        _ => args.len(),
+    }
+}
+
+/// The name `__length_hint__`, for a check that a class has none.
+pub unsafe fn length_hint() -> PyObj {
+    PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__length_hint__".as_ptr()))
+}
+
+/// Whether a callee is the builtin `list` or `tuple`.
+pub unsafe fn makes_sequence(callee: Obj) -> bool {
+    builtin_named(Builtin::List) == callee as usize || builtin_named(Builtin::Tuple) == callee as usize
+}
+
 /// The modules whose functions a path may call on any arguments (`torch._C`:
 /// those that ask about the state of the thread or of what they are given)
 /// or on numbers (`math`).
@@ -2370,6 +2448,79 @@ pub unsafe fn pure_method(recv: Obj, name: Obj, args: &[Obj], api: &TcfgApi) -> 
     }
 }
 
+/// The names of the functions that a class has for what the interpreter
+/// does with its instances without a call being written.
+pub struct Specials {
+    pub iter: PyObj,
+    pub len: PyObj,
+    pub getitem: PyObj,
+    pub get: PyObj,
+    pub getattr: PyObj,
+    getattribute: PyObj,
+}
+
+pub unsafe fn specials() -> &'static Specials {
+    static NAMES: std::sync::OnceLock<Specials> = std::sync::OnceLock::new();
+    let name = |name: &std::ffi::CStr| PyObj::from_owned(ffi::PyUnicode_InternFromString(name.as_ptr()));
+    NAMES.get_or_init(|| Specials {
+        iter: name(c"__iter__"),
+        len: name(c"__len__"),
+        getitem: name(c"__getitem__"),
+        get: name(c"__get__"),
+        getattr: name(c"__getattr__"),
+        getattribute: name(c"__getattribute__"),
+    })
+}
+
+/// The Python function that the class of an object has under a name, for
+/// a class that is defined in Python: what the interpreter calls where it
+/// iterates over the object, counts it, or takes an item of it. Null for
+/// anything else. Borrowed.
+pub unsafe fn special(o: Obj, name: &PyObj) -> Obj {
+    if o.is_null() || capi::is_unboxed(o) || is_static(ffi::Py_TYPE(o)) || ffi::PyType_Check(o) != 0 {
+        return null_mut();
+    }
+    let found = pyffi::_PyType_Lookup(ffi::Py_TYPE(o), name.as_ptr());
+    if !found.is_null() && ffi::PyFunction_Check(found) != 0 { found } else { null_mut() }
+}
+
+/// Whether the attributes of an object are looked up as `object` or a
+/// module does it, before any `__getattr__` of its class.
+unsafe fn plain_lookup(o: Obj) -> bool {
+    if capi::is_unboxed(o) || ffi::PyType_Check(o) != 0 {
+        return false;
+    }
+    let names = specials();
+    let found = pyffi::_PyType_Lookup(ffi::Py_TYPE(o), names.getattribute.as_ptr());
+    let of = |ty: *mut ffi::PyTypeObject| pyffi::_PyType_Lookup(ty, names.getattribute.as_ptr());
+    found == of(std::ptr::addr_of_mut!(ffi::PyBaseObject_Type)) || found == of(std::ptr::addr_of_mut!(ffi::PyModule_Type))
+}
+
+/// What the class of an object has under a name, if that is what reading
+/// the attribute comes down to whatever the object holds itself: a
+/// descriptor that also takes stores. Null for anything else. Borrowed.
+pub unsafe fn data_descriptor(o: Obj, name: Obj) -> Obj {
+    if o.is_null() || !plain_lookup(o) {
+        return null_mut();
+    }
+    let descr = pyffi::_PyType_Lookup(ffi::Py_TYPE(o), name);
+    let data = !descr.is_null() && (*ffi::Py_TYPE(descr)).tp_descr_set.is_some();
+    if data { descr } else { null_mut() }
+}
+
+/// Whether an object has no attribute of a name, so that reading it comes
+/// down to the `__getattr__` of its class: neither the class nor the
+/// object has it, and a module has no `__getattr__` of its own.
+pub unsafe fn absent(o: Obj, name: Obj) -> bool {
+    if o.is_null() || !plain_lookup(o) || !pyffi::_PyType_Lookup(ffi::Py_TYPE(o), name).is_null() {
+        return false;
+    }
+    let slot = pyffi::_PyObject_GetDictPtr(o);
+    let dict = if slot.is_null() { null_mut() } else { *slot };
+    let has = |name: Obj| !dict.is_null() && !ffi::PyDict_GetItemWithError(dict, name).is_null();
+    !has(name) && !(ffi::PyModule_Check(o) != 0 && has(specials().getattr.as_ptr()))
+}
+
 /// Whether what a type has under a name is given out by Python code: a
 /// property whose getter is a Python function, or a descriptor of a class
 /// that is defined in Python.
@@ -2445,7 +2596,7 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
     let mut info = TcfgTensorInfo::empty();
     let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
     let generic = (*ty).tp_getattro.map(|own| own as usize) == (*object).tp_getattro.map(|own| own as usize);
-    let hooked = !generic && crate::shortcuts::plain_getattribute(ty);
+    let hooked = !generic && plain_lookup(obj);
     let shortcut = hooked && crate::shortcuts::has_getattr(ty);
     if !(generic || hooked || (api.tensor_info)(obj, &mut info) != 0) {
         return false;
