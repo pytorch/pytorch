@@ -44,6 +44,9 @@ torch::stable::Device cuda_device(torch::headeronly::DeviceType::CUDA, 0);
 ```{doxygenfunction} torch::stable::empty
 ```
 
+```{doxygenfunction} torch::stable::empty_strided
+```
+
 ```{doxygenfunction} torch::stable::empty_like
 ```
 
@@ -57,6 +60,9 @@ torch::stable::Device cuda_device(torch::headeronly::DeviceType::CUDA, 0);
 ```
 
 ```{doxygenfunction} torch::stable::from_blob(void *data, torch::headeronly::IntHeaderOnlyArrayRef sizes, torch::headeronly::IntHeaderOnlyArrayRef strides, torch::stable::Device device, torch::headeronly::ScalarType dtype, int64_t storage_offset, torch::headeronly::Layout layout)
+```
+
+```{doxygenfunction} torch::stable::from_file
 ```
 
 **Example:**
@@ -91,6 +97,9 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::permute
 ```
 
+```{doxygenfunction} torch::stable::flip
+```
+
 ```{doxygenfunction} torch::stable::flatten
 ```
 
@@ -110,6 +119,9 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::narrow
+```
+
+```{doxygenfunction} torch::stable::slice
 ```
 
 ```{doxygenfunction} torch::stable::pad
@@ -142,6 +154,18 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::matmul
 ```
 
+```{doxygenfunction} torch::stable::mm_out(torch::stable::Tensor &out, const torch::stable::Tensor &self, const torch::stable::Tensor &mat2)
+```
+
+```{doxygenfunction} torch::stable::mm_out(torch::stable::Tensor &out, const torch::stable::Tensor &self, const torch::stable::Tensor &mat2, torch::headeronly::ScalarType out_dtype)
+```
+
+```{doxygenfunction} torch::stable::bmm_out(torch::stable::Tensor &out, const torch::stable::Tensor &self, const torch::stable::Tensor &mat2)
+```
+
+```{doxygenfunction} torch::stable::bmm_out(torch::stable::Tensor &out, const torch::stable::Tensor &self, const torch::stable::Tensor &mat2, torch::headeronly::ScalarType out_dtype)
+```
+
 ```{doxygenfunction} torch::stable::amax(const torch::stable::Tensor &self, int64_t dim, bool keepdim)
 ```
 
@@ -152,6 +176,9 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::sum_out
+```
+
+```{doxygenfunction} torch::stable::add
 ```
 
 ```{doxygenfunction} torch::stable::subtract
@@ -170,4 +197,13 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::floor_divide
+```
+
+```{doxygenfunction} torch::stable::sort(const torch::stable::Tensor &self, int64_t dim, bool descending)
+```
+
+```{doxygenfunction} torch::stable::sort(const torch::stable::Tensor &self, std::optional<bool> stable, int64_t dim, bool descending)
+```
+
+```{doxygenfunction} torch::stable::masked_select
 ```

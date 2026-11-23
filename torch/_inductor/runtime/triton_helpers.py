@@ -226,6 +226,35 @@ def is_floating(x):
 
 
 @triton.jit
+def trunc_to_float(x, float_dtype: tl.constexpr):
+    # libdevice.trunc only accepts floating-point inputs.
+    if is_floating(x):
+        # Adding zero preserves large results while canonicalizing
+        # libdevice.trunc(-0.0) to Python's +0.0 materialization behavior.
+        return libdevice.trunc(x) + tl.zeros_like(x)
+    else:
+        return x.to(float_dtype)
+
+
+# libdevice.ceil, libdevice.floor, and libdevice.trunc accept only floating-point
+# inputs. Conservatively canonicalized symbolic expressions can still be integer
+# at Triton compile time, so bypass libdevice for those inputs.
+@triton.jit
+def rounding_to_int(x, index_dtype: tl.constexpr, rounding: tl.constexpr):
+    if is_floating(x):
+        if rounding == "ceil":
+            return libdevice.ceil(x).to(index_dtype)
+        elif rounding == "floor":
+            return libdevice.floor(x).to(index_dtype)
+        elif rounding == "trunc":
+            return libdevice.trunc(x).to(index_dtype)
+        else:
+            tl.static_assert(False, "unsupported rounding mode")
+    else:
+        return x.to(index_dtype)
+
+
+@triton.jit
 def _prod_accumulate(a, b):
     return a * b
 
@@ -274,6 +303,37 @@ def _maximum_reduce(a, b):
 @triton.jit
 def fmaximum(a, b):
     return tl.maximum(a, b)
+
+
+@triton.jit
+def nextafter(x, y):
+    bitwidth: tl.constexpr = x.dtype.primitive_bitwidth
+    if bitwidth == 64:
+        result = libdevice.nextafter(x, y)
+    else:
+        # libdevice.nextafterf honors CUDA FTZ and skips fp32 subnormals. For
+        # fp16/bf16, stepping must happen before values are promoted to fp32.
+        idtype: tl.constexpr = tl.core.get_int_dtype(bitwidth, signed=False)
+        ix = x.to(idtype, bitcast=True)
+        iy = y.to(idtype, bitcast=True)
+        sign_mask: tl.constexpr = 1 << (bitwidth - 1)
+
+        x_is_zero = (ix & (sign_mask - 1)) == 0
+        y_is_zero = (iy & (sign_mask - 1)) == 0
+
+        # Compare bit patterns so denormal handling cannot affect IEEE ordering.
+        same_sign = (ix & sign_mask) == (iy & sign_mask)
+        step_up = same_sign & (iy > ix)
+        stepped = ix + tl.where(step_up, 1, -1).to(idtype)
+        zero_step = (iy & sign_mask) | 1
+
+        result = (
+            tl.where(x_is_zero, zero_step, stepped).to(idtype).to(x.dtype, bitcast=True)
+        )
+        result = tl.where((ix == iy) | (x_is_zero & y_is_zero), y, result)
+
+    # ROCm's fp64 libdevice nextafter can preserve signaling NaNs.
+    return tl.where((x != x) | (y != y), x + y, result)
 
 
 @triton.jit
@@ -414,17 +474,15 @@ def online_softmax_combine(
     else:
         out_max = maximum(lhs_max, rhs_max)
 
-    lhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
-    )
-    rhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
-    )
+    scale = exp(-tl.abs(lhs_max - rhs_max), use_fast_math)
+    lhs_scale = tl.where(lhs_max == out_max, 1.0, scale)
+    rhs_scale = tl.where(rhs_max == out_max, 1.0, scale)
 
     # Should be
     #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
     # but since rhs_sum is all 1, we can simplify it.
     out_sum = lhs_sum * lhs_scale + rhs_scale
+    out_sum = tl.where(out_max == float("inf"), float("nan"), out_sum)
     return out_max, out_sum
 
 
@@ -465,14 +523,12 @@ def online_softmax_combine_with_sum(
     else:
         out_max = maximum(lhs_max, rhs_max)
 
-    lhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
-    )
-    rhs_scale = tl.where(
-        out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
-    )
+    scale = exp(-tl.abs(lhs_max - rhs_max), use_fast_math)
+    lhs_scale = tl.where(lhs_max == out_max, 1.0, scale)
+    rhs_scale = tl.where(rhs_max == out_max, 1.0, scale)
 
     out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    out_sum = tl.where(out_max == float("inf"), float("nan"), out_sum)
     return out_max, out_sum
 
 
