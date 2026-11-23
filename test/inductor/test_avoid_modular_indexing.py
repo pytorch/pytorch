@@ -609,6 +609,7 @@ class AvoidModularIndexingTest(TestCase):
         ):
             self.check(fn, a, b, kernel_count=1)
 
+    @config.patch(loop_ordering_after_fusion=True)
     def test_decision_receives_sizes(self, device):
         # every call site tells the decision how many elements the affected
         # kernel touches, and a split reduction also how many of them each
