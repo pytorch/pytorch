@@ -641,7 +641,8 @@ class TestOrderedColRoute(TestCase):
         ],
     )
     def test_constructor_invariants_raise(self, field, error):
-        # reduce_ordered_col declines these plans first, so only direct callers reach them.
+        # reduce_ordered_col declines the first three and the planner builds no one-warp
+        # split, so only direct callers reach these plans.
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         trait = T.SumOps(acc=cutlass.Float32)
