@@ -43,7 +43,9 @@ torch.vm.regions(g)
 # [{'where': 'f (block 0)[2]', 'state': 'built', 'ops': 6,
 #   'operators': ['aten::matmul', 'aten::tanh', 'aten::sum',
 #   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'inputs': 3,
-#   'outputs': 1, 'variants': 0, 'hits': 0, 'misses': 0, 'version': 1}]
+#   'outputs': 1, 'ends': [(0, 11)], 'why': 'the function returns',
+#   'variants': 0, 'hits': 0, 'misses': 0, 'exports': 0, 'version': 1,
+#   'forms': []}]
 ```
 
 `where` names the function, the block, and the instruction of the first
@@ -51,8 +53,10 @@ operation of the graph (`g.dump()` shows them). The state
 `"built"` says that the engine runs the graph itself. `inputs` and `outputs`
 are how many values the graph takes from the code in front of it (here `x`,
 `w` and the function `torch.tanh`) and how many the code behind it reads.
-What was left out of the graphs of a block that has tensor work on both
-sides of it is listed too, with the state `"vm"` and the reason:
+`ends` is the block and the instruction the function goes on at behind the
+graph, and `why` what ends the graph there. What was left out of the graphs
+of a block that has tensor work on both sides of it is listed too, with the
+state `"vm"` and the reason:
 
 ```python
 def two(x):
@@ -173,11 +177,21 @@ it at the call, up to 64 lists, tuples and slices inside one another, not by
 which list it is: one that was changed in place since is another value, and
 one that goes deeper, or that holds itself, is never the value a form was
 made for). A call of another kind runs the
-operations and is exported in its turn, `max_variants` times at most (8
+operations and is exported in its turn. What was made for a kind of call is
+a form of the graph, and a graph has `max_variants` of them at most (8
 unless `Graphs` is made with another number); calls of further kinds then
-run the operations every time. A pass states what else its rewrite depends
-on with `torch.vm.guard(gm, placeholder, torch.vm.Dim(0, range(16, 33)))`: a
-call that fails a guard runs the operations.
+run the operations every time. The forms are tried in the order they last
+ran, so the kind of call that keeps coming is found first. A pass states
+what else its rewrite depends on with `torch.vm.guard(gm, placeholder,
+torch.vm.Dim(0, range(16, 33)))`: a call that fails a guard runs the
+operations.
+
+`torch.vm.regions` lists the forms of a graph under `forms`, the one that ran
+last first: what a call has to be like to be of the kind (`checks`, as
+text), how many calls ran the form (`hits`), and the `reason` if calls of
+the kind are not exported. `exports` is how many times the graph was handed
+to the passes, and `fn.stats()["graphs"]` has the totals for a function and
+what it calls.
 
 ```python
 (found,) = torch.vm.regions(g)
@@ -186,6 +200,39 @@ for _ in range(3):
     out = g(torch.randn(6, 8), w)  # another size: exported again
 (found,) = torch.vm.regions(g)
 found["state"], found["variants"], found["hits"], found["misses"]  # ('compiled', 2, 4, 2)
+[(form["checks"][1:], form["hits"]) for form in found["forms"]]
+# [(['%x.1: float32[6, 8]', '%w.2: float32[8, 8]'], 2), (['%x.1: float32[4, 8]', '%w.2: float32[8, 8]'], 2)]
+g.stats()["graphs"]  # {'built': 1, 'exported': 2, 'hits': 4, 'misses': 2, 'given_up': 0}
+```
+
+A number that an operation takes is one of the checks, wherever the function
+reads it from: a global, a variable of an enclosing function, an attribute
+of a module. The same graph with another number is another form, and the
+old number finds the old form again:
+
+```python
+SCALE = 0.5
+
+
+def scaled(x):
+    return ((x.sin() * SCALE).cos() + SCALE).tanh() * 2
+
+
+def keep(gm, input_types):
+    return gm
+
+
+g = torch.vm(scaled, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+x = torch.randn(5)
+for _ in range(3):
+    out = g(x)
+SCALE = 0.25
+for _ in range(3):
+    out = g(x)
+torch.equal(out, scaled(x))  # True
+(found,) = torch.vm.regions(g)
+[(form["checks"], form["hits"]) for form in found["forms"]]
+# [(['%4 == 0.25', '%8 == 0.25', '%x.1: float32[5]'], 2), (['%4 == 0.5', '%8 == 0.5', '%x.1: float32[5]'], 1)]
 ```
 
 The states `torch.vm.regions` reports of a graph:
@@ -195,7 +242,8 @@ The states `torch.vm.regions` reports of a graph:
 - `"waiting"`: the list has a pass over graphs, and the graph is exported at
   the next call that comes to it.
 - `"compiled"`: what the passes made runs in place of the operations for
-  the kinds of calls that were exported; `variants` is how many there are.
+  the kinds of calls that were exported; `variants` is how many forms with
+  something to run there are.
   A `reason` next to it says why no further kind of call is exported.
 - `"vm"`: the engine runs the operations, for the `reason` given. Either
   the graph was given up: a pass raised (`the pass broken raised
@@ -273,10 +321,6 @@ class Box:
 
 def boxed(x, box):
     return ((x.sin() * box.scale).cos() + box.scale).tanh() * 2
-
-
-def keep(gm, input_types):
-    return gm
 
 
 g = torch.vm(boxed, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))

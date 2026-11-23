@@ -144,6 +144,8 @@ pub struct Path {
     /// Where it is entered: the block, and the generic instruction its first
     /// node stands for.
     pub root: (usize, usize),
+    /// Where the generic code goes on behind it.
+    pub land: (usize, usize),
     /// The values it takes from before it, in the order it first reads them.
     pub inputs: Vec<V>,
     pub body: Vec<PathInst>,
@@ -164,6 +166,9 @@ pub struct Path {
     pub bound: Vec<(u32, PathValue)>,
     /// The operators of its nodes, as the dispatcher names them.
     pub operators: Vec<String>,
+    /// Why it ends where it does: what the instruction behind it is, or how
+    /// the block ends.
+    pub ends: String,
     pub exported: Shared<Vec<Arc<Exported>>>,
     pub hits: AtomicU64,
     pub misses: AtomicU64,
@@ -227,6 +232,10 @@ pub struct GraphSite {
     pub exporter: Option<PyObj>,
     pub max_variants: usize,
     unsure: AtomicU32,
+    /// How many times it was handed to the exporter, and how many calls
+    /// came to it and ran its instructions.
+    pub exports: AtomicU64,
+    pub misses: AtomicU64,
 }
 
 impl GraphSite {
@@ -1995,6 +2004,94 @@ impl Path {
     }
 }
 
+impl Exported {
+    /// What its checks ask of a call, as text.
+    pub unsafe fn conditions(&self, func: &Function) -> Vec<String> {
+        const DTYPES: [&str; 12] = [
+            "uint8", "int8", "int16", "int32", "int64", "float16", "float32", "float64", "complex32",
+            "complex64", "complex128", "bool",
+        ];
+        let short = |o: &PyObj| named(o.as_ptr());
+        let numbers = self.sizes.made_on();
+        let mut at = 0;
+        self.checks
+            .iter()
+            .map(|check| {
+                let value = func.value_name(check.target);
+                match &check.cond {
+                    Cond::Is(expected) => format!("{} is {}", value, short(expected)),
+                    Cond::ValueEq(expected) => format!("{} == {}", value, short(expected)),
+                    Cond::Type(ty) => format!("type({}) is {}", value, pyffi::class_name(ty.as_ptr())),
+                    Cond::Tensor(row) => {
+                        let field = |i: usize| i32::from_ne_bytes(row.kind[4 * i..4 * i + 4].try_into().unwrap());
+                        let (rank, dtype, flags) = (field(0) as usize, field(1), field(3));
+                        let dtype = DTYPES.get(dtype as usize).map_or_else(|| format!("dtype{}", dtype), |d| d.to_string());
+                        let sizes: Vec<String> = numbers[at..at + rank].iter().map(|n| n.to_string()).collect();
+                        at += rank * (1 + (flags >> 1 & 1) as usize);
+                        let grad = if flags & 1 != 0 { ", requires_grad" } else { "" };
+                        let forward = if row.forward { ", forward-mode gradient" } else { "" };
+                        format!("{}: {}[{}]{}{}", value, dtype, sizes.join(", "), grad, forward)
+                    }
+                }
+            })
+            .collect()
+    }
+}
+
+/// What an object is, in the text of a check: the value of what is compared
+/// by value, the name of a function, a class or a module, and of anything
+/// else the name of its class. No address is part of it, so the text is the
+/// same in every run.
+unsafe fn named(o: Obj) -> String {
+    const LONGEST: usize = 40;
+    if checkable(o) {
+        let text = pyffi::repr(o);
+        return match text.char_indices().nth(LONGEST) {
+            Some((cut, _)) => format!("{}...", &text[..cut]),
+            None => text,
+        };
+    }
+    let string = |s: Obj| (!s.is_null() && ffi::PyUnicode_Check(s) != 0).then(|| pyffi::str_to_string(s));
+    let of_module = |module: Obj| {
+        let name = ffi::PyModule_GetNameObject(module);
+        ffi::PyErr_Clear();
+        let text = string(name);
+        xdecref(name);
+        text
+    };
+    if ffi::PyType_Check(o) != 0 {
+        return pyffi::class_name(o);
+    }
+    if ffi::PyModule_Check(o) != 0 {
+        return format!("module {}", of_module(o).unwrap_or_default());
+    }
+    if ffi::PyFunction_Check(o) != 0 {
+        let function = o as *mut ffi::PyFunctionObject;
+        let name = string((*function).func_qualname).unwrap_or_default();
+        return match string((*function).func_module) {
+            Some(module) => format!("{}.{}", module, name),
+            None => name,
+        };
+    }
+    if ffi::PyCFunction_Check(o) != 0 {
+        let function = o as *mut ffi::PyCFunctionObject;
+        let name = std::ffi::CStr::from_ptr((*(*function).m_ml).ml_name).to_string_lossy().into_owned();
+        let bound = (*function).m_self;
+        let owner = match string((*function).m_module) {
+            Some(module) => Some(module),
+            None if bound.is_null() => None,
+            None if ffi::PyModule_Check(bound) != 0 => of_module(bound),
+            None if ffi::PyType_Check(bound) != 0 => Some(pyffi::class_name(bound)),
+            None => Some(format!("a {}", pyffi::type_name(bound))),
+        };
+        return match owner {
+            Some(owner) => format!("{}.{}", owner, name),
+            None => name,
+        };
+    }
+    format!("a {}", pyffi::type_name(o))
+}
+
 impl Row {
     /// The row of a tensor that has its Python object, whose sizes and
     /// strides are appended to `numbers`. `same` is the first of the
@@ -2079,7 +2176,7 @@ impl Graphs {
         let n = unit.insts.len();
         let roles: Vec<Role> = (0..n).map(|i| role(unit, cx, i)).collect();
         // The runs, each from its first node to its last.
-        let mut runs: Vec<(usize, usize)> = Vec::new();
+        let mut runs: Vec<(usize, usize, String)> = Vec::new();
         let mut at = 0;
         while at < n {
             if matches!(roles[at], Role::Break(_)) {
@@ -2089,7 +2186,17 @@ impl Graphs {
             let end = stretch(unit, cx, &roles, at);
             let is_node = |i: &usize| matches!(roles[*i], Role::Part(Kind::Node));
             if let (Some(first), Some(last)) = ((at..end).find(is_node), (at..end).rev().find(is_node)) {
-                runs.push((first, last + 1));
+                let ends = match roles.get(end) {
+                    Some(Role::Break(reason)) => reason.clone(),
+                    Some(Role::Part(_)) => "an operation takes what the graph cannot compute".to_string(),
+                    None => match &unit.term {
+                        Term::Return(_) => "the function returns".to_string(),
+                        Term::Jump(_) => "the block ends".to_string(),
+                        Term::Br { .. } | Term::BrNull { .. } => "the block ends in a branch".to_string(),
+                        Term::Raise { .. } | Term::Reraise(..) => "the block raises".to_string(),
+                    },
+                };
+                runs.push((first, last + 1, ends));
             }
             at = end;
         }
@@ -2111,14 +2218,14 @@ impl Graphs {
             }
         }
         let mut found: Vec<(usize, Path)> = Vec::new();
-        for (first, end) in runs {
+        for (first, end, ends) in runs {
             let nodes = (first..end).filter(|i| matches!(roles[*i], Role::Part(Kind::Node))).count();
             if nodes < self.min_ops {
                 let reason = format!("{} operations, fewer than min_ops ({})", nodes, self.min_ops);
                 left.push(Left { lo: origins[first], hi: origins[end - 1] + 1, reason });
                 continue;
             }
-            found.push((first, path(unit, cx, &roles, first, end)));
+            found.push((first, path(unit, cx, &roles, first, end, ends)));
         }
         unit.left = left;
         let export = self.export.is_some() && !found.is_empty();
@@ -2133,6 +2240,8 @@ impl Graphs {
                 exporter: self.export.clone(),
                 max_variants: self.max_variants,
                 unsure: AtomicU32::new(0),
+                exports: AtomicU64::new(0),
+                misses: AtomicU64::new(0),
             });
             // With `Graph` in front of this run and of each one before it,
             // the first instruction of the path moves down by as many.
@@ -2364,7 +2473,7 @@ fn droppable(op: &Op, kind: Kind) -> bool {
 
 /// The path of the instructions first..end of a unit, which start and end
 /// with a node.
-fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize) -> Path {
+fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends: String) -> Path {
     let cf = cx.cf;
     let block = unit.block;
     let mut defs: HashMap<V, Def> = HashMap::new();
@@ -2504,6 +2613,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize) -> P
     }
     Path {
         root: (block, unit.insts[first].origin as usize),
+        land: (block, unit.insts[end - 1].origin as usize + 1),
         inputs,
         body,
         feeds,
@@ -2511,6 +2621,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize) -> P
         exits,
         bound,
         operators,
+        ends,
         exported: Shared::new(Vec::new()),
         hits: AtomicU64::new(0),
         misses: AtomicU64::new(0),

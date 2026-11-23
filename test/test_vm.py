@@ -5578,6 +5578,43 @@ class GraphSeen(TorchDispatchMode):
         return func(*args, **(kwargs or {}))
 
 
+# What ``graph_global`` reads between its operations.
+GRAPH_SCALE = 0.5
+
+
+def graph_global(x):
+    return ((x.sin() * GRAPH_SCALE).cos() + GRAPH_SCALE).tanh() * 2
+
+
+def graph_enclosed(scale):
+    """A function that reads a variable of this one between its operations,
+    and what rebinds the variable."""
+
+    def run(x):
+        return ((x.sin() * scale).cos() + scale).tanh() * 2
+
+    def rebind(value):
+        nonlocal scale
+        scale = value
+
+    return run, rebind
+
+
+class GraphLeaky(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(6, 8)
+        self.act = torch.nn.LeakyReLU(0.1)
+        self.fc2 = torch.nn.Linear(8, 4)
+
+    def forward(self, x):
+        return self.act(self.fc2(self.act(self.fc1(x))))
+
+
+def graph_infer(model, x):
+    return model(x)
+
+
 class GraphBox:
     """An object whose ``scale`` is an attribute until it is deleted: then
     its ``__getattr__`` makes one, another at every read."""
@@ -6167,6 +6204,90 @@ print(json.dumps(found))
         self.assertEqual(out, torch.tanh(a @ b))
         self.assertEqual(type(out.grad_fn).__name__, "CompiledFunctionBackward")
 
+    # --- values that are read, kinds of calls, operations that are no call sites
+
+    def forms(self, fn, operator):
+        """The checks and the hits of the forms of the graph of ``fn`` that
+        has an operator."""
+        (graph,) = [g for g in self.graphs(fn) if operator in g["operators"]]
+        return graph, [(form["checks"], form["hits"]) for form in graph["forms"]]
+
+    def test_a_number_a_module_keeps_is_checked_where_a_graph_takes_it(self):
+        torch.manual_seed(0)
+        x = torch.randn(3, 6)
+        for behind in ((), (P.Inductor(),)):
+            model = GraphLeaky().eval()
+            passes = (*DEFAULT, P.Graphs(min_ops=1), *behind)
+            compiled = torch.vm(graph_infer, passes=passes, fallback=False)
+            with torch.no_grad():
+                for _ in range(5):
+                    first = compiled(model, x)
+                self.assertEqual(first, model(x), rtol=1e-5, atol=1e-6)
+                steady = compiled.stats()["graphs"]
+                # The layer is the same object, and its slope another number.
+                model.act.negative_slope = 0.3
+                for _ in range(3):
+                    second = compiled(model, x)
+                self.assertEqual(second, model(x), rtol=1e-5, atol=1e-6)
+                self.assertNotEqual(first, second)
+                changed = compiled.stats()["graphs"]
+                model.act.negative_slope = 0.1
+                self.assertEqual(compiled(model, x), first, atol=0, rtol=0)
+                back = compiled.stats()["graphs"]
+            graph, forms = self.forms(compiled, "aten::leaky_relu")
+            if not behind:
+                # The engine runs the operation with what it reads.
+                self.assertEqual((graph["state"], back["exported"]), ("built", 0))
+                continue
+            self.assertEqual(graph["state"], "compiled")
+            # The layer is called with two sizes: a form for each, with the
+            # slope it was exported for, and then two more for the other.
+            self.assertEqual(changed["exported"], steady["exported"] + 2)
+            said = [check for checks, _ in forms for check in checks]
+            self.assertEqual(sum("== 0.1" in check for check in said), 2)
+            self.assertEqual(sum("== 0.3" in check for check in said), 2)
+            # The first slope again is the forms that were made for it.
+            self.assertEqual(back["exported"], changed["exported"])
+            self.assertGreater(back["hits"], changed["hits"])
+            self.assertEqual(back["misses"], changed["misses"])
+
+    def test_a_global_and_a_variable_of_an_enclosing_function_are_checked(self):
+        def keep(gm, input_types):
+            return gm
+
+        def set_global(value):
+            globals()["GRAPH_SCALE"] = value
+
+        x = torch.randn(5)
+        try:
+            for behind in (keep, P.Inductor()):
+                run, rebind = graph_enclosed(0.5)
+                for fn, change in ((graph_global, set_global), (run, rebind)):
+                    passes = (*DEFAULT, P.Graphs(), behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False)
+                    exact = {} if behind is keep else {"rtol": 1e-5, "atol": 1e-6}
+                    for _ in range(4):
+                        first = compiled(x)
+                    self.assertEqual(first, fn(x), **exact)
+                    change(0.25)
+                    for _ in range(3):
+                        second = compiled(x)
+                    self.assertEqual(second, fn(x), **exact)
+                    self.assertNotEqual(first, second)
+                    graph, forms = self.forms(compiled, "aten::tanh")
+                    self.assertEqual((graph["exports"], graph["variants"]), (2, 2))
+                    # The form that ran last is the first one.
+                    self.assertTrue(any("== 0.25" in check for check in forms[0][0]))
+                    self.assertTrue(any("== 0.5" in check for check in forms[1][0]))
+                    hits = graph["hits"]
+                    change(0.5)
+                    self.assertEqual(compiled(x), first, atol=0, rtol=0)
+                    graph, forms = self.forms(compiled, "aten::tanh")
+                    self.assertEqual((graph["exports"], graph["hits"]), (2, hits + 1))
+                    self.assertTrue(any("== 0.5" in check for check in forms[0][0]))
+        finally:
+            set_global(0.5)
+
     def test_a_read_that_runs_python_code_is_not_run_out_of_its_place(self):
         graphs = []
 
@@ -6193,6 +6314,41 @@ print(json.dumps(found))
         (graph,) = self.graphs(compiled)
         self.assertEqual((graph["state"], len(graphs)), ("vm", 1))
         self.assertEqual(graph["reason"], "load_attr could run Python code")
+        self.assertEqual(compiled.stats()["graphs"]["given_up"], 1)
+
+    def test_the_forms_of_a_graph_are_tried_in_the_order_they_last_ran(self):
+        graphs = []
+
+        def keep(gm, input_types):
+            graphs.append(input_types[0].dtype)
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(max_variants=2), keep)
+        compiled = torch.vm(graph_poly, passes=passes, fallback=False)
+        single, double = torch.randn(4), torch.randn(4, dtype=torch.float64)
+
+        def first():
+            return self.forms(compiled, "aten::sin")[1][0]
+
+        for value in (single, single, single, double, double):
+            self.assertEqual(compiled(value), graph_poly(value), atol=0, rtol=0)
+        self.assertEqual(first(), (["%x.1: float64[4]"], 1))
+        compiled(single)
+        self.assertEqual(first(), (["%x.1: float32[4]"], 2))
+        compiled(double)
+        self.assertEqual(first(), (["%x.1: float64[4]"], 2))
+        # A third kind of call is one more than the graph is exported for.
+        half = torch.randn(4, dtype=torch.float16)
+        for _ in range(3):
+            self.assertEqual(compiled(half), graph_poly(half), atol=0, rtol=0)
+        graph, forms = self.forms(compiled, "aten::sin")
+        self.assertEqual(graphs, [torch.float32, torch.float64])
+        self.assertEqual((graph["variants"], graph["exports"], len(forms)), (2, 2, 2))
+        stats = compiled.stats()["graphs"]
+        self.assertEqual((stats["built"], stats["exported"]), (1, 2))
+        counted = (graph["hits"], graph["misses"])
+        self.assertEqual((stats["hits"], stats["misses"]), counted)
+        self.assertEqual((graph["hits"], graph["misses"]), (4, 5))
 
     def test_a_forward_mode_gradient_does_not_end_the_exports_of_a_graph(self):
         import torch.autograd.forward_ad as forward_ad
@@ -6216,16 +6372,20 @@ print(json.dumps(found))
                 self.assertEqual(got.primal, expected.primal, atol=0, rtol=0)
                 self.assertEqual(got.tangent, expected.tangent, atol=0, rtol=0)
         # Calls like those run the operations, and are looked at once.
-        (graph,) = self.graphs(compiled)
+        graph, forms = self.forms(compiled, "aten::sin")
         found = (graph["state"], graph["variants"], graph["misses"])
         self.assertEqual(found, ("compiled", 1, 6))
+        closed = [form["reason"] for form in graph["forms"] if "reason" in form]
+        reason = "a tensor of the call carries a forward-mode gradient"
+        self.assertEqual(closed, [reason])
         # The graph goes on being exported for other calls.
         wide = torch.randn(5, dtype=torch.float64)
         for _ in range(3):
             self.assertEqual(compiled(wide), graph_poly(wide), atol=0, rtol=0)
         self.assertEqual(graphs, [torch.float32, torch.float64])
-        (graph,) = self.graphs(compiled)
-        self.assertEqual(graph["variants"], 2)
+        graph, forms = self.forms(compiled, "aten::sin")
+        self.assertEqual((graph["variants"], forms[0]), (2, (["%x.1: float64[5]"], 2)))
+        self.assertEqual(compiled.stats()["graphs"]["given_up"], 0)
 
     def test_a_hook_for_every_module_is_not_for_what_was_made_of_a_graph(self):
         def keep(gm, input_types):
@@ -6303,12 +6463,16 @@ print(json.dumps(found))
                     got = compiled(x, w)
                 self.assertEqual(got, graph_mixed(x, w), atol=0, rtol=0)
                 self.assertEqual(mode.seen, eager)
+            (graph,) = self.graphs(compiled)
+            closed = [form["reason"] for form in graph["forms"] if "reason" in form]
+            self.assertEqual(closed, ["a dispatch mode is to see the operations"])
             # A kind of call without the mode is exported as any other.
+            exports = graph["exports"]
             wide = x.double(), w.double()
             for _ in range(3):
                 compiled(*wide)
             (graph,) = self.graphs(compiled)
-            self.assertEqual(graph["variants"], 2)
+            self.assertEqual((graph["exports"], graph["variants"]), (exports + 1, 2))
         # A torch function mode sees the calls the function makes.
         with GraphCalls() as mode:
             graph_mixed(x, w)
@@ -6656,7 +6820,7 @@ class TestVmGraphResults(TestCase):
             self.assertEqual(got.float(), expected.float(), rtol=0.05, atol=0.05)
         (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
         # One form per dtype; the first dtype again is the first form.
-        self.assertEqual(graph["variants"], 2)
+        self.assertEqual((graph["variants"], graph["exports"]), (2, 2))
         # Without autocast, and where operations have to be deterministic,
         # the graph is another one as well.
         for _ in range(3):
@@ -6669,7 +6833,7 @@ class TestVmGraphResults(TestCase):
         finally:
             torch.use_deterministic_algorithms(False)
         (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
-        self.assertEqual(graph["variants"], 4)
+        self.assertEqual((graph["variants"], graph["exports"]), (4, 4))
 
     def test_a_key_that_comes_to_be_compared_in_python_is_compared_once(self, device):
         def keep(gm, input_types):

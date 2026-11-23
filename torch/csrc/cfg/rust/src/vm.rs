@@ -4461,6 +4461,7 @@ impl Compiled {
         if !self.run_stage(site, path, Stage::Before, regs, api) {
             return Some(PathEnd::Miss);
         }
+        // The forms, the one that ran last first.
         let mut found = None;
         for k in 0..count {
             let Some(exported) = path.exported.borrow().get(k).cloned() else {
@@ -4470,14 +4471,21 @@ impl Compiled {
                 && self.accepts(&exported, regs, api)
                 && exported.state == *state.get_or_insert_with(|| graph::thread_state());
             if fits {
-                found = Some(exported);
+                found = Some((k, exported));
                 break;
             }
         }
-        let Some(exported) = found else {
+        let Some((at, exported)) = found else {
             self.undo_path(path, regs);
             return None;
         };
+        if at > 0 {
+            let mut forms = path.exported.borrow_mut();
+            if forms.get(at).is_some_and(|form| Arc::ptr_eq(form, &exported)) {
+                let form = forms.remove(at);
+                forms.insert(0, form);
+            }
+        }
         let Some(callable) = &exported.callable else {
             self.undo_path(path, regs);
             return Some(PathEnd::Miss);
@@ -4711,7 +4719,7 @@ impl Compiled {
             Arc::new(Exported { modes, included, excluded, state, checks, sizes, args, guards, callable, closed, proven, hits })
         };
         let Some(description) = description.filter(|_| closed.is_none()) else {
-            path.exported.borrow_mut().push(form(None, Vec::new(), closed));
+            path.exported.borrow_mut().insert(0, form(None, Vec::new(), closed));
             return PathEnd::Done;
         };
         let bc = path.body[0].bc;
@@ -4721,13 +4729,14 @@ impl Compiled {
         }
         // The time this takes says nothing about the function.
         unsettled();
+        site.exports.fetch_add(1, Ordering::Relaxed);
         let made = {
             let _nobody = Hooked::nobody();
             site.export(description.as_ptr())
         };
         match made {
             Ok((callable, guards)) => {
-                path.exported.borrow_mut().push(form(Some(callable), guards, None));
+                path.exported.borrow_mut().insert(0, form(Some(callable), guards, None));
                 plan_changed();
             }
             Err(_) if !ffi::PyErr_Occurred().is_null() => return PathEnd::Raised(bc),
