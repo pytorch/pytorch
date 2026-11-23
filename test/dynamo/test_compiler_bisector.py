@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from importlib import import_module
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -17,7 +18,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipIf,
 )
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.utils._triton import has_triton, has_triton_for_device
 
 
@@ -29,6 +34,7 @@ i64 = torch.int64
 i32 = torch.int32
 
 
+@instantiate_parametrized_tests
 class TestCompilerBisector(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -139,6 +145,78 @@ class TestCompilerBisector(TestCase):
         out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
+
+    @parametrize("outcome", ["return", "exception", "interrupt"])
+    def test_session_cleanup(self, outcome):
+        import os
+
+        with (
+            TemporaryDirectory() as directory,
+            patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": directory}),
+        ):
+            manual = Path(directory, "bisect", "bisect_status.txt")
+            manual.parent.mkdir()
+            manual.write_text("backend=eager\n")
+            unrelated = Path(directory, "unrelated")
+            unrelated.write_text("preserve")
+            original_cache = CompilerBisector.in_process_cache
+            original_enabled = CompilerBisector.bisection_enabled
+            session = None
+            errors = {"exception": RuntimeError, "interrupt": KeyboardInterrupt}
+            error = errors.get(outcome)
+
+            def repro():
+                nonlocal session
+                session = Path(CompilerBisector.get_dir())
+                if error is not None:
+                    raise error("probe failed")
+                return False
+
+            if error is None:
+                CompilerBisector.do_bisect(repro)
+            else:
+                with self.assertRaises(error):
+                    CompilerBisector.do_bisect(repro)
+
+            self.assertIsNotNone(session)
+            self.assertFalse(session.parent.exists())
+            self.assertEqual(manual.read_text(), "backend=eager\n")
+            self.assertEqual(unrelated.read_text(), "preserve")
+            self.assertEqual(CompilerBisector.in_process_cache, original_cache)
+            self.assertEqual(CompilerBisector.bisection_enabled, original_enabled)
+
+    def test_run_with_fresh_cache(self):
+        import os
+        import subprocess
+        import sys
+
+        helper = Path(__file__).with_name("_test_compiler_bisector_test_helper.py")
+        env = os.environ.copy()
+        env.update(
+            INDUCTOR_TEST_DISABLE_FRESH_CACHE="0",
+            TORCH_COMPILE_DEBUG="0",
+            TORCH_BISECT_BACKEND="inductor",
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "torch._inductor.compiler_bisector",
+                "run",
+                sys.executable,
+                str(helper),
+                "TestRepro.test_compiler_error",
+            ],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        expected = "Binary search completed for inductor - pre_grad_passes"
+        self.assertIn(expected, result.stdout)
+        self.assertIn("Debug info: pre_grad_custom_pass", result.stdout)
 
     def test_config_change_only_parses_literals(self):
         with TemporaryDirectory() as tmpdir:

@@ -1,6 +1,6 @@
 import ast
-import atexit
 import collections
+import contextlib
 import dataclasses
 import functools
 import os
@@ -148,7 +148,11 @@ class CompilerBisector:
 
     @classmethod
     def get_dir(cls) -> str:
-        return f"{cache_dir() if not cls.in_process_cache else cls.in_process_cache}/{SUBDIR_NAME}"
+        if cls.in_process_cache:
+            return os.path.join(cls.in_process_cache, SUBDIR_NAME)
+        if directory := os.environ.get("TORCH_BISECT_DIR"):
+            return directory
+        return os.path.join(cache_dir(), SUBDIR_NAME)
 
     @classmethod
     def write_lines_to_file(
@@ -359,8 +363,7 @@ class CompilerBisector:
 
     @classmethod
     def delete_bisect_status(cls) -> None:
-        # in process_cache we have created if it exists, just the subdirectory of non created dir
-        dir_name = cls.in_process_cache or cls.get_dir()
+        dir_name = cls.get_dir()
         if os.path.exists(dir_name):
             shutil.rmtree(dir_name)
             print("Bisection status deleted.")
@@ -567,34 +570,25 @@ class CompilerBisector:
         # bisector so far. Use a config to opt-in
         import torch._inductor.config as inductor_config
 
-        if inductor_config.test_configs.bisect_pre_grad_graph:
-            BACKENDS["inductor"].insert(0, BisectSubsystem("pre_grad_graph"))
+        with contextlib.ExitStack() as stack:
+            if inductor_config.test_configs.bisect_pre_grad_graph:
+                BACKENDS["inductor"].insert(0, BisectSubsystem("pre_grad_graph"))
+                stack.callback(BACKENDS["inductor"].pop, 0)
 
-        if not cli_interface:
-            bisection_enabled_orig = cls.bisection_enabled
-            cls.delete_bisect_status()
-            cls.bisection_enabled = True
-            # Only create temp dir if not already set (CLI run mode pre-sets it)
-            if not cls.in_process_cache:
-                cls.in_process_cache = tempfile.mkdtemp()
+            if not cli_interface:
+                directory = stack.enter_context(tempfile.TemporaryDirectory())
+                stack.callback(setattr, cls, "in_process_cache", cls.in_process_cache)
+                stack.callback(setattr, cls, "bisection_enabled", cls.bisection_enabled)
+                cls.in_process_cache = directory
+                cls.bisection_enabled = True
+                stack.callback(cls.delete_bisect_status)
 
-            def cleanup() -> None:
-                cls.bisection_enabled = bisection_enabled_orig
-                cls.delete_bisect_status()
-                cls.in_process_cache = None
+            return cls._do_bisect(fn, cli_interface)
 
-                if BACKENDS["inductor"][0].name == "pre_grad_graph":
-                    del BACKENDS["inductor"][0]
-
-            cleanup_handler = atexit.register(cleanup)
-
-            class DisableBisect:
-                def __del__(self) -> None:
-                    cleanup()
-                    atexit.unregister(cleanup_handler)
-
-            _cleanup = DisableBisect()
-
+    @classmethod
+    def _do_bisect(
+        cls, fn: Callable[[], bool], cli_interface: bool
+    ) -> BisectionResult | None:
         curr_backend = cls.get_backend()
         curr_subsystem_name = cls.get_subsystem()
 
@@ -771,6 +765,7 @@ def command_line_usage() -> None:
         def test_function() -> bool:
             # Pass bisection state to subprocess via environment variables
             env = os.environ.copy()
+            env["TORCH_BISECT_DIR"] = bisection_manager.get_dir()
             backend = bisection_manager.get_backend()
             subsystem = bisection_manager.get_subsystem()
 
@@ -796,10 +791,6 @@ def command_line_usage() -> None:
             result = subprocess.run(run_cmd, env=env)
             return result.returncode == 0
 
-        bisection_manager.delete_bisect_status()
-        bisection_manager.bisection_enabled = True
-        # Use shared cache_dir instead of temp dir so subprocesses can access files
-        CompilerBisector.in_process_cache = cache_dir()
         result = bisection_manager.do_bisect(test_function, cli_interface=False)
         if result:
             print(f"\nBisection complete: {result}")
