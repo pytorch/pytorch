@@ -208,6 +208,17 @@ class TestCuTeDSLReductionWiring(TestCase):
         self.assertTrue(torch._C._is_cow_tensor(x))
         self.assertTrue(torch._C._is_cow_tensor(out))
 
+    def test_strided_out_condition_allocates_no_span(self, device):
+        """Check a strided out= in PYTORCH_SUM_INNER_TREE's condition without allocating
+        the span its strides cover (here 32 MiB for 512 bytes of outputs)."""
+        x = torch.randn(128, 512, device=device)
+        out = torch.empty(128, 65536, device=device)[:, 0]
+        torch.cuda.synchronize(device)
+        torch.cuda.reset_peak_memory_stats(device)
+        before = torch.cuda.memory_allocated(device)
+        self.assertTrue(cutedsl_impl._out_cond(x, [1], out=out))
+        self.assertLess(torch.cuda.max_memory_allocated(device) - before, 1 << 20)
+
     @unittest.skipUnless(torch.cuda.device_count() >= 2, "needs >= 2 GPUs")
     def test_other_device_is_served(self, device):
         """Serve tensors on a non-current device under that device's guard."""
