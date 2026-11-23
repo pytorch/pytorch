@@ -37,5 +37,6 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pyapi::CfgFunction>()?;
     m.add_class::<pyapi::Region>()?;
     m.add_class::<pyapi::Replay>()?;
+    m.add_class::<shapes::ShapeGuard>()?;
     Ok(())
 }
