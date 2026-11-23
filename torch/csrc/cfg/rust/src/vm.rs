@@ -4802,6 +4802,7 @@ impl Compiled {
                             && ffi::Py_TYPE(held) as usize == *class
                             && ffi::PyObject_Size(held) as usize == *count
                     }
+                    Assert::Equals(v, number) => !reg(own, *v).is_null() && graph::same_value(reg(own, *v), number.as_ptr()),
                     Assert::Keys(v, names) => {
                         let held = reg(own, *v);
                         let dict = !held.is_null() && !capi::is_unboxed(held) && ffi::PyDict_CheckExact(held) != 0;
@@ -5589,6 +5590,29 @@ impl Compiled {
             kill(t, regs);
             return Taken::Went;
         }
+        if let Op::GetItem(list, at) = &inst.op {
+            // An item of a list the path filled is the value that was put
+            // there, for as long as the place is the same number.
+            let place = reg(regs, *at);
+            let items = if made(t, *list) { self.built(t, t.mapped(*list)) } else { None };
+            let plain = !place.is_null() && !capi::is_unboxed(place) && ffi::PyLong_CheckExact(place) != 0;
+            if let (Some(items), true) = (items, plain && ffi::PyList_CheckExact(reg(regs, *list)) != 0) {
+                let count = items.len() as isize;
+                let asked = ffi::PyLong_AsSsize_t(place);
+                let found = if asked < 0 { asked + count } else { asked };
+                if (0..count).contains(&found) && count == ffi::PyList_GET_SIZE(reg(regs, *list)) {
+                    let Ok(item) = self.exec_op(regs, &inst.op) else {
+                        return Taken::Raised;
+                    };
+                    let number = self.path_value(t, regs, *at);
+                    t.check(Assert::Equals(number, PyObj::from_borrowed(place)), inst.bc);
+                    capi::release(std::mem::replace(&mut regs[inst.dst as usize], item));
+                    t.rename(inst.dst, items[found as usize]);
+                    kill(t, regs);
+                    return Taken::Went;
+                }
+            }
+        }
         let operators = self.operation(block, origin, inst, regs, api);
         if operators.is_none() {
             if let Some(taken) = self.record_call(t, site, (block, code as *const BlockCode, pc), regs, frames, api) {
@@ -6324,7 +6348,7 @@ impl Compiled {
                 }
                 if *kwargs != NONE {
                     let named = self.path_value(t, regs, *kwargs);
-                    let pinned = self.pins_keys(t, named);
+                    let pinned = self.pins_keys(t, named, bc);
                     let entries = self.entries(t, named).filter(|entries| {
                         pinned && entries.len() == nkw && entries.iter().zip(&keys).all(|((key, _), name)| key == name)
                     });
@@ -6583,12 +6607,13 @@ impl Compiled {
     }
 
     /// Whether the keys under which a path put entries into a dict it made,
-    /// and took them out, are the same at every call: each is a constant.
-    /// What `entries` says of the dict holds at another call only with
-    /// this: with other keys the same instructions leave other entries.
-    /// False for any other key, and for a dict that took the entries of
-    /// one of which this is not so.
-    unsafe fn pins_keys(&self, t: &Trace, dict: PathValue) -> bool {
+    /// and took them out, are the same at every call: each is a constant
+    /// or is made one here by a check (`Assert::Equals`). What `entries`
+    /// says of the dict holds at another call only with this: with other
+    /// keys the same instructions leave other entries. False where a key
+    /// is computed behind the callable or cannot be checked, and for a
+    /// dict that took the entries of one of which this is not so.
+    unsafe fn pins_keys(&self, t: &mut Trace, dict: PathValue, bc: u32) -> bool {
         if dict == NONE || dict == UNDEF {
             return false;
         }
@@ -6605,20 +6630,33 @@ impl Compiled {
         // The dict that was merged was put together in front of the merge.
         for (at, more) in merged {
             let built = t.body[..at].iter().any(|inst| inst.dst == more && matches!(inst.op, Op::BuildMap(_)));
-            if !built || !self.pins_keys(t, more) {
+            if !built || !self.pins_keys(t, more, bc) {
                 return false;
             }
         }
-        // A constant of its function is one wherever the path took it
-        // from (a path that starts behind it has it as an input).
-        let constant = |key: PathValue| {
+        for key in keys {
+            let (of, held) = (t.defs[key as usize], t.rec.values[key as usize]);
+            // A constant of its function is one wherever the path took
+            // it from (a path that starts behind it has it as an input).
             let (owner, v) = t.source[key as usize];
-            v != NONE && v != UNDEF && {
+            let constant = v != NONE && v != UNDEF && {
                 let function = &*t.owners[owner as usize];
                 matches!(function.analysis.def_op(&function.func, v), Some(Op::Const(_)))
+            };
+            // A constant that the path loads, or pinned by a check already.
+            let known = |inst: &graph::PathInst| match &inst.assert {
+                Some(Assert::Equals(v, _)) => *v == key,
+                _ => inst.dst == key && matches!(inst.op, Op::Const(_)),
+            };
+            if constant || t.body.iter().any(known) {
+                continue;
             }
-        };
-        keys.into_iter().all(|key| constant(key) || t.body.iter().any(|inst| inst.dst == key && matches!(inst.op, Op::Const(_))))
+            if of.late || held.is_null() || !graph::checkable(held) {
+                return false;
+            }
+            t.check(Assert::Equals(key, graph::frozen(held)), bc);
+        }
+        true
     }
 
     /// For a list that a path made: the values it holds where the trace has

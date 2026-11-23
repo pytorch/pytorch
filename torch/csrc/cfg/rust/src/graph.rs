@@ -93,6 +93,9 @@ pub enum Assert {
     /// names, in this order.
     Sequence(PathValue, usize, usize),
     Keys(PathValue, Vec<PyObj>),
+    /// The number is this one: the place of an item that the path takes
+    /// out of a list it filled itself.
+    Equals(PathValue, PyObj),
 }
 
 impl Assert {
@@ -106,7 +109,8 @@ impl Assert {
             | Assert::Absent(v, _)
             | Assert::Lacks(v, _)
             | Assert::Sequence(v, ..)
-            | Assert::Keys(v, _) => *v,
+            | Assert::Keys(v, _)
+            | Assert::Equals(v, _) => *v,
             Assert::Guard(cond) => cond.value(),
         }
     }
@@ -337,6 +341,11 @@ pub struct Path {
     /// Per register: an instruction of the path made what it holds
     /// (`Def::made`), which is the path's own to change and to use up.
     pub made: Vec<bool>,
+    /// What the checks of the path pin: a value of the path with the value
+    /// it has to have (`Assert::Equals`; the flag says that it is compared
+    /// by value). The path was taken down with these, so they are part of
+    /// which path it is (`pinned_as`), as its instructions are.
+    pub pins: Vec<(PathValue, PyObj, bool)>,
 }
 
 // The registers are empty between calls, and only touched with the GIL held.
@@ -389,6 +398,16 @@ impl Path {
     /// How many kinds of calls it was recorded for and is not exported for.
     pub fn closed(&self) -> usize {
         self.exported.borrow().iter().filter(|exported| exported.callable.is_none()).count()
+    }
+
+    /// Whether two paths of the same instructions were taken down with
+    /// the same pinned values: only then are they one path, and a form
+    /// of the one may run under the checks of the other.
+    pub fn pinned_as(&self, other: &Path) -> bool {
+        self.pins.len() == other.pins.len()
+            && self.pins.iter().zip(&other.pins).all(|((v, a, value), (w, b, _))| {
+                v == w && if *value { unsafe { same_value(a.as_ptr(), b.as_ptr()) } } else { a.as_ptr() == b.as_ptr() }
+            })
     }
 }
 
@@ -654,7 +673,11 @@ impl GraphSite {
             return;
         }
         let mut paths = self.variants.borrow_mut();
-        let known = paths.iter().position(|other| other.shape == path.shape && other.provisional == path.provisional);
+        // The same path: the same instructions, taken down with the same
+        // pinned values. A form runs under the checks of the path it is
+        // kept with, so the form of a trace with other pinned values is
+        // kept with a path of its own.
+        let known = paths.iter().position(|other| other.shape == path.shape && other.provisional == path.provisional && other.pinned_as(&path));
         let at = known.unwrap_or_else(|| {
             // A path that was not final makes way for the ones that are.
             paths.retain(|other| !other.provisional);
@@ -4140,6 +4163,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         stages: stages_of(&body),
         handed: Vec::new(),
         made: Vec::new(),
+        pins: Vec::new(),
         body,
         feeds,
         outputs,
@@ -4195,6 +4219,7 @@ pub struct Mark {
     /// How many inlined calls the trace is in since then; 0 for the mark of
     /// a call it went into.
     pub frames: usize,
+    pins: usize,
     body: usize,
     values: usize,
     nodes: usize,
@@ -4248,6 +4273,8 @@ pub struct Trace {
     /// The things the path made and what may be them or hold them, in
     /// families (see `Family`).
     pub things: Family,
+    /// See `Path::pins`.
+    pub pins: Vec<(PathValue, PyObj, bool)>,
 }
 
 /// The things a path made (a list, a dict, an iterator) and the values of
@@ -4327,6 +4354,7 @@ impl Trace {
             lost: false,
             provisional: false,
             things: Family { first: vec![NONE], since: vec![u32::MAX], ..Family::default() },
+            pins: Vec::new(),
         }
     }
 
@@ -4671,6 +4699,9 @@ impl Trace {
             }
             // How a call binds what it is not handed.
             Assert::Enters(_, _, defaults) => self.shape.extend([u32::MAX - 8, *defaults as u32]),
+            // What the path was taken down with: the place of an item, a
+            // number or a name that was made a constant.
+            Assert::Equals(v, value) => self.pins.push((*v, value.clone(), true)),
             _ => {}
         }
         self.push(Op::Hold(Vec::new()), NONE, Kind::Check, bc);
@@ -4714,6 +4745,7 @@ impl Trace {
         self.mark = Some(Mark {
             at,
             frames,
+            pins: self.pins.len(),
             body: self.body.len(),
             values: self.defs.len(),
             nodes: self.rec.nodes.len(),
@@ -4742,6 +4774,7 @@ impl Trace {
             return;
         };
         self.body.truncate(mark.body);
+        self.pins.truncate(mark.pins);
         if self.operators.is_empty() {
             self.first = None;
         }
@@ -4900,6 +4933,7 @@ impl Path {
             stages: Default::default(),
             handed: Vec::new(),
             made: Vec::new(),
+            pins: Vec::new(),
         }
     }
 
@@ -5154,6 +5188,7 @@ impl Path {
             stages: stages_of(&trace.body),
             handed: handed_of(&trace.inputs, &trace.body, &writes, &bound),
             made: trace.defs.iter().map(|def| def.made).collect(),
+            pins: std::mem::take(&mut trace.pins),
             inputs: trace.inputs.clone(),
             body: std::mem::take(&mut trace.body),
             feeds,

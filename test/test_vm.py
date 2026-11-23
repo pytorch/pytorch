@@ -6271,6 +6271,33 @@ class GraphLogs(torch.nn.Module):
         return y.tanh() * 2
 
 
+class GraphRouted(torch.nn.Module):
+    """Keeps what its layers gave in a list, with a placeholder for the
+    ones nothing reads, and reads the list further on."""
+
+    def __init__(self):
+        super().__init__()
+
+        def conv():
+            return torch.nn.Conv2d(4, 4, 3, padding=1)
+
+        layers = [conv(), conv(), conv(), conv(), GraphLogs(), conv(), conv()]
+        self.layers = torch.nn.ModuleList(layers)
+        self.routes = {2: (-2,), 5: (-5, 2), 6: (-2, 0)}
+        self.kept = [True, True, True, False, True, True, True]
+
+    def forward(self, x):
+        out = []
+        for i, layer in enumerate(self.layers):
+            x = layer(x) if i != 4 else x * 1
+            for back in self.routes.get(i, ()):
+                x = x + out[back]
+            out.append(x if self.kept[i] else [])
+            if i == 4:
+                GRAPH_TOOLS.log.append(len(out))
+        return x
+
+
 def graph_rated(x, rate):
     return ((x.sin() * rate).cos() + rate).tanh().exp()
 
@@ -8066,6 +8093,25 @@ print(json.dumps(found))
         inner = [g for g in graphs if g["where"].startswith("GraphStage.forward")]
         counts = [(g["hits"], g["exports"]) for g in inner]
         self.assertEqual(counts, [(0, 0)] * len(inner))
+
+    def test_a_list_that_holds_tensors_and_other_things_lands_in_order(self):
+        def keep(gm, input_types):
+            return gm
+
+        torch.manual_seed(0)
+        model = GraphRouted().eval()
+        x = torch.randn(2, 4, 8, 8)
+        compiled = torch.vm(model, passes=(*DEFAULT, P.Graphs(), keep), fallback=False)
+        del GRAPH_TOOLS.log[:]
+        with torch.no_grad():
+            for _ in range(8):
+                self.assertEqual(compiled(x), model(x), atol=0, rtol=0)
+        self.assertEqual(GRAPH_TOOLS.log, [5] * 16)
+        graphs = [g for g in self.graphs(compiled) if g["hits"]]
+        # Up to the store, where the list has four tensors and a
+        # placeholder: what is read of it from there on is what the
+        # instructions read.
+        self.assertEqual([g["operators"].count("aten::conv2d") for g in graphs], [4])
 
     # --- what the report says
 
@@ -10446,14 +10492,15 @@ class TestVmGraphResults(TestCase):
                 self.assertGreaterEqual(ran, 6, msg=f"{name}, {way}: {graphs}")
 
     def test_a_form_runs_only_under_the_checks_of_its_path(self, device):
-        # A form runs only for calls that take the path it was made for.
-        # What a trace was taken down with besides its instructions is
-        # part of which path it is: how many defaults a function has
-        # that the path goes into, and the names under which a dict that
-        # is spread into a call was filled, which have to be constants
-        # for the path to go through the call. What the function is
-        # handed changes at the eighth and the eleventh call and changes
-        # back: every call is eager's.
+        # Two calls that take the same instructions are one path only if
+        # they were taken down with the same pinned values: the place of
+        # an item that is taken out of a list or a tuple the path built,
+        # a number or a name that a check made a constant, how many
+        # defaults a function has. A call with another one is a path of
+        # its own, with its own checks, and what was made of its graph
+        # is never tried for a call of the first. The pinned thing
+        # changes at the eighth and the eleventh call and changes back:
+        # every call is eager's.
         def keep(gm, input_types):
             return gm
 

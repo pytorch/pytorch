@@ -118,6 +118,17 @@ found["operators"][2:4]  # ['aten::tanh', 'aten::sub.Tensor']: of the path that 
 found["ends"], found["why"]  # ([(3, 6)], 'the function returns')
 ```
 
+A value that a path was taken down with and that decides what the path is is
+one of its checks as well: the place of an item that is taken out of a list
+or a tuple the function built (`items[k]`), a name under which a dict that
+is spread into a call was filled. A call that comes with another such value
+takes the same instructions and is a path of its own all the same, with its
+own checks; what was made of its graph runs for calls with that value and
+for no others. They count against `max_variants` like the ways through a
+branch: a function that is called with more places than a graph may have
+forms (eight by default) runs the instructions for the ones that got none,
+so a place that keeps changing costs the graph and never the result.
+
 `branches` is how many branches the path goes through and `paths` how many
 ways through the function were taken down; `ends` says for each path where
 the function goes on behind it, once for paths that end at the same place.
@@ -219,6 +230,27 @@ for _ in range(3):
 (found,) = torch.vm.regions(g)
 found["where"], found["ops"], found["inputs"]  # ('collect (block 3)[4]', 9, 1)
 found["operators"][-3:]  # ['aten::cat', 'aten::tanh', 'aten::sum']
+```
+
+An item that the function reads back out of such a list, at a place that is
+a number, is the value that was put there, so an operation can take it. The
+place is one of the checks of the path. A list that gets tensors and other
+things has its items in the order the function put them where the path
+ends:
+
+```python
+def routed(xs):
+    out = []
+    for x in xs:
+        out.append(x.sin() * 2)
+    return (out[0] + out[-1]).tanh().sum()
+
+
+g = torch.vm(routed, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+for _ in range(4):
+    same = torch.equal(g(xs), routed(xs))
+(found,) = torch.vm.regions(g)
+found["ops"], found["why"]  # (9, 'the function returns')
 ```
 
 What ends a path:
