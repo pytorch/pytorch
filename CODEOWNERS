@@ -26,8 +26,8 @@
 #   as a set) appears on exactly one "# label:" line. When a list extends a
 #   sibling's, the shared labels come first and the distinguishing label last.
 # - A label line leaves out an oncall label when one of its module labels
-#   implies it; .github/label_to_label.yml records which modules imply which
-#   oncall.
+#   implies it; label_parents in OWNERSHIP.yaml records which labels imply
+#   which.
 # - Labels planned but not yet created on GitHub (issues can't be routed to
 #   them until they exist): module: tvm, module: operator benchmarks, module: mobile delegates, module: hipify, module: headeronly, module: github automation
 #
@@ -579,6 +579,7 @@
 # /test/test_pytree.py
 # /test/test_reductions.py
 # /test/test_rename_privateuse1_to_existing_device.py
+# /test/test_rounded_conversion.py
 # /test/test_scatter_gather_ops.py
 # /test/test_schema_check.py
 # /test/test_segment_reductions.py
@@ -971,8 +972,8 @@
 # owner: @atalman @huydhn @malfet
 /.ci/docker/ @atalman @huydhn @malfet
 # label: module: ci, module: inductor
-# owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+# owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony @atalman @njriasan @warrendeng
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony @atalman @njriasan @warrendeng
 #
 # [infra_github_automation]
 # label: module: ci, module: github automation
