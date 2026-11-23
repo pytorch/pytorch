@@ -142,6 +142,10 @@ bool is_supported_device(Device device) {
   return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS || device_type == kXPU;
 }
 
+} // namespace
+
+namespace at::native {
+
 // Shell dtypes have no defined value conversion. Rejecting casts on the host
 // keeps every backend consistent with tracing; on CUDA they would otherwise
 // device-assert in the dynamic-cast kernel.
@@ -167,10 +171,6 @@ void check_shell_dtype_cast(ScalarType src, ScalarType dst) {
       " is a shell dtype with no defined conversions. Use .view() to "
       "reinterpret the bytes as a same-size integer dtype instead.");
 }
-
-} // namespace
-
-namespace at::native {
 
 static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
