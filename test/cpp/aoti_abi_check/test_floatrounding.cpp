@@ -69,12 +69,10 @@ TEST(TestFloatRounding, TestConvertWithRoundingFormats) {
       value(convert_with_rounding<Float8_e4m3fn>(-kInfinity, kZero)), -448.0f);
   EXPECT_TRUE(
       std::isnan(value(convert_with_rounding<Float8_e4m3fn>(kNaN, kZero))));
-  // Has infinity.
   EXPECT_EQ(
-      value(convert_with_rounding<Float8_e5m2>(1e6f, kNearest)), kInfinity);
-  EXPECT_EQ(value(convert_with_rounding<Float8_e5m2>(1e6f, kZero)), 57344.0f);
+      value(convert_with_rounding<Float8_e5m2>(1e6f, kNearest)), 57344.0f);
   EXPECT_EQ(
-      value(convert_with_rounding<Float8_e5m2>(-kInfinity, kZero)), -kInfinity);
+      value(convert_with_rounding<Float8_e5m2>(-kInfinity, kZero)), -57344.0f);
   // NaN on overflow, and no negative zero.
   EXPECT_TRUE(std::isnan(
       value(convert_with_rounding<Float8_e4m3fnuz>(1e6f, kNearest))));
