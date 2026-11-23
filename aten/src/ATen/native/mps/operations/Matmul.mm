@@ -596,7 +596,8 @@ bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output)
   static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
   constexpr auto max_complex_inner_size = 2048;
-  if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
+  // A graph capture records Metal kernels only.
+  if (always_use_metal || c10::isIntegralType(self.scalar_type(), true) || isCurrentStreamCapturing()) {
     return true;
   }
   // MPSGraph mis-writes a non-contiguous output before macOS 26; the metal
@@ -1046,6 +1047,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   using namespace mps;
 
+  // Encodes through MPSNDArrayMatrixMultiplication, whose encodeToCommandEncoder:
+  // drives the encoder past the selectors MPSRecordingEncoder intercepts.
+  assertNotCapturing("bmm on more than 2^32 elements (MPSNDArray kernel)");
+
   id<MTLBuffer> aBuffer = getMTLBufferStorage(batch1);
   id<MTLBuffer> bBuffer = getMTLBufferStorage(batch2);
   id<MTLBuffer> resBuffer = getMTLBufferStorage(result);
@@ -1206,6 +1211,11 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     // Tiled path uses MPSNDArray directly, so resolve conjugate views upfront
     result = tiled_bmm_out_mps_impl(batch1.resolve_conj(), batch2.resolve_conj(), result);
     return result;
+  }
+
+  // A graph capture records Metal kernels only.
+  if (isCurrentStreamCapturing()) {
+    return do_metal_bmm(batch1, batch2, result);
   }
 
   MPSStream* stream = getCurrentMPSStream();

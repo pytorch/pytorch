@@ -1866,7 +1866,12 @@ uint64_t MetalKernelFunction::getStaticThreadGroupMemoryLength() const {
 }
 
 void* get_tensor_gpu_address(const at::TensorBase& t) {
-  return reinterpret_cast<void*>(getMTLBufferStorage(t).gpuAddress + t.storage_offset() * t.element_size());
+  const auto buffer = getMTLBufferStorage(t);
+  // An extension may embed this address in an argument buffer; a capture must keep the buffer for replay.
+  if (C10_UNLIKELY(at::mps::isAnyStreamCapturing())) {
+    at::mps::getCurrentMPSStream()->captureNoteBuffer(buffer);
+  }
+  return reinterpret_cast<void*>(buffer.gpuAddress + t.storage_offset() * t.element_size());
 }
 
 } // namespace at::native::mps

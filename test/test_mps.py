@@ -16185,6 +16185,407 @@ class TestMetalLibrary(TestCaseMPS):
             self.assertEqual(destination, source.permute(2, 3, 4, 1, 0))
 
 
+class TestGraphCapture(TestCaseMPS):
+    """MPS backend of torch.accelerator.Graph.
+
+    The capture pass runs the work and records every Metal kernel dispatch and blit;
+    replay re-encodes them on the current stream. Every replay test updates an input
+    in place or fills the output with NaN first, so a replay that did nothing cannot pass.
+    """
+
+    def assertNotRecording(self):
+        # RNG raises inside a capture, so this fails if a capture is still recording.
+        torch.rand(1, device="mps")
+
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_replay_recomputes_with_new_inputs(self, dtype):
+        d = 32
+        w = torch.randn(d, d, device="mps", dtype=dtype)
+        x = torch.randn(8, d, device="mps", dtype=dtype)
+
+        def model(inp):
+            return torch.relu(F.layer_norm(inp @ w, [d]))
+
+        g = torch.accelerator.Graph()
+        with g:
+            out = model(x)
+        self.assertEqual(out, model(x))
+        for _ in range(3):
+            new_x = torch.randn_like(x)
+            x.copy_(new_x)
+            out.fill_(float("nan"))
+            g.replay()
+            self.assertEqual(out, model(new_x))
+
+    @parametrize("rows", [1, 4])
+    def test_nn_linear_captured(self, rows):
+        # While capturing, linear delegates to the Metal mm/addmm kernels instead of
+        # its MPSNDArray fast path, which the recorder cannot see.
+        linear = torch.nn.Linear(16, 16, device="mps")
+        x = torch.randn(rows, 16, device="mps")
+        with torch.no_grad():
+            g = torch.accelerator.Graph()
+            with g:
+                out = linear(x)
+            new_x = torch.randn_like(x)
+            x.copy_(new_x)
+            out.fill_(float("nan"))
+            g.replay()
+            self.assertEqual(out, linear(new_x))
+
+    def test_transformer_encoder_captured(self):
+        layer = torch.nn.TransformerEncoderLayer(
+            d_model=64, nhead=4, dim_feedforward=128, batch_first=True, norm_first=True
+        ).to("mps").eval()
+        x = torch.randn(2, 16, 64, device="mps")
+        with torch.no_grad():
+            g = torch.accelerator.Graph()
+            with g:
+                out = layer(x)
+            new_x = torch.randn_like(x)
+            x.copy_(new_x)
+            out.fill_(float("nan"))
+            g.replay()
+            self.assertEqual(out, layer(new_x))
+
+    def test_embedding_captured(self):
+        emb = torch.nn.Embedding(1000, 32, device="mps")
+        idx = torch.randint(0, 1000, (4, 16), device="mps")
+        with torch.no_grad():
+            g = torch.accelerator.Graph()
+            with g:
+                out = emb(idx)
+            new_idx = torch.randint(0, 1000, (4, 16), device="mps")
+            idx.copy_(new_idx)
+            out.fill_(float("nan"))
+            g.replay()
+            self.assertEqual(out, emb(new_idx))
+
+    def test_lu_factor_captured(self):
+        # lu_factor_ex, since lu_factor's info check is a host read.
+        A = torch.randn(4, 16, 16, device="mps")
+        g = torch.accelerator.Graph()
+        with g:
+            LU, pivots, _ = torch.linalg.lu_factor_ex(A)
+        new_A = torch.randn_like(A)
+        A.copy_(new_A)
+        LU.fill_(float("nan"))
+        g.replay()
+        expected_LU, expected_pivots = torch.linalg.lu_factor(new_A)
+        self.assertEqual(LU, expected_LU, atol=1e-4, rtol=1e-4)
+        self.assertEqual(pivots, expected_pivots)
+
+    def test_blit_copy_captured(self):
+        # A cast into a destination with a storage offset casts into a temporary
+        # and blits it into place, so the capture records a blit.
+        src = torch.randn(64, device="mps", dtype=torch.float16)
+        dst = torch.zeros(2, 64, device="mps")
+        g = torch.accelerator.Graph()
+        with g:
+            dst[1].copy_(src)
+        new_src = torch.randn_like(src)
+        src.copy_(new_src)
+        dst.zero_()
+        g.replay()
+        self.assertEqual(dst[0], torch.zeros(64, device="mps"))
+        self.assertEqual(dst[1], new_src.float())
+
+    def test_threadgroup_memory_kernel_captured(self):
+        # The large-M int8 weight-only matmul binds threadgroup memory, which replay
+        # must re-issue. A missing binding can still compute correctly, so only Metal
+        # API validation, which aborts on it, can see it.
+        code = """
+import torch
+M, N, K = 32, 64, 128
+x = torch.randn(M, K, device="mps")
+w = torch.randint(-128, 127, (N, K), dtype=torch.int8, device="mps")
+scales = torch.rand(N, device="mps")
+g = torch.accelerator.Graph()
+with g:
+    out = torch._weight_int8pack_mm(x, w, scales)
+x2 = torch.randn(M, K, device="mps")
+x.copy_(x2)
+out.fill_(float("nan"))
+g.replay()
+torch.testing.assert_close(out, torch._weight_int8pack_mm(x2, w, scales))
+"""
+        env = dict(os.environ, MTL_DEBUG_LAYER="1", MTL_DEBUG_LAYER_ERROR_MODE="assert")
+        subprocess.check_output([sys.executable, "-c", code], env=env, stderr=subprocess.STDOUT)
+
+    def test_advanced_indexing_captured(self):
+        # The index tensor reaches the kernel through an argument buffer.
+        x = torch.arange(16, dtype=torch.float32, device="mps")
+        idx = torch.tensor([0, 1, 2], dtype=torch.int64, device="mps")
+        g = torch.accelerator.Graph()
+        with g:
+            out = x[idx]
+        x.copy_(torch.arange(100, 116, dtype=torch.float32, device="mps"))
+        idx.copy_(torch.tensor([5, 6, 7], dtype=torch.int64, device="mps"))
+        out.fill_(float("nan"))
+        g.replay()
+        self.assertEqual(out, torch.tensor([105.0, 106.0, 107.0], device="mps"))
+
+    def test_training_step_captured(self):
+        # Forward, backward and a fused optimizer step with 40 parameters, which
+        # exceeds the 32 tensors MultiTensorApply binds per dispatch.
+        model = nn.Sequential(*[nn.Linear(8, 8) for _ in range(20)]).to("mps")
+        twin = copy.deepcopy(model)
+        opt = torch.optim.Adam(model.parameters(), lr=1e-2, fused=True)
+        twin_opt = torch.optim.Adam(twin.parameters(), lr=1e-2, fused=True)
+        x = torch.randn(4, 8, device="mps")
+        y = torch.randn(4, 8, device="mps")
+
+        def step(m, o, inp, target):
+            o.zero_grad(set_to_none=False)
+            loss = F.mse_loss(m(inp), target)
+            loss.backward()
+            o.step()
+            return loss
+
+        step(model, opt, x, y)  # warm up, so the capture does not record lazy state creation
+        step(twin, twin_opt, x, y)
+        g = torch.accelerator.Graph()
+        with g:
+            loss = step(model, opt, x, y)
+        step(twin, twin_opt, x, y)
+        for _ in range(2):
+            new_x, new_y = torch.randn_like(x), torch.randn_like(y)
+            x.copy_(new_x)
+            y.copy_(new_y)
+            g.replay()
+            self.assertEqual(loss, step(twin, twin_opt, new_x, new_y))
+            self.assertEqual(list(model.parameters()), list(twin.parameters()))
+
+    def test_replay_inside_a_capture_is_recorded(self):
+        # Kernel steps re-record through the recording encoder, blits are duplicated,
+        # and the outer graph keeps its own reservations once the inner one is released.
+        x = torch.full((70, 70), 2.0, device="mps")
+        w = torch.full((70, 70), 3.0, device="mps")
+        src = torch.randn(64, device="mps", dtype=torch.float16)
+        dst = torch.zeros(2, 64, device="mps")
+        inner = torch.accelerator.Graph()
+        with inner:
+            mid = x @ w
+            dst[1].copy_(src)
+        outer = torch.accelerator.Graph()
+        with outer:
+            inner.replay()
+        del w
+        inner.reset()
+        squatters = [torch.full((70, 70), 9.0, device="mps") for _ in range(32)]
+        new_src = torch.randn_like(src)
+        src.copy_(new_src)
+        mid.fill_(float("nan"))
+        dst.zero_()
+        outer.replay()
+        self.assertEqual(mid, torch.full((70, 70), 420.0, device="mps"))
+        self.assertEqual(dst[1], new_src.float())
+        del squatters
+
+    def test_ops_on_other_streams_are_not_recorded(self):
+        # A capture records only the stream it began on, including when another
+        # thread issues work on its own (default) stream meanwhile.
+        x = torch.randn(64, 64, device="mps")
+        y = torch.ones(8, device="mps")
+        z = torch.ones(8, device="mps")
+
+        def other_thread():
+            z.mul_(2)
+
+        s = torch.Stream()
+        g = torch.accelerator.Graph()
+        with s, g:
+            out = x @ x
+            with torch.Stream():
+                y.add_(1)
+            t = threading.Thread(target=other_thread)
+            t.start()
+            t.join()
+        torch.accelerator.synchronize()
+        new_x = torch.randn_like(x)
+        x.copy_(new_x)
+        out.fill_(float("nan"))
+        g.replay()
+        self.assertEqual(out, new_x @ new_x)
+        self.assertEqual(y, torch.full((8,), 2.0, device="mps"))
+        self.assertEqual(z, torch.full((8,), 2.0, device="mps"))
+
+    @parametrize("release", ["reset", "del"])
+    def test_release_frees_captured_buffers(self, release):
+        # A buffer the capture bound stays out of the allocator's reuse pool while
+        # the graph lives, and returns to it once the graph is released.
+        shape = (73, 61)
+        x = torch.ones(shape, device="mps")
+        g = torch.accelerator.Graph()
+        with g:
+            h = x * 2
+            out = h + 1
+        ptr = h.data_ptr()
+        del h
+        self.assertNotIn(ptr, [torch.empty(shape, device="mps").data_ptr() for _ in range(32)])
+        if release == "reset":
+            g.reset()
+        else:
+            del g
+        self.assertIn(ptr, [t.data_ptr() for t in [torch.empty(shape, device="mps") for _ in range(64)]])
+        del out
+
+    def test_replay_correct_after_captured_storage_freed(self):
+        # Replay re-binds buffers by address, so the freed input and intermediate
+        # must not be handed to the squatters.
+        shape = (73, 61)  # odd size, so no other test's cached block fits it exactly
+        src = torch.full(shape, 3.0, device="mps")
+        idx = torch.tensor([5, 9, 1, 30], device="mps")
+        g = torch.accelerator.Graph()
+        with g:
+            h = src * 2
+            out = h + src
+            picked = torch.arange(64.0, device="mps")[idx]
+        ptrs = {src.data_ptr(), h.data_ptr(), idx.data_ptr()}
+        del src, h, idx
+        squatters = [torch.full(shape, 7.0, device="mps") for _ in range(32)]
+        squatters += [torch.full((4,), 63, dtype=torch.int64, device="mps") for _ in range(16)]
+        self.assertFalse(ptrs & {t.data_ptr() for t in squatters})
+        out.fill_(float("nan"))
+        picked.fill_(float("nan"))
+        g.replay()
+        self.assertEqual(out, torch.full(shape, 9.0, device="mps"))
+        self.assertEqual(picked, torch.tensor([5.0, 9.0, 1.0, 30.0], device="mps"))
+
+    def test_scalar_operands(self):
+        # A Python scalar is recorded as bytes, so replay reuses its value; a 0-dim
+        # MPS tensor is a buffer like any other input.
+        x = torch.ones(8, device="mps")
+        s = torch.tensor(2.0, device="mps")
+        g = torch.accelerator.Graph()
+        with g:
+            out = x * 2.0 * s
+        x.fill_(5.0)
+        s.fill_(3.0)
+        g.replay()
+        self.assertEqual(out, torch.full((8,), 30.0, device="mps"))
+
+    @parametrize("op", ["conv2d", "eigh", "embedding_renorm", "svd", "item", "cpu", "from_host", "event_record",
+                        "event_wait", "randn", "dropout", "lstm_dropout"])
+    def test_uncapturable_op_raises(self, op):
+        # Work replay could not reproduce raises instead of being left out of the graph.
+        img = torch.randn(1, 2, 8, 8, device="mps")
+        weight = torch.randn(4, 2, 3, 3, device="mps")
+        sym = torch.randn(128, 128, device="mps")  # too large for the GPU eigh kernel
+        sym = sym + sym.t()
+        table = torch.randn(10, 4, device="mps")
+        idx = torch.tensor([1, 2, 3], device="mps")
+        big = torch.randn(256, 256, device="mps")
+        x = torch.arange(8.0, device="mps")
+        event = torch.Event(device="mps")
+        event.record()
+        lstm = nn.LSTM(4, 4, num_layers=2, dropout=0.5).to("mps")
+        seq = torch.randn(3, 2, 4, device="mps")
+        fn, msg = {
+            "conv2d": (lambda: F.conv2d(img, weight), "An op implemented with MPSGraph"),
+            "eigh": (lambda: torch.linalg.eigh(sym), "linalg.eigh CPU fallback"),
+            "embedding_renorm": (lambda: F.embedding(idx, table, max_norm=1.0), "CPU fallback for aten::embedding_renorm_"),
+            "svd": (lambda: torch.linalg.svd(big), "linalg.svd CPU fallback"),
+            "item": (lambda: x[3].item(), "Copying between CPU and MPS"),
+            "cpu": (lambda: x.cpu(), "Copying between CPU and MPS"),
+            "from_host": (lambda: x.copy_(torch.zeros(8)), "Copying between CPU and MPS"),
+            "event_record": (lambda: torch.Event(device="mps").record(), "Recording an MPS event"),
+            "event_wait": (lambda: event.wait(), "Waiting on an MPS event"),
+            "randn": (lambda: torch.randn(8, device="mps"), r"Random number generation \(.*\)"),
+            "dropout": (lambda: F.dropout(x, p=0.5, training=True), r"Random number generation \(.*\)"),
+            "lstm_dropout": (lambda: lstm(seq), r"Random number generation \(.*\)"),
+        }[op]
+        g = torch.accelerator.Graph()
+        with self.assertRaisesRegex(RuntimeError, msg + " during MPS graph capture"):
+            with g:
+                fn()
+        self.assertNotRecording()
+        fn()  # still runs outside a capture
+
+    def test_set_rng_state_inside_capture(self):
+        # Restoring generator state draws no random numbers, so it is allowed.
+        state = torch.mps.get_rng_state()
+        x = torch.ones(4, device="mps")
+        g = torch.accelerator.Graph()
+        with g:
+            torch.mps.set_rng_state(state)
+            out = x + 1
+        out.fill_(float("nan"))
+        g.replay()
+        self.assertEqual(out, torch.full((4,), 2.0, device="mps"))
+
+    def test_capture_rejects_when_profiling_enabled(self):
+        g = torch.accelerator.Graph()
+        with torch.mps.profiler.profile(mode="interval"):
+            with self.assertRaisesRegex(RuntimeError, "profiling"):
+                g.capture_begin()
+        self.assertNotRecording()
+
+    def test_capture_api_misuse_raises(self):
+        x = torch.ones(4, device="mps")
+        g = torch.accelerator.Graph()
+        with self.assertRaisesRegex(RuntimeError, "without a matching capture_begin"):
+            g.capture_end()
+        with g:
+            out = x + 1
+            with self.assertRaisesRegex(RuntimeError, "without a preceding successful capture"):
+                g.replay()
+        with self.assertRaisesRegex(RuntimeError, "already holds a capture"):
+            g.capture_begin()
+        with self.assertRaisesRegex(NotImplementedError, "not supported for MPS graphs"):
+            g.debug_dump("graph.dot")
+        # The failed calls left the existing capture intact.
+        out.fill_(float("nan"))
+        g.replay()
+        self.assertEqual(out, torch.full((4,), 2.0, device="mps"))
+
+    def test_nested_capture_raises(self):
+        # Recording is exclusive per stream, and a failed inner begin must leave the
+        # outer capture recording normally.
+        x = torch.ones(4, device="mps")
+        outer, inner = torch.accelerator.Graph(), torch.accelerator.Graph()
+        with outer:
+            with self.assertRaisesRegex(RuntimeError, "already in progress"):
+                inner.capture_begin()
+            out = x + 1
+        out.fill_(float("nan"))
+        outer.replay()
+        self.assertEqual(out, torch.full((4,), 2.0, device="mps"))
+
+    def test_multiple_independent_graphs(self):
+        x1 = torch.randn(4, 4, device="mps")
+        x2 = torch.randn(8, 8, device="mps")
+        g1, g2 = torch.accelerator.Graph(), torch.accelerator.Graph()
+        with g1:
+            out1 = x1 @ x1
+        with g2:
+            out2 = x2 @ x2
+        out1.fill_(float("nan"))
+        out2.fill_(float("nan"))
+        g2.replay()
+        g1.replay()
+        self.assertEqual(out1, x1 @ x1)
+        self.assertEqual(out2, x2 @ x2)
+        g1.reset()
+        out2.fill_(float("nan"))
+        g2.replay()
+        self.assertEqual(out2, x2 @ x2)
+
+    def test_dropping_graph_mid_recording_leaves_stream_usable(self):
+        x = torch.ones(4, 4, device="mps")
+        g = torch.accelerator.Graph()
+        g.capture_begin()
+        _ = x @ x
+        del g
+        self.assertNotRecording()
+        g2 = torch.accelerator.Graph()
+        with g2:
+            out = x @ x
+        out.fill_(float("nan"))
+        g2.replay()
+        self.assertEqual(out, torch.full((4, 4), 4.0, device="mps"))
+
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
@@ -16209,6 +16610,7 @@ instantiate_parametrized_tests(TestConv3dChannelsLast3dMPS)
 instantiate_parametrized_tests(TestConvolutionMPS)
 instantiate_parametrized_tests(TestLargeTensors)
 instantiate_parametrized_tests(TestViewOpsMPS)
+instantiate_parametrized_tests(TestGraphCapture)
 
 if __name__ == "__main__":
     run_tests()

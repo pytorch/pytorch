@@ -2,6 +2,7 @@
 
 #include <ATen/Utils.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
+#include <ATen/mps/MPSStream.h>
 #include <algorithm>
 
 namespace at {
@@ -36,6 +37,10 @@ void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
 }
 
 void MPSGeneratorImpl::set_offset(uint64_t offset) {
+  // Every RNG op but LSTM dropout advances the generator here. A capture records
+  // the philox seed and offset as fixed bytes, so replays would repeat the capture
+  // pass's values; CUDA advances the offset per replay, MPS does not yet.
+  mps::assertNotCapturing("Random number generation (MPSGeneratorImpl::set_offset)");
   engine_.set_offset(offset);
 }
 
@@ -55,6 +60,9 @@ uint64_t MPSGeneratorImpl::seed() {
 
 // See Note [Acquire lock when using random generators]
 void MPSGeneratorImpl::update_philox_counters() {
+  // LSTM dropout reads the generator here rather than through set_offset(), so it
+  // needs the same guard.
+  mps::assertNotCapturing("Random number generation (LSTM dropout)");
   // calling engine_() would call operator() of philox_engine class to
   // get each of the four newly generated counter values (see PhiloxRNGEngine.h).
   for (int i = 1; i <= 4; i++) {
@@ -101,7 +109,9 @@ void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   memcpy(&input_seed, new_rng_state + states_size, seed_size);
   this->set_current_seed(input_seed);
   memcpy(&input_offset, new_rng_state + states_size + seed_size, offset_size);
-  this->set_offset(input_offset);
+  // Not set_offset(): that carries the capture guard for ops that consume
+  // randomness, and restoring generator state consumes none.
+  engine_.set_offset(input_offset);
   // state.data must be copied after input_seed to not reset the state in set_current_seed()
   memcpy(this->state_data(), new_rng_state, states_size);
 }

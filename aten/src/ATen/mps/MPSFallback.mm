@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/mps/MPSStream.h>
 #include <ATen/native/CPUFallback.h>
 #include <c10/util/env.h>
 #include <caffe2/core/common.h>
@@ -26,6 +27,8 @@ static void mps_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack
 #ifdef USE_DISTRIBUTED
   mps_distributed_error(op);
 #endif
+
+  mps::assertNotCapturing(c10::str("CPU fallback for ", op.schema().operator_name()));
 
   TORCH_WARN_ONCE("The operator '",
                   op.schema().operator_name(),

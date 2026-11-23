@@ -423,6 +423,9 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
     }
   }
 
+  if (src.device().type() != dst.device().type()) {
+    assertNotCapturing("Copying between CPU and MPS");
+  }
   if (src.device().type() == at::kMPS && dst.device().type() == at::kCPU) {
     return copy_from_mps_(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }

@@ -156,7 +156,9 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
 
   // See pytorch/pytorch#177116. Delegating to addmm/mm reaches the metal kernels, which
   // take the weight's real strides, so the transposed (column-major) operand costs nothing.
-  if (!is_complex && (rows == 1 || needs_mm_overflow_fallback(rows, input.size(-1), weight.size(0)))) {
+  // A graph capture records Metal kernels only, so it delegates too.
+  if (!is_complex &&
+      (rows == 1 || needs_mm_overflow_fallback(rows, input.size(-1), weight.size(0)) || isCurrentStreamCapturing())) {
     const auto input_2d = input.dim() != 2 ? input.reshape({-1, input.size(-1)}) : input;
     // addmm fuses the bias and routes rank-1 shapes to the GEMV kernels. A multi-dim bias
     // cannot broadcast against the 2D result, so it is added after the reshape instead.

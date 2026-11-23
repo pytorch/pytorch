@@ -97,6 +97,7 @@ static void svd_kernel_mps(const Tensor& A,
   // check's mandatory device->host sync, so gating small inputs to CPU was 3-6x
   // slower, not faster.
   if (too_large) {
+    assertNotCapturing("linalg.svd CPU fallback");
     TORCH_WARN_ONCE("linalg.svd: matrix too large to stage in MPS threadgroup memory (",
                     staging_bytes,
                     " > ",
