@@ -125,6 +125,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_LINUX,
     IS_MACOS,
+    IS_WINDOWS,
     IS_X86,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -137,8 +138,8 @@ from torch.testing._internal.common_utils import (
     skipIfNoLapack,
     skipIfRocm,
     skipIfRocmArch,
+    skipIfRocmWindows,
     skipIfTorchInductor,
-    skipIfWindows,
     skipIfXpu,
     subtest,
     TEST_WITH_ASAN,
@@ -181,6 +182,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     RUN_TPU,
     skipCPUIf,
     skipCUDAIf,
+    skipIfMsvcCl,
 )
 from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
@@ -1580,7 +1582,6 @@ class CommonTemplate:
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
-    @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_dtype_device_layout(self):
         ns = "aten"
         op_name = "tril_indices"
@@ -1624,7 +1625,6 @@ class CommonTemplate:
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
-    @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_support_out(self):
         ns = "aten"
         op_name = "clamp"
@@ -1680,7 +1680,6 @@ class CommonTemplate:
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
-    @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_support_str(self):
         ns = "aten"
         op_name = "div"
@@ -1721,7 +1720,6 @@ class CommonTemplate:
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
-    @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_cache_hit(self):
         ns = "aten"
         op_name = "abs"
@@ -1766,7 +1764,6 @@ class CommonTemplate:
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
-    @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_with_persistent_cache(self):
         def fn(a):
             return torch.abs(a)
@@ -1814,7 +1811,6 @@ class CommonTemplate:
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
-    @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_with_scalar(self):
         namespace_name = "aten"
         op_name = "add"
@@ -1888,7 +1884,6 @@ class CommonTemplate:
     @skip_if_halide  # aoti
     @skip_if_pallas  # aoti
     @skip_if_triton_cpu  # aoti
-    @skipIfWindows(msg="aoti not support on Windows")
     def test_aoti_eager_override_registration(self):
         namespace_name = "aten"
         dispatch_key = "CPU"
@@ -2268,7 +2263,6 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 1)
 
     @config.patch({"fx_graph_cache": False})
-    @skipIfWindows(msg="torch._dynamo.exc.Unsupported")
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
@@ -2279,7 +2273,6 @@ class CommonTemplate:
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
 
     @config.patch({"fx_graph_cache": False})
-    @skipIfWindows(msg="torch._dynamo.exc.Unsupported")
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
@@ -2360,6 +2353,10 @@ class CommonTemplate:
         if is_cpp_backend(self.device) and not cpu_vec_isa.pick_vec_isa():
             raise unittest.SkipTest(
                 "inf to int cast is UB; scalar C++ results depend on the compiler"
+            )
+        if is_cpp_backend(self.device) and IS_WINDOWS:
+            raise unittest.SkipTest(
+                "inf to int cast is UB; clang-cl C++ results differ from GCC"
             )
 
         def fn():
@@ -11333,7 +11330,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (inp, False))
         self.common(fn, (inp, True))
 
-    @skipIfWindows(msg="Crash UT")
+    @skipIfMsvcCl("Crash UT")
     def test_sort_transpose(self):
         def fn(a, descending):
             return torch.sort(a, stable=True, descending=descending)
@@ -18597,7 +18594,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     # If we serve from the cache, the init hook isn't called
     @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
-    @skipIfWindows(msg="torch._dynamo.exc.Unsupported")
     def test_inner_fn_str_and_stride(self):
         def f(x):
             x = x + 1
@@ -20287,8 +20283,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                         nonlocal inp_refs
                         nonlocal matmul_seen
 
-                        gc.collect()
                         if func is aten.mm.out:
+                            # Collecting on every op is too slow on Windows.
+                            gc.collect()
                             matmul_seen = True
                             if len(inps) != 0:
                                 raise AssertionError(
@@ -20590,6 +20587,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(Model(), inputs)
 
     @requires_gpu_and_triton
+    @skipIfRocmWindows(
+        msg="Kineto is not built on Windows ROCm yet; profiler support belongs to future Kineto work"
+    )
     @parametrize("use_cat", [True, False])
     def test_copy_non_blocking_is_pinned(self, use_cat):
         def f(a_list):

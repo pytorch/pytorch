@@ -5304,6 +5304,7 @@ class TestCudaCompileCommand(TestCase):
         self.assertIn("-lcudart", flags)
 
     @requires_cuda_and_triton
+    @unittest.skipIf(IS_WINDOWS, "CUTLASS nvcc compile command (_cuda_lib_options) only supports Linux")
     def test_cuda_compile_command(self):
         cmd_no_extra_args: str = cuda_compile_command(
             ["abc.cu", "def.cu"], "output", "so"

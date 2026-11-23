@@ -53,6 +53,7 @@ from torch._inductor.utils import (
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import (
@@ -1963,11 +1964,13 @@ def helper(x):
 
     @unittest.skipUnless(has_triton_package(), "requires Triton package")
     def test_fp8_dtype_support_matrix(self):
-        self.assertFalse(
-            is_triton_fp8_dtype_supported(
-                torch.float8_e4m3fn, triton_backend="cuda", triton_arch=80
+        # The pinned Triton lists fp8e4nv from sm89 on; triton-windows on every arch.
+        if not IS_WINDOWS:
+            self.assertFalse(
+                is_triton_fp8_dtype_supported(
+                    torch.float8_e4m3fn, triton_backend="cuda", triton_arch=80
+                )
             )
-        )
         self.assertTrue(
             is_triton_fp8_dtype_supported(
                 torch.float8_e4m3fn, triton_backend="cuda", triton_arch=89

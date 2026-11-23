@@ -175,6 +175,7 @@ class TestCompilerBisectorDevice(TestCase):
     def test_bisect_run_debuginfo(self, device):
         import os
         import subprocess
+        import sys
         from pathlib import Path
         from unittest.mock import patch
 
@@ -191,11 +192,11 @@ class TestCompilerBisectorDevice(TestCase):
         ):
             output = subprocess.run(
                 [
-                    "python",
+                    sys.executable,
                     "-m",
                     "torch._inductor.compiler_bisector",
                     "run",
-                    "python",
+                    sys.executable,
                     str(test_file),
                     device,
                 ],

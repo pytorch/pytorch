@@ -11,7 +11,7 @@ from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import HardwareClassification, IS_WINDOWS
 from torch.testing._internal.inductor_utils import requires_triton, RUN_CPU
 
 
@@ -308,6 +308,7 @@ class InputDistanceTests(TestCase):
 
 
 @skipIf(not dist.is_available(), "requires distributed")
+@skipIf(IS_WINDOWS, "torch.distributed is not supported on Windows yet")
 @requires_triton()
 class TestCommAnalysis(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR

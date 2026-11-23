@@ -2,6 +2,7 @@
 import copy
 import os
 import random
+import unittest
 
 import torch
 from torch import nn
@@ -9,7 +10,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import tf32_off
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -41,6 +42,10 @@ class TestLayoutOptim(TestCase):
         super().setUpClass()
 
         import torch.distributed as dist
+
+        # Only the DDP-wrapped tests need the process group.
+        if IS_WINDOWS:
+            return
 
         # not use a fixed port for stress test
         tot_retry = 5
@@ -122,12 +127,14 @@ class TestLayoutOptim(TestCase):
     def verify_accuracy_for_train(self, *args, **kwargs):
         self.verify_accuracy(*args, **kwargs, is_train=True)
 
+    @unittest.skipIf(IS_WINDOWS, "torch.distributed is not supported on Windows yet")
     def test_2conv_with_graph_break(self):
         """
         Make sure graph break does not cause any accuracy issue.
         """
         self.verify_accuracy_for_infer(Model2Conv)
 
+    @unittest.skipIf(IS_WINDOWS, "torch.distributed is not supported on Windows yet")
     def test_3conv_with_graph_break(self):
         class Model(nn.Module):
             def __init__(
@@ -195,6 +202,7 @@ class TestLayoutOptim(TestCase):
         ):
             self.test_keep_output_layout_infer()
 
+    @unittest.skipIf(IS_WINDOWS, "torch.distributed is not supported on Windows yet")
     def test_training_acc(self):
         self.verify_accuracy_for_train(Model2Conv)
 
@@ -235,6 +243,7 @@ class TestLayoutOptim(TestCase):
         y = f(x)
         self.assertTrue(torch.equal(y, torch.ones(3, 2).to(GPU_TYPE) * 2))
 
+    @unittest.skipIf(IS_WINDOWS, "torch.distributed is not supported on Windows yet")
     @tf32_off()
     def test_mutate_base_for_conv_output(self):
         class Model(nn.Module):
@@ -253,6 +262,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model)
 
+    @unittest.skipIf(IS_WINDOWS, "torch.distributed is not supported on Windows yet")
     @tf32_off()
     def test_mutate_view_for_conv_output(self):
         class Model(nn.Module):

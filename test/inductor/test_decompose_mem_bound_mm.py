@@ -20,6 +20,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     is_navi3_arch,
+    isRocmArchAnyOf,
+    NAVI3_5_ARCH,
     parametrize,
     patch_test_members,
     preserves_unittest_skip_marks,
@@ -27,6 +29,12 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu
+
+
+# RDNA3 (Navi3) and RDNA3.5 (Navi3.5, e.g. gfx1151) share the hardware GEMM
+# accuracy limitation that the looser tolerance below accounts for.
+def _is_rdna3_x():
+    return is_navi3_arch() or isRocmArchAnyOf(NAVI3_5_ARCH)
 
 
 class MyModule(torch.nn.Module):
@@ -238,8 +246,8 @@ class TestDecomposeMemMM(TestCase):
     # GEMMs operations have an accuracy issue caused by hardware limitation
     @patch_test_members(
         {
-            "atol": 2e-3 if is_navi3_arch() else 1e-3,
-            "rtol": 2e-3 if is_navi3_arch() else 1e-3,
+            "atol": 2e-3 if _is_rdna3_x() else 1e-3,
+            "rtol": 2e-3 if _is_rdna3_x() else 1e-3,
         }
     )
     @parametrize(
@@ -354,8 +362,8 @@ class TestDecomposeMemMM(TestCase):
     # GEMMs operations have an accuracy issue caused by hardware limitation
     @patch_test_members(
         {
-            "atol": 8e-3 if is_navi3_arch() else 1e-3,
-            "rtol": 8e-3 if is_navi3_arch() else 1e-3,
+            "atol": 8e-3 if _is_rdna3_x() else 1e-3,
+            "rtol": 8e-3 if _is_rdna3_x() else 1e-3,
         }
     )
     @parametrize(

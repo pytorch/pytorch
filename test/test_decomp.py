@@ -37,6 +37,7 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     decorateIf,
     HardwareClassification,
+    IS_WINDOWS,
     is_iterable_of_tensors,
     parametrize,
     run_tests,
@@ -1858,10 +1859,11 @@ class DecompOneOffTests(TestCase):
 
         # check RMSNorm was fused with sinh
         self.assertTrue("triton_per_fused__fused_rms_norm_sinh" in generated_codes[0])
-        self.assertTrue(
-            "triton_per_fused__fused_rms_norm__fused_rms_norm_backward_cosh_mul"
-            in generated_codes[1]
-        )
+        bw_name = "triton_per_fused__fused_rms_norm__fused_rms_norm_backward_cosh_mul"
+        if IS_WINDOWS:
+            # Inductor caps long fused kernel names on Windows (MAX_PATH).
+            bw_name = bw_name[: len("triton_per_") + 41]
+        self.assertTrue(bw_name in generated_codes[1])
 
     @onlyAccelerator
     @skipIfCrossRef
