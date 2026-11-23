@@ -18,6 +18,7 @@ if not TEST_CUTEDSL:
 
 import cutlass
 
+from torch._native.cutedsl import launch as _L
 from torch._native.ops.reductions import (
     kernel_coltile as ct,
     kernel_general as kg,
@@ -30,11 +31,17 @@ from torch._native.ops.reductions import (
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelColTile(TestCase):
     def test_reduce_col_tile_single_stage(self):
-        x = torch.randn(32, 512, device="cuda")
-        out = ct.reduce_col_tile(
-            T.SumOps(acc=cutlass.Float32), "smoke", x, torch.float32, npar=1
-        )
-        torch.testing.assert_close(out, x.sum(dim=0), atol=1e-2, rtol=1e-2)
+        # A misaligned input needs an element-aligned descriptor.
+        raw = torch.randn(32 * 512 + 1, device="cuda")
+        trait = T.SumOps(acc=cutlass.Float32)
+        for offset in (0, 1):
+            x = raw[offset : offset + 32 * 512].view(32, 512)
+            with self.subTest(offset=offset):
+                bound = tile.align_bytes(512, x.element_size())
+                aligned = _L.supported_alignment(x, bound) > x.element_size()
+                self.assertEqual(aligned, offset == 0)
+                out = ct.reduce_col_tile(trait, "smoke", x, torch.float32, npar=1)
+                self.assertEqual(out, x.sum(dim=0), atol=1e-2, rtol=1e-2)
 
     def test_reduce_col_tile_split_reduced_axis(self):
         # Exercise a ragged reduced-axis split and stage-2 partial combination.
