@@ -3615,15 +3615,19 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does, on the code two steps before this
-commit; neither step changes a graph of these models (their graphs,
-operations, runs in a call and hits are the same on all three): one process
-a row, the median of three turns, on 16 cores under the lock for timed runs,
-with the load average between 1.8 and 7.5 in front of a row (above 4 in
-front of three of them) and nothing else on the GPU. The graphs that run are
-those counted above (DistillGPT2 with the operations it has on a GPU; of
-hf_DistilBert the graph of a layer and the one of its feed-forward part run
-six times each in a call):
+which is what the dashboard's runner does, on the code three steps before
+this commit; none of the three changes a graph of these models (their
+graphs, operations, runs in a call and hits are the same on all four): one
+process a row, the median of three turns, on 16 cores under the lock for
+timed runs, with the load average between 1.8 and 7.5 in front of a row
+(above 4 in front of three of them) and nothing else on the GPU. Taken again
+on this commit's code and on the code one step before it, model by model in
+one window, the 13 rows differ by no more than eager mode and
+`torch.compile` differ between the same two processes (`torch.vm` between
+0.95 and 1.04 of the row of the step before, and between 0.99 and 1.02 of it
+against those two). The graphs that run are those counted above (DistillGPT2
+with the operations it has on a GPU; of hf_DistilBert the graph of a layer
+and the one of its feed-forward part run six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
@@ -3644,7 +3648,7 @@ for five of the models (`python benchmarks/dynamo/torchbench.py
 --performance --inference --bfloat16 --only MODEL` with `--vm` and with
 `--backend inductor`, `timm_models.py` and `huggingface.py` for the models
 of those suites; one run each), which report the speed against eager mode,
-next to what the tool had on the runner's code. That is the code seven steps
+next to what the tool had on the runner's code. That is the code eight steps
 before this commit (the one that changed which dicts the engine looks a name
 up in): the runner's lines were taken one after the other with the load
 average between 0.8 and 2.6 in front of a line and nothing else on the GPU,
@@ -3685,9 +3689,9 @@ same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the code two
+The rows of yolov3 and of DistillGPT2's training step are of the code three
 steps before this commit, measured with the rows of the table in the
-runner's mode (the load average 6.0 and 4.2 in front of them). Eight steps
+runner's mode (the load average 6.0 and 4.2 in front of them). Nine steps
 before, when a graph gave only what the code behind it reads, another job
 had yolov3 with gradients recorded at 7.67 ms (1.53 times eager's speed) in
 the process that fills the compiler's cache and at 7.73 ms (1.54) with the
@@ -3701,8 +3705,8 @@ DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of whisper-tiny
 7 and 4 where they gave 6 and 3; the graphs of the other models give what
 they gave. With gradients recorded the graph of yolov3 is cut at 28 more of
 its results, those that it also reads ("Writes"). That costs yolov3 nothing
-that two takes of the row tell apart under `torch.no_grad()` (4.31 ms two
-steps before this commit and 4.48 four steps before it, on the same graph,
+that two takes of the row tell apart under `torch.no_grad()` (4.31 ms three
+steps before this commit and 4.48 five steps before it, on the same graph,
 for 4.34) and about a third with gradients recorded (10.47 ms and 9.98 for
 7.67 and 7.73; 9.19 of the 10.34 ms that the tool takes apart are in what
 stands for the graph). The rows of this section with gradients recorded that
@@ -3910,15 +3914,50 @@ What graphs do not do at this stage:
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from. With `Inductor()`
   every export is a compilation.
-- While a `TorchFunctionMode` is on, the default pass that puts an accessor
-  in place of a read of `shape` or `ndim` of a tensor, or of a call of its
-  `dim()` or `size(0)` (`TensorAccessors`), does not ask the mode from the
-  second call on: a mode that returns something else for them changes what
-  the function computes. With that pass left out of the list the mode is
-  asked for them as in eager mode.
+- A `__getattribute__` that a process puts on `torch.Tensor` is not called
+  where the default pass `TensorAccessors` stands for a read of
+  `x.shape[i]`, `x.ndim`, `x.dim()` or `x.size(i)`: one that answers the
+  name with something else changes what the function computes.
+- Where the class of a tensor that the function was called with is assigned
+  (`x.__class__ = Sub`) in front of a read of `x.shape[i]`, `x.ndim`,
+  `x.dim()` or `x.size(i)` in the same block of instructions, the read
+  raises a `SystemError` ("torch.vm: tensor_size ran without its guard", or
+  "tensor_dim"), where eager mode reads through the new class. For a tensor
+  that an operation of the function made, and where a branch lies between
+  the two, the read is eager's.
+- A function whose first call runs under a `TorchFunctionMode` takes, in
+  every later call without a mode, 1.4 to 1.5 times what it takes in a
+  function that never ran under one (measured on a function of six
+  operations, where that is more than eager mode takes), and gets no graph
+  with `Graphs()`; a mode that is entered after the first calls costs
+  nothing in the calls behind it. `torch.set_default_device` installs such a
+  mode for the whole process, and `with torch.device(...)` for its block: a
+  function that is first called with a default device set is specialized in
+  almost none of its runs, gets no graph, and takes what eager mode takes;
+  set after the first calls, the function keeps its blocks and takes about
+  15 percent more than eager mode while the device is set.
+- While a `TorchFunctionMode` is on and `Graphs()` alone is in the list, the
+  first call under a mode that is entered after a graph was built asks the
+  mode for seven reads that the engine makes for itself (`untyped_storage`,
+  `layout`, `is_quantized`, `is_nested`, `is_mkldnn`, `grad`, `_base`) of a
+  view that a function of `torch.nn.functional` such as `F.dropout2d` is
+  given.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
-  and the calls under one are not exported.
+  and the calls under one are not exported. A `TorchFunctionMode` is asked
+  at every read of a tensor's sizes as well, and may answer with something
+  else. What a default pass puts in the place of a read or a call (a read of
+  a size or of the number of dimensions for `x.shape[i]`, `x.size(i)`,
+  `x.dim()` and `x.ndim`; a kernel that is called directly) is therefore
+  valid only while the interpreter would run no Python code there, which is
+  asked at every run, where the read is: no mode is on, and `torch.Tensor`
+  and `torch.nn.Parameter` have under these names what the class under every
+  tensor defines (a property that a process puts on `torch.Tensor` is
+  called, and no graph runs in the place of the instructions while it is
+  there). Where it is not so, the instructions that the read stands for run
+  as they are written, and the block goes on as it is specialized. The
+  question costs about 40 ns a read (69 ns for 27 in a loop of reads of
+  `x.shape[0]`).
 - With gradients recorded, a graph has a backward of its own only if eager's
   nodes for its operations give nothing when they are handed no gradient and
   the same bits when they are run twice. The cuDNN kernel that
