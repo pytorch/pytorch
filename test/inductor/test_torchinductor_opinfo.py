@@ -496,6 +496,9 @@ inductor_override_kwargs["cuda"] = {
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
     ("logcumsumexp", f16): {"grad_atol": 3e-3, "grad_rtol": 0.01},
+    # MXFP8 outputs require zero tolerance.
+    ("nn.functional.quantize_tensor.cutedsl", f32): {"atol": 0.0, "rtol": 0.0},
+    ("nn.functional.quantize_tensor_dual.cutedsl", f32): {"atol": 0.0, "rtol": 0.0},
     ("nn.functional.rms_norm.cutedsl", f16): {"reference_in_float": True},
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
