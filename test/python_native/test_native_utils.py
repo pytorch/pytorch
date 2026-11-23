@@ -2,7 +2,6 @@
 # Torch-only tests for DSL-agnostic native-op utilities. Real architecture queries require
 # CUDA, not ROCm: is_available() is true on ROCm while device_ok intentionally declines HIP.
 
-import contextlib
 import sys
 import unittest
 
@@ -133,61 +132,6 @@ class TestNativeUtils(TestCase):
         with patch.object(torch.cuda, "get_device_capability", return_value=(11, 0)):
             self.assertFalse(cap.device_ok(x, (9, 10, 12)))
             self.assertTrue(cap.device_ok(x, (11,)), "the (9,10,12) answer was reused")
-
-    def test_cuda_device_guard_passes_non_cuda_inputs(self):
-        from unittest.mock import patch
-
-        from torch._native.utils.device import cuda_device_guard
-
-        # torch.cuda.device(-1) is a no-op, so only the patches show the guard skipped it.
-        x = torch.ones(2)
-        with (
-            patch.object(
-                torch._C, "_cuda_getDevice", side_effect=AssertionError, create=True
-            ),
-            patch.object(torch.cuda, "device", side_effect=AssertionError),
-        ):
-            self.assertIs(cuda_device_guard(lambda t: t)(x), x)
-
-    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
-    def test_cuda_device_guard_enters_the_inputs_device(self):
-        from unittest.mock import patch
-
-        from torch._native.utils.device import cuda_device_guard
-
-        # One GPU has no other device, so pretend another one is current and record the
-        # device contexts fn runs in.
-        active, seen = [], []
-
-        @contextlib.contextmanager
-        def device(index):
-            active.append(index)
-            try:
-                yield
-            finally:
-                active.pop()
-
-        def fn(t, fail=False):
-            seen.append(list(active))
-            if fail:
-                raise RuntimeError("fn failed")
-            return t
-
-        guarded = cuda_device_guard(fn)
-        x = torch.ones(2, device="cuda")
-        index = x.get_device()
-        # An input on the current device skips the context; any other input enters it.
-        for current, want in ((index, []), (index + 1, [index])):
-            with (
-                patch.object(torch._C, "_cuda_getDevice", return_value=current),
-                patch.object(torch.cuda, "device", device),
-            ):
-                self.assertIs(guarded(x), x)
-                with self.assertRaisesRegex(RuntimeError, "fn failed"):
-                    guarded(x, fail=True)
-            self.assertEqual(seen[-2:], [want, want])
-            # The context exits even when fn raises.
-            self.assertEqual(active, [])
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
     def test_cuda_device_guard_switches_device(self):

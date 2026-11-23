@@ -36,7 +36,9 @@ def align_bytes(N: int, itemsize: int) -> int:
 def _decode_offset(
     linear, divs, strides, npairs, native_div: cutlass.Constexpr = False
 ):
-    # Mixed-radix flat offset with only pair count compiled.
+    # Mixed-radix flat offset with only pair count compiled. Callers pass FastDivmod
+    # divisors (native_div=False) only for linear below 2^31; wider linear values need
+    # native_div=True.
     rem = linear
     if npairs == 0:
         return cutlass.Int64(0)
@@ -272,9 +274,11 @@ def _uniform_tree_issue(
     flat_tail,
     ragged_chunk,
 ) -> str | None:
-    # The tree indexes one run with Int32 r, which the load cap keeps in range. It bounds
-    # the tail by the unclamped rb (no flat_tail or ragged_chunk clamp), and masked lanes
-    # read obase rather than in_base, which only overhanging chunks need.
+    # The tree indexes one run with Int32 r, which the load cap keeps in range. Its
+    # whole loads are unmasked and compiled from count // T, and combine_equal's counts
+    # are hard-coded, so a flat_tail or ragged_chunk clamp of rb below them would read
+    # past the run and miscount. Masked lanes read obase rather than in_base, which only
+    # overhanging chunks need.
     max_count = threads_per_block * UNIFORM_TREE_MAX_LOADS
     if axis != "general" or order != "linear":
         return f"a linear general-axis fold, got {axis=} {order=}"
@@ -394,7 +398,10 @@ def fold_uniform_tree(
     return acc
 
 
-# Rounds per partial-fold tree and the accumulators its roots rotate over.
+# Rounds per partial-fold tree and the accumulators its roots rotate over. Unlike
+# fold_cols_rolled's stage-one trees, whose group shrinks with vec to fit 32 registers
+# and whose leftover rows fold first, stage two reads one partial per load and folds
+# leftovers last, so the two schemes are tuned separately.
 _PARTIAL_GROUP = 16
 _PARTIAL_ACCS = 4
 
@@ -475,14 +482,16 @@ def _linear_reduce(vals, op):
 
 def _halving_reduce(vals, op):
     # warp_reduce's decreasing offsets: v[i] += v[i + n / 2], then v[i] += v[i + n / 4], ...
-    # A count below a power of two n skips the combines with slots past it, as if they
-    # held identities.
+    # A count below a power of two n skips the combines with slots past it. Skipping is
+    # exact for slots the caller filled via reduce(init, x); a kept leaf-path -0.0 is
+    # restored by the caller's final combine(acc, init) (fold_linear_rolled).
+    from .inner_tree_plan import _next_power_of_2
     from .traits import _offsets
 
     v = list(vals)
     if not 0 < len(v) <= WARP:
         raise ValueError(f"halving takes 1 to {WARP} values, got {len(v)}")
-    for half in _offsets(1 << (len(v) - 1).bit_length(), ascending=False):
+    for half in _offsets(_next_power_of_2(len(v)), ascending=False):
         v = [op(v[i], v[i + half]) if i + half < len(v) else v[i] for i in range(half)]
     return v[0]
 
@@ -1285,9 +1294,9 @@ class TileReduce:
         # or 24, the top ones of WARP only combine identities into the rest, which every
         # single-field trait returns bitwise (a sum leaf 0.0 + y is never -0.0), so
         # fewer keep the bits. Narrow rows then fold leaves, not reduce(init, x), so
-        # only traits that promise leaf_is_reduce_init opt in: a norm's leaf rounds its
-        # square on its own, and an abs-extremum leaf can carry another NaN payload than
-        # max(0.0, |x|).
+        # only traits that promise leaf_is_reduce_init opt in: of the norms, only
+        # NormOps(2)'s leaf rounds its square on its own, and an abs-extremum leaf can
+        # carry another NaN payload than max(0.0, |x|).
         narrow = (
             axis == "row"
             and order == "linear"
@@ -2331,7 +2340,8 @@ class TileReduce:
         # Compute output indices after folding to reduce live registers.
         out_base = unit * const_expr(self.nslots)
         if const_expr(self.axis in ("row", "general")):
-            # Split inner-tree writes by block; other row/general paths write by unit.
+            # Split inner-tree plans write one partial per (block, row-in-block) slot;
+            # other row/general paths write by unit.
             part_base = (
                 Int32(bx) * const_expr(self.itree.rows_per_block) + row_in_block
                 if const_expr(
