@@ -3895,6 +3895,10 @@ impl Compiled {
                         let new = graph::fresh_new(held);
                         if new.is_null() { null_mut() } else { ffi::PyObject_CallOneArg(new, held) }
                     }
+                    Part::Cached if ffi::PyTuple_CheckExact(held) != 0 && ffi::PyTuple_GET_SIZE(held) > 0 => {
+                        let given: Vec<Obj> = (1..ffi::PyTuple_GET_SIZE(held)).map(|i| ffi::PyTuple_GET_ITEM(held, i)).collect();
+                        graph::cached(ffi::PyTuple_GET_ITEM(held, 0), &given).map_or(null_mut(), |found| new_ref(found))
+                    }
                     _ => null_mut(),
                 };
                 if found.is_null() && ffi::PyErr_Occurred().is_null() {
@@ -5618,6 +5622,12 @@ impl Compiled {
                         }
                     }
                 }
+                // A call that finds its entry in a cache, and so runs no
+                // Python code.
+                Op::Call { callee, args, .. } if there(*callee) && args.iter().all(|v| there(*v)) => {
+                    let given: Vec<Obj> = args.iter().map(|v| at(*v)).collect();
+                    graph::cached(at(*callee), &given).is_some()
+                }
                 // Into what the graph gives: shown where the path lands.
                 _ => !landed,
             }
@@ -6452,6 +6462,9 @@ impl Compiled {
                 return Taken::Went;
             }
         }
+        if let Some(taken) = self.record_cached(t, inst, regs, frames, api) {
+            return taken;
+        }
         if let Some(taken) = self.record_effect(t, inst, regs, frames, api) {
             return taken;
         }
@@ -7262,6 +7275,86 @@ impl Compiled {
         }
         kill(t, regs);
         Taken::Went
+    }
+
+    /// A call of a `functools.lru_cache` wrapper that finds its entry in
+    /// the cache (`graph::cached`): the call runs no Python code and
+    /// changes nothing but the wrapper's count of such calls. What it
+    /// gives is read of the cache, without the call, wherever the path
+    /// needs it (`Part::Cached`); the call itself is made here, as the
+    /// instruction makes it, and once where a path that is run lands,
+    /// under the same proof (`effects_ready`), so the wrapper counts it
+    /// once per call of the function, as it does in the interpreter. A
+    /// call that would not find an entry runs the wrapped function and is
+    /// none of this: the path ends in front of it. None for any other
+    /// instruction.
+    unsafe fn record_cached(&self, t: &mut Trace, inst: &Inst, regs: &mut [Obj], frames: &mut Frames, api: &TcfgApi) -> Option<Taken> {
+        // What is called: a value of the function, or what an object has
+        // under a name where reading that runs no Python code.
+        let (of, args, read) = match &inst.op {
+            Op::Call { callee, args, kwnames: NONE } => (*callee, args, None),
+            Op::CallMethod { recv, name, args, kwnames: NONE } => {
+                let load = Op::LoadAttr(*recv, *name);
+                let held = reg(regs, *recv);
+                let quiet = !held.is_null() && !capi::is_unboxed(held) && self.quiet(regs, &load, api);
+                if !quiet || !matches!(self.stored(t, regs, *recv, self.func.consts[*name as usize].as_ptr(), true, inst.bc), Behind::Clear) {
+                    return None;
+                }
+                let Ok(found) = self.exec_op(regs, &load) else {
+                    ffi::PyErr_Clear();
+                    return None;
+                };
+                (*recv, args, Some((PyObj::from_owned(found), *name)))
+            }
+            _ => return None,
+        };
+        let callee = read.as_ref().map_or(reg(regs, of), |(found, _)| found.as_ptr());
+        let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
+        graph::cached(callee, &given)?;
+        let behind = |t: &Trace, v: V| t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].late;
+        let late = behind(t, of) || args.iter().any(|v| behind(t, *v));
+        if late && t.writes {
+            let why = "a call that reads a cache with what the graph gives, behind a write to a tensor from outside";
+            return Some(Taken::Ends(why.to_string()));
+        }
+        frames.top().at(inst.bc & OFFSET_MASK);
+        let Ok(result) = self.exec_op(regs, &inst.op) else {
+            return Some(Taken::Raised);
+        };
+        let mut called = self.path_value(t, regs, of);
+        if let Some((found, name)) = &read {
+            called = t.derive(Op::LoadAttr(called, *name), Kind::Read, false, new_ref(found.as_ptr()), inst.bc);
+        }
+        let handed: Vec<PathValue> = args.iter().map(|v| self.path_value(t, regs, *v)).collect();
+        if late {
+            t.fails_late();
+        }
+        if inst.dst != NONE {
+            let whole = ffi::PyTuple_New(given.len() as isize + 1);
+            if whole.is_null() {
+                capi::release(result);
+                return Some(Taken::Raised);
+            }
+            ffi::PyTuple_SET_ITEM(whole, 0, new_ref(callee));
+            for (i, o) in given.iter().enumerate() {
+                ffi::PyTuple_SET_ITEM(whole, i as isize + 1, new_ref(*o));
+            }
+            let mut asked = vec![called];
+            asked.extend(handed.iter().copied());
+            let asked = t.derive(Op::BuildTuple(asked), Kind::Pure, false, whole, inst.bc);
+            ffi::Py_XINCREF(result);
+            let found = t.derive(Op::Part(Part::Cached, asked), Kind::Read, false, result, inst.bc);
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], result));
+            t.rename(inst.dst, found);
+        } else {
+            capi::release(result);
+        }
+        t.push(Op::Call { callee: called, args: handed, kwnames: NONE }, NONE, Kind::Effect, inst.bc);
+        for v in &inst.kills {
+            capi::release(take(regs, *v));
+            t.kill(*v);
+        }
+        Some(Taken::Went)
     }
 
     /// Takes a store into an object from outside the path down as an effect
