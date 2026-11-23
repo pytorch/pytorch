@@ -3364,7 +3364,9 @@ class VariableBuilder:
 
         # A ZeroTensor has no storage, so it is materialized in-graph below. Export
         # skips this: an ExportedProgram has no dispatch key guard to recompile on.
-        is_zerotensor = value._is_zerotensor() and not self.tx.export
+        # Tensor._is_zerotensor() would dispatch to a subclass __torch_function__.
+        keys = torch._C._dispatch_keys(value)
+        is_zerotensor = keys.has(torch._C.DispatchKey.ZeroTensor) and not self.tx.export
         if is_zerotensor and (value.requires_grad or infer_subclass_type(value)):
             unimplemented(
                 gb_type="Attempted to wrap a ZeroTensor input that requires grad or is a subclass",

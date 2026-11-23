@@ -9159,6 +9159,22 @@ SavedForBackwardsAOTOutput(idx=5)""",
             with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "ZeroTensor"):
                 torch.compile(fn, backend="eager", fullgraph=True)(t)
 
+    def test_zerotensor_check_skips_torch_function(self):
+        class MyTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is torch.Tensor._is_zerotensor:
+                    return NotImplemented
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **(kwargs or {}))
+
+        def fn(t):
+            return t + 1
+
+        t = torch.ones(3).as_subclass(MyTensor)
+        out = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(out, torch.full((3,), 2.0))
+
     def test_swap_tensors_after_discarded_attempt(self):
         # Issue #186796: a discarded restart/skip attempt fakifies the real
         # params and builds guards on them, leaving weakrefs on the real params

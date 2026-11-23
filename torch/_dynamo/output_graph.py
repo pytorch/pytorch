@@ -1951,7 +1951,8 @@ class OutputGraph(OutputGraphCommon):
                 attr_proxy.node.meta["tensor_dict"] = _extract_tensor_dict(target)
 
                 # See the ZeroTensor note in VariableBuilder.wrap_tensor.
-                if target._is_zerotensor() and not self.export:
+                keys = torch._C._dispatch_keys(target)
+                if keys.has(torch._C.DispatchKey.ZeroTensor) and not self.export:
                     vt = wrap_fx_proxy(
                         self.root_tx,
                         tracer.create_proxy(
