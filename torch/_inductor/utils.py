@@ -3068,8 +3068,10 @@ def use_triton_blackwell_bmm_template(
         or output_layout.device.type != "cuda"
     ):
         return False
+    # Dynamic sizes can't be proven to fit without a guard; one on their hints
+    # recompiles past the bound instead of rejecting every dynamic batch.
     if not _descriptor_shapes_fit_in_int32(
-        [mat1.get_size(), mat2.get_size(), output_layout.size]
+        [mat1.get_size(), mat2.get_size(), output_layout.size], add_guards=True
     ):
         return False
 

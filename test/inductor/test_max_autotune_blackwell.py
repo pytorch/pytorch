@@ -2761,7 +2761,18 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
     """Reduction epilogues of the Blackwell persistent TMA BMM template."""
 
     def _run_bmm_reduction(
-        self, fn, B, M, K, N, test_config, *, extra_input=False, tol=0, **patches
+        self,
+        fn,
+        B,
+        M,
+        K,
+        N,
+        test_config,
+        *,
+        extra_input=False,
+        tol=0,
+        dynamic_batch=False,
+        **patches,
     ):
         """Run fn on a (B, M, K) @ (B, K, N) bmm with only test_config and its
         num_stages - 1 twin as choices, keeping every fusion the gates allow, and
@@ -2809,7 +2820,22 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
             ),
             TestBlackwellTMALoadFusion._poison_outputs(),
         ):
-            actual, code = run_and_get_code(torch.compile(fn), *args)
+            if dynamic_batch:
+                for t in args:
+                    if t.dim() == 3 and t.size(0) == B:
+                        torch._dynamo.mark_dynamic(t, 0)
+            compiled = torch.compile(fn)
+            actual, code = run_and_get_code(compiled, *args)
+            if dynamic_batch:
+                # Another batch reuses the kernel. 37 programs' worth of tiles
+                # is fewer than the SMs, so the grid and the batch-sum partial
+                # count come from the runtime batch, not the hint.
+                fewer = tuple(t[:37] if t.size(0) == B else t for t in args)
+                frames = torch._dynamo.utils.counters["stats"]["unique_graphs"]
+                self.assertEqual(compiled(*fewer), fn(*fewer), atol=tol, rtol=tol)
+                self.assertEqual(
+                    torch._dynamo.utils.counters["stats"]["unique_graphs"], frames
+                )
         self.assertEqual(actual, fn(*args), atol=tol, rtol=tol)
         return re.findall(r"def (triton_\w+)\(", code[0]), code[0]
 
@@ -2902,6 +2928,31 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
             # does one whose result is read only over the batches.
             partials = shape[1] > 128 or op == "matrix_mean"
             self.assertEqual("tl.pointer_type(tl.float32)" in code, partials)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", tuple(BMM_OPS))
+    # One and two tiles per batch; both divide the SM count.
+    @parametrize("shape", ((300, 96, 64, 128), (300, 176, 64, 80)))
+    @parametrize("tma_store", (False, True))
+    def test_blackwell_bmm_reduction_epilogue_dynamic_batch(
+        self, op: str, shape: tuple[int, int, int, int], tma_store: bool
+    ):
+        fn = self.BMM_OPS[op]
+        kernels, code = self._run_bmm_reduction(
+            fn,
+            *shape,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=fn.__code__.co_argcount == 3,
+            tol=1e-5 if "mean" in op else 0,
+            dynamic_batch=True,
+            **{"triton.enable_template_tma_store": tma_store},
+        )
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        self.assertEqual(len(kernels), 2 if op == "matrix_mean" else 1, kernels)
+        FileCheck().check_not("BATCH_SIZE : tl.constexpr").run(code)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),

@@ -9192,17 +9192,14 @@ def template_reduction_epilogue_supported(
     ):
         return False
     size = template.get_size()
-    # N sets whether a tile spans the rows, so it must be static. A dynamic M
-    # must be backed, so autotuning and the fusion benchmark have a hint.
-    # SizeHintMultiKernel's per-hint kernels are untested with these epilogues.
-    # The batched (bmm) template specializes dynamic sizes.
+    # The trailing sizes (N, and the bmm template's M) set the tile shape, so
+    # they must be static. A dynamic leading size (M, or the bmm template's
+    # batch) must be backed, so autotuning and the fusion benchmark have a
+    # hint. SizeHintMultiKernel's per-hint kernels are untested with these
+    # epilogues.
     if not all(isinstance(s, sympy.Integer) for s in size[1:]) or (
         not isinstance(size[0], sympy.Integer)
-        and (
-            len(size) == 3
-            or free_unbacked_symbols(size[0])
-            or config.multi_kernel_hints
-        )
+        and (free_unbacked_symbols(size[0]) or config.multi_kernel_hints)
     ):
         return False
     if template.get_stride() != ir.FlexibleLayout.contiguous_strides(size):

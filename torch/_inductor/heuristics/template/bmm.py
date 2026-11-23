@@ -5,8 +5,11 @@ from __future__ import annotations
 import math
 from typing import Any, TYPE_CHECKING
 
+import sympy
+
 import torch
 from torch._inductor.heuristics.registry import register_template_heuristic
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 from ... import config
 from ...autows_utils import has_two_ctas, meta_ws_enabled
@@ -16,7 +19,8 @@ from ...kernel.bmm import (
     is_blackwell_bmm_2cta_compatible,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
-from ...utils import can_use_tma, get_num_sms, has_free_symbols
+from ...utils import can_use_tma, expr_fits_within_32bit, get_num_sms, has_free_symbols
+from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .triton import mm_allow_tf32
 from .triton_addmm import AddMMConfigMixin
@@ -53,18 +57,38 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
 
         mat1_size = mat1.get_size()
         mat2_size = mat2.get_size()
-        sizes = (*mat1_size, *mat2_size)
-        # The current bounded configs require concrete dimensions, and CUDA
-        # tensor-map dimensions must be positive. Static sizes can still carry
-        # symbolic strides, e.g. a slice of a dynamic tensor.
-        if has_free_symbols(
-            (*sizes, *mat1.get_stride(), *mat2.get_stride())
-        ) or has_free_symbols((mat1.get_layout().offset, mat2.get_layout().offset)):
+        batch, batch_b = mat1_size[0], mat2_size[0]
+        strides = (*mat1.get_stride(), *mat2.get_stride())
+        # A backed dynamic batch is a runtime argument: only the grid and the
+        # tile loop bound depend on it. The matrix dims and strides are
+        # constexprs, so they must be static (strides can be symbolic for a
+        # slice of a dynamic tensor), and CUDA tensor-map dimensions must be
+        # positive.
+        if (
+            has_free_symbols((*mat1_size[1:], *mat2_size[1:], *strides))
+            or has_free_symbols((mat1.get_layout().offset, mat2.get_layout().offset))
+            or free_unbacked_symbols(batch)
+            or free_unbacked_symbols(batch_b)
+            or not V.graph.sizevars.statically_known_equals(batch, batch_b)
+        ):
             return
+        static_batch = isinstance(batch, (int, sympy.Integer))
+        if static_batch:
+            batch = batch_b = int(batch)
+            if batch <= 0:
+                return
 
-        batch, m, k = map(int, mat1_size)
-        batch_b, k_b, n = map(int, mat2_size)
-        if min(batch, m, n, k) <= 0:
+        m, k = map(int, mat1_size[1:])
+        k_b, n = map(int, mat2_size[1:])
+        if min(m, n, k) <= 0:
+            return
+        # The TMA store indexes in int32. A dynamic batch is checked on its
+        # hint; a larger batch recompiles (codegen guards the 32-bit index)
+        # and falls back to other choices.
+        if not static_batch and not all(
+            expr_fits_within_32bit(numel)
+            for numel in (batch * m * k, batch * k * n, batch * m * n)
+        ):
             return
 
         # Ordinary operands use rank-3 TMA descriptors; stride-zero broadcast
@@ -74,7 +98,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         if not can_use_tma(mat1, mat2):
             return
 
-        if batch != batch_b or k != k_b:
+        if (static_batch and batch != batch_b) or k != k_b:
             raise NotImplementedError(
                 "Blackwell BMM does not broadcast logical batches"
             )
@@ -110,12 +134,15 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
 
         output_layout = kernel_inputs.output_layout()
         flatten_output = len(output_layout.size) == 2
+        # The grid reads a dynamic batch from the rank-3 output's size.
+        if not static_batch and flatten_output:
+            return
         rank3_output = len(output_layout.size) == 3
         tma_store = config.triton.enable_template_tma_store and can_use_tma(
             output_layout=output_layout
         )
         descriptor_options = {
-            "BATCH_SIZE": batch,
+            **({"BATCH_SIZE": batch} if static_batch else {}),
             "LOGICAL_M": m,
             "LOGICAL_N": n,
             "DESCRIPTOR_K": k,

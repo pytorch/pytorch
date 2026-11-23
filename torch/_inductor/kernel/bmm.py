@@ -144,7 +144,8 @@ def blackwell_bmm_grid(*args, cdiv, max, min):
     # of inferring it from the output layout passed before ``meta``.
     # Flatten logical batches and matrix tiles into one global persistent queue.
     meta = args[-1]
-    b = meta["BATCH_SIZE"]
+    # A dynamic batch has no constexpr; it is the rank-3 output's first dim.
+    b = meta["BATCH_SIZE"] if "BATCH_SIZE" in meta else args[0]
     m = meta["LOGICAL_M"]
     n = meta["LOGICAL_N"]
     grid_m = cdiv(m, meta["BLOCK_M"])

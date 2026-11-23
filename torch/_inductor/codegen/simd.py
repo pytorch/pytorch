@@ -26,7 +26,7 @@ from torch._inductor.ir import MultiTemplateBuffer
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
+from torch.utils._sympy.functions import FloorDiv, Identity, Min, ModularIndexing
 from torch.utils._sympy.symbol import (
     free_symbol_is_type,
     prefix_str,
@@ -483,10 +483,17 @@ BATCH_COLUMN_AXIS = 3
 BATCH_MATRIX_AXIS = 4
 
 
+def template_output_size(template: ir.Buffer) -> list[sympy.Expr]:
+    """The template output's size, simplified: the layout keeps the symbols the
+    template was lowered with, while epilogue nodes use their replacements (e.g.
+    one input's dynamic batch for another's, once broadcasting equates them)."""
+    return [V.graph.sizevars.simplify(s) for s in template.get_size()]
+
+
 def template_output_matrix(template: ir.Buffer) -> tuple[sympy.Expr, sympy.Expr]:
     """The row-major template output as an (M, N) matrix, with any batch dim
     folded into M."""
-    *batch, n = template.get_size()
+    *batch, n = template_output_size(template)
     return sympy_product(batch), n
 
 
@@ -494,23 +501,35 @@ def batch_matrix_tiles(tile: tuple[int, int, int], template: ir.Buffer) -> int:
     """The number of (sub)tiles of shape tile that cover one batch's (M, N)
     matrix of a (B, M, N) template output. A reduction over each matrix finishes
     in the tile when this is 1, and from per-tile partials otherwise."""
-    _, m, n = map(int, template.get_size())
+    _, m, n = template.get_size()
+    m, n = int(m), int(n)
     return ceildiv(m, tile[0]) * ceildiv(n, tile[1])
 
 
 def batch_reduction_partials(
     tile: tuple[int, int, int], template: ir.Buffer
-) -> int | None:
+) -> int | sympy.Expr | None:
     """The number of partial sums a batch reduction over template output tiles
     of shape tile stores, or None if it can't. Each program of the persistent
     batched template must see the same (row, col) tile on every iteration, so
-    the program count must be a multiple of the tiles per batch."""
-    b, m, n = map(int, template.get_size())
+    the program count, min(SMs, B * tiles per batch), must be a multiple of the
+    tiles per batch."""
+    b, *mn = template_output_size(template)
+    m, n = map(int, mn)
     tiles_per_batch = ceildiv(m, tile[0]) * ceildiv(n, tile[1] * tile[2])
-    programs = min(get_num_sms(), b * tiles_per_batch)
-    if tile[2] != 1 or programs % tiles_per_batch:
+    if tile[2] != 1:
         return None
-    return programs // tiles_per_batch
+    if isinstance(b, sympy.Integer):
+        programs = min(get_num_sms(), int(b) * tiles_per_batch)
+        if programs % tiles_per_batch:
+            return None
+        return programs // tiles_per_batch
+    # A dynamic batch can launch either B * T programs (small B) or one per SM
+    # (large B), so T must divide the SM count too, and there are
+    # min(B, SMs // T) partials.
+    if get_num_sms() % tiles_per_batch:
+        return None
+    return Min(b, get_num_sms() // tiles_per_batch)
 
 
 def reduction_output_name(node: scheduler.BaseSchedulerNode) -> str:
@@ -599,7 +618,7 @@ def template_reduction_axis(
         and reads(unsplit, col_major)
     ):
         return 1
-    size = template.get_size()
+    size = template_output_size(template)
     if len(size) != 3:
         return None
     batch, rows = size[0], size[1]
@@ -626,7 +645,11 @@ def template_reduction_axis(
             and dep.index == sympy_dot((*strides, rows * n), dep.var_names)
         )
 
-    pointwise, reduced = unsplit.get_ranges()
+    # Ranges keep the symbols the node was lowered with; see template_output_size.
+    pointwise, reduced = (
+        [V.graph.sizevars.simplify(s) for s in ranges]
+        for ranges in unsplit.get_ranges()
+    )
     if (
         unsplit.group[1] == (batch, rows * n)
         and list(pointwise) == [batch]

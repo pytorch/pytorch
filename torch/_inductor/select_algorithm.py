@@ -78,6 +78,7 @@ from .codegen.simd import (
     PARTIAL_REDUCTION_OPS,
     reduction_output_name,
     template_output_matrix,
+    template_output_size,
     template_reduction_axis,
 )
 from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -3030,7 +3031,7 @@ class TritonTemplateKernel(TritonKernel):
                 f"batch sums need the template's NUM_SMS ({self.meta.get('NUM_SMS')}) "
                 f"to match the device's SM count ({get_num_sms()})"
             )
-        _, m, n = map(int, self.output_node.get_size())
+        m, n = map(int, self.output_node.get_size()[1:])
         batch, row, col = self.output_index_symbols[subgraph_idx]
         stored: list[str] = []
         for node in nodes:
@@ -3068,7 +3069,8 @@ class TritonTemplateKernel(TritonKernel):
                 if indexing.mask_str != "None":
                     mask = f"{indexing.mask_str} & {mask}"
                 self.stores.writeline(
-                    f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
+                    f"tl.store(({ws_ptr} + {self.index_to_str(offset)})"
+                    f".to(tl.pointer_type(tl.float32)) + "
                     f"{m * n} * ({slot}) + {indexing.index_str}, {acc}, {mask})"
                 )
 
@@ -3154,7 +3156,8 @@ class TritonTemplateKernel(TritonKernel):
         mask, like pointwise epilogues."""
         origin, tile_shape, _ = self.output_tiles[subgraph_idx]
         rows, cols, _ = tile_shape
-        b, m, n = map(int, self.output_node.get_size())
+        b, *mn = template_output_size(self.output_node)
+        m, n = map(int, mn)
         tiles = batch_matrix_tiles(tile_shape, self.output_node)
         batch_origin, row_origin, col_origin = origin
         tile_index = (
@@ -3232,8 +3235,10 @@ class TritonTemplateKernel(TritonKernel):
                 )
                 # Subtiles past N have no slot.
                 self.stores.writeline(
-                    f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
-                    f"{b} * {tile_index} + {batch_origin}, {value}, {col_origin} < {n})"
+                    f"tl.store(({ws_ptr} + {self.index_to_str(offset)})"
+                    f".to(tl.pointer_type(tl.float32)) + "
+                    f"{self.index_to_str(b)} * {tile_index} + {batch_origin}, "
+                    f"{value}, {col_origin} < {n})"
                 )
 
             with patch.multiple(
@@ -3282,7 +3287,8 @@ class TritonTemplateKernel(TritonKernel):
             # rows, so rows past M are masked rather than read as the next
             # batch's, and a row tile's partial index counts tiles per batch.
             batch, row = origin[:2]
-            batches, rows_per_batch = map(int, self.output_node.get_size()[:2])
+            batches, rows_per_batch = template_output_size(self.output_node)[:2]
+            rows_per_batch = int(rows_per_batch)
             row_tiles = ceildiv(rows_per_batch, rows)
             row = batch * rows_per_batch + row
             row_bound = (batch + 1) * rows_per_batch
@@ -3301,7 +3307,8 @@ class TritonTemplateKernel(TritonKernel):
             sizes, offsets, bounds = (cols, rows), (col, row), (n, row_bound)
         if per_batch:
             batch, row = origin[:2]
-            batches, rows_per_batch = map(int, self.output_node.get_size()[:2])
+            batches, rows_per_batch = template_output_size(self.output_node)[:2]
+            rows_per_batch = int(rows_per_batch)
             numels = {"x": batches * n, "r0_": rows_per_batch}
             offsets = (batch * n + col, row)
             bounds = ((batch + 1) * n, rows_per_batch)
@@ -3399,7 +3406,7 @@ class TritonTemplateKernel(TritonKernel):
             element = row_tile_element(key, tile_syms, rows_per_batch)
             if element is None:
                 return None
-            sizes = self.output_node.get_size()
+            sizes = template_output_size(self.output_node)
             for recorded, var in self._template_loads.get(name, ()):
                 if not same_template_element(element, recorded, sizes):
                     continue
