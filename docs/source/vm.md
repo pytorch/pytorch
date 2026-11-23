@@ -337,6 +337,95 @@ names  # ['h', 'x', 'y']
 found["ops"], found["outputs"]  # (6, 2): y, which is read behind the call, and h
 ```
 
+Between the landings the instructions of the function run in the VM's own
+loop, and so does a function without a graph. There a variable that is
+bound to what a kernel gave holds a tensor that has no Python object yet
+(`unboxed`), and waits for one. It gets its object, and the frame the
+variable, in front of everything that can look at the frame. That is asked
+where it would run, at every call:
+
+- at a call of anything but a kernel;
+- at any other instruction, unless it is shown to run C code of the
+  interpreter that reads its operands and nothing else. What is shown is
+  said per instruction, for the classes of what it is given: arithmetic on
+  ints, floats and bools, on two strs, on two lists or two tuples; a
+  comparison of values whose classes compare with the function of `int`,
+  `float`, `str` or `object`, of dtypes and devices, of tuples of numbers
+  and strs; the truth, the length and the unpacking of a list, a tuple, a
+  dict, a set or a str; an item of a list, a tuple or a dict under a number,
+  a str, None, a slice or a tuple of them, where every key the dict has is
+  such a value; `in` where each item that is compared compares in C; a
+  loop over a list, a tuple, a dict, a range or a str, and over an
+  `enumerate` or a `zip` of them; an f-string of numbers and strs; a dict
+  that is built under such keys; an item of a tensor (of the class
+  `Tensor` or `Parameter`) under such keys or another such tensor, and its
+  truth: kernels. An attribute that is found in the dict of a module, of
+  an object or of a class; one that the class has as a function (it is
+  bound), as a plain value or as a field of the object (`__slots__`); one
+  that a `__getattr__` with a shortcut finds (`nn.Module`); and one that a
+  getter written in C gives, where the class that defines the getter is
+  one whose getters read the object itself: `object` and `type`, the
+  numbers, `str`, `bytes`, `tuple`, `list`, `dict`, `set`, `frozenset`,
+  `slice`, `range`, a function, a function of C, a bound method, a cell, a
+  module, the exception classes defined in C, the class under every
+  tensor, `dtype`, `device`, `layout`, `memory_format`, `finfo` and
+  `iinfo`, the names and the bytecode of a code object (`co_varnames`),
+  and the `__dict__` of an object of a class written in Python.
+  Anything else binds first: a property, a descriptor or a `__getattr__` in
+  Python, an operator or a comparison that an object of the user's
+  answers (also as an item of a list that is compared), a `__bool__`, a
+  `__len__`, an `__index__`, a `__hash__`, a `__format__`, an iterator or a
+  generator, a `map`, an `import`, a `match`, every store into an object,
+  a dict or a global (what was there ends), and a getter of any other
+  class. The getter of a frame's `f_locals` is the look itself, and a
+  traceback, a generator and a coroutine lead to a frame;
+- at a branch on a value that is no bool, the same way;
+- where the function lets go of an object (a variable is bound over or
+  deleted, a value is used for the last time, an iterator comes to its
+  end), unless something else refers to the object, it is a number, a str
+  or None, or its end is shown to run nothing: neither it nor anything it
+  takes along has a `__del__`, a weak reference with a callback or a
+  generator that waits at a `yield`;
+- where the interpreter starts the frame of a Python function under the
+  compiled one, whatever made it start one: a kernel under a
+  `TorchDispatchMode`, a kernel that is written in Python, a finalizer that
+  only C++ gets to, a signal handler;
+- at an exception.
+
+So what looks finds what it finds in eager mode: a `__getattr__`, a
+`__del__` or a signal handler that reads `sys._getframe(1).f_locals`, a
+frame object that the function kept and reads (`frame.f_locals`), a
+traceback. A path ends in front of an instruction that is not shown to
+run C code on its operands, so the same list says what a path reads
+without ending: `x.dtype` and `torch.finfo(x.dtype).min` between two
+operations are part of a graph, `frame.f_locals` is where one lands. A
+tensor that only goes from one kernel into the next still never gets an
+object: `stats()["bound_later"]` counts the variables that did.
+
+```python
+class Config:
+    @property
+    def rate(self):
+        return sorted(sys._getframe(1).f_locals)  # Python code that looks
+
+
+def scaled(x, config):
+    h = torch.relu(x) + 1
+    y = h * 2
+    return config.rate, y
+
+
+g = torch.vm(scaled)
+for _ in range(8):
+    names, y = g(torch.ones(3), Config())
+names  # ['config', 'h', 'x', 'y']
+```
+
+Pending signals are looked for behind every call and every kernel, as the
+interpreter looks for them behind a call, so a loop of kernels answers
+Ctrl-C within a round; the handler is given the frame of the function,
+with every variable.
+
 What stands in front of an instruction that raised is a path like any other:
 its operations are a graph that the calls like it run, and such calls are
 not taken down again. Its checks say nothing of the raise; where it lands,
@@ -3451,55 +3540,42 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does. The row of resnet50 is of two
-processes on the tree named above. The rows of the three timm models are of
-one process each on the code three steps before this commit (the one that
-changed which dicts the engine looks a name up in), the median of three
-turns, with the load average between 3.3 and 5.1 in front of a row and
-nothing else on the GPU:
+which is what the dashboard's runner does, on the code one step before this
+commit, which changes the VM's own loop and no graph of these models (their
+graphs, operations, runs in a call and hits are the same on both): one
+process a row, the median of three turns, on 16 cores of a quiet machine
+under the lock for timed runs, with the load average between 1.8 and 2.6 in
+front of a row and nothing else on the GPU. The graphs that run are those
+counted above (DistillGPT2 with the operations it has on a GPU; of
+hf_DistilBert the graph of a layer and the one of its feed-forward part run
+six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
-| resnet50 (TorchBench) | 6.02, 6.06 ms | 2.62, 2.61 ms | 2.29x, 2.32x | 2.51, 2.47 ms | 2.40x, 2.45x | 0.96, 0.95 | 175 x1 |
-| mobilenetv2_100 (timm) | 8.50 ms | 3.22 ms | 2.64x | 3.12 ms | 2.72x | 0.97 | 152 x1 |
-| adv_inception_v3 (timm) | 21.17 ms | 8.64 ms | 2.45x | 8.40 ms | 2.52x | 0.97 | 314 x1 |
-| deit_base_distilled_patch16_224 (timm) | 6.71 ms | 6.29 ms | 1.07x | 6.22 ms | 1.08x | 0.99 | 233 x1 |
+| resnet18 (TorchBench) | 2.42 ms | 1.05 ms | 2.30x | 1.00 ms | 2.41x | 0.95 | 69 x1 |
+| resnet50 (TorchBench) | 6.27 ms | 2.73 ms | 2.30x | 2.62 ms | 2.39x | 0.96 | 175 x1 |
+| yolov3 (TorchBench) | 10.10 ms | 4.48 ms | 2.26x | 3.98 ms | 2.54x | 0.89 | 328 x1 |
+| mobilenetv2_100 (timm) | 8.49 ms | 3.10 ms | 2.74x | 3.00 ms | 2.83x | 0.97 | 152 x1 |
+| adv_inception_v3 (timm) | 21.26 ms | 8.70 ms | 2.45x | 8.47 ms | 2.51x | 0.97 | 314 x1 |
+| deit_base_distilled_patch16_224 (timm) | 6.74 ms | 6.46 ms | 1.04x | 6.40 ms | 1.05x | 0.99 | 233 x1 |
+| hf_DistilBert (TorchBench) | 3.28 ms | 3.18 ms | 1.03x | 1.65 ms | 1.99x | 0.52 | 17 x6, 6 x1, 4 x6, 4 x1 |
+| DistillGPT2 (HuggingFace) | 13.92 ms | 4.59 ms | 3.04x | 3.79 ms | 3.67x | 0.83 | 231 x1, 10 x1, 8 x1, 8 x1 |
+| MobileBertForMaskedLM (HuggingFace) | 29.20 ms | 14.36 ms | 2.03x | 12.86 ms | 2.27x | 0.90 | 1272 x1, 16 x1, 7 x1 |
+| whisper-tiny (HuggingFace) | 9.00 ms | 4.91 ms | 1.83x | 3.08 ms | 2.92x | 0.63 | 237 x1, 126 x1, 8 x1 |
+| Qwen3-0.6B (HuggingFace) | 33.09 ms | 9.30 ms | 3.56x | 7.33 ms | 4.52x | 0.79 | 2080 x1, 11 x1, 6 x1 |
 
-Four steps before the code of this commit, which since changed which dicts
-the engine looks a name up in (none whose keys are not all plain), made a
-take that writes to a tensor from outside a path of its own, gave the frame
-every variable wherever a path lands, and made a path of what stands in
-front of an instruction that raised (the graphs of these models have the
-same operations and run as often on all five; what the variables add to what
-a graph gives is said behind the next table but one), by another job with
-the same tool, which enters the runner's own grad mode around the calls: the
-median of three turns in one process, on 16 cores, with the load average
-between 1.5 and 20, falling, and nothing else on the GPU. The graphs that
-run are those counted above (DistillGPT2 with the operations it has on a
-GPU; of hf_DistilBert the graph of a layer and the one of its feed-forward
-part run six times each in a call):
-
-| model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
-|---|---|---|---|---|---|---|---|
-| resnet18 (TorchBench) | 2.47 ms | 1.05 ms | 2.35x | 1.00 ms | 2.46x | 0.96 | 69 x1 |
-| resnet50 (TorchBench) | 6.20 ms | 2.74 ms | 2.26x | 2.60 ms | 2.38x | 0.95 | 175 x1 |
-| yolov3 (TorchBench) | 10.14 ms | 4.34 ms | 2.34x | 3.96 ms | 2.56x | 0.91 | 328 x1 |
-| hf_DistilBert (TorchBench) | 3.27 ms | 3.13 ms | 1.04x | 1.64 ms | 1.99x | 0.52 | 17 x6, 6 x1, 4 x6, 4 x1 |
-| DistillGPT2 (HuggingFace) | 13.91 ms | 4.55 ms | 3.06x | 3.78 ms | 3.68x | 0.83 | 231 x1, 10 x1, 8 x1, 8 x1 |
-| MobileBertForMaskedLM (HuggingFace) | 29.80 ms | 14.12 ms | 2.11x | 13.15 ms | 2.27x | 0.93 | 1272 x1, 16 x1, 7 x1 |
-| whisper-tiny (HuggingFace) | 8.95 ms | 4.89 ms | 1.83x | 3.07 ms | 2.92x | 0.63 | 237 x1, 126 x1, 8 x1 |
-| Qwen3-0.6B (HuggingFace) | 32.28 ms | 10.03 ms | 3.22x | 7.68 ms | 4.21x | 0.77 | 2080 x1, 11 x1, 6 x1 |
-
-As a check that these rows are the runner's mode, the runner's own lines for
-the same models (`python benchmarks/dynamo/torchbench.py --performance
---inference --bfloat16 --only MODEL` with `--vm` and with `--backend
-inductor`, `timm_models.py` and `huggingface.py` for the models of those
-suites; one run each), which report the speed against eager mode, next to
-what the tool has. The runner's lines are of the code three steps before
-this commit, the code of the tool's rows of the timm models, taken one after
-the other with the load average between 0.8 and 2.6 in front of a line and
-nothing else on the GPU; the tool's figures of resnet50 and DistillGPT2 are
-those of the eight rows above, one step before that code:
+As a check that the tool measures the runner's mode, the runner's own lines
+for five of the models (`python benchmarks/dynamo/torchbench.py
+--performance --inference --bfloat16 --only MODEL` with `--vm` and with
+`--backend inductor`, `timm_models.py` and `huggingface.py` for the models
+of those suites; one run each), which report the speed against eager mode,
+next to what the tool had on the runner's code. That is the code four steps
+before this commit (the one that changed which dicts the engine looks a name
+up in): the runner's lines were taken one after the other with the load
+average between 0.8 and 2.6 in front of a line and nothing else on the GPU,
+the tool's figures of the three timm models on the same code with 3.3 to 5.1
+in front of a row, and its figures of resnet50 and DistillGPT2 one step
+before that:
 
 | model | the runner with `--vm` | the tool, `torch.vm` | the runner with `--backend inductor` | the tool, `torch.compile` |
 |---|---|---|---|---|
@@ -3524,37 +3600,37 @@ altogether ("Limits"):
 | adv_inception_v3 (timm), gradients recorded | 21.21, 21.23 ms | 12.82, 12.85 ms | 1.66x, 1.65x | 8.72, 8.72 ms | 2.43x, 2.43x | 0.68, 0.68 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm), gradients recorded | 6.80, 6.82 ms | 6.95, 6.84 ms | 0.98x, 1.00x | 6.21, 6.22 ms | 1.10x, 1.10x | 0.89, 0.91 | 233 x1 |
 | hf_DistilBert (TorchBench), gradients recorded | 3.88 ms | 3.97 ms | 0.98x | 1.99 ms | 1.95x | 0.50 | 6 x1, 4 x1 |
-| yolov3 (TorchBench), gradients recorded, the process that fills the compiler's cache | 11.74 ms | 7.67 ms | 1.53x | 4.46 ms | 2.64x | 0.58 | 328 x1 |
-| yolov3 (TorchBench), gradients recorded, with the cache filled | 11.89 ms | 7.73 ms | 1.54x | 4.59 ms | 2.59x | 0.59 | 328 x1 |
+| yolov3 (TorchBench), gradients recorded | 12.00 ms | 9.98 ms | 1.20x | 4.57 ms | 2.62x | 0.46 | 328 x1 |
 | resnet18 (TorchBench), a training step | 8.50, 8.35 ms | 5.48, 5.37 ms | 1.55x, 1.56x | 5.42, 5.22 ms | 1.57x, 1.60x | 0.99, 0.97 | 89 x1 |
 | resnet50 (TorchBench), a training step | 23.48, 22.99 ms | 15.74, 15.68 ms | 1.49x, 1.47x | 13.98, 13.37 ms | 1.68x, 1.72x | 0.89, 0.85 | 228 x1 |
-| DistillGPT2, a training step | 53.35 ms | 29.71 ms | 1.80x | 17.98 ms | 2.97x | 0.61 | 15 x6, 10 x1, 8 x1, 8 x1 |
+| DistillGPT2, a training step | 53.31 ms | 29.67 ms | 1.80x | 17.99 ms | 2.96x | 0.61 | 15 x6, 10 x1, 8 x1, 8 x1 |
 
 The row of hf_DistilBert is one measurement, made by another job with the
 same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the measurement
-of the eight rows above, four steps before the code of this commit. Since
-then a graph gives what the variables of the function are bound to where its
-path lands as well ("Paths"): as the job that measured it counts them, the
+The rows of yolov3 and of DistillGPT2's training step are of the code one
+step before this commit, measured with the rows of the table in the runner's
+mode. Five steps before, when a graph gave only what the code behind it
+reads, another job had yolov3 with gradients recorded at 7.67 ms (1.53 times
+eager's speed) in the process that fills the compiler's cache and at 7.73 ms
+(1.54) with the cache filled, and at 4.34 ms under `torch.no_grad()`; the
+graph runs in a first process as in a later one ("Limits"). Since then a
+graph gives what the variables of the function are bound to where its path
+lands as well ("Paths"): as the job that made the change counts them, the
 graph of yolov3 gives 77 results where it gave 49 (what the layers put into
 the list that the model keeps until its forward returns), the two small
 graphs of DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of
 whisper-tiny 7 and 4 where they gave 6 and 3; the graphs of the other models
 give what they gave. With gradients recorded the graph of yolov3 is cut at
-28 more of its results, those that it also reads ("Writes"). That job ran
-the code in front of the change and the code behind it in turns on the same
-cores and the same GPU, beside other load on the machine (a load average of
-34 to 41), two turns each, which are no rows of these tables: a call of
-yolov3 took 4.47 and 4.62 ms where it took 4.40 and 4.49 under
-`torch.no_grad()`, and 11.11 and 11.61 ms where it took 7.99 and 7.94 with
-gradients recorded. The rows of this section with gradients recorded are of
-code from before the change: a model whose forward binds a tensor that its
-graph reads again is cut there since. yolov3 with gradients recorded runs
-its graph in the process that fills the compiler's cache as in a later one
-("Limits").
+28 more of its results, those that it also reads ("Writes"). That costs
+yolov3 about 3 percent under `torch.no_grad()` (4.48 ms for 4.34) and about
+30 percent with gradients recorded (9.98 ms for 7.67 and 7.73; 8.83 of the
+9.93 ms that the tool takes apart are in what stands for the graph). The
+rows of this section with gradients recorded that have two figures in a
+column are of code from before the change: a model whose forward binds a
+tensor that its graph reads again is cut there since.
 
 That gradients are recorded is why deit and hf_DistilBert are at eager's
 speed in their rows with gradients. Their attention is
@@ -3563,7 +3639,7 @@ and with gradients recorded a graph that holds it keeps eager's tape and is
 handed to no compiler ("Limits"). The graph of deit is its whole forward,
 233 operations, and its operations run one by one on eager's kernels. Under
 `torch.no_grad()` the same graph is compiled like any other, and a call of
-deit takes 6.29 ms where eager's takes 6.71. The graph of a layer of
+deit takes 6.46 ms where eager's takes 6.74. The graph of a layer of
 hf_DistilBert, 17 operations, keeps eager's tape for the same node; it is no
 faster than the instructions it stands for, so the measurement leaves the
 layer to the interpreter, at its second look as at its first ("Limits"), and
@@ -3576,9 +3652,9 @@ kernels of the optimizer's update, which are no call sites.
 
 In the runner's mode the layers of hf_DistilBert are graphs (17 operations,
 and the 4 of the feed-forward part, six times each in a call), and a call
-takes 3.13 ms where eager's takes 3.27: of the 3.15 ms of a call that the
-tool takes apart, 1.93 are in what stands for the graphs, 0.37 in front of
-them and 0.82 between them.
+takes 3.18 ms where eager's takes 3.28: of the 3.22 ms of a call that the
+tool takes apart, 1.98 are in what stands for the graphs, 0.37 in front of
+them and 0.83 between them.
 
 ### Limits
 
@@ -3660,7 +3736,8 @@ What graphs do not do at this stage:
   left the model to the interpreter for the rest of the process. It runs
   its graph in such a process as in a later one: at 1.53 times eager's
   speed in the process that fills the cache and at 1.54 with the cache
-  filled ("Models"). A function that is slower with its graph for good is
+  filled, measured before the frame had every variable ("Models"). A
+  function that is slower with its graph for good is
   measured twice: with gradients recorded the layers of hf_DistilBert lose
   both times ("Models"), and the model settles after 147 to 159 calls
   where one measurement took 136.
@@ -3680,13 +3757,38 @@ What graphs do not do at this stage:
   while what was made of a graph runs lacks the variables that such a path
   does not give back if the path writes to a tensor from outside: its
   results cannot be dropped.
+- With `callees=False`, or `TORCH_VM_EVAL_FRAME=0`, no frame that the
+  interpreter starts is offered to the VM, and a variable that waits for
+  its object gets it only where the VM's own loop asks ("Paths": at an
+  instruction, at a branch, where the function lets go of an object, at
+  an exception). Python code that runs under a kernel (a
+  `TorchDispatchMode`, a kernel written in Python) and a finalizer that is
+  reached only through C++ (the context of a custom `autograd.Function`
+  whose last holder is a tensor without an object) then find such a
+  variable unbound. A signal handler would too: there, pending signals are
+  looked for at the next call that is no kernel, at every 64th round of a
+  loop and when the function returns, not behind each kernel.
+- Where a pass over graphs or a gradient stands for a path, Python code that
+  runs inside what was made of the graph, or among the reads that the path
+  makes in front of it, finds the frame of the function as it was in front
+  of the graph, without the variables that the graph gives. Two cases (with
+  `Graphs()` alone both find every variable): a warning that a kernel gives,
+  shown by a `warnings.showwarning` written in Python; and the
+  `__torch_function__` of a tensor of a subclass under a read of its
+  `shape`, `requires_grad` or `grad`, which a path takes for a read that
+  runs no code.
+- `f_lasti` of the function's frame is not the interpreter's (`f_lineno` and
+  `tb_lineno` are).
 - A call that starts while a trace function is set (`sys.settrace`) is the
   interpreter's, and the trace function gets every line as in eager mode.
   One that is set during a call that the engine is running (by a callee,
   with the `f_trace` of the frame) sees no further line of that function.
   `sys.monitoring` is not asked: a tool that asks it for the lines of a
   function (debuggers and coverage tools that use `sys.monitoring`) sees
-  none of a call that the engine runs, whenever it asked.
+  none of a call that the engine runs, whenever it asked. A profile function
+  that is set when the call starts (`sys.setprofile`, which `cProfile` uses)
+  gets no event of the function's frame: neither its call and its return nor
+  the calls of its operations.
 - A path lets go of an object from outside it only where the end of the
   object cannot run Python code, or the object stays alive. Whether it
   stays alive is looked at in front of what stands for the graph: for a

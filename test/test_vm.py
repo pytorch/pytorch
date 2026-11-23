@@ -4066,6 +4066,29 @@ class FrameWork(torch.autograd.Function):
         return grad, None
 
 
+def breaker_kernel_loop(x, flag, n):
+    # Nothing but kernels in the loop; `flag` is memory that another
+    # process writes to.
+    seen = flag * 0
+    for _ in range(n):
+        x = x * 0.5 + 1
+        seen = seen + flag
+    return x, seen
+
+
+# Sends this process an interrupt after a while, and then says so in the
+# file that `flag` is mapped from.
+BREAKER_SIGNALS = sys.platform != "win32" and hasattr(signal, "SIGINT")
+BREAKER_INTERRUPTS = """
+import mmap, os, signal, sys, time
+time.sleep(float(sys.argv[3]))
+with open(sys.argv[1], "r+b") as shared:
+    memory = mmap.mmap(shared.fileno(), 8)
+    os.kill(int(sys.argv[2]), signal.SIGINT)
+    memory[:8] = (1).to_bytes(8, sys.byteorder)
+"""
+
+
 def breaker_signals_itself(log):
     os.kill(os.getpid(), signal.SIGUSR1)
     log.append("after the call")
@@ -4119,6 +4142,68 @@ class TestVmEvalBreaker(TestCase):
                 self.assertEqual(log, [])
         finally:
             signal.signal(signal.SIGUSR1, previous)
+
+    @unittest.skipUnless(BREAKER_SIGNALS, "needs a signal from another process")
+    def test_a_loop_of_kernels_answers_an_interrupt_within_a_round(self):
+        # A loop of nothing but kernels, with variables that wait for
+        # their objects. Another process interrupts this one and then
+        # sets a flag in memory that the loop adds up: the rounds after
+        # the flag was set. Where frames are offered to the VM (the
+        # default) it looks for pending signals behind every kernel, as
+        # before: the loop ends within a round, as in eager. The handler
+        # (given the frame itself, if it is Python code) and the traceback
+        # find every variable bound. Where no frame is offered, a handler
+        # that is Python code would find a variable that waits unbound:
+        # signals are looked for at the next call, at every 64th round of
+        # a loop and when the function returns.
+        names = ["_", "flag", "n", "seen", "x"]
+        rounds = 20_000_000
+        handled = []
+
+        def looks(number, frame):
+            handled.append(sorted(frame.f_locals))
+            raise KeyboardInterrupt
+
+        def interrupted(fn, handler, flag, path):
+            del handled[:]
+            flag.zero_()
+            previous = signal.signal(signal.SIGINT, handler)
+            pid = str(os.getpid())
+            command = [sys.executable, "-c", BREAKER_INTERRUPTS, path, pid, "0.3"]
+            child = subprocess.Popen(command)
+            try:
+                fn(torch.ones(4), flag, rounds)
+            except KeyboardInterrupt as error:
+                tb = error.__traceback__
+                while tb.tb_frame.f_code is not breaker_kernel_loop.__code__:
+                    tb = tb.tb_next
+                return dict(tb.tb_frame.f_locals)
+            finally:
+                child.wait()
+                signal.signal(signal.SIGINT, previous)
+            self.fail("the loop ran to its end")
+
+        with tempfile.NamedTemporaryFile() as shared:
+            shared.write(bytes(8))
+            shared.flush()
+            flag = torch.from_file(shared.name, shared=True, size=1, dtype=torch.int64)
+            loop = breaker_kernel_loop
+            offered = torch.vm(loop, fallback=False, demote=False)
+            alone = torch.vm(loop, fallback=False, demote=False, callees=False)
+            for fn, within in ((loop, 1), (offered, 1), (alone, 64)):
+                for _ in range(8):
+                    fn(torch.ones(4), flag, 100)
+                for handler in (signal.default_int_handler, looks):
+                    found = interrupted(fn, handler, flag, shared.name)
+                    said = (fn is not alone, fn is not loop, handler is looks)
+                    msg = f"frames offered, compiled, a handler in Python: {said}: {found}"
+                    self.assertEqual(sorted(found), names, msg=msg)
+                    self.assertLessEqual(found["seen"].item(), within, msg=msg)
+                    self.assertTrue(100 < found["_"] < rounds - 1, msg=msg)
+                    wanted = [names] if handler is looks else []
+                    self.assertEqual(handled, wanted, msg=msg)
+            self.assertGreater(offered.stats()["unboxed_results"], 1000)
+            del found
 
     def test_other_threads_run_during_a_compiled_loop(self):
         flag = []
@@ -11488,6 +11573,499 @@ def graph_short_way_raises(x, given):
     return (torch.tanh(h * 2) * 2 - 1).sum()
 
 
+# What looked at the frame of a function during a call: the variables it
+# found, by name.
+VM_LOOKS_SEEN = []
+
+
+def vm_looks_note(what):
+    # From Python code that an instruction of `fn` runs: the variables of
+    # the frame of `fn`, the nearest one above.
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_code.co_name != "fn":
+        frame = frame.f_back
+    VM_LOOKS_SEEN.append((what, None if frame is None else dict(frame.f_locals)))
+    del frame
+
+
+class VmLooksAttributes:
+    def __getattr__(self, name):
+        vm_looks_note("getattr")
+        return 2.0
+
+    @property
+    def rate(self):
+        vm_looks_note("property")
+        return 2.0
+
+    @rate.setter
+    def rate(self, value):
+        vm_looks_note("property set")
+
+
+class VmLooksEveryAttribute:
+    def __getattribute__(self, name):
+        vm_looks_note("getattribute")
+        return 2.0
+
+
+class VmLooksDescriptor:
+    def __get__(self, obj, cls):
+        vm_looks_note("descriptor get")
+        return 2.0
+
+    def __set__(self, obj, value):
+        vm_looks_note("descriptor set")
+
+
+class VmLooksHolder:
+    described = VmLooksDescriptor()
+
+
+class VmLooksMeta(type):
+    def __getattr__(cls, name):
+        vm_looks_note("metaclass getattr")
+        return 2.0
+
+
+class VmLooksOfMeta(metaclass=VmLooksMeta):
+    pass
+
+
+class VmLooksTruth:
+    def __bool__(self):
+        vm_looks_note("bool")
+        return True
+
+
+class VmLooksSized:
+    def __len__(self):
+        vm_looks_note("len")
+        return 3
+
+
+class VmLooksItems:
+    def __getitem__(self, key):
+        vm_looks_note("getitem")
+        return 2.0
+
+    def __setitem__(self, key, value):
+        vm_looks_note("setitem")
+
+    def __delitem__(self, key):
+        vm_looks_note("delitem")
+
+    def __contains__(self, item):
+        vm_looks_note("contains")
+        return True
+
+
+class VmLooksIndex:
+    def __index__(self):
+        vm_looks_note("index")
+        return 0
+
+
+class VmLooksKey:
+    def __hash__(self):
+        vm_looks_note("hash")
+        return 1
+
+    def __eq__(self, other):
+        vm_looks_note("eq of a key")
+        return True
+
+
+class VmLooksNumber:
+    def __add__(self, other):
+        vm_looks_note("add")
+        return 2.0
+
+    def __radd__(self, other):
+        vm_looks_note("radd")
+        return 2.0
+
+    def __iadd__(self, other):
+        vm_looks_note("iadd")
+        return self
+
+    def __neg__(self):
+        vm_looks_note("neg")
+        return 2.0
+
+    def __rmul__(self, other):
+        vm_looks_note("rmul")
+        return 2.0
+
+
+class VmLooksEquals:
+    def __eq__(self, other):
+        vm_looks_note("eq")
+        return True
+
+    def __lt__(self, other):
+        vm_looks_note("lt")
+        return True
+
+    __hash__ = None
+
+
+class VmLooksStores:
+    def __setattr__(self, name, value):
+        vm_looks_note("setattr")
+
+    def __delattr__(self, name):
+        vm_looks_note("delattr")
+
+
+class VmLooksIterable:
+    def __iter__(self):
+        vm_looks_note("iter")
+        return VmLooksIterator()
+
+
+class VmLooksIterator:
+    def __init__(self):
+        self.left = 2
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        vm_looks_note("next")
+        self.left -= 1
+        if self.left < 0:
+            raise StopIteration
+        return 2.0
+
+
+class VmLooksMapping:
+    def keys(self):
+        vm_looks_note("keys")
+        return ["a"]
+
+    def __getitem__(self, key):
+        vm_looks_note("getitem of a mapping")
+        return 2.0
+
+
+class VmLooksText:
+    def __format__(self, spec):
+        vm_looks_note("format")
+        return "t"
+
+    def __repr__(self):
+        vm_looks_note("repr")
+        return "t"
+
+    def __str__(self):
+        vm_looks_note("str")
+        return "t"
+
+
+class VmLooksEnds:
+    def __del__(self):
+        vm_looks_note("del")
+
+
+class VmLooksPlain:
+    pass
+
+
+class VmLooksPoint:
+    __match_args__ = ("a",)
+
+    def __getattr__(self, name):
+        vm_looks_note("match getattr")
+        return 1
+
+
+class VmLooksMode(TorchDispatchMode):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        vm_looks_note("dispatch mode")
+        return func(*args, **(kwargs or {}))
+
+
+def vm_looks_gone(ref):
+    vm_looks_note("weak")
+
+
+def vm_looks_generator():
+    vm_looks_note("generator")
+    yield 2.0
+    vm_looks_note("generator again")
+    yield 3.0
+
+
+def vm_looks_waits():
+    try:
+        yield 1
+    finally:
+        vm_looks_note("generator closed")
+
+
+VM_LOOKS_MODULE = types_module.ModuleType("vm_looks_module")
+VM_LOOKS_MODULE.__getattr__ = lambda name: (vm_looks_note("module getattr"), 2.0)[1]
+VM_LOOKS_NAMES = dict(
+    torch=torch, sys=sys, weakref=weakref, note=vm_looks_note, kept=[], attributes=VmLooksAttributes(),
+    every=VmLooksEveryAttribute(), Holder=VmLooksHolder, holder=VmLooksHolder(), OfMeta=VmLooksOfMeta, module=VM_LOOKS_MODULE,
+    truth=VmLooksTruth(), sized=VmLooksSized(), items=VmLooksItems(), index=VmLooksIndex(), key=VmLooksKey(), number=VmLooksNumber(),
+    equals=VmLooksEquals(), stores=VmLooksStores(), iterable=VmLooksIterable(), mapping=VmLooksMapping(), text=VmLooksText(),
+    Ends=VmLooksEnds, Plain=VmLooksPlain, Point=VmLooksPoint, point=VmLooksPoint(), gone=vm_looks_gone, generator=vm_looks_generator,
+    waits=vm_looks_waits, G=None,
+)  # fmt: skip
+# Each case: its kind, what the function does in front of its operations
+# and what it does behind them. Behind them `h` and `y` are bound to what
+# kernels gave, and the function does ONE thing that is no call of its own
+# and runs Python code, which looks at the frame.
+VM_LOOKS_CASES = (
+    ("attribute", "", "out = attributes.missing"),
+    ("attribute", "", "out = attributes.rate"),
+    ("attribute", "", "out = every.any"),
+    ("attribute", "", "out = Holder.described"),
+    ("attribute", "", "out = holder.described"),
+    ("attribute", "", "out = OfMeta.missing"),
+    ("attribute", "", "out = module.missing"),
+    ("truth", "", "out = 0\nif truth:\n    out = 1"),
+    ("truth", "", "out = not truth"),
+    ("truth", "", "out = truth and 1"),
+    ("truth", "", "out = 0\nif sized:\n    out = 1"),
+    ("truth", "", "out = 0\nwhile truth and out < 2:\n    out += 1"),
+    ("item", "", "out = items[0]"),
+    ("item", "", "items[0] = 1\nout = 1"),
+    ("item", "", "del items[0]\nout = 1"),
+    ("item", "", "out = [2.0, 3.0][index]"),
+    ("item", "", "out = y[index].sum().item()"),
+    ("item", "", "out = y[(index, 0)].item()"),
+    ("item", "", "out = [2.0, 3.0][index:][0]"),
+    ("item", "", "out = {key: 2.0}[1]"),
+    ("operator", "", "out = 1 + number"),
+    ("operator", "", "out = number + 1"),
+    ("operator", "", "acc = number\nacc += 1\nout = 1"),
+    ("operator", "", "out = -number"),
+    ("operator", "", "out = y * number"),
+    ("comparison", "", "out = equals == 1"),
+    ("comparison", "", "out = 1 == equals"),
+    ("comparison", "", "out = equals < 1"),
+    ("comparison", "", "out = 1 in items"),
+    ("comparison", "", "out = 1 in [equals]"),
+    ("comparison", "", "out = [equals] == [1]"),
+    ("comparison", "", "out = (equals,) == (1,)"),
+    ("store", "", "stores.rate = 1\nout = 1"),
+    ("store", "", "del stores.rate\nout = 1"),
+    ("store", "", "attributes.rate = 1\nout = 1"),
+    ("store", "", "holder.described = 1\nout = 1"),
+    ("iteration", "", "out = 0\nfor value in iterable:\n    out += value"),
+    ("iteration", "gen = generator()\n", "out = 0\nfor value in gen:\n    out += value"),
+    ("iteration", "", "first, second = iterable\nout = first"),
+    ("iteration", "", "out = [*iterable]"),
+    ("iteration", "", "out = len({**mapping})"),
+    ("iteration", "", "out = [value for value in iterable]"),
+    ("iteration", "pairs = zip(generator(), generator())\n", "out = 0\nfor value, other in pairs:\n    out += value"),
+    ("iteration", "pairs = enumerate(generator())\n", "out = 0\nfor at, value in pairs:\n    out += value"),
+    ("iteration", "mapped = map(note, ['map', 'map again'])\n", "out = 0\nfor value in mapped:\n    out += 1"),
+    ("text", "", "out = f'{text}'"),
+    ("text", "", "out = f'{text!r}'"),
+    ("text", "", "out = '%s' % text"),
+    ("text", "", "out = '%s' % (text,)"),
+    ("text", "", "out = f'{[text]}'"),
+    ("hash", "", "out = len({key: 1})"),
+    ("hash", "", "out = len({key})"),
+    ("hash", "", "out = len({(key, 1): 1})"),
+    ("let go", "loud = Ends()\n", "del loud\nout = 1"),
+    ("let go", "loud = Ends()\n", "loud = None\nout = 1"),
+    ("let go", "made = [Ends()]\n", "del made\nout = 1"),
+    ("let go", "made = [Ends()]\n", "made = None\nout = 1"),
+    ("let go", "made = {'a': Ends()}\n", "del made['a']\nout = 1"),
+    ("let go", "made = [Ends()]\n", "made[0] = None\nout = 1"),
+    ("let go", "box = Plain()\nbox.held = Ends()\n", "box.held = None\nout = 1"),
+    ("let go", "box = Plain()\nbox.held = Ends()\n", "del box.held\nout = 1"),
+    ("let go", "global G\nG = Ends()\n", "G = None\nout = 1"),
+    ("let go", "loud = Ends()\ndef inner():\n    return loud\n", "loud = None\nout = inner() is None"),
+    ("let go", "made = iter([Ends(), Ends()])\n", "out = 0\nfor value in made:\n    out += 1\n    value = None"),
+    ("let go", "target = Plain()\nref = weakref.ref(target, gone)\n", "del target\nout = ref() is None"),
+    ("let go", "target = Plain()\nref = weakref.ref(target, gone)\n", "target = None\nout = ref() is None"),
+    ("let go", "gen = waits()\nnext(gen)\n", "del gen\nout = 1"),
+    ("match", "", "match point:\n    case Point(1):\n        out = 1\n    case _:\n        out = 0"),
+    # Reads of the variables themselves, by a getter of C: of a frame
+    # object that the function took, kept in a variable and kept outside.
+    ("frame", "own = sys._getframe()\n", "out = sorted(name for name in own.f_locals if name != 'own')"),
+    ("frame", "kept.append(sys._getframe())\n", "out = sorted(kept[-1].f_locals)"),
+    # Python code that a kernel runs: every operation under a mode.
+    ("kernel", "", "out = 1"),
+)  # fmt: skip
+
+
+def vm_looks_function(front, behind):
+    # A function of two tensors' worth of kernels around one case.
+    kernels = "h = torch.relu(x) + 1\ny = (h * 2).sin() * 3 + 1\n"
+    lines = front + kernels + behind + "\nreturn (y * 2).sum(), out"
+    body = "".join(f"    {line}\n" for line in lines.split("\n") if line)
+    source = "def fn(x, given):\n" + body
+    scope = dict(VM_LOOKS_NAMES)
+    exec(compile(source, "<vm looks>", "exec"), scope)
+    return scope["fn"]
+
+
+def vm_looks_calls(run, scope, device, graded, mode, count):
+    # What `count` calls give and what looked at the frame during each:
+    # the result, and of every look what it was and what each variable
+    # held (a tensor by its values, and whether it is the argument itself).
+    def held(value, x):
+        if isinstance(value, torch.Tensor):
+            return ("tensor", value is x, value.detach().cpu().tolist())
+        plain = isinstance(value, (int, float, str, bool, type(None)))
+        return value if plain else type(value).__name__
+
+    def all_held(seen, x):
+        if seen is None:
+            return None
+        return {name: held(value, x) for name, value in seen.items()}
+
+    gc.collect()
+    found = []
+    for at in range(count):
+        given = 5 if at in (7, 10) else 1
+        x = torch.full((3, 4), 0.25 * (at + 1), device=device, requires_grad=graded)
+        del VM_LOOKS_SEEN[:], scope["kept"][:]
+        scope["G"] = None
+        if mode is None:
+            first, out = run(x, given)
+        else:
+            with mode():
+                first, out = run(x, given)
+        if graded:
+            first.backward()
+        grad = None if x.grad is None else x.grad.tolist()
+        plain = isinstance(out, (int, float, str, bool, list))
+        said = (first.item(), grad, out if plain else type(out).__name__)
+        looks = [(what, all_held(seen, x)) for what, seen in VM_LOOKS_SEEN]
+        del VM_LOOKS_SEEN[:], scope["kept"][:], first, out
+        found.append((said, looks))
+    return found
+
+
+def vm_looks_ways(case, device, ways):
+    # One case, each way against eager. A way: what makes the passes
+    # behind the default ones, whether the tensors require a gradient,
+    # whether the frames that the interpreter starts are offered to the
+    # VM. For each way: where the first call that differs does (or None),
+    # the counters of the function, and the hits of its largest graph.
+    kind, front, behind = case
+    mode = VmLooksMode if kind == "kernel" else None
+    found, expected = [], {}
+    for passes, graded, callees in ways:
+        fn = vm_looks_function(front, behind)
+        # The VM's own loop has its kernels from the third call on; a
+        # graph is taken down, and runs, later.
+        count = 12 if passes() else 6
+        key, scope = (graded, count), fn.__globals__
+        if key not in expected:
+            expected[key] = vm_looks_calls(fn, scope, device, graded, mode, count)
+        eager = expected[key]
+        options = {"fallback": False, "demote": False, "callees": callees}
+        compiled = torch.vm(fn, passes=(*DEFAULT, *passes()), **options)
+        got = vm_looks_calls(compiled, scope, device, graded, mode, count)
+        differs = None
+        # Eager looked, and found every variable at every look (under a
+        # mode: at the last one, behind the kernel that gives `y`).
+        if kind == "frame":
+            looks = [said[2] for said, _ in eager if isinstance(said[2], list)]
+        elif kind == "kernel":
+            last = [call[-1][1] for _, call in eager if call]
+            looks = [seen for seen in last if seen is not None]
+        else:
+            looks = [seen for _, call in eager for _, seen in call if seen is not None]
+        if not looks or not all("h" in seen and "y" in seen for seen in looks):
+            differs = f"eager itself: {eager[-1]}"
+        for at, (a, b) in enumerate(zip(got, eager)):
+            if a != b and differs is None:
+                differs = f"call {at}: {a} where eager has {b}"
+        graphs = [g for g in torch.vm.regions(compiled) if g.get("ops", 0) >= 4]
+        hits = max((g.get("hits", 0) for g in graphs), default=0)
+        found.append((differs, compiled.stats(), hits))
+    return found
+
+
+def vm_binds_quiet_reads(x, holder, n):
+    # Between the kernels: an attribute of a module, one in an object's
+    # dict, whole numbers, a size, an item of a tensor, a tensor's truth.
+    for i in range(n):
+        y = torch.relu(x) * holder.scale
+        if i + 1 < n and y.shape[0] > 0 and (y > -1).any():
+            x = y[0] + x * math.pi
+    return x
+
+
+def vm_binds_goes_over(x, weights, shifts):
+    for (at, weight), shift in zip(enumerate(weights), shifts):
+        x = x * weight + shift + at
+    return x
+
+
+def vm_binds_property(x, holder, n):
+    for _ in range(n):
+        x = x * holder.rate + 1
+    return x
+
+
+REPLACED_NAMES = '''"""What a process put under a name before anything ran compiled, where the
+engine could call it by that name for itself: functions of `__main__` named
+`type`, `iter`, `range` and `reversed`, and a loop while a tensor variable
+waits for its object. One line `done {...}`: the calls, of eight, in which
+the result or the calls of what was put there differ from eager's, and the
+first of them."""
+import builtins
+import json
+import sys
+
+import torch
+import torch.vm
+
+DEVICE = sys.argv[1]
+CALLS = []
+OWN = {name: getattr(builtins, name) for name in dir(builtins)}
+
+
+def counted(name):
+    own = OWN[name]
+
+    def replacement(*args, **kwargs):
+        CALLS.append(name)
+        return own(*args, **kwargs)
+
+    return replacement
+
+
+def loops(x, rows):
+    h = torch.relu(x) + 1
+    total = 0.0
+    for row in rows:
+        total += row
+    for at, row in enumerate(zip(rows, rows)):
+        total += at
+    return (h * total).sin().sum(), total
+
+
+# Names of this module that are the interpreter's in `builtins`; the
+# default passes: the loop runs in the VM.
+type, iter, range, reversed = (counted(name) for name in ("type", "iter", "range", "reversed"))
+compiled = torch.vm(loops)
+ways = {}
+for label, run in (("under", compiled), ("eager", loops)):
+    rows = []
+    for at in OWN["range"](8):
+        x = torch.full((3, 4), 0.25 * (at + 1), device=DEVICE)
+        del CALLS[:]
+        out, said = run(x, [1.0, 2.0])
+        rows.append((out.item().hex(), said, OWN["sorted"](CALLS)))
+    ways[label] = rows
+differ = [at for at in OWN["range"](8) if ways["under"][at] != ways["eager"][at]]
+first = [ways["under"][differ[0]][1:], ways["eager"][differ[0]][1:]] if differ else None
+print("done " + json.dumps({"differ": differ, "first": first}), flush=True)
+'''
+
+
 GRAPH_NAME_LOG = []
 
 
@@ -16307,6 +16885,106 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                 self.assertGreaterEqual(raised, 1, msg=msg)
             else:
                 self.assertEqual(raised, 0, msg=msg)
+
+    def test_what_an_instruction_runs_finds_the_variables_bound(self, device):
+        # A variable that is bound to what a kernel of the VM's own loop
+        # gave holds a tensor without a Python object, and waits for one.
+        # It gets it in front of everything that can look at the frame,
+        # which is asked where that would run: at an instruction that is
+        # no call, unless it is shown to run C code that reads its
+        # operands and nothing else (so not for an attribute through
+        # Python code, a truth, an item, an operator, a comparison, a
+        # store, an iteration, a text or a hash that an object of the
+        # user's answers, and not for a getter of C that hands out the
+        # variables of a frame); where the function lets go of an object
+        # whose end runs code; and where the interpreter starts the frame
+        # of a Python function, whatever started it (a kernel under a
+        # mode). Against eager, call by call: what each look found in the
+        # frame, by name and by value, and the result.
+        def keep(gm, input_types):
+            return gm
+
+        # The default passes, and the same with no frame offered to the VM
+        # (what the instructions ask by themselves).
+        ways = ((tuple, False, True), (tuple, False, False))
+        # `Graphs()` alone, with a pass behind the graphs, with a gradient.
+        graphs = (lambda: (P.Graphs(),), False, True)
+        kept = (lambda: (P.Graphs(), keep), False, True)
+        graded = (lambda: (P.Graphs(),), True, True)
+        more = (graphs, kept, graded)
+        kinds = set()
+        for case in VM_LOOKS_CASES:
+            kind = case[0]
+            # What a kernel runs is met where its frame starts, and nowhere
+            # else. One case of each kind runs every way, and so does every
+            # read of a frame's variables: a path ends in front of it.
+            chosen = ways[:1] if kind == "kernel" else ways
+            if kind not in kinds or kind == "frame":
+                chosen = chosen + more
+            kinds.add(kind)
+            found = vm_looks_ways(case, device, chosen)
+            for way, (differs, stats, hits) in zip(chosen, found):
+                msg = f"{case}, a gradient: {way[1]}, frames offered: {way[2]}, passes: {len(way[0]())}: {differs}"
+                self.assertIsNone(differs, msg=msg)
+                if way in more and way is not graphs:
+                    # The operations in front of the look ran as a graph.
+                    # Not under a mode, and not where the function lets go
+                    # of an object whose end runs code: the instructions
+                    # run, and bind as said above.
+                    least = 0 if kind in ("kernel", "let go") else 6
+                    self.assertGreaterEqual(hits, least, msg=msg)
+                elif way in ways:
+                    # The kernels gave tensors without an object, and the
+                    # variables got theirs on the way.
+                    self.assertGreater(stats["unboxed_results"], 0, msg=msg)
+                    self.assertGreater(stats["bound_later"], 0, msg=msg)
+        self.assertEqual(len(kinds), 13)
+
+    def test_what_runs_no_code_between_kernels_binds_no_variable(self, device):
+        # The other side: an instruction that is shown to run C code on
+        # its operands leaves the variables as they are, and a tensor that
+        # only goes from one kernel into the next never gets an object. An
+        # attribute of a module and one in the dict of an object, whole
+        # numbers, a size, an item of a tensor, the truth of a tensor; a
+        # `zip` and an `enumerate` over lists. A property is Python code:
+        # the variable is bound in front of it at every round.
+        x = torch.ones(8, device=device)
+        plain, loud = VmLooksPlain(), VmLooksAttributes()
+        plain.scale = 2.0
+        cases = (
+            (vm_binds_quiet_reads, (x, plain, 40), 0),
+            (vm_binds_goes_over, (x, [1.5] * 40, [0.5] * 40), 0),
+            (vm_binds_property, (x, loud, 40), 39),
+        )
+        for fn, args, bound in cases:
+            compiled = torch.vm(fn, fallback=False, demote=False)
+            for _ in range(8):
+                compiled(*args)
+            before = compiled.stats()
+            self.assertEqual(compiled(*args), fn(*args))
+            after = compiled.stats()
+            unboxed = after["unboxed_results"] - before["unboxed_results"]
+            self.assertGreaterEqual(unboxed, 80, msg=fn.__name__)
+            later = after["bound_later"] - before["bound_later"]
+            self.assertEqual(later, bound, msg=fn.__name__)
+        del VM_LOOKS_SEEN[:]
+
+    def test_a_name_the_process_replaced_is_not_called_for_the_engine(self, device):
+        # The classes of the interpreter's iterators, which the VM's loop
+        # asks for while a variable waits for its object, are the
+        # interpreter's by no name that a process can put something else
+        # under: functions of `__main__` named `type`, `iter`, `range` and
+        # `reversed` are not called for the engine. In a process of its
+        # own, in which nothing ran compiled before.
+        import json
+
+        command = [sys.executable, "-c", vm_case_script(REPLACED_NAMES), device]
+        limit = GRAPH_CASE_SECONDS
+        pipes = {"capture_output": True, "text": True, "timeout": limit}
+        ran = subprocess.run(command, **pipes)
+        self.assertEqual(ran.returncode, 0, msg=ran.stderr[-600:])
+        said = json.loads(ran.stdout.strip().split("\n")[-1][5:])
+        self.assertEqual(said["differ"], [], msg=str(said))
 
     def test_a_key_that_compares_in_python_is_compared_once_per_lookup(self, device):
         # A dict that the engine looks a name up in (the dict of an object,
