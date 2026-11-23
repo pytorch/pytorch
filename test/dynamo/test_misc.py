@@ -422,12 +422,15 @@ class MiscTests(torch._inductor.test_case.TestCase):
         cases = (
             (read_dict, "Introspection on a class created in the same frame"),
             (instantiate, "Instantiating a class created in the same frame"),
-            (read_dir, "Introspection on a class created in the same frame"),
-            (read_repr, "Introspection on a class created in the same frame"),
-            (read_str, "Introspection on a class created in the same frame"),
-            (read_fstring, "Introspection on a class created in the same frame"),
-            (read_format, "Introspection on a class created in the same frame"),
-            (read_str_format, "Introspection on a class created in the same frame"),
+            (
+                read_dir,
+                "Listing attributes of a class created in the same frame",
+            ),
+            (read_repr, "Representing a class created in the same frame"),
+            (read_str, "Representing a class created in the same frame"),
+            (read_fstring, "Formatting a class created in the same frame"),
+            (read_format, "Formatting a class created in the same frame"),
+            (read_str_format, "Formatting a class created in the same frame"),
             (
                 delete_attr,
                 "Deleting an attribute from a class created in the same frame",

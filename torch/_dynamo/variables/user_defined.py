@@ -2438,7 +2438,7 @@ class NewClassVariable(UserDefinedClassVariable):
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         unimplemented(
-            gb_type="Introspection on a class created in the same frame",
+            gb_type="Representing a class created in the same frame",
             context=f"repr({self.value})",
             explanation="Dynamo cannot safely represent this class while it has deferred mutations.",
             hints=[*graph_break_hints.SUPPORTABLE],

@@ -2774,7 +2774,7 @@ class BuiltinVariable(TypeVariable):
     ) -> VariableTracker | None:
         if isinstance(arg, variables.user_defined.NewClassVariable):
             unimplemented(
-                gb_type="Introspection on a class created in the same frame",
+                gb_type="Listing attributes of a class created in the same frame",
                 context=f"dir({arg.value})",
                 explanation="Dynamo cannot safely inspect this class while it has deferred mutations.",
                 hints=[*graph_break_hints.SUPPORTABLE],
@@ -3332,7 +3332,7 @@ class BuiltinVariable(TypeVariable):
                 )
             if not (tx.one_graph or tx.error_on_graph_break):
                 unimplemented(
-                    gb_type="Dynamic class creation with type",
+                    gb_type="Dynamic class creation outside fullgraph",
                     context="type(name, bases, namespace)",
                     explanation="Dynamo only traces dynamic class creation when graph breaks are errors.",
                     hints=[*graph_break_hints.SUPPORTABLE],
@@ -3476,7 +3476,7 @@ class BuiltinVariable(TypeVariable):
             for arg in itertools.chain((_format_string,), args, kwargs.values())
         ):
             unimplemented(
-                gb_type="Introspection on a class created in the same frame",
+                gb_type="Formatting a class created in the same frame",
                 context="formatting a class created in the same frame",
                 explanation="Dynamo cannot safely format this class while it has deferred mutations.",
                 hints=[*graph_break_hints.SUPPORTABLE],
