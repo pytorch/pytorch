@@ -101,7 +101,7 @@ def _test_device_ipc_collect_during_export(device):
 
     def collect(_stream):
         nonlocal collections
-        torch.get_device_module().ipc_collect()
+        torch.accelerator.ipc_collect()
         collections += 1
 
     try:
@@ -123,7 +123,7 @@ def _test_device_ipc_collect_during_export(device):
         for handle in handles:
             torch.UntypedStorage._release_ipc_counter_device(handle[4], handle[5])
         tensors.clear()
-        torch.get_device_module().ipc_collect()
+        torch.accelerator.ipc_collect()
 
 
 def simple_fill(queue, event):
@@ -362,8 +362,8 @@ class leak_checker:
         return self
 
     def __exit__(self, *args):
-        if torch.cuda.is_available():
-            torch.cuda.ipc_collect()
+        if torch.accelerator.is_available():
+            torch.accelerator.ipc_collect()
         if args[0] is None:
             # Check that the 10th available file-descriptor at the end of the
             # test is no more than 4 higher than the 10th available at the
@@ -544,8 +544,8 @@ class _MultiprocessingTestMixin:
             queue.put(param)
             self.assertTrue(done.wait(MAX_WAITING_TIME_IN_SECONDS))
             del param
-            if torch.device(device).type == "cuda":
-                torch.cuda.ipc_collect()
+            if torch.accelerator.is_available():
+                torch.accelerator.ipc_collect()
         finally:
             finish.set()
             p.join(100)
@@ -567,8 +567,8 @@ class TestMultiprocessingDevice(_MultiprocessingTestMixin, TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def tearDown(self):
-        if torch.cuda.is_available():
-            torch.cuda.ipc_collect()
+        if torch.accelerator.is_available():
+            torch.accelerator.ipc_collect()
 
     def _get_ctx(self, device):
         if torch.device(device).type == "cpu":
@@ -914,7 +914,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
 
     def tearDown(self):
         if torch.accelerator.is_available():
-            torch.get_device_module().ipc_collect()
+            torch.accelerator.ipc_collect()
 
     def test_device_memory_allocation(self, device):
         ctx = mp.get_context("spawn")
@@ -1057,7 +1057,7 @@ class TestMultiprocessingAccelerator(_MultiprocessingTestMixin, TestCase):
 
         # We need to collect, as MP implementation holds one shared
         # memory 'file' for performance reason
-        torch.get_device_module().ipc_collect()
+        torch.accelerator.ipc_collect()
 
     @parametrize("expandable", [False, True])
     @parametrize("peer", [False, True])

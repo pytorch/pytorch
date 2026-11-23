@@ -11,6 +11,7 @@ __all__ = [
     "empty_cache",
     "empty_host_cache",
     "get_memory_info",
+    "ipc_collect",
     "max_memory_allocated",
     "max_memory_reserved",
     "memory_allocated",
@@ -276,3 +277,13 @@ def _snapshot(device=None, augment_with_fx_traces: bool = False):
     return torch.cuda.memory._snapshot(
         device, augment_with_fx_traces=augment_with_fx_traces
     )
+
+
+def ipc_collect() -> None:
+    r"""Force collect :ref:`accelerator<accelerators>` device memory released by IPC (Inter Process Communication).
+
+    Frees device memory of tensors previously shared with other processes once all consumers have released them,
+    and closes the shared memory file used for reference counting if it has no active counters. This is useful
+    when the producer process has stopped sending tensors and wants to release unused memory.
+    """
+    torch._C._accelerator_ipcCollect()
