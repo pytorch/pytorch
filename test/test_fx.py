@@ -5868,7 +5868,7 @@ def run_getitem_target():
         _wrapped_methods_to_patch.pop()
 
 
-class TestFXProfiler(JitTestCase):
+class TestFXProfilerDevice(JitTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def setUp(self):
@@ -6138,7 +6138,7 @@ event={kernel_event} node=add stack_trace=a = s + self.c""",
         )
 
 
-instantiate_device_type_tests(TestFXProfiler, globals(), except_for="cpu", allow_xpu=True)
+instantiate_device_type_tests(TestFXProfilerDevice, globals(), except_for="cpu", allow_xpu=True)
 
 
 class TestFXDevice(JitTestCase):
