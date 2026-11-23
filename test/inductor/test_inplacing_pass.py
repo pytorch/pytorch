@@ -21,15 +21,19 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.fx_passes.control_dependencies import preserve_node_ordering
 from torch._inductor.fx_passes.post_grad import decompose_auto_functionalized
 from torch._inductor.fx_passes.reinplace import (
+    _generalized_scatter,
+    _inplace_generalized_scatter,
+    annotate_scatter_chain_lengths,
     inplaceable_foreach_ops,
     reinplace_inplaceable_ops,
     reinplace_inplaceable_ops_core,
+    ViewOp,
 )
 from torch._inductor.fx_utils import FakeTensorUpdater, get_node_storage
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._inductor.virtualized import V
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -130,6 +134,16 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         ReinplaceCounters.clear()
         return super().setUp()
 
+    def _assert_graph_matches(self, gm, f, inputs):
+        gm.graph.lint()
+        gm.recompile()
+        expected_inputs = tuple(value.clone() for value in inputs)
+        actual_inputs = tuple(value.clone() for value in inputs)
+        expected = f(*expected_inputs)
+        actual = gm(*actual_inputs)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_inputs, expected_inputs)
+
     def _test(self, f):
         nf = torch.compile(f)
         inp = (
@@ -158,8 +172,6 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         fake_mode = detect_fake_mode([n.meta.get("val") for n in gm.graph.nodes])
         with V.set_fake_mode(fake_mode):
             reinplace_inplaceable_ops(updater, gm.graph)
-        gm.graph.lint()
-        gm.recompile()
 
         input_node = next(n for n in gm.graph.nodes if n.op == "placeholder")
         rows_written_to_input = [
@@ -171,11 +183,9 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         ]
         self.assertIn(0, rows_written_to_input)
 
+        self._assert_graph_matches(gm, f, inputs)
         expected_input = inputs[0].clone()
         f(expected_input, *inputs[1:])
-        actual_input = inputs[0].clone()
-        gm(actual_input, *inputs[1:])
-        self.assertEqual(actual_input, expected_input)
         compiled_input = inputs[0].clone()
         torch.compile(f, fullgraph=True)(compiled_input, *inputs[1:])
         self.assertEqual(compiled_input, expected_input)
@@ -1490,19 +1500,13 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         indices = torch.tensor([0])
         values = torch.full((4,), 10.0)
         replacement = torch.full_like(x, -1.0)
-        expected_input = x.clone()
-        expected = model(expected_input, indices, values, replacement)
         gm = make_fx(model, tracing_mode="fake")(x, indices, values, replacement)
         reinplace_inplaceable_ops_core(gm.graph)
-        gm.graph.lint()
-        gm.recompile()
         targets = [node.target for node in gm.graph.nodes]
         self.assertIn(aten.index_put_.default, targets)
         self.assertNotIn(aten.index_put.default, targets)
         self.assertIn(aten.copy_.default, targets)
-        actual_input = x.clone()
-        self.assertEqual(gm(actual_input, indices, values, replacement), expected)
-        self.assertEqual(actual_input, expected_input)
+        self._assert_graph_matches(gm, model, (x, indices, values, replacement))
 
     @parametrize("alias_source", [False, True])
     def test_input_view_aliased_copyback_keeps_functional(self, alias_source):
@@ -1516,32 +1520,66 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         x = torch.arange(8, dtype=torch.float32)
         indices = torch.tensor([0])
         values = torch.full((4,), 10.0)
-        expected_input = x.clone()
-        expected = f(expected_input, indices, values)
         gm = make_fx(f, tracing_mode="fake")(x, indices, values)
         reinplace_inplaceable_ops_core(gm.graph)
-        gm.graph.lint()
-        gm.recompile()
         targets = [node.target for node in gm.graph.nodes]
         self.assertIn(aten.index_put.default, targets)
         self.assertNotIn(aten.index_put_.default, targets)
-        actual_input = x.clone()
-        self.assertEqual(gm(actual_input, indices, values), expected)
-        self.assertEqual(actual_input, expected_input)
+        self._assert_graph_matches(gm, f, (x, indices, values))
+
+    # Dynamo canonicalization currently reorders mutating cond ahead of reads.
+    # Use its production default to test Inductor's mutation permissions.
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=False)
+    @inductor_config.patch(reinplace_whenever_possible=True)
+    @parametrize("predicate", [False, True])
+    def test_input_view_conditional_overwrite(self, predicate):
+        def f(pred, x, indices, values, replacement):
+            updated = x.view(2, 4).index_put((indices,), values)
+            result = updated.square()
+
+            def true_fn(t, r):
+                t.copy_(r)
+                return r.sum()
+
+            def false_fn(t, r):
+                return r.sum()
+
+            branch_result = torch.cond(pred, true_fn, false_fn, (x, replacement))
+            return result + branch_result
+
+        original = torch.arange(8, dtype=torch.float32)
+        indices = torch.tensor([0])
+        values = torch.full((4,), 10.0)
+        replacement = torch.full_like(original, -1.0)
+        # A tensor predicate keeps both branches in the compiled graph.
+        pred = torch.tensor(predicate)
+        eager_x = original.clone()
+        compiled_x = original.clone()
+        with torch.no_grad():
+            expected = f(pred, eager_x, indices, values, replacement)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                pred, compiled_x, indices, values, replacement
+            )
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_x, eager_x)
+        self.assertEqual(compiled_x, replacement if predicate else original)
 
     @parametrize("rewire_outputs", [False, True])
-    def test_input_view_list_copyback_keeps_live_result(self, rewire_outputs):
+    @parametrize("live_result", [False, True])
+    @parametrize("copy_result_first", [False, True])
+    def test_input_view_copyback_preserves_structured_result(
+        self, rewire_outputs, live_result, copy_result_first
+    ):
         def f(x, replacement):
-            _, updated = auto_functionalized(
-                list_sin_._opoverload, tensors=[x.view(2, 4)]
-            )
+            _, updated = auto_functionalized(boo._opoverload, x=x.view(2, 4))
+            result = updated if live_result else updated.square()
+            if copy_result_first:
+                x.copy_(updated.view_as(x))
             x.copy_(replacement)
-            return updated[0]
+            return result
 
         x = torch.arange(8, dtype=torch.float32)
         replacement = torch.full_like(x, 9.0)
-        expected_input = x.clone()
-        expected = f(expected_input, replacement)
         gm = make_fx(f, tracing_mode="fake")(x, replacement)
         wrapper = next(n for n in gm.graph.nodes if n.target is auto_functionalized)
         with V.set_fake_mode(
@@ -1552,33 +1590,105 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 fake_tensor_updater=FakeTensorUpdater(gm),
                 rewire_auto_functionalized_outputs=rewire_outputs,
             )
-            self.assertEqual(wrapper.meta["only_clone_these_tensors"], ["tensors"])
+            # An independent copy may reuse the input only after the updated
+            # result's last read. A result returned after that copy needs a clone.
+            self.assertEqual(
+                wrapper.meta["only_clone_these_tensors"], ["x"] if live_result else []
+            )
             decompose_auto_functionalized(gm.graph)
+        self._assert_graph_matches(gm, f, (x, replacement))
+
+    @parametrize("rewire_outputs", [False, True])
+    def test_input_view_copyback_preserves_live_container(self, rewire_outputs):
+        def f(x, replacement):
+            result = auto_functionalized(boo._opoverload, x=x.view(2, 4))
+            squared = result[1].square()
+            x.copy_(replacement)
+            return result, squared
+
+        x = torch.arange(8, dtype=torch.float32)
+        replacement = torch.full_like(x, 9.0)
+        gm = make_fx(f, tracing_mode="fake")(x, replacement)
+        wrapper = next(n for n in gm.graph.nodes if n.target is auto_functionalized)
+        squared = next(n for n in gm.graph.nodes if n.target is aten.pow.Tensor_Scalar)
+        output = next(n for n in gm.graph.nodes if n.op == "output")
+        # Preserve a direct tuple use instead of make_fx's flattened getitems.
+        output.args = ((wrapper, squared),)
+        with V.set_fake_mode(
+            detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        ):
+            reinplace_inplaceable_ops_core(
+                gm.graph,
+                fake_tensor_updater=FakeTensorUpdater(gm),
+                rewire_auto_functionalized_outputs=rewire_outputs,
+            )
+            self.assertEqual(wrapper.meta["only_clone_these_tensors"], ["x"])
+            decompose_auto_functionalized(gm.graph)
+        self._assert_graph_matches(gm, f, (x, replacement))
+
+    @parametrize("stride", [4, 6])
+    def test_input_view_copyback_unbacked_stride(self, stride):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            unknown_stride = shape_env.create_unbacked_symint()
+            x_val = torch.empty_strided((2, 4), (unknown_stride, 1))
+            indices_val = torch.empty((1,), dtype=torch.int64)
+            values_val = torch.empty((1, 4))
+            replacement_val = torch.empty((2, 4))
+            updated_val = torch.empty((2, 4))
+            squared_val = torch.empty((2, 4))
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        indices = graph.placeholder("indices")
+        values = graph.placeholder("values")
+        replacement = graph.placeholder("replacement")
+        for node, val in zip(
+            (x, indices, values, replacement),
+            (x_val, indices_val, values_val, replacement_val),
+        ):
+            node.meta["val"] = val
+        view = graph.call_function(aten.alias.default, (x,))
+        view.meta["val"] = x_val
+        updated = graph.call_function(aten.index_put.default, (view, [indices], values))
+        updated.meta["val"] = updated_val
+        squared = graph.call_function(aten.pow.Tensor_Scalar, (updated, 2))
+        squared.meta["val"] = squared_val
+        copy = graph.call_function(aten.copy_.default, (x, replacement))
+        copy.meta["val"] = x_val
+        graph.output(squared)
+        gm = torch.fx.GraphModule({}, graph)
+        # Contiguity cannot be proved from the unbacked stride. Keep the
+        # functional op instead of raising while trying to guard the layout.
+        reinplace_inplaceable_ops_core(graph)
+        targets = [node.target for node in graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+
+        def f(x, indices, values, replacement):
+            result = aten.index_put.default(x, [indices], values).square()
+            x.copy_(replacement)
+            return result
+
+        # Run both a contiguous and a noncontiguous realization of the metadata.
+        x_real = torch.empty_strided((2, 4), (stride, 1))
+        x_real.copy_(torch.arange(8, dtype=torch.float32).reshape(2, 4))
         gm.graph.lint()
         gm.recompile()
-        actual_input = x.clone()
-        self.assertEqual(gm(actual_input, replacement), expected)
-        self.assertEqual(actual_input, expected_input)
-
-    def test_copyback_permission_preserves_earlier_result(self):
-        def f(input_pos, val, cache):
-            view = cache.reshape(4, -1)
-            updated = aten.index_put.default(view, [input_pos], val.reshape(-1))
-            cache.copy_(torch.zeros_like(cache))
-            return updated
-
-        input_pos = torch.tensor([1], device=device)
-        val = torch.randn(3, 4, device=device)
-        cache = torch.randn(4, 3, 4, device=device)
-        expected_cache = cache.clone()
-        expected = f(input_pos, val, expected_cache)
-        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
-        reinplace_inplaceable_ops_core(gm.graph)
-        gm.graph.lint()
-        gm.recompile()
-        actual_cache = cache.clone()
-        self.assertEqual(gm(input_pos, val, actual_cache), expected)
-        self.assertEqual(actual_cache, expected_cache)
+        expected_x = torch.empty_strided((2, 4), (stride, 1))
+        expected_x.copy_(x_real)
+        actual_x = torch.empty_strided((2, 4), (stride, 1))
+        actual_x.copy_(x_real)
+        indices_real = torch.tensor([0])
+        values_real = torch.full((1, 4), 10.0)
+        replacement_real = torch.full((2, 4), -1.0)
+        expected = f(expected_x, indices_real, values_real, replacement_real)
+        actual = gm(actual_x, indices_real, values_real, replacement_real)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x, expected_x)
 
     def test_counters_functionalize_old(self):
         ReinplaceCounters.clear()
@@ -2134,8 +2244,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         with V.set_fake_mode(detect_fake_mode([base.meta["val"]])):
             updater.incremental_update()
         self.assertIs(wrapped.args[1], aten.index_put_.default)
-        self.assertIsInstance(wrapped.meta["val"][0], FakeTensor)
-        self.assertIsInstance(wrapped.meta["val"][1], FakeTensor)
+        self.assertTrue(is_fake_tensor(wrapped.meta["val"][0]))
+        self.assertTrue(is_fake_tensor(wrapped.meta["val"][1]))
         self.assertEqual(
             wrapped.meta["val"][1].untyped_storage()._cdata, get_node_storage(base)
         )
@@ -2544,7 +2654,139 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 del inplaceable_ops[my_wait_functional._opoverload]
 
 
+def scatter(graph, inp, src, slot):
+    """One _generalized_scatter writing `src` into `inp[slot]`."""
+    view = ViewOp(aten.select.int, args=(0, slot), kwargs={})
+    return graph.call_function(_generalized_scatter, (inp, src, [view]))
+
+
+def make_scatter_chain(length):
+    """A graph holding one chain of `length` scatters into a single buffer.
+
+    Node i writes src{i} into slot i of the running buffer, giving the
+    gs(gs(gs(base, src0), src1), src2) shape that canonicalize_view_scatter_ops
+    produces for `for i in range(n): out[i] = src[i]`. Returns (graph, chain);
+    the caller adds the output node so it can splice in extra users first.
+    """
+    graph = torch.fx.Graph()
+    inp = graph.placeholder("base")
+    srcs = [graph.placeholder(f"src{i}") for i in range(length)]
+    chain = []
+    for slot, src in enumerate(srcs):
+        inp = scatter(graph, inp, src, slot)
+        chain.append(inp)
+    return graph, chain
+
+
+def recorded_lengths(graph):
+    """The chain length recorded on every _generalized_scatter, in graph order."""
+    return [
+        node.meta["scatter_chain_length"]
+        for node in graph.find_nodes(op="call_function", target=_generalized_scatter)
+    ]
+
+
+class TestScatterChainReinplacing(InductorTestCase):
+    def test_single_scatter_has_length_one(self):
+        graph, chain = make_scatter_chain(1)
+        graph.output(chain[-1])
+
+        annotate_scatter_chain_lengths(graph)
+
+        self.assertEqual(recorded_lengths(graph), [1])
+
+    def test_every_node_in_a_chain_reports_the_full_length(self):
+        graph, chain = make_scatter_chain(5)
+        graph.output(chain[-1])
+
+        annotate_scatter_chain_lengths(graph)
+
+        # All five must agree. A count that shrinks along the chain reinplaces
+        # the head and leaves the tail functional, which costs both lowerings.
+        self.assertEqual(recorded_lengths(graph), [5, 5, 5, 5, 5])
+
+    def test_chain_breaks_at_a_multi_user_intermediate(self):
+        graph, chain = make_scatter_chain(5)
+        # A second consumer materializes chain[2], so the scatters before and
+        # after it are two independent chains of 3 and 2.
+        graph.call_function(aten.mul.Tensor, (chain[2], 2))
+        graph.output(chain[-1])
+
+        annotate_scatter_chain_lengths(graph)
+
+        self.assertEqual(recorded_lengths(graph), [3, 3, 3, 2, 2])
+
+    def test_independent_chains_are_measured_separately(self):
+        graph = torch.fx.Graph()
+        base_a = graph.placeholder("base_a")
+        base_b = graph.placeholder("base_b")
+        srcs = [graph.placeholder(f"src{i}") for i in range(6)]
+        tail_a = base_a
+        for slot, src in enumerate(srcs[:2]):
+            tail_a = scatter(graph, tail_a, src, slot)
+        tail_b = base_b
+        for slot, src in enumerate(srcs[2:]):
+            tail_b = scatter(graph, tail_b, src, slot)
+        graph.output((tail_a, tail_b))
+
+        annotate_scatter_chain_lengths(graph)
+
+        self.assertEqual(recorded_lengths(graph), [2, 2, 4, 4, 4, 4])
+
+    def test_scatter_consumed_as_src_does_not_extend_the_chain(self):
+        graph = torch.fx.Graph()
+        base_a = graph.placeholder("base_a")
+        base_b = graph.placeholder("base_b")
+        src = graph.placeholder("src")
+        produced = scatter(graph, base_a, src, 0)
+        # `produced` is the source of the second scatter, not its base, so the
+        # two are separate chains of 1 rather than one chain of 2.
+        graph.output(scatter(graph, base_b, produced, 0))
+
+        annotate_scatter_chain_lengths(graph)
+
+        self.assertEqual(recorded_lengths(graph), [1, 1])
+
+    def test_lengths_survive_the_target_rewrite(self):
+        graph, chain = make_scatter_chain(5)
+        graph.output(chain[-1])
+        annotate_scatter_chain_lengths(graph)
+
+        # reinplace_inplaceable_ops_core walks forward and rewrites each target
+        # as it fires. Annotating up front is what stops the later nodes from
+        # measuring a chain truncated at the last rewritten node.
+        for node in chain[:3]:
+            node.target = _inplace_generalized_scatter
+
+        lengths = [node.meta["scatter_chain_length"] for node in chain]
+        self.assertEqual(lengths, [5, 5, 5, 5, 5])
+
+    @parametrize(
+        "threshold",
+        [
+            subtest(4, name="reinplaced"),
+            subtest(1000, name="functional"),
+        ],
+    )
+    def test_scatter_chain_matches_eager(self, threshold):
+        # A chain of 6 sits either side of these thresholds, so both the
+        # mutating and the functional lowering have to produce the same answer.
+        def fn(x):
+            out = torch.zeros(6, 4)
+            for i in range(6):
+                out[i] = x[i] * 2
+            return out
+
+        x = torch.randn(6, 4)
+        expected = fn(x)
+        torch._dynamo.reset()
+        with inductor_config.patch(reinplace_scatter_chain_threshold=threshold):
+            result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
+        self.assertEqual(result, expected)
+
+
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)
+instantiate_parametrized_tests(TestScatterChainReinplacing)
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:

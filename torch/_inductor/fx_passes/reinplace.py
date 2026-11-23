@@ -34,6 +34,7 @@ from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
 from torch._inductor.virtualized import V
+from torch._prims_common import is_contiguous_or_false
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
@@ -248,6 +249,36 @@ def should_reinplace_index_put(node: torch.fx.Node) -> bool:
     )
 
 
+def annotate_scatter_chain_lengths(graph: torch.fx.Graph) -> None:
+    """
+    Record on each _generalized_scatter node the length of the chain it is in.
+
+    Consider a generalized_scatter chain in the following format:
+        gs(gs(gs(base, s0, ...), s1, ...), s2, ...)
+    Every generalized_scatter op is given the same length of 3 and is stored in the
+    "scatter_chain_length" field in the node's metadata. Note that only single-user
+    links in the example above count.
+
+    When should_reinplace_scatter() runs, it will use this field to make decisions on
+    whether to preserve the chained scatter (functional form) or reinplace the chain into
+    a mutate in-place form that costs more kernel launches but is more memory bw efficient
+    per threadblock.
+    """
+    for head in graph.find_nodes(op="call_function", target=_generalized_scatter):
+        if "scatter_chain_length" in head.meta:
+            continue
+        chain = [head]
+        tail = head
+        while len(tail.users) == 1:
+            (user,) = tail.users
+            if user.target is not _generalized_scatter or user.args[0] is not tail:
+                break
+            chain.append(user)
+            tail = user
+        for node in chain:
+            node.meta["scatter_chain_length"] = len(chain)
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -277,6 +308,17 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     # realized as the output is a user of the input
     if inp.op in ("placeholder", "get_attr") and any(  # type: ignore[union-attr]
         user.target is aten.copy_.default and user.args[0] is inp for user in node.users
+    ):
+        return True
+
+    # TODO This can and should be moved to a fxgraph pass upstream
+    # A long chain of scatters should NOT be kept in functional variant, as each thread block
+    # in functional variant is required to load all input pointers instead of just the one it
+    # needs. Therefore, we should reinplace for longer scatter chains.
+    chain_length = node.meta.get("scatter_chain_length", 1)
+    if (
+        config.reinplace_scatter_chain_threshold > 0
+        and chain_length >= config.reinplace_scatter_chain_threshold
     ):
         return True
 
@@ -318,11 +360,20 @@ def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
             or scatter_always_uses_mutation(node)
         )
 
+        prev = node.prev
         with graph.inserting_before(node):
             if use_mutation:
                 new_node = _decompose_scatter_mutating(graph, node)
             else:
                 new_node = _decompose_scatter_functional(graph, node)
+
+        # Keep user stream/mempool annotations on the decomposed nodes, so they
+        # run in the same context as the scatter they replace.
+        if custom := node.meta.get("custom"):
+            inserted = node.prev
+            while inserted is not prev:
+                inserted.meta["custom"] = custom.copy()
+                inserted = inserted.prev
 
         node.replace_all_uses_with(new_node)
         graph.erase_node(node)
@@ -381,6 +432,9 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         def can_fuse():
             if src.target is not _generalized_scatter:  # type: ignore[union-attr]
                 return False
+            # Fusing would move one scatter into the other's stream/mempool.
+            if src.meta.get("custom") != node.meta.get("custom"):  # type: ignore[union-attr]
+                return False
             src_inp, _src_src, _src_scatter_view_op = src.args  # type: ignore[union-attr]
 
             inp_base = node_to_view_base.get(inp, inp)  # type: ignore[arg-type]
@@ -390,6 +444,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 scatter_view_op,
             ]
 
+        custom = node.meta.get("custom")
         if not can_fuse():
             with graph.inserting_before(node):
                 new_node = graph_call_function(
@@ -399,6 +454,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     src,
                     [scatter_view_op],
                 )
+            if custom:
+                new_node.meta["custom"] = custom.copy()
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
             return
@@ -412,6 +469,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                 src_src,
                 [scatter_view_op, *src_scatter_view_op],  # type: ignore[misc]
             )
+            if custom:
+                new_node.meta["custom"] = custom.copy()
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
 
@@ -423,6 +482,8 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
                     *node.args[2:],
                     **node.kwargs,
                 )
+                if custom:
+                    new_src.meta["custom"] = custom.copy()
 
                 handle_views(new_src)
                 src.replace_all_uses_with(new_src)  # type: ignore[union-attr]
@@ -559,9 +620,12 @@ def reinplace_inplaceable_ops_core(
     side effects of the current node. If the current node is not used later as
     well as no view of this node is used later in the graph, then it is safe to
     inplace as there would be no way to observe the side effects.
-    This condition is slightly different for graph inputs where they can only
-    be inplaced if the above condition is true and there's a copy_ in the
-    epilogue that signals that the caller wants to observe the mutation.
+    Graph inputs are also observable by the caller, so they require a later
+    copy_ into the input. A candidate-specific copyback preserves the requested
+    mutation. For input views, a full-storage overwrite can instead hide the
+    earlier mutation, provided the input is not read before the overwrite and
+    no result made to alias it remains live across the overwrite. Permission
+    to reuse input storage does not by itself permit removing that copy_.
 
     Unlike JIT Inductor, AOTInductor currently unlifts weights and buffers from
     input args, so instead of checking mutation on placeholder, AOTInductor
@@ -749,6 +813,8 @@ def reinplace_inplaceable_ops_core(
         )
 
     def can_inplace(node, mutated_arg, *, result_nodes=None):
+        # For the expanded input-view permission, None infers tensor results;
+        # [] disables that permission when structured results are not tracked.
         # ls should be a list of tensors that all shares the same storage.
         def _overlap(ls) -> bool:
             try:
@@ -765,22 +831,6 @@ def reinplace_inplaceable_ops_core(
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
                 return False
-            if node.target in inplaceable_foreach_ops:
-                foreach_results = {
-                    user.args[1]: user
-                    for user in node.users
-                    if user.target is operator.getitem and isinstance(user.args[1], int)
-                }
-                return all(
-                    can_inplace(
-                        node,
-                        arg,
-                        result_nodes=(
-                            [foreach_results[index]] if index in foreach_results else []
-                        ),
-                    )
-                    for index, arg in enumerate(mutated_arg)
-                )
             return all(can_inplace(node, arg, result_nodes=[]) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:
@@ -798,63 +848,24 @@ def reinplace_inplaceable_ops_core(
             if _overlap([mutated_arg.meta["val"], v.meta["val"]])
         ]
 
-        # Canonical references can make previously rejected consumers eligible.
         mutated_storage = get_node_storage(mutated_arg)
+        removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
+        result_views = OrderedSet()
         if mutated_storage in canonicalized_storages:
-            result_views = OrderedSet([node])
+            # Canonical references can make previously rejected consumers eligible.
+            result_views.add(node)
             for result in pytree.tree_leaves(node.meta.get("val")):
                 if isinstance(result, torch.Tensor) and torch._C._has_storage(result):
                     result_views.update(storage_to_nodes[get_storage(result)])
-            removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
-            mutations = OrderedSet(
-                user
-                for alias in storage_to_nodes[mutated_storage]
-                for user in alias.users
-                if node_order[user] > node_order[node]
-                and user is not removable_copyback
-            )
-            for mutation in mutations:
-                if writes_storage(
-                    mutation, mutated_storage
-                ) and any_use_of_views_after_node(
-                    mutation,
-                    result_views,
-                    copy_node=None,
-                    mutated_arg=node,
-                    include_current=True,
-                ):
-                    return False
+        elif (result_storage := get_node_storage(node)) is not None:
+            result_views.update(storage_to_nodes[result_storage])
 
-        result_storage = get_node_storage(node)
-        if result_storage is not None:
-            removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
-            mutated_storage = get_node_storage(mutated_arg)
-            possible_mutations = OrderedSet(
-                user
-                for alias in storage_to_nodes[mutated_storage]
-                for user in alias.users
-            )
-            for mutation in possible_mutations:
-                if not writes_storage(mutation, mutated_storage):
-                    continue
-                if node_order[mutation] <= node_order[node]:
-                    continue
-                # Successful reinplacement removes this copyback, so it cannot
-                # overwrite a live functional result. Other later writes still matter.
-                if mutation is removable_copyback:
-                    continue
-                if any_use_of_views_after_node(
-                    mutation,
-                    storage_to_nodes[result_storage],
-                    copy_node=None,
-                    mutated_arg=node,
-                    include_current=True,
-                ):
-                    return False
-
+        preserved_copyback_views = OrderedSet()
         copy_node = None
         mutated_arg_base = mutated_arg
         if any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
+            # Without a later copy into the input, the caller could observe an
+            # extra mutation even if the graph has no remaining reads of it.
             mutated_arg_base = _get_view_base(mutated_arg)
             # Use the next input overwrite for permission and liveness checks.
             copy_node = min(
@@ -864,18 +875,17 @@ def reinplace_inplaceable_ops_core(
             )
             if copy_node is None or node_order[copy_node] <= node_order[node]:
                 return False
-            if mutated_arg.op in ("placeholder", "get_attr") or (
-                copy_node is copy_node_for_reinplaced_arg(node, mutated_arg)
-            ):
-                return not any_use_of_views_after_node(
-                    node,
-                    shared_view_nodes,
-                    copy_node=copy_node,
-                    mutated_arg=mutated_arg_base,
-                )
+        # Direct input mutations and recognized copybacks keep their permission.
+        if (
+            copy_node is not None
+            and mutated_arg.op not in ("placeholder", "get_attr")
+            and copy_node is not removable_copyback
+        ):
+            # An unrelated copy can hide the view mutation only if it overwrites
+            # all input storage, including any bytes outside the input's shape.
             base_val = mutated_arg_base.meta["val"]
             if not (
-                base_val.is_contiguous()
+                is_contiguous_or_false(base_val)
                 and statically_known_true(base_val.storage_offset() == 0)
                 and statically_known_true(
                     base_val.numel() * base_val.element_size()
@@ -885,6 +895,10 @@ def reinplace_inplaceable_ops_core(
                 return False
 
             if result_nodes is None:
+                if not isinstance(node.meta.get("val"), torch.Tensor) and any(
+                    user.target is not operator.getitem for user in node.users
+                ):
+                    return False
                 result_nodes = (
                     [node]
                     if isinstance(node.meta.get("val"), torch.Tensor)
@@ -895,8 +909,12 @@ def reinplace_inplaceable_ops_core(
                     ]
                 )
             source_storage = get_node_storage(copy_node.args[1])
+            # A self-copy or aliased source would preserve the early mutation
+            # instead of restoring the input's required final values.
             if source_storage is None or source_storage == mutated_storage:
                 return False
+            # Untracked outputs could remain live after the overwrite and would
+            # observe different values once reinplacement aliases them to the input.
             output_storages = FakeTensorUpdater._storage_ids(node.meta["val"])
             tracked_storages = OrderedSet(
                 get_node_storage(result) for result in result_nodes
@@ -906,16 +924,38 @@ def reinplace_inplaceable_ops_core(
             ):
                 return False
             for result in result_nodes:
-                if get_node_storage(copy_node.args[1]) == get_node_storage(result):
+                views = storage_to_nodes[get_node_storage(result)]
+                result_views.update(views)
+                if source_storage == get_node_storage(result):
+                    # A copy of the result must preserve its view/copy semantics.
                     if not _is_layout_preserving_view_copy_back(
                         mutated_arg_base, copy_node.args[1], mutated_arg, result
                     ):
                         return False
-                elif any_use_of_views_after_node(
-                    copy_node,
-                    storage_to_nodes[get_node_storage(result)],
+                    preserved_copyback_views.update(views)
+
+        if result_views:
+            mutations = OrderedSet(
+                user
+                for alias in storage_to_nodes[mutated_storage]
+                for user in alias.users
+                if node_order[user] > node_order[node]
+                and user is not removable_copyback
+            )
+            for mutation in mutations:
+                views = (
+                    result_views - preserved_copyback_views
+                    if mutation is copy_node
+                    else result_views
+                )
+                if writes_storage(
+                    mutation, mutated_storage
+                ) and any_use_of_views_after_node(
+                    mutation,
+                    views,
                     copy_node=None,
-                    mutated_arg=result,
+                    mutated_arg=node,
+                    include_current=True,
                 ):
                     return False
 
@@ -1509,6 +1549,12 @@ def reinplace_inplaceable_ops(
         # We run fake_tensor_updater to update the alias information.
         # Correct alias information is required for `reinplace_inplaceable_ops_core`.
         fake_tensor_updater.incremental_update()
+        # Calculate scatter chain length on scatter nodes if we intend to reinplace long
+        # scatter chains. Reinplacing scatter may be more efficient on some hardware types.
+        # Must calculate scatter chain length on original fx graph. Therefore should
+        # precede reinplace_inplaceable_ops_core as that pass rewrites the scatter nodes.
+        if config.reinplace_scatter_chain_threshold > 0:
+            annotate_scatter_chain_lengths(graph)
         reinplace_inplaceable_ops_core(
             graph,
             fake_tensor_updater=fake_tensor_updater,
