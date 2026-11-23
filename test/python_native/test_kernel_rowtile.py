@@ -133,12 +133,14 @@ class TestKernelRowTile(TestCase):
             (torch.float32, 31),
             (torch.bfloat16, 8),
             (torch.bfloat16, 16),
+            (torch.float64, 8),
         ),
     )
     def test_narrow_one_thread_rows_match_warp_chains(self, dtype, columns):
-        """Narrow one-thread rows fold the bits of WARP accumulators, which the row
-        padded with identities to WARP elements takes, signed zeros, subnormal sums and
-        NaNs included."""
+        """Narrow one-thread rows match the row padded with identities to WARP elements
+        bitwise, signed zeros, a subnormal sum and NaNs included. Widths 16 (fp32), 8 and
+        16 (bf16) and 8 (fp64) reach the leaf branch; 1 and 3 fold only the masked tail,
+        and 17 and 31 keep WARP chains."""
         M, inf = 4096, float("inf")
         gen = torch.Generator("cuda").manual_seed(0)
         x = torch.randn(M, columns, device="cuda", generator=gen)
@@ -146,7 +148,7 @@ class TestKernelRowTile(TestCase):
         x[: M // 2] = torch.tensor([0.0, -0.0], device="cuda")[signs]
         x[M // 2 : M // 2 + 64, columns // 2] = float("nan")
         x[-64:, 0], x[-64:, -1] = inf, -inf
-        x[-128:-64, 0], x[-128:-64, -1] = -1.5e-38, 1e-38
+        x[:64, 0], x[:64, -1] = -1.5e-38, 1e-38
         x = x.to(dtype)
         kw, f32 = {"threads_per_row": 1, "use_tma": False}, [torch.float32]
         for name, trait, pad in (
