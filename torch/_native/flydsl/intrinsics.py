@@ -42,16 +42,21 @@ def minsi(lhs: Integer, rhs: Integer) -> Integer:
 
 
 def wave_barrier() -> None:
-    """Order the lanes of one wave, with no memory fence.
+    """Synchronize the lanes of one wave and order their memory accesses.
 
-    Lowers to ``rocdl.wave.barrier``, which FlyDSL 0.3.1 and later provide. On
-    0.3.0 it falls back to a workgroup barrier: still correct, but slower.
+    ``rocdl.wave.barrier`` alone is modelled as touching no memory, so LLVM
+    may move loads and stores across it. The wavefront-scope release and
+    acquire fences around it keep them in place; on gfx9 they emit no
+    instructions. FlyDSL releases without ``rocdl.wave_barrier`` (0.3.0) get a
+    workgroup barrier instead: still correct, but slower.
     Every lane that must be ordered has to be in the same wave.
     """
-    if hasattr(fx.rocdl, "wave_barrier"):
-        fx.rocdl.wave_barrier()
-    else:
+    if not hasattr(fx.rocdl, "wave_barrier"):
         gpu.barrier()
+        return
+    llvm.FenceOp(llvm.AtomicOrdering.release, syncscope="wavefront")
+    fx.rocdl.wave_barrier()
+    llvm.FenceOp(llvm.AtomicOrdering.acquire, syncscope="wavefront")
 
 
 def atomic_add(
