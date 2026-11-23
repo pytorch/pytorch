@@ -5136,6 +5136,7 @@ if HAS_CUDA_AND_TRITON:
                     out = fn_compiled(inp)
                     out.sum().backward()
                 self.assertEqual(out, inp.detach().pow(2).sin())
+                self.assertEqual(inp.grad, 2 * inp.detach() * inp.detach().pow(2).cos())
                 self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits)
                 # The override is reported once, on a hit as on a compile.
                 self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
