@@ -2353,7 +2353,14 @@ class NewClassVariable(UserDefinedClassVariable):
         value: VariableTracker | None,
     ) -> VariableTracker:
         if value is None:
-            return super().tp_setattro_impl(tx, name_var, value)
+            unimplemented(
+                gb_type="Deleting an attribute from a class created in the same frame",
+                context=f"delattr({self}, {name_var})",
+                explanation="Dynamo cannot safely replay this deletion when rebuilding the class.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
         if not name_var.is_python_constant():
             unimplemented(
                 gb_type="Non-constant class attribute mutation",

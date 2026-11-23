@@ -3471,6 +3471,18 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if any(
+            isinstance(arg, variables.user_defined.NewClassVariable)
+            for arg in itertools.chain((_format_string,), args, kwargs.values())
+        ):
+            unimplemented(
+                gb_type="Introspection on a class created in the same frame",
+                context="formatting a class created in the same frame",
+                explanation="Dynamo cannot safely format this class while it has deferred mutations.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+                preserve_skip_frame_after_inline=True,
+            )
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(tx, format_string, list(args), kwargs)

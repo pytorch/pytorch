@@ -404,6 +404,21 @@ class MiscTests(torch._inductor.test_case.TestCase):
             cls.__qualname__ = "B"
             return x + int("B" in f"{cls}")
 
+        def read_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in format(cls))
+
+        def read_str_format(x):
+            cls = type("A", (), {})
+            cls.__qualname__ = "B"
+            return x + int("B" in "{}".format(cls))
+
+        def delete_attr(x):
+            cls = type("A", (), {"value": 1})
+            del cls.value
+            return x + int(hasattr(cls, "value"))
+
         cases = (
             (read_dict, "Introspection on a class created in the same frame"),
             (instantiate, "Instantiating a class created in the same frame"),
@@ -411,6 +426,12 @@ class MiscTests(torch._inductor.test_case.TestCase):
             (read_repr, "Introspection on a class created in the same frame"),
             (read_str, "Introspection on a class created in the same frame"),
             (read_fstring, "Introspection on a class created in the same frame"),
+            (read_format, "Introspection on a class created in the same frame"),
+            (read_str_format, "Introspection on a class created in the same frame"),
+            (
+                delete_attr,
+                "Deleting an attribute from a class created in the same frame",
+            ),
         )
         x = torch.ones(2)
         for fn, error in cases:
