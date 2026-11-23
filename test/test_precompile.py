@@ -6247,13 +6247,14 @@ class TestPrecompileDynamoCapture(TestCase):
         from torch._dynamo.utils import counters
 
         single = self.mod.single
-        with self._capture(single) as cap:
-            y = cap(self.model, self.x2)
+        with torch._inductor.config.patch({"triton.cudagraphs": False}):
+            with self._capture(single) as cap:
+                y = cap(self.model, self.x2)
         counters.clear()
         with torch._inductor.config.patch({"triton.cudagraphs": True}):
             f = load(self.artifact, self.cache)
             self.assertEqual(f(self.model, self.x2), y)
-        # Not a skip: the graph was never meant to run as a CUDA graph.
+        # A CPU graph: no CUDA graph was skipped.
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     @parametrize("backend", ["inductor", "eager"])
@@ -6882,7 +6883,8 @@ class TestPrecompileCudagraphs(TestCase):
     @parametrize("how", ["ambient", "options"])
     def test_an_artifact_captured_without_cudagraphs_serves_none(self, how):
         if how == "ambient":
-            y, meta = self._capture_step(self.mod.step)
+            with torch._inductor.config.patch({"triton.cudagraphs": False}):
+                y, meta = self._capture_step(self.mod.step)
         else:
             # The options win over the global flag, as under torch.compile.
             off = {"triton.cudagraphs": False}
@@ -6900,12 +6902,13 @@ class TestPrecompileCudagraphs(TestCase):
 
     def test_a_graph_an_override_kept_out_serves_without_a_cudagraph(self):
         # Its continuation compiled for CUDA graphs, so load post-compiles with
-        # them on; the graph the override kept out has nothing to be wrapped with.
+        # them on; the graph the override kept out has nothing to be wrapped
+        # with, which load counts as a skip, as the capture's compile did.
         fn = self.mod.keeps_one_graph_out
         y, meta = self._capture_step(fn, mode="reduce-overhead")
         self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
         served = self._serve_in_fresh_process(y)
-        self.assertEqual((served["recorded"], served["skips"]), (1, 0))
+        self.assertEqual((served["recorded"], served["skips"]), (1, 1))
 
     def test_a_graph_options_kept_out_of_cudagraphs_serves_without_one(self):
         # Whether a graph can run as a CUDA graph is decided when it compiles
