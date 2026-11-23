@@ -16,6 +16,7 @@ class XPUCodename(enum.Enum):
     PTL = "PTL"  # Panther Lake
     WCL = "WCL"  # Wildcat Lake
     CRI = "CRI"
+    NVL_P = "NVL-P"
 
 
 class XPUArch(enum.IntEnum):
@@ -53,7 +54,7 @@ _DEVICE_ID_TO_CODENAME = {
     0xE221: XPUCodename.BMG,
     0xE222: XPUCodename.BMG,
     0xE223: XPUCodename.BMG,
-    # LNL/PTL/WCL/CRI ids: intel/compute-runtime device_ids_configs_*.h
+    # LNL/PTL/WCL/CRI/NVL-P ids: intel/compute-runtime device_ids_configs_*.h
     0x6420: XPUCodename.LNL,
     0x64A0: XPUCodename.LNL,
     0x64B0: XPUCodename.LNL,
@@ -81,6 +82,17 @@ _DEVICE_ID_TO_CODENAME = {
     0x6754: XPUCodename.CRI,
     0x6755: XPUCodename.CRI,
     0x6756: XPUCodename.CRI,
+    0xD74A: XPUCodename.NVL_P,
+    0xD74B: XPUCodename.NVL_P,
+    0xD750: XPUCodename.NVL_P,
+    0xD751: XPUCodename.NVL_P,
+    0xD752: XPUCodename.NVL_P,
+    0xD753: XPUCodename.NVL_P,
+    0xD754: XPUCodename.NVL_P,
+    0xD755: XPUCodename.NVL_P,
+    0xD756: XPUCodename.NVL_P,
+    0xD757: XPUCodename.NVL_P,
+    0xD75F: XPUCodename.NVL_P,
 }
 
 _CODENAME_TO_ARCH = {
@@ -90,6 +102,7 @@ _CODENAME_TO_ARCH = {
     XPUCodename.PTL: XPUArch.Xe3,
     XPUCodename.WCL: XPUArch.Xe3,
     XPUCodename.CRI: XPUArch.Xe3P,
+    XPUCodename.NVL_P: XPUArch.Xe3P,
 }
 
 
