@@ -499,9 +499,6 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 precisionOverride({torch.float: 2e-4}), "TestFFT", "test_reference_nd"
             ),
-            # Mismatched elements!
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warnings"),
         ),
     ),
     SpectralFuncInfo(
@@ -526,8 +523,6 @@ op_db: list[OpInfo] = [
         decorators=[
             # The values for attribute 'shape' do not match: torch.Size([5, 6, 5]) != torch.Size([5, 6, 6]).
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out_warning"),
-            # Mismatched elements!
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_out"),
             DecorateInfo(
                 precisionOverride({torch.float: 2e-4}), "TestFFT", "test_reference_nd"
             ),

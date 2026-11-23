@@ -629,6 +629,10 @@ static Tensor fft_ihfftn_impl(
   constexpr std::string_view fname = "ihfftn";
   auto desc = canonicalize_fft_shape_and_dim_args(self, s, dim);
   TORCH_CHECK(!desc.shape.empty(), "ihfftn must transform at least one axis");
+  if (out.defined()) {
+    TORCH_CHECK(out.is_complex(), fname,
+                " expects a complex output tensor, but got ", out.scalar_type());
+  }
   auto input = promote_tensor_fft(self, /*require_complex=*/false);
   auto x = resize_fft_input(input, desc.dim, desc.shape);
   const auto norm = static_cast<int64_t>(
@@ -637,7 +641,11 @@ static Tensor fft_ihfftn_impl(
   const auto last_dim = desc.dim.back();
   auto tmp = at::_fft_r2c(x, last_dim, norm, /*onesided=*/true);
   if (desc.dim.size() == 1) {
-    return out.defined() ? at::conj_physical_out(tmp, out) : tmp.conj();
+    if (out.defined()) {
+      auto out_mut = out;
+      return at::conj_physical_out(out_mut, tmp);
+    }
+    return tmp.conj();
   }
 
   tmp = at::conj_physical(tmp);

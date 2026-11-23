@@ -601,6 +601,41 @@ class TestFFT(TestCase):
             actual = torch.fft.ihfftn(input, dim=dim, norm="ortho")
             self.assertEqual(expect, actual)
 
+            out = torch.empty_like(expect)
+            torch.fft.ihfftn(input, dim=dim, norm="ortho", out=out)
+            self.assertEqual(expect, out)
+
+    @skipCPUIfNoFFT
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.double)
+    def test_ihfft_single_axis_out(self, device, dtype):
+        x = torch.arange(1.0, 9.0, device=device, dtype=dtype)
+        expected = torch.fft.ihfftn(x)
+        out = torch.full_like(expected, 7.0)
+        res = torch.fft.ihfftn(x, out=out)
+        self.assertIs(res, out)
+        self.assertEqual(expected, out)
+
+        x_2d = torch.arange(1.0, 9.0, device=device, dtype=dtype).reshape(2, 4)
+        for dim in (0, 1, -1, -2):
+            expected = torch.fft.ihfft2(x_2d, dim=dim)
+            out = torch.full_like(expected, 7.0)
+            res = torch.fft.ihfft2(x_2d, dim=dim, out=out)
+            self.assertIs(res, out)
+            self.assertEqual(expected, out)
+
+            expected_n = torch.fft.ihfftn(x_2d, dim=(dim,))
+            out_n = torch.full_like(expected_n, 7.0)
+            res_n = torch.fft.ihfftn(x_2d, dim=(dim,), out=out_n)
+            self.assertIs(res_n, out_n)
+            self.assertEqual(expected_n, out_n)
+
+        bad_out = torch.empty_like(x)
+        with self.assertRaisesRegex(RuntimeError, "ihfftn expects a complex output tensor"):
+            torch.fft.ihfftn(x, out=bad_out)
+        with self.assertRaisesRegex(RuntimeError, "ihfftn expects a complex output tensor"):
+            torch.fft.ihfft2(x_2d, dim=0, out=bad_out)
+
 
     # 2d-fft tests
 
