@@ -254,7 +254,7 @@ impl OpcodeTable {
                 version.major, version.minor
             )));
         }
-        let opcode = py.import_bound("opcode")?;
+        let opcode = py.import("opcode")?;
         let names: Vec<String> = opcode.getattr("opname")?.extract()?;
         let caches: Vec<u32> = opcode.getattr("_inline_cache_entries")?.extract()?;
         let kinds = names.iter().map(|n| bc_from_name(n)).collect();

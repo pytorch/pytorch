@@ -953,7 +953,7 @@ impl<'a> Builder<'a> {
         let obj = unsafe {
             let s = ffi::PyUnicode_FromStringAndSize(name.as_ptr() as *const _, name.len() as isize);
             if s.is_null() {
-                return Err(Python::with_gil(PyErr::fetch));
+                return Err(Python::attach(PyErr::fetch));
             }
             PyObj::from_owned(s)
         };
@@ -1000,7 +1000,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     }
     let cellvars: Vec<String> = code.getattr("co_cellvars")?.extract()?;
     let co_code = code.getattr("co_code")?;
-    let co_code = co_code.downcast::<PyBytes>()?;
+    let co_code = co_code.cast::<PyBytes>()?;
     let instrs = bytecode::decode(table, co_code);
     if instrs.is_empty() {
         return unsupported("empty bytecode");
@@ -1012,7 +1012,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         .collect();
 
     let exc_table = code.getattr("co_exceptiontable")?;
-    let exc_table = exc_table.downcast::<PyBytes>()?;
+    let exc_table = exc_table.cast::<PyBytes>()?;
     let mut handled = bytecode::parse_exception_table(exc_table.as_bytes());
     // The handlers of an inlined comprehension only restore its variable and
     // re-raise. As long as nothing in the function catches exceptions, that
@@ -1034,7 +1034,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     }
 
     let mut lines: Vec<(u32, u32, i32)> = Vec::new();
-    for item in code.call_method0("co_lines")?.iter()? {
+    for item in code.call_method0("co_lines")?.try_iter()? {
         let (start, end, line): (u32, u32, Option<i32>) = item?.extract()?;
         if let Some(line) = line {
             lines.push((start, end, line));
@@ -1175,9 +1175,9 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
 
     // ---- function metadata ----
     let consts_tuple = code.getattr("co_consts")?;
-    let consts_tuple = consts_tuple.downcast::<PyTuple>()?;
+    let consts_tuple = consts_tuple.cast::<PyTuple>()?;
     let names_tuple = code.getattr("co_names")?;
-    let names_tuple = names_tuple.downcast::<PyTuple>()?;
+    let names_tuple = names_tuple.cast::<PyTuple>()?;
     let mut consts: Vec<PyObj> = Vec::new();
     for c in consts_tuple.iter() {
         consts.push(unsafe { PyObj::from_borrowed(c.as_ptr()) });
@@ -1239,7 +1239,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
         instrs.iter().filter(|i| i.op == Bc::MakeCell).map(|i| i.arg).collect();
     let freevars: Vec<String> = code.getattr("co_freevars")?.extract()?;
     let varnames_tuple = code.getattr("co_varnames")?;
-    let varnames_tuple = varnames_tuple.downcast::<PyTuple>()?;
+    let varnames_tuple = varnames_tuple.cast::<PyTuple>()?;
     let mut varnames: Vec<String> = varnames_tuple.extract()?;
     // The frame's slots: the locals, then the cells that are not also
     // arguments, then (not numbered here) the cells of the closure.
@@ -1464,14 +1464,14 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     drop(builder);
 
     let globals = func.getattr("__globals__")?;
-    globals.downcast::<PyDict>()?;
+    globals.cast::<PyDict>()?;
     // The interpreter reads the globals of such a function through the
     // mapping protocol (a `__missing__`, a `__getitem__` of its own).
     if !globals.is_exact_instance_of::<PyDict>() {
         return unsupported("the globals of the function are not a plain dict");
     }
     let builtins = func.getattr("__builtins__")?;
-    let builtins = if builtins.downcast::<PyDict>().is_ok() {
+    let builtins = if builtins.cast::<PyDict>().is_ok() {
         builtins
     } else {
         builtins.getattr("__dict__")?
