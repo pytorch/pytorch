@@ -925,6 +925,56 @@ impl Compiled {
                 }
                 Ok(v)
             }
+            Op::ImportName { name, fromlist, level } => {
+                // What the interpreter does: builtins.__import__(name, globals,
+                // locals, fromlist, level).
+                let import = ffi::PyDict_GetItemString(f.builtins.as_ptr(), c"__import__".as_ptr());
+                if import.is_null() {
+                    set_error(ffi::PyExc_ImportError, "__import__ not found".to_string());
+                    return Err(());
+                }
+                let args = [
+                    f.consts[*name as usize].as_ptr(),
+                    f.globals.as_ptr(),
+                    ffi::Py_None(),
+                    self.obj(regs, *fromlist),
+                    self.obj(regs, *level),
+                ];
+                checked(ffi::PyObject_Vectorcall(import, args.as_ptr(), 5, null_mut()))
+            }
+            Op::ImportFrom(module, name) => {
+                let module = self.obj(regs, *module);
+                let name = f.consts[*name as usize].as_ptr();
+                let v = ffi::PyObject_GetAttr(module, name);
+                if !v.is_null() || ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) == 0 {
+                    return checked(v);
+                }
+                // A submodule that is still being imported is in sys.modules
+                // before it is an attribute of its package.
+                ffi::PyErr_Clear();
+                let package = ffi::PyObject_GetAttrString(module, c"__name__".as_ptr());
+                let mut found = null_mut();
+                if !package.is_null() {
+                    let full = ffi::PyUnicode_FromFormat(c"%U.%U".as_ptr(), package, name);
+                    if !full.is_null() {
+                        found = pyffi::PyImport_GetModule(full);
+                        ffi::Py_DECREF(full);
+                    }
+                }
+                if found.is_null() {
+                    ffi::PyErr_Clear();
+                    set_error(
+                        ffi::PyExc_ImportError,
+                        format!(
+                            "cannot import name '{}' from '{}'",
+                            pyffi::str_to_string(name),
+                            if package.is_null() { "?".to_string() } else { pyffi::str_to_string(package) }
+                        ),
+                    );
+                }
+                xdecref(package);
+                checked(found)
+            }
             Op::LoadSlot(slot) => {
                 let o = reg(regs, *slot);
                 capi::retain(o);
@@ -1289,6 +1339,52 @@ impl Compiled {
                 status(ffi::PyDict_Update(d, o))
             }
             Op::ListToTuple(l) => checked(ffi::PyList_AsTuple(self.obj(regs, *l))),
+            Op::UnpackEx(seq, before, after) => {
+                let seq = self.obj(regs, *seq);
+                let items = ffi::PySequence_List(seq);
+                if items.is_null() {
+                    if ffi::PyErr_ExceptionMatches(ffi::PyExc_TypeError) != 0 {
+                        ffi::PyErr_Clear();
+                        set_error(
+                            ffi::PyExc_TypeError,
+                            format!("cannot unpack non-iterable {} object", pyffi::type_name(seq)),
+                        );
+                    }
+                    return Err(());
+                }
+                let (before, after) = (*before as isize, *after as isize);
+                let size = ffi::PyList_GET_SIZE(items);
+                if size < before + after {
+                    ffi::Py_DECREF(items);
+                    set_error(
+                        ffi::PyExc_ValueError,
+                        format!(
+                            "not enough values to unpack (expected at least {}, got {})",
+                            before + after,
+                            size
+                        ),
+                    );
+                    return Err(());
+                }
+                let out = ffi::PyTuple_New(before + 1 + after);
+                let middle = ffi::PyList_GetSlice(items, before, size - after);
+                if out.is_null() || middle.is_null() {
+                    ffi::Py_DECREF(items);
+                    xdecref(out);
+                    xdecref(middle);
+                    return Err(());
+                }
+                for i in 0..before {
+                    ffi::PyTuple_SET_ITEM(out, i, new_ref(ffi::PyList_GET_ITEM(items, i)));
+                }
+                ffi::PyTuple_SET_ITEM(out, before, middle);
+                for i in 0..after {
+                    let item = ffi::PyList_GET_ITEM(items, size - after + i);
+                    ffi::PyTuple_SET_ITEM(out, before + 1 + i, new_ref(item));
+                }
+                ffi::Py_DECREF(items);
+                Ok(out)
+            }
             Op::Unpack(seq, n) => {
                 let seq = self.obj(regs, *seq);
                 let n = *n as isize;
