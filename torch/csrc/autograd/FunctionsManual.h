@@ -1221,8 +1221,8 @@ Tensor values_backward(const Tensor& grad, const Tensor& self);
 std::tuple<Tensor, Tensor> philox_uniform_bounds_backward(
     const Tensor& grad,
     const Tensor& key,
-    const Tensor& low,
-    const Tensor& high,
+    c10::SymIntArrayRef low_sizes,
+    c10::SymIntArrayRef high_sizes,
     std::array<bool, 2> grad_input_mask);
 
 Tensor philox_uniform_bounds_jvp(
@@ -1234,8 +1234,8 @@ Tensor philox_uniform_bounds_jvp(
 std::tuple<Tensor, Tensor> philox_normal_params_backward(
     const Tensor& grad,
     const Tensor& key,
-    const Tensor& mean,
-    const Tensor& std,
+    c10::SymIntArrayRef mean_sizes,
+    c10::SymIntArrayRef std_sizes,
     std::array<bool, 2> grad_input_mask);
 
 Tensor philox_normal_params_jvp(
