@@ -291,15 +291,17 @@ Tensor _philox_key_fold_in_cpu(const Tensor& key, int64_t data) {
 }
 
 Tensor _philox_key_fold_in_tensor_cpu(const Tensor& key, const Tensor& data) {
-  TORCH_CHECK(data.scalar_type() == kUInt64,
-      "_philox_key_fold_in: data must have dtype uint64, got ",
+  TORCH_CHECK(data.scalar_type() == kUInt64 || data.scalar_type() == kLong,
+      "_philox_key_fold_in: data must have dtype uint64 or int64, got ",
       data.scalar_type());
   // TODO: Relax this and allow for arbitrary data shape that broadcasts with
   // batched keys?
   TORCH_CHECK(data.numel() == 1,
       "_philox_key_fold_in: data must be a single value, got ",
       data.numel(), " elements");
-  return philox_key_fold_in_impl(key, data.const_data_ptr<uint64_t>()[0]);
+  // Read int64 as uint64, matching the int overload's remap of negative values.
+  auto* data_ptr = static_cast<const uint64_t*>(data.const_data_ptr());
+  return philox_key_fold_in_impl(key, data_ptr[0]);
 }
 
 Tensor& _philox_uniform_cpu_(Tensor& self, const Tensor& key, double low, double high) {
