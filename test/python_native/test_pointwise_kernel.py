@@ -774,6 +774,7 @@ class TestPointwiseKernel(TestCase):
             "cpu_rank",
             "casts",
             "results",
+            "load",
         ),
     )
     def test_engine_rejects_invalid_operands_outputs(
@@ -809,6 +810,8 @@ class TestPointwiseKernel(TestCase):
             kwargs, message = {"input_casts": ()}, "input cast count"
         elif case == "results":
             kwargs, message = {"result_dtypes": ()}, "result dtype count"
+        elif case == "load":
+            kwargs, message = {"load": "TMA"}, "load mode"
         with self.assertRaisesRegex(ValueError, message):
             kernel.run(
                 ops.get_fn("_identity"),
