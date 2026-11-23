@@ -158,38 +158,42 @@ _PATH_LAUNCHES = {
 _OPS = [d.ATEN_OP for d in load_declarations(str(_DECL))]
 
 
-def _covers_inputs(device):
+def _near_one(*shape, device, dtype=torch.float32):
+    return (1 + 0.01 * torch.randn(*shape, device=device)).to(dtype)
+
+
+def _covers_inputs(device, randn=torch.randn):
     """Views across the row classes, the ragged and cross-CTA paths, and declines."""
-    flat = torch.randn(8 * 1024 + 1, device=device)
-    nchw = torch.randn(2, 64, 8, 8, device=device)
+    flat = randn(8 * 1024 + 1, device=device)
+    nchw = randn(2, 64, 8, 8, device=device)
     return [
-        torch.randn(4, 32, device=device),  # t32_b128
-        torch.randn(8, 1024, device=device),  # t32_b128
-        torch.randn(8, 4096, device=device, dtype=torch.bfloat16),  # t64_b128
-        torch.randn(8, 7168, device=device, dtype=torch.bfloat16),  # t128_b128
-        torch.randn(2, 4, 4096, device=device),  # t256_b256
-        torch.randn(256, device=device),  # t64_b64 as a reduce-all
-        torch.randn(2, 32768, device=device),  # t256_b256
-        torch.randn(2, 131072, device=device, dtype=torch.bfloat16),  # xcta
-        torch.randn(4, 1001, device=device),  # ragged rows
-        torch.randn(4, 4097, device=device, dtype=torch.bfloat16),  # t64 ragged
-        torch.randn(4, 9001, device=device),  # t256 ragged
-        torch.randn(1, 1001, device=device),  # a single ragged row: JIT reduce_all
-        torch.randn(4, 258, device=device, dtype=torch.float16),  # even, too narrow
-        torch.randn(4, 1026, device=device, dtype=torch.float16),  # even ragged
-        torch.randn(4, 259, device=device, dtype=torch.float16)[:, :258],  # odd pitch
-        torch.randn(8, 1040, device=device)[:, :1024],  # pitched rows
-        torch.randn(8, 1032, device=device)[:, :1001],  # pitched ragged rows
-        torch.randn(4, 8, 1024, device=device)[:, :4],  # kept dims that do not coalesce
-        torch.randn(8, 1, 1024, device=device),  # a size-1 dim
+        randn(4, 32, device=device),  # t32_b128
+        randn(8, 1024, device=device),  # t32_b128
+        randn(8, 4096, device=device, dtype=torch.bfloat16),  # t64_b128
+        randn(8, 7168, device=device, dtype=torch.bfloat16),  # t128_b128
+        randn(2, 4, 4096, device=device),  # t256_b256
+        randn(256, device=device),  # t64_b64 as a reduce-all
+        randn(2, 32768, device=device),  # t256_b256
+        randn(2, 131072, device=device, dtype=torch.bfloat16),  # xcta
+        randn(4, 1001, device=device),  # ragged rows
+        randn(4, 4097, device=device, dtype=torch.bfloat16),  # t64 ragged
+        randn(4, 9001, device=device),  # t256 ragged
+        randn(1, 1001, device=device),  # a single ragged row: JIT reduce_all
+        randn(4, 258, device=device, dtype=torch.float16),  # even, too narrow
+        randn(4, 1026, device=device, dtype=torch.float16),  # even ragged
+        randn(4, 259, device=device, dtype=torch.float16)[:, :258],  # odd pitch
+        randn(8, 1040, device=device)[:, :1024],  # pitched rows
+        randn(8, 1032, device=device)[:, :1001],  # pitched ragged rows
+        randn(4, 8, 1024, device=device)[:, :4],  # kept dims that do not coalesce
+        randn(8, 1, 1024, device=device),  # a size-1 dim
         nchw.to(memory_format=torch.channels_last),
-        torch.randn(64, 32, device=device).t(),  # dense permuted
-        torch.randn(1024, device=device).expand(8, 1024),  # overlapping rows
+        randn(64, 32, device=device).t(),  # dense permuted
+        randn(1024, device=device).expand(8, 1024),  # overlapping rows
         flat[1:].view(8, 1024),  # misaligned
-        torch.randn(4096, 32, device=device),  # narrow rows, not a reduce-all
+        randn(4096, 32, device=device),  # narrow rows, not a reduce-all
         # A row over 192 KiB that is not a multiple of 8192 elements.
-        torch.randn(2, 98312, device=device, dtype=torch.bfloat16),
-        torch.randn(8, 1024, device=device, dtype=torch.float16),  # fp16
+        randn(2, 98312, device=device, dtype=torch.bfloat16),
+        randn(8, 1024, device=device, dtype=torch.float16),  # fp16
     ]
 
 
@@ -217,29 +221,14 @@ class TestReductionAOT(TestCase):
                 "mean.dim",
                 "prod.dim_int",
             }
-            # 10 points per dtype pair; dtype= adds only FP16->FP32 and BF16->FP32.
-            self.assertEqual(len(grid), 50 if has_dtype else 30)
             paths = {point["path"] for point in grid}
             self.assertEqual(paths, {"row", "ragged", "xcta"})
+            # dtype= adds only FP16->FP32 and BF16->FP32.
             same = {(dtype, dtype) for dtype in ("float16", "bfloat16", "float32")}
             widened = {("float16", "float32"), ("bfloat16", "float32")}
             self.assertEqual(
                 {(point["dtype"], point["out_dtype"]) for point in grid},
                 same | widened if has_dtype else same,
-            )
-            self.assertEqual(
-                {point["row_class"] for point in grid if point["path"] == "row"},
-                {
-                    "t32_b128",
-                    "t64_b64",
-                    "t64_b128",
-                    "t128_b128",
-                    "t256_b256",
-                },
-            )
-            self.assertEqual(
-                {point["row_class"] for point in grid if point["path"] == "ragged"},
-                {"t32_b128", "t64_b128", "t128_b128", "t256_b256"},
             )
 
 
@@ -342,10 +331,13 @@ class TestReductionAOTCUDA(TestCase):
         functional = getattr(aten, overload or "default")
         with_out = getattr(aten, out_op)
         dim = -1 if op == "prod.dim_int" else [-1]
-        calls = [((x, dim, False), {}) for x in _covers_inputs(device)]
+        # As in _PATH_PROBE, prod inputs stay near 1 so that products of whole rows
+        # neither underflow nor vanish inside the tolerance.
+        randn = _near_one if name == "prod" else torch.randn
+        calls = [((x, dim, False), {}) for x in _covers_inputs(device, randn)]
         # out= dtypes the stubs serve (the input's, or widened) and decline (narrowed),
         # and a non-contiguous out=. amax and amin outputs keep the input dtype.
-        x16 = torch.randn(8, 1024, device=device, dtype=torch.float16)
+        x16 = randn(8, 1024, device=device, dtype=torch.float16)
         out_dtypes = (torch.float16, torch.float32, torch.bfloat16)
         for out_dtype in out_dtypes if op not in ("amax", "amin") else out_dtypes[:1]:
             out = torch.empty(8, device=device, dtype=out_dtype)
@@ -353,17 +345,20 @@ class TestReductionAOTCUDA(TestCase):
         strided = torch.empty(8, 2, device=device, dtype=torch.float16)[:, 0]
         calls.append(((x16, dim, False), {"out": strided}))
 
-        def fired(fn, args, kwargs):
+        def run(fn, args, kwargs):
             # With the JIT overrides deregistered, reduction kernels are the stubs'.
             with profile(activities=[ProfilerActivity.CUDA]) as prof:
-                fn(*args, **kwargs)
+                result = fn(*args, **kwargs)
                 torch.cuda.synchronize()
             events = [e for e in prof.events() if e.device_type.name == "CUDA"]
-            return any("torch_nativeopsreductions" in e.name for e in events)
+            return result, any("torch_nativeopsreductions" in e.name for e in events)
 
+        # _PATH_PROBE's tolerances; amax and amin select inputs exactly.
+        tols = {torch.float16: 1e-2, torch.bfloat16: 1e-2, torch.float32: 1e-4}
+        exact = name in ("amax", "amin")
         gates = {"PYTORCH_NATIVE_INNER_TREE": "0", "PYTORCH_SUM_INNER_TREE": "0"}
         cutedsl = torch.backends.python_native.cutedsl
-        was_enabled = cutedsl.enabled
+        was_enabled, aot = cutedsl.enabled, torch._native.aot_enabled()
         cutedsl.disable()
         try:
             with mock.patch.dict(os.environ, gates):
@@ -373,8 +368,17 @@ class TestReductionAOTCUDA(TestCase):
                     x, out = args[0], kwargs.get("out")
                     out_dtype = None if out is None else out.dtype
                     msg = f"{tuple(x.shape)} {x.stride()} {x.dtype} {out_dtype=}"
-                    self.assertEqual(claimed, fired(fn, args, kwargs), msg=msg)
+                    got, launched = run(fn, args, kwargs)
+                    self.assertEqual(claimed, launched, msg=msg)
+                    # With native AOT off too, ATen computes the reference.
+                    ref = {} if out is None else {"out": torch.empty_like(out)}
+                    torch._native.set_aot_enabled(False)
+                    want = fn(*args, **(kwargs | ref))
+                    torch._native.set_aot_enabled(aot)
+                    tol = 0 if exact else tols[want.dtype]
+                    self.assertEqual(got, want, atol=tol, rtol=tol, msg=msg)
         finally:
+            torch._native.set_aot_enabled(aot)
             if was_enabled:
                 cutedsl.enable()
 

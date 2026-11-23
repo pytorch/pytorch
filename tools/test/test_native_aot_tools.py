@@ -1875,16 +1875,6 @@ class TestAbiValidation(unittest.TestCase):
             + self._struct("mOut", shapes=2, strides=1)
         )
 
-    def _list_header(self, name, count):
-        p = SIDECAR["prefix"]
-        return (
-            "#pragma once\n#include <stdint.h>\n"
-            + self._struct(name, shapes=1, strides=0)
-            + "typedef struct {\n"
-            f"  {p}_Tensor_{name}_t elements[{count}];\n"
-            f"  int32_t count;\n}} {p}_TensorList_{name}_t;\n"
-        )
-
     def _sidecar(self, tmpdir, header: str, **over) -> dict:
         with open(os.path.join(tmpdir, SIDECAR["prefix"] + ".h"), "w") as f:
             f.write(header)
@@ -1905,19 +1895,6 @@ class TestAbiValidation(unittest.TestCase):
         # int32 SHAPE slots are expected and handled (explicit cast + size gate);
         # only the stride WIDTH and both slot COUNTS are the subject.
         self._accepts(self._header())
-
-    def test_tensor_list_count_and_elements_are_validated(self):
-        items = [
-            {"name": "mOut0", "dynamic_sizes": [0]},
-            {"name": "mOut1", "dynamic_sizes": [0]},
-        ]
-        tensor_args = [{"name": "mOuts", "items": items}]
-        self._accepts(self._list_header("mOuts", 2), tensor_args=tensor_args)
-        self._refuses(
-            self._list_header("mOuts", 3),
-            "declares elements\\[3\\], but the sidecar lists 2",
-            tensor_args=tensor_args,
-        )
 
     def test_tensor_list_errors_are_refused(self):
         p = SIDECAR["prefix"]
@@ -1955,6 +1932,10 @@ class TestAbiValidation(unittest.TestCase):
                 "declares elements\\[N\\]",
             ),
             "octal bound": (header(list_t(elements(bound="01"))), "leading zero"),
+            "bound past the items": (
+                header(list_t(elements(bound="2"))),
+                "declares elements\\[2\\], but the sidecar lists 1",
+            ),
         }
         for label, (text, pattern) in cases.items():
             with self.subTest(label):
