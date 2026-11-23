@@ -1,7 +1,5 @@
-// NEON-optimized uint8 bilinear resize with antialiasing for aarch64.
-//
-// This is the NEON counterpart of UpSampleKernelAVXAntialias.h.
-// It only supports num_channels == 3 with channels-last input.
+// AArch64 NEON kernels for channels-last uint8 RGB resizing: bilinear and
+// bicubic with or without antialiasing, and antialiased Lanczos.
 
 #pragma once
 #if defined(__aarch64__)
@@ -184,6 +182,9 @@ NEON_RESAMPLE_TARGET_I8MM inline int64_t neon_horizontal_usdot(const NeonHorizon
   return x;
 }
 
+#undef NEON_RESAMPLE_TARGET_DOTPROD
+#undef NEON_RESAMPLE_TARGET_I8MM
+
 // One output pixel at a time, with an 8-wide vector loop over its inputs. Without dot products it is
 // faster than neon_horizontal_mla for more than 8 inputs per output pixel.
 inline void neon_horizontal_by_pixel(const at::Tensor& unpacked_output,
@@ -352,7 +353,7 @@ inline NeonHorizontalKernel choose_neon_horizontal_kernel(int ksize, bool negati
 // Of the shapes benchmarked (1x2, 4x1, 4x2, 4x4, 8x1 and 8x2 output pixels x rows), 4x4 was the
 // fastest.
 //
-// This is very similar to the the AVX2 kernel which follows the same load /
+// The AVX2 kernel follows the same load /
 // shuffle / multiply-add steps, but computes 1 output pixel (instead of 4) in
 // each of 4 rows per iteration and multiplies 16-bit values with
 // _mm256_madd_epi16. NEON has no equivalent 16-bit multiply-add instruction,
@@ -577,9 +578,9 @@ void NeonResampleVertical(const at::Tensor& unpacked_output,
 // Mirrors upsample_avx_bilinear_bicubic_uint8 but uses NEON intrinsics and
 // works directly on interleaved RGB data (no unpack/pack step needed).
 //
-// Weights are computed as int16 values by compute_index_ranges_int16_weights
-// with align_i32=false; NeonResampleHorizontal copies them into its own
-// zero-padded layout (see the comment above NeonResampleHorizontal).
+// Weights are computed as int16 values with align_i32=false. The horizontal
+// kernels use a zero-padded copy, except for the per-pixel fallback, which
+// reads the original weights directly.
 template <typename scale_type, class F>
 void upsample_neon_bilinear_bicubic_uint8(const at::Tensor& input_,
                                           const at::Tensor& output,
