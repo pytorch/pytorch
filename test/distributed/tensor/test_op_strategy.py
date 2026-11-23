@@ -37,8 +37,11 @@ from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
+    DTensorContinuousTestBase,
     DTensorOpTestBase,
     DTensorTestBase,
+    LocalDTensorContinuousTestBase,
+    NUM_DEVICES,
     op_strategy_context,
     with_comms,
 )
@@ -227,12 +230,20 @@ class TestCostModel(DTensorOpTestBase):
         # reaching the shard_order check
         self.assertEqual(redistribute_cost(replica_spec, strided_shard_spec), 0.0)
 
-    def test_redistribute_cost_latency(self):
+    def test_addmm_partial_redistribute(self):
         mesh = DeviceMesh("cpu", torch.arange(self.world_size))
-        torch.manual_seed(0)
-        bias = torch.randn(8)
-        mat1 = torch.randn(50, 6)
-        mat2 = torch.randn(6, 8)
+        # bias/mat1/mat2 are the GLOBAL (unsharded) tensors, distributed below;
+        # the final assert checks full_tensor() against the global addmm. Every
+        # rank must therefore draw identical values: distribute_tensor broadcasts
+        # from rank 0, and the Partial() mat1 reconstruction sums mat1/world_size
+        # across ranks, which only recovers the global mat1 if all ranks match.
+        # This class is a MultiThreadedTestCase, so ranks are threads sharing the
+        # process-global default generator; a per-thread local Generator gives
+        # each rank its own state seeded identically, avoiding interleaved draws.
+        gen = torch.Generator().manual_seed(0)
+        bias = torch.randn(8, generator=gen)
+        mat1 = torch.randn(50, 6, generator=gen)
+        mat2 = torch.randn(6, 8, generator=gen)
 
         dist_bias = distribute_tensor(bias, mesh, [Shard(0)])
         dist_mat1 = DTensor.from_local(
@@ -589,7 +600,9 @@ def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
         return len(output_strategy_str_list) == len(set(output_strategy_str_list))
 
 
-class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
+class DistTensorReplicateStrategyRegistrationTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
+
     @with_comms
     @patch("torch.distributed.tensor._sharding_prop._select_min_cost_strategy")
     def test_replicate_strategy_placement(self, mock_select_strategy):
@@ -727,6 +740,7 @@ class TestStrategyOperation(DTensorTestBase):
 DistTensorReplicateStrategyRegistrationTestWithLocalTensor = (
     create_local_tensor_test_class(
         DistTensorReplicateStrategyRegistrationTest,
+        base_class=LocalDTensorContinuousTestBase,
     )
 )
 
@@ -917,12 +931,13 @@ class TestOpSchemaMetaProperties(TestCase):
             torch.ops.aten._foreach_max.default, (input_meta,), {}
         )
 
-        self.assertEqual(len(strategies), 3)
+        # No P(max) -> P(max) pass-through: NCCL's all_reduce MAX ignores NaN,
+        # so a NaN in one rank's local values would hide its other values.
+        self.assertEqual(len(strategies), 2)
         self.assertEqual(strategies[0][0], Partial("max"))
         self.assertEqual(strategies[0][1].dim, 0)
         self.assertEqual(strategies[1][0], Partial("max"))
         self.assertEqual(strategies[1][1].dim, 1)
-        self.assertEqual(strategies[2], [Partial("max"), Partial("max")])
 
     def test_var_mean_single_dim_strategy(self):
         from torch.distributed.tensor._ops._math_ops import std_var_single_dim_strategy

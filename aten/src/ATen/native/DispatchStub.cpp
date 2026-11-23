@@ -1,8 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/DispatchStub.h>
 
-#include <c10/core/DeviceType.h>
-#include <c10/util/Array.h>
+#include <array>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 
@@ -10,8 +9,6 @@
 #include <cpuinfo.h>
 #endif
 #include <algorithm>
-#include <cstdlib>
-#include <cstring>
 
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
 #include <sys/auxv.h>
@@ -151,15 +148,15 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
   , void *SVE256
 #endif
 ) {
-  constexpr auto supported_devices = c10::array_of<c10::DeviceType>(
-        c10::DeviceType::CPU,
+  constexpr auto supported_devices = std::to_array<c10::DeviceType>(
+        {c10::DeviceType::CPU,
         c10::DeviceType::CUDA,
         c10::DeviceType::HIP,
         c10::DeviceType::MPS,
         c10::DeviceType::MTIA,
         c10::DeviceType::XPU,
         c10::DeviceType::HPU,
-        c10::DeviceType::PrivateUse1
+        c10::DeviceType::PrivateUse1}
     );
     // Check if the device type is supported.
     if (std::find(supported_devices.begin(), supported_devices.end(), device_type) == supported_devices.end()) {
@@ -191,7 +188,8 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
 #endif
         );
         if (!std::holds_alternative<ErrorType>(result)) {
-          cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
+          cpu_dispatch_ptr.store(
+              std::get<void*>(result), std::memory_order_relaxed);
         }
       return result;
       }
@@ -316,7 +314,7 @@ DispatchResult DispatchStubImpl::try_choose_cpu_impl(
     // Quantization kernels have also been disabled on Windows
     // for AVX512 because some of their tests are flaky on Windows.
     // Ideally, we should have AVX512 kernels for all kernels.
-    if (C10_UNLIKELY(!AVX512)) {
+    if (!AVX512) [[unlikely]] {
       // dispatch to AVX2, since the AVX512 kernel is missing
       return AVX2 != nullptr ? DispatchResult(AVX2) : ErrorType::MissingDeviceKernel;
     } else {
@@ -341,13 +339,13 @@ DispatchResult DispatchStubImpl::try_choose_cpu_impl(
 #endif
 #ifdef HAVE_SVE_CPU_DEFINITION
   if (capability == static_cast<int>(CPUCapability::SVE128)) {
-    if (C10_UNLIKELY(!SVE128)) {
+    if (!SVE128) [[unlikely]] {
       return DEFAULT != nullptr ? DispatchResult(DEFAULT) : ErrorType::MissingDeviceKernel;
     }
     return DispatchResult(SVE128);
   }
   if (capability == static_cast<int>(CPUCapability::SVE256)) {
-    if (C10_UNLIKELY(!SVE256)) {
+    if (!SVE256) [[unlikely]] {
       return DEFAULT != nullptr ? DispatchResult(DEFAULT) : ErrorType::MissingDeviceKernel;
     }
     return DispatchResult(SVE256);
@@ -382,7 +380,7 @@ void* DispatchStubImpl::choose_cpu_impl(
     // Quantization kernels have also been disabled on Windows
     // for AVX512 because some of their tests are flaky on Windows.
     // Ideally, we should have AVX512 kernels for all kernels.
-    if (C10_UNLIKELY(!AVX512)) {
+    if (!AVX512) [[unlikely]] {
       // dispatch to AVX2, since the AVX512 kernel is missing
       TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
       return AVX2;
@@ -411,14 +409,14 @@ void* DispatchStubImpl::choose_cpu_impl(
 #endif
 #ifdef HAVE_SVE_CPU_DEFINITION
   if (capability == static_cast<int>(CPUCapability::SVE128)) {
-    if (C10_UNLIKELY(!SVE128)) {
+    if (!SVE128) [[unlikely]] {
       TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
       return DEFAULT;
     }
     return SVE128;
   }
   if (capability == static_cast<int>(CPUCapability::SVE256)) {
-    if (C10_UNLIKELY(!SVE256)) {
+    if (!SVE256) [[unlikely]] {
       TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
       return DEFAULT;
     }

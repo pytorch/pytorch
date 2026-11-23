@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: distributed"]
-import unittest
 
 import torch
 import torch.distributed as dist
@@ -24,8 +23,12 @@ from torch.distributed._tools.fake_collectives import (
     CollectiveOp,
     non_functional_collectives,
 )
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -35,24 +38,29 @@ c10d = torch.ops.c10d
 _c10d_functional = torch.ops._c10d_functional
 _c10d_functional_autograd = torch.ops._c10d_functional_autograd
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 
 class TestFakeCollectives(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def _setup_distributed(self):
         world_size = 4
         store = FakeStore()
         dist.init_process_group("fake", rank=0, world_size=world_size, store=store)
-        torch.cuda.set_device(torch.cuda.current_device())
+        torch.accelerator.set_device_index(torch.accelerator.current_device_index())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_collectives(self):
+    def test_collectives(self, device):
         try:
             self._setup_distributed()
             with FakeTensorMode(), CollectiveTest(test=self):
-                test_tensor_list = [torch.randn(100, device="cuda") for _ in range(4)]
-                test_tensor_list_2 = [torch.randn(400, device="cuda") for _ in range(4)]
-                test_tensor = torch.randn(100, device="cuda")
+                test_tensor_list = [torch.randn(100, device=device) for _ in range(4)]
+                test_tensor_list_2 = [torch.randn(400, device=device) for _ in range(4)]
+                test_tensor = torch.randn(100, device=device)
                 # Used as gather output or scatter input
-                test_tensor2 = torch.randn(400, device="cuda")
+                test_tensor2 = torch.randn(400, device=device)
 
                 # Testing non-functional collective operations
                 dist.broadcast(test_tensor, src=0)
@@ -116,6 +124,7 @@ class CollectiveTest(TorchDispatchMode):
         c10d.barrier.default,
         c10d.monitored_barrier_.default,
         _c10d_functional.wait_tensor.default,
+        _c10d_functional.wait_tensors.default,
     }
 
     def __init__(self, test: TestFakeCollectives, _dispatch_key=None):
@@ -126,7 +135,10 @@ class CollectiveTest(TorchDispatchMode):
         res = func(*args, **(kwargs or {}))
 
         if func in collective_ops:
-            if func != _c10d_functional.wait_tensor.default:
+            if func not in (
+                _c10d_functional.wait_tensor.default,
+                _c10d_functional.wait_tensors.default,
+            ):
                 pg = CollectiveOp.get_process_group(func, args)
                 self.test.assertIsInstance(
                     pg, ProcessGroup, "Error: pg is not an instance of ProcessGroup"
@@ -208,6 +220,10 @@ class CollectiveTest(TorchDispatchMode):
 
         raise ValueError(f"Unhandled function: {func}")
 
+
+instantiate_device_type_tests(
+    TestFakeCollectives, globals(), except_for="cpu", allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

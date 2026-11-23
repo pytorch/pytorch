@@ -1,10 +1,8 @@
 # Owner(s): ["module: rocm"]
 name: linux-binary-test-rocm
 
-# Reusable workflow that runs the ROCm binary test (setup-rocm, GPU device
-# passthrough, ECR docker pull, test-pytorch-binary, teardown-rocm). Called
-# from the matrix-driven manywheel-test-rocm job in
-# generated-linux-binary-manywheel-nightly.yml.
+# Reusable ROCm manywheel binary test. setup-rocm prepares the runner
+# and logs into ECR. The test image is started with docker run.
 
 on:
   workflow_call:
@@ -21,6 +19,10 @@ on:
       DESIRED_CUDA:
         required: true
         type: string
+      INDEX_SUBFOLDER:
+        required: false
+        default: ""
+        type: string
       GPU_ARCH_VERSION:
         required: true
         type: string
@@ -33,13 +35,21 @@ on:
       DOCKER_IMAGE_TAG_PREFIX:
         required: true
         type: string
+      DOCKER_IMAGE_REGISTRY_HOST:
+        required: false
+        default: ""
+        type: string
+        description: |
+          Registry host prefix (with trailing slash) prepended to the
+          pytorch/<image> path. Empty means Docker Hub. setup-rocm logs
+          into ECR before the pull.
       DESIRED_PYTHON:
         required: false
         type: string
       runs_on:
         required: false
         type: string
-        default: linux.rocm.gpu.gfx942.1
+        default: linux.rocm.gpu.mi350.1
       timeout-minutes:
         required: false
         type: number
@@ -50,21 +60,17 @@ permissions:
   contents: read
 
 jobs:
-  # ROCm test runs the test container via the GHA `container:` directive.
-  # ROCm device passthrough flags go through container.options. Same shape
-  # as the standard _binary-test-linux.yml.
   test:
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    container:
-      image: pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
-      options: --device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       DESIRED_CUDA: ${{ inputs.DESIRED_CUDA }}
+      INDEX_SUBFOLDER: ${{ inputs.INDEX_SUBFOLDER }}
       GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
+      DOCKER_IMAGE: ${{ format('{0}pytorch/{1}:{2}', inputs.DOCKER_IMAGE_REGISTRY_HOST, inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -73,7 +79,6 @@ jobs:
       BUILD_ENVIRONMENT: linux-binary-manywheel
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      GPU_FLAG: "--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon"
     permissions:
       id-token: write
       contents: read
@@ -87,6 +92,9 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           show-progress: false
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
 
       - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
@@ -103,9 +111,10 @@ jobs:
             echo "PYTORCH_ROOT=${PYTORCH_ROOT}"
             echo "PACKAGE_TYPE=${PACKAGE_TYPE}"
             echo "DESIRED_CUDA=${DESIRED_CUDA}"
+            echo "INDEX_SUBFOLDER=${INDEX_SUBFOLDER}"
             echo "GPU_ARCH_VERSION=${GPU_ARCH_VERSION}"
             echo "GPU_ARCH_TYPE=${GPU_ARCH_TYPE}"
-            echo "DOCKER_IMAGE=pytorch/${{ inputs.DOCKER_IMAGE }}:${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}"
+            echo "DOCKER_IMAGE=${DOCKER_IMAGE}"
             echo "SKIP_ALL_TESTS=${SKIP_ALL_TESTS}"
             echo "DESIRED_PYTHON=${DESIRED_PYTHON}"
             echo "ALPINE_IMAGE=${ALPINE_IMAGE}"
@@ -118,17 +127,47 @@ jobs:
             echo "SHA1=${SHA1}"
           } >> "${GITHUB_ENV}"
 
-      - name: Populate binary env
-        shell: bash
-        run: bash .ci/pytorch/binary_populate_env.sh
-
       - name: Test PyTorch binary
         shell: bash
-        env:
-          OUTPUT_SCRIPT: /run.sh
         run: |
-          ln -sf "${GITHUB_WORKSPACE}" /pytorch
-          ln -sf "${PYTORCH_FINAL_PACKAGE_DIR}" /final_pkgs
-          bash .ci/pytorch/binary_linux_test.sh
-          source "${BINARY_ENV_FILE}"
-          bash -x /run.sh
+          set -x
+          # shellcheck disable=SC2086
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e BINARY_ENV_FILE \
+            -e BUILD_ENVIRONMENT \
+            -e DESIRED_CUDA \
+            -e DESIRED_PYTHON \
+            -e DOCKER_IMAGE \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e INDEX_SUBFOLDER \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" \
+            -v "${PYTORCH_FINAL_PACKAGE_DIR}:${PYTORCH_FINAL_PACKAGE_DIR}" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          # Cleanup removes only this container; shared runners may run other jobs.
+          echo "BINARY_CONTAINER=${container_name}" >> "${GITHUB_ENV}"
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .ci/pytorch/binary_populate_env.sh"
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT=/run.sh "${container_name}" bash -c "
+            ln -sf '${GITHUB_WORKSPACE}' /pytorch
+            ln -sf '${PYTORCH_FINAL_PACKAGE_DIR}' /final_pkgs
+            bash .ci/pytorch/binary_linux_test.sh
+          "
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+
+      - name: Cleanup docker
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${BINARY_CONTAINER:-}" ]]; then
+            docker rm -f "${BINARY_CONTAINER}" || true
+          fi

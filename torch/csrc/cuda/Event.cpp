@@ -3,15 +3,9 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Event.h>
-#include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-
-#include <c10/cuda/CUDAGuard.h>
-
-#include <cuda_runtime_api.h>
-#include <structmember.h>
 
 PyObject* THCPEventClass = nullptr;
 
@@ -108,13 +102,13 @@ static void THCPEvent_dealloc(THCPEvent* self) {
   THPEvent_dealloc_common(reinterpret_cast<THPEvent*>(self));
 }
 
-static PyObject* THCPEvent_get_cuda_event(THCPEvent* self, void* unused) {
+static PyObject* THCPEvent_get_cuda_event(THCPEvent* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(self->cuda_event.event());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPEvent_get_device(THCPEvent* self, void* unused) {
+static PyObject* THCPEvent_get_device(THCPEvent* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   std::optional<at::Device> device = self->cuda_event.device();
   if (!device) {
@@ -162,7 +156,7 @@ static PyObject* THCPEvent_wait(PyObject* _self, PyObject* _stream) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPEvent_query(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPEvent_query(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
   return PyBool_FromLong(self->cuda_event.query());
@@ -180,7 +174,7 @@ static PyObject* THCPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     auto self = (THCPEvent*)_self;
     pybind11::gil_scoped_release no_gil{};
@@ -190,7 +184,7 @@ static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
+static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = (THCPEvent*)_self;
   cudaIpcEventHandle_t handle{};
@@ -266,12 +260,9 @@ void THCPEvent_init(PyObject* module) {
   Py_INCREF(THPEventClass);
   THCPEventType.tp_base = THPEventClass;
   THCPEventClass = (PyObject*)&THCPEventType;
-  if (PyType_Ready(&THCPEventType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyType_Ready(&THCPEventType) >= 0);
   Py_INCREF(&THCPEventType);
-  if (PyModule_AddObject(module, "_CudaEventBase", (PyObject*)&THCPEventType) <
-      0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(
+      PyModule_AddObject(module, "_CudaEventBase", (PyObject*)&THCPEventType) >=
+      0);
 }

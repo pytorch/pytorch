@@ -3,9 +3,21 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <c10/core/ScalarType.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+
+#include <algorithm>
+#include <bit>
+#include <chrono>
+#include <condition_variable>
+#include <cstdlib>
+#include <future>
+#include <mutex>
+#include <optional>
+#include <thread>
 
 constexpr int64_t N = 100;
 
@@ -17,7 +29,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
   }
 
   // Clear the stats and ensure they are zero.
-  size_t round_size = c10::llvm::PowerOf2Ceil(N);
+  size_t round_size = std::bit_ceil(static_cast<size_t>(N));
   auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
   ASSERT_EQ(stats.allocations.current, 0);
   ASSERT_EQ(stats.allocations.peak, 0);
@@ -54,7 +66,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
   // Ensure we don't reuse the allocation, due to size mismatch.
   {
     int64_t new_size = N*2;
-    size_t new_round_size = c10::llvm::PowerOf2Ceil(new_size);
+    size_t new_round_size = std::bit_ceil(static_cast<size_t>(new_size));
     auto pinned_tensor = at::empty(
         {new_size}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
     auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
@@ -252,6 +264,494 @@ TEST(CachingHostAllocatorTest, check_reuse) {
     ASSERT_EQ(ptr, pinned_tensor.data_ptr());
     ASSERT_EQ(ctx, pinned_tensor.storage().data_ptr().get_context());
   }
+}
+
+namespace {
+
+// Stand-ins so the allocator can be instantiated with no device present.
+struct TestStream {
+  TestStream() = default;
+  /* implicit */ TestStream(c10::Stream) {}
+  /* implicit */ operator c10::Stream() const {
+    return c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::kCPU));
+  }
+  bool operator==(const TestStream&) const {
+    return true;
+  }
+};
+
+struct TestEvent {};
+
+} // namespace
+
+template <>
+struct std::hash<TestStream> {
+  std::size_t operator()(const TestStream&) const noexcept {
+    return 0;
+  }
+};
+
+namespace {
+
+struct ThrowingRecordAllocator
+    : at::CachingHostAllocatorImpl<TestStream, TestEvent> {
+  void allocate_host_memory(size_t size, void** ptr) override {
+    *ptr = std::malloc(size);
+  }
+
+  void free_block(at::HostBlock<TestStream>* block) override {
+    std::free(block->ptr_);
+  }
+
+  void record_stream(std::optional<std::vector<TestEvent>>&, TestStream)
+      override {
+    // @allow-raw-throw: tests catch(...) path in free() for non-std exceptions
+    throw 1;
+  }
+};
+
+} // namespace
+
+// On a real device every event record fails once the context is poisoned, and
+// free() is reached from ~StorageImpl, so an escaping throw would cross a
+// noexcept destructor and terminate the process.
+TEST(CachingHostAllocatorTest, free_does_not_propagate_record_failure) {
+  ThrowingRecordAllocator allocator;
+
+  auto [ptr, ctx] = allocator.allocate(N);
+  ASSERT_NE(ptr, nullptr);
+  ASSERT_TRUE(allocator.record_event(
+      ptr, ctx, c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::kCPU))));
+
+  EXPECT_NO_THROW(allocator.free(ctx));
+}
+
+namespace {
+
+// Host memory comes from malloc, and events complete at once.
+struct MockAllocator : at::CachingHostAllocatorImpl<TestStream, TestEvent> {
+  size_t max_cached_size{SIZE_MAX};
+  // Whether the current stream is capturing. free() records no event for a
+  // block allocated during capture.
+  bool capturing{true};
+
+  bool pinned_use_background_threads() override {
+    return false;
+  }
+
+  size_t pinned_max_cached_size() const override {
+    return max_cached_size;
+  }
+
+  void allocate_host_memory(size_t size, void** ptr) override {
+    *ptr = std::malloc(size);
+  }
+
+  void free_block(at::HostBlock<TestStream>* block) override {
+    std::free(block->ptr_);
+  }
+
+  void record_stream(std::optional<std::vector<TestEvent>>& events, TestStream)
+      override {
+    events->emplace_back();
+  }
+
+  bool query_event(TestEvent&) override {
+    return true;
+  }
+
+  TestStream get_current_stream() const override {
+    return {};
+  }
+
+  bool stream_is_capturing(TestStream) const override {
+    return capturing;
+  }
+};
+
+const auto kStream = c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::kCPU));
+
+// free_block() waits for unblock(), like cudaFreeHost waits for the work
+// already queued on the current device.
+struct BlockingFreeAllocator : MockAllocator {
+  bool wait_until_freeing(std::chrono::seconds timeout) {
+    std::unique_lock<std::mutex> g(free_mutex_);
+    return free_cv_.wait_for(g, timeout, [&] { return freeing_; });
+  }
+
+  void unblock() {
+    std::lock_guard<std::mutex> g(free_mutex_);
+    unblocked_ = true;
+    free_cv_.notify_all();
+  }
+
+  void free_block(at::HostBlock<TestStream>* block) override {
+    {
+      std::unique_lock<std::mutex> g(free_mutex_);
+      freeing_ = true;
+      free_cv_.notify_all();
+      free_cv_.wait(g, [&] { return unblocked_; });
+    }
+    MockAllocator::free_block(block);
+  }
+
+ private:
+  std::mutex free_mutex_;
+  std::condition_variable free_cv_;
+  bool freeing_{false};
+  bool unblocked_{false};
+};
+
+// Runs stuck() on another thread until it blocks in free_block(), then checks
+// that record_event() on the live block ctx, allocate() and free() finish
+// meanwhile.
+template <typename F>
+void expect_progress_while_freeing(
+    BlockingFreeAllocator& allocator,
+    void* ptr,
+    void* ctx,
+    F stuck) {
+  constexpr auto kTimeout = std::chrono::seconds(10);
+  auto freeing_thread = std::async(std::launch::async, stuck);
+  bool freeing = allocator.wait_until_freeing(kTimeout);
+  auto other = std::async(std::launch::async, [&] {
+    bool recorded = allocator.record_event(ptr, ctx, kStream);
+    allocator.free(allocator.allocate(N).second);
+    return recorded;
+  });
+  bool done = other.wait_for(kTimeout) == std::future_status::ready;
+  // Unblock before checking anything, so that both threads finish.
+  allocator.unblock();
+  freeing_thread.get();
+  EXPECT_TRUE(other.get());
+  EXPECT_TRUE(freeing);
+  EXPECT_TRUE(done) << "another thread waited for the blocked free_block()";
+}
+
+// free_block() and query_event() fail when asked to, as they do on a device
+// after a sticky error. live counts the host allocations not yet freed.
+struct FailingAllocator : MockAllocator {
+  int live{0};
+  // The next frees_to_fail free_block() calls fail, with numbered messages.
+  int frees_to_fail{0};
+  int failed_frees{0};
+  // If positive, the query_to_fail-th query_event() call from now fails.
+  int query_to_fail{0};
+
+  void allocate_host_memory(size_t size, void** ptr) override {
+    MockAllocator::allocate_host_memory(size, ptr);
+    ++live;
+  }
+
+  // Frees the memory, then fails if asked to.
+  void free_block(at::HostBlock<TestStream>* block) override {
+    MockAllocator::free_block(block);
+    --live;
+    if (frees_to_fail > 0) {
+      --frees_to_fail;
+      TORCH_CHECK(false, "free_block failure ", ++failed_frees);
+    }
+  }
+
+  bool query_event(TestEvent&) override {
+    if (query_to_fail > 0) {
+      TORCH_CHECK(--query_to_fail > 0, "query_event failed");
+    }
+    return true;
+  }
+};
+
+// The next allocate_host_memory() fails when asked to, as cudaHostAlloc does
+// while the memory it needs is still being freed.
+struct FailOnceAllocator : BlockingFreeAllocator {
+  std::atomic<bool> fail_next{false};
+  std::promise<void> failed;
+  std::atomic<bool> freed{false};
+  // Whether the last successful allocate_host_memory() came after a
+  // free_block() returned.
+  std::atomic<bool> allocated_after_free{false};
+
+  void allocate_host_memory(size_t size, void** ptr) override {
+    if (fail_next.exchange(false)) {
+      failed.set_value();
+      TORCH_CHECK(false, "out of host memory");
+    }
+    allocated_after_free = freed.load();
+    BlockingFreeAllocator::allocate_host_memory(size, ptr);
+  }
+
+  void free_block(at::HostBlock<TestStream>* block) override {
+    BlockingFreeAllocator::free_block(block);
+    freed = true;
+  }
+};
+
+// Expects fn() to throw a c10::Error whose message contains msg.
+template <typename F>
+void expect_error(F fn, const std::string& msg) {
+  try {
+    fn();
+    ADD_FAILURE() << "did not throw";
+  } catch (const c10::Error& e) {
+    EXPECT_NE(std::string(e.what()).find(msg), std::string::npos) << e.what();
+  }
+}
+
+} // namespace
+
+// empty_cache() used to free blocks while holding locks that record_event()
+// takes, so a non_blocking copy on any device waited for cudaFreeHost.
+TEST(CachingHostAllocatorTest, empty_cache_frees_default_pool_outside_locks) {
+  BlockingFreeAllocator allocator;
+  auto [ptr, ctx] = allocator.allocate(N);
+  allocator.free(allocator.allocate(N).second);
+
+  expect_progress_while_freeing(
+      allocator, ptr, ctx, [&] { allocator.empty_cache(); });
+  allocator.free(ctx);
+  allocator.empty_cache();
+}
+
+TEST(CachingHostAllocatorTest, empty_cache_frees_released_pool_outside_locks) {
+  BlockingFreeAllocator allocator;
+  auto [ptr, ctx] = allocator.allocate(N);
+  c10::MempoolId_t pool_id{1, 0};
+  allocator.begin_allocate_to_pool(pool_id, [](c10::Stream) { return true; });
+  void* pool_block = allocator.allocate(N).second;
+  allocator.end_allocate_to_pool(pool_id);
+  allocator.free(pool_block);
+  allocator.release_pool(pool_id);
+
+  expect_progress_while_freeing(
+      allocator, ptr, ctx, [&] { allocator.empty_cache(); });
+  allocator.free(ctx);
+  allocator.empty_cache();
+}
+
+// A block larger than pinned_max_cached_size is freed once its event
+// completes, here in empty_cache() while it holds instance_mutex_.
+TEST(CachingHostAllocatorTest, empty_cache_frees_large_pool_block_outside_locks) {
+  BlockingFreeAllocator allocator;
+  allocator.max_cached_size = 1024;
+  allocator.capturing = false;
+  auto [ptr, ctx] = allocator.allocate(N);
+  c10::MempoolId_t pool_id{1, 0};
+  allocator.begin_allocate_to_pool(pool_id, [](c10::Stream) { return true; });
+  auto [pool_ptr, pool_block] = allocator.allocate(4096);
+  allocator.end_allocate_to_pool(pool_id);
+  ASSERT_TRUE(allocator.record_event(pool_ptr, pool_block, kStream));
+  allocator.free(pool_block);
+  allocator.release_pool(pool_id);
+
+  expect_progress_while_freeing(
+      allocator, ptr, ctx, [&] { allocator.empty_cache(); });
+  allocator.free(ctx);
+  allocator.empty_cache();
+}
+
+TEST(CachingHostAllocatorTest, free_frees_large_block_outside_locks) {
+  BlockingFreeAllocator allocator;
+  allocator.max_cached_size = 1024;
+  auto [ptr, ctx] = allocator.allocate(N);
+  void* large = allocator.allocate(4096).second;
+
+  expect_progress_while_freeing(
+      allocator, ptr, ctx, [&] { allocator.free(large); });
+  allocator.free(ctx);
+  allocator.empty_cache();
+}
+
+// empty_cache() takes blocks out of their pools before freeing them, so after
+// a failure it must still free every block it took out, and rethrow the first
+// error.
+TEST(CachingHostAllocatorTest, empty_cache_frees_detached_blocks_on_error) {
+  FailingAllocator allocator;
+  // Cached blocks in two size buckets.
+  allocator.free(allocator.allocate(N).second);
+  allocator.free(allocator.allocate(4 * N).second);
+  allocator.frees_to_fail = 2;
+  expect_error([&] { allocator.empty_cache(); }, "free_block failure 1");
+  EXPECT_EQ(allocator.live, 0);
+}
+
+// After an event query fails, empty_cache() must still free the blocks it
+// already took out of their pools, and rethrow the query error rather than an
+// error from freeing them.
+TEST(CachingHostAllocatorTest, empty_cache_frees_detached_blocks_on_query_error) {
+  FailingAllocator allocator;
+  allocator.max_cached_size = 1024;
+  auto [large_ptr, large] = allocator.allocate(4096);
+  auto [ptr, ctx] = allocator.allocate(N);
+  ASSERT_TRUE(allocator.record_event(large_ptr, large, kStream));
+  ASSERT_TRUE(allocator.record_event(ptr, ctx, kStream));
+  // Events are queried in the order of free(): the first query detaches the
+  // large block, and the second fails.
+  allocator.free(large);
+  allocator.free(ctx);
+  allocator.query_to_fail = 2;
+  allocator.frees_to_fail = 1;
+  expect_error([&] { allocator.empty_cache(); }, "query_event failed");
+  // The failed query dropped the other block's event, so that block stays.
+  EXPECT_EQ(allocator.live, 1);
+}
+
+// Frees run with no allocator lock held, so an allocation that fails while
+// another thread frees a block waits for that free, then retries once.
+TEST(CachingHostAllocatorTest, allocate_retries_after_frees_in_flight) {
+  constexpr auto kTimeout = std::chrono::seconds(10);
+  FailOnceAllocator allocator;
+  allocator.max_cached_size = 1024;
+  void* large = allocator.allocate(4096).second;
+  auto freeing_thread =
+      std::async(std::launch::async, [&] { allocator.free(large); });
+  bool freeing = allocator.wait_until_freeing(kTimeout);
+  auto failed = allocator.failed.get_future();
+  allocator.fail_next = true;
+  auto allocating_thread =
+      std::async(std::launch::async, [&] { return allocator.allocate(4096); });
+  // Unblock only after the allocation failed, so that the free was in flight.
+  bool failed_once = failed.wait_for(kTimeout) == std::future_status::ready;
+  allocator.unblock();
+  freeing_thread.get();
+  auto [ptr, ctx] = allocating_thread.get();
+  EXPECT_TRUE(freeing);
+  EXPECT_TRUE(failed_once);
+  EXPECT_TRUE(allocator.allocated_after_free)
+      << "retried before the free in flight finished";
+  EXPECT_NE(ptr, nullptr);
+  allocator.free(ctx);
+}
+
+// With no free in flight, the error is rethrown without a retry, which would
+// succeed here.
+TEST(CachingHostAllocatorTest, allocate_throws_with_no_frees_in_flight) {
+  FailOnceAllocator allocator;
+  allocator.unblock();
+  // A free that already finished does not count.
+  allocator.free(allocator.allocate(N).second);
+  allocator.empty_cache();
+  allocator.fail_next = true;
+  expect_error([&] { allocator.allocate(N); }, "out of host memory");
+}
+
+// empty_cache() holds instance_mutex_ exclusively while it processes the
+// events of released private pools. Returning a block whose event completed
+// used to take instance_mutex_ again to find its pool, which fails with
+// "Resource deadlock avoided".
+TEST(CachingHostAllocatorTest, empty_cache_released_pool_with_completed_event) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+
+  auto* allocator = at::getHostAllocator(at::kCUDA);
+  auto pool_id = at::cuda::graph_pool_handle();
+  auto stream = at::cuda::getStreamFromPool();
+
+  void* ptr{nullptr};
+  void* ctx{nullptr};
+  {
+    allocator->begin_allocate_to_pool(
+        pool_id, [](c10::Stream) { return true; });
+    auto pinned_tensor = at::empty(
+        {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+    allocator->end_allocate_to_pool(pool_id);
+    ptr = pinned_tensor.data_ptr();
+    ctx = pinned_tensor.storage().data_ptr().get_context();
+    auto segments = allocator->get_segments();
+    auto seg = std::find_if(segments.begin(), segments.end(), [&](const auto& s) {
+      return s.address == reinterpret_cast<size_t>(ptr);
+    });
+    ASSERT_NE(seg, segments.end());
+    ASSERT_EQ(seg->owner_private_pool_id, pool_id);
+    ASSERT_TRUE(allocator->record_event(ptr, ctx, stream.unwrap()));
+    allocator->release_pool(pool_id);
+  }
+  stream.synchronize();
+
+  ASSERT_NO_THROW(allocator->empty_cache());
+  ASSERT_FALSE(allocator->record_event(ptr, ctx, stream.unwrap()));
+}
+
+// Each pool keeps its own bucket stats. getStats() adds them up, and erasing a
+// private pool leaves the totals unchanged.
+TEST(CachingHostAllocatorTest, stats_include_private_pools) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+
+  auto* allocator = at::getHostAllocator(at::kCUDA);
+  // Let earlier tests' pending events complete, so that their blocks do not
+  // come back during this test.
+  at::cuda::device_synchronize();
+  allocator->empty_cache();
+  auto before = allocator->get_stats();
+  auto pool_id = at::cuda::graph_pool_handle();
+  {
+    allocator->begin_allocate_to_pool(
+        pool_id, [](c10::Stream) { return true; });
+    auto pinned_tensor = at::empty(
+        {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+    allocator->end_allocate_to_pool(pool_id);
+    auto stats = allocator->get_stats();
+    ASSERT_EQ(stats.active_requests.current, before.active_requests.current + 1);
+    ASSERT_EQ(stats.allocations.current, before.allocations.current + 1);
+    allocator->release_pool(pool_id);
+  }
+  auto released = allocator->get_stats();
+
+  allocator->empty_cache();
+  auto after = allocator->get_stats();
+  ASSERT_EQ(after.allocations.current, before.allocations.current);
+  ASSERT_EQ(after.active_requests.allocated, released.active_requests.allocated);
+  ASSERT_EQ(after.active_requests.freed, released.active_requests.freed);
+  ASSERT_EQ(after.active_requests.peak, released.active_requests.peak);
+  ASSERT_EQ(after.active_bytes.allocated, released.active_bytes.allocated);
+  ASSERT_EQ(after.active_bytes.freed, released.active_bytes.freed);
+  ASSERT_EQ(after.active_bytes.peak, released.active_bytes.peak);
+  ASSERT_EQ(after.bucket_allocation, released.bucket_allocation);
+}
+
+// The default pool and a private pool used to update shared bucket stats, each
+// under its own free list mutex, so using both at once lost updates.
+TEST(CachingHostAllocatorTest, stats_concurrent_pools) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+
+  auto* allocator = at::getHostAllocator(at::kCUDA);
+  at::cuda::device_synchronize();
+  allocator->empty_cache();
+  auto before = allocator->get_stats();
+  auto pool_id = at::cuda::graph_pool_handle();
+  auto pool_stream = at::cuda::getStreamFromPool();
+  allocator->begin_allocate_to_pool(
+      pool_id, [s = pool_stream.unwrap()](c10::Stream stream) { return stream == s; });
+
+  constexpr int kIters = 100000;
+  auto churn = [](std::optional<c10::cuda::CUDAStream> stream) {
+    std::optional<c10::cuda::CUDAStreamGuard> guard;
+    if (stream) {
+      guard.emplace(*stream);
+    }
+    for (int i = 0; i < kIters; ++i) {
+      at::empty({N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+    }
+  };
+  std::thread in_pool(churn, pool_stream);
+  std::thread in_default(churn, std::nullopt);
+  in_pool.join();
+  in_default.join();
+  allocator->end_allocate_to_pool(pool_id);
+  allocator->release_pool(pool_id);
+
+  auto after = allocator->get_stats();
+  ASSERT_EQ(after.active_requests.allocated - before.active_requests.allocated, 2 * kIters);
+  ASSERT_EQ(after.active_requests.freed - before.active_requests.freed, 2 * kIters);
+  ASSERT_EQ(after.active_requests.current, before.active_requests.current);
+  int64_t bytes = 2 * kIters * std::bit_ceil(static_cast<size_t>(N));
+  ASSERT_EQ(after.active_bytes.allocated - before.active_bytes.allocated, bytes);
+  ASSERT_EQ(after.active_bytes.freed - before.active_bytes.freed, bytes);
+  ASSERT_EQ(after.active_bytes.current, before.active_bytes.current);
 }
 
 int main(int argc, char* argv[]) {

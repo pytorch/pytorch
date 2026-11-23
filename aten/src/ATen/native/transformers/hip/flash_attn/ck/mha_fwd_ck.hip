@@ -141,7 +141,7 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                                    at::Tensor dropout_randval,
                                    float softmax_scale,
                                    float p_dropout,
-                                   std::pair<uint64_t*, uint64_t*> drop_seed_offset)
+                                   std::pair<uint64_t, uint64_t> drop_seed_offset)
 {
     // q: (batch_size, seqlen_q, nheads, d)
     // k: (batch_size, seqlen_k, nheads_k, d)
@@ -253,7 +253,8 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
            int window_size_right,
            const bool return_dropout_randval,
            std::optional<at::Generator> gen_,
-           const std::optional<at::Tensor>& attn_bias_) // batch_size x nheads x seqlen_q x seqlen_k
+           const std::optional<at::Tensor>& attn_bias_, // batch_size x nheads x seqlen_q x seqlen_k
+           const bool causal_top_left)
 {
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -277,7 +278,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     const int head_size = sizes[3];
     const int seqlen_k = k.size(1);
     const int num_heads_k = k.size(2);
-    TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size <= 256, "CK only supports head dimension at most 256");
     TORCH_CHECK(head_size % 8 == 0, "query, key, value, and out_ must have a head_size that is a multiple of 8");
     TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
@@ -285,14 +285,14 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     if (window_size_left >= seqlen_k) { window_size_left = -1; }
     if (window_size_right >= seqlen_k) { window_size_right = -1; }
 
-    // causal=true is the same as causal=false in this case
-    if (seqlen_q == 1 && !attn_bias_.has_value()) { is_causal = false; }
+    // causal=true is the same as causal=false in this case (bottom-right only)
+    if (seqlen_q == 1 && !attn_bias_.has_value() && !causal_top_left) { is_causal = false; }
 
     mask_info mask;
     if (is_causal) {
         // Causal is the special case where window_size_right == 0 and window_size_left < 0.
         window_size_right = 0;
-        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," + "0";
+        std::string mask_identify = (causal_top_left ? "t:" : "b:") + std::to_string(window_size_left) + "," + "0";
         mask = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // casual
     }
     else if (window_size_left == -1 && window_size_right == -1) {
@@ -361,8 +361,7 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     const int head_size_8x = round_multiple(head_size, 8);
 
     // Otherwise the kernel will be launched from cuda:0 device
-    // Cast to char to avoid compiler warning about narrowing
-    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{q.get_device()};
 
     auto opts = q.options();
     bool has_lse = true;
@@ -384,12 +383,6 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
     at::Tensor seed_t, offset_t;
     int64_t counter_offset = batch_size * num_heads * ck_tile::get_warp_size();
 
-
-    // rng_state is used to pass philox params to CK in a type it likes i.e. uint64
-    auto rng_state_options = at::TensorOptions().dtype(at::kUInt64).device(at::kCUDA);
-    auto rng_state = at::zeros({2}, rng_state_options.dtype(at::kUInt64));
-    auto _unused = at::empty({}, at::dtype(c10::kUInt64).device(at::kCUDA));
-
     if (p_dropout > 0.0)  {
 
         auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
@@ -400,61 +393,20 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         auto philox_args = gen->philox_cuda_state(counter_offset);
 
         std::tie(drop_seed, drop_offset) = at::cuda::philox::unpack(philox_args);
-        rng_state[0] = *(reinterpret_cast<int64_t*>(&drop_seed));
-        rng_state[1] = *(reinterpret_cast<int64_t*>(&drop_offset));
 
     } else {
         seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
         offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
     }
     std::optional<at::Tensor> attn_bias;
-    std::pair<uint64_t*, uint64_t*> drop_seed_offset;
     if( attn_bias_.has_value())
     {
       attn_bias = attn_bias_;
     }
-    // === [stopgap] gfx950 CK FMHA tile-tail OOB guard ===
-    // The generated no-seqlen-pad fwd instances issue unpredicated tile loads/
-    // stores of round_up(seqlen, tile) rows. For tile-unaligned seqlens this
-    // over-reads Q/K/V and over-writes O/LSE past the tensor end, which faults
-    // ("Memory access fault by GPU node-N ... Reason: Unknown") when the buffer
-    // ends on an unmapped page (observed on MI350X AOTT lowering, fwd pass).
-    // Hand the kernel seqlen-padded *allocations* (the extra rows are mapped
-    // scratch) while leaving seqlen_q/seqlen_k unchanged, so the kernel's logical
-    // masking is identical and numerics are unchanged; the real rows are copied
-    // back into the caller-visible tensors below. Engages only for tile-unaligned
-    // seqlens on the non-swapped path; skipped when seqlenq_ngroups_swapped is
-    // active (that fast path reshapes seqlen_q into the batch/group dim, so the
-    // tile-tail over-read does not apply).
-    // Scope: covers Q/K/V (read) and O/LSE (write) only. attn_bias (bias_ptr,
-    // seqlen_q x seqlen_k) and the dropout randval buffer (p / rand_val_ptr) are
-    // touched by the same round_up(seqlen, tile) pattern but are left unpadded
-    // here -- out of scope for this stopgap (pre-existing, not in the observed
-    // fault repro; whether CK issues full-tile loads on them is upstream-
-    // dependent). The proper fix is upstream CK kPadSeqLen fwd instances.
-    // TODO: remove once CK generates/selects kPadSeqLen fwd instances upstream.
-    at::Tensor q_arg = q_padded, k_arg = k_padded, v_arg = v_padded;
-    at::Tensor out_arg = out, lse_arg = softmax_lse;
-    constexpr int kCkSeqTileLCM = 256; // >= every fwd kM0/kN0 in the generated set
-    const int seqlen_q_pad = round_multiple(seqlen_q, kCkSeqTileLCM);
-    const int seqlen_k_pad = round_multiple(seqlen_k, kCkSeqTileLCM);
-    const bool ck_oob_guard = !seqlenq_ngroups_swapped &&
-        ((seqlen_q_pad != seqlen_q) || (seqlen_k_pad != seqlen_k));
-    if (ck_oob_guard) {
-        if (seqlen_q_pad != seqlen_q) {
-            q_arg   = at::pad(q_padded, {0, 0, 0, 0, 0, seqlen_q_pad - seqlen_q});
-            out_arg = at::empty({out.size(0), seqlen_q_pad, out.size(2), out.size(3)}, out.options());
-            lse_arg = at::empty({batch_size, num_heads, seqlen_q_pad}, softmax_lse.options());
-        }
-        if (seqlen_k_pad != seqlen_k) {
-            k_arg = at::pad(k_padded, {0, 0, 0, 0, 0, seqlen_k_pad - seqlen_k});
-            v_arg = at::pad(v_padded, {0, 0, 0, 0, 0, seqlen_k_pad - seqlen_k});
-        }
-    }
 
-    if (seqlen_k > 0) {
-        drop_seed_offset.first = rng_state[0].data_ptr<uint64_t>();
-        drop_seed_offset.second = rng_state[1].data_ptr<uint64_t>();
+    // An empty batch or key sequence has no work: the tensors allocated above are
+    // already the correct empty result, so skip the launch rather than reject it.
+    if (batch_size > 0 && seqlen_k > 0) {
         auto stream = at::cuda::getCurrentHIPStream().stream();
         ck_tile::stream_config stream_config{stream};
 
@@ -478,26 +430,22 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                 num_heads,
                 num_heads_k,
                 head_size_8x,
-                q_arg,
-                k_arg,
-                v_arg,
+                q_padded,
+                k_padded,
+                v_padded,
                 attn_bias,
-                out_arg,
-                lse_arg,
+                out,
+                softmax_lse,
                 p,
                 softmax_scale,
                 p_dropout,
-                drop_seed_offset);
+                {drop_seed, drop_offset});
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
-        if (ck_oob_guard && seqlen_q_pad != seqlen_q) {
-            // copy the real rows out of the padded scratch into the caller tensors
-            out.copy_(out_arg.narrow(1, 0, seqlen_q));
-            softmax_lse.copy_(lse_arg.narrow(2, 0, seqlen_q));
-        }
     }
     else {
-        // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
+        // No kernel ran. Both are empty when batch_size == 0; when only seqlen_k is 0
+        // they are not, and attention over no keys is defined as zeros with an lse of inf.
         out.zero_();
         softmax_lse.fill_(std::numeric_limits<float>::infinity());
     }
@@ -506,12 +454,12 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
-    // Before returning populate seed_t and offset_t if dropout is used
+    // Before returning populate seed_t and offset_t if dropout is used.
     if(p_dropout > 0.0)
     {
-        seed_t = at::scalar_tensor(at::Scalar(reinterpret_cast<uint64_t>(*(drop_seed_offset.first))),
+        seed_t = at::scalar_tensor(at::Scalar(drop_seed),
                                    at::dtype(at::kUInt64).device(at::kCUDA));
-        offset_t = at::scalar_tensor(at::Scalar(reinterpret_cast<uint64_t>(*(drop_seed_offset.second))),
+        offset_t = at::scalar_tensor(at::Scalar(drop_offset),
                                    at::dtype(at::kUInt64).device(at::kCUDA));
     }
     // Note: These are propagated up to the return of mha_fwd(). comments

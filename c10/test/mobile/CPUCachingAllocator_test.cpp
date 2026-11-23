@@ -1,0 +1,74 @@
+#include <c10/core/CPUAllocator.h>
+#include <c10/mobile/CPUCachingAllocator.h>
+#include <gtest/gtest.h>
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <thread>
+#include <vector>
+
+#if defined(__SANITIZE_THREAD__)
+#define CPU_CACHING_ALLOCATOR_TEST_TSAN
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define CPU_CACHING_ALLOCATOR_TEST_TSAN
+#endif
+#endif
+
+namespace {
+
+TEST(CPUCachingAllocatorTest, LiveAllocationSurvivesAllocatorDestruction) {
+  auto* allocator = c10::GetDefaultMobileCPUAllocator();
+  for (bool reuse_cached : {false, true}) {
+    c10::DataPtr live;
+    {
+      c10::CPUCachingAllocator caching_allocator;
+      c10::WithCPUCachingAllocatorGuard guard(&caching_allocator);
+      auto cached = allocator->allocate(64);
+      auto* cached_pointer = cached.get();
+      cached.clear();
+      live = allocator->allocate(reuse_cached ? 64 : 128);
+      if (reuse_cached) {
+        EXPECT_EQ(cached_pointer, live.get());
+      }
+      *static_cast<int*>(live.get()) = 1234;
+    }
+    EXPECT_EQ(1234, *static_cast<int*>(live.get()));
+  }
+}
+
+#ifdef CPU_CACHING_ALLOCATOR_TEST_TSAN
+// TSan detects unsynchronized map accesses without relying on data corruption.
+TEST(CPUCachingAllocatorTest, ConcurrentDestruction) {
+  std::atomic<bool> start{false};
+  std::array<std::thread, 4> threads;
+  for (auto& thread : threads) {
+    thread = std::thread([&start]() {
+      auto* allocator = c10::GetDefaultMobileCPUAllocator();
+      while (!start.load()) {
+        std::this_thread::yield();
+      }
+      for (int iteration = 0; iteration < 1000; ++iteration) {
+        c10::DataPtr live;
+        {
+          c10::CPUCachingAllocator caching_allocator;
+          c10::WithCPUCachingAllocatorGuard guard(&caching_allocator);
+          live = allocator->allocate(sizeof(int));
+          std::vector<c10::DataPtr> cached;
+          cached.reserve(16);
+          for (std::size_t block = 1; block <= 16; ++block) {
+            cached.emplace_back(allocator->allocate(64 * block));
+          }
+        }
+      }
+    });
+  }
+  start.store(true);
+  for (auto& thread : threads) {
+    thread.join();
+  }
+}
+#endif
+
+} // namespace

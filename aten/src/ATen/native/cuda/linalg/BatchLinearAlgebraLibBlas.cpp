@@ -19,12 +19,9 @@
 // contains the full, original git history for both files.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Context.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/irange.h>
 
@@ -90,12 +87,13 @@ void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
   auto tau_ptr_array_data = reinterpret_cast<scalar_t**>(tau_ptr_array.data_ptr());
 
   int info;
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  at::cuda::blas::geqrfBatched(handle, m, n, input_ptr_array_data, lda, tau_ptr_array_data, &info, batch_size);
-
-  // info only indicates wrong arguments to geqrfBatched call
-  // info is a host variable, we can check it without device synchronization
-  TORCH_INTERNAL_ASSERT(info == 0);
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    at::cuda::blas::geqrfBatched(handle, m, n, &input_ptr_array_data[mini_idx], lda, &tau_ptr_array_data[mini_idx], &info, cur_batch_size);
+    TORCH_INTERNAL_ASSERT(info == 0);
+  }
 }
 
 void geqrf_batched_cublas(const Tensor& input, const Tensor& tau) {
@@ -118,7 +116,13 @@ static void apply_lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots
   Tensor a_ptr_array = get_device_pointers<scalar_t>(A);
   auto a_ptr_array_data = reinterpret_cast<scalar_t**>(a_ptr_array.data_ptr());
 
-  at::cuda::blas::getrfBatched(n, a_ptr_array_data, lda, pivots_data, infos_data, batch_size);
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    auto pivots_cur = pivots_data ? &pivots_data[mini_idx * n] : nullptr;
+    auto infos_cur = &infos_data[mini_idx];
+    at::cuda::blas::getrfBatched(n, &a_ptr_array_data[mini_idx], lda, pivots_cur, infos_cur, cur_batch_size);
+  }
 }
 
 void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
@@ -145,10 +149,17 @@ static void apply_lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots
   auto lu_ptr_array_data = reinterpret_cast<const scalar_t* const*>(lu_ptr_array.const_data_ptr());
   auto b_ptr_array_data = reinterpret_cast<scalar_t**>(b_ptr_array.data_ptr());
 
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  at::cuda::blas::getrsBatched(handle, trans, m, nrhs, const_cast<scalar_t**>(lu_ptr_array_data),
-    lda, const_cast<int*>(pivots_data), b_ptr_array_data, lda, &info, batch_size);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    auto pivots_cur = const_cast<int*>(&pivots_data[mini_idx * m]);
+    auto lu_ptr_cur = const_cast<scalar_t**>(&lu_ptr_array_data[mini_idx]);
+    auto b_ptr_cur = &b_ptr_array_data[mini_idx];
+    at::cuda::blas::getrsBatched(handle, trans, m, nrhs, lu_ptr_cur,
+      lda, pivots_cur, b_ptr_cur, lda, &info, cur_batch_size);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info == 0);
+  }
 }
 
 void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
@@ -176,11 +187,11 @@ static void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, 
   auto ldb = std::max<int>(1, cuda_int_cast(B.size(-2), "ldb"));
 
   auto alpha = scalar_t{1};
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
 
   for (decltype(batch_size) i = 0; i < batch_size; i++) {
     const scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* B_working_ptr = &B_data[i * B_mat_stride];
-    auto handle = at::cuda::getCurrentCUDABlasHandle();
     at::cuda::blas::trsm(handle, side, uplo, trans, diag, m, n, &alpha, A_working_ptr, lda, B_working_ptr, ldb);
   }
 }
@@ -213,21 +224,32 @@ static void apply_triangular_solve_batched(const Tensor& A, const Tensor& B, boo
   auto A_ptr_array_data = reinterpret_cast<scalar_t**>(A_ptr_array.data_ptr());
   auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
 
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, m, n, &alpha, A_ptr_array_data, lda, B_ptr_array_data, ldb, batch_size);
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    at::cuda::blas::trsmBatched(handle, side, uplo, trans, diag, m, n, &alpha, &A_ptr_array_data[mini_idx], lda, &B_ptr_array_data[mini_idx], ldb, cur_batch_size);
+  }
 }
 
 void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
-  // Workaround the following a bug on CUDA < 12.1
-  // RuntimeError: CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling `cublasStrsmBatched
+  // Workaround the following bug on CUDA < 12.1
+  // RuntimeError: CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling `cublasStrsmBatched`
   // See https://github.com/pytorch/pytorch/issues/79191#issuecomment-1154222580
-#if defined(CUSOLVER_VERSION) && CUSOLVER_VERSION < 12100
+#if defined(CUDA_VERSION) && CUDA_VERSION < 12010
   constexpr auto max_batch_size = 524280;
   if (B.size(-1) > max_batch_size) {
     auto n_chunks = (B.size(-1) + max_batch_size - 1) / max_batch_size; // ceildiv
-    auto splits = B.split(n_chunks, /*dim=*/-1);
-    for (const Tensor& b : splits) {
-      triangular_solve_batched_cublas(A, b, left, upper, transpose, unitriangular);
+    auto chunks = B.chunk(n_chunks, /*dim=*/-1);
+    for (const Tensor& b : chunks) {
+      // Each matrix in a chunk still has the layout cuBLAS expects, but
+      // get_device_pointers() infers the batch stride from the last two sizes, so
+      // it would use the chunk's number of columns instead of B's. Cloning the
+      // chunk makes that inference correct.
+      Tensor b_cm = cloneBatchedColumnMajor(b);
+      triangular_solve_batched_cublas(A, b_cm, left, upper, transpose, unitriangular);
+      // Copy solution back into the output view
+      b.copy_(b_cm);
     }
     return;
   }
@@ -276,19 +298,21 @@ inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
   auto B_ptr_array_data = reinterpret_cast<scalar_t**>(B_ptr_array.data_ptr());
 
   auto infos_data = infos.data_ptr<int>();
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto handle = at::cuda::getCurrentCUDABlasHandleWithWorkspace();
   int info;
 
-  at::cuda::blas::gelsBatched<scalar_t>(
-    handle, trans, m, n, nrhs,
-    A_ptr_array_data, lda,
-    B_ptr_array_data, ldb,
-    &info,
-    infos_data,
-    batch_size);
-
-  // negative info indicates that an argument to gelsBatched call is invalid
-  TORCH_INTERNAL_ASSERT(info == 0);
+  constexpr int batch_limit = 65535;
+  for (int mini_idx = 0; mini_idx < batch_size; mini_idx += batch_limit) {
+    int cur_batch_size = std::min<int>(batch_size - mini_idx, batch_limit);
+    at::cuda::blas::gelsBatched<scalar_t>(
+      handle, trans, m, n, nrhs,
+      &A_ptr_array_data[mini_idx], lda,
+      &B_ptr_array_data[mini_idx], ldb,
+      &info,
+      &infos_data[mini_idx],
+      cur_batch_size);
+    TORCH_INTERNAL_ASSERT(info == 0);
+  }
 }
 
 // This is a type dispatching helper function for 'apply_gels_batched'

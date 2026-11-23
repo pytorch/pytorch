@@ -75,7 +75,7 @@ Tensor run_layernorm_context(
   // mean, 1/sqrt(var+eps)>, but we only need the first tensor (layer_norm).
   std::tuple<Tensor, Tensor, Tensor> native_layer_norm_output =
       at::native_layer_norm(input, normalized_shape, weight_opt, bias_opt, eps);
-  return std::get<0>(native_layer_norm_output);
+  return std::get<0>(std::move(native_layer_norm_output));
 }
 
 static Tensor layer_norm(

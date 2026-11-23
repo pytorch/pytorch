@@ -8,6 +8,7 @@
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <c10/util/safe_conv.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -93,9 +94,9 @@ static void distribution_kernel_mps_impl(TensorIteratorBase& iter,
   }
 
   // After `with_32bit_indexing` decomposition `iter.numel()` fits in uint32,
-  // but `checked_convert` keeps us honest if anything ever reaches the kernel
+  // but `safe_conv` keeps us honest if anything ever reaches the kernel
   // with a count that would silently truncate.
-  const uint32_t numel = c10::checked_convert<uint32_t>(iter.numel(), "uint32_t");
+  const uint32_t numel = c10::safe_conv<uint32_t>(iter.numel(), "number of generated samples");
   const int64_t threads = at::ceil_div<int64_t>(numel, elements_per_thread);
 
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
@@ -189,10 +190,10 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
-        const auto numel = c10::checked_convert<uint32_t>(output.numel(), "uint32_t");
+        const auto numel = c10::safe_conv<uint32_t>(output.numel(), "output.numel()");
         mtl_setArgs(
             computeEncoder, output, p_float, std::array<long, 2>{seed, base_offset}, numel, stream->getErrorBuffer());
-        mtl_dispatch1DJob(computeEncoder, pso, at::ceil_div(numel, 4u));
+        mtl_dispatch1DJob(computeEncoder, pso, at::ceil_div<int64_t>(numel, 4));
       }
     });
   }
@@ -208,11 +209,15 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
 // still the inplace target (TensorIterator uses the same idiom).
 static void bernoulli_scalar_kernel_mps(const TensorBase& self, double p, std::optional<Generator> gen) {
   // 0 <= p <= 1 is already enforced by `bernoulli_impl_` before the stub is dispatched.
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "bernoulli is not implemented for complex types on MPS");
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   distribution_kernel_mps_impl(iter, p, 0.0, "bernoulli_scalar", 1, gen);
 }
 
 static void bernoulli_tensor_kernel_mps(const TensorBase& self, const TensorBase& p_, std::optional<Generator> gen) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "bernoulli is not implemented for complex types on MPS");
   Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
   const Tensor& p_t = static_cast<const Tensor&>(p_);
   bernoulli_tensor_mps_impl(self_t, p_t, gen);

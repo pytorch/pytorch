@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorIterator.h>
@@ -28,6 +29,33 @@
 #endif
 
 namespace at::native { namespace {
+
+// gcc-13 ICEs auto-vectorizing the vec_base.h Vectorized<T> emulation under fixed-length SVE.
+// The barebones unsigned types have no SVE specialization, so they are the ones that land on that path.
+// Not every 13.x build is affected, so the bound covers the series rather than a point release.
+// Remove once the aarch64 wheels require gcc-14 or newer.
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ < 14 && \
+    (defined(CPU_CAPABILITY_SVE256) || defined(CPU_CAPABILITY_SVE128))
+template <typename scalar_t>
+constexpr bool use_vectorized_clamp =
+    !isBarebonesUnsignedType(c10::CppTypeToScalarType<scalar_t>::value);
+#else
+template <typename scalar_t>
+constexpr bool use_vectorized_clamp = true;
+#endif
+
+// std::min and std::max return their first argument when the two compare equal,
+// so they keep the sign of a zero; a hardware min/max does not. Restore `a`
+// where both operands are zeros -- their bitwise or is +-0, which still
+// compares equal to zero.
+template <typename scalar_t>
+Vectorized<scalar_t> keep_zero_sign(
+    const Vectorized<scalar_t>& res,
+    const Vectorized<scalar_t>& a,
+    const Vectorized<scalar_t>& b) {
+  const auto both_zero = (a | b) == Vectorized<scalar_t>(scalar_t(0));
+  return Vectorized<scalar_t>::blendv(res, a, both_zero);
+}
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 inline void compare_base_kernel_core(
@@ -340,63 +368,85 @@ void isin_default_kernel_cpu(
 }
 
 void clamp_kernel_impl(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_cpu", [&]() {
-    cpu_kernel_vec(iter,
-      [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
-        if (min != min || max != max) {
-            return std::numeric_limits<scalar_t>::quiet_NaN();
-        } else {
-            return std::min(std::max(a, min), max);
-        }
-      },
-      [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
-        return vec::minimum(vec::maximum(a, min), max);
-      });
-  });
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_cpu", AT_WRAP([&]() {
+    const auto clamp_op = [](scalar_t a, scalar_t min, scalar_t max) -> scalar_t {
+      if (min != min || max != max) {
+          return std::numeric_limits<scalar_t>::quiet_NaN();
+      } else {
+          return std::min(std::max(a, min), max);
+      }
+    };
+
+    if constexpr (use_vectorized_clamp<scalar_t>) {
+      cpu_kernel_vec(iter, clamp_op,
+        [](Vectorized<scalar_t> a, Vectorized<scalar_t> min, Vectorized<scalar_t> max) {
+          const auto lo = keep_zero_sign(vec::maximum(a, min), a, min);
+          return keep_zero_sign(vec::minimum(lo, max), lo, max);
+        });
+    } else {
+      cpu_kernel(iter, clamp_op);
+    }
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
 }
 
 void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_scalar_cpu", AT_WRAP([&]() {
     const auto min = min_.to<scalar_t>();
     const auto max = max_.to<scalar_t>();
-    const Vectorized<scalar_t> min_vec(min);
-    const Vectorized<scalar_t> max_vec(max);
-      cpu_kernel_vec(iter,
-        [=](scalar_t a) -> scalar_t {
-          return std::min(std::max(a, min), max);
-        },
+    const auto clamp_op = [=](scalar_t a) -> scalar_t {
+      return std::min(std::max(a, min), max);
+    };
+
+    if constexpr (use_vectorized_clamp<scalar_t>) {
+      const Vectorized<scalar_t> min_vec(min);
+      const Vectorized<scalar_t> max_vec(max);
+      cpu_kernel_vec(iter, clamp_op,
         [=](Vectorized<scalar_t> a) {
-          return vec::clamp(a, min_vec, max_vec);
+          const auto lo = keep_zero_sign(vec::clamp_min(a, min_vec), a, min_vec);
+          return keep_zero_sign(vec::clamp_max(lo, max_vec), lo, max_vec);
         });
-  });
+    } else {
+      cpu_kernel(iter, clamp_op);
+    }
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
 }
 
 void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_max_scalar_cpu", [&]() {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_max_scalar_cpu", AT_WRAP([&]() {
     const auto max = max_.to<scalar_t>();
-    const Vectorized<scalar_t> max_vec(max);
-    cpu_kernel_vec(iter,
-      [=](scalar_t a) -> scalar_t {
-        return std::min(a, max);
-      },
-      [=](Vectorized<scalar_t> a) {
-        return vec::clamp_max(a, max_vec);
-      });
-  });
+    const auto clamp_max_op = [=](scalar_t a) -> scalar_t {
+      return std::min(a, max);
+    };
+
+    if constexpr (use_vectorized_clamp<scalar_t>) {
+      const Vectorized<scalar_t> max_vec(max);
+      cpu_kernel_vec(iter, clamp_max_op,
+        [=](Vectorized<scalar_t> a) {
+          return keep_zero_sign(vec::clamp_max(a, max_vec), a, max_vec);
+        });
+    } else {
+      cpu_kernel(iter, clamp_max_op);
+    }
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
 }
 
 void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_min_scalar_cpu", [&]() {
+  AT_DISPATCH_V2(iter.common_dtype(), "clamp_min_scalar_cpu", AT_WRAP([&]() {
     const auto min = min_.to<scalar_t>();
-    const Vectorized<scalar_t> min_vec(min);
-    cpu_kernel_vec(iter,
-        [=](scalar_t a) -> scalar_t {
-          return std::max(a, min);
-        },
+    const auto clamp_min_op = [=](scalar_t a) -> scalar_t {
+      return std::max(a, min);
+    };
+
+    if constexpr (use_vectorized_clamp<scalar_t>) {
+      const Vectorized<scalar_t> min_vec(min);
+      cpu_kernel_vec(iter, clamp_min_op,
         [=](Vectorized<scalar_t> a) {
-          return vec::clamp_min(a, min_vec);
+          return keep_zero_sign(vec::clamp_min(a, min_vec), a, min_vec);
         });
-  });
+    } else {
+      cpu_kernel(iter, clamp_min_op);
+    }
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf);
 }
 
 } // anonymous namespace

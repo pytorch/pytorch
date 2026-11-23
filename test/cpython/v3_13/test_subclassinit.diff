@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_subclassinit.py b/test/cpython/v3_13/test_subclassinit.py
-index 0d32aa509bd..15d58500db5 100644
+index 0d32aa509bd25cde53da618bfa417e2cd23acbb9..15d58500db551e740bb4e4b3f5a0b23bcdce2097 100644
 --- a/test/cpython/v3_13/test_subclassinit.py
 +++ b/test/cpython/v3_13/test_subclassinit.py
 @@ -1,8 +1,26 @@

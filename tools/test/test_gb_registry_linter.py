@@ -548,6 +548,74 @@ def other():
         messages = check_registry_sync(self.test_data_dir, self.registry_path)
         self.assertEqual(messages, [])
 
+    def test_case12_direct_disable_helper(self):
+        callsite_content = """from torch._dynamo.exc import unimplemented
+
+def test(self):
+    def unimplemented_direct_disable_call(api_name):
+        _unimplemented = unimplemented
+        _unimplemented(
+            gb_type=f"Call to `{api_name}()`",
+            context=f"Called `{api_name}()` with args `{args}`, kwargs `{kwargs}`",
+            explanation=f"`{api_name}()` was called inside a compiled region. "
+            "This API disables compilation when used as a decorator or wrapper outside the compiled region.",
+            hints=[
+                f"Move the `{api_name}()` call outside the compiled function and apply it to the function that should run eagerly.",
+                "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
+            ],
+        )
+
+    unimplemented_direct_disable_call("torch._dynamo.disable")
+    unimplemented_direct_disable_call(api_name="torch.compiler.disable")
+"""
+        with open(self.callsite_file, "w") as f:
+            f.write(callsite_content)
+
+        registry_data = {
+            "GB0000": [
+                {
+                    "Gb_type": "Call to `torch._dynamo.disable()`",
+                    "Context": "Called `torch._dynamo.disable()` with args `{args}`, kwargs `{kwargs}`",
+                    "Explanation": "`torch._dynamo.disable()` was called inside a compiled region. This API disables compilation when used as a decorator or wrapper outside the compiled region.",
+                    "Hints": [
+                        "Move the `torch._dynamo.disable()` call outside the compiled function and apply it to the function that should run eagerly.",
+                        "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
+                    ],
+                }
+            ],
+            "GB0001": [
+                {
+                    "Gb_type": "Call to `torch.compiler.disable()`",
+                    "Context": "Called `torch.compiler.disable()` with args `{args}`, kwargs `{kwargs}`",
+                    "Explanation": "`torch.compiler.disable()` was called inside a compiled region. This API disables compilation when used as a decorator or wrapper outside the compiled region.",
+                    "Hints": [
+                        "Move the `torch.compiler.disable()` call outside the compiled function and apply it to the function that should run eagerly.",
+                        "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
+                    ],
+                }
+            ],
+        }
+        with open(self.registry_path, "w") as f:
+            json.dump(registry_data, f, indent=2)
+
+        messages = check_registry_sync(self.test_data_dir, self.registry_path)
+        self.assertEqual(messages, [])
+
+        changed_callsite_content = callsite_content.replace(
+            "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point.",
+            "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point instead.",
+        )
+        with open(self.callsite_file, "w") as f:
+            f.write(changed_callsite_content)
+
+        messages = check_registry_sync(self.test_data_dir, self.registry_path)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].name, "Registry sync needed")
+        self.assertIn(
+            "Use `torch._dynamo.graph_break()` to intentionally insert a graph break at this point instead.",
+            messages[0].replacement,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

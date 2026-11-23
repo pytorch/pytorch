@@ -50,7 +50,7 @@ static void searchsorted_mps_contiguous(Tensor& result,
       id<MTLComputePipelineState> bucketizationPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(bucketizationPSO, kernel, {input, boundaries, sorter});
+      getMPSProfiler().beginProfileKernel(bucketizationPSO, kernel, {input, boundaries, sorter}, mpsStream);
 
       [computeEncoder setComputePipelineState:bucketizationPSO];
       mtl_setArgs(computeEncoder, input, boundaries, result, idim_in, idim_bd, numel_in, right_i64, is_1d_boundaries);
@@ -65,7 +65,7 @@ static void searchsorted_mps_contiguous(Tensor& result,
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadGroupSize];
 
-      getMPSProfiler().endProfileKernel(bucketizationPSO);
+      getMPSProfiler().endProfileKernel(bucketizationPSO, mpsStream);
     }
   });
 }
@@ -82,6 +82,11 @@ Tensor& searchsorted_out_mps(const Tensor& sorted_sequence,
   auto sorter_maybe_owned = at::borrow_from_optional_tensor(sorter_opt);
   const Tensor& sorter = *sorter_maybe_owned;
   searchsorted_pre_check(sorted_sequence, self, result, out_int32, right, side_opt, sorter);
+
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !c10::isComplexType(self.scalar_type()) && !c10::isComplexType(sorted_sequence.scalar_type()),
+      "searchsorted is not supported for complex on MPS");
+
   resize_output(result, self.sizes());
 
   // we have two inputs to set right, pre_check checks that they aren't set to opposites

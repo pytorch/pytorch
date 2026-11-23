@@ -67,11 +67,11 @@ def _promote_type_fft(
         dtype = torch.get_default_dtype()
 
     allowed_types = [torch.float32, torch.float64]
-    maybe_support_half = device.type in ["cuda", "meta", "xpu"]
+    maybe_support_half = device.type in ["cuda", "meta", "xpu", "mtia"]
 
     if maybe_support_half:
         allowed_types.append(torch.float16)
-        # bfloat16 is supported for FFT on CUDA/XPU devices, but there is no
+        # bfloat16 is supported for FFT on CUDA/XPU/MTIA devices, but there is no
         # corresponding "complex bfloat16" dtype (corresponding_complex_dtype
         # maps it to complex64). Promote bfloat16 -> float32 here so that:
         #   * the decomposition output dtype (complex64) matches aten, and
@@ -81,7 +81,9 @@ def _promote_type_fft(
         #     (test_python_ref__refs_fft_*_cuda_bfloat16).
         if dtype == torch.bfloat16:
             dtype = torch.float32
-    torch._check(dtype in allowed_types, lambda: f"Unsupported dtype {dtype}")
+    torch._check_not_implemented(
+        dtype in allowed_types, lambda: f"Unsupported dtype {dtype}"
+    )
 
     if require_complex:
         dtype = utils.corresponding_complex_dtype(dtype)
@@ -165,7 +167,7 @@ def _fft_r2c(
     onesided: bool,
 ) -> TensorLikeType:
     """Common code for performing any real to complex FFT (rfft or ihfft)"""
-    torch._check(
+    torch._check_type(
         not input.dtype.is_complex,
         lambda: f"{func_name} expects a floating point input tensor, but got {input.dtype}",
     )
@@ -405,7 +407,7 @@ def rfftn(
     dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not input.dtype.is_complex,
         lambda: f"rfftn expects a real-valued input tensor, but got {input.dtype}",
     )
@@ -424,7 +426,7 @@ def ihfftn(
     dim: DimsType | None = None,
     norm: NormType = None,
 ) -> TensorLikeType:
-    torch._check(
+    torch._check_type(
         not input.dtype.is_complex,
         lambda: f"ihfftn expects a real-valued input tensor, but got {input.dtype}",
     )

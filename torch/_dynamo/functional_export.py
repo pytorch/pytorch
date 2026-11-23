@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from torch._dynamo.output_graph import OutputReturnInfo
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
     from torch.export._trace import _DynamicShapesInput
     from torch.fx import Node
     from torch.fx.node import Argument, Target
@@ -259,7 +259,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         flat_args_dynamic_dims: list[set[int]],
         graph_input_order: dict[int, int],
         graph_output_map: dict[int, OutputReturnInfo],
-        fake_mode: FakeTensorMode | None = None,
+        fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
         graph_inputs: dict[int, Source | None] | None = None,
     ) -> None:
         super().__init__(module)
@@ -395,7 +395,8 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             if output_type == "graph_out":
                 new_outputs.append(original_outputs[cast(int, val)])
             elif output_type == "input":
-                input_idx = cast(GetItemSource, val).index
+                input_source = cast(GetItemSource, val)
+                input_idx = cast(int, input_source.index)
                 new_outputs.append(self.new_input_nodes[input_idx])
             elif output_type == "constant":
                 new_outputs.append(val)
@@ -446,7 +447,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 def _suggest_or_raise_constraint_violation(
     module_to_trace: torch.nn.Module,
     orig_callable: Callable[..., Any],
-    fake_mode: FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
     graph_capture_output: CaptureOutput,
     args: Any,
     kwargs: Any,
@@ -1066,7 +1067,7 @@ def _dynamo_graph_capture_for_export(
             graph_input_order: dict[int, int] = {}
             for inp in graph_inputs:
                 source = graph_inputs[inp]
-                if isinstance(source, torch._dynamo.source.GetItemSource):
+                if isinstance(source, GetItemSource) and isinstance(source.index, int):
                     graph_input_order[source.index] = len(graph_input_order)
 
             for real_idx, graph_idx in graph_input_order.items():

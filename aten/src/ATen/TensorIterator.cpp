@@ -7,16 +7,17 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/Copy.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
-#include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
 #endif
 
@@ -24,7 +25,6 @@
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
-#include <algorithm>
 #include <cmath>
 
 namespace at {
@@ -44,8 +44,8 @@ inline void get_base_ptrs(char** ptrs, ArrayRef<OperandInfo> operands) {
 
 inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_t ndim) {
   for (const auto dim : c10::irange(ndim)) {
-    for (const auto arg : c10::irange(operands.size())) {
-      *strides++ = operands[arg].stride_bytes[dim];
+    for (const auto& operand : operands) {
+      *strides++ = operand.stride_bytes[dim];
     }
   }
   // Always at least 2d strides to support 2d for_each loops
@@ -184,10 +184,6 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
     (*static_shape_)[squash_dim] = 1;
   }
   return *this;
-}
-
-bool TensorIteratorConfig::is_tensor_const(size_t idx) {
-  return std::find(const_tensor_indices_.begin(), const_tensor_indices_.end(), idx) != const_tensor_indices_.end();
 }
 
 // NOTE: [Computing output strides]
@@ -508,6 +504,20 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       TORCH_CHECK(canCast(common_dtype_, op.current_dtype),
                   "result type ", common_dtype_, " can't be cast to the "
                   "desired output type ", op.current_dtype);
+    }
+
+    // Shell dtypes (e.g. float4_e2m1fn_x2) have no value conversions. CPU rejects
+    // converting an input to the common dtype, or the common dtype to an output,
+    // when it creates the temporaries below through copy_; other devices convert
+    // inside their kernels, so check here to make every device (and meta) reject
+    // the same casts.
+    const bool converted = op.is_output ? config.cast_common_dtype_to_outputs_
+                                        : config.promote_inputs_to_common_dtype_;
+    if (converted && op.current_dtype != common_dtype_) {
+      // Direction only affects the error message
+      at::native::check_shell_dtype_cast(
+          op.is_output ? common_dtype_ : op.current_dtype,
+          op.is_output ? op.current_dtype : common_dtype_);
     }
 
     // Creates temporaries for CPU operations, if needed and requested
@@ -1129,8 +1139,7 @@ TensorIterator TensorIterator::reduce_op(TensorBase& out1, TensorBase& out2, con
 }
 
 void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
-  for (const auto idx : c10::irange(config.tensors_.size())) {
-    auto& tensor = config.tensors_[idx];
+  for (auto& tensor : config.tensors_) {
     // If *any* of the arguments is a meta tensor, the overall
     // computation is a meta computation (don't do any work,
     // just compute output information).  This aligns with
@@ -1139,7 +1148,10 @@ void TensorIteratorBase::populate_operands(TensorIteratorConfig& config) {
       is_meta_ = true;
     }
     operands_.emplace_back(std::move(tensor));
-    operands_[idx].is_const = config.is_tensor_const(idx);
+  }
+  // const_tensor_indices_ are indices into operands_.
+  for (const auto idx : config.const_tensor_indices_) {
+    operands_[idx].is_const = true;
   }
   num_outputs_ = config.num_outputs_;
 }
@@ -1413,18 +1425,26 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
   }
 
   bool is_contiguous = true;
-  bool is_channels_last = true;
-  bool is_non_overlapping_and_dense = true;
   for (const auto& op : operands_) {
     if (op.tensor_base().defined() && !op.will_resize) {
       is_contiguous &= op.tensor_base().is_contiguous(at::MemoryFormat::Contiguous);
-      is_channels_last &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast);
-      is_non_overlapping_and_dense &= op.tensor_base().is_non_overlapping_and_dense();
+      if (!is_contiguous) {
+        break;
+      }
     }
   }
   // TODO this leads to ambiguous cases (NC11) to be always treated as contiguous
   if (is_contiguous) {
     return FastSetupType::CONTIGUOUS;
+  }
+
+  bool is_channels_last = true;
+  bool is_non_overlapping_and_dense = true;
+  for (const auto& op : operands_) {
+    if (op.tensor_base().defined() && !op.will_resize) {
+      is_channels_last &= op.tensor_base().is_contiguous(at::MemoryFormat::ChannelsLast);
+      is_non_overlapping_and_dense &= op.tensor_base().is_non_overlapping_and_dense();
+    }
   }
   if (is_channels_last) {
     return FastSetupType::CHANNELS_LAST;

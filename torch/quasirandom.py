@@ -174,6 +174,8 @@ class SobolEngine:
         Args:
             n (Int): The number of steps to fast-forward by.
         """
+        if n == 0:
+            return self
         if self.num_generated == 0:
             torch._sobol_engine_ff_(
                 self.quasi, n - 1, self.sobolstate, self.dimension, self.num_generated

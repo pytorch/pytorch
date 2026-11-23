@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -16,11 +17,15 @@ void complex_kernel(TensorIterator& iter) {
 }
 
 void polar_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.input_dtype(), "polar_cpu", [&]() {
-    cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
-      return c10::complex<scalar_t>(a * std::cos(b), a * std::sin(b));
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kHalf, iter.input_dtype(), "polar_cpu", [&]() {
+        using opmath_t = at::opmath_type<scalar_t>;
+        cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
+          return c10::complex<scalar_t>(
+              static_cast<scalar_t>(opmath_t(a) * std::cos(opmath_t(b))),
+              static_cast<scalar_t>(opmath_t(a) * std::sin(opmath_t(b))));
+        });
+      });
 }
 
 } // anonymous namespace

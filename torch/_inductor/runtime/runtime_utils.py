@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import json
 import math
 import operator
 from typing import Any, TYPE_CHECKING
@@ -68,6 +69,24 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     )
 
 
+def extra_options_to_hashable(extra_options: Any) -> str:
+    """Serialize backend options as sorted JSON; string keys are assumed."""
+    try:
+        return json.dumps(extra_options or {}, sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            "Triton Config.extra_options cannot be serialized with sorted JSON keys. "
+            "Use JSON-serializable values and string dictionary keys."
+        ) from exc
+
+
+def config_ctas_per_cga(cfg: Config) -> tuple[int, ...] | None:
+    """A config's cluster shape as the tuple triton.Config documents, also when it
+    holds a list."""
+    ctas_per_cga = getattr(cfg, "ctas_per_cga", None)
+    return None if ctas_per_cga is None else tuple(ctas_per_cga)
+
+
 def triton_config_to_hashable(cfg: Config) -> Hashable:
     """
     Convert triton config to a tuple that can uniquely identify it. We can use
@@ -79,6 +98,16 @@ def triton_config_to_hashable(cfg: Config) -> Hashable:
     items.append(("num_warps", cfg.num_warps))
     # pyrefly: ignore [missing-attribute]
     items.append(("num_stages", cfg.num_stages))
+    # A register cap or a cluster shape makes a different kernel; without them,
+    # unique_configs discards such a config as a duplicate of the plain one.
+    if getattr(cfg, "maxnreg", None) is not None:
+        items.append(("maxnreg", cfg.maxnreg))
+    if (ctas_per_cga := config_ctas_per_cga(cfg)) is not None:
+        items.append(("ctas_per_cga", ctas_per_cga))
+    if extra_options := getattr(cfg, "extra_options", None):
+        # Match the cache's JSON representation, including nested options and
+        # tuples that are restored as lists. Dict insertion order is irrelevant.
+        items.append(("extra_options", extra_options_to_hashable(extra_options)))
     return tuple(items)
 
 
@@ -90,6 +119,30 @@ def validate_triton_config(cfg: Config) -> None:
     # So we assert - if we do get a pre_hook, it might get ignored after caching.
     if getattr(cfg, "pre_hook", None) is not None:
         raise AssertionError("triton configs with pre_hooks not supported")
+
+
+def assert_tensor_metadata(
+    tensor: torch.Tensor | None,
+    expected_size: tuple[Any, ...],
+    expected_stride: tuple[Any, ...],
+    expected_dtype: torch.dtype,
+    op_name: str | None = None,
+) -> None:
+    if tensor is None:
+        return
+    if tensor.dtype != expected_dtype:
+        op_msg = f"\nError in op: {op_name}" if op_name else ""
+        raise RuntimeError(
+            f"expected dtype {expected_dtype} but got {tensor.dtype}"
+            + op_msg
+            + "\nThis error most often comes from an incorrect fake (aka meta) "
+            "kernel for a custom op."
+            "\nUse torch.library.opcheck to test your custom op."
+            "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck"
+        )
+    torch._C._dynamo.guards.assert_size_stride(
+        tensor, expected_size, expected_stride, op_name
+    )
 
 
 def create_bandwidth_info_str(
@@ -146,7 +199,7 @@ def blue_text(msg: str) -> str:
     return _color_text(msg, "blue")
 
 
-def get_first_attr(obj: Any, *attrs: str) -> Any:
+def get_first_attr(obj: object, *attrs: str) -> Any:
     """
     Return the first available attribute or throw an exception if none is present.
     """

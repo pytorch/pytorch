@@ -7,7 +7,6 @@
 #include <torch/csrc/utils/object_ptr.h>
 
 #include <array>
-#include <stdexcept>
 
 namespace torch {
 namespace {
@@ -29,17 +28,13 @@ void registerLayoutObject(THPLayout* thp_layout, at::Layout layout) {
 
 THPDtype* getTHPDtype(at::ScalarType scalarType) {
   auto dtype = dtype_registry[static_cast<int>(scalarType)];
-  if (!dtype) {
-    throw std::invalid_argument("unsupported scalarType");
-  }
+  TORCH_CHECK(dtype, "unsupported scalarType");
   return dtype;
 }
 
 THPLayout* getTHPLayout(at::Layout layout) {
   auto thp_layout = layout_registry[static_cast<int>(layout)];
-  if (!thp_layout) {
-    throw std::invalid_argument("unsupported at::Layout");
-  }
+  TORCH_CHECK(thp_layout, "unsupported at::Layout");
   return thp_layout;
 }
 
@@ -52,9 +47,12 @@ PyObject* createPyObject(const at::Storage& storage) {
   // information about storages from python). However, any accesses to the
   // data_ptr is not allowed, through methods like
   // x.untyped_storage().data_ptr()
+  // To ask whether a tensor's storage holds data without raising, use
+  // torch._C._has_storage_data(x). Do not use x.data_ptr() == 0 for this: it
+  // is nonzero for a wrapper subclass with a nonzero storage offset, and zero
+  // for a tensor with numel() == 0 viewing a non-empty storage.
   PyObject* obj = THPStorage_Wrap(storage);
-  if (!obj)
-    throw python_error();
+  TORCH_CHECK_PYTHON(obj);
   return obj;
 }
 

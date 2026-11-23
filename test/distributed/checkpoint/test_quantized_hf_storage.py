@@ -1,19 +1,34 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
+import os
 import tempfile
+import unittest
 from unittest.mock import MagicMock, patch
 
 import torch
 from torch.distributed.checkpoint._hf_utils import _HFStorageInfo
-from torch.distributed.checkpoint.metadata import MetadataIndex
+from torch.distributed.checkpoint.metadata import ChunkStorageMetadata, MetadataIndex
 from torch.distributed.checkpoint.planner import LoadItemType, ReadItem
+from torch.distributed.checkpoint.planner_helpers import (
+    create_read_items_for_chunk_list,
+)
 from torch.distributed.checkpoint.quantized_hf_storage import (
     QuantizedHuggingFaceStorageReader,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
+from torch.testing._internal.distributed.checkpoint_utils import (
+    random_compressed_tensors_mxfp4,
+    save_hf_checkpoint,
+)
 
 
 class TestQuantizedHfStorage(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         """Set up common test fixtures."""
@@ -273,6 +288,34 @@ class TestQuantizedHfStorage(TestCase):
         expected_result[2:4, 3:4] = 2.0 * 4.0  # Block (1,1) intersection
 
         torch.testing.assert_close(committed_tensor, expected_result)
+
+    def test_compressed_tensors_mxfp4_slice_read(self):
+        """A planner read item that starts and ends mid-group gets that slice."""
+        try:
+            from safetensors import safe_open
+        except ImportError:
+            raise unittest.SkipTest("safetensors not installed") from None
+
+        packed, scale, expected = random_compressed_tensors_mxfp4(4, 96)
+        fqn = "model.layers.1.block_sparse_moe.experts.0.w1.weight_packed"
+        scale_fqn = "model.layers.1.block_sparse_moe.experts.0.w1.weight_scale"
+        files = {"model.safetensors": {fqn: packed, scale_fqn: scale}}
+        save_hf_checkpoint(self.path, files)
+
+        reader = QuantizedHuggingFaceStorageReader(path=self.path)
+        metadata = reader.read_metadata()
+        # Rows 1:3, cols 40:90 of the dequantized [4, 96] tensor.
+        chunk = ChunkStorageMetadata(torch.Size([1, 40]), torch.Size([2, 50]))
+        (read_item,) = create_read_items_for_chunk_list(
+            fqn, metadata.state_dict_metadata[fqn], [chunk]
+        )
+        planner = MagicMock()
+        planner.resolve_tensor.return_value = torch.zeros(2, 50)
+        file_name = os.path.join(self.path, "model.safetensors")
+        with safe_open(file_name, framework="pt") as f:
+            reader._process_read_request(f, read_item, planner)
+        committed = planner.commit_tensor.call_args[0][1]
+        torch.testing.assert_close(committed, expected[1:3, 40:90])
 
 
 if __name__ == "__main__":

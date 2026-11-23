@@ -25,10 +25,9 @@
 namespace torch::aot_inductor {
 
 inline void validate_arrayref_tensor_ndim(int32_t ndim) {
-  if (ndim < 0 || ndim > AOTI_ARRAYREF_TENSOR_MAX_DIMS) {
-    throw std::runtime_error(
-        "AOTInductorArrayRefTensor ndim exceeds AOTI_ARRAYREF_TENSOR_MAX_DIMS");
-  }
+  AOTI_RUNTIME_CHECK(
+      ndim >= 0 && ndim <= AOTI_ARRAYREF_TENSOR_MAX_DIMS,
+      "AOTInductorArrayRefTensor ndim exceeds AOTI_ARRAYREF_TENSOR_MAX_DIMS");
 }
 
 // -------------------------------------------------------------------------

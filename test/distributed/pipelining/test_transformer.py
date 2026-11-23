@@ -3,7 +3,11 @@
 import torch
 from torch.distributed.pipelining import pipeline, SplitPoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 d_hid = 16
@@ -35,6 +39,8 @@ class TransformerLike(torch.nn.Module):
 
 
 class TransformerTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def test_ir(self, device):
         transformer = TransformerLike().to(device)
         x = torch.randn(microbatch_size, d_hid, device=device)
@@ -74,10 +80,7 @@ class TransformerTests(TestCase):
         print(f"Equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
 
 
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(
-    TransformerTests, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(TransformerTests, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

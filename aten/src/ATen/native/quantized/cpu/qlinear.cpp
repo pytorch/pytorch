@@ -134,7 +134,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
   // Allocate a buffer for fbgemmPacked to use
   auto buffer = at::empty(out_sizes, output.options().dtype(at::kInt));
 
-  auto output_data = reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>());
+  auto output_data = reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>());
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
@@ -198,7 +198,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
             /*packA=*/packA,
             /*packB=*/*packB,
             /*C=*/output_data,
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -233,7 +233,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
             /*packA=*/packA,
             /*packB=*/*packB,
             /*C=*/output_data,
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -370,7 +370,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
       output.options().dtype(at::kInt),
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  auto output_data = output.data_ptr<float>();
+  auto output_data = output.mutable_data_ptr<float>();
 
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
@@ -411,7 +411,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
             /*packA=*/packA,
             /*packB=*/*packB,
             /*C=*/output_data,
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -443,7 +443,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
             /*packA=*/packA,
             /*packB=*/*packB,
             /*C=*/output_data,
-            /*C_buffer=*/buffer.data_ptr<int32_t>(),
+            /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
             /*thread_id=*/task_id,
@@ -644,9 +644,10 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
     // Get the original weight and adjust it to uint8 from int8
     auto weight_contig = orig_weight;
     auto bias_fp32 = bias_;
-    int8_t* w_data = (int8_t*)weight_contig.data_ptr<c10::qint8>();
+    const int8_t* w_data =
+        reinterpret_cast<const int8_t*>(weight_contig.const_data_ptr<c10::qint8>());
 
-    float* weight_scales_data = w_scales.data_ptr<float>();
+    const float* weight_scales_data = w_scales.const_data_ptr<float>();
     // We calculate requant scale here as the vector holding the requant scale
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
@@ -658,7 +659,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
         at::device(c10::kCPU).dtype(c10::kQUInt8),
         weight_scales_data[0],
         w_zero_points[0]);
-    auto* qnnp_w_data = qnnp_weight.data_ptr<c10::quint8>();
+    auto* qnnp_w_data = qnnp_weight.mutable_data_ptr<c10::quint8>();
     auto wt_numel = weight_contig.numel();
     for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
@@ -736,7 +737,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       (uint8_t*)input_contig.const_data_ptr<c10::quint8>(),
       cols_input /* input_stride */,
       packB->getPackedWeights(),
-      (uint8_t*)output.data_ptr<c10::quint8>(),
+      reinterpret_cast<uint8_t*>(output.mutable_data_ptr<c10::quint8>()),
       rows_w /* output_stride */,
       // TODO (Ashkan): Disabling temporarily.
       // Throws a floating point exception with OSS pthreadpool.
@@ -829,12 +830,12 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   auto dst_dims = {M, N};
   double input_scale = input.q_scale();
   int64_t input_zero_point = input.q_zero_point();
-  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input_scale);
-  const ideep::scale_t& weights_scales = w.get_scale();
+  const std::vector<float>& src_scales = std::vector<float>(1, 1.0/input_scale);
+  const std::vector<float>& weights_scales = w.get_scale();
   // Scales of ONEDNN and PyTorch are reciprocal
-  const ideep::scale_t& dst_scales = ideep::scale_t(1, 1.0/output_scale);
-  const ideep::zero_point_t& src_zero_point = ideep::zero_point_t(1, input_zero_point);
-  const ideep::zero_point_t& dst_zero_point = ideep::zero_point_t(1, output_zero_point);
+  const std::vector<float>& dst_scales = std::vector<float>(1, 1.0/output_scale);
+  const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(1, input_zero_point);
+  const std::vector<int32_t>& dst_zero_point = std::vector<int32_t>(1, output_zero_point);
   // Compute: Use ideep::matmul_forward to support asymmetric quantization
   // Allocate output Tensor
   at::Tensor output = at::_empty_affine_quantized(
@@ -845,7 +846,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   if (output.numel() == 0) {
     return output;
   }
-  auto output_ideep_data_type = is_input_qint8 ? ideep::tensor::data_type::s8 : ideep::tensor::data_type::u8;
+  auto output_ideep_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
   auto ideep_lowp_kind = is_input_qint8 ? ideep::s8s8 : ideep::u8s8;
   ideep::tensor y({dst_dims, output_ideep_data_type,
                    {output.strides().cbegin(), output.strides().cend()}},
@@ -865,15 +866,25 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   PrimitiveCacheKey cache_key = std::make_tuple(
       input_scale, input_zero_point, input_dims, output_scale, output_zero_point, num_threads, /*accum scale*/1.0, /*accum zero point*/0);
   c10::call_once(*cache_initialized_flag, [&](){
+#if IDEEP_PREREQ(3, 13, 0, 4)
+      // Prepacking does not know the output dtype. Select the layout for this
+      // invocation before preparing the cached primitive.
+      auto expected_w = w.reorder_if_differ_in(
+          ideep::matmul_forward::expected_weights_desc(
+              w.get_dims(), input_dims, w.get_data_type(), input_data_type,
+              output_ideep_data_type, op_attr));
+#else
+      auto& expected_w = w;
+#endif
       LinearParams params;
       ideep::matmul_forward::prepare</*is_dynamic=*/false>(
-          params, x, w, b, y,
+          params, x, expected_w, b, y,
           src_scales, weights_scales, dst_scales,
           src_zero_point, dst_zero_point, 1.0f, 1.0f, op_attr,
           output_ideep_data_type,
           ideep_lowp_kind);
       get_cache() = LinearPrimitiveCache(cache_key, params);
-      w = w.reorder_if_differ_in(params.pd.weights_desc());
+      w = expected_w.reorder_if_differ_in(params.pd.weights_desc());
   });
   if (get_cache().hit(cache_key)) {
     LinearParams& params = get_cache().get_param();
@@ -1135,10 +1146,11 @@ static at::Tensor linear_int8_with_onednn_weight(
           context_cache_enabled && !(is_fp8 && !cpuinfo_has_x86_amx_fp16());
 #endif
   if (allow_cache) {
-    if (qlinear_forward_params_map.contains(cache_key)) {
+    if (auto it = qlinear_forward_params_map.find(cache_key);
+        it != qlinear_forward_params_map.end()) {
       auto input_contig =
           dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
-      auto& params = qlinear_forward_params_map.at(cache_key);
+      auto& params = it->second;
       if (params.K == K && params.N == N) {
         at::Tensor output = binary_post_op == "sum"
             ? other.value()
@@ -1258,12 +1270,12 @@ static at::Tensor linear_int8_with_onednn_weight(
   }
   // Create onednn primitive
   auto src_dtype = at::native::get_mkldnn_dtype(input.scalar_type());
-  auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
+  auto src_desc = tensor::desc(src_dims, src_dtype, dnnl::memory::format_tag::any);
   auto weights_desc = packed_weight.get_desc();
   auto dst_dtype = dst.get_data_type();
-  auto dst_desc = tensor::desc(dst_dims, dst_dtype, ideep::format_tag::any);
+  auto dst_desc = tensor::desc(dst_dims, dst_dtype, dnnl::memory::format_tag::any);
   auto bias_desc = with_bias ?
-      tensor::desc(onednn_bias.get_dims(), onednn_bias.get_data_type(), ideep::format_tag::any) :
+      tensor::desc(onednn_bias.get_dims(), onednn_bias.get_data_type(), dnnl::memory::format_tag::any) :
       empty_tensor_desc;
   // Get op attr for primitive
   // Note: output_scale & output_zero_point are for re-quantization of the final output.
@@ -1314,7 +1326,7 @@ static at::Tensor linear_int8_with_onednn_weight(
 
   // Prepare args and execute primitive
   tensor scratchpad(primitive_desc.scratchpad_desc());
-  ideep::exec_args args;
+  std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src});
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});
@@ -1322,11 +1334,11 @@ static at::Tensor linear_int8_with_onednn_weight(
   if (with_bias) {
     args.insert({DNNL_ARG_BIAS, onednn_bias});
   }
-  tensor src_scales_t = tensor(ideep::scale_t(1, input_scale));
+  tensor src_scales_t = tensor(std::vector<float>(1, input_scale));
   tensor wei_scales_t = at::native::itensor_from_tensor(weight_scales);
-  tensor dst_scales_t = tensor(ideep::scale_t(1, output_scale));
-  tensor src_zp_t = tensor(ideep::zero_point_t(1, input_zero_point));
-  tensor dst_zp_t = tensor(ideep::zero_point_t(1, output_zero_point));
+  tensor dst_scales_t = tensor(std::vector<float>(1, output_scale));
+  tensor src_zp_t = tensor(std::vector<int32_t>(1, input_zero_point));
+  tensor dst_zp_t = tensor(std::vector<int32_t>(1, output_zero_point));
   if (input_scale != 1.0f) {
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_scales_t});
   }

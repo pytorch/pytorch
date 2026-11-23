@@ -3,25 +3,28 @@
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/cuda/CUDADataType.h>
-#include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseBlas.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
-#include <ATen/cuda/CUDAContext.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/add.h>
 #include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/MaybeOwned.h>
+
+#include <optional>
 
 namespace at::native::sparse::impl::cuda {
 
@@ -526,6 +529,67 @@ void block_sparse_mm(
   }
 }
 
+#if !defined(USE_ROCM)
+// CSR tensor described to cuSPARSE as COO (row indices expanded from
+// crow_indices) for CUSPARSE_SPMM_COO_ALG2. Batches are laid out as in
+// CuSparseSpMatCsrDescriptor: batch b starts at b * nnz, or at stride 0 when
+// indices and values are shared by all batches.
+class CuSparseSpMatCooFromCsrDescriptor
+    : public at::cuda::sparse::CuSparseSpMatDescriptor {
+ public:
+  explicit CuSparseSpMatCooFromCsrDescriptor(const Tensor& input, bool is_vector)
+      : col_indices_(input.col_indices().contiguous()),
+        values_(input.values().contiguous()) {
+    auto nnz = col_indices_.size(-1);
+    // Shape (batch_ndim + 2, batch_count * nnz); row -2 holds the row indices.
+    row_indices_ = at::_convert_indices_from_csr_to_coo(
+                       input.crow_indices(),
+                       col_indices_,
+                       /*out_int32=*/col_indices_.scalar_type() == kInt)
+                       .select(0, -2);
+    // SpMM with one output column can use SpMV, which requires aligned COO
+    // row indices before cuSPARSE 12.7 (CUDA 13.1, gh-167901).
+    if (is_vector &&
+        reinterpret_cast<uintptr_t>(row_indices_.data_ptr()) % 16 != 0 &&
+        at::cuda::sparse::cusparse_runtime_version() < 12700) {
+      row_indices_ = row_indices_.clone();
+    }
+
+    cusparseSpMatDescr_t raw_descriptor = nullptr;
+    TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
+        &raw_descriptor,
+        input.size(-2),
+        input.size(-1),
+        nnz,
+        row_indices_.data_ptr(),
+        col_indices_.data_ptr(),
+        values_.data_ptr(),
+        at::cuda::sparse::getCuSparseIndexType(col_indices_.scalar_type()),
+        CUSPARSE_INDEX_BASE_ZERO,
+        at::cuda::ScalarTypeToCudaDataType(input.scalar_type())));
+    descriptor_.reset(raw_descriptor);
+
+    if (input.dim() == 3) {
+      int batch_count = at::native::cuda_int_cast(
+          at::native::batchCount(input), "batch_count");
+      bool batched = values_.dim() >= 2;
+      TORCH_CHECK(
+          (input.crow_indices().dim() >= 2) == batched &&
+              (col_indices_.dim() >= 2) == batched,
+          "Expected crow_indices, col_indices and values of a batched CSR "
+          "tensor to be either all batched or all shared across batches");
+      TORCH_CUDASPARSE_CHECK(cusparseCooSetStridedBatch(
+          raw_descriptor, batch_count, batched ? nnz : 0));
+    }
+  }
+
+ private:
+  Tensor col_indices_;
+  Tensor values_;
+  Tensor row_indices_;
+};
+#endif
+
 void spmm(
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
@@ -563,6 +627,28 @@ void spmm(
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
   auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
+  cusparseSpMatDescr_t spmatA = descA.descriptor();
+
+  // See Note [Enabling Deterministic Operations]
+#if !defined(USE_ROCM)
+  std::optional<CuSparseSpMatCooFromCsrDescriptor> descA_coo;
+#endif
+  if (at::globalContext().deterministicAlgorithms()) {
+#if !defined(USE_ROCM)
+    algorithm = at::cuda::sparse::deterministic_spmm_alg(
+        opA,
+        opB,
+        at::cuda::ScalarTypeToCudaDataType(mat1.scalar_type()),
+        /*batched=*/mat1.dim() == 3);
+    if (algorithm == CUSPARSE_SPMM_COO_ALG2) {
+      descA_coo.emplace(mat1, /*is_vector=*/mat2.size(-1) == 1);
+      spmatA = descA_coo->descriptor();
+    }
+#else
+    // hipSPARSE does not document a deterministic SpMM algorithm.
+    at::globalContext().alertNotDeterministic("addmm_out_sparse_compressed_cuda");
+#endif
+  }
 
   auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(
       transpose_B ? mat2_->mT() : *mat2_);
@@ -586,7 +672,7 @@ void spmm(
             opA,
             opB,
             &alpha_,
-            descA.descriptor(),
+            spmatA,
             descB.unsafe_mutable_descriptor(),
             &beta_,
             descC.descriptor(),
@@ -603,7 +689,7 @@ void spmm(
             opA,
             opB,
             &alpha_,
-            descA.descriptor(),
+            spmatA,
             descB.unsafe_mutable_descriptor(),
             &beta_,
             descC.descriptor(),
@@ -623,7 +709,6 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-
   IntArrayRef A_sizes = A.sizes();
   auto ndim = A.dim();
   auto m = A_sizes[ndim - 2];
@@ -806,6 +891,41 @@ void addmm_out_sparse_csr(
     result.copy_(input);
   }
 
+  // If beta != 0, spgemm is correct only when the sparsity pattern
+  // of mat1 @ mat2 is that of result, i.e. sp(mat1 @ mat2) = sp(result).
+  // Since sp(mat1 @ mat2) is not known in advance, we need to materialize it
+  // in an external memory, and then deal with accumulation into result.
+  const auto is_csr_or_csc = [](const Tensor& t) {
+    return t.layout() == kSparseCsr || t.layout() == kSparseCsc;
+  };
+  if (beta.toComplexDouble() != 0. && is_csr_or_csc(mat1) && is_csr_or_csc(mat2) && is_csr_or_csc(result)) {
+    // NOTE: beta == 0 implies that the result is overwritten, not accumulated into.
+    auto AB = at::zeros(result.sizes(), result.options());
+    addmm_out_sparse_csr(AB, mat1, mat2, static_cast<Scalar>(0), alpha, AB);
+
+    // Handling accumulation into result.
+    // No add for reduced dtypes, so we try to deploy add on values,
+    // and that only possible when sp(mat1 @ mat2) == sp(result), which we check.
+    // When sp do no match, we use float32 add instead.
+    const auto [AB_compressed, AB_plain] = at::sparse_csr::getCompressedPlainIndices(AB);
+    const auto [C_compressed, C_plain] = at::sparse_csr::getCompressedPlainIndices(result);
+    if (
+      (AB._nnz() == result._nnz())
+      && AB_compressed.eq(C_compressed).all().logical_and_(AB_plain.eq(C_plain).all()).item<bool>()
+    ) {
+      (beta.toComplexDouble() == 1. ? result.values() : result.values().mul_(beta)).add_(AB.values());
+    } else {
+      const auto add_dtype = at::isReducedFloatingType(result.scalar_type()) ? kFloat : result.scalar_type();
+      // CUDA sparse add supports CSR only, and the transpose of a CSC tensor is CSR.
+      const auto t = [&](const Tensor& x) {
+        return result.layout() == kSparseCsc ? x.transpose(-2, -1) : x;
+      };
+      const auto res = t(at::add(t(AB).to(add_dtype), t(result).to(add_dtype), beta));
+      result.resize_as_sparse_(res).copy_(res);
+    }
+    return;
+  }
+
   // mm functions that assume that result contains input:
   if (mat1.layout() == kStrided) {
     if (mat2.layout() == kSparseCsr) {
@@ -869,12 +989,22 @@ void addmm_out_sparse_csr(
             mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result); return;
       }
       if (result.layout() == kSparseCsc) {
+        // spgemm may change nnz by resizing or replacing the member tensors of
+        // the transposed view, which share storage with those of result, but
+        // not sizes. Hence result adopts the view's member tensors.
+        auto result_t = result.transpose(-2, -1);
         spgemm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result.transpose(-2, -1)); return;
+            result_t);
+        static_cast<SparseCsrTensorImpl*>(result.unsafeGetTensorImpl())->set_member_tensors(
+            result_t.crow_indices(),
+            result_t.col_indices(),
+            result_t.values(),
+            result.sizes());
+        return;
       }
     }
   }
@@ -917,10 +1047,19 @@ void addmv_out_sparse_csr(
   auto descX = at::cuda::sparse::CuSparseDnVecDescriptor(*vec_);
   auto descY = at::cuda::sparse::CuSparseDnVecDescriptor(*result_);
 
+  // See Note [Enabling Deterministic Operations]
+  // cuSPARSE documents bit-wise reproducible SpMV results only for
+  // CUSPARSE_SPMV_CSR_ALG2 (and COO_ALG2, BSR_ALG1) with opA == NON_TRANSPOSE.
 #ifdef USE_ROCM
   cusparseSpMVAlg_t alg = CUSPARSE_MV_ALG_DEFAULT;
+  if (at::globalContext().deterministicAlgorithms()) {
+    // hipSPARSE does not document a deterministic SpMV algorithm.
+    at::globalContext().alertNotDeterministic("addmv_out_sparse_compressed_cuda");
+  }
 #else
-  cusparseSpMVAlg_t alg = CUSPARSE_SPMV_ALG_DEFAULT;
+  cusparseSpMVAlg_t alg = at::globalContext().deterministicAlgorithms()
+      ? CUSPARSE_SPMV_CSR_ALG2
+      : CUSPARSE_SPMV_ALG_DEFAULT;
 #endif
 
   // SpMV doesn't support uniform precision computation
@@ -1001,7 +1140,7 @@ void add_out_sparse_csr(
   auto A_32 = at::native::_sparse_csr_tensor_unsafe(
       A.crow_indices().to(kInt),
       A.col_indices().to(kInt),
-      A.values(),
+      A.values().contiguous(),
       A.sizes(),
       A.scalar_type(),
       A.layout(),
@@ -1009,7 +1148,7 @@ void add_out_sparse_csr(
   auto B_32 = at::native::_sparse_csr_tensor_unsafe(
       B.crow_indices().to(kInt),
       B.col_indices().to(kInt),
-      B.values(),
+      B.values().contiguous(),
       B.sizes(),
       B.scalar_type(),
       B.layout(),

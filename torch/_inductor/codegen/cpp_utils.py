@@ -50,6 +50,7 @@ DTYPE_TO_CPP = {
     torch.float8_e5m2: "at::Float8_e5m2",
     torch.float8_e4m3fnuz: "at::Float8_e4m3fnuz",
     torch.float8_e5m2fnuz: "at::Float8_e5m2fnuz",
+    torch.float8_e8m0fnu: "at::Float8_e8m0fnu",
 }
 
 DTYPE_TO_ATEN = {
@@ -76,14 +77,7 @@ DTYPE_TO_ATEN = {
     torch.float8_e5m2: "at::kFloat8_e5m2",
     torch.float8_e4m3fnuz: "at::kFloat8_e4m3fnuz",
     torch.float8_e5m2fnuz: "at::kFloat8_e5m2fnuz",
-}
-
-DEVICE_TO_ATEN = {
-    "meta": "at::kMeta",
-    "cpu": "at::kCPU",
-    "cuda": "at::kCUDA",
-    "xpu": "at::kXPU",
-    "mps": "at::kMPS",
+    torch.float8_e8m0fnu: "at::kFloat8_e8m0fnu",
 }
 
 LAYOUT_TO_ATEN = {
@@ -93,6 +87,49 @@ LAYOUT_TO_ATEN = {
 
 # matches c10/core/DeviceType.h
 DEVICE_TO_INT = {"cpu": 0, "cuda": 1}
+
+
+def device_to_aten(device_type: str) -> str:
+    # Meta has no registered DeviceOpOverrides.
+    if device_type == "meta":
+        return "at::kMeta"
+
+    from .common import DeviceOpOverrides, get_device_op_overrides
+
+    try:
+        overrides = get_device_op_overrides(device_type)
+    except KeyError as exc:
+        raise RuntimeError(
+            f"No ATen device type mapping for {device_type}: no DeviceOpOverrides "
+            f"is registered; call register_device_op_overrides({device_type!r}, ...)."
+        ) from exc
+
+    if type(overrides).aten_device_type is DeviceOpOverrides.aten_device_type:
+        raise RuntimeError(
+            f"No ATen device type mapping for {device_type}: "
+            f"{type(overrides).__name__} does not implement aten_device_type()."
+        )
+
+    aten_device_type = overrides.aten_device_type()
+
+    if not isinstance(aten_device_type, str) or not aten_device_type.startswith(
+        "at::k"
+    ):
+        raise RuntimeError(
+            f"{type(overrides).__name__}.aten_device_type() must return "
+            f"an ATen device type expression starting with 'at::k', "
+            f"got {aten_device_type!r}"
+        )
+    suffix = aten_device_type[len("at::k") :]
+    if not suffix.isidentifier():
+        raise RuntimeError(
+            f"{type(overrides).__name__}.aten_device_type() must return "
+            f"an ATen device type expression with a valid identifier suffix "
+            f"after 'at::k', got {aten_device_type!r}"
+        )
+
+    return aten_device_type
+
 
 _IS_WINDOWS = sys.platform == "win32"
 

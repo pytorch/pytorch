@@ -340,6 +340,11 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     # pyrefly: ignore [bad-override]
+    def fmaximum(a, b):
+        return f"hl.max({a}, {b})"
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
     def where(a, b, c):
         if hasattr(b, "name"):
             c = f"hl.cast({b.name}.type(), {c})"
@@ -1182,9 +1187,20 @@ class HalideKernel(SIMDKernel):
             if old.stride != new.stride:
                 return False
             if old.size != new.size or old.expr != new.expr:
-                old.size = V.graph.sizevars.evaluate_max(old.size, new.size)
+                # sizes can be kernel arg names (ks0) or graph symbols (s0),
+                # and the shape env only knows the latter
+                old.size = V.graph.sizevars.evaluate_max(
+                    self.unrename_indexing(old.size), self.unrename_indexing(new.size)
+                )
                 old.expr = None
         return True
+
+    def unrename_indexing(self, expr: sympy.Expr) -> sympy.Expr:
+        """Map kernel arg names such as ks0 back to graph symbols"""
+        expr = sympy.sympify(expr)
+        outer = {inner: sym for sym, inner in self.args.sizevars.items()}
+        subs = {s: outer[s.name] for s in expr.free_symbols if s.name in outer}
+        return sympy_subs(expr, subs)
 
     def apply_offset_to_dimension(self, dims, offset):
         if offset == 0:
@@ -1659,7 +1675,7 @@ class HalideKernel(SIMDKernel):
             }
             cuda_device = max(0, current_device.index)
 
-        # strict_float is requires for correctness
+        # strict_float is required for correctness
         target.append("strict_float")
 
         # without this we will initialize cuda once per kernel and hit errors

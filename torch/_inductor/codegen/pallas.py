@@ -19,6 +19,7 @@ from torch.utils._sympy.functions import (
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
+from ..runtime.tiling import get_pointwise_prefixes
 from ..utils import get_fused_kernel_name, get_kernel_metadata
 from ..virtualized import V
 from .block_analysis import BlockPatternMatcher
@@ -818,6 +819,7 @@ class PallasKernelOverrides(OpOverrides):
     def load_seed(name: str, offset: str) -> str:
         """Load the random seed value from a buffer."""
         # Load the seed from the buffer and add offset for uniqueness
+        # pyrefly: ignore[bad-argument-type]
         seed_offset = V.kernel.args.seed_offset("load_seed_offset", offset)
         return f"({V.kernel.args.input(name)}[0] + {seed_offset})"
 
@@ -887,7 +889,7 @@ class _BufferIndexing:
 class _BroadcastedIterVar:
     """Encapsulates information needed to codegen a broadcasted iteration var"""
 
-    # index of this var in `self.range_tree_nodes.items()``
+    # index of this var in `self.range_tree_nodes.items()`
     idx: int
     var_sym: sympy.Symbol
     entry: IterationRangesEntry
@@ -3331,8 +3333,8 @@ class PallasKernel(SIMDKernel):
 
         # Determine if this is a partial reduction (has pointwise dimensions)
         # or a full reduction to scalar
-        pointwise_prefixes = OrderedSet(["x", "y", "z"])
-        has_pointwise = any(p in self.numels for p in pointwise_prefixes)
+        pointwise_prefixes = OrderedSet(get_pointwise_prefixes(self.numels))
+        has_pointwise = bool(pointwise_prefixes)
         pointwise_numel: int | None = self._compute_prefix_numel(pointwise_prefixes)
         reduction_numel: int | None = self._compute_reduction_numel()
         n_reduction_dims = sum(

@@ -154,7 +154,7 @@ class Status(Enum):
         )
 
 
-# Sometime the types of configs aren't expressive enough to be captured by python type system, so the options can be
+# Sometimes the types of configs aren't expressive enough to be captured by python type system, so the options can be
 # manually specified here:
 # TODO this needs to be indexed to the module, like inductor or dynamo, for name collisions
 TYPE_OVERRIDES: dict[str, list[Any]] = {
@@ -178,18 +178,6 @@ TYPE_OVERRIDES: dict[str, list[Any]] = {
             "batch_aten_div": {},
             "group_linear": {"require_fbgemm": True},
         },
-    ],
-    "autoheuristic_collect": [
-        {"pad_mm": True, "mixed_mm": True},
-        {"pad_mm": True, "mixed_mm": False},
-        {"pad_mm": False, "mixed_mm": True},
-        {"pad_mm": False, "mixed_mm": False},
-    ],
-    "autoheuristic_use": [
-        {"pad_mm": True, "mixed_mm": True},
-        {"pad_mm": True, "mixed_mm": False},
-        {"pad_mm": False, "mixed_mm": True},
-        {"pad_mm": False, "mixed_mm": False},
     ],
     "traceable_tensor_subclasses": [OrderedSet()],
     "nontraceable_tensor_subclasses": [OrderedSet()],
@@ -470,6 +458,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "cpp.cxx": DEFAULT,  # Out of Scope
         "TYPE_CHECKING": DEFAULT,  # Not a config
         "max_autotune_pointwise": DEFAULT,  # Timing
+        "max_autotune_reduction": DEFAULT,  # Timing
         "max_autotune_gemm": DEFAULT,  # Timing, re-enable when autotune speed improvements merged.
         "max_autotune_gemm_backends": DEFAULT,  # Timing
         "max_autotune_conv_backends": DEFAULT,  # Timing
@@ -480,7 +469,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "aot_inductor.presets": DEFAULT,  # Typing
         "cuda.arch": DEFAULT,  # Out of Scope
         "cuda.version": DEFAULT,  # Out of Scope
-        "cuda.cutlass_dir": DEFAULT,  # Out of Scope
+        "cutlass.cutlass_dir": DEFAULT,  # Out of Scope
         "cuda.cuda_cxx": DEFAULT,  # Out of Scope
         "rocm.arch": DEFAULT,  # Out of Scope
         "rocm.ck_supported_arch": DEFAULT,  # Out of Scope
@@ -605,7 +594,12 @@ class ConfigFuzzer:
         self.detailed_results: dict[ComboType, dict[str, Any]] = {}
         self.config_module = config_module
         self.test_model_fn_factory = test_model_fn_factory
-        self.fields: dict[str, _ConfigEntry] = self.config_module._config
+        # Aliases have no default of their own; their targets are fuzzed instead.
+        self.fields: dict[str, _ConfigEntry] = {
+            name: entry
+            for name, entry in self.config_module._config.items()
+            if entry.alias is None
+        }
         self.sample = SamplingMethod.dispatch(sm)
 
         if default is None:

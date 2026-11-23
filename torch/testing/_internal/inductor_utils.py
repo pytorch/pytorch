@@ -5,27 +5,20 @@ import functools
 import logging
 import os
 import re
+import string
 import sys
 import unittest
+import unittest.mock
 from subprocess import CalledProcessError
 
 import torch
-import torch._inductor.async_compile
 import torch._inductor.config as config
-from torch._inductor.codecache import CppCodeCache
-from torch._inductor.codegen.common import (
-    get_custom_backend_config_for_device,
-    get_custom_backend_pass_for_device,
-    get_scheduling_for_device,
-    get_wrapper_codegen_for_device,
-    init_backend_registration,
-    register_backend_for_device,
-)
-from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-from torch._inductor.compile_fx import shape_env_from_inputs
-from torch._inductor.custom_graph_pass import CustomGraphModulePass, CustomGraphPass
-from torch._inductor.graph import GraphLowering
+
+from torch._dynamo.device_interface import get_interface_for_device
+from torch._inductor import compile_fx  # noqa: F401
+from torch._inductor import ir
 from torch._inductor.utils import (
+    _device_is_available,
     get_gpu_shared_memory,
     get_gpu_type,
     GPU_TYPES,
@@ -33,18 +26,25 @@ from torch._inductor.utils import (
     is_gpu,
     OrderedSet,
 )
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._helion import has_helion
 from torch.utils._pallas import has_pallas_package, has_tpu_pallas
-from torch.utils._triton import has_triton
+from torch.utils._triton import (
+    has_triton,
+    has_triton_block_ptr,
+    has_triton_cpu_backend,
+    has_triton_stable_tma_api,
+)
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import (
+    add_skip_condition,
     IS_CI,
     IS_WINDOWS,
     LazyVal,
+    NOTEST_CPU,
+    TEST_INDUCTOR_RUN_CPU,
     TestCase,
 )
 
@@ -55,6 +55,8 @@ log: logging.Logger = logging.getLogger(__name__)
 
 def test_cpu():
     try:
+        from torch._inductor.codecache import CppCodeCache
+
         CppCodeCache.load("")
         return True
     except (
@@ -69,51 +71,98 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+# Respect triton_disable_device_detection when probing the CPU backend.
+TRITON_HAS_CPU = has_triton(include_cpu=True) and has_triton_cpu_backend()
 
-HAS_PALLAS = has_pallas_package()
+HAS_PALLAS = LazyVal(has_pallas_package)
 
 HAS_HELION = has_helion()
 
-if HAS_TRITON:
-    import triton
-
-    TRITON_HAS_CPU = "cpu" in triton.backends.backends
-else:
-    TRITON_HAS_CPU = False
-
-
 HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
+
+HAS_MTIA_AND_TRITON = torch.mtia.is_available() and HAS_TRITON
 
 HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()
 
-HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
+HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON or HAS_MTIA_AND_TRITON
 HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
 
-HAS_MULTIGPU = any(
-    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
-    for gpu in GPU_TYPES
-)
+
+def platform_supports_tensor_descriptor() -> bool:
+    """Return whether CUDA TMA descriptors are supported on this platform."""
+    return (
+        HAS_CUDA_AND_TRITON
+        and not torch.version.hip
+        and torch.cuda.get_device_capability()[0] >= 9
+        and has_triton_stable_tma_api()
+    )
+
+
+def running_on_tdm_device() -> bool:
+    """Return whether the active ROCm device and Triton support gfx1250 TDM."""
+    if not torch.version.hip or not HAS_CUDA_AND_TRITON:
+        return False
+    try:
+        from torch._inductor.utils import _gfx1250_device_prereqs
+
+        device = torch.device("cuda", torch.cuda.current_device())
+        return _gfx1250_device_prereqs(device)
+    except Exception:
+        return False
+
+
+def _is_multigpu(gpu: str) -> bool:
+    # Resolve through the DeviceInterface registry: GPU_TYPES may include
+    # out-of-tree backends with no torch.<gpu> module (getattr would raise)
+    # or with partially-implemented interfaces (base methods raise
+    # NotImplementedError).
+    if not _device_is_available(gpu):
+        return False
+    try:
+        return get_interface_for_device(gpu).device_count() >= 2
+    except NotImplementedError:
+        return False
+
+
+HAS_MULTIGPU = any(_is_multigpu(gpu) for gpu in GPU_TYPES)
 
 _desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
 RUN_GPU = HAS_GPU and any(
     is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases
 )
 
-RUN_CPU = HAS_CPU and any(
-    getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases
+# PYTORCH_TEST_INDUCTOR_RUN_CPU=1 runs the CPU tests even when
+# PYTORCH_TESTING_DEVICE_ONLY_FOR leaves CPU out (but not when
+# PYTORCH_TESTING_DEVICE_EXCEPT_FOR excludes it). CI sets it for the
+# nogpu_NO_AVX2 job, which runs a CUDA build (so ONLY_FOR=cuda) on a machine
+# without a GPU.
+# test_cpu_cpp_wrapper keeps its own check, which ignores the flag.
+RUN_CPU = LazyVal(
+    lambda: HAS_CPU
+    and (
+        any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+        or (TEST_INDUCTOR_RUN_CPU and not NOTEST_CPU)
+    )
 )
 
-HAS_TPU = has_tpu_pallas()
+HAS_TPU = LazyVal(has_tpu_pallas)
 # TPU is a privateuse1 backend that isn't in _desired_test_bases (it requires
 # runtime initialization before the test base is registered). Check the env var
-# directly, matching the same semantics as RUN_CPU/RUN_GPU: when the env var is
-# unset, run if the hardware is available; when set, only run if "tpu" is listed.
-_only_for = os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
-RUN_TPU = HAS_TPU and ("tpu" in _only_for.split(",") if _only_for else True)
+# directly, matching RUN_GPU's ONLY_FOR semantics: when the env var is unset, run
+# if the hardware is available; when set, only run if "tpu" is listed. Unlike
+# RUN_GPU, it ignores PYTORCH_TESTING_DEVICE_EXCEPT_FOR.
+RUN_TPU = LazyVal(
+    lambda: HAS_TPU
+    and (
+        "tpu" in os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "").split(",")
+        if os.environ.get("PYTORCH_TESTING_DEVICE_ONLY_FOR", "")
+        else True
+    )
+)
 
 
 def _check_has_dynamic_shape(
@@ -152,6 +201,11 @@ def skipDeviceIf(cond, msg, *, device):
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
 
+            add_skip_condition(
+                inner,
+                lambda cls: type(device) is str and vars(cls).get("_device_at_collection") == device,
+                msg,
+            )
             return inner
 
     else:
@@ -179,6 +233,12 @@ requires_gpu = functools.partial(
 )
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
+# Only run tests that assert Triton block-pointer codegen where the frontend API
+# still exists (removed in triton-lang/triton#10833); elsewhere Inductor falls back
+# to masked indexing, so there is nothing to assert.
+requires_block_ptr = unittest.skipUnless(
+    has_triton_block_ptr(), "requires Triton block-pointer API"
+)
 
 
 def requires_gpu_with_enough_memory(min_mem_required):
@@ -212,11 +272,15 @@ IS_H100 = LazyVal(lambda: HAS_CUDA_AND_TRITON and get_gpu_shared_memory() == 232
 IS_BIG_GPU = LazyVal(lambda: HAS_GPU_AND_TRITON and is_big_gpu())
 
 
-def dummy_graph() -> GraphLowering:
+def dummy_graph():
     """
     Create a graph. This is useful for unit testing code which accesses
     V.graph.sizevars.
     """
+    from torch._inductor.compile_fx import shape_env_from_inputs
+    from torch._inductor.graph import GraphLowering
+    from torch.fx.experimental.proxy_tensor import make_fx
+
     example_inputs = [torch.randn(10) for _ in range(2)]
     gm = make_fx(torch.add, tracing_mode="fake")(*example_inputs)
     shape_env = shape_env_from_inputs(example_inputs)
@@ -371,15 +435,12 @@ def _quantize_blockwise(
     scale_expanded = scale.repeat_interleave(min_outer, dim=0).repeat_interleave(
         min_inner, dim=1
     )
-    x_fp8 = _to_fp8_saturated(
-        x / scale_expanded,  # Ensures that scaling doesn't cause inf/nan values
-        float8_dtype,
-    )
+    x_fp8 = _to_fp8_saturated(x * scale_expanded, float8_dtype)
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 
 
-class MockGraphHandler(GraphLowering):
+class MockGraphHandler:
     """Minimal mock graph handler for testing virtualized context."""
 
     def __init__(self, name_to_buffer=None):
@@ -404,7 +465,56 @@ class MockGraphHandler(GraphLowering):
         return torch.float32
 
 
+@contextlib.contextmanager
+def patch_lowering(lowering_overrides):
+    """
+    Temporarily register lowerings, given as
+    {op: (lowering_fn, broadcast, type_promotion_kind, convert_input_to_bool)}.
+    """
+    import torch._inductor.lowering as inductor_lowering
+
+    with unittest.mock.patch.dict(inductor_lowering.lowerings):
+        for op, (fn, broadcast, type_promotion_kind, convert_input_to_bool) in lowering_overrides.items():
+            inductor_lowering._register_lowering(
+                op,
+                fn,
+                broadcast=broadcast,
+                type_promotion_kind=type_promotion_kind,
+                convert_input_to_bool=convert_input_to_bool,
+                lowering_dict=inductor_lowering.lowerings,
+            )
+        yield
+
+
+class MockExternalTemplateBuffer(ir.TemplateBuffer):
+    """
+    A TemplateBuffer whose kernel is an ExternalTritonTemplateKernel that renders
+    its own Python source, as Helion does. render_fn(buf, kernel) sets
+    kernel._call_args and returns the PartialRender. Inputs are named A, B, ...
+    in order.
+    """
+
+    def __init__(self, layout, inputs, render_fn):
+        from torch._inductor.select_algorithm import ExternalTritonTemplateKernel
+
+        def make_kernel_render(out_node, hint_override=None):
+            kernel = ExternalTritonTemplateKernel(self)
+            return kernel, lambda: render_fn(self, kernel)
+
+        super().__init__(
+            layout,
+            inputs,
+            make_kernel_render,
+            named_inputs=dict(zip(string.ascii_uppercase, inputs)),
+        )
+
+
 def has_cpp_wrapper_for_device(device: str) -> bool:
+    from torch._inductor.codegen.common import (
+        get_wrapper_codegen_for_device,
+        init_backend_registration,
+    )
+
     init_backend_registration()
     return get_wrapper_codegen_for_device(device, cpp_wrapper=True) is not None
 
@@ -412,13 +522,22 @@ def has_cpp_wrapper_for_device(device: str) -> bool:
 @contextlib.contextmanager
 def patch_inductor_backend(
     device: str,
-    python_wrapper_codegen: PythonWrapperCodegen = None,
-    custom_pass: CustomGraphModulePass = None,
+    python_wrapper_codegen=None,
+    custom_pass=None,
     custom_backend_config: ConfigModule = None,
 ):
     """
     Patch the inductor backend for a specific device.
     """
+    from torch._inductor.codegen.common import (
+        get_custom_backend_config_for_device,
+        get_custom_backend_pass_for_device,
+        get_scheduling_for_device,
+        get_wrapper_codegen_for_device,
+        init_backend_registration,
+        register_backend_for_device,
+    )
+
     # Make sure the backend is already registered
     init_backend_registration()
 
@@ -468,6 +587,8 @@ def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> co
     we could provide a predicate which returns True for all aten.add.default nodes.
     Returns a context activating the pass.
     """
+    from torch._inductor.custom_graph_pass import CustomGraphPass
+
     class Pass(CustomGraphPass):
         def __call__(self, graph: torch.fx.Graph):
             for node in graph.nodes:

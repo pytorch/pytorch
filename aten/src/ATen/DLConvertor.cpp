@@ -62,7 +62,9 @@ DLDataType getDLDataType(const Tensor& t) {
       break;
     case ScalarType::BComplex32:
         TORCH_CHECK_BUFFER(false, "BComplex32 type is not supported by dlpack");
-        break;
+    case ScalarType::Float8_e5m3fnu:
+      TORCH_CHECK_BUFFER(
+          false, "Float8_e5m3fnu type is not supported by dlpack");
     case ScalarType::BFloat16:
       dtype.code = DLDataTypeCode::kDLBfloat;
       break;
@@ -93,14 +95,12 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::QUInt4x2:
     case ScalarType::QUInt2x4:
       TORCH_CHECK_BUFFER(false, "QUInt/QInt types are not supported by dlpack");
-      break;
     case ScalarType::Bits1x8:
     case ScalarType::Bits2x4:
     case ScalarType::Bits4x2:
     case ScalarType::Bits8:
     case ScalarType::Bits16:
       TORCH_CHECK_BUFFER(false, "Bit types are not supported by dlpack");
-      break;
     case ScalarType::Undefined:
       TORCH_CHECK_BUFFER(false, "Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:
@@ -113,7 +113,8 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
   DLDevice ctx;
 
   ctx.device_id =
-      (device.is_cuda() || device.is_privateuseone() || device.is_mtia())
+      (device.is_cuda() || device.is_xpu() || device.is_privateuseone() ||
+       device.is_mtia())
       ? static_cast<int32_t>(static_cast<unsigned char>(device.index()))
       : 0;
 
@@ -138,7 +139,6 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
       break;
     case DeviceType::XPU:
       ctx.device_type = DLDeviceType::kDLOneAPI;
-      ctx.device_id = at::detail::getXPUHooks().getGlobalIdxFromDevice(device);
       break;
     case DeviceType::MAIA:
       ctx.device_type = DLDeviceType::kDLMAIA;
@@ -162,7 +162,7 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
 Device dlDeviceToTorchDevice(
     DLDeviceType type,
     c10::DeviceIndex index,
-    void* data) {
+    void* data [[maybe_unused]]) {
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -181,8 +181,7 @@ Device dlDeviceToTorchDevice(
       return at::Device(DeviceType::HIP, index);
 #endif
     case DLDeviceType::kDLOneAPI:
-      TORCH_CHECK(data != nullptr, "Can't get ATen device for XPU without XPU data.");
-      return at::detail::getXPUHooks().getDeviceFromPtr(data);
+      return at::Device(DeviceType::XPU, index);
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, index);
     case DLDeviceType::kDLExtDev:
@@ -493,9 +492,17 @@ void toDLPackNonOwning(const Tensor& src, DLTensor* out, bool read_only) {
   // Fill in the pre-allocated DLTensor struct with direct pointers
   // This is a non-owning conversion - the caller owns the tensor
   // and must keep it alive for the duration of DLTensor usage
-  // See toDLPackImpl for why the read-only const_cast is safe.
-  out->data = read_only ? const_cast<void*>(src.const_data_ptr())
-                        : src.mutable_data_ptr();
+  // See toDLPackImpl for why the read-only const_cast is safe, and for why MPS
+  // exports the storage base plus a byte_offset instead of data_ptr().
+  if (src.device().type() == kMPS) {
+    out->data = read_only ? const_cast<void*>(src.storage().data())
+                          : src.storage().mutable_data();
+    out->byte_offset = src.storage_offset() * c10::elementSize(src.scalar_type());
+  } else {
+    out->data = read_only ? const_cast<void*>(src.const_data_ptr())
+                          : src.mutable_data_ptr();
+    out->byte_offset = 0;
+  }
   out->device = torchDeviceToDLDevice(src.device());
   out->ndim = static_cast<int32_t>(src.dim());
   out->dtype = getDLDataType(src);
@@ -503,7 +510,6 @@ void toDLPackNonOwning(const Tensor& src, DLTensor* out, bool read_only) {
   // which remains valid as long as the tensor is alive
   out->shape = const_cast<int64_t*>(src.sizes().data());
   out->strides = const_cast<int64_t*>(src.strides().data());
-  out->byte_offset = 0;
 }
 
 DLManagedTensor* toDLPack(const Tensor& src) {
@@ -536,7 +542,8 @@ Tensor maybeCopyTensor(
   if (optional_dl_device.has_value()) {
     auto device = at::dlDeviceToTorchDevice(
         optional_dl_device->device_type,
-        static_cast<c10::DeviceIndex>(optional_dl_device->device_id));
+        static_cast<c10::DeviceIndex>(optional_dl_device->device_id),
+        data.data_ptr());
 
     if (device != data.device()) {
       TORCH_CHECK_VALUE(

@@ -12,11 +12,12 @@ from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 
 from torch.testing._internal.common_utils import \
-    (TestCase, parametrize, suppress_warnings, _TestParametrizer, run_tests)
+    (TestCase, parametrize, suppress_warnings, _TestParametrizer, run_tests,
+     instantiate_parametrized_tests, HardwareClassification)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyNativeDeviceTypes, precisionOverride)
+    (instantiate_device_type_tests, ops, precisionOverride)
 
 
 def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
@@ -259,11 +260,22 @@ class mask_layouts(_TestParametrizer):
 
             test(self, layout, device, dtype, op, sample_inputs_generator())
 
+        def decorators(params):
+            layout, op = params['layout'], params['op']
+            if torch.device(params['device']).type in ('cpu', 'cuda') and (
+                layout == torch.sparse_coo and not op.supports_sparse
+                or layout == torch.sparse_csr and not op.supports_sparse_csr
+            ):
+                layout_name = str(layout).lstrip('torch.')
+                return [unittest.skip(f"{op.name} does not support inputs with {layout_name} layout")]
+            return []
+
         for layout in (torch.strided, torch.sparse_coo, torch.sparse_csr):
-            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout}, lambda _: [])
+            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout}, decorators)
 
 
 class TestMasked(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def assertEqualMasked(self, actual, expected, mask):
         strided = to_strided(actual)
@@ -272,7 +284,6 @@ class TestMasked(TestCase):
             expected = torch.where(mask, expected, expected.new_zeros([]))
         self.assertEqual(strided, expected, exact_device=False)
 
-    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(masked_ops_with_references)
     @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-4})
@@ -294,7 +305,6 @@ class TestMasked(TestCase):
             self.assertEqualMasked(actual, expected, outmask)
 
     @mask_layouts()
-    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(masked_ops_with_non_strided_support)
     @precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-3})
@@ -316,6 +326,12 @@ class TestMasked(TestCase):
                 outmask = torch.masked._output_mask(op.op, r_inp, *r_args, **r_kwargs)
             expected = op.op(r_inp, *r_args, **r_kwargs)
             self.assertEqualMasked(actual, expected, outmask)
+
+
+
+
+class TestMaskedGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
     @parametrize("sparse_kind,fill_value", [('coo', 0), ('hybrid_coo', 0),
@@ -431,7 +447,8 @@ class TestMasked(TestCase):
         self.assertEqual(dense, expected)
 
 
-instantiate_device_type_tests(TestMasked, globals(), except_for='meta')
+instantiate_device_type_tests(TestMasked, globals(), except_for='meta', allow_xpu=True)
+instantiate_parametrized_tests(TestMaskedGeneric)
 
 if __name__ == "__main__":
     run_tests()

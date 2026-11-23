@@ -92,6 +92,12 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   bool isStreamCapturing(const Stream& stream) const override {
     return impl_->isStreamCapturing(stream);
   }
+  uint64_t getStreamCaptureId(const Stream& stream) const override {
+    return impl_->getStreamCaptureId(stream);
+  }
+  void waitStream(const Stream& stream, const Stream& source) const override {
+    impl_->waitStream(stream, source);
+  }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
       const override {
@@ -109,6 +115,20 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
 
   void synchronizeDevice(const DeviceIndex device_index) const override {
     impl_->synchronizeDevice(device_index);
+  }
+
+  std::string getEventIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const EventFlag flag) const override {
+    return impl_->getEventIPCHandle(event, device_index, flag);
+  }
+
+  void reconstructEventFromIPCHandle(
+      void** event,
+      const DeviceIndex device_index,
+      const std::string& handle_string) const override {
+    impl_->reconstructEventFromIPCHandle(event, device_index, handle_string);
   }
 
  private:

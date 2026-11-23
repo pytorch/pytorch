@@ -40,15 +40,10 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
     set_locals_to_steal,
 )
-from torch._functorch._aot_autograd.runtime_wrappers import (
-    AutogradLazyBackwardCompileInfo,
-    CachedAutogradLazyBackwardCompileInfo,
-)
 from torch._guards import compile_context, CompileContext, CompileId, Source
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
-from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import (
@@ -60,6 +55,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.fx.node import Argument
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.types import FloatLikeType, IntLikeType
 from torch.utils._ordered_set import OrderedSet
@@ -67,6 +63,10 @@ from torch.utils._traceback import CapturedTraceback
 
 
 if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.runtime_wrappers import (
+        AutogradLazyBackwardCompileInfo,
+        CachedAutogradLazyBackwardCompileInfo,
+    )
     from torch._functorch._aot_autograd.schemas import SubclassMeta, ViewAndMutationMeta
     from torch.fx.proxy import Proxy
 
@@ -115,7 +115,7 @@ class _AOTCompiledFunction(Protocol):
     """
 
     _lazy_backward_info: (
-        AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
+        "AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None"
     )
     metadata: "ViewAndMutationMeta"
     maybe_subclass_metadata: "SubclassMeta | None"
@@ -125,6 +125,12 @@ class _AOTCompiledFunction(Protocol):
 
 
 def extract_bw_module(CompiledFunction: _AOTCompiledFunction) -> GraphModule:
+    # runtime_wrappers imports Dynamo, so defer this dependency until runtime.
+    from torch._functorch._aot_autograd.runtime_wrappers import (
+        AutogradLazyBackwardCompileInfo,
+        CachedAutogradLazyBackwardCompileInfo,
+    )
+
     if isinstance(
         CompiledFunction._lazy_backward_info, AutogradLazyBackwardCompileInfo
     ):
@@ -345,7 +351,7 @@ class AutogradCompilerInstance:
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Proxy | None = None
 
-    def wrap_fake(self, x: torch.Tensor, source: Source | None) -> FakeTensor:
+    def wrap_fake(self, x: torch.Tensor, source: Source | None) -> torch.Tensor:
         if not isinstance(x, torch.Tensor):
             raise AssertionError(f"Expected torch.Tensor, got {type(x)}")
         return self.fake_tensor_mode.from_tensor(x, source=source)
@@ -1079,14 +1085,6 @@ class AutogradCompilerInstance:
 
         return []
 
-    def is_sym_node(self, node: Any) -> bool:
-        return (
-            isinstance(node, torch.fx.Node)
-            and node.op == "call_function"
-            and node.target
-            in [torch.ops.aten.sym_size.int, torch.ops.aten.sym_numel.default]
-        )
-
     def dce(self) -> None:
         # Most of these removed nodes would have been removed during Dynamo and AOTDispatch
         # Remove some of these nodes earlier to improve compilation speed
@@ -1290,7 +1288,7 @@ class AutogradCompilerInstance:
         return runtime_wrapper, self.compiler_fn(graph)
 
     @staticmethod
-    def get_all_nodes(args: Sequence[Any]) -> list[torch.fx.Node]:
+    def get_all_nodes(args: Sequence[Argument]) -> list[torch.fx.Node]:
         # filter out non-Node args, like None
         nodes = [n for n in args if type(n) is torch.fx.Node]
         return nodes

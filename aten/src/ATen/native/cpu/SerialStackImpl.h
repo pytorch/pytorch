@@ -8,6 +8,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
 namespace at::native::detail {
@@ -30,14 +31,14 @@ void stack_serial_kernel_impl(Tensor& result, TensorListType tensors, int64_t di
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       dim >= 0 && dim <= result.dim(),
       "dim out of range in stack_serial_kernel_impl");
-  int64_t outer =
-      result.numel() / (result.sizes()[dim] * result.strides()[dim]);
+  int64_t outer = c10::multiply_integers(result.sizes().slice(0, dim));
   scalar_t* result_data = result.data_ptr<scalar_t>();
   int64_t ninputs = tensors.size();
   std::vector<InputMeta> inputs;
   inputs.reserve(ninputs);
   for (const auto& tensor : tensors) {
-    inputs.emplace_back(tensor, dim, tensor.strides()[dim]);
+    inputs.emplace_back(
+        tensor, dim, c10::multiply_integers(tensor.sizes().slice(dim + 1)));
   }
 
   using Vec = vec::Vectorized<scalar_t>;
@@ -81,7 +82,8 @@ bool can_use_native_serial_stack_impl(Tensor& result, TensorListType tensors, in
   auto first_tensor_mem_format = first_tensor.suggest_memory_format();
   ScalarType dtype = first_tensor.scalar_type();
 
-  if (!result.is_contiguous(first_tensor_mem_format)) {
+  if (!result.is_contiguous(first_tensor_mem_format) ||
+      !first_tensor.is_contiguous(first_tensor_mem_format)) {
     return false;
   }
 

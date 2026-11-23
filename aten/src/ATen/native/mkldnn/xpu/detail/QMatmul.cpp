@@ -1,15 +1,18 @@
 #include <ATen/BlasBackend.h>
+#include <ATen/Context.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <c10/core/ScalarType.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace at::native::onednn {
-at::Tensor broadcast_bias2D(
+static at::Tensor broadcast_bias2D(
     at::Tensor& dst,
     at::Tensor& bias,
     int64_t m,
@@ -41,7 +44,7 @@ at::Tensor broadcast_bias2D(
   return bias;
 }
 
-at::Tensor broadcast_bias3D(
+static at::Tensor broadcast_bias3D(
     at::Tensor& dst,
     at::Tensor bias,
     int64_t mb,
@@ -73,7 +76,7 @@ at::Tensor broadcast_bias3D(
   return bias;
 }
 
-at::Tensor broadcast_bias(
+static at::Tensor broadcast_bias(
     at::Tensor& dst,
     at::Tensor bias,
     int64_t mb,
@@ -87,14 +90,14 @@ at::Tensor broadcast_bias(
 }
 
 void quantized_matmul(
-    at::Tensor mat1, // act
+    const at::Tensor& mat1, // act
     double input_scale,
     int64_t input_zero_point,
-    at::Tensor mat2, // weight
+    const at::Tensor& mat2, // weight
     at::Tensor& weight_scales,
     at::Tensor& weight_zero_points,
     at::Tensor& bias,
-    at::Tensor result, // output
+    const at::Tensor& result, // output
     double output_scale,
     int64_t output_zero_point,
     std::optional<c10::ScalarType> output_dtype,
@@ -167,7 +170,7 @@ void quantized_matmul(
   auto m1_dt = m1_usr_dt;
   auto m2_dt = m2_usr_dt;
   auto dst_dt = dst_usr_dt;
-  dnnl::memory::data_type bias_dt;
+  dnnl::memory::data_type bias_dt = dnnl::memory::data_type::f32;
 
   dnnl::memory::desc m1_md, m1_usr_md;
   dnnl::memory::desc m2_md, m2_usr_md;
@@ -261,9 +264,10 @@ void quantized_matmul(
   m2_usr_md = dnnl::memory::desc(m2_dims, m2_usr_dt, m2_strides);
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
-  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
-  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
-  auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
+  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.const_data_ptr());
+  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.const_data_ptr());
+  auto dst_usr_m =
+      make_onednn_memory(dst_usr_md, engine, dst.mutable_data_ptr());
 
   auto expected_m1_md = matmul_pd.src_desc();
   auto expected_m2_md = matmul_pd.weights_desc();
@@ -272,11 +276,14 @@ void quantized_matmul(
   dnnl::memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
   at::Tensor m1_, m2_, dst_;
 
-  int scratchpad_size = matmul_pd.scratchpad_desc().get_size();
+  int64_t scratchpad_size =
+      static_cast<int64_t>(matmul_pd.scratchpad_desc().get_size());
   at::Tensor scratchpad_tensor =
       at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
-      matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+      matmul_pd.scratchpad_desc(),
+      engine,
+      scratchpad_tensor.mutable_data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
   if (attr.with_binary())
@@ -286,7 +293,7 @@ void quantized_matmul(
   args.insert({DNNL_ARG_WEIGHTS, m2_m});
   args.insert({DNNL_ARG_DST, dst_m});
   if (b.defined()) {
-    auto b_m = make_onednn_memory(b_md, engine, b.data_ptr());
+    auto b_m = make_onednn_memory(b_md, engine, b.const_data_ptr());
     args.insert({DNNL_ARG_BIAS, b_m});
   }
 
@@ -297,7 +304,8 @@ void quantized_matmul(
       get_onednn_dims(weight_scales),
       dnnl::memory::data_type::f32,
       dnnl::memory::format_tag::x);
-  m2_sc_m = make_onednn_memory(m2_sc_md, engine, weight_scales.data_ptr());
+  m2_sc_m =
+      make_onednn_memory(m2_sc_md, engine, weight_scales.const_data_ptr());
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, m2_sc_m});
 
   dnnl::memory m1_sc_m, m1_zp_m;
@@ -365,6 +373,11 @@ struct ScaleSpec {
     //     This gives outer_dim scales (M for SRC, N for WEI)
     // For blockwise 1x128: groups = {1, 128} for SRC, {128, 1} for WEI
     //     scale shape: [outer_dim, ceil_div(inner_dim, 128)]
+    // For blockwise 1x32 (MXFP8/MXFP4): groups = {1, 32} for SRC, {32, 1} for
+    // WEI
+    //     scale shape: [outer_dim, ceil_div(inner_dim, 32)]
+    // For blockwise 1x16 (NVFP4): groups = {1, 16} for SRC, {16, 1} for WEI
+    //     scale shape: [outer_dim, ceil_div(inner_dim, 16)]
     if (group_m == 1 && group_k > 1) {
       return outer_dim * at::ceil_div(inner_dim, group_k);
     } else if (group_m > 1 && group_k == 1) {
@@ -405,12 +418,13 @@ struct ScaleSpec {
 //
 // The returned value will be used in
 // `set_scales(arg, mask, groups, data_type)`.
-inline ScaleSpec make_scale_spec(
+static inline ScaleSpec make_scale_spec(
     at::blas::ScalingType scaling_type,
     int64_t M,
     int64_t K,
     int64_t N,
-    const std::string& arg_type) {
+    const std::string& arg_type,
+    at::ScalarType scale_dtype = at::kFloat) {
   TORCH_CHECK(
       arg_type == "src" || arg_type == "wei",
       "Expected arg_type to be 'src' or 'wei', but got '",
@@ -441,22 +455,49 @@ inline ScaleSpec make_scale_spec(
       // Blockwise 1x128 scaling (DeepSeek style)
       // For SRC (A): scale shape [M, ceil_div(K, 128)], groups = {1, 128}
       // For WEI (B): scale shape [ceil_div(K, 128), N], groups = {128, 1}
-      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      int mask = (1 << 0) | (1 << 1); // mask: scale both dim0 and dim1
+      auto dt = (scale_dtype == at::kFloat8_e8m0fnu)
+          ? dnnl::memory::data_type::e8m0
+          : dnnl::memory::data_type::f32;
       return {
-          (1 << 0) | (1 << 1),
+          mask,
           is_src ? dnnl::memory::dims{1, 128} : dnnl::memory::dims{128, 1},
-          dnnl::memory::data_type::f32};
+          dt};
     }
 
     case at::blas::ScalingType::BlockWise128x128: {
       // Blockwise 128x128 scaling (2D block scaling)
       // For SRC (A): scale shape [M // 128, K // 128], groups = {128, 128}
       // For WEI (B): scale shape [K // 128, N // 128], groups = {128, 128}
+      int mask = (1 << 0) | (1 << 1); // mask: scale both dim0 and dim1
+      auto dt = (scale_dtype == at::kFloat8_e8m0fnu)
+          ? dnnl::memory::data_type::e8m0
+          : dnnl::memory::data_type::f32;
+      return {mask, dnnl::memory::dims{128, 128}, dt};
+    }
+
+    case at::blas::ScalingType::BlockWise1x32: {
+      // Blockwise 1x32 scaling (MXFP8/MXFP4 microscaling)
+      // For SRC (A): scale shape [M, ceil_div(K, 32)], groups = {1, 32}
+      // For WEI (B): scale shape [ceil_div(K, 32), N], groups = {32, 1}
       // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      // Scale dtype is e8m0
       return {
           (1 << 0) | (1 << 1),
-          dnnl::memory::dims{128, 128},
-          dnnl::memory::data_type::f32};
+          is_src ? dnnl::memory::dims{1, 32} : dnnl::memory::dims{32, 1},
+          dnnl::memory::data_type::e8m0};
+    }
+
+    case at::blas::ScalingType::BlockWise1x16: {
+      // Blockwise 1x16 scaling (NVFP4)
+      // For SRC (A): scale shape [M, ceil_div(K, 16)], groups = {1, 16}
+      // For WEI (B): scale shape [ceil_div(K, 16), N], groups = {16, 1}
+      // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
+      // Scale dtype is float8_e4m3fn -> oneDNN f8_e4m3
+      return {
+          (1 << 0) | (1 << 1),
+          is_src ? dnnl::memory::dims{1, 16} : dnnl::memory::dims{16, 1},
+          dnnl::memory::data_type::f8_e4m3};
     }
 
     default:
@@ -464,7 +505,7 @@ inline ScaleSpec make_scale_spec(
           false,
           "Unsupported scaling_type: ",
           static_cast<int>(scaling_type),
-          ". Currently only support TensorWise, RowWise, BlockWise1x128, and BlockWise128x128");
+          ". Currently only support TensorWise, RowWise, BlockWise1x128, BlockWise128x128, BlockWise1x32, and BlockWise1x16");
   }
 }
 
@@ -478,7 +519,8 @@ sycl::event scaled_matmul(
     at::blas::ScalingType scaling_choice_b,
     const std::optional<at::Tensor>& bias,
     const std::optional<at::Tensor>& scale_result,
-    bool use_fast_accum) {
+    bool use_fast_accum,
+    const std::optional<at::Tensor>& alpha) {
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
@@ -488,12 +530,34 @@ sycl::event scaled_matmul(
   // 3. execute
 
   const int64_t M = mat1.size(0);
-  const int64_t K = mat1.size(1);
+  const bool is_fp4 = (mat1.scalar_type() == at::ScalarType::Float4_e2m1fn_x2);
+  if (is_fp4) {
+    TORCH_INTERNAL_ASSERT(
+        mat2.scalar_type() == at::ScalarType::Float4_e2m1fn_x2,
+        "Both mat1 and mat2 must be Float4_e2m1fn_x2 when FP4 path is used");
+  }
+  // Packed FP4 format means actual-K = 2 * reported-K -- adjust
+  const int64_t K_multiplier = is_fp4 ? 2 : 1;
+  const int64_t K = mat1.size(1) * K_multiplier;
   const int64_t N = mat2.size(1);
 
-  // 1.1 Create memory descriptors
-  dnnl::memory::desc src_md = get_onednn_md(mat1);
-  dnnl::memory::desc weights_md = get_onednn_md(mat2);
+  // 1.1 Create memory descriptors. get_onednn_md() respects the tensor's real
+  // strides and unpacks Float4_e2m1fn_x2 (2 logical elements per byte) into the
+  // logical shape oneDNN's f4_e2m1 descriptor expects.
+  //
+  // For packed FP4 the x2 packing is along the contraction (K) dim. Which dim
+  // is K is fixed by the operand shapes that TORCH_META_FUNC(_scaled_mm_v2)
+  // checks: mat1 is [M, K] so K is dim 1; mat2 is [K, N] so K is dim 0. We
+  // pass those dims to get_onednn_md instead of re-deriving them from strides;
+  // get_onednn_md separately requires the K dim to be contiguous (stride-1).
+  std::optional<int> mat1_packed_dim;
+  std::optional<int> mat2_packed_dim;
+  if (is_fp4) {
+    mat1_packed_dim = 1;
+    mat2_packed_dim = 0;
+  }
+  dnnl::memory::desc src_md = get_onednn_md(mat1, mat1_packed_dim);
+  dnnl::memory::desc weights_md = get_onednn_md(mat2, mat2_packed_dim);
   dnnl::memory::desc dst_md = get_onednn_md(result);
 
   dnnl::memory::desc bias_md;
@@ -509,9 +573,21 @@ sycl::event scaled_matmul(
     }
   }
 
+  // alpha applies a per-tensor multiplier to the matmul product (used by
+  // two-level NVFP4 global scaling: alpha = global_scale_a * global_scale_b).
+  // CUDA computes alpha*(A@B)+bias. oneDNN applies DNNL_ARG_BIAS *before*
+  // post-ops, so when alpha is present we apply bias as a binary_add post-op
+  // *after* the alpha multiply to preserve the same math. Without alpha, bias
+  // stays on the native DNNL_ARG_BIAS path.
+  bool with_alpha = alpha.has_value() && alpha->defined();
+  bool bias_as_arg = with_bias && !with_alpha;
+  bool bias_as_post_op = with_bias && with_alpha;
+
   // 1.2 Create primitive descriptor and set scales mask
-  const ScaleSpec src_spec = make_scale_spec(scaling_choice_a, M, K, N, "src");
-  const ScaleSpec wei_spec = make_scale_spec(scaling_choice_b, M, K, N, "wei");
+  const ScaleSpec src_spec =
+      make_scale_spec(scaling_choice_a, M, K, N, "src", scale_a.scalar_type());
+  const ScaleSpec wei_spec =
+      make_scale_spec(scaling_choice_b, M, K, N, "wei", scale_b.scalar_type());
 
   dnnl::primitive_attr op_attr = dnnl::primitive_attr();
 
@@ -532,10 +608,27 @@ sycl::event scaled_matmul(
     op_attr.set_scales(DNNL_ARG_DST, 0, {}, dnnl::memory::data_type::f32);
   }
 
+  // Assemble post-ops: optional alpha (binary_mul) followed by optional bias
+  // (binary_add). Order matters -- alpha must be applied to the product before
+  // bias is added.
+  dnnl::memory::desc alpha_md;
+  dnnl::post_ops po;
+  if (with_alpha) {
+    alpha_md = dnnl::memory::desc(
+        {1, 1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::ab);
+    po.append_binary(dnnl::algorithm::binary_mul, alpha_md);
+  }
+  if (bias_as_post_op) {
+    po.append_binary(dnnl::algorithm::binary_add, bias_md);
+  }
+  if (po.len() > 0) {
+    op_attr.set_post_ops(po);
+  }
+
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   // 1.3 Create the matmul primitive descriptor
-  dnnl::matmul::primitive_desc matmul_pd = with_bias
+  dnnl::matmul::primitive_desc matmul_pd = bias_as_arg
       ? dnnl::matmul::primitive_desc(
             engine, src_md, weights_md, bias_md, dst_md, op_attr)
       : dnnl::matmul::primitive_desc(
@@ -549,15 +642,16 @@ sycl::event scaled_matmul(
   // 2. Prepare memory
 
   // Create memory
-  auto src_usr_m = make_onednn_memory(src_md, engine, mat1.data_ptr());
-  auto weights_usr_m = make_onednn_memory(weights_md, engine, mat2.data_ptr());
-  auto dst_usr_m = make_onednn_memory(dst_md, engine, result.data_ptr());
+  auto src_usr_m = make_onednn_memory(src_md, engine, mat1.const_data_ptr());
+  auto weights_usr_m =
+      make_onednn_memory(weights_md, engine, mat2.const_data_ptr());
+  auto dst_usr_m =
+      make_onednn_memory(dst_md, engine, result.mutable_data_ptr());
   dnnl::memory b_usr_m;
   if (with_bias) {
-    b_usr_m =
-        make_onednn_memory(bias_md, engine, possible_reshaped_bias.data_ptr());
+    b_usr_m = make_onednn_memory(
+        bias_md, engine, possible_reshaped_bias.const_data_ptr());
   }
-
   // Prepare scale memory for oneDNN.
   auto make_scale_mem_from_spec =
       [&](const ScaleSpec& spec,
@@ -571,11 +665,11 @@ sycl::event scaled_matmul(
         scale_tensor.numel());
     dnnl::memory::desc scale_md(
         {scale_tensor.numel()}, spec.dtype, dnnl::memory::format_tag::x);
-    return make_onednn_memory(scale_md, engine, scale_tensor.data_ptr());
+    return make_onednn_memory(scale_md, engine, scale_tensor.const_data_ptr());
   };
 
-  auto scratchpad =
-      make_onednn_memory(matmul_pd.scratchpad_desc(), engine, (void*)nullptr);
+  auto scratchpad = make_onednn_memory(
+      matmul_pd.scratchpad_desc(), engine, static_cast<void*>(nullptr));
 
   // 3. Setup Args for exec
   std::unordered_map<int, dnnl::memory> args;
@@ -583,7 +677,7 @@ sycl::event scaled_matmul(
   args.insert({DNNL_ARG_WEIGHTS, weights_usr_m});
   args.insert({DNNL_ARG_DST, dst_usr_m});
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
-  if (with_bias) {
+  if (bias_as_arg) {
     args.insert({DNNL_ARG_BIAS, b_usr_m});
   }
 
@@ -596,14 +690,33 @@ sycl::event scaled_matmul(
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_mem});
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, wei_sc_mem});
 
+  // Bind post-op operands in the same order they were appended above.
+  at::Tensor alpha_f32;
+  int post_op_idx = 0;
+  if (with_alpha) {
+    alpha_f32 = alpha->to(at::kFloat).contiguous();
+    auto alpha_mem =
+        make_onednn_memory(alpha_md, engine, alpha_f32.const_data_ptr());
+    args.insert(
+        {DNNL_ARG_ATTR_MULTIPLE_POST_OP(post_op_idx) | DNNL_ARG_SRC_1,
+         alpha_mem});
+    post_op_idx++;
+  }
+  if (bias_as_post_op) {
+    args.insert(
+        {DNNL_ARG_ATTR_MULTIPLE_POST_OP(post_op_idx) | DNNL_ARG_SRC_1,
+         b_usr_m});
+    post_op_idx++;
+  }
+
   at::Tensor dst_scale_tensor;
   if (with_dst_scale) {
     // Bind single f32 scalar as DST scale
     dst_scale_tensor = scale_result->to(at::kFloat).contiguous();
     dnnl::memory::desc dst_sc_md(
         {1}, dnnl::memory::data_type::f32, dnnl::memory::format_tag::x);
-    auto dst_sc_mem =
-        make_onednn_memory(dst_sc_md, engine, dst_scale_tensor.data_ptr());
+    auto dst_sc_mem = make_onednn_memory(
+        dst_sc_md, engine, dst_scale_tensor.const_data_ptr());
     args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_DST, dst_sc_mem});
   }
 

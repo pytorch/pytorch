@@ -58,8 +58,14 @@ def _patch_dynamo_unsupported_functions():
 
 
 @contextlib.contextmanager
-def _patch_dynamic_shape_rnn_decompositions(dynamic_shapes):
-    if not dynamic_shapes:
+def patch_dynamic_shape_rnn_decompositions(dynamic: object):
+    """Use while_loop based RNN decompositions when the model has dynamic shapes.
+
+    The default LSTM/GRU decompositions unroll the sequence loop in Python, which
+    specializes the sequence length to the example input length. ``dynamic`` is any
+    value that is truthy when the model is exported with dynamic shapes.
+    """
+    if not dynamic:
         yield
         return
 
@@ -176,7 +182,7 @@ class TorchExportStrictStrategy(CaptureStrategy):
     ) -> torch.export.ExportedProgram:
         with (
             _patch_dynamo_unsupported_functions(),
-            _patch_dynamic_shape_rnn_decompositions(dynamic_shapes),
+            patch_dynamic_shape_rnn_decompositions(dynamic_shapes),
             # Support the dynamism with 0/1 input dim
             torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
         ):
@@ -216,14 +222,14 @@ class TorchExportStrictStrategy(CaptureStrategy):
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... [OK]"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... [FAIL]"
         )
 
 
@@ -232,7 +238,7 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
         self, model, args, kwargs, dynamic_shapes
     ) -> torch.export.ExportedProgram:
         with (
-            _patch_dynamic_shape_rnn_decompositions(dynamic_shapes),
+            patch_dynamic_shape_rnn_decompositions(dynamic_shapes),
             # Support the dynamism with 0/1 input dim
             torch.fx.experimental._config.patch(backed_size_oblivious=True),  # type: ignore[attr-defined]
         ):
@@ -272,14 +278,14 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=False)`... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=False)`... [OK]"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=False)`... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=False)`... [FAIL]"
         )
 
 
@@ -305,14 +311,14 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... [OK]"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... [FAIL]"
         )
 
 

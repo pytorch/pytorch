@@ -27,7 +27,7 @@ from torch._inductor.ir import (
     Layout,
 )
 from torch._inductor.runtime.benchmarking import benchmarker
-from torch._inductor.utils import do_bench_using_profiling
+from torch._inductor.utils import do_bench_using_profiling, GraphPartitionPlan
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -199,7 +199,12 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
             name=f"benchmark_{safe_name}",
+            # Only benchmarked, never captured.
+            partition_plan=GraphPartitionPlan.no_partition(),
         )
+        # Donation indices use the parent graph's placeholder ordering, not ours
+        # (same as SubgraphLowering).
+        bm_graph_lowering.bw_donated_idxs = None
 
         for sym_inp in self.sym_inputs:
             bm_graph_lowering.graph_inputs[sym_inp.name] = sym_inp
@@ -262,18 +267,42 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         if self._compiled_module is None:
             self._compiled_module = self._compile_for_benchmarking()
 
+    def _ensure_benchmark_request(
+        self,
+    ) -> SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest:
+        """Create the benchmark request under the caller's active policy."""
+        self._ensure_compiled()
+        if self._bmreq is None:
+            self._bmreq = self._create_benchmark_request()
+        return self._bmreq
+
     def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
         """Regular benchmarking: compile if needed, then use benchmarker."""
-        self._ensure_compiled()
+        bmreq = (
+            self._ensure_benchmark_request()
+            if self.layout.device.type != "cpu"
+            else None
+        )
+        if bmreq is None:
+            self._ensure_compiled()
         bm_func = self._compiled_module.call
         sym_inputs = self.sym_input_values
 
         def fn() -> Any:
             return bm_func([*sym_inputs, *args])
 
+        if bmreq is not None:
+            bmreq.benchmark_with_cudagraphs = self._benchmark_with_cudagraphs
+            if (
+                config.profile_bandwidth_with_do_bench_using_profiling
+                and not self._benchmark_with_cudagraphs
+                and not bmreq.config_cudagraph_benchmarking
+            ):
+                return do_bench_using_profiling(fn)
+            return bmreq.benchmark_run_fn(fn, out=out)
+
         if self._benchmark_with_cudagraphs:
             return benchmarker.benchmark_gpu_with_cuda_graph(fn)
-
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(fn)
         return benchmarker.benchmark(
@@ -509,7 +538,7 @@ class SubgraphTemplate(KernelTemplate):
         if not kwargs:
             return base_name
 
-        def sanitize_value(v: Any) -> str:
+        def sanitize_value(v: object) -> str:
             """Convert a value to a valid Python identifier component."""
             s = str(v)
             # Replace invalid characters with underscores

@@ -1,5 +1,8 @@
+#include <c10/metal/float8.h>
 #include <metal_stdlib>
 using namespace metal;
+using c10::metal::float8_e4m3fn;
+using c10::metal::float8_e8m0fnu;
 
 // For complex types (float2/half2), "1" is (1, 0), not (1, 1)
 template <typename T>
@@ -57,3 +60,5 @@ REGISTER_EYE_OP(short);
 REGISTER_EYE_OP(char);
 REGISTER_EYE_OP(uchar);
 REGISTER_EYE_OP(bool);
+REGISTER_EYE_OP(float8_e4m3fn);
+REGISTER_EYE_OP(float8_e8m0fnu);

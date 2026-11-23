@@ -142,12 +142,12 @@ TORCH_API std::vector<std::string> getModuleAccessPath(
 TORCH_API Module
 findChildModule(const Module& module, const std::vector<std::string>& path);
 
-// Given an CallMethod node, get the module instance corresponding
+// Given a CallMethod node, get the module instance corresponding
 // to the instance Value
 // TODO: refactor all current uses of this function to the Opt one
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
-// Given an CallMethod node, get the module instance corresponding
+// Given a CallMethod node, get the module instance corresponding
 // to the instance Value if the instance is a module, otherwise return
 // std::nullopt
 std::optional<Module> getInvokedModuleOpt(

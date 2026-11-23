@@ -10,6 +10,7 @@ from torch._functorch import partitioners
 from torch._inductor import config as inductor_config, debug as inductor_debug
 from torch._inductor.debug import DebugFormatter
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def _make_graph_module() -> torch.fx.GraphModule:
@@ -27,14 +28,26 @@ class _FakeDebugHandler:
     def filename(self, name: str) -> str:
         return os.path.join(self.root, name)
 
-    def fopen(self, name: str) -> None:
-        raise AssertionError(f"unexpected fopen({name})")
+    def fopen(self, name: str):
+        return open(self.filename(name), "w")
 
     def fopen_context(self) -> None:
         raise AssertionError("unexpected fopen_context()")
 
 
 class TestDebugGraphDump(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_fx_graph_preserves_is_inference(self) -> None:
+        gm = _make_graph_module()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            formatter = DebugFormatter(_FakeDebugHandler(tmpdir))
+            formatter.fx_graph(gm, [torch.randn(4)], is_inference=True)
+
+            with open(os.path.join(tmpdir, "fx_graph_runnable.py")) as fd:
+                self.assertIn("is_inference=True", fd.read())
+
     def test_legacy_svg_flags_default_to_svg_with_global_dot_format(self) -> None:
         with mock.patch.dict(
             os.environ,

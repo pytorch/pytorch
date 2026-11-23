@@ -198,8 +198,8 @@ operator*(const BFloat16& a, const BFloat16& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE BFloat16 operator/(const BFloat16& a, const BFloat16& b)
-    __ubsan_ignore_float_divide_by_zero__ {
+inline C10_HOST_DEVICE BFloat16
+operator/(const BFloat16& a, const BFloat16& b) {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
@@ -471,7 +471,7 @@ class numeric_limits<c10::BFloat16> {
     return c10::BFloat16(0x7FC0, c10::BFloat16::from_bits());
   }
   static constexpr c10::BFloat16 signaling_NaN() {
-    return c10::BFloat16(0x7F80, c10::BFloat16::from_bits());
+    return c10::BFloat16(0x7FA0, c10::BFloat16::from_bits());
   }
   static constexpr c10::BFloat16 denorm_min() {
     return c10::BFloat16(0x0001, c10::BFloat16::from_bits());

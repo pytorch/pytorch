@@ -1,17 +1,23 @@
 #pragma once
 
+#include <c10/core/GraphExecGroupState.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <ATen/FuncTorchTLS.h>
+#include <ATen/NodeCreationHooks.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
 #include <ATen/ThreadLocalPythonObjects.h>
 #include <ATen/record_function.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+
+namespace c10 {
+struct FakeTensorMode;
+}
 
 namespace at {
 
@@ -28,6 +34,7 @@ class TORCH_API ThreadLocalState {
   //  the current state object. This is used for example in the
   //  autograd engine.
   void set_grad_mode(bool enabled);
+  bool get_grad_mode() const;
 
   // set_multithreading_enabled - force the value of the multithreadinmaximum
   // threads TLS in
@@ -41,6 +48,9 @@ class TORCH_API ThreadLocalState {
 
  private:
   c10::impl::LocalDispatchKeySet dispatch_key_;
+
+  std::shared_ptr<c10::FakeTensorMode> fake_tensor_mode_state_;
+  bool in_kernel_invocation_state_;
 
   // ThreadLocalDebugInfo does not change after being created
   // with DebugInfoGuard
@@ -61,6 +71,8 @@ class TORCH_API ThreadLocalState {
   // TLS for AutogradModes
   AutogradState autograd_tls_;
 
+  std::optional<c10::SafePyObject> graph_exec_group_state_;
+
   // TLS for enable_torch_dispatch_mode
   c10::impl::TorchDispatchModeTLS torch_dispatch_mode_state_;
 
@@ -72,6 +84,9 @@ class TORCH_API ThreadLocalState {
 
   // TLS for saved tensors default hooks
   at::impl::SavedTensorDefaultHooksTLS saved_tensors_default_hooks_state_;
+
+  // TLS for node creation hooks
+  at::impl::NodeCreationHooksTLS node_creation_hooks_state_;
 
   bool functionalization_reapply_views_state_;
 

@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/mobile/compatibility/backport_manager.h>
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
 #include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
+#include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -26,6 +27,7 @@
 
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
+#include <fstream>
 #include <unordered_set>
 
 #if defined(FB_XPLAT_BUILD) || defined(FBCODE_CAFFE2)
@@ -1811,6 +1813,38 @@ TEST(FlatbufferUpgraderTest, DivScalarInplaceIntV2) {
 
   // The out argument will be overwritten with the output
   ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(FlatbufferUpgraderTest, DivTensorV2OperatorIndexOutOfRange) {
+  // Same model as DivTensorV2 (operator version 2, so upgraders run), with
+  // every OP instruction pointing past its 3-entry operator table. Read into a
+  // heap buffer: get_file_content may return a read-only mmap.
+  std::ifstream in(
+      resolveTestDataFile(
+          __FILE__, "upgrader_models/test_versioned_div_tensor_v2.ptl.ff"),
+      std::ios::binary);
+  auto [data, size] = get_stream_content(in);
+  auto* ivalues =
+      mobile::serialization::GetMutableModule(data.get())->mutable_ivalues();
+  for (const auto i : c10::irange(ivalues->size())) {
+    auto* ivalue = ivalues->GetMutableObject(i);
+    if (ivalue->val_type() != mobile::serialization::IValueUnion::Function) {
+      continue;
+    }
+    auto* instructions =
+        static_cast<mobile::serialization::Function*>(ivalue->mutable_val())
+            ->mutable_instructions();
+    for (const auto j : c10::irange(instructions->size())) {
+      auto* inst = instructions->GetMutableObject(j);
+      if (inst->op() == static_cast<int8_t>(OpCode::OP)) {
+        inst->mutate_x(1000);
+      }
+    }
+  }
+
+  ASSERT_THROWS_WITH_MESSAGE(
+      parse_and_initialize_mobile_module(data.get(), size),
+      "applyUpgrader: operator index 1000 out of range");
 }
 
 #endif // !defined(FB_XPLAT_BUILD)

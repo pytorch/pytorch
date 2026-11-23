@@ -192,19 +192,20 @@ TryGeneralizeInputDimensionsToSymbolicShapes(
     }
     input_striding.push_back(summarizeInputStrides(tt));
     std::vector<at::ShapeSymbol> shape_vec = *tt.symbolic_sizes().sizes();
-    auto new_sizes = c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
-      auto value = shape.value();
-      TORCH_INTERNAL_ASSERT(value >= 0, "Expected complete tensor");
-      if (value == 1) {
-        return value;
-      } else if (shape_to_sym_shape.count(static_cast<size_t>(value))) {
-        return shape_to_sym_shape[value];
-      } else {
-        auto new_shape_symbol = at::ShapeSymbol::newSymbol().value();
-        shape_to_sym_shape[static_cast<size_t>(value)] = new_shape_symbol;
-        return new_shape_symbol;
-      }
-    });
+    auto new_sizes =
+        c10::fmap(std::move(shape_vec), [&](const at::ShapeSymbol& shape) {
+          auto value = shape.value();
+          TORCH_INTERNAL_ASSERT(value >= 0, "Expected complete tensor");
+          if (value == 1) {
+            return value;
+          } else if (shape_to_sym_shape.count(static_cast<size_t>(value))) {
+            return shape_to_sym_shape[value];
+          } else {
+            auto new_shape_symbol = at::ShapeSymbol::newSymbol().value();
+            shape_to_sym_shape[static_cast<size_t>(value)] = new_shape_symbol;
+            return new_shape_symbol;
+          }
+        });
     v->setType(tt.withSymbolicShapes(c10::SymbolicShape(new_sizes)));
   }
   return input_striding;
@@ -524,7 +525,7 @@ static RegisterOperators SRCopyOuts({
 
 // On each invocation of this guard, we need to check all of the static
 // information (dtype/device/requires grad/contiguity/static dims),
-// and also the that the symbolic shape dimensions are observed.
+// and also that the symbolic shape dimensions are observed.
 // For any symbolic dimension we need to set its value on its first
 // use and for all subsequent uses check that the values are equal
 static RegisterOperators reg_guard({
@@ -621,19 +622,18 @@ static RegisterOperators reg_guard({
             size_t flattened_stride_offset = 0;
             for (const auto i : c10::irange(num_inputs)) {
               at::Tensor tensor = inputs[i].toTensor();
-              if (C10_UNLIKELY(
-                      tensor.device() != device ||
-                      tensor.dtype() != expected_scalar_types[i])) {
+              if (tensor.device() != device ||
+                  tensor.dtype() != expected_scalar_types[i]) [[unlikely]] {
                 push(stack, false);
                 return;
               }
-              if (C10_UNLIKELY(grad_mode_enabled && tensor.requires_grad())) {
+              if (grad_mode_enabled && tensor.requires_grad()) [[unlikely]] {
                 push(stack, false);
                 return;
               }
               const auto& sizes = tensor.sizes();
               const auto num_dims = sizes.size();
-              if (C10_UNLIKELY(num_dims != expected_dims[i])) {
+              if (num_dims != expected_dims[i]) [[unlikely]] {
                 push(stack, false);
                 return;
               }
@@ -643,16 +643,16 @@ static RegisterOperators reg_guard({
               // so it is more efficient to query whether they follow this
               // property than iterating over dimensions and checking yourself
               if (striding == StrideInput::TENSOR_CONT) {
-                if (C10_UNLIKELY(
-                        !tensor.is_contiguous(at::MemoryFormat::Contiguous))) {
+                if (!tensor.is_contiguous(at::MemoryFormat::Contiguous))
+                    [[unlikely]] {
                   push(stack, false);
                   return;
                 }
                 flattened_stride_offset += 1;
               } else if (striding == StrideInput::TENSOR_CONT_CHANNELS_LAST) {
                 // TODO: 5D channels last
-                if (C10_UNLIKELY(!tensor.is_contiguous(
-                        at::MemoryFormat::ChannelsLast))) {
+                if (!tensor.is_contiguous(at::MemoryFormat::ChannelsLast))
+                    [[unlikely]] {
                   push(stack, false);
                   return;
                 }
@@ -666,10 +666,9 @@ static RegisterOperators reg_guard({
                       dim,
                       flattened_input_striding,
                       flattened_stride_offset);
-                  if (C10_UNLIKELY(
-                          summarized_dim !=
-                          flattened_input_striding
-                              [dim + flattened_stride_offset])) {
+                  if (summarized_dim !=
+                      flattened_input_striding[dim + flattened_stride_offset])
+                      [[unlikely]] {
                     push(stack, false);
                     return;
                   }
@@ -681,7 +680,7 @@ static RegisterOperators reg_guard({
                     flattened_input_dims[dim_index + flattened_dim_offset];
                 const int64_t tensor_dim = sizes[dim_index];
                 if (dim_value >= 0) {
-                  if (C10_UNLIKELY(dim_value != tensor_dim)) {
+                  if (dim_value != tensor_dim) [[unlikely]] {
                     push(stack, false);
                     return;
                   }
@@ -693,7 +692,7 @@ static RegisterOperators reg_guard({
                       flattened_symbolic_dims[flattened_sym_index];
                   // sym symbol already seen, check value
                   if (flattened_symbolic_dims[flattened_sym_index] >= 0) {
-                    if (C10_UNLIKELY(flattened_sym_value != tensor_dim)) {
+                    if (flattened_sym_value != tensor_dim) [[unlikely]] {
                       push(stack, false);
                       return;
                     }

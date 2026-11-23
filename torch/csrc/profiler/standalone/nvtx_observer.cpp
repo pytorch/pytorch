@@ -60,7 +60,7 @@ std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(
   if (tensor.defined()) {
     at::TensorImpl* ten_addr = tensor.unsafeGetTensorImpl();
     // See if Address is in the map already
-    if (producer_tensor_map_.count((void*)ten_addr) > 0) {
+    if (producer_tensor_map_.contains((void*)ten_addr)) {
       producer_op_pair = producer_tensor_map_[(void*)ten_addr];
     }
   }
@@ -166,7 +166,7 @@ void pushNVTXCallbacks(
           state_ptr->config().report_input_shapes
               ? &enterNVTX</*report_input_shapes=*/true>
               : &enterNVTX</*report_input_shapes=*/false>,
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx) {
+          [](const at::RecordFunction& fn, at::ObserverContext* /*ctx*/) {
             torch::profiler::impl::cudaStubs()->rangePop();
             updateOutputTensorTracker(fn);
           })

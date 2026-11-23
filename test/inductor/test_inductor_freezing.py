@@ -28,6 +28,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model,
     check_model_gpu,
     copy_tests,
+    skip_if_device,
 )
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
@@ -35,7 +36,7 @@ from torch.testing._internal.common_utils import TEST_WITH_ROCM
 importlib.import_module("functorch")
 importlib.import_module("filelock")
 
-from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm
+from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -244,10 +245,45 @@ class OptimizeForInferenceTemplate(TestCase):
             mod_eager = mod()
             self.assertEqual(foo(mod), mod_eager)
 
-    def test_autocast(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest("MLKDNN Bug")
+    def test_aliased_intermediate_output_folds_params(self):
+        # https://github.com/pytorch/pytorch/issues/191449
+        # base_idx on an alias_of_intermediate* output indexes user outputs,
+        # not graph inputs. Treating it as an input index preserved whichever
+        # parameter happened to share that number, silently disabling folding.
+        from unittest.mock import patch as mock_patch
 
+        from torch._inductor import freezing
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                base = self.lin(x)
+                return base, base.view_as(base)
+
+        mod = Mod().to(self.device).eval()
+        inp = torch.randn(2, 4, device=self.device)
+        preserved = []
+        orig = freezing.replace_params_with_constants
+
+        def spy(gm, flat_params, fw_metadata):
+            out = orig(gm, flat_params, fw_metadata)
+            preserved.append(list(out))
+            return out
+
+        with torch.no_grad():
+            mod_eager = mod(inp)
+            with mock_patch.object(freezing, "replace_params_with_constants", spy):
+                self.assertEqual(torch.compile(mod)(inp), mod_eager)
+
+        # Only the graph input survives; the Linear weight and bias are folded.
+        self.assertTrue(preserved)
+        self.assertEqual(preserved[0], [2])
+
+    @skip_if_device(lambda device: device == "cpu", "MLKDNN Bug")
+    def test_autocast(self):
         mod = torch.nn.Linear(10, 10).to(self.device).eval()
         inp = torch.rand([10, 10]).to(self.device).to(torch.half)
 
@@ -691,12 +727,10 @@ class OptimizeForInferenceTemplate(TestCase):
             out_compiled = foo_c(mod, x)
             self.assertEqual(out_eager, out_compiled)
 
+    # TODO: cpu path keeps an extra copy of graph around somewhere,
+    # memory not as important for cpu
+    @skip_if_device(lambda device: device == "cpu", "NYI CPU")
     def test_param_deallocated(self):
-        # TODO: cpu path keeps an extra copy of graph around somewhere,
-        # memory not as important for cpu
-        if self.device == "cpu":
-            raise unittest.SkipTest("NYI CPU")
-
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -765,7 +799,6 @@ class OptimizeForInferenceTemplate(TestCase):
                 mod_eager = mod(x)
                 self.assertEqual(foo(mod, x), mod_eager)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180128")
     @unittest.skipIf(IS_MACOS, "https://github.com/pytorch/pytorch/issues/106557")
     @unittest.skipIf(IS_FBCODE, "Not yet runnable in fbcode")
     @unittest.skipIf(

@@ -13,7 +13,11 @@ from torch._inductor.runtime.hints import (
     TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -53,7 +57,105 @@ def mock_compare_config_prefer_larger_XBLOCK(
     return orig_compare_config(self, func, candidate_config, best_config, best_timing)
 
 
+@instantiate_parametrized_tests
 class TestCoordinateDescentTuner(TestCase):
+    @parametrize(
+        "max_tiles,expected",
+        [
+            (1, ["XBLOCK", "R0_BLOCK"]),
+            (2, ["XBLOCK", "YBLOCK", "R0_BLOCK", "R1_BLOCK"]),
+            (3, ["XBLOCK", "YBLOCK", "Z0_BLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]),
+            (
+                None,
+                ["XBLOCK", "YBLOCK", "Z0_BLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"],
+            ),
+            (
+                4,
+                [
+                    "XBLOCK",
+                    "YBLOCK",
+                    "Z0_BLOCK",
+                    "Z1_BLOCK",
+                    "R0_BLOCK",
+                    "R1_BLOCK",
+                    "R2_BLOCK",
+                    "R3_BLOCK",
+                ],
+            ),
+            (
+                5,
+                [
+                    "XBLOCK",
+                    "YBLOCK",
+                    "Z0_BLOCK",
+                    "Z1_BLOCK",
+                    "Z2_BLOCK",
+                    "R0_BLOCK",
+                    "R1_BLOCK",
+                    "R2_BLOCK",
+                    "R3_BLOCK",
+                    "R4_BLOCK",
+                ],
+            ),
+        ],
+    )
+    def test_tunable_fields_follow_max_tiles(self, max_tiles, expected):
+        with config.patch({"triton.max_tiles": max_tiles}):
+            self.assertEqual(
+                CoordescTuner().tunable_fields,
+                expected + ["BLOCK_M", "BLOCK_N", "BLOCK_K", "num_warps"],
+            )
+
+    @config.patch("triton.max_tiles", 1)
+    def test_tunable_fields_use_size_hints(self):
+        self.assertEqual(
+            CoordescTuner(size_hints={"z10_": 32, "x": 64, "r10_": 128}).tunable_fields,
+            [
+                "XBLOCK",
+                "Z10_BLOCK",
+                "R10_BLOCK",
+                "BLOCK_M",
+                "BLOCK_N",
+                "BLOCK_K",
+                "num_warps",
+            ],
+        )
+
+    @parametrize("axis", ["y", "z0_", "z1_"])
+    def test_nd_grid_overflow_neighbors(self, axis):
+        hints = {"x": 16, "y": 1, "z0_": 1, "z1_": 1}
+        hints[axis] = 65536 if axis == "y" else 65534
+        if axis != "y":
+            hints["z1_" if axis == "z0_" else "z0_"] = 2
+        tuner = CoordescTuner(size_hints=hints)
+        blocks = {f"{p.upper()}BLOCK": 1 for p in hints}
+        blocks[f"{axis.upper()}BLOCK"] = 2
+        baseline = triton.Config(blocks)
+        self.assertTrue(tuner.is_valid_config(baseline))
+        neighbors = tuner.get_neighbour_configs(baseline, f"{axis.upper()}BLOCK")
+        self.assertEqual([c.kwargs[f"{axis.upper()}BLOCK"] for c in neighbors], [4])
+        invalid = triton.Config({**blocks, f"{axis.upper()}BLOCK": 1})
+        self.assertFalse(tuner.is_valid_config(invalid))
+        hints[axis] = 65535 if axis == "y" else 32767
+        self.assertTrue(tuner.is_valid_config(invalid))
+
+    @parametrize("axis", ["y", "z0_"])
+    def test_3d_rounded_size_hint_keeps_tuning_neighbors(self, axis):
+        hints = {"x": 64, "y": 8, "z0_": 8, axis: 1 << 26}
+        baseline = triton.Config(
+            {"XBLOCK": 16, "YBLOCK": 8, "Z0_BLOCK": 8, f"{axis.upper()}BLOCK": 1024}
+        )
+        tuner = CoordescTuner(size_hints=hints)
+        self.assertTrue(tuner.is_valid_config(baseline))
+        neighbors = tuner.get_neighbour_configs(baseline, "XBLOCK")
+        self.assertCountEqual([c.kwargs["XBLOCK"] for c in neighbors], [8, 32])
+
+    def test_y_grid_overflow_without_z(self):
+        tuner = CoordescTuner(size_hints={"x": 16, "y": 65536})
+        self.assertTrue(
+            tuner.is_valid_config(triton.Config({"XBLOCK": 1, "YBLOCK": 1}))
+        )
+
     def test_abs_function(self):
         """
         The benchmark result is simply abs(XBLOCK - 15)
@@ -66,6 +168,19 @@ class TestCoordinateDescentTuner(TestCase):
 
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 16, str(best_config))
+
+    def test_reduction_blocks(self):
+        tuner = CoordescTuner()
+        for reduction_dim in range(3):
+            block = f"R{reduction_dim}_BLOCK"
+            with self.subTest(block=block):
+                baseline_config = triton.Config({block: 1}, num_warps=8, num_stages=1)
+
+                def func(config, block=block):
+                    return abs(config.kwargs[block] - 15)
+
+                best_config = tuner.autotune(func, baseline_config)
+                self.assertEqual(best_config.kwargs[block], 16)
 
     def test_no_neighbors(self):
         """
@@ -116,8 +231,11 @@ class TestCoordinateDescentTuner(TestCase):
         max_block = TRITON_MAX_BLOCK
         self.assertFalse(tuner.value_too_large("XBLOCK", max_block["X"]))
         self.assertTrue(tuner.value_too_large("XBLOCK", max_block["X"] * 2))
-        self.assertFalse(tuner.value_too_large("R0_BLOCK", max_block["R0_"]))
-        self.assertTrue(tuner.value_too_large("R0_BLOCK", max_block["R0_"] * 2))
+        for prefix in ("R0_", "R1_", "R2_"):
+            with self.subTest(prefix=prefix):
+                block = f"{prefix}BLOCK"
+                self.assertFalse(tuner.value_too_large(block, max_block[prefix]))
+                self.assertTrue(tuner.value_too_large(block, max_block[prefix] * 2))
 
     def test_native_matmul_block_numel_limit(self):
         tuner = CoordescTuner(is_native_matmul=True)
@@ -216,6 +334,53 @@ class TestCoordinateDescentTuner(TestCase):
         neighbours = tuner.get_neighbour_configs(baseline, "XBLOCK")
         self.assertNotIn(512, [cfg.kwargs["XBLOCK"] for cfg in neighbours])
 
+    def test_mix_order_reduction_rejects_incompatible_xblock(self):
+        tuner = CoordescTuner(
+            is_mix_order_reduction=True,
+            size_hints={"x": 40961, "r0_": 129},
+        )
+        config = triton.Config(
+            {"XBLOCK": 1, "RSPLIT_SIZE": 17, "NUM_STAGES": 1},
+            num_warps=1,
+            num_stages=1,
+        )
+
+        neighbours = tuner.get_neighbour_configs(config, "XBLOCK")
+        self.assertEqual(neighbours, [])
+
+    @parametrize(
+        "rnumel,inductor_meta,xblock,rsplit_size,num_stages,accepted",
+        (
+            (129, {}, 3, 18, 1, False),
+            (129, {}, 32, 64, 1, False),
+            (129, {}, 2, 18, 4, False),
+            (129, {"mix_order_reduction_allow_multi_stages": False}, 2, 18, 2, False),
+            (129, {"uses_device_tma": True}, 2, 18, 2, False),
+            (16384, {}, 2, 18, 3, False),
+            (129, {}, 2, 18, 3, True),
+            (16384, {}, 2, 18, 2, True),
+        ),
+    )
+    def test_mix_order_reduction_validates_config(
+        self, rnumel, inductor_meta, xblock, rsplit_size, num_stages, accepted
+    ):
+        tuner = CoordescTuner(
+            is_mix_order_reduction=True,
+            size_hints={"x": 40961, "r0_": rnumel},
+            inductor_meta=inductor_meta,
+        )
+        candidate = triton.Config(
+            {
+                "XBLOCK": xblock,
+                "RSPLIT_SIZE": rsplit_size,
+                "NUM_STAGES": num_stages,
+            },
+            num_warps=1,
+            num_stages=1,
+        )
+
+        self.assertEqual(tuner.is_valid_config(candidate), accepted)
+
     def test_native_matmul_persistent_uses_meta_rblock_for_limit(self):
         size_hints = {"x": 4096, "y": 4096, "r0_": 64}
         effective_rblock = 1024
@@ -276,6 +441,17 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertEqual(fields[:3], ["XBLOCK_0", "YBLOCK_0", "XBLOCK_1"])
         self.assertIn("XBLOCK", fields)
 
+    def test_combo_all_directions_search_is_bounded(self):
+        fields = [f"XBLOCK_{i}" for i in range(7)]
+        tuner = CoordescTuner(inductor_meta={"combo_coordesc_field_order": fields})
+        baseline = triton.Config(
+            dict.fromkeys(fields, 2),
+            num_warps=4,
+            num_stages=1,
+        )
+
+        self.assertEqual(tuner.get_all_tuning_directions(baseline), [])
+
     def test_value_too_large_combo_field_limits(self):
         tuner = CoordescTuner(
             size_hints={"x": 2**20, "r0_": 2**20},
@@ -284,10 +460,21 @@ class TestCoordinateDescentTuner(TestCase):
                     "XBLOCK_0": 64,
                     "XBLOCK_1": 256,
                     "R0_BLOCK_1": 128,
-                }
+                },
+                "combo_coordesc_field_minimums": {
+                    "XBLOCK_0": 4,
+                    "XBLOCK_1": 8,
+                    "R0_BLOCK_1": 16,
+                },
             },
         )
 
+        self.assertTrue(tuner.value_too_small("XBLOCK_0", 2))
+        self.assertFalse(tuner.value_too_small("XBLOCK_0", 4))
+        self.assertTrue(tuner.value_too_small("XBLOCK_1", 4))
+        self.assertFalse(tuner.value_too_small("XBLOCK_1", 8))
+        self.assertTrue(tuner.value_too_small("R0_BLOCK_1", 8))
+        self.assertFalse(tuner.value_too_small("R0_BLOCK_1", 16))
         self.assertFalse(tuner.value_too_large("XBLOCK_0", 64))
         self.assertTrue(tuner.value_too_large("XBLOCK_0", 128))
         self.assertFalse(tuner.value_too_large("XBLOCK_1", 256))
@@ -301,6 +488,7 @@ class TestCoordinateDescentTuner(TestCase):
             inductor_meta={
                 "min_xblock": 16,
                 "min_rblock": 64,
+                "tma_min_block_sizes": {"XBLOCK": 4},
             },
         )
 
@@ -310,6 +498,25 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertFalse(tuner.value_too_small("R0_BLOCK", 64))
         self.assertEqual(tuner.get_neighbour_values("XBLOCK", 16), [32])
         self.assertEqual(tuner.get_neighbour_values("R0_BLOCK", 64), [128])
+
+    def test_tma_minimum_block_sizes(self):
+        tuner = CoordescTuner(
+            inductor_meta={
+                "uses_tma": True,
+                "tma_min_block_sizes": {
+                    "XBLOCK": 4,
+                    "R0_BLOCK": 16,
+                },
+            }
+        )
+
+        self.assertTrue(tuner.value_too_small("XBLOCK", 2))
+        self.assertFalse(tuner.value_too_small("XBLOCK", 4))
+        self.assertTrue(tuner.value_too_small("R0_BLOCK", 8))
+        self.assertFalse(tuner.value_too_small("R0_BLOCK", 16))
+
+        stale_tma = CoordescTuner(inductor_meta={"tma_min_block_sizes": {"XBLOCK": 4}})
+        self.assertFalse(stale_tma.value_too_small("XBLOCK", 2))
 
     def test_combo_metadata_orders_larger_subkernels_first_for_coordesc(self):
         def make_configs(xblock, yblock):
@@ -390,6 +597,56 @@ class TestCoordinateDescentTuner(TestCase):
         self.assertEqual(
             tuner.tunable_fields[: len(inductor_meta["combo_coordesc_field_order"])],
             inductor_meta["combo_coordesc_field_order"],
+        )
+
+    def test_compile_time_combo_metadata_preserves_block_minimums(self):
+        inductor_meta = {
+            "combo_grid_meta": {
+                "num_kernels": 2,
+                "heuristic_0": "pointwise",
+                "size_hints_0": {"x": 64},
+                "size_hints_1": {"x": 256},
+                "inductor_meta_0": {
+                    "uses_tma": True,
+                    "tma_min_block_sizes": {"XBLOCK": 4},
+                },
+                "inductor_meta_1": {
+                    "uses_tma": True,
+                    "tma_min_block_sizes": {"XBLOCK": 4},
+                    "min_xblock": 8,
+                },
+                "block_arg_names": ("XBLOCK_0", "XBLOCK_1"),
+                "default_config": {
+                    "XBLOCK_0": 4,
+                    "R0_BLOCK_0": 16,
+                    "XBLOCK_1": 16,
+                },
+                "stitched_launch_candidates": [({}, 4, 1)],
+            }
+        }
+
+        configs = triton_heuristics._handle_combo_kernel_per_subkernel_blocks(
+            {"x": 256},
+            inductor_meta,
+            triton_meta={},
+        )
+
+        self.assertIsNotNone(configs)
+        self.assertEqual(
+            inductor_meta["combo_coordesc_field_order"],
+            ["XBLOCK_1", "XBLOCK_0"],
+        )
+        self.assertEqual(
+            inductor_meta["combo_coordesc_field_minimums"],
+            {"XBLOCK_0": 4, "XBLOCK_1": 8},
+        )
+        tuner = CoordescTuner(inductor_meta=inductor_meta)
+        self.assertEqual(
+            [
+                cfg.kwargs["XBLOCK_0"]
+                for cfg in tuner.get_neighbour_configs(configs[0], "XBLOCK_0")
+            ],
+            [8],
         )
 
 

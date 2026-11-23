@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlas.h>
@@ -42,6 +43,9 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  if (at::sparse_csr::has_noncontiguous_values(result)) {
+    return at::sparse_csr::run_on_contiguous_clone(result, [&](Tensor& r) { sparse_sampled_addmm_out_sparse_csr_cuda(self, mat1, mat2, beta, alpha, r); });
+  }
   at::native::sparse::sparse_sampled_addmm_check_inputs(
       self, mat1, mat2, beta, alpha, result);
 
@@ -83,6 +87,9 @@ Tensor& addmm_out_sparse_compressed_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  if (at::sparse_csr::has_noncontiguous_values(result)) {
+    return at::sparse_csr::run_on_contiguous_clone(result, [&](Tensor& r) { addmm_out_sparse_compressed_cuda(self, mat1, mat2, beta, alpha, r); });
+  }
   sparse::impl::_check_is_cuda(self, "self");
   sparse::impl::_check_is_cuda(mat1, "mat1");
   sparse::impl::_check_is_cuda(mat2, "mat2");
@@ -90,12 +97,7 @@ Tensor& addmm_out_sparse_compressed_cuda(
 
   // Same checks as in TORCH_META_FUNC(addmm) at
   // aten/src/ATen/native/LinearAlgebra.cpp
-  sparse::impl::_check_dim(mat1, 2, "mat1");
-  sparse::impl::_check_dim(mat2, 2, "mat2");
-
-  TORCH_CHECK(
-      mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+  check_mm_shapes(mat1, mat2, "addmm");
 
   // From addmm_out_cuda_impl at ATen/native/cuda/Blas.cpp
   // TODO: remove code duplication and unify code

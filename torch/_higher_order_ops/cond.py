@@ -17,6 +17,7 @@ from torch._C._functorch import (
 )
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
+    _fake_mode_handler,
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
@@ -30,7 +31,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -331,7 +332,7 @@ class CondAutogradOp(torch.autograd.Function):
             false_fn,
             operands,
         )
-        # We snapshot the dispatch keys in forward for materializing the
+        # We snapshot the dispatch keys in forward for materializing
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
@@ -415,6 +416,9 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
     return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
+cond_op.py_impl(DispatchKey.Fake)(_fake_mode_handler(cond_fake_tensor_mode))
+
+
 def check_tensor_meta_match(
     t1: torch.Tensor, t2: torch.Tensor, attr_names: tuple[str, ...], msg_prefix: str
 ) -> None:
@@ -431,6 +435,22 @@ def check_tensor_meta_match(
             lattr == rattr,
             lambda: f"{msg_prefix} expected same {attr_name} but got {lattr} and {rattr}.",
         )
+
+
+def _merge_ints_to_symint(
+    values: list[int], mode: FakeTensorMode
+) -> int | torch.SymInt:
+    """Merge N concrete ints into a single unbacked SymInt bounded [min, max].
+
+    Returns the value unchanged when all values are equal.
+    """
+    if all(v == values[0] for v in values):
+        return values[0]
+    if mode.shape_env is None:
+        raise AssertionError("mode.shape_env is None")
+    merged = mode.shape_env.create_unbacked_symint()
+    mode.shape_env.constrain_symbol_range(merged.node.expr, min(values), max(values))
+    return merged
 
 
 def _merge_output(
@@ -463,15 +483,9 @@ def _merge_output(
         )
 
     if type(a) is int and type(b) is int:
-        if a == b:
-            return a
-        if mode.shape_env is None:
-            raise AssertionError("mode.shape_env is None")
-        merged_out = mode.shape_env.create_unbacked_symint()
-        mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
-        return merged_out
+        return _merge_ints_to_symint([a, b], mode)
 
-    if not (type(a) is FakeTensor and type(b) is FakeTensor):
+    if not (is_fake_tensor(a) and is_fake_tensor(b)):
         raise AssertionError(
             f"expected both a and b to be FakeTensor, got a={type(a)}, b={type(b)}"
         )
@@ -680,6 +694,11 @@ def _merge_output(
             nxt_merged_stride_expr = merged_strides[i] * merged_size[i]
             a_stride_expr[_maybe_expr(a_val * a_ex_size[i])] = nxt_merged_stride_expr
             b_stride_expr[_maybe_expr(b_val * b_ex_size[i])] = nxt_merged_stride_expr
+            # fake tensors accumulate contiguous strides as stride * max(size, 1)
+            a_max_key = _maybe_expr(a_val * torch.sym_max(a_ex_size[i], 1))
+            b_max_key = _maybe_expr(b_val * torch.sym_max(b_ex_size[i], 1))
+            a_stride_expr.setdefault(a_max_key, nxt_merged_stride_expr)
+            b_stride_expr.setdefault(b_max_key, nxt_merged_stride_expr)
         return merged_strides
 
     merged_stride: list[int | torch.SymInt] = _bound_stride(
@@ -698,12 +717,27 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         can_auto_functionalize,
         do_auto_functionalize_v2,
     )
-    from torch._higher_order_ops.utils import _check_alias_and_mutation, HopInstance
+    from torch._higher_order_ops.utils import (
+        _check_alias,
+        _check_alias_and_mutation,
+        HopInstance,
+    )
 
     hop_instance = HopInstance.create(cond_op, pred, true_fn, false_fn, inputs)
     # For now, we only support auto-functionalization for cond when using python
     # functionalization mode
     if can_auto_functionalize(hop_instance) and hasattr(ctx, "mode"):
+        # Auto-functionalization supports operand mutation, but not aliasing that it
+        # does not repair: returning a mutated operand is fine, since the output then
+        # aliases the clone inserted for that base, while returning an operand that is
+        # not mutated leaves the output aliasing the caller's tensor.
+        # _check_alias_and_mutation is skipped on this path because it would also
+        # reject the mutation, so check aliasing only.  This re-traces both branches;
+        # see the PR discussion for why the maps gen_schema computed are not reused.
+        unwrapped_inputs = ctx.unwrap_tensors(inputs)
+        pre_dispatch = ctx.mode.pre_dispatch
+        for branch, branch_name in [(true_fn, "cond_true"), (false_fn, "cond_false")]:
+            _check_alias(branch, unwrapped_inputs, branch_name, pre_dispatch)
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,

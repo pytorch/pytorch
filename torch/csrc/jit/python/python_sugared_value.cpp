@@ -229,7 +229,7 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
       "set_stream",
       "synchronize"};
 
-  if (cuda_ops.find(field) != cuda_ops.end()) {
+  if (cuda_ops.contains(field)) {
     // Both current_device and set_device API's are a part of c10::cuda
     // namespace. Hence, to resolve the conflict for jit, we append _ to both
     // these APIs.
@@ -1204,9 +1204,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }
     return std::make_shared<PythonModuleValue>(obj);
-  } else if (
-      obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
-      obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
+  } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("_awaitable").ptr()) {

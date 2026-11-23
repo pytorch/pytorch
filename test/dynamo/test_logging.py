@@ -20,6 +20,7 @@ from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     find_free_port,
     IS_WINDOWS,
     munge_exc,
@@ -225,13 +226,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 199, in outmost_fn
+    -   File [file_path], line 200, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 202, in outer_fn
+    -   File [file_path], line 203, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 205, in fn
+    -   File [file_path], line 206, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 208, in inner
+    -   File [file_path], line 209, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -357,9 +358,7 @@ class LoggingTests(LoggingTestCase):
         except Exception:
             pass
         record = self.getRecord(records, "WON'T CONVERT")
-        self.assertExpectedInline(
-            munge_exc(record.getMessage()),
-            """\
+        expected = """\
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
@@ -373,7 +372,13 @@ torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))""",
+    output = output.add(torch.ones(10, 10))"""
+        expected = expectedIfCppFakeTensor(
+            expected.replace("FakeTensor(...", "tensor(..."), expected
+        )
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            expected,
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
@@ -590,6 +595,43 @@ Mutating object of type list (source name: L['my_list'])
         my_list.append(3)
 """,
         )
+
+    def test_side_effects_stacks_captured_only_when_consumed(self):
+        from torch._dynamo.side_effects import SideEffects
+        from torch._logging._internal import trace_log
+        from torch.testing._internal.logging_utils import log_api
+
+        seen_stacks = []
+        orig = SideEffects.codegen_update_mutated
+
+        def spy(self_, cg, log_side_effects=False):
+            seen_stacks.append(dict(self_.mutation_user_stacks))
+            return orig(self_, cg, log_side_effects)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, lst):
+            lst.append(4)
+            return x + len(lst)
+
+        with unittest.mock.patch.object(SideEffects, "codegen_update_mutated", spy):
+            # The dynamo TestCase installs a trace_log handler; drop it so no
+            # consumer of the user stacks is active.
+            with unittest.mock.patch.object(trace_log, "handlers", []):
+                lst = [1, 2, 3]
+                self.assertEqual(fn(torch.ones(1), lst), torch.ones(1) + 4)
+                self.assertEqual(lst, [1, 2, 3, 4])
+                self.assertTrue(seen_stacks)
+                self.assertTrue(all(not stacks for stacks in seen_stacks))
+
+            torch._dynamo.reset()
+            seen_stacks.clear()
+            records = []
+            with log_api(side_effects=True), self._handler_watcher(records):
+                lst = [1, 2, 3]
+                fn(torch.ones(1), lst)
+            self.assertTrue(any(stacks for stacks in seen_stacks))
+            self.assertEqual(len(records), 1)
+            self.assertIn("lst.append(4)", records[0].getMessage())
 
     @make_logging_test(side_effects=True)
     def test_side_effects_multiple_mutations_same_object(self, records):
@@ -1060,6 +1102,18 @@ Mutating object of type dict (source name: L['mod']._buffers)
 
         self.assertTrue(found_funcname)
 
+    def test_flex_gemm_log_levels(self):
+        from torch._logging._internal import _parse_log_settings
+
+        log_name = "torch._inductor.kernel.flex_gemm.debug"
+        concise = _parse_log_settings("flex_gemm")
+        verbose = _parse_log_settings("+flex_gemm")
+
+        self.assertEqual(concise.log_qname_to_level[log_name], logging.INFO)
+        self.assertEqual(verbose.log_qname_to_level[log_name], logging.DEBUG)
+        self.assertEqual(concise.artifact_names, set())
+        self.assertEqual(verbose.artifact_names, set())
+
     def test_invalid_artifact_flag(self):
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
@@ -1322,7 +1376,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         record = self.getRecord(records, "TREE_GUARD_MANAGER")
         self.assertExpectedInline(
             munge_global_state_json(record.getMessage()),
-            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",
+            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"cuda_matmul_precision": "#","default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",
         )
 
     @make_logging_test(cudagraph_static_inputs=True)
@@ -1440,6 +1494,16 @@ fn(torch.randn(5))
                 """,
                 env=env,
             )
+            torch_log_line = re.compile(
+                r"(\[rank\d+\]:)?[VIWEC]\d{4} \d{2}:\d{2}:\d{2}\.\d{6} \d+ \S+\.py:\d+\]"
+            )
+            # Other libraries (e.g. kineto) may write to stderr concurrently,
+            # without an atomic trailing newline; compare only torch log lines.
+            stderr_logs = "".join(
+                line[m.start() :] + "\n"
+                for line in stderr.decode("utf-8").splitlines()
+                if (m := torch_log_line.search(line))
+            )
             with open(
                 file_path, encoding="utf-8"
             ) as fd:  # encoding file to UTF-8 for Windows.
@@ -1449,7 +1513,7 @@ fn(torch.randn(5))
                 try:
                     self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
                         empty_line_normalizer(lines),
-                        empty_line_normalizer(stderr.decode("utf-8")),
+                        empty_line_normalizer(stderr_logs),
                     )
                 except Exception:
                     unittest.TestCase.maxDiff = orig_maxDiff
@@ -1571,6 +1635,34 @@ TorchDynamo attempted to trace the following frames: [
         )
 
 
+class PartitionedScatterLoggingTests(LoggingTestCase):
+    """
+    Dedicated tests for the partitioned_scatter TORCH_LOGS artifact.
+    """
+
+    @make_logging_test(partitioned_scatter=True)
+    def test_partitioned_scatter(self, records):
+        from torch._inductor import config as inductor_config
+
+        N, n = 8192, 8
+
+        def f(out, idx, vals):
+            return out.index_put([idx], vals, accumulate=True)
+
+        with inductor_config.patch(
+            partitioned_scatter_enabled=True,
+            partitioned_scatter_force=True,
+        ):
+            fn_opt = torch.compile(f, backend="inductor", fullgraph=True)
+            out = torch.zeros(n)
+            idx = torch.randint(0, 4, (N,), dtype=torch.int64)
+            vals = torch.randn(N)
+            fn_opt(out, idx, vals)
+
+        # At least one debug record should be emitted (APPLY or SKIP decision).
+        self.assertGreater(len(records), 0)
+
+
 # non single record tests
 exclusions = {
     "bytecode",
@@ -1626,6 +1718,9 @@ exclusions = {
     "node_runtime_estimation",
     "caching",
     "overlap_scheduling",
+    "partitioned_scatter",
+    # Only emits for torch._native DSL ops, not for a plain torch.compile.
+    "native_dsl_compile",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

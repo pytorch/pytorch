@@ -26,7 +26,7 @@ from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
     _check_dynamic_shapes,
@@ -198,7 +198,7 @@ def _is_constant_argument(t: object) -> bool:
 
 
 def fakify(
-    mode: FakeTensorMode,
+    mode: FakeTensorMode | CppFakeTensorMode,
     kp: KeyPath,
     t: Any,
     t_constraints: dict[int, dict[int, Constraint]],
@@ -259,13 +259,15 @@ def _create_symbolic_context_for_tensor(
     source: Source,
     t_constraints: dict[int, dict[int, Constraint]],
     sources: dict[tuple[int, int], list[Source]],
-    mode: FakeTensorMode,
+    mode: FakeTensorMode | CppFakeTensorMode,
 ) -> "SymbolicContext":
     """Helper function to create symbolic context for a tensor."""
+    from torch._dynamo.decorators import _dim_range_to_value_ranges, _get_dim_range
     from torch._dynamo.source import AttrSource
     from torch.fx.experimental.symbolic_shapes import (
         DimDynamic,
         RelaxedUnspecConstraint,
+        StrictMinMaxConstraint,
         SubclassSymbolicContext,
     )
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -278,12 +280,27 @@ def _create_symbolic_context_for_tensor(
     for i in range(n_dims):
         if i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
             dynamic_sizes.append(DimDynamic.DYNAMIC)
+            # maybe_mark_dynamic ranges are advisory, the dim may still be
+            # specialized or narrowed, hence warn_only.
+            dim_range = _get_dim_range(t, i)
+            if dim_range is not None:
+                constraint_sizes[i] = StrictMinMaxConstraint(  # type: ignore[call-overload]
+                    vr=_dim_range_to_value_ranges(dim_range),
+                    warn_only=True,
+                )
         elif i in getattr(t, "_dynamo_dynamic_indices", {}):
             # bit annoying, but we need to replicate process in _dynamo/variables/builder.py
             # where a RelaxedUnspecConstraint is created for Dim.DYNAMIC, so constraint violations
             # are raised when specializing.
             dynamic_sizes.append(DimDynamic.DYNAMIC)
-            constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
+            dim_range = _get_dim_range(t, i)
+            if dim_range is None:
+                constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
+            else:
+                constraint_sizes[i] = StrictMinMaxConstraint(  # type: ignore[call-overload]
+                    vr=_dim_range_to_value_ranges(dim_range),
+                    warn_only=False,
+                )
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
 
@@ -442,14 +459,21 @@ def _override_builtin_ops() -> Generator[None, None, None]:
 
 
 def _make_fake_inputs_with_spec(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     nn_module: Any,
     args: Any,
     kwargs: Any,
     sourced_prefixes: Any,
     dynamic_shapes: Any,
     original_signature: inspect.Signature,
-) -> tuple[FakeTensorMode, Any, Any, EqualityConstraint, inspect.Signature, Any]:
+) -> tuple[
+    FakeTensorMode | CppFakeTensorMode,
+    Any,
+    Any,
+    EqualityConstraint,
+    inspect.Signature,
+    Any,
+]:
     from torch.fx.experimental._spec_binding import _bind_spec_to_args
     from torch.fx.experimental.dynamic_spec import (
         _coerce_to_shapes_spec,
@@ -544,7 +568,7 @@ def make_fake_inputs(
     dynamic_shapes: "dict[str, Any] | tuple[Any, ...] | list[Any] | ShapesSpec | ParamsSpec | None",
     prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> tuple[
-    FakeTensorMode,
+    FakeTensorMode | CppFakeTensorMode,
     tuple[Any, ...],
     dict[str, Any],
     EqualityConstraint,
@@ -723,7 +747,7 @@ def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
 
 
 def produce_guards_and_solve_constraints(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     gm: torch.fx.GraphModule,
     dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
     equalities_inputs: EqualityConstraint,
@@ -833,7 +857,9 @@ def _constrain_user_specified_dimhint_range(
             out_vr = trace_vr & user_vr
         else:
             range_constraints[symint.node.expr] &= user_vr
-            shape_env.var_to_range[symint.node._expr] &= user_vr
+            shape_env._update_var_to_range(
+                symint.node._expr, user_vr, is_constraint=True
+            )
             out_vr = range_constraints[symint.node.expr]
 
         # check for Dim.DYNAMIC specializations; special case error message on 0/1
@@ -872,7 +898,7 @@ def _constrain_user_specified_dimhint_range(
 
 
 def make_constraints(
-    fake_mode: FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
     gm: torch.fx.GraphModule,
     combined_args: dict[str, Any],
     dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
@@ -1091,7 +1117,7 @@ def _enable_graph_inputs_of_type_nn_module(
 def _fakify_module_inputs(
     args: tuple[Any],
     kwargs: dict[Any, Any],
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+    fake_mode: FakeTensorMode | CppFakeTensorMode,
 ) -> Generator[None, None, None]:
     # This context manager is used to fakify module inputs.
     # Inputs:
@@ -1122,7 +1148,7 @@ def _fakify_script_objects(
     mod: _ModuleT,
     args: Sequence[Any],
     kwargs: dict[Any, Any],
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode | None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None,
 ) -> Generator[tuple[_ModuleT, Any, Any, ConstantAttrMap, dict[Any, Any]], None, None]:
     # This context manager is used to fakify script objects into FakeScriptObject.
     # Inputs:
@@ -1224,27 +1250,14 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     ) -> tuple[Callable[..., object], Sequence[Any], dict[str, Any]]:
         if torch.distributed.is_available():
             from torch.distributed._functional_collectives import (
-                REDUCE_OP_TO_STR,
-                traceable_collective_remaps,
+                _remap_traceable_collective,
             )
 
-            if func in traceable_collective_remaps:
-                # Redirect to a corresponding functional collective, following Dynamo.
-                # See torch/distributed/_functional_collectives.py for details.
-                # The following is an adaptation of CollectiveFunctionRewriteVariable.
-                mapped_func = traceable_collective_remaps[func]
-                signature = inspect.signature(func)
-                kwargs = dict(signature.bind(*args, **kwargs).arguments)
-                args = ()
-                if func in (
-                    torch.distributed.all_reduce,
-                    torch.distributed.reduce_scatter_single,
-                    torch.distributed.reduce_scatter_tensor,
-                    torch.distributed._reduce_scatter_base,
-                ):
-                    if "op" in kwargs:
-                        kwargs["op"] = REDUCE_OP_TO_STR[kwargs["op"]]
-                return mapped_func, args, kwargs
+            # Redirect legacy collectives to functional collectives, following
+            # Dynamo. See torch/distributed/_functional_collectives.py for details.
+            remapped = _remap_traceable_collective(func, args, kwargs)
+            if remapped is not None:
+                return remapped
         if func is torch.tensor:
             # Redirect to Python implementation of torch.tensor for data with symints.
             # NOTE(avik): We don't unconditionally redirect to this implementation
@@ -1255,10 +1268,30 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                 for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
+        if func is torch._assert:
+            condition = args[0] if args else kwargs.get("condition")
+            if isinstance(condition, torch.Tensor):
+                if len(args) >= 2:
+                    return torch._assert_async, args, kwargs
+                if len(args) == 1 and "message" in kwargs:
+                    return torch._assert_async, (args[0], kwargs["message"]), {}
+                if "condition" in kwargs and "message" in kwargs:
+                    return (
+                        torch._assert_async,
+                        (
+                            kwargs["condition"],
+                            kwargs["message"],
+                        ),
+                        {},
+                    )
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
 
             def is_scalar_tensor_index(item: object) -> TypeGuard[torch.Tensor]:
                 if not isinstance(item, torch.Tensor) or item.ndim != 0:
+                    return False
+                # vmap BatchedTensor scalar indices must remain tensor indices;
+                # calling item() on them is unsupported.
+                if torch._C._functorch.is_batchedtensor(item):
                     return False
 
                 from torch._prims_common import is_integer_dtype

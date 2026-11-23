@@ -1,16 +1,12 @@
 #include <torch/csrc/cuda/python_nccl.h>
 
-#include <ATen/core/functional.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/utils/pybind.h>
 
-#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -21,17 +17,19 @@ using namespace torch::cuda::nccl::detail;
 
 static constexpr const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
 
-PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_version(PyObject* /*self*/, PyObject* /*args*/) {
   return PyLong_FromUnsignedLongLong(version());
 }
 
-PyObject* THCPModule_nccl_version_suffix(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_version_suffix(
+    PyObject* /*self*/,
+    PyObject* /*args*/) {
   HANDLE_TH_ERRORS
   return PyBytes_FromString(version_suffix());
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_unique_id(PyObject* /*self*/, PyObject* /*args*/) {
   HANDLE_TH_ERRORS
   ncclUniqueId id;
   get_unique_id(id);
@@ -42,8 +40,7 @@ PyObject* THCPModule_nccl_unique_id(PyObject* self, PyObject* args) {
 static ncclComm_t unpack_nccl_comm(PyObject* capsule) {
   ncclComm_t comm =
       (ncclComm_t)PyCapsule_GetPointer(capsule, COMM_CAPSULE_NAME);
-  if (!comm)
-    throw python_error();
+  TORCH_CHECK_PYTHON(comm);
   return comm;
 }
 
@@ -82,8 +79,7 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
     comms = {unpack_nccl_comm(obj)};
   } else {
     auto seq = THPObjectPtr(PySequence_Fast(obj, "comm is not a sequence"));
-    if (!seq)
-      throw python_error();
+    TORCH_CHECK_PYTHON(seq);
     auto size = PySequence_Fast_GET_SIZE(seq.get());
     comms = std::vector<ncclComm_t>(size);
     for (const auto i : c10::irange(size)) {
@@ -96,7 +92,7 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
   return comms;
 }
 
-PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_init_rank(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   int nranks = 0;
   const char* id = nullptr;
@@ -126,7 +122,7 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_reduce(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_output = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -159,7 +155,7 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_all_reduce(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -192,7 +188,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_broadcast(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_streams = nullptr, *_comms = nullptr;
   int root = 0;
@@ -223,7 +219,7 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_all_gather(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -255,7 +251,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
+PyObject* THCPModule_nccl_reduce_scatter(PyObject* /*self*/, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
            *_comms = nullptr;
@@ -299,8 +295,7 @@ static at::Tensor extract_tensor(PyObject* obj) {
 
 static std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   auto seq = THPObjectPtr(PySequence_Fast(obj, "expected a sequence"));
-  if (!seq)
-    throw python_error();
+  TORCH_CHECK_PYTHON(seq);
 
   const Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
   std::vector<at::Tensor> list;

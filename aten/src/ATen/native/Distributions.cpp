@@ -391,8 +391,8 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
   auto iter = TensorIteratorConfig()
     .add_output(ret)
-    .add_input(self)
-    .add_input(output)
+    .add_const_input(self)
+    .add_const_input(output)
     .build();
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "_standard_gamma_grad_cpu", [&] {
     cpu_serial_kernel(iter, [](scalar_t self_val, scalar_t output_val) -> scalar_t{
@@ -406,9 +406,9 @@ Tensor _dirichlet_grad_cpu(const Tensor& x, const Tensor& alpha, const Tensor& t
   Tensor ret = at::empty(x.sizes(), x.options());
   auto iter = TensorIteratorConfig()
     .add_output(ret)
-    .add_input(x)
-    .add_input(alpha)
-    .add_input(total)
+    .add_const_input(x)
+    .add_const_input(alpha)
+    .add_const_input(total)
     .build();
   AT_DISPATCH_FLOATING_TYPES(x.scalar_type(), "_dirichlet_grad_cpu", [&] {
     cpu_serial_kernel(iter, [](scalar_t x_val, scalar_t alpha_val, scalar_t total_val) -> scalar_t{
@@ -434,8 +434,8 @@ Tensor _s_binomial_cpu(const Tensor& count, const Tensor& prob, std::optional<Ge
   Tensor ret = at::zeros(count.sizes(), count.options());
   auto iter = TensorIteratorConfig()
     .add_output(ret)
-    .add_input(count)
-    .add_input(prob)
+    .add_const_input(count)
+    .add_const_input(prob)
     .build();
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "binomial_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
@@ -459,7 +459,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, std::optional<Generator> gen) {
   Tensor ret = at::zeros(lambda.sizes(), lambda.options());
   auto iter = TensorIteratorConfig()
     .add_output(ret)
-    .add_input(lambda)
+    .add_const_input(lambda)
     .build();
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, ret.scalar_type(), "poisson_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
@@ -476,7 +476,7 @@ Tensor _s_gamma_cpu(const Tensor& alpha, std::optional<Generator> gen) {
   Tensor ret = at::zeros(alpha.sizes(), alpha.options());
   auto iter = TensorIteratorConfig()
     .add_output(ret)
-    .add_input(alpha)
+    .add_const_input(alpha)
     .build();
   AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "gamma_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
@@ -512,7 +512,7 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, std::optional<Generator> gen) {
     /* Generate gamma sample by casting alpha to double to prevent underflow. */
     auto iter1 = TensorIteratorConfig()
       .add_output(gamma)
-      .add_input(alpha)
+      .add_const_input(alpha)
       .check_all_same_dtype(false)
       .build();
     cpu_serial_kernel(iter1, [generator](scalar_t alpha_val) -> double{
@@ -535,8 +535,8 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, std::optional<Generator> gen) {
     Tensor gamma_sum = gamma.sum(-1, true).expand(alpha.sizes());
     auto iter2 = TensorIteratorConfig()
       .add_output(ret)
-      .add_input(gamma)
-      .add_input(gamma_sum)
+      .add_const_input(gamma)
+      .add_const_input(gamma_sum)
       .check_all_same_dtype(false)
       .build();
     cpu_serial_kernel(iter2, [](double gamma_val, double gamma_sum_val) -> scalar_t{
@@ -572,12 +572,6 @@ Tensor& multinomial_out(const Tensor& self,
   int64_t n_categories = self.size(-1);
   TORCH_CHECK(with_replacement || (n_sample <= n_categories),
       "cannot sample n_sample > prob_dist.size(-1) samples without replacement");
-  // Since the index tensor is float, numCategories cannot exceed max
-  // float integer precision
-  TORCH_CHECK(
-      n_categories <= FLOAT32_MAX_CONSECUTIVE_INT,
-      "number of categories cannot exceed 2^24");
-
   if (self.dim() == 1) {
     result.resize_({n_sample});
   } else {
@@ -611,7 +605,12 @@ Tensor& multinomial_out(const Tensor& self,
     // s = argmax( p / (-log(eps)) ) where eps ~ U(0, 1).
     // We can also simplify the formula above by
     // s = argmax( p / q ) where q ~ Exp(1)
-    Tensor q = at::empty_like(self).exponential_(1, std::move(gen));
+    // q is float for half and bfloat16: in half, p / q overflows to inf whenever
+    // q < p / 65504, and bfloat16 rounding ties near-equal p / q; argmax breaks
+    // both kinds of tie toward low indices.
+    const auto self_type = self.scalar_type();
+    const auto q_type = self_type == kHalf || self_type == kBFloat16 ? kFloat : self_type;
+    Tensor q = at::empty_like(self, self.options().dtype(q_type)).exponential_(1, std::move(gen));
     // In theory the probability to generate 0 from exponential distribution is
     // 0. However, on CUDA side there is a protection to avoid 0s, but on CPU
     // side, there is a very low probability to generate 0 from
@@ -621,12 +620,18 @@ Tensor& multinomial_out(const Tensor& self,
     if (n_sample == 1) {
       at::argmax_out(result, q, /*dim=*/-1, /*keepdim=*/true);
     } else {
-      Tensor vals = at::empty(result.sizes(), self.options());
+      Tensor vals = at::empty(result.sizes(), q.options());
       at::topk_out(vals, result, q, n_sample);
     }
     return result;
   }
 
+  // The CPU and CUDA kernels search a double CDF past 2^24 categories; other
+  // backends (e.g. MPS) may search a float CDF, which cannot resolve that many.
+  TORCH_CHECK(
+      self.is_cpu() || self.is_cuda() || n_categories <= FLOAT32_MAX_CONSECUTIVE_INT,
+      "number of categories cannot exceed 2^24 when sampling with replacement on ",
+      self.device().type());
   multinomial_with_replacement_stub(
       result.device().type(), result, self, n_sample, gen);
   return result;

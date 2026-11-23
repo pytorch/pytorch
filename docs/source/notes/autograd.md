@@ -91,11 +91,36 @@ Unfortunately many of the functions we use in practice do not have this property
 To try and reduce the impact of functions that are non-differentiable, we define the gradients of the elementary operations by applying the following rules in order:
 
 1. If the function is differentiable and thus a gradient exists at the current point, use it.
-2. If the function is convex (at least locally), use the sub-gradient of minimum norm.
-3. If the function is concave (at least locally), use the super-gradient of minimum norm (consider `-f(x)` and apply the previous point).
+2. If the function is convex (at least locally), use a subgradient of minimum norm.
+3. If the function is concave (at least locally), use a supergradient of minimum norm (consider `-f(x)` and apply the previous point).
 4. If the function is defined, define the gradient at the current point by continuity (note that ``inf`` is possible here, for example for ``sqrt(0)``). If multiple values are possible, pick one arbitrarily.
 5. If the function is not defined (``sqrt(-1)``, ``log(-1)`` or most functions when the input is ``NaN``, for example) then the value used as the gradient is arbitrary (we might also raise an error but that is not guaranteed). Most functions will use ``NaN`` as the gradient, but for performance reasons, some functions will use other values (``log(-1)``, for example).
 6. If the function is not a deterministic mapping (i.e. it is not a [mathematical function](https://en.wikipedia.org/wiki/Function_%28mathematics%29)), it will be marked as non-differentiable. This will make it error out in the backward if used on tensors that require grad outside of a ``no_grad`` environment.
+
+In particular, a ``NaN`` input is outside the mathematical input domain used by these rules, even when the operator has specified floating-point behavior for ``NaN``. An autograd formula may return any gradient at such an input and does not need to propagate the ``NaN`` input into the gradient. This is distinct from a ``NaN`` incoming gradient or tangent: formulas must propagate it when that contribution is used, without allowing an inactive contribution to contaminate the result.
+
+For these rules, the function and its input space are defined by the selected dispatcher overload and its schema signature.
+This applies to built-in operators and user-defined operators, including Python ``custom_op`` definitions.
+Overload resolution occurs before autograd applies these rules; Python-level syntax does not redefine the function's input space.
+For details about how Python values select Scalar and Tensor overloads, see
+{ref}`python-number-overload-resolution`.
+
+All differentiable Tensor arguments in the selected dispatcher signature jointly form the function's input space, regardless of whether a particular argument currently requires grad.
+``requires_grad`` only controls which gradient components autograd computes.
+Non-Tensor arguments, including Scalar parameters, are fixed parameters.
+The norm is the Euclidean norm on this joint Tensor input space.
+
+Consequently, different dispatcher signatures can intentionally produce different subgradients.
+Consider these two schemas:
+
+```text
+max(Tensor x, Scalar c) -> Tensor
+max.Tensor(Tensor x, Tensor y) -> Tensor
+```
+
+At equality, the first schema treats ``c`` as fixed, so the minimum-norm derivative with respect to ``x`` is ``0``.
+The second schema is jointly a function of ``x`` and ``y``, so its minimum-norm joint subgradient is ``(1/2, 1/2)``.
+A zero-dimensional Tensor remains a Tensor argument for this purpose.
 
 
 ### Division by Zero in Autograd
@@ -353,6 +378,79 @@ a version counter of their containing Tensor is saved as well. Once you access
 an error is raised. This ensures that if you're using in-place
 functions and not seeing any errors, you can be sure that the computed
 gradients are correct.
+
+(disallow-implicit-grad-accumulation)=
+
+## Disallowing implicit gradient accumulation
+
+When a tensor is used by more than one operation in forward, for example ``h`` in a
+residual connection ``h + attn(norm(h))``, the autograd engine is responsible for
+accumulating the gradient contributions from each use during the backward.
+
+Passing ``disallow_implicit_grad_accumulation=True`` to {meth}`torch.Tensor.backward`,
+{func}`torch.autograd.backward` or {func}`torch.autograd.grad` makes it so that whenever
+such an accumulation is needed, we raise an error instead. This is useful for finding
+places in your code relies on autograd to accumulate gradients, when you might actually
+want to do it explicitly so you can have finer control over it. For example, you may
+want to control what precision the accumulation or how the rounding is performed
+when casting to the desired precision.
+
+Note that while a leaf tensor used twice during a forward raises an error during backward
+under this flag, a leaf tensor that is only used once, but whose ``.grad`` field is
+accumulated into over several ``.backward()`` calls is not covered by this flag and does
+NOT raise an error.
+
+```python
+a = torch.randn(3, requires_grad=True)
+x = a.sin()
+loss = (x * 2 + x * 3).sum()
+loss.backward(disallow_implicit_grad_accumulation=True)
+# RuntimeError: Gradients would be summed implicitly into output 0 of SinBackward0
+# (shape [3], dtype float): it already received a gradient, and MulBackward0
+# produced another. ...
+```
+
+Run under {func}`torch.autograd.detect_anomaly` to also print the forward traceback
+of the operation that produced the second gradient.
+
+To do the accumulation explicitly, give each use its own tensor with a custom
+{class}`torch.autograd.Function` whose forward returns the tensor once per use and
+whose backward sums the gradients of those uses:
+
+```python
+class Split(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x):
+        return x, x
+
+    @staticmethod
+    def backward(ctx, grad_a, grad_b):
+        # Accumulate here however you need, e.g. in float32.
+        return grad_a + grad_b
+
+a = torch.randn(3, requires_grad=True)
+x = a.sin()
+x1, x2 = Split.apply(x)
+loss = (x1 * 2 + x2 * 3).sum()
+loss.backward(disallow_implicit_grad_accumulation=True)  # no error
+```
+
+Autograd returns each input that ``forward`` returns as a new view of it, so
+``x1`` and ``x2`` are separate tensors, each used once: backward does not accumulate
+into either, and ``Split.backward`` combines their gradients. Because they are views
+of ``x``, do not modify them in place.
+
+If you are using
+{attr}`ctx.input_grad_buffers <torch.autograd.function.FunctionCtx.input_grad_buffers>`
+and returned ``None``, this flag will not raise.
+
+A backward started while another one runs, such as the recomputation done by
+{func}`torch.utils.checkpoint.checkpoint` with ``use_reentrant=True``, inherits the
+setting. Derivative formulas can use their inputs more than once, so a graph built
+with ``create_graph=True`` accumulates gradients when it is differentiated; do not
+pass the flag when computing such higher-order gradients. The flag is not supported
+with compiled autograd, and is only available from Python for now: the C++
+``torch::autograd::backward`` and ``torch::autograd::grad`` do not accept it.
 
 ## Multithreaded Autograd
 
@@ -674,11 +772,11 @@ derivatives on complex functions.  However, we still need to
 compute $\frac{\partial s}{\partial z}$ and $\frac{\partial s}{\partial z^*}$.
 There are two ways you could do this:
 
-    - The first way is to just use the definition of Wirtinger derivatives directly and calculate $\frac{\partial s}{\partial z}$ and $\frac{\partial s}{\partial z^*}$ by
-      using $\frac{\partial s}{\partial x}$ and $\frac{\partial s}{\partial y}$
-      (which you can compute in the normal way).
-    - The second way is to use the change of variables trick and rewrite $f(z)$ as a two variable function $f(z, z^*)$, and compute
-      the conjugate Wirtinger derivatives by treating $z$ and $z^*$ as independent variables. This is often easier; for example, if the function in question is holomorphic, only $z$ will be used (and $\frac{\partial s}{\partial z^*}$ will be zero).
+- The first way is to just use the definition of Wirtinger derivatives directly and calculate $\frac{\partial s}{\partial z}$ and $\frac{\partial s}{\partial z^*}$ by
+  using $\frac{\partial s}{\partial x}$ and $\frac{\partial s}{\partial y}$
+  (which you can compute in the normal way).
+- The second way is to use the change of variables trick and rewrite $f(z)$ as a two variable function $f(z, z^*)$, and compute
+  the conjugate Wirtinger derivatives by treating $z$ and $z^*$ as independent variables. This is often easier; for example, if the function in question is holomorphic, only $z$ will be used (and $\frac{\partial s}{\partial z^*}$ will be zero).
 
 Let's consider the function $f(z = x + yj) = c * z = c * (x+yj)$ as an example, where $c \in ℝ$.
 

@@ -6,8 +6,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, Self, TYPE_CHECKING
 
 import torch
 import torch.distributed._tools.fake_collectives
@@ -309,7 +308,7 @@ def _print_state_snapshots_tabular(
 
 
 class _UpdateType(Enum):
-    # These are used for tracking updates to the continuouly maintained memory snapshot.
+    # These are used for tracking updates to the continuously maintained memory snapshot.
     # ADD - When a new tensor storage is tracked
     # DEL - When a tensor storage is about to be finalized (garbage collected).
     # REF - When a tensor reference is updated, for instance, the gradients are marked as
@@ -367,7 +366,7 @@ class MemTracker(TorchDispatchMode):
         - If the tensors are not traceable or wrappable subclasses of ``torch.Tensor``, then the tracker does not know how to
             track their storages. File a Github issue if you have use-cases for this.
         - During AC in the backward pass there might be misattribution between activation and temp memory, but the peak memory
-          will be tracked accurately. This will be fixed in the next update by hooking intricately with ``torch.uitls.checkpoint``.
+          will be tracked accurately. This will be fixed in the next update by hooking intricately with ``torch.utils.checkpoint``.
     """
 
     def __init__(self) -> None:

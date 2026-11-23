@@ -7,11 +7,19 @@
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+#include <fmt/ostream.h>
+#include <fmt/ranges.h>
+#include <chrono>
 #include <optional>
 #include <stdexcept>
 #include <utility>
 
 namespace c10d {
+
+gc_count_getter_t& get_gc_count_getter() {
+  static gc_count_getter_t getter = nullptr;
+  return getter;
+}
 
 namespace {
 // A container for information about a particular collective, including optype
@@ -28,6 +36,9 @@ struct CollectiveFingerPrint {
   // input tensor sizes
   std::vector<std::vector<int64_t>> tensor_sizes_;
   uint64_t sequence_number_;
+  // Local-only debug context; not included in serialize_fingerprint().
+  std::optional<std::array<int64_t, 3>> python_gc_counts_;
+  std::optional<int64_t> steady_clock_time_ms_;
 
   CollectiveFingerPrint(
       OpType op_type,
@@ -35,7 +46,18 @@ struct CollectiveFingerPrint {
       uint64_t sequence_number)
       : op_type_(op_type),
         num_tensors_(input_tensors.size()),
-        sequence_number_(sequence_number) {
+        sequence_number_(sequence_number),
+        steady_clock_time_ms_(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count()) {
+    if (auto getter = get_gc_count_getter()) {
+      try {
+        python_gc_counts_ = (*getter)();
+      } catch (...) {
+        // Optional diagnostics must not fail the collective.
+      }
+    }
     tensor_dtypes_.reserve(num_tensors_);
     tensor_device_types_.reserve(num_tensors_);
     tensor_sizes_.reserve(num_tensors_);
@@ -107,17 +129,17 @@ struct CollectiveFingerPrint {
       sizes.reserve(num_tensors);
 
       // 3. Tensor dtypes
-      for (int i = 0; i < num_tensors; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_tensors)) {
         dtypes.push_back(serialized_tensor[index].item<int8_t>());
         index++;
       }
       // 4. Device types
-      for (int i = 0; i < num_tensors; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_tensors)) {
         device_types.push_back(serialized_tensor[index].item<int8_t>());
         index++;
       }
       // 5. Tensor shapes
-      for (int i = 0; i < num_tensors; i++) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_tensors)) {
         // 5a. Shape size
         int size = serialized_tensor[index].item<int>();
         index++;
@@ -330,7 +352,6 @@ struct CollectiveFingerPrint {
 std::ostream& operator<<(
     std::ostream& output,
     const CollectiveFingerPrint& collective_fingerprint) {
-  std::string collectiveInfo;
   auto op_type_str = opTypeToString(collective_fingerprint.op_type_);
   if (collective_fingerprint.num_tensors_ != 0) {
     // Convert dtype and device type info to string.
@@ -341,29 +362,33 @@ std::ostream& operator<<(
     std::vector<std::string> size_strs =
         CollectiveFingerPrint::get_size_strs(collective_fingerprint);
 
-    collectiveInfo = c10::str(
-        "CollectiveFingerPrint(",
-        "SequenceNumber=",
+    fmt::print(
+        output,
+        "CollectiveFingerPrint(SequenceNumber={}, OpType={}, TensorShape=[{}], TensorDtypes=[{}], TensorDeviceTypes=[{}]",
         collective_fingerprint.sequence_number_,
-        ", OpType=",
         op_type_str,
-        ", TensorShape=[",
-        c10::Join(", ", size_strs),
-        "], TensorDtypes=",
-        dtype_strs,
-        ", TensorDeviceTypes=",
-        device_type_strs,
-        ")");
+        fmt::join(size_strs, ", "),
+        fmt::join(dtype_strs, ", "),
+        fmt::join(device_type_strs, ", "));
   } else {
-    collectiveInfo = c10::str(
-        "CollectiveFingerPrint(",
-        "SequenceNumber=",
+    fmt::print(
+        output,
+        "CollectiveFingerPrint(SequenceNumber={}, OpType={}",
         collective_fingerprint.sequence_number_,
-        "OpType=",
-        op_type_str,
-        ")");
+        op_type_str);
   }
-  return output << collectiveInfo;
+  if (collective_fingerprint.python_gc_counts_.has_value()) {
+    const auto& gc = *collective_fingerprint.python_gc_counts_;
+    fmt::print(output, ", PythonGcCounts=[{}]", fmt::join(gc, ", "));
+  }
+  if (collective_fingerprint.steady_clock_time_ms_.has_value()) {
+    fmt::print(
+        output,
+        ", SteadyClockTimeMs={}",
+        *collective_fingerprint.steady_clock_time_ms_);
+  }
+  fmt::print(output, ")");
+  return output;
 }
 
 bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
@@ -464,6 +489,11 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::all_gather_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
+  // NOTE: We don't enforce shape checking for allgather_into_tensor_coalesced
+  // because the implementation itself does not enforce it. We have tests that
+  // use inconsistent shapes, see python implementation in distributed_c10d for
+  // details.
+  runCollectiveChecks(OpType::ALLGATHER_INTO_TENSOR_COALESCED, {});
   return backend_->all_gather_single_coalesced(outputs, inputs, opts);
 }
 
@@ -519,7 +549,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::alltoall(
 void ProcessGroupWrapper::monitoredBarrier(
     const BarrierOptions& opts,
     bool waitAllRanks) {
-  return backend_->monitoredBarrier(opts, waitAllRanks);
+  backend_->monitoredBarrier(opts, waitAllRanks);
 }
 
 uint64_t ProcessGroupWrapper::getSequenceNumberForGroup() {
@@ -574,7 +604,7 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter_single_coalesced(
 }
 
 void ProcessGroupWrapper::startCoalescing() {
-  return backend_->startCoalescing();
+  backend_->startCoalescing();
 }
 
 c10::intrusive_ptr<Work> ProcessGroupWrapper::endCoalescing() {
@@ -585,12 +615,24 @@ bool ProcessGroupWrapper::supportsSplitting() const {
   return backend_->supportsSplitting();
 }
 
+bool ProcessGroupWrapper::isInitialized() {
+  return backend_->isInitialized();
+}
+
 bool ProcessGroupWrapper::supportsCoalescing() const {
   return backend_->supportsCoalescing();
 }
 
 bool ProcessGroupWrapper::supportsTimeEstimation() const {
   return backend_->supportsTimeEstimation();
+}
+
+void ProcessGroupWrapper::startTimeEstimate() {
+  backend_->startTimeEstimate();
+}
+
+float ProcessGroupWrapper::endTimeEstimate() {
+  return backend_->endTimeEstimate();
 }
 
 bool ProcessGroupWrapper::supportsShrinking() const {
@@ -651,6 +693,14 @@ ErrorType ProcessGroupWrapper::getError() {
   return backend_->getError();
 }
 
+std::optional<at::Device> ProcessGroupWrapper::getBoundDeviceId() const {
+  return backend_->getBoundDeviceId();
+}
+
+void ProcessGroupWrapper::setBoundDeviceId(std::optional<at::Device> device) {
+  backend_->setBoundDeviceId(device);
+}
+
 void ProcessGroupWrapper::eagerConnectSingleDevice(at::Device device) {
   backend_->eagerConnectSingleDevice(device);
 }
@@ -666,6 +716,10 @@ void ProcessGroupWrapper::waitForPendingWorks() {
 
 void ProcessGroupWrapper::enableCollectivesTiming() {
   backend_->enableCollectivesTiming();
+}
+
+bool ProcessGroupWrapper::collectivesTimingEnabled() const {
+  return backend_->collectivesTimingEnabled();
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupWrapper::split(

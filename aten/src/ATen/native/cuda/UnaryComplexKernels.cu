@@ -17,7 +17,7 @@ __host__ __device__ static inline scalar_t angle_wrapper(scalar_t v) {
   if (at::_isnan(v)){
     return v;
   }
-  return v < 0 ? M_PI : 0;
+  return signbit(static_cast<at::opmath_type<scalar_t>>(v)) ? M_PI : 0;
 }
 
 template<typename T>
@@ -54,7 +54,7 @@ void angle_kernel_cuda(TensorIteratorBase& iter) {
     });
 #endif
   } else {
-    AT_DISPATCH_FLOATING_TYPES(dtype, "angle_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "angle_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return angle_wrapper(a);
         });

@@ -456,6 +456,11 @@ def can_auto_functionalize(
             continue
         return False
 
+    if isinstance(op, OpOverload) and torch._C._dispatch_has_kernel_for_dispatch_key(
+        op.name(), "Functionalize"
+    ):
+        return False
+
     if len(schema.returns) == 1 and isinstance(schema.returns[0].type, torch.NoneType):
         # Skip schema returns -> None
         return True
@@ -474,8 +479,6 @@ def can_auto_functionalize(
                     continue
                 # Not yet supported: List[Tensor] return.
                 return False
-        if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), "Functionalize"):
-            return False
     return True
 
 
@@ -619,7 +622,17 @@ class FunctionalCallableWithEpilogue:
 
     def __call__(self, *args, **kwargs):
         # Functionalize to inline the epilogue graph (copy_ ops) for better fusion.
-        functionalized = torch.func.functionalize(self.orig_callable)
+        # Python functionalization so mutable custom ops reach auto_functionalized_v2.
+        from torch._subclasses.functional_tensor import (
+            dispatch_functionalize,
+            FunctionalTensorMode,
+        )
+
+        functionalized = dispatch_functionalize(
+            self.orig_callable,
+            FunctionalTensorMode(),
+            propagate_input_mutations=True,
+        )
         if self._boxed_call:
             # Not all callers respect _boxed_call (e.g. reenter_make_fx
             # always calls f(*args)). Detect which convention was used.

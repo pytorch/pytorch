@@ -1,10 +1,17 @@
 #include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <mutex>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 #include <c10/util/StringUtil.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cslt_compress_native.h>
+#include <ATen/ops/_cslt_sparse_mm_native.h>
+#include <ATen/ops/_cslt_sparse_mm_search_native.h>
+#endif
+
 #if AT_CUSPARSELT_ENABLED()
 
 namespace at::native {
@@ -126,12 +133,16 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
     case at::ScalarType::Float8_e4m3fn:
       type = CUDA_R_8F_E4M3;
       break;
+#ifdef USE_ROCM
+    case at::ScalarType::Float8_e4m3fnuz:
+      type = HIP_R_8F_E4M3_FNUZ;
+      break;
+#endif
 #endif
     default:
       TORCH_CHECK(
           false,
           "Unsupported dtype for cuSPARSELt/hipSparseLt compressed matrix");
-      break;
   }
 
   TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
@@ -258,6 +269,14 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
 #endif
       compute_type = CUSPARSE_COMPUTE_32F;
       break;
+#ifdef USE_ROCM
+    case at::ScalarType::Float8_e4m3fnuz:
+      input_type = HIP_R_8F_E4M3_FNUZ;
+      output_type = CUDA_R_32F;
+      C_type = CUDA_R_32F;
+      compute_type = CUSPARSE_COMPUTE_32F;
+      break;
+#endif
 #endif
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
 #else
@@ -284,9 +303,17 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       TORCH_CHECK(
           false,
           "Unsupported dtype for cuSPARSELt compressed matrix multiplication.");
-      break;
   }
   ScalarType out_dtype = dense_B.scalar_type();
+#ifdef USE_ROCM
+  // The fp8 cases above force output_type/C_type to CUDA_R_32F because
+  // hipSparseLt only produces fp32 for fp8 inputs. Without matching out_dtype
+  // here, an omitted out_dtype leaves the result tensor allocated as fp8 while
+  // cusparseLtMatmul writes fp32 into it, overrunning it by 4x.
+  if (input_type == CUDA_R_8F_E4M3 || input_type == HIP_R_8F_E4M3_FNUZ) {
+    out_dtype = at::ScalarType::Float;
+  }
+#endif
   // special check for mixed dtype support for 8 bit dtypes
   // cslt 0.5.2+: int8 int8 -> {fp16, bf16, int32} support
   if (out_dtype_opt.has_value()) {
@@ -309,13 +336,16 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
           TORCH_CHECK(
               false,
               "Unsupported out_dtype passed, must be one of {fp16, bf16, int32} for int8 inputs");
-          break;
       }
     }
 // cslt 0.6.2+ or hipSparseLt: fp8 output dtype support
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 || \
     defined(USE_ROCM)
-    else if (input_type == CUDA_R_8F_E4M3) {
+    else if (input_type == CUDA_R_8F_E4M3
+#ifdef USE_ROCM
+             || input_type == HIP_R_8F_E4M3_FNUZ
+#endif
+    ) {
       switch (out_dtype) {
 #ifndef USE_ROCM
         case at::ScalarType::Float8_e4m3fn:
@@ -343,7 +373,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
 #else
               "Unsupported out_dtype passed, must be one of {fp8, fp16, bf16, float32} for fp8 inputs");
 #endif
-          break;
       }
     }
 #endif
@@ -596,7 +625,7 @@ at::Tensor _cslt_sparse_mm(
       (int)split_k,
       (int)split_k_mode,
       false);
-  return std::get<0>(result);
+  return std::get<0>(std::move(result));
 }
 
 int64_t _cslt_sparse_mm_search(

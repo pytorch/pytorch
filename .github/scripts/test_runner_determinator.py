@@ -1,4 +1,6 @@
+import tempfile
 from argparse import Namespace
+from pathlib import Path
 from unittest import main, TestCase
 from unittest.mock import Mock, patch
 
@@ -752,47 +754,88 @@ class TestRunnerDeterminatorGetRunnerPrefix(TestCase):
         self.assertEqual("mt-", result.prefix, "Runner prefix not correct for user")
 
 
-class TestRunnerDeterminatorAmdDoExperiment(TestCase):
-    AMD_DO_SETTINGS = """
+class TestRunnerDeterminatorAmdSandboxExperiment(TestCase):
+    AMD_SANDBOX_SETTINGS = """
         experiments:
-            amd-do:
+            amd-sandbox:
                 rollout_perc: 0
         ---
 
         Users:
-        @User1,amd-do
+        @User1,amd-sandbox
         @User2,lf
 
         """
 
-    def test_amd_do_opted_in_returns_prefix(self) -> None:
-        result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User1"], USER_BRANCH)
-        self.assertEqual("amd-do-", result.amd_do_prefix)
-        # amd-do is exposed via its own output; the base prefix is the default fleet
+    def test_amd_sandbox_opted_in_returns_prefix(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_SANDBOX_SETTINGS, ["User1"], USER_BRANCH)
+        self.assertEqual("amd-sandbox-", result.amd_sandbox_prefix)
+        # amd-sandbox is exposed via its own output; the base prefix is the default fleet
         self.assertEqual("mt-", result.prefix)
 
-    def test_amd_do_not_enabled_returns_default_fleet(self) -> None:
+    def test_amd_sandbox_not_enabled_returns_default_fleet(self) -> None:
         # User2 opts into lf, but lf is not defined here, so it falls back to Meta
-        result = rd.get_runner_prefix(self.AMD_DO_SETTINGS, ["User2"], USER_BRANCH)
-        self.assertEqual("", result.amd_do_prefix)
+        result = rd.get_runner_prefix(self.AMD_SANDBOX_SETTINGS, ["User2"], USER_BRANCH)
+        self.assertEqual("", result.amd_sandbox_prefix)
         self.assertEqual("mt-", result.prefix)
 
-    def test_amd_do_with_lf_keeps_both(self) -> None:
+    def test_amd_sandbox_with_lf_keeps_both(self) -> None:
         settings_text = """
         experiments:
             lf:
                 rollout_perc: 0
-            amd-do:
+            amd-sandbox:
                 rollout_perc: 0
         ---
 
         Users:
-        @User1,lf,amd-do
+        @User1,lf,amd-sandbox
 
         """
         result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
         self.assertEqual("lf-", result.prefix)
-        self.assertEqual("amd-do-", result.amd_do_prefix)
+        self.assertEqual("amd-sandbox-", result.amd_sandbox_prefix)
+
+
+class TestRunnerDeterminatorAmdDpxExperiment(TestCase):
+    AMD_DPX_SETTINGS = """
+        experiments:
+            amd-dpx:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,amd-dpx
+        @User2,lf
+
+        """
+
+    def test_amd_dpx_opted_in_returns_prefix(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_DPX_SETTINGS, ["User1"], USER_BRANCH)
+        self.assertEqual("amd-dpx-", result.amd_dpx_prefix)
+        self.assertEqual("mt-", result.prefix)
+
+    def test_amd_dpx_not_enabled_returns_default_fleet(self) -> None:
+        result = rd.get_runner_prefix(self.AMD_DPX_SETTINGS, ["User2"], USER_BRANCH)
+        self.assertEqual("", result.amd_dpx_prefix)
+        self.assertEqual("mt-", result.prefix)
+
+    def test_amd_dpx_with_lf_keeps_both(self) -> None:
+        settings_text = """
+        experiments:
+            lf:
+                rollout_perc: 0
+            amd-dpx:
+                rollout_perc: 0
+        ---
+
+        Users:
+        @User1,lf,amd-dpx
+
+        """
+        result = rd.get_runner_prefix(settings_text, ["User1"], USER_BRANCH)
+        self.assertEqual("lf-", result.prefix)
+        self.assertEqual("amd-dpx-", result.amd_dpx_prefix)
 
 
 class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
@@ -836,6 +879,9 @@ class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
             opt_out_experiments=frozenset(),
             pr_number="123",
             workflow_name="pull",
+            # No lf_allowlist assertions in this class; /dev/null reads as
+            # empty YAML, which resolves to the unrestricted default.
+            arc_yaml_path="/dev/null",
         )
         captured: dict[str, str] = {}
         with (
@@ -857,5 +903,286 @@ class TestRunnerDeterminatorNoRunnerExperimentsLabel(TestCase):
         self.assertEqual("lf-", out[rd.GH_OUTPUT_KEY_LABEL_TYPE])
 
 
+class TestGetLfRunnersOutput(TestCase):
+    """get_lf_runners_output: the --lf-runners allowlist (ci-infra#1081)."""
+
+    @staticmethod
+    def _arc_yaml(tmp_dir: str, body: str) -> str:
+        path = Path(tmp_dir) / "arc.yaml"
+        path.write_text(body)
+        return str(path)
+
+    def test_lf_disabled_returns_empty(self) -> None:
+        # arc.yaml is never opened when lf is disabled.
+        self.assertEqual("", rd.get_lf_runners_output("/nonexistent", lf_enabled=False))
+
+    def test_restrict_runners_false_returns_empty_and_logs_info(self) -> None:
+        # The kill-switch short-circuits before arc.yaml is opened.
+        with self.assertLogs(rd.log, level="INFO") as logs:
+            result = rd.get_lf_runners_output(
+                "/nonexistent", lf_enabled=True, restrict_runners=False
+            )
+        self.assertEqual("", result)
+        self.assertIn("kill-switch is off", logs.output[0])
+
+    def test_mode_all_returns_empty_and_logs_info(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = self._arc_yaml(
+                d, "lf_allowlist:\n  mode: all\n  runners: [l-x86iavx512-8-64]\n"
+            )
+            with self.assertLogs(rd.log, level="INFO") as logs:
+                result = rd.get_lf_runners_output(arc_yaml, lf_enabled=True)
+            self.assertEqual("", result)
+            self.assertIn("mode is 'all'; unrestricted", logs.output[0])
+
+    def test_mode_restricted_returns_sorted_comma_joined_runners(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = self._arc_yaml(
+                d,
+                "lf_allowlist:\n"
+                "  mode: restricted\n"
+                "  runners: [l-x86iavx512-16-128, l-x86iavx512-8-64]\n",
+            )
+            self.assertEqual(
+                "l-x86iavx512-16-128,l-x86iavx512-8-64",
+                rd.get_lf_runners_output(arc_yaml, lf_enabled=True),
+            )
+
+    def test_restrict_runners_false_overrides_restricted_arc_yaml(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = self._arc_yaml(
+                d, "lf_allowlist:\n  mode: restricted\n  runners: [l-x86iavx512-8-64]\n"
+            )
+            self.assertEqual(
+                "",
+                rd.get_lf_runners_output(
+                    arc_yaml, lf_enabled=True, restrict_runners=False
+                ),
+            )
+
+    def test_missing_lf_allowlist_section_defaults_to_all(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = self._arc_yaml(d, "unrelated_key: {}\n")
+            self.assertEqual("", rd.get_lf_runners_output(arc_yaml, lf_enabled=True))
+
+    def test_missing_arc_yaml_file_returns_empty(self) -> None:
+        self.assertEqual(
+            "", rd.get_lf_runners_output("/nonexistent/arc.yaml", lf_enabled=True)
+        )
+
+    def test_invalid_mode_returns_empty_and_logs_error(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = self._arc_yaml(d, "lf_allowlist:\n  mode: bogus\n")
+            with self.assertLogs(rd.log, level="ERROR") as logs:
+                result = rd.get_lf_runners_output(arc_yaml, lf_enabled=True)
+            self.assertEqual("", result)
+            self.assertIn("must be one of", logs.output[0])
+
+    def test_malformed_yaml_returns_empty_and_logs_warning(self) -> None:
+        # A YAML syntax error must not escape and abort main() before it
+        # emits any of the other four outputs.
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = self._arc_yaml(d, "lf_allowlist: [unterminated\n")
+            with self.assertLogs(rd.log, level="WARNING") as logs:
+                result = rd.get_lf_runners_output(arc_yaml, lf_enabled=True)
+            self.assertEqual("", result)
+            self.assertIn("treating as unrestricted", logs.output[0])
+
+    def test_non_mapping_lf_allowlist_returns_empty_and_logs_warning(self) -> None:
+        # lf_allowlist as a scalar (not a mapping) must not raise
+        # AttributeError out of get_lf_runners_output.
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = self._arc_yaml(d, "lf_allowlist: not_a_mapping\n")
+            with self.assertLogs(rd.log, level="WARNING") as logs:
+                result = rd.get_lf_runners_output(arc_yaml, lf_enabled=True)
+            self.assertEqual("", result)
+            self.assertIn("treating as unrestricted", logs.output[0])
+
+
+class TestRunnerDeterminatorLfRestrictRunners(TestCase):
+    """restrict_runners kill-switch propagation (ci-infra#1081, test-infra#5132)."""
+
+    def test_default_restrict_runners_is_true(self) -> None:
+        settings_text = """
+            experiments:
+                lf:
+                    rollout_perc: 100
+            ---
+
+            Users:
+
+            """
+        result = rd.get_runner_prefix(settings_text, [], USER_BRANCH)
+        self.assertEqual("lf-", result.prefix)
+        self.assertTrue(result.lf_restrict_runners)
+
+    def test_restrict_runners_false_is_kill_switch(self) -> None:
+        settings_text = """
+            experiments:
+                lf:
+                    rollout_perc: 100
+                    restrict_runners: false
+            ---
+
+            Users:
+
+            """
+        result = rd.get_runner_prefix(settings_text, [], USER_BRANCH)
+        self.assertEqual("lf-", result.prefix)
+        self.assertFalse(result.lf_restrict_runners)
+
+    def test_lf_not_enabled_keeps_default_true(self) -> None:
+        # restrict_runners is only read from the experiment when lf itself
+        # enables; an unused kill-switch setting must not leak through.
+        settings_text = """
+            experiments:
+                lf:
+                    rollout_perc: 0
+                    restrict_runners: false
+            ---
+
+            Users:
+
+            """
+        result = rd.get_runner_prefix(settings_text, [], USER_BRANCH)
+        self.assertEqual("mt-", result.prefix)
+        self.assertTrue(result.lf_restrict_runners)
+
+
+class TestRunnerDeterminatorMainLfRunnersOutput(TestCase):
+    """main()'s end-to-end plumbing: get_runner_prefix -> get_lf_runners_output
+    -> the lf-runners GITHUB_OUTPUT (ci-infra#1081)."""
+
+    RESTRICTED_ARC_YAML = (
+        "lf_allowlist:\n  mode: restricted\n  runners: [l-x86iavx512-8-64]\n"
+    )
+
+    def _run_main(self, *, settings: str, arc_yaml_path: str) -> dict[str, str]:
+        args = Namespace(
+            github_token="t",
+            github_issue_repo="pytorch/test-infra",
+            github_repo="pytorch/pytorch",
+            github_issue=5132,
+            github_actor="User1",
+            github_issue_owner="User1",
+            github_branch=USER_BRANCH,
+            github_ref_type="branch",
+            eligible_experiments=frozenset({"lf"}),
+            opt_out_experiments=frozenset(),
+            pr_number="",
+            workflow_name="pull",
+            arc_yaml_path=arc_yaml_path,
+        )
+        captured: dict[str, str] = {}
+        with (
+            patch.object(rd, "parse_args", return_value=args),
+            patch.object(rd, "get_rollout_state_from_issue", return_value=settings),
+            patch.object(rd, "get_potential_pr_author", return_value="User1"),
+            patch.object(rd, "set_github_output", side_effect=captured.__setitem__),
+        ):
+            rd.main()
+        return captured
+
+    def test_restricted_arc_yaml_flows_through_to_output(self) -> None:
+        settings_text = """
+            experiments:
+                lf:
+                    rollout_perc: 100
+            ---
+
+            Users:
+
+            """
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = Path(d) / "arc.yaml"
+            arc_yaml.write_text(self.RESTRICTED_ARC_YAML)
+            out = self._run_main(settings=settings_text, arc_yaml_path=str(arc_yaml))
+        self.assertEqual("lf-", out[rd.GH_OUTPUT_KEY_LABEL_TYPE])
+        self.assertEqual("l-x86iavx512-8-64", out[rd.GH_OUTPUT_KEY_LF_RUNNERS])
+
+    def test_kill_switch_overrides_restricted_arc_yaml(self) -> None:
+        settings_text = """
+            experiments:
+                lf:
+                    rollout_perc: 100
+                    restrict_runners: false
+            ---
+
+            Users:
+
+            """
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = Path(d) / "arc.yaml"
+            arc_yaml.write_text(self.RESTRICTED_ARC_YAML)
+            out = self._run_main(settings=settings_text, arc_yaml_path=str(arc_yaml))
+        self.assertEqual("lf-", out[rd.GH_OUTPUT_KEY_LABEL_TYPE])
+        self.assertEqual("", out[rd.GH_OUTPUT_KEY_LF_RUNNERS])
+
+    def test_meta_fleet_never_gets_lf_runners(self) -> None:
+        settings_text = """
+            experiments:
+                lf:
+                    rollout_perc: 0
+            ---
+
+            Users:
+
+            """
+        with tempfile.TemporaryDirectory() as d:
+            arc_yaml = Path(d) / "arc.yaml"
+            arc_yaml.write_text(self.RESTRICTED_ARC_YAML)
+            out = self._run_main(settings=settings_text, arc_yaml_path=str(arc_yaml))
+        self.assertEqual("mt-", out[rd.GH_OUTPUT_KEY_LABEL_TYPE])
+        self.assertEqual("", out[rd.GH_OUTPUT_KEY_LF_RUNNERS])
+
+
 if __name__ == "__main__":
     main()
+
+
+class TestScaleConfigPrefix(TestCase):
+    """Only wincanary/wincanarylf drive scale-config-label-type."""
+
+    SETTINGS = """
+experiments:
+  lf:
+    rollout_perc: 0
+  wincanary:
+    rollout_perc: 0
+  wincanarylf:
+    rollout_perc: 0
+---
+@lfuser,lf
+@wcuser,wincanary
+@wclfuser,wincanarylf
+@bothuser,lf,wincanarylf
+@plainuser,
+"""
+    ALL = frozenset({"lf", "wincanary", "wincanarylf"})
+
+    def _result(self, user: str) -> rd.RunnerPrefixResult:
+        return rd.get_runner_prefix(
+            self.SETTINGS, (user, user), "somebranch", self.ALL, frozenset()
+        )
+
+    def test_no_variant_means_no_prefix(self) -> None:
+        self.assertEqual("", self._result("plainuser").scale_config_prefix)
+
+    def test_lf_alone_does_not_set_a_prefix(self) -> None:
+        # lf rolls out over ALL workflows; it must not relocate Windows builds.
+        self.assertEqual("", self._result("lfuser").scale_config_prefix)
+
+    def test_wincanary(self) -> None:
+        self.assertEqual("wincanary.", self._result("wcuser").scale_config_prefix)
+
+    def test_wincanarylf(self) -> None:
+        self.assertEqual("wincanarylf.", self._result("wclfuser").scale_config_prefix)
+
+    def test_lf_does_not_compose_with_the_variant(self) -> None:
+        # never "lf.wincanarylf."
+        self.assertEqual("wincanarylf.", self._result("bothuser").scale_config_prefix)
+
+    def test_arc_label_type_is_untouched(self) -> None:
+        self.assertEqual("mt-", self._result("plainuser").prefix)
+        self.assertEqual("lf-", self._result("lfuser").prefix)
+        self.assertEqual("lf-", self._result("bothuser").prefix)

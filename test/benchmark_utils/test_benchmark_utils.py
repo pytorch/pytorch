@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     slowTest,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -497,6 +498,7 @@ class TestBenchmarkUtils(TestCase):
     @unittest.skipIf(IS_WINDOWS, "Valgrind is not supported on Windows.")
     @unittest.skipIf(IS_SANDCASTLE, "Valgrind is OSS only.")
     @unittest.skipIf(TEST_WITH_ASAN, "fails on asan")
+    @unittest.skipIf(TEST_WITH_ROCM, "valgrind aborts with SIGTRAP on ROCm")
     def test_collect_callgrind(self):
         with self.assertRaisesRegex(
             ValueError,
@@ -518,15 +520,10 @@ class TestBenchmarkUtils(TestCase):
                 globals={"model": benchmark_utils.CopyIfCallgrind(MyModule())},
             ).collect_callgrind(collect_baseline=False)
 
-        @torch.jit.script
-        def add_one(x):
-            return x + 1
-
         timer = benchmark_utils.Timer(
-            "y = add_one(x) + k",
+            "y = model(x) + k",
             setup="x = torch.ones((1,))",
             globals={
-                "add_one": benchmark_utils.CopyIfCallgrind(add_one),
                 "k": benchmark_utils.CopyIfCallgrind(5),
                 "model": benchmark_utils.CopyIfCallgrind(
                     MyModule(),

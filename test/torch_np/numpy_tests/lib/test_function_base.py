@@ -39,7 +39,7 @@ import string
 
 # FIXME: make from torch._numpy
 # These are commented, as if they are imported, some of the tests pass for the wrong reasons
-# from numpy lib import digitize, piecewise, trapz, select, trim_zeros, interp
+# from numpy lib import digitize, piecewise, select, trim_zeros, interp
 # FIXME: broken on numpy 2.0+
 if int(numpy.__version__[0]) < 2:
     from numpy.lib import (
@@ -75,7 +75,6 @@ if TEST_WITH_TORCHDYNAMO:
         kaiser,
         meshgrid,
         sinc,
-        trapz,
         trim_zeros,
         unique,
     )
@@ -1919,52 +1918,6 @@ class TestFilterwindows(TestCase):
             assert_almost_equal(np.sum(w, axis=0), 10, 15)
 
 
-@xpassIfTorchDynamo_np  # (reason="TODO: implement")
-class TestTrapz(TestCase):
-    def test_simple(self):
-        x = np.arange(-10, 10, 0.1)
-        r = trapz(np.exp(-0.5 * x**2) / np.sqrt(2 * np.pi), dx=0.1)
-        # check integral of normal equals 1
-        assert_almost_equal(r, 1, 7)
-
-    def test_ndim(self):
-        x = np.linspace(0, 1, 3)
-        y = np.linspace(0, 2, 8)
-        z = np.linspace(0, 3, 13)
-
-        wx = np.ones_like(x) * (x[1] - x[0])
-        wx[0] /= 2
-        wx[-1] /= 2
-        wy = np.ones_like(y) * (y[1] - y[0])
-        wy[0] /= 2
-        wy[-1] /= 2
-        wz = np.ones_like(z) * (z[1] - z[0])
-        wz[0] /= 2
-        wz[-1] /= 2
-
-        q = x[:, None, None] + y[None, :, None] + z[None, None, :]
-
-        qx = (q * wx[:, None, None]).sum(axis=0)
-        qy = (q * wy[None, :, None]).sum(axis=1)
-        qz = (q * wz[None, None, :]).sum(axis=2)
-
-        # n-d `x`
-        r = trapz(q, x=x[:, None, None], axis=0)
-        assert_almost_equal(r, qx)
-        r = trapz(q, x=y[None, :, None], axis=1)
-        assert_almost_equal(r, qy)
-        r = trapz(q, x=z[None, None, :], axis=2)
-        assert_almost_equal(r, qz)
-
-        # 1-d `x`
-        r = trapz(q, x=x, axis=0)
-        assert_almost_equal(r, qx)
-        r = trapz(q, x=y, axis=1)
-        assert_almost_equal(r, qy)
-        r = trapz(q, x=z, axis=2)
-        assert_almost_equal(r, qz)
-
-
 class TestSinc(TestCase):
     def test_simple(self):
         assert_(sinc(0) == 1)
@@ -3262,9 +3215,19 @@ class TestPercentile(TestCase):
         assert_raises(ValueError, np.percentile, d, axis=(-1, -1), q=25)
         assert_raises(ValueError, np.percentile, d, axis=(3, -1), q=25)
 
-    def test_keepdims(self):
-        d = np.ones((3, 5, 7, 11))
-        assert_equal(np.percentile(d, 7, axis=None, keepdims=True).shape, (1, 1, 1, 1))
+    @parametrize("q", [7, [7], [1, 7], [[1, 7]]])
+    def test_keepdims(self, q):
+        d = np.arange(3 * 5 * 7 * 11).reshape(3, 5, 7, 11)
+        q = np.array(q)
+        shape = q.shape + (1,) * d.ndim
+        expected = (d.size - 1) * q / 100
+        result = np.percentile(d, q, axis=None, keepdims=np.bool_(True))
+        assert_equal(result.shape, shape)
+        assert_allclose(result, expected.reshape(shape))
+        if q.ndim:
+            result = np.percentile(d, q, axis=None, keepdims=np.bool_(False))
+            assert_equal(result.shape, q.shape)
+            assert_allclose(result, expected)
 
     @xfail  # (reason="pytorch percentile does not support tuple axes.")
     def test_keepdims_2(self):
@@ -3291,18 +3254,7 @@ class TestPercentile(TestCase):
         )
 
     @skipif(numpy.__version__ < "1.24", reason="NP_VER: fails on NumPy 1.23.x")
-    @parametrize(
-        "q",
-        [
-            7,
-            subtest(
-                [1, 7],
-                decorators=[
-                    skip(reason="Keepdims wrapper incorrect for multiple q"),
-                ],
-            ),
-        ],
-    )
+    @parametrize("q", [7, [1, 7]])
     @parametrize(
         "axis",
         [
@@ -3324,14 +3276,17 @@ class TestPercentile(TestCase):
         ],
     )
     def test_keepdims_out(self, q, axis):
-        d = np.ones((3, 5, 7, 11))
+        d = np.arange(3 * 5 * 7 * 11).reshape(3, 5, 7, 11)
+        fractions = np.array(q).reshape(np.shape(q) + (1,) * d.ndim) / 100
         if axis is None:
             shape_out = (1,) * d.ndim
+            expected = (d.size - 1) * fractions
         else:
             axis_norm = normalize_axis_tuple(axis, d.ndim)
             shape_out = tuple(
                 1 if i in axis_norm else d.shape[i] for i in range(d.ndim)
             )
+            expected = d[:, :1] + 4 * 7 * 11 * fractions
         shape_out = np.shape(q) + shape_out
 
         out = np.empty(shape_out)
@@ -3339,6 +3294,7 @@ class TestPercentile(TestCase):
         if result is not out:
             raise AssertionError("result is not out")
         assert_equal(result.shape, shape_out)
+        assert_allclose(result, expected)
 
     @skip(reason="NP_VER: fails on CI; no method=")
     def test_out(self):

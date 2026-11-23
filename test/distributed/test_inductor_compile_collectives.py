@@ -12,15 +12,22 @@ from torch._inductor._functionalize_collectives import (
     _functionalize_inplace_collectives,
     _unbox_process_group_torchbinds,
 )
+from torch._subclasses.fake_tensor import maybe_get_fake_mode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 from torch.fx.passes.regional_inductor import regional_inductor
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
+
+from torch.testing._internal.common_distributed import requires_gloo
 
 
 def _f(t):
@@ -33,7 +40,10 @@ def _make_fx_with_allreduce():
     return make_fx(_f)(torch.ones(4))
 
 
+@requires_gloo()
 class TestInductorCompileCollectives(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
@@ -202,10 +212,14 @@ def forward(self, arg0_1, arg1_1):
                     "inductor_configs": {}
                 }
         fake_mode = next(
-            n.meta["val"].fake_mode
+            maybe_get_fake_mode(n.meta["val"])
             for n in gm.graph.nodes
             if n.op == "placeholder" and isinstance(n.meta.get("val"), torch.Tensor)
         )
+        if fake_mode is None:
+            raise AssertionError(
+                "Expected placeholder metadata to contain a fake tensor"
+            )
 
         with tracing(TracingContext(fake_mode)):
             compiled_gm = regional_inductor(gm)

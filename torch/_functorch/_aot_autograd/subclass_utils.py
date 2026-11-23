@@ -12,8 +12,17 @@ import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._library.fake_class_registry import maybe_unwrap_fake_script_object
-from torch._library.opaque_object import is_opaque_symbolic_type
+from torch._guards import detect_fake_mode
+from torch._library.fake_class_registry import (
+    maybe_to_fake_obj,
+    maybe_unwrap_fake_script_object,
+)
+from torch._library.opaque_object import (
+    is_custom_class,
+    is_opaque_constant_type,
+    is_opaque_symbolic_type,
+    should_hoist,
+)
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 from torch.types import IntLikeType
@@ -36,6 +45,7 @@ from .descriptors import (
 from .schemas import (
     FakifiedFlatArgs,
     FxValue,
+    InputAliasInfo,
     MutationType,
     OpaqueMeta,
     PlainTensorMeta,
@@ -309,13 +319,16 @@ def unwrap_tensor_subclasses(
     def _maybe_fakeify_opaque(v: Any) -> Any:
         # Registered opaque types need to be wrapped as FakeScriptObject for
         # compile-time FX tracing (proxy slot tracking, hashability, etc.).
+        # Exception: non-hoisted constant-type opaques are inlined as literals
+        # by the tracing layers that produce the FX graph (VariableBuilder._wrap,
+        # track_tensor_tree's wrap_with_proxy, TracerBase.create_arg), so they
+        # must stay real here too -- fakeifying would route them through
+        # torchbind_constants and return a FakeScriptObject at runtime.
         if isinstance(v, CustomClassBase):
-            from torch._guards import detect_fake_mode
-            from torch._library.fake_class_registry import maybe_to_fake_obj
-            from torch._library.opaque_object import is_custom_class
-
             fake_mode = detect_fake_mode()
             if fake_mode is not None and is_custom_class(type(v)):
+                if is_opaque_constant_type(type(v)) and not should_hoist(type(v)):
+                    return v
                 return maybe_to_fake_obj(fake_mode, v)
         return v
 
@@ -715,6 +728,27 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
     fw_metadata: ViewAndMutationMeta,
     inner_metadata: ViewAndMutationMeta,
 ) -> list[int]:
+    if not fw_metadata.subclass_inp_meta:
+        # Sometimes we don't have subclass info, e.g. synthetic_base codepaths
+        return inner_metadata.mutated_inp_runtime_indices
+    return [
+        i
+        for i, inp in enumerate(
+            compute_inner_input_info_from_subclass_meta(fw_metadata, inner_metadata)
+        )
+        if inp.mutation_type == MutationType.MUTATED_OUT_GRAPH
+    ]
+
+
+def compute_inner_input_info_from_subclass_meta(
+    fw_metadata: ViewAndMutationMeta,
+    inner_metadata: ViewAndMutationMeta | None,
+) -> list[InputAliasInfo]:
+    """
+    Expand the outer input_info onto the inner (unwrapped) inputs, so each
+    subclass component carries the requires_grad and mutation info of the
+    subclass tensor it came from.
+    """
     # Note: [Recomputing subclass mutation handling]
     #
     # Generally, if a subclass requires grad, its components will not require grad.
@@ -732,11 +766,12 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
     # To do this, we patch num_mutated_inp_runtime_indices below by expanding the inputs
     # from the outer subclass tensors and propagating
 
-    updated_input_info = []
+    updated_input_info: list[InputAliasInfo] = []
     inner_idx = 0
     if not fw_metadata.subclass_inp_meta:
-        # Sometimes we don't have subclass info, e.g. synthetic_base codepaths
-        return inner_metadata.mutated_inp_runtime_indices
+        if inner_metadata is None:
+            raise AssertionError("inner_metadata is required without subclass metadata")
+        return inner_metadata.input_info
     if len(fw_metadata.subclass_inp_meta) != len(fw_metadata.input_info):
         raise AssertionError(
             f"subclass_inp_meta length ({len(fw_metadata.subclass_inp_meta)}) != input_info length ({len(fw_metadata.input_info)})"
@@ -777,8 +812,4 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
                 f"!= updated_input_info length ({len(updated_input_info)})"
             )
 
-    return [
-        i
-        for i, inp in enumerate(updated_input_info)
-        if inp.mutation_type == MutationType.MUTATED_OUT_GRAPH
-    ]
+    return updated_input_info

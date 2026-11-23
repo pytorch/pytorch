@@ -131,7 +131,8 @@ class InductorCodeSideTable:
 
     def get_callable(self, idx: int) -> InductorCompiledCallable:
         """Get the callable at the given index."""
-        assert idx in self.id_to_callable, f"Invalid inductor code index: {idx}"  # noqa: S101
+        if idx not in self.id_to_callable:
+            raise AssertionError(f"Invalid inductor code index: {idx}")
         return self.id_to_callable[idx]
 
     def __getstate__(self):
@@ -160,9 +161,8 @@ def _resolve_inductor_callable(
     """
     if isinstance(func, int):
         return inductor_code_side_table.get_callable(func)
-    assert isinstance(func, InductorCompiledCallable), (  # noqa: S101
-        f"Unexpected func type: {type(func)}"
-    )
+    if not isinstance(func, InductorCompiledCallable):
+        raise AssertionError(f"Unexpected func type: {type(func)}")
     return func
 
 
@@ -243,11 +243,14 @@ class WrapWithSetGradEnabled(HigherOrderOperator):
 
         @disable
         def wrapper():
+            # Not `with torch.set_grad_enabled(...)`: it sets the mode in both
+            # __init__ and __enter__, and export retracing would record both calls.
             prev = torch.is_grad_enabled()
             torch.set_grad_enabled(enable_grad)
-            res = wrapped_func(*args, **kwargs)
-            torch.set_grad_enabled(prev)
-            return res
+            try:
+                return wrapped_func(*args, **kwargs)
+            finally:
+                torch.set_grad_enabled(prev)
 
         return wrapper()
 

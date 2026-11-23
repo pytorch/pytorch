@@ -42,7 +42,7 @@ void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
                  "is the type of elements in the list for Python 2)";
       }
     }
-    throw std::runtime_error(std::move(error).str());
+    TORCH_CHECK(false, std::move(error).str());
   }
 }
 
@@ -375,6 +375,10 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA("aten::_get_tracing_state() -> bool"),
+        [](Stack& stack) { push(stack, false); },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::_is_tracing() -> bool"),
         [](Stack& stack) { push(stack, false); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(

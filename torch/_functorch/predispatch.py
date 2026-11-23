@@ -142,12 +142,6 @@ def lazy_load_decompositions() -> None:
         if DECOMPOSITIONS_LOADED:
             return
 
-        import os
-
-        if not (os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__):
-            DECOMPOSITIONS_LOADED = True
-            return
-
         # use an alternate way to register an operator into the decomposition table
         # _register_jit_decomposition doesn't work for some operators, e.g. addr,
         #  because the Tensor types generated cannot be unioned by torchscript
@@ -295,3 +289,35 @@ def _exit_dual_level(*, level: int) -> None:
     if mode:
         return torch.overrides.handle_torch_function(_exit_dual_level, (), level=level)
     return _exit_dual_level_impl(level=level)
+
+
+# The forward-mode AD calls, and _unwrap_for_grad, which grad, vjp and jvp
+# use. PreDispatchTorchFunctionMode in torch/fx/experimental/proxy_tensor.py
+# tracks their results with functorch disabled.
+_jvp_predispatch_functions = frozenset(
+    {
+        _make_dual,
+        _unpack_dual,
+        _jvp_increment_nesting,
+        _jvp_decrement_nesting,
+        _unwrap_for_grad,
+        _enter_dual_level,
+        _exit_dual_level,
+    }
+)
+
+# The functorch wrappers that pre-dispatch tracing keeps in the graph. They
+# change global state (functorch levels, forward-mode AD levels, the registered
+# vmap decompositions), or take as an argument a level that an earlier call
+# entered. So they must stay where they are: passes that check
+# Node.is_impure() must not fold, reorder or run one on its own. That check is
+# also what dead code elimination reads, so it keeps them even with no users,
+# including the calls that change no state, such as an unused _unwrap_for_grad.
+# The export verifier allows them.
+_functorch_predispatch_functions = _jvp_predispatch_functions | {
+    lazy_load_decompositions,
+    _vmap_increment_nesting,
+    _vmap_decrement_nesting,
+    _add_batch_dim,
+    _remove_batch_dim,
+}

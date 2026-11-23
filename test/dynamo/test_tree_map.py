@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import unittest
 from collections import namedtuple
 from dataclasses import dataclass
 from typing import NamedTuple
@@ -9,6 +10,7 @@ import torch._dynamo
 import torch.utils._pytree as python_pytree
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     subtest,
@@ -145,6 +147,11 @@ class TreeMapCompileTests(TestCase):
         result = compiled(lhs, rhs)
         _assert_trees_allclose(self, expected, result)
 
+    @decorateIf(
+        unittest.skip("kwargs unsupported for implementation"),
+        lambda params: params["allowed_impls"] is not None
+        and params["pytree_name"] not in params["allowed_impls"],
+    )
     @parametrize_pytree_module
     @parametrize("kwargs_name,kwargs,allowed_impls", KWARG_CASES)
     def test_tree_map_variants(
@@ -189,6 +196,64 @@ class TreeMapCompileTests(TestCase):
         expected = fn(tree)
         result = compiled(tree)
         _assert_trees_allclose(self, expected, result)
+
+    def test_cxx_treespec_namespace_wildcard_eq_hash(self) -> None:
+        # optree treats an empty namespace as a wildcard: tree_structure uses
+        # namespace 'torch' while treespec_leaf uses '', yet the leaf specs
+        # compare equal.  With namespace excluded from the hash they also hash
+        # equal, so a spec looked up across namespaces is found.
+        _require_optree(self)
+
+        def fn(x):
+            a = cxx_pytree.tree_structure(x)  # leaf, namespace='torch'
+            b = cxx_pytree.treespec_leaf()  # leaf, namespace=''
+            return a == b, hash(a) == hash(b), {a: 1}.get(b)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.randn(3)), (True, True, 1))
+
+    def test_cxx_treespec_dict_is_hashable(self) -> None:
+        # A dict treespec carries optree's unhashable DictMetaData; hashing it
+        # under compile must trace the spec's custom __hash__ (which hashes the
+        # keys), not the frozen-dataclass field hash that would choke on it.
+        _require_optree(self)
+
+        def fn(x):
+            spec = cxx_pytree.tree_structure({"a": x, "b": x})
+            return {spec: 1}[cxx_pytree.tree_structure({"a": x, "b": x})]
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.randn(3)), 1)
+
+    def test_cxx_treespec_ordereddict_defaultdict_hashable(self) -> None:
+        # OrderedDict and defaultdict specs also carry unhashable optree metadata
+        # (defaultdict's includes the default factory), so they must hash through
+        # the spec's custom __hash__ too.  defaultdicts with different factories
+        # are distinct keys (metadata differs) even though they hash alike;
+        # dict-family types stay unequal.
+        _require_optree(self)
+        from collections import defaultdict, OrderedDict
+
+        def fn(x):
+            od = cxx_pytree.tree_structure(OrderedDict(a=x, b=x))
+            dd_int = cxx_pytree.tree_structure(defaultdict(int, {"a": x, "b": x}))
+            dd_list = cxx_pytree.tree_structure(defaultdict(list, {"a": x, "b": x}))
+            factories = {dd_int: 2, dd_list: 3}
+            return (
+                {od: 1}[cxx_pytree.tree_structure(OrderedDict(a=x, b=x))],
+                factories[
+                    cxx_pytree.tree_structure(defaultdict(int, {"a": x, "b": x}))
+                ],
+                factories[
+                    cxx_pytree.tree_structure(defaultdict(list, {"a": x, "b": x}))
+                ],
+                len(factories),  # int/list factories -> distinct keys despite same keys
+                dd_int == dd_list,
+                od == cxx_pytree.tree_structure({"a": x, "b": x}),
+            )
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.randn(3)), (1, 2, 3, 2, False, False))
 
     def test_tree_map_only_applies_to_tensor_nodes(self) -> None:
         tree = {"tensor": torch.ones(2), "int": 3}
@@ -297,6 +362,10 @@ class TreeMapCompileTests(TestCase):
         ):
             compiled(lhs, rhs)
 
+    @decorateIf(
+        unittest.skip("optree treats None as an internal node by default"),
+        lambda params: params["pytree_name"] == "native_optree",
+    )
     @parametrize_pytree_module
     def test_tree_map_none_nodes_default_behavior(
         self, pytree_name: str, pytree

@@ -167,7 +167,7 @@ def _nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
         kernel_cache = jit_function.device_caches[device][0]
         kernel = kernel_cache.get(key, None)
         if kernel is not None:
-            kernel.run
+            _ = kernel.run
             # Initialize NVSHMEM for the CU module
             _nvshmemx_cumodule_init(kernel.module)
         else:
@@ -434,8 +434,8 @@ if has_triton():
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
             sig_op (int32): Signal operation type. Common values:
-                           - NVSHMEM_SIGNAL_SET (0): Atomic set operation
-                           - NVSHMEM_SIGNAL_ADD (5): Atomic add operation
+                           - NVSHMEM_SIGNAL_SET: Atomic set operation
+                           - NVSHMEM_SIGNAL_ADD: Atomic add operation
             pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Returns:
@@ -452,7 +452,7 @@ if has_triton():
         Example:
             ```
             # Transfer data and set completion flag to 1
-            NVSHMEM_SIGNAL_SET = 0
+            NVSHMEM_SIGNAL_SET = 9
             nvshmem.putmem_signal_block(
                 dst_ptr, src_ptr, 1024, sig_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe
             )
@@ -514,12 +514,12 @@ if has_triton():
         Args:
             ivar_tensor: Tensor to monitor (typically int64/uint64) in symmetric memory.
             cmp: Comparison operator. Common values:
-                 - NVSHMEM_CMP_EQ (0): Wait until ivar == cmp_val
-                 - NVSHMEM_CMP_NE (1): Wait until ivar != cmp_val
-                 - NVSHMEM_CMP_GT (2): Wait until ivar > cmp_val
-                 - NVSHMEM_CMP_GE (3): Wait until ivar >= cmp_val
-                 - NVSHMEM_CMP_LT (4): Wait until ivar < cmp_val
-                 - NVSHMEM_CMP_LE (5): Wait until ivar <= cmp_val
+                 - NVSHMEM_CMP_EQ: Wait until ivar == cmp_val
+                 - NVSHMEM_CMP_NE: Wait until ivar != cmp_val
+                 - NVSHMEM_CMP_GT: Wait until ivar > cmp_val
+                 - NVSHMEM_CMP_GE: Wait until ivar >= cmp_val
+                 - NVSHMEM_CMP_LT: Wait until ivar < cmp_val
+                 - NVSHMEM_CMP_LE: Wait until ivar <= cmp_val
             cmp_val: Value to compare against.
 
         Notes:
@@ -529,9 +529,9 @@ if has_triton():
 
         Example:
             ```
-            # Wait until flag tensor becomes 1 (set by another PE)
-            NVSHMEM_CMP_EQ = 0
-            nvshmem.wait_until_tensor(flag_tensor, NVSHMEM_CMP_EQ, 1)
+            # Compute cmp_op on the host from _ShmemCompareOp.EQ and pass it
+            # into the Triton kernel as an integer argument.
+            nvshmem.wait_until_tensor(flag_tensor, cmp_op, 1)
             ```
         """
         tl.static_assert(
@@ -571,12 +571,12 @@ if has_triton():
             signal (tensor): Symmetric signal tensor with remote PE.
                              Must be 8-byte aligned symmetric memory.
             cmp (int32): Comparison operator. Common values:
-                        - NVSHMEM_CMP_EQ (0): Wait until signal == cmp_val
-                        - NVSHMEM_CMP_NE (1): Wait until signal != cmp_val
-                        - NVSHMEM_CMP_GT (2): Wait until signal > cmp_val
-                        - NVSHMEM_CMP_GE (3): Wait until signal >= cmp_val
-                        - NVSHMEM_CMP_LT (4): Wait until signal < cmp_val
-                        - NVSHMEM_CMP_LE (5): Wait until signal <= cmp_val
+                        - NVSHMEM_CMP_EQ: Wait until signal == cmp_val
+                        - NVSHMEM_CMP_NE: Wait until signal != cmp_val
+                        - NVSHMEM_CMP_GT: Wait until signal > cmp_val
+                        - NVSHMEM_CMP_GE: Wait until signal >= cmp_val
+                        - NVSHMEM_CMP_LT: Wait until signal < cmp_val
+                        - NVSHMEM_CMP_LE: Wait until signal <= cmp_val
             cmp_val (int64): Value to compare against.
 
         Returns:
@@ -591,9 +591,9 @@ if has_triton():
 
         Example:
             ```
-            # Wait for signal to be set to completion value
-            NVSHMEM_CMP_EQ = 0
-            nvshmem.signal_wait_until(signal_ptr, NVSHMEM_CMP_EQ, 42)
+            # Compute cmp_op on the host from _ShmemCompareOp.EQ and pass it
+            # into the Triton kernel as an integer argument.
+            nvshmem.signal_wait_until(signal_ptr, cmp_op, 42)
             ```
         """
         cmp_val = 0 << 32 | cmp_val
@@ -632,8 +632,8 @@ if has_triton():
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
             sig_op (int32): Signal operation type. Common values:
-                           - NVSHMEM_SIGNAL_SET (0): Atomically set sig_addr = signal
-                           - NVSHMEM_SIGNAL_ADD (5): Atomically set sig_addr += signal
+                           - NVSHMEM_SIGNAL_SET: Atomically set sig_addr = signal
+                           - NVSHMEM_SIGNAL_ADD: Atomically set sig_addr += signal
             pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
             _semantic: Optional semantic information for Triton compilation.
 
@@ -650,7 +650,7 @@ if has_triton():
         Example:
             ```python
             # Atomically set remote signal to 1 to notify completion
-            NVSHMEM_SIGNAL_SET = 0
+            NVSHMEM_SIGNAL_SET = 9
             nvshmem.signal_op(remote_signal_ptr, 1, NVSHMEM_SIGNAL_SET, target_pe)
             ```
         """
@@ -1083,6 +1083,8 @@ if has_triton():
         Notes:
             - Performs compile-time type checking between dest and source tensors.
             - This is a collective operation that must be called by all PEs in the team.
+            - All threads in the participating block must call with identical arguments.
+            - Exactly one block per team per rank must participate.
             - Requires a cooperative grid launch.
 
         Example:
@@ -1176,7 +1178,7 @@ if has_triton():
             )
 
         # Generate NVSHMEM function name
-        nvshmem_func = f"nvshmem_{nvshmem_typename}_{op_name}_reduce"
+        nvshmem_func = f"nvshmemx_{nvshmem_typename}_{op_name}_reduce_block"
 
         # Define function signature - all parameters are int64 in Triton (they are just ptrs)
         signature = (

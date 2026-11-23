@@ -5,6 +5,7 @@ import inspect
 import textwrap
 import types
 import warnings
+from typing_extensions import Format, get_annotations as get_type_annotations
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -156,26 +157,12 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
 
 
 def get_annotations(obj):
-    # In Python-3.10+ it is recommended to use inspect.get_annotations
-    # See https://docs.python.org/3.10/howto/annotations.html
-    # But also, in 3.10 annotations from base class are not inherited
-    # by unannotated derived one, so they must be manually extracted
-    annotations = inspect.get_annotations(obj)
-    if annotations:
-        return annotations
-
-    def get_cls_annotations(cls):
-        cls_annotations = inspect.get_annotations(cls)
-        if cls_annotations:
-            return cls_annotations
-        for base in cls.__bases__:
-            cls_annotations = get_cls_annotations(base)
-            if cls_annotations:
-                return cls_annotations
-        return {}
-
     cls = obj if isinstance(obj, type) else type(obj)
-    return get_cls_annotations(cls)
+    for base in cls.__mro__:
+        annotations = get_type_annotations(base, format=Format.FORWARDREF)
+        if annotations:
+            return annotations
+    return {}
 
 
 def infer_concrete_type_builder(nn_module, share_types=True):
@@ -367,7 +354,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         # Handle Python function attributes
         if inspect.isfunction(value):
             try:
-                scripted_fn = torch.jit.script(value)
+                scripted_fn = torch.jit._script.script(value)
                 concrete_type_builder.add_function_attribute(
                     name, torch._C._jit_try_infer_type(scripted_fn).type(), value
                 )
@@ -1001,7 +988,7 @@ def try_compile_fn(fn, loc):
     # extract the necessary info from the closed over variables on the function
     # object
     rcb = _jit_internal.createResolutionCallbackFromClosure(fn)
-    return torch.jit.script(fn, _rcb=rcb)
+    return torch.jit._script.script(fn, _rcb=rcb)
 
 
 def wrap_cpp_class(cpp_class):

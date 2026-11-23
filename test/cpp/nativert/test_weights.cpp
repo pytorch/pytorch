@@ -40,6 +40,100 @@ TEST_F(WeightsTest, SetAndGetValue) {
   EXPECT_EQ(weights.at("added_weight").sizes(), tensor.sizes());
 }
 
+TEST_F(WeightsTest, ResolvesGeneratedAotiWrapperPrefix) {
+  std::unordered_map<std::string, c10::IValue> stateDict;
+  Weights weights(graph.get(), stateDict);
+  const std::string packedFqn = "merge.submod_0.shared_arch.layers.2.weight";
+  weights.setValue(packedFqn, at::ones({2, 2}));
+
+  EXPECT_EQ(
+      weights.resolveAotiOriginalFqn(
+          "merge.submod_0._run_on_acc_0.shared_arch.layers.2.weight"),
+      packedFqn);
+  EXPECT_EQ(
+      weights.resolveAotiOriginalFqn(
+          "merge.submod_0._run_on_gpu_12.shared_arch.layers.2.weight"),
+      packedFqn);
+}
+
+TEST_F(WeightsTest, ExactAotiFqnWinsOverCanonicalFallback) {
+  std::unordered_map<std::string, c10::IValue> stateDict;
+  Weights weights(graph.get(), stateDict);
+  const std::string wrappedFqn = "module._run_on_acc_0.weight";
+  weights.setValue("module.weight", at::ones({2, 2}));
+  weights.setValue(wrappedFqn, at::zeros({2, 2}));
+
+  EXPECT_EQ(weights.resolveAotiOriginalFqn(wrappedFqn), wrappedFqn);
+}
+
+TEST_F(WeightsTest, RejectsAmbiguousAotiWrapperFallback) {
+  std::unordered_map<std::string, c10::IValue> stateDict;
+  Weights weights(graph.get(), stateDict);
+  weights.setValue("module._run_on_acc_0.weight", at::ones({2, 2}));
+  weights.setValue("module._run_on_acc_1.weight", at::zeros({2, 2}));
+
+  EXPECT_FALSE(weights.resolveAotiOriginalFqn("module.weight").has_value());
+}
+
+TEST_F(WeightsTest, DoesNotStripUserNamedWrapperComponents) {
+  std::unordered_map<std::string, c10::IValue> stateDict;
+  Weights weights(graph.get(), stateDict);
+  weights.setValue("module.weight", at::ones({2, 2}));
+
+  EXPECT_FALSE(
+      weights.resolveAotiOriginalFqn("module._run_on_acc_.weight").has_value());
+  EXPECT_FALSE(
+      weights.resolveAotiOriginalFqn("module._run_on_gpu_custom.weight")
+          .has_value());
+}
+
+TEST_F(WeightsTest, ResolvesChangedFqnByStableStorageKey) {
+  std::unordered_map<std::string, c10::IValue> stateDict;
+  Weights oldWeights(graph.get(), stateDict);
+  Weights newWeights(graph.get(), stateDict);
+  const std::string oldFqn = "merge.submod_0._run_on_acc_0.layer.weight";
+  const std::string newFqn = "merge.rewritten.layer.weight";
+  oldWeights.setValue(oldFqn, at::ones({2, 2}));
+  newWeights.setValue(newFqn, at::zeros({2, 2}));
+  oldWeights.setWeightStorageKeys({{oldFqn, "weight_655"}}, {});
+  newWeights.setWeightStorageKeys({{newFqn, "weight_655"}}, {});
+
+  const auto storageKey = oldWeights.getWeightStorageKey(oldFqn);
+  ASSERT_TRUE(storageKey.has_value());
+  EXPECT_EQ(newWeights.resolveWeightStorageKey(*storageKey), newFqn);
+}
+
+TEST_F(WeightsTest, RejectsAmbiguousStableStorageKey) {
+  std::unordered_map<std::string, c10::IValue> stateDict;
+  Weights weights(graph.get(), stateDict);
+  weights.setValue("first.weight", at::ones({2, 2}));
+  weights.setValue("second.weight", at::ones({2, 2}));
+  weights.setWeightStorageKeys(
+      {{"first.weight", "shared_weight"}, {"second.weight", "shared_weight"}},
+      {});
+
+  const auto storageKey = weights.getWeightStorageKey("first.weight");
+  ASSERT_TRUE(storageKey.has_value());
+  EXPECT_FALSE(weights.resolveWeightStorageKey(*storageKey).has_value());
+}
+
+TEST_F(WeightsTest, NamespacesStateAndConstantStorageKeys) {
+  std::unordered_map<std::string, c10::IValue> stateDict;
+  Weights weights(graph.get(), stateDict);
+  weights.setValue("parameter", at::ones({2, 2}));
+  weights.setValue("constant", at::zeros({2, 2}));
+  weights.setWeightStorageKeys(
+      {{"parameter", "tensor_0"}}, {{"constant", "tensor_0"}});
+
+  const auto parameterKey = weights.getWeightStorageKey("parameter");
+  const auto constantKey = weights.getWeightStorageKey("constant");
+  ASSERT_TRUE(parameterKey.has_value());
+  ASSERT_TRUE(constantKey.has_value());
+  EXPECT_NE(*parameterKey, *constantKey);
+  EXPECT_EQ(weights.resolveWeightStorageKey(*parameterKey), "parameter");
+  EXPECT_EQ(weights.resolveWeightStorageKey(*constantKey), "constant");
+}
+
 } // namespace torch::nativert
 
 using namespace ::testing;

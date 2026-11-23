@@ -10,7 +10,6 @@ from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch._C as _C
-import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._C import _functions
 from torch._functorch.autograd_function import custom_function_call
@@ -37,6 +36,94 @@ _P = ParamSpec("_P")
 
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx:
+    _input_grad_buffers: tuple[torch.Tensor | None, ...]
+    output_grad_dtypes: "tuple[torch.dtype | None, ...] | None"
+
+    @property
+    def input_grad_buffers(self) -> tuple[torch.Tensor | None, ...]:
+        r"""Return existing buffers for accumulating gradients of this Function's inputs.
+
+        Each entry corresponds to an argument passed to
+        :meth:`~Function.forward`, in the same order.
+        Each entry is ``None`` or the autograd engine's current ``InputBuffer`` for
+        that input. A non-``None`` buffer contains gradient contributions already
+        produced during the current backward. A custom backward may accumulate its
+        contribution directly into the buffer and return ``None`` for that input,
+        fusing gradient computation with accumulation and avoiding a separate
+        gradient tensor.
+
+        Availability follows backward execution order and is independent for each
+        input. An entry is ``None`` when no earlier producer has contributed to
+        that input, or when the existing buffer is aliased or cannot safely be
+        updated in place.
+
+        For example, ``x`` has another forward use while ``weight`` does not. The
+        custom backward conditionally fuses accumulation only for ``grad_x``::
+
+            >>> # xdoctest: +SKIP
+            >>> class Matmul(torch.autograd.Function):
+            >>>     @staticmethod
+            >>>     def forward(ctx, x, weight):
+            >>>         ctx.save_for_backward(x, weight)
+            >>>         return x @ weight
+            >>>
+            >>>     @staticmethod
+            >>>     def backward(ctx, grad_output):
+            >>>         x, weight = ctx.saved_tensors
+            >>>         x_buffer, _ = ctx.input_grad_buffers
+            >>>         if x_buffer is not None:
+            >>>             # Computes grad_x and adds it to the existing buffer.
+            >>>             matmul_backward_input_acc(
+            >>>                 grad_output, weight, acc_into=x_buffer
+            >>>             )
+            >>>             grad_x = None
+            >>>         else:
+            >>>             grad_x = matmul_backward_input(grad_output, weight)
+            >>>         grad_weight = matmul_backward_weight(grad_output, x)
+            >>>         return grad_x, grad_weight
+            >>>
+            >>> loss = Matmul.apply(x, weight).sum() + other_op(x).sum()
+
+        If ``other_op`` produces its contribution first, ``x_buffer`` can expose
+        that partial sum. If ``Matmul`` runs first, ``x_buffer`` is ``None`` and it
+        returns a separate tensor instead. The fallback lets the function work
+        under either ordering.
+
+        .. warning::
+            A returned buffer is valid only while the current custom ``backward``
+            invocation is running. Mutate it synchronously and do not retain it.
+            A later producer may replace the engine's buffer, making a retained
+            tensor stale.
+
+            After receiving a non-``None`` buffer, calling ``backward`` or
+            ``grad`` before the custom backward returns raises an error.
+
+            All engine-scheduled producers that use or subsequently update an
+            exposed buffer must execute on the same device, autograd engine thread,
+            and stream.
+
+        This property is available only while a Python custom ``backward`` is
+        executing during an eager, first-order :meth:`~torch.Tensor.backward`,
+        :func:`torch.autograd.backward`, or :func:`torch.autograd.grad` call. It is
+        unavailable with ``create_graph=True``, anomaly detection, a post-hook on
+        the producing autograd node, or stale capture stream overrides.
+
+        .. note::
+            For a leaf input, a non-``None`` entry exposes its execution-local
+            ``InputBuffer``, not its existing ``.grad``. All contributions are
+            first combined in that buffer. During ``backward``, ``AccumulateGrad``
+            then runs once with the completed buffer to update ``.grad`` and run
+            its usual hooks. :func:`torch.autograd.grad` instead returns the
+            completed buffer without updating ``.grad``.
+
+            During ``backward``, a custom backward that instead accumulates
+            directly into a leaf ``.grad`` and returns ``None`` does not use this
+            interface. It is responsible for managing ``.grad`` state, including
+            initialization and lifetime, synchronization with all other producers,
+            and any ``AccumulateGrad`` hook behavior bypassed by the direct write.
+        """
+        return self._input_grad_buffers
+
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.backward`.
 
@@ -231,6 +318,46 @@ class FunctionCtx:
 
         """
         self.non_differentiable = args
+
+    def set_output_grad_dtype(self, *dtypes: "torch.dtype | None") -> None:
+        r"""Declare the gradient dtype for each of this Function's outputs.
+
+        This should be called at most once, from either the
+        :func:`setup_context` or :func:`forward` methods. The number of
+        declarations must match the number of returned values, and each argument
+        corresponds positionally to the output at the same index.
+
+        For each output, pass the dtype your backward should receive its
+        gradient in:
+
+        - Pass a :class:`torch.dtype` and the engine guarantees the gradient
+          handed to backward has that dtype. This is only valid for a
+          differentiable Tensor output.
+        - Pass ``None`` and the gradient is handed to backward with whatever
+          dtype it already has. This is also the only valid choice for a
+          non-Tensor or non-differentiable output, which has no gradient.
+        - Omit this call (or pass the output's own dtype) and the gradient is
+          handed to backward in the output's dtype, which is the default.
+
+        For example::
+
+            >>> # xdoctest: +SKIP
+            >>> @staticmethod
+            >>> def forward(ctx, x):
+            >>>     t1 = x.sin()
+            >>>     t2 = x.cos()
+            >>>     t3 = x.tan()
+            >>>     ctx.set_output_grad_dtype(torch.float32, t2.dtype, None, None)
+            >>>     return t1, t2, t3, "not a tensor"
+
+        This ensures that backward receives ``t1``'s gradient in ``float32``,
+        keeps the default behavior for ``t2``'s gradient via ``t2.dtype``,
+        passes ``t3``'s gradient through uncast with ``None``, and uses ``None``
+        as the placeholder for the trailing non-Tensor output.
+        """
+        if self.output_grad_dtypes is not None:
+            raise RuntimeError("set_output_grad_dtype can only be called once")
+        self.output_grad_dtypes = dtypes
 
     def set_materialize_grads(self, value: bool):
         r"""Set whether to materialize grad tensors. Default is ``True``.
@@ -445,6 +572,11 @@ class _SingleLevelFunction(
         corresponding input. If an input is not a Tensor or is a Tensor not
         requiring grads, you can just pass None as a gradient for that input.
 
+        The strides of the gradients passed to :func:`backward` are undefined:
+        they are not guaranteed to be contiguous or to match the strides of the
+        corresponding forward outputs, so implementations must not assume a
+        particular memory layout.
+
         The context can be used to retrieve tensors saved during the forward
         pass. It also has an attribute :attr:`ctx.needs_input_grad` as a tuple
         of booleans representing whether each input needs gradient. E.g.,
@@ -606,37 +738,28 @@ class Function(_SingleLevelFunction):
             "vmap staticmethod or set generate_vmap_rule=True."
         )
 
-    @classmethod
-    def apply(cls, *args, **kwargs):
-        def bind_default_args(func, *args, **kwargs):
-            signature = inspect.signature(func)
-            bound_args = signature.bind(*args, **kwargs)
-            bound_args.apply_defaults()
-
-            return bound_args.args, bound_args.kwargs
-
-        is_setup_ctx_defined = _is_setup_context_defined(cls.setup_context)
-        if is_setup_ctx_defined:
-            args, kwargs = bind_default_args(cls.forward, *args, **kwargs)
-
-        if not torch._C._are_functorch_transforms_active():
-            # See NOTE: [functorch vjp and autograd interaction]
-            args = _functorch.utils.unwrap_dead_wrappers(args)
-            return super().apply(*args, **kwargs)  # type: ignore[misc]
-
-        if not is_setup_ctx_defined:
-            raise RuntimeError(
-                "In order to use an autograd.Function with functorch transforms "
-                "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
-                "staticmethod. For more details, please see "
-                "https://pytorch.org/docs/main/notes/extending.func.html"
-            )
-
-        return custom_function_call(cls, *args, **kwargs)
+    apply = _C._FunctionBase.__dict__["apply"]
 
     @staticmethod
     def _compiled_autograd_key(ctx):
         return (ctx._autograd_function_id,)
+
+
+def _bind_default_args(
+    func: Callable[_P, Any],
+    args: _P.args,  # type: ignore[valid-type]
+    kwargs: _P.kwargs,  # type: ignore[valid-type]
+) -> tuple[_P.args, _P.kwargs]:  # type: ignore[valid-type]
+    signature = inspect.signature(func)
+    bound_args = signature.bind(*args, **({} if kwargs is None else kwargs))
+    bound_args.apply_defaults()
+    return bound_args.args, bound_args.kwargs
+
+
+def _call_custom_function_call(cls, args, kwargs):
+    if kwargs is None:
+        return custom_function_call(cls, *args)
+    return custom_function_call(cls, *args, **kwargs)
 
 
 def _is_setup_context_defined(fn):

@@ -54,7 +54,7 @@ struct Bitfield<uint64_t> {
     pos &= 0xff;
     len &= 0xff;
 
-    uint64_t m = (1u << len) - 1u;
+    uint64_t m = (static_cast<uint64_t>(1) << len) - 1;
     return (val >> pos) & m;
 #else
     uint64_t ret;
@@ -69,7 +69,7 @@ struct Bitfield<uint64_t> {
     pos &= 0xff;
     len &= 0xff;
 
-    uint64_t m = (1u << len) - 1u;
+    uint64_t m = (static_cast<uint64_t>(1) << len) - 1;
     toInsert &= m;
     toInsert <<= pos;
     m <<= pos;

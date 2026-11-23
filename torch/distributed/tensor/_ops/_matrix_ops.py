@@ -70,7 +70,9 @@ def _scaled_mm_scale_placement(
     Handles three cases:
 
     1. Tensor-wise scale (single element): always Replicate.
-    2. 2D (or higher) scale, e.g. row-wise [M,1]: copy data placement directly.
+    2. 2D (or higher) scale, e.g. row-wise [M,1]: copy data placement, except
+       Replicate when the data is Partial or sharded on a dim where the scale
+       has size 1 (the scale broadcasts along it).
     3. 1D blockwise scale, e.g. MX format [M*K/block_size]: map
        non-contracting shard to Shard(0)/_ShardingPlaceholder(0), and reject
        contracting-dim shards (returns None).
@@ -79,6 +81,13 @@ def _scaled_mm_scale_placement(
         return Replicate()
 
     if len(scale_shape) != 1:
+        if isinstance(data_placement, Partial):
+            return Replicate()
+        if (
+            isinstance(data_placement, (_ShardingPlaceholder, Shard))
+            and scale_shape[data_placement.dim] == 1
+        ):
+            return Replicate()
         return data_placement
 
     # 1D blockwise scale: Shard(>=1) is invalid on a 1D tensor, so we need
@@ -352,7 +361,7 @@ def _scaled_dot_product_flash_attention_base_strategies(
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda case, we have 3 valid tensor outputs and 3 tensor inputs
+    # in the sdpa case, we have 3 valid tensor outputs and 3 tensor inputs
     # first we can always accept full replication for both inputs and outputs
     all_replicate: PlacementList = [
         Replicate(),
@@ -487,7 +496,7 @@ def _scaled_dot_product_flash_attention_backward_base_strategies(
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda backward case, we have 3 tensor outputs and 6 to 10 tensor inputs
+    # in the sdpa backward case, we have 3 tensor outputs and 6 to 10 tensor inputs
     # first we can always accept full replication for both inputs and outputs
     all_replicate: PlacementList = [Replicate()] * (3 + num_tensor_inputs)
 
@@ -641,7 +650,7 @@ def _scaled_dot_product_efficient_attention_base_strategies(
     single_mesh_dim_strategies: list[PlacementList] = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda case, we have 2 valid tensor outputs and 3 or 4 tensor inputs
+    # in the sdpa case, we have 2 valid tensor outputs and 3 or 4 tensor inputs
     # first we can always accept full replication for both inputs and outputs
     all_replicate: PlacementList = [
         Replicate(),
@@ -764,7 +773,7 @@ def _scaled_dot_product_efficient_attention_backward_base_strategies(
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda backward case, we have 4 tensor outputs and 8 or 9 tensor inputs
+    # in the sdpa backward case, we have 4 tensor outputs and 8 or 9 tensor inputs
     # NOTE: Output sharding of grad_bias on heads dim if attn_bias is present;
     #       otherwise grad_bias will be empty and its DTensorSpec will be removed.
     # first we can always accept full replication for both inputs and outputs
@@ -907,7 +916,7 @@ def _scaled_dot_product_cudnn_attention_base_strategies(
     single_mesh_dim_strategies = []
 
     # placement list stores placements of [outputs, inputs]
-    # in the spda case, we have 2 valid tensor outputs and 3 tensor inputs
+    # in the sdpa case, we have 2 valid tensor outputs and 3 tensor inputs
     # first we can always accept full replication for both inputs and outputs
     all_replicate: PlacementList = [
         Replicate(),  # output
@@ -1366,3 +1375,21 @@ def grouped_mm_single_dim_strategy(
         )
 
     return strategies
+
+
+# Registered by hand rather than generated from the rule above, because the generated
+# out rules do not carry the stride filter.
+@register_single_dim_strategy(
+    aten._grouped_mm.out,
+    full_mesh_strategy_filter=_valid_grouped_mm_strides,
+)
+def grouped_mm_out_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder | None]]:
+    # out is the last input and must have the placement of the result.
+    return [
+        [*rule, rule[0]]
+        for rule in grouped_mm_single_dim_strategy(
+            aten._grouped_mm.default, args_schema, kwargs_schema
+        )
+    ]

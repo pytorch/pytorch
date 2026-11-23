@@ -140,7 +140,7 @@ class FileWriter:
         Args:
           graph: A `Graph` protocol buffer.
           walltime: float. Optional walltime to override the default (current)
-            _get_file_writerfrom time.time())
+            walltime (from time.time()) seconds after epoch
         """
         event = event_pb2.Event(graph_def=graph.SerializeToString())
         self.add_event(event, None, walltime)
@@ -325,7 +325,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_hparam.png
+        .. image:: /_static/img/tensorboard/add_hparam.png
            :scale: 50 %
 
         """
@@ -374,7 +374,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_scalar.png
+        .. image:: /_static/img/tensorboard/add_scalar.png
            :scale: 50 %
 
         """
@@ -410,7 +410,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_scalars.png
+        .. image:: /_static/img/tensorboard/add_scalars.png
            :scale: 50 %
 
         """
@@ -494,7 +494,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_histogram.png
+        .. image:: /_static/img/tensorboard/add_histogram.png
            :scale: 50 %
 
         """
@@ -563,7 +563,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_histogram_raw.png
+        .. image:: /_static/img/tensorboard/add_histogram_raw.png
            :scale: 50 %
 
         """
@@ -622,7 +622,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_image.png
+        .. image:: /_static/img/tensorboard/add_image.png
            :scale: 50 %
 
         """
@@ -666,7 +666,7 @@ class SummaryWriter:
 
         Expected result:
 
-        .. image:: _static/img/tensorboard/add_images.png
+        .. image:: /_static/img/tensorboard/add_images.png
            :scale: 30 %
 
         """

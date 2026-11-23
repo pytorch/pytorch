@@ -1,8 +1,8 @@
 #include <c10/util/DynamicCounter.h>
 
+#include <c10/util/Exception.h>
 #include <c10/util/Synchronized.h>
 
-#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -39,10 +39,8 @@ struct DynamicCounter::Guard {
         backends_{dynamicCounterBackends().withLock(
             [](auto& backends) { return backends; })} {
     registeredCounters().withLock([&](auto& registeredCounters) {
-      if (!registeredCounters.insert(std::string(key)).second) {
-        throw std::logic_error(
-            "Counter " + std::string(key) + " already registered");
-      }
+      const bool inserted = registeredCounters.insert(std::string(key)).second;
+      TORCH_CHECK(inserted, "Counter ", key, " already registered");
     });
 
     for (const auto& backend : backends_) {

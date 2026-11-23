@@ -8,9 +8,12 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class IdTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_id_equals(self, obj):
         """Assert Dynamo's id(obj) matches eager Python's id(obj)."""
         expected = id(obj)

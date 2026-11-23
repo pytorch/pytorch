@@ -3,8 +3,6 @@
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/Tensor.h>

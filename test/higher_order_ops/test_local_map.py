@@ -30,6 +30,7 @@ if torch.distributed.is_available():
     from torch.distributed.tensor.placement_types import Replicate, Shard
 
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
@@ -61,9 +62,7 @@ def ap_style_initial_capture(
     - no AP decomps
     - no inductor
     """
-    fake_mode = FakeTensorMode()
-    fake_mode.shape_env = ShapeEnv()
-    fake_mode.static_shapes = False
+    fake_mode = FakeTensorMode(shape_env=ShapeEnv(), static_shapes=False)
 
     with fake_mode:
         inputs = inputs_fn()
@@ -216,6 +215,8 @@ def get_local_mapped_functions(mesh):
 
 
 class TestLocalMap(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()

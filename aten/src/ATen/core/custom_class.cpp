@@ -19,7 +19,7 @@ getCustomClassTypeMap() {
 c10::ClassTypePtr getCustomClassTypeImpl(const std::type_index& tindex) {
   auto& tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(tindex);
-  if (C10_UNLIKELY(res == tmap.end())) {
+  if (res == tmap.end()) [[unlikely]] {
     // type_index is not guaranteed to be unique across shared libraries on some
     // platforms For example see
     // https://github.com/llvm-mirror/libcxx/blob/78d6a7767ed57b50122a161b91f59f19c9bd0d19/include/typeinfo#L133
@@ -70,7 +70,7 @@ void registerCustomClass(at::ClassTypePtr class_type) {
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto name = class_type->name()->qualifiedName();
   TORCH_CHECK(
-      !customClasses().count(name),
+      !customClasses().contains(name),
       "Custom class with name ",
       name,
       " is already registered. Ensure that registration with torch::class_ is only called once.");
@@ -79,7 +79,7 @@ void registerCustomClass(at::ClassTypePtr class_type) {
 
 at::ClassTypePtr getCustomClass(const std::string& class_name) {
   auto ret =
-      customClasses().count(class_name) ? customClasses()[class_name] : nullptr;
+      customClasses().contains(class_name) ? customClasses()[class_name] : nullptr;
   if (ret) {
     RECORD_CUSTOM_CLASS(class_name);
   }

@@ -5,9 +5,12 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipIf,
+)
+from torch.testing._internal.common_utils import HardwareClassification, IS_LINUX
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 def patch(f):
@@ -27,6 +30,8 @@ def patch(f):
 
 
 class TestSplitCatFxPasses(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
             "normalization_pass": {},
@@ -122,14 +127,26 @@ class TestSplitCatFxPasses(TestCase):
         post_grad_fusion_options={},
     )
     def test_cat_normalization(self):
-        def caoncat_only(x):
+        def concat_only(x):
             return torch.concat(list(torch.split(x, 2, 1)), dim=1)
+
+        def concatenate_only(x):
+            return torch.concatenate(list(torch.split(x, 2, 1)), dim=1)
+
+        def concatenate_neg_dim(x):
+            return torch.concatenate(list(torch.split(x, 2, 1)), dim=-1)
+
+        def concatenate_axis(x):
+            return torch.concatenate(list(torch.split(x, 2, 1)), axis=1)
 
         args = [
             torch.randn(2, 32),
         ]
         for fn, dynamic, expected_cat_norm_count in [
-            (caoncat_only, False, 2),
+            (concat_only, False, 2),
+            (concatenate_only, False, 2),
+            (concatenate_neg_dim, False, 2),
+            (concatenate_axis, False, 2),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn, dynamic=dynamic)(*args)
@@ -1550,19 +1567,28 @@ class TestSplitCatFxPasses(TestCase):
             for k in n.kwargs:
                 self.assertTrue(k not in {"x", "x1", "x2", "a", "axis", "keepdims"})
 
+
+class TestSplitCatFxPassesDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @patch
-    @requires_gpu
-    def test_stack_normalization_axis_kwarg(self):
+    @skipIf(not HAS_TRITON, "requires triton", device_type=("cuda", "xpu"))
+    def test_stack_normalization_axis_kwarg(self, device):
         def fn(x, y):
             return torch.stack([x, y], axis=1)
 
-        x, y = (torch.rand((4, 4), device=GPU_TYPE) for _ in range(2))
+        x, y = (torch.rand((4, 4), device=device) for _ in range(2))
         expected = fn(x, y)
         actual = torch.compile(fn)(x, y)
 
         self.assertEqual(actual, expected)
 
 
+instantiate_device_type_tests(
+    TestSplitCatFxPassesDevice, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if IS_LINUX:
         run_tests()

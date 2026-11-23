@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 # noqa: F401, E501
 # This is an auto-generated file. Please do not modify it by hand.
 # To re-generate, run:
@@ -20,7 +18,9 @@ from torch._inductor.pattern_matcher import (
    CallMethodVarArgs,
    CallModule,
    CallModuleVarArgs,
+   CanonicalDims,
    ExclusiveKeywordArg,
+   GetAttr,
    Ignored,
    KeywordArg,
    ListOf,

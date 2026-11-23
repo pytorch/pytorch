@@ -1,8 +1,9 @@
 
-#include <c10/xpu/XPUFunctions.h>
 
-#include <ATen/ATen.h>
-#include <ATen/record_function.h>
+#include <ATen/Context.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/empty.h>
 
 #include <Attr.h>
 #include <Utils.h>
@@ -225,7 +226,8 @@ sycl::event matmul(
   // STEP4: create memory
   auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.const_data_ptr());
   auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.const_data_ptr());
-  auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
+  auto dst_usr_m =
+      make_onednn_memory(dst_usr_md, engine, dst.mutable_data_ptr());
 
   auto expected_m1_md = matmul_pd.src_desc();
   auto expected_m2_md = matmul_pd.weights_desc();
@@ -243,7 +245,9 @@ sycl::event matmul(
       m1.options().dtype(at::kByte),
       std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
-      matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
+      matmul_pd.scratchpad_desc(),
+      engine,
+      scratchpad_tensor.mutable_data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
   args.insert({DNNL_ARG_SRC, m1_m});

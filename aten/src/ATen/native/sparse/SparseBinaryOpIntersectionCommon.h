@@ -6,6 +6,7 @@
 #include <ATen/native/sparse/Macros.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/SparseTensorUtils.h>
+#include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -113,11 +114,11 @@ TensorIterator make_value_selection_intersection_iter(
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_owned_output(res_values)
-    .add_owned_input(restride_values(lhs_values))
-    .add_owned_input(restride_idx(lhs_select_idx))
-    .add_owned_input(restride_values(rhs_values))
-    .add_owned_input(restride_idx(rhs_select_idx))
-    .add_owned_input(restride_idx(intersection_counts))
+    .add_owned_const_input(restride_values(lhs_values))
+    .add_owned_const_input(restride_idx(lhs_select_idx))
+    .add_owned_const_input(restride_values(rhs_values))
+    .add_owned_const_input(restride_idx(rhs_select_idx))
+    .add_owned_const_input(restride_idx(intersection_counts))
     .build();
 
   return iter;
@@ -200,7 +201,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       const auto sparse_dim_numel = std::accumulate(
           larger_sizes.begin(),
           larger_sizes.begin() + larger.sparse_dim(),
-          1,
+          static_cast<int64_t>(1),
           std::multiplies<int64_t>());
       // If nnz > prod(larger.shape[:sparse_dim]), by the pidgeonhole principle,
       // there is at least one bucket with nnz / prod(larger.shape[:sparse_dim]) elements.
@@ -208,7 +209,8 @@ void _sparse_binary_op_intersection_kernel_impl(
       // This condition is very conservative as we do not check whether such an event
       // actually occurred, although it is very likely under a uniform distribution,
       // the distribution with the highest uncertainty (maximizes entropy).
-      const auto max_count_lower_bound = larger._nnz() / sparse_dim_numel;
+      // A zero-size sparse dim admits no valid indices, so there is nothing to coalesce.
+      const auto max_count_lower_bound = sparse_dim_numel > 0 ? larger._nnz() / sparse_dim_numel : 0;
       constexpr int64_t MAX_COPIES_PER_THREAD = 50;
       return max_count_lower_bound > MAX_COPIES_PER_THREAD
         // coalesce invalidates hash values, so force-recompute
@@ -264,7 +266,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .add_output(hash)
-      .add_input(probably_coalesced_nnz_arange)
+      .add_const_input(probably_coalesced_nnz_arange)
       .build();
 
     {
@@ -278,7 +280,7 @@ void _sparse_binary_op_intersection_kernel_impl(
             return hash;
           }
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-          for (int64_t dim = 0; dim < sparse_dim; ++dim) {
+          for (const auto dim : c10::irange(sparse_dim)) {
             const auto dim_hash_coeff = hash_coeffs[dim];
             const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
             hash += dim_index * dim_hash_coeff;
@@ -339,21 +341,21 @@ void _sparse_binary_op_intersection_kernel_impl(
       ? (*source_indices_hash_opt).contiguous()
       : at::empty({0}, probably_coalesced._indices().options().dtype(kLong));
     const auto* RESTRICT hash_ptr = source_indices_hash_opt.has_value()
-      ? hash.data_ptr<int64_t>()
+      ? hash.const_data_ptr<int64_t>()
       : nullptr;
 
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .add_owned_output(dummy.expand_as(source_arange))
-      .add_input(source_arange)
+      .add_const_input(source_arange)
       .build();
 
     {
       const auto* RESTRICT ptr_indices = source_indices.const_data_ptr<index_t>();
       const auto* RESTRICT ptr_sorted_hash = sorted_hash.const_data_ptr<int64_t>();
       const auto sorted_hash_len = sorted_hash.numel();
-      auto* RESTRICT ptr_intersection_count = intersection_count.data_ptr<int64_t>();
-      auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.data_ptr<int64_t>();
+      auto* RESTRICT ptr_intersection_count = intersection_count.mutable_data_ptr<int64_t>();
+      auto* RESTRICT ptr_intersection_first_idx = intersection_first_idx.mutable_data_ptr<int64_t>();
 
       // Fusing hash computation with hash intersection.
       KernelLauncher::launch(iter,
@@ -365,7 +367,7 @@ void _sparse_binary_op_intersection_kernel_impl(
           } else if (sparse_dim) {
             // Compute hash value
             const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
-            for (int64_t dim = 0; dim < sparse_dim; ++dim) {
+            for (const auto dim : c10::irange(sparse_dim)) {
               const auto dim_hash_coeff = hash_coeffs[dim];
               const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
               hash += dim_index * dim_hash_coeff;

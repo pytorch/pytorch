@@ -6,7 +6,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 from torch.utils.checkpoint import (
-    _checkpoint_without_reentrant_generator,
+    _checkpoint_without_reentrant_generator_impl,
     _DEFAULT_DETERMINISM_MODE,
 )
 
@@ -98,15 +98,15 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
                 else:
                     return nullcontext(), _no_hook(module)
 
-            gen = _checkpoint_without_reentrant_generator(
+            gen = _checkpoint_without_reentrant_generator_impl(
                 module,
-                preserve_rng_state,
-                context_fns,
-                determinism_check,
-                debug,
-                early_stop,
-                *args,
-                **kwargs,
+                args,
+                kwargs,
+                preserve_rng_state=preserve_rng_state,
+                context_fn=context_fns,
+                determinism_check=determinism_check,
+                debug=debug,
+                early_stop=early_stop,
             )
             checkpoint.state(module)._ac_generator = gen
             next(gen)

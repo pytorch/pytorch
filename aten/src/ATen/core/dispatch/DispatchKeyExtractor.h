@@ -4,6 +4,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <ATen/core/type_factory.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/Bitset.h>
 #include <c10/util/irange.h>
@@ -136,11 +137,11 @@ struct TORCH_API DispatchKeyExtractor final {
   }
 
   void registerSchema(const FunctionSchema& schema) {
-    TORCH_INTERNAL_ASSERT(dispatch_arg_indices_reverse_.is_entirely_unset());
+    TORCH_INTERNAL_ASSERT(dispatch_arg_indices_reverse_.none());
     dispatch_arg_indices_reverse_ = makeBitsetForDispatchArgs(schema);
   }
   void deregisterSchema() {
-    dispatch_arg_indices_reverse_ = c10::utils::bitset();
+    dispatch_arg_indices_reverse_.reset();
   }
 
   C10_ALWAYS_INLINE DispatchKeySet getDispatchKeySetFromRawDispatchKeySet(
@@ -162,30 +163,31 @@ struct TORCH_API DispatchKeyExtractor final {
 
   DispatchKeySet getDispatchKeySetBoxed(const torch::jit::Stack* stack) const {
     DispatchKeySet ks;
-    dispatch_arg_indices_reverse_.for_each_set_bit([&](size_t
-                                                           reverse_arg_index) {
-      const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
-      if (C10_LIKELY(ivalue.isTensor())) {
-        // NB: Take care not to introduce a refcount bump (there's
-        // no safe toTensorRef method, alas)
-        ks = ks | ivalue.unsafeToTensorImpl()->key_set();
-      } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-        // NB: use toListRef as it doesn't induce refcount bumps
-        // (toTensorListRef is not a thing)
-        for (const auto& nv : ivalue.toListRef()) {
-          auto* tensor = nv.unsafeToTensorImpl();
-          ks = ks | tensor->key_set();
-        }
-      }
-      // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
-      else if (C10_UNLIKELY(ivalue.isList())) {
-        for (const auto& elt : ivalue.toListRef()) {
-          if (elt.isTensor()) {
-            ks = ks | elt.toTensor().key_set();
+    c10::utils::for_each_set_bit(
+        dispatch_arg_indices_reverse_, [&](size_t reverse_arg_index) {
+          const auto& ivalue =
+              torch::jit::peek(*stack, 0, reverse_arg_index + 1);
+          if (ivalue.isTensor()) [[likely]] {
+            // NB: Take care not to introduce a refcount bump (there's
+            // no safe toTensorRef method, alas)
+            ks = ks | ivalue.unsafeToTensorImpl()->key_set();
+          } else if (ivalue.isTensorList()) [[unlikely]] {
+            // NB: use toListRef as it doesn't induce refcount bumps
+            // (toTensorListRef is not a thing)
+            for (const auto& nv : ivalue.toListRef()) {
+              auto* tensor = nv.unsafeToTensorImpl();
+              ks = ks | tensor->key_set();
+            }
           }
-        }
-      }
-    });
+          // Tensor?[] translates to c10::List<IValue> so we need to peek inside
+          else if (ivalue.isList()) [[unlikely]] {
+            for (const auto& elt : ivalue.toListRef()) {
+              if (elt.isTensor()) {
+                ks = ks | elt.toTensor().key_set();
+              }
+            }
+          }
+        });
     return getDispatchKeySetFromRawDispatchKeySet(ks);
   }
 
@@ -209,36 +211,30 @@ struct TORCH_API DispatchKeyExtractor final {
     // Checking isSubtypeOf on a DynamicType heap-allocates a
     // DynamicType version of the argument if it's not a DynamicType
     // already, and this has measurable overhead during startup.
-#ifdef C10_MOBILE
     struct CachedTypes {
-      DynamicTypePtr listOfTensors;
-      DynamicTypePtr listOfOptionalTensors;
-      DynamicTypePtr optionalOfTensor;
+      TypePtr listOfTensors;
+      TypePtr listOfOptionalTensors;
+      TypePtr optionalOfTensor;
     };
     static const CachedTypes ct = {
-        DynamicType::create(*ListType::ofTensors()),
-        DynamicType::create(*ListType::ofOptionalTensors()),
-        DynamicType::create(*OptionalType::ofTensor())};
-    return type.isSubtypeOf(c10::TypeFactory::get<TensorType>()) ||
+        TypeFactory::create<ListType>(TypeFactory::get<TensorType>()),
+        TypeFactory::create<ListType>(
+            TypeFactory::create<OptionalType>(TypeFactory::get<TensorType>())),
+        TypeFactory::create<OptionalType>(TypeFactory::get<TensorType>())};
+    return type.isSubtypeOf(TypeFactory::get<TensorType>()) ||
         type.isSubtypeOf(ct.listOfTensors) ||
         type.isSubtypeOf(ct.listOfOptionalTensors) ||
         type.isSubtypeOf(ct.optionalOfTensor);
-#else // C10_MOBILE
-    return type.isSubtypeOf(*TensorType::get()) ||
-        type.isSubtypeOf(*ListType::ofTensors()) ||
-        type.isSubtypeOf(*ListType::ofOptionalTensors()) ||
-        type.isSubtypeOf(*OptionalType::ofTensor());
-#endif // C10_MOBILE
   }
   static c10::utils::bitset makeBitsetForDispatchArgs(
       const FunctionSchema& schema) {
+    c10::utils::bitset dispatch_arg_indices_reverse;
     TORCH_CHECK(
-        schema.arguments().size() <= c10::utils::bitset::NUM_BITS(),
+        schema.arguments().size() <= dispatch_arg_indices_reverse.size(),
         "The function schema has ",
         schema.arguments().size(),
         " arguments but this PyTorch build only supports ",
-        c10::utils::bitset::NUM_BITS());
-    c10::utils::bitset dispatch_arg_indices_reverse;
+        dispatch_arg_indices_reverse.size());
     for (const auto index : c10::irange(schema.arguments().size())) {
       if (isDispatchType(*schema.arguments()[index].type())) {
         dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
@@ -250,9 +246,7 @@ struct TORCH_API DispatchKeyExtractor final {
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
       : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse),
         nonFallthroughKeys_(DispatchKeySet::FULL) {
-    for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
-      nonFallthroughKeysPerBackend_[i] = DispatchKeySet::FULL;
-    }
+    nonFallthroughKeysPerBackend_.fill(DispatchKeySet::FULL);
   }
 
   // this is a bitset that has ones for each argument index which has to be

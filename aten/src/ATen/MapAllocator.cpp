@@ -321,18 +321,6 @@ MapAllocator::MapAllocator(WithFd /*unused*/, std::string_view filename, int fd,
             ::close(fd);
             TORCH_CHECK(false, "unable to stretch file <", filename_, "> to the right size: ", c10::utils::str_error(last_err), " (", last_err, ")");
           }
-/* on macOS write returns with errno 45 (Operation not supported) when used
- * with a file descriptor obtained via shm_open
- */
-#ifndef __APPLE__
-          if ((write(fd, "", 1)) != 1) /* note that the string "" contains the '\0' byte ... */ {
-#ifndef STRIP_ERROR_MESSAGES
-            int last_err = errno;
-#endif
-            ::close(fd);
-            TORCH_CHECK(false, "unable to write to file <", filename_, ">: ", c10::utils::str_error(last_err), " (", last_err, ")");
-          }
-#endif
         } else {
           ::close(fd);
           TORCH_CHECK(false, "file <", filename_, "> size <",  file_stat.st_size, "> is smaller than the required mapping size <", size, ">");

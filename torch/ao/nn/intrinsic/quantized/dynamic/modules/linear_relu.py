@@ -1,5 +1,4 @@
-from typing import Any
-from typing_extensions import Self
+from typing import Any, Self
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -44,7 +43,7 @@ class LinearReLU(nnqd.Linear):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self._packed_params.dtype == torch.qint8:
-            # TODO check if we should set reduce_rage = True by default here
+            # TODO check if we should set reduce_range = True by default here
             Y = torch.ops.quantized.linear_relu_dynamic(
                 x, self._packed_params._packed_params, reduce_range=True
             )
