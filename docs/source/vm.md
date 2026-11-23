@@ -428,6 +428,42 @@ checks at every call. For anything else, and where the path ends inside
 the function, which then runs on to its end as instructions (below), the
 instruction gives the interpreter's answer and the path ends in front of it.
 
+A comparison (`a == b`, `a < b`, `a in (b, c)`) is part of a path where the
+classes of both values compare with the function of `str`, `int`, `float` or
+`object`: numbers and texts, None, the members of an enum (also of one that
+is a `str` as well), any two objects whose classes have no `__eq__`, which
+are equal only where they are the same object. A class that has an `__eq__`
+or an `__lt__` written in Python, or gets one, compares there, and a path
+does not go on through that comparison; which of the two it is, is asked of
+both classes at every call. An order that the classes do not have raises
+`TypeError` at the instruction, as it does without the engine.
+
+```python
+import enum
+
+
+class Action(str, enum.Enum):
+    NONE = "none"
+    NOTIFY = "notify"
+    RAISE = "raise"
+
+
+def checked(x, action):
+    y = x.sin() * 2
+    if action == Action.RAISE:
+        raise ValueError(action)
+    if action in (Action.NOTIFY, Action.RAISE):
+        y = y + 1
+    return y.cos().sum()
+
+
+g = torch.vm(checked, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    same = torch.equal(g(x, Action.NOTIFY), checked(x, Action.NOTIFY))
+found = torch.vm.regions(g)[0]
+same, found["ops"], found["why"]  # (True, 5, 'the function returns')
+```
+
 ```python
 class Block(torch.nn.Module):
     def __init__(self):
