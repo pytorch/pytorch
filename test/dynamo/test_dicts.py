@@ -4811,6 +4811,20 @@ class OrderedDictMethodsTests(DictMethodsTests):
         self.assertTrue(a == dict.fromkeys("bca"))
         self.assertTrue(dict.fromkeys("bca") == a)
 
+    def test_cmp_eq_order_guard(self):
+        def fn(x, y):
+            return x == y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        a = self.thetype.fromkeys("abc")
+        b = self.thetype.fromkeys("abc")
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+        b.move_to_end("a")
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+        b.move_to_end("b")
+        b.move_to_end("c")
+        self.assertEqual(opt_fn(a, b), fn(a, b))
+
     @make_dynamo_test
     def test_binop_or_return_type(self):
         d1 = self.thetype({"a": 1, "b": 2})
