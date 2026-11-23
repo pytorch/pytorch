@@ -28,7 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, IO, Never, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Never, NewType, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.exc import PackageError
@@ -1102,7 +1102,7 @@ class PrecompileCacheEntry:
     @staticmethod
     def from_cache_entry(
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
-    ) -> Optional["PrecompileCacheEntry"]:
+    ) -> "PrecompileCacheEntry":
         backend_content: dict[_BackendId, Any] = {}
 
         for code in cache_entry.codes:
