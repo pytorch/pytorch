@@ -143,32 +143,6 @@ class TestBmmOuterProductDevice(TestCase):
         b = torch.randn(8, 1, 1, device=device)
         self.assertEqual(torch.bmm(a, b), a @ b)
 
-    @onlyCUDA
-    @skipCUDAIfNotRocm
-    def test_hip_grid_limit_fallback(self, device):
-        from torch._native.ops.bmm_outer_product.triton_kernels import (
-            _bmm_outer_product_launch_config,
-            _TRITON_DEFAULT_NUM_WARPS,
-        )
-
-        warp_size = torch.cuda.get_device_properties(device).warp_size
-        threads_per_program = _TRITON_DEFAULT_NUM_WARPS * warp_size
-        batch = _HIP_MAX_LAUNCH_WORK_ITEMS // threads_per_program + 1
-        # M = N = 1 puts exactly one program in the grid per batch entry, so
-        # this batch is the first one whose launch exceeds the limit.
-        self.assertEqual(_bmm_outer_product_launch_config(batch, 1, 1)[0], batch)
-
-        a = torch.randn(1, 1, 1, device=device).expand(batch, -1, -1)
-        b = torch.randn(1, 1, 1, device=device).expand(batch, -1, -1)
-
-        # Only the decision is checked. torch.bmm is deliberately not called:
-        # rocBLAS tiles this shape as one 256-thread workgroup per batch entry,
-        # so on some architectures the ATen fallback reaches the same work-item
-        # limit and raises, which says nothing about the guard under test.
-        self.assertTrue(_is_hip_grid_safe(a[:-1], b[:-1]))
-        self.assertFalse(_is_hip_grid_safe(a, b))
-        self.assertFalse(_bmm_outer_product_cond(a, b))
-
     @onlyAccelerator
     def test_gradient_flow(self, device):
         a = torch.randn(4, 8, 1, device=device, requires_grad=True)
@@ -244,7 +218,39 @@ class TestBmmOuterProductDevice(TestCase):
         self.assertTrue(torch._C._is_cow_tensor(b_cow))
 
 
+class TestBmmOuterProductCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_hip_grid_limit_fallback(self, device):
+        from torch._native.ops.bmm_outer_product.triton_kernels import (
+            _bmm_outer_product_launch_config,
+            _TRITON_DEFAULT_NUM_WARPS,
+        )
+
+        warp_size = torch.cuda.get_device_properties(device).warp_size
+        threads_per_program = _TRITON_DEFAULT_NUM_WARPS * warp_size
+        batch = _HIP_MAX_LAUNCH_WORK_ITEMS // threads_per_program + 1
+        # M = N = 1 puts exactly one program in the grid per batch entry, so
+        # this batch is the first one whose launch exceeds the limit.
+        self.assertEqual(_bmm_outer_product_launch_config(batch, 1, 1)[0], batch)
+
+        a = torch.randn(1, 1, 1, device=device).expand(batch, -1, -1)
+        b = torch.randn(1, 1, 1, device=device).expand(batch, -1, -1)
+
+        # Only the decision is checked. torch.bmm is deliberately not called:
+        # rocBLAS tiles this shape as one 256-thread workgroup per batch entry,
+        # so on some architectures the ATen fallback reaches the same work-item
+        # limit and raises, which says nothing about the guard under test.
+        self.assertTrue(_is_hip_grid_safe(a[:-1], b[:-1]))
+        self.assertFalse(_is_hip_grid_safe(a, b))
+        self.assertFalse(_bmm_outer_product_cond(a, b))
+
+
 class TestBmmOuterProduct(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_cpu_outer_product_fallback(self):
         a = torch.randn(4, 8, 1)
         b = torch.randn(4, 1, 16)
@@ -253,6 +259,8 @@ class TestBmmOuterProduct(TestCase):
 
 
 class TestOuterProductDetection(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_is_outer_product(self):
         self.assertTrue(_is_outer_product(torch.empty(4, 8, 1), torch.empty(4, 1, 16)))
         self.assertTrue(_is_outer_product(torch.empty(4, 8, 1), torch.empty(4, 1, 1)))
