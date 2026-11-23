@@ -483,12 +483,6 @@ def _isinf(x: StorageScalar) -> Boolean:
 
 
 @cute.jit
-def _isfinite(x: StorageScalar) -> Boolean:
-    x = _opmath(x)
-    return (x - x) == (x - x)
-
-
-@cute.jit
 def _bitwise_and(x: StorageScalar, y: StorageScalar) -> StorageScalar:
     return x & y
 

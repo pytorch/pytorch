@@ -28,7 +28,7 @@ class PointwiseDef(NamedTuple):
     dtypes: DTypes | None = None
     int_dtypes: DTypes = ()
     int_via_float: bool = False
-    # Skip out overloads incompatible with wrapped scalars.
+    # Out signatures unsupported by the adapter.
     skip_out_variant: bool = False
     precondition: (
         Callable[[Sequence[torch.Tensor], torch.Tensor | None], bool] | None
@@ -40,7 +40,8 @@ class PointwiseDef(NamedTuple):
     mode_int_only: tuple[Mode, ...] = ()
     # Allowed CPU scalar input indices; None permits any single input.
     cpu_scalar_inputs: tuple[int, ...] | None = None
-    output_dispatch: bool = False
+    # Native out kernels requiring the computed result dtype.
+    exact_out_dtype: bool = False
 
 
 _DEFAULT = PromotionKind.DEFAULT
@@ -66,6 +67,28 @@ def _all_same_dtype(ins: Sequence[torch.Tensor], tgt: torch.Tensor | None) -> bo
 
 def _boolean_out(ins: Sequence[torch.Tensor], tgt: torch.Tensor | None) -> bool:
     return tgt is None or tgt.dtype is torch.bool
+
+
+def _bitwise_out(ins: Sequence[torch.Tensor], tgt: torch.Tensor | None) -> bool:
+    return tgt is None or tgt.dtype in (
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+    )
+
+
+def _logical_out(ins: Sequence[torch.Tensor], tgt: torch.Tensor | None) -> bool:
+    if tgt is None or tgt.dtype is torch.bool:
+        return True
+    if tgt.dtype in (torch.uint16, torch.uint32, torch.uint64):
+        return False
+    try:
+        # Promotion preserves zero detection across native input casts.
+        return torch.promote_types(ins[0].dtype, tgt.dtype) == tgt.dtype
+    except RuntimeError:
+        return False
 
 
 def _lerp_dtypes_ok(ins: Sequence[torch.Tensor], tgt: torch.Tensor | None) -> bool:
@@ -152,7 +175,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         2,
         Functor("_logaddexp"),
         cpu_scalar_inputs=(),
-        output_dispatch=True,
+        exact_out_dtype=True,
     ),
     PointwiseDef(
         "xlogy.Tensor", 2, Functor("_xlogy"), promotion=_INT2FLOAT, int_via_float=True
@@ -228,7 +251,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         1,
         Functor("_elu"),
         scalars=("alpha", "scale", "input_scale"),
-        promotion=_INT2FLOAT,
+        promotion=_DEFAULT,
         precondition=_all_same_dtype,
     ),
     PointwiseDef(
@@ -236,11 +259,11 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         1,
         Functor("_elu"),
         scalars=("alpha",),
-        promotion=_INT2FLOAT,
+        promotion=_DEFAULT,
         precondition=_all_same_dtype,
     ),
     PointwiseDef(
-        "mish", 1, Functor("_mish"), promotion=_INT2FLOAT, precondition=_all_same_dtype
+        "mish", 1, Functor("_mish"), promotion=_DEFAULT, precondition=_all_same_dtype
     ),
     PointwiseDef(
         "softplus",
@@ -248,7 +271,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         Functor("_softplus"),
         scalars=("beta", "threshold"),
         scalar_defaults=(1, 20),
-        promotion=_INT2FLOAT,
+        promotion=_DEFAULT,
         precondition=_all_same_dtype,
     ),
     PointwiseDef(
@@ -263,7 +286,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         "hardsigmoid",
         1,
         Functor("_hardsigmoid"),
-        promotion=_INT2FLOAT,
+        promotion=_DEFAULT,
         precondition=_all_same_dtype,
     ),
     PointwiseDef(
@@ -331,6 +354,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         Functor("_logical_not"),
         promotion=_BOOL,
         int_dtypes=_INT_DTYPES,
+        precondition=_logical_out,
     ),
     PointwiseDef(
         "signbit",
@@ -342,9 +366,27 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
     PointwiseDef("isnan", 1, Functor("_isnan"), promotion=_BOOL),
     PointwiseDef("isinf", 1, Functor("_isinf"), promotion=_BOOL),
     # Bitwise operations.
-    PointwiseDef("bitwise_and.Tensor", 2, Functor("_bitwise_and"), dtypes=_INT_DTYPES),
-    PointwiseDef("bitwise_or.Tensor", 2, Functor("_bitwise_or"), dtypes=_INT_DTYPES),
-    PointwiseDef("bitwise_xor.Tensor", 2, Functor("_bitwise_xor"), dtypes=_INT_DTYPES),
+    PointwiseDef(
+        "bitwise_and.Tensor",
+        2,
+        Functor("_bitwise_and"),
+        dtypes=_INT_DTYPES,
+        precondition=_bitwise_out,
+    ),
+    PointwiseDef(
+        "bitwise_or.Tensor",
+        2,
+        Functor("_bitwise_or"),
+        dtypes=_INT_DTYPES,
+        precondition=_bitwise_out,
+    ),
+    PointwiseDef(
+        "bitwise_xor.Tensor",
+        2,
+        Functor("_bitwise_xor"),
+        dtypes=_INT_DTYPES,
+        precondition=_bitwise_out,
+    ),
     PointwiseDef(
         "bitwise_not",
         1,
@@ -356,14 +398,14 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         "bitwise_left_shift.Tensor",
         2,
         Functor("_bitwise_left_shift"),
-        output_dispatch=True,
+        exact_out_dtype=True,
         dtypes=_INT_DTYPES,
     ),
     PointwiseDef(
         "bitwise_right_shift.Tensor",
         2,
         Functor("_bitwise_right_shift"),
-        output_dispatch=True,
+        exact_out_dtype=True,
         dtypes=_INT_DTYPES,
     ),
     # Ternary and multiple-output operations.
@@ -401,7 +443,7 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         2,
         Functor("_logaddexp2"),
         cpu_scalar_inputs=(),
-        output_dispatch=True,
+        exact_out_dtype=True,
     ),
     PointwiseDef("special_entr", 1, Functor("_entr"), promotion=_INT2FLOAT),
     PointwiseDef(
@@ -492,48 +534,3 @@ POINTWISE_DEF_TABLE: tuple[PointwiseDef, ...] = (
         cpu_scalar_inputs=(2,),
     ),
 )
-
-
-def variant_aten_name(base_aten: str, variant: PointwiseVariant) -> str | None:
-    r"""Find the ATen overload for a functional, out or in-place variant."""
-    op, _, ov = base_aten.partition(".")
-    ov = ov or "default"
-    if variant == "functional":
-        return base_aten
-    if variant == "out":
-        packet = getattr(torch.ops.aten, op)
-        arguments = getattr(packet, ov)._schema.arguments
-        for name in packet.overloads():
-            candidate = getattr(packet, name)._schema.arguments
-            outputs = [a for a in candidate if a.alias_info and a.alias_info.is_write]
-            inputs = [
-                a for a in candidate if not (a.alias_info and a.alias_info.is_write)
-            ]
-            if not outputs or len(inputs) != len(arguments):
-                continue
-            if all(
-                a.name == b.name
-                and a.type == b.type
-                and a.kwarg_only == b.kwarg_only
-                and a.default_value == b.default_value
-                for a, b in zip(arguments, inputs)
-            ):
-                return f"{op}.{name}"
-        return None
-    if variant == "inplace":
-        packet = getattr(torch.ops.aten, op + "_", None)
-        if packet is None:
-            return None
-        arguments = getattr(getattr(torch.ops.aten, op), ov)._schema.arguments
-        for name in packet.overloads():
-            candidate = getattr(packet, name)._schema.arguments
-            if len(candidate) == len(arguments) and all(
-                a.name == b.name
-                and a.type == b.type
-                and a.kwarg_only == b.kwarg_only
-                and a.default_value == b.default_value
-                for a, b in zip(arguments, candidate)
-            ):
-                return op + "_" if name == "default" else f"{op}_.{name}"
-        return None
-    return None
