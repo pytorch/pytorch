@@ -55,8 +55,9 @@ if TYPE_CHECKING:
     # if any of them compiled for CUDA graphs, and the capture's cudagraph_trees.
     # Empty for a backend other than Inductor, whose subgraphs have none.
     CUDAGRAPH_CONFIG: dict[str, bool] = {}
-    # The capture's normalized mode/options, which a serve-time compile uses;
-    # None when they have no literal form.
+    # The capture's normalized mode/options and the CUDA graph settings it
+    # resolved at capture(), which a serve-time compile uses; None when the
+    # options have no literal form.
     INDUCTOR_OPTIONS: dict[str, object] | None = {}
     BACKEND: str = ""
     FN_NAME: str = ""

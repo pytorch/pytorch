@@ -2896,8 +2896,9 @@ def _build_multigraph_python_source(
     if mode == "installed":
         # load(allow_serve_time_compiles=True) flips this to True before exec.
         buf.writeline("_ALLOW_SERVE_TIME_COMPILES = False")
-        # What a serve-time compile is configured with: the capture's options, or
-        # None when they have no literal form (a custom pass), which load() refuses.
+        # What a serve-time compile is configured with: the capture's options and
+        # CUDA graph settings, or None when the options have no literal form (a
+        # custom pass), which load() refuses.
         options = dict(inductor_options or {})
         try:
             recordable = ast.literal_eval(repr(options)) == options
@@ -4302,12 +4303,10 @@ def load(
     graphs are wrapped and run (``cudagraph_policy``, which can decline to wrap
     a graph, ``triton.cudagraph_capture_sizes``, the rerecord limits,
     ``triton.cudagraph_or_error``, the warmup and sync knobs, ...) are the
-    loading process's, as for a :func:`torch.compile` cache hit. So is a
-    serve-time compile (``allow_serve_time_compiles``, below), which takes the
-    capture's ``mode`` or ``options`` and otherwise the loading process's
-    config. Loading does not apply :func:`torch.compile`'s CUPTI workaround
-    for CUDA graphs (a serve-time compile whose ``mode`` or ``options`` turn
-    them on does): when profiling repeatedly on CUDA older than 12.6, set
+    loading process's, as for a :func:`torch.compile` cache hit. Loading does
+    not apply :func:`torch.compile`'s CUPTI workaround for CUDA graphs
+    (``allow_serve_time_compiles``, below, does for a capture that compiled
+    with them on): when profiling repeatedly on CUDA older than 12.6, set
     ``DISABLE_CUPTI_LAZY_REINIT=1`` and ``TEARDOWN_CUPTI=0`` yourself.
 
     Frozen C++ kernels are keyed by their build command with the PyTorch install
@@ -4325,7 +4324,16 @@ def load(
     refusal: a call no captured variant covers compiles with the artifact's
     backend and the capture's ``mode`` or ``options`` (recorded in the
     artifact's ``INDUCTOR_OPTIONS``), as ``torch.compile`` would, under the
-    process-wide stance like any other compile. An artifact whose options are
+    process-wide stance like any other compile. ``INDUCTOR_OPTIONS`` also
+    holds ``triton.cudagraphs`` and ``triton.cudagraph_trees`` as the capture
+    resolved them when ``capture()`` was called (its options over
+    ``torch._inductor.config``), so a miss is lowered with CUDA graphs when
+    the capture asked for them, wherever it asked. Dynamo traces it under the
+    loading process's own config, though: for an artifact
+    captured with CUDA graphs on and ``graph_partition`` off, turn
+    ``triton.cudagraphs`` on in the loading process too, or a Python float
+    argument becomes a CPU scalar input that keeps the serve-time graph out
+    of CUDA graphs. An artifact whose options are
     not all Python literals (such as a custom pass) refuses the flag. The
     captured variants are still served first and do not count toward
     ``torch._dynamo.config.recompile_limit``, so each frame gets
