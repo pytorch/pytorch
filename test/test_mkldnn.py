@@ -17,14 +17,13 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
 import torch.nn.functional as F
-import torch.jit
 import torch.backends.mkldnn
+from torch.testing import FileCheck
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
-    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
+    run_tests, gradcheck, gradgradcheck, IS_WINDOWS, \
     skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision, \
-    parametrize, instantiate_parametrized_tests, HardwareClassification, \
-    expectedIfCppFakeTensor
+    parametrize, instantiate_parametrized_tests, HardwareClassification
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -299,10 +298,7 @@ class TestMkldnn(TestCase):
                     self.assertEqual(y_aten, y_mkldnn, atol=self.precision, rtol=self.precision)
                 else:
                     self.assertEqual(y_aten, y_mkldnn)
-            if not train:
-                self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
-                self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
-            elif dim != 1:
+            if train and dim != 1:
                 loss2 = y_mkldnn.sum()
                 loss2.backward()
                 self.assertTrue(x2.grad.is_mkldnn)
@@ -573,34 +569,6 @@ class TestMkldnn(TestCase):
     def test_conv_transpose3d(self):
         self._test_conv_transpose_base(dim=3)
 
-    def test_conv2d_legacy_jit_model(self):
-        """
-        MKLDNN integration used to serialize models with 5d weight for grouped
-        convolutions, we'd like to preserve this behavior
-        """
-        g = 4
-        conv2d = torch.nn.Conv2d(16, 16, 3, groups=g)
-        conv2d_mkldnn = torch.utils.mkldnn.to_mkldnn(conv2d)
-
-        # contrive legacy conv2d module with a 5-d weight
-        o, i, h, w = conv2d.weight.shape
-        weight_5d = conv2d.weight.reshape((g, o // g, i, h, w))
-        conv2d_mkldnn.weight = weight_5d.to_mkldnn()
-
-        x = torch.randn(1, 16, 8, 8)
-
-        with TemporaryFileName() as fname:
-            torch.jit.save(conv2d_mkldnn, fname)
-            conv2d_loaded = torch.jit.load(fname)
-
-            self.assertEqual(conv2d_mkldnn.weight.ndimension(), 5)
-            self.assertEqual(conv2d_loaded.weight.ndimension(), 4)
-            self.assertEqual(
-                conv2d(x),
-                conv2d_loaded(x.to_mkldnn()).to_dense())
-
-    # This test is to check whether 1D conv is supported for mkldnn tensor,
-    # which is exposed by Issue https://github.com/pytorch/pytorch/issues/68034.
     def test_conv1d_functional(self):
         input = torch.randn(2, 3, 10).to_mkldnn()
         weight = torch.randn(3, 3, 3).to_mkldnn()
@@ -649,9 +617,11 @@ class TestMkldnn(TestCase):
                                    msg,
                                    lambda: fn(x_bf16.to_mkldnn()))
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_relu_bf16(self):
         self._test_relu_bf16_base("relu")
 
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_relu_inplace_bf16(self):
         self._test_relu_bf16_base("relu_")
 
@@ -853,7 +823,7 @@ class TestMkldnn(TestCase):
                 self.assertEqual(y1, y2.to_dense())
 
     # https://github.com/pytorch/pytorch/issues/127111
-    @expectedIfCppFakeTensor(lambda fn: fn, xfailIfTorchDynamo)
+    @xfailIfTorchDynamo
     def test_max_pool_unsupported(self):
         # OneDNN not support dilation max_pooling, will be avilabled in v2.0.
         N = torch.randint(3, 10, (1,)).item()
@@ -1012,8 +982,6 @@ class TestMkldnn(TestCase):
             bn(input),
             mkldnn_bn(input.to_mkldnn()).to_dense())
 
-        self._test_serialization(mkldnn_bn, (input.to_mkldnn(),))
-        self._test_tracing(mkldnn_bn, (input.to_mkldnn(),))
 
     def _test_batch_norm_train_base(self, dim, channels, input):
         # TODO: support 3d batchnorm training.
@@ -1053,6 +1021,23 @@ class TestMkldnn(TestCase):
         C = torch.randint(3, 100, (1,)).item()
         x = torch.randn(N, C, 30, 30, 30, dtype=torch.float32) * 10
         self._test_batch_norm_base(dim=3, channels=C, input=x)
+
+    @skipIfTorchDynamo("TorchScript graph pass")
+    def test_mkldnn_layer_norm(self):
+        # prim::MKLDNNLayerNorm is only emitted by the frozen-graph MKLDNN pass.
+        mod = torch.nn.Sequential(
+            torch.nn.Conv2d(8, 8, 1), torch.nn.LayerNorm(8), torch.nn.Conv2d(8, 8, 1)
+        ).eval()
+        # Non-default scale and shift, so dropping either changes the output.
+        with torch.no_grad():
+            mod[1].weight.uniform_(0.5, 1.5)
+            mod[1].bias.uniform_(-0.5, 0.5)
+        scripted_mod = torch.jit._freeze.freeze(torch.jit._script.script(mod))
+        torch._C._jit_pass_convert_frozen_ops_to_mkldnn(scripted_mod.graph)
+        FileCheck().check("prim::MKLDNNLayerNorm").run(scripted_mod.graph)
+
+        inp = torch.rand([1, 8, 8, 8])
+        self.assertEqual(scripted_mod(inp), mod(inp))
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_batch_norm_bf16_base(self, dim, channels, input):
@@ -1322,8 +1307,6 @@ class TestMkldnn(TestCase):
                 linear(x),
                 mkldnn_linear(x.to_mkldnn()).to_dense())
 
-            self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
-            self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
 
     def test_linear_backward(self):
         in_features = torch.randint(3, 10, (1,)).item()
@@ -1412,19 +1395,7 @@ class TestMkldnn(TestCase):
         torch.tanh_(mkldnn_x)
         self.assertEqual(x, mkldnn_x.to_dense())
 
-    def _test_serialization(self, module, inputs):
-        with TemporaryFileName() as fname:
-            torch.jit.save(module, fname)
-            loaded = torch.jit.load(fname)
-            self.assertEqual(
-                module(*inputs).to_dense(),
-                loaded(*inputs).to_dense())
 
-    def _test_tracing(self, module, inputs):
-        traced = torch.jit.trace(module, inputs)
-        self.assertEqual(
-            module(*inputs).to_dense(),
-            traced(*inputs).to_dense())
 
     def test_set_data_tensorimpl_type(self):
         # Dense tensor has impl of type `TensorImpl`, while MKL-DNN tensor has impl
@@ -1440,13 +1411,34 @@ class TestMkldnn(TestCase):
         self.assertEqual(x1.size(), x2.to_dense().size())
         self.assertEqual(x1.dtype, x2.to_dense().dtype)
 
-    def test_zero_(self):
-        x1 = torch.randn(4, 5, dtype=torch.float32) * 10
-        x2 = x1.clone().to_mkldnn()
-        self.assertEqual(
-            x1.zero_(),
-            x2.zero_().to_dense(),
+    @parametrize("dtype", types + [torch.int8, torch.uint8])
+    @parametrize("shape", [(0,), (1,), (63,), (64,), (65,), (4, 5), (2, 17, 3, 3), (16385,)])
+    def test_zero_(self, dtype, shape):
+        x = torch.full(shape, 1, dtype=dtype)
+        mkldnn_x = x.to_mkldnn()
+        self.assertIs(mkldnn_x.zero_(), mkldnn_x)
+        self.assertTrue(mkldnn_x.is_mkldnn)
+        self.assertEqual(mkldnn_x.dtype, dtype)
+        self.assertEqual(mkldnn_x.to_dense(), torch.zeros_like(x))
+
+    @parametrize("dtype", types)
+    def test_zero_padded_weights(self, dtype):
+        lowp_support = {
+            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+            torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported,
+        }
+        if dtype in lowp_support and not lowp_support[dtype]():
+            self.skipTest("CPU does not support this low-precision weight reorder")
+
+        weight = torch.ones(17, 17, 3, 3, dtype=dtype)
+        packed = torch._C._nn.mkldnn_reorder_conv2d_weight(
+            weight.to_mkldnn(), (1, 1), (1, 1), (1, 1), 1,
         )
+        if torch.ops.mkldnn._nbytes(packed) == weight.numel() * weight.element_size():
+            self.skipTest("Selected oneDNN weight format does not use padding")
+
+        self.assertIs(packed.zero_(), packed)
+        self.assertEqual(packed.to_dense(), torch.zeros_like(weight))
 
     def test_is_mkldnn(self):
         x = torch.randn(1, dtype=torch.float32)
@@ -1464,18 +1456,6 @@ class TestMkldnn(TestCase):
         self.assertRaises(RuntimeError, lambda: x_mkldnn.new(torch.Size([2, 3])))
         self.assertRaises(RuntimeError, lambda: x_mkldnn.new([6]))
 
-    def test_is_mkldnn_jit(self):
-        class EnsureMkldnn(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, x):
-                if not x.is_mkldnn:
-                    x = x.to_mkldnn()
-                return x
-
-        m = EnsureMkldnn()
-        x = torch.randn(1, dtype=torch.float32)
-        self.assertTrue(m(x).is_mkldnn)
-        self.assertTrue(m(x.to_mkldnn()).is_mkldnn)
 
     def _test_imagenet_model(self, model):
         model = model.train(False).float()
@@ -1995,6 +1975,7 @@ class TestMkldnn(TestCase):
         self.assertTrue(torch._C._is_cow_tensor(wbn_c))
         self.assertEqual(wbn_c, wbn_copy)
 
+    @unittest.skipIf(not torch.cpu.get_capabilities().get("amx_int8", False), "AMX is not supported on this machine")
     def test_mkldnn_scaled_mm_cow_input(self):
         if not torch.cpu.get_capabilities().get("amx_int8", False):
             self.skipTest("AMX is not supported on this machine")
@@ -2021,6 +2002,11 @@ class TestMkldnn(TestCase):
         self.assertEqual(bsc, bsc_copy)
         self.assertEqual(bias_sc, bias_sc_copy)
 
+    @unittest.skipIf(
+        not (torch.cpu.get_capabilities().get("avx512_vnni", False)
+             or torch.cpu.get_capabilities().get("architecture") == "aarch64"),
+        "VNNI is not supported on this machine",
+    )
     def test_mkldnn_int_mm_cow_input(self):
         if not (
             torch.cpu.get_capabilities().get("avx512_vnni", False)

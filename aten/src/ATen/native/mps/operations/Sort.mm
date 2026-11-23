@@ -13,8 +13,9 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/metal/common.h>
-#include <c10/util/TypeCast.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -645,7 +646,12 @@ static std::tuple<Tensor&, Tensor&> median_with_indices_impl_mps(Tensor& values,
 // Global median via radix selection (see Sort.metal); no sort materialized.
 static void median_radix_select(const Tensor& flat, const Tensor& out_val, bool ignore_nan) {
   const int n_passes = static_cast<int>(flat.element_size());
-  const auto numel = c10::checked_convert<uint32_t>(flat.numel(), "uint32_t");
+  // The histogram kernel strides through the input in uint32 by up to 256 * 256 threads.
+  TORCH_CHECK(std::in_range<uint32_t>(flat.numel() + 256 * 256),
+              "median: MPS does not support tensors with ",
+              flat.numel(),
+              " elements");
+  const auto numel = c10::safe_conv<uint32_t>(flat.numel(), "input.numel()");
   auto state = at::zeros({3}, flat.options().dtype(kLong));
   auto hist = at::zeros({257}, flat.options().dtype(kInt));
   const auto n_tgs = std::min<uint32_t>(at::ceil_div(numel, 256u), 256u);

@@ -1565,27 +1565,14 @@ def load(
 
     with _open_file_like(f, "rb") as opened_file:
         if _is_zipfile(opened_file):
-            # The zipfile reader is going to advance the current file position.
-            # If we want to actually tail call to torch.jit.load, we need to
-            # reset back to the original position.
-            orig_position = opened_file.tell()
             overall_storage = None
             with _open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
-                    warnings.warn(
-                        "'torch.load' received a zip file that looks like a TorchScript archive"
-                        " dispatching to 'torch.jit.load' (call 'torch.jit.load' directly to"
-                        " silence this warning)",
-                        UserWarning,
-                        stacklevel=2,
+                    raise RuntimeError(
+                        "TorchScript archives are no longer supported by torch.load. "
+                        "Use an older PyTorch version to load a legacy archive, or migrate "
+                        "the original model to torch.export and use torch.export.load."
                     )
-                    if weights_only:
-                        raise RuntimeError(
-                            "Cannot use ``weights_only=True`` with TorchScript archives passed to "
-                            "``torch.load``. " + UNSAFE_MESSAGE
-                        )
-                    opened_file.seek(orig_position)
-                    return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
                     if not _is_path(f):
                         raise ValueError(
@@ -1901,7 +1888,7 @@ def _legacy_load(
             if _is_zipfile(f):
                 # .zip is used for torch.jit.save and will throw an un-pickling error here
                 raise RuntimeError(
-                    f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)"
+                    f"{f.name} is a zip archive, not a legacy tensor checkpoint"
                 ) from None
             # if not a tarfile, reset file offset and proceed
             f.seek(0)

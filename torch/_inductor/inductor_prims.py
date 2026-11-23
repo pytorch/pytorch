@@ -47,7 +47,9 @@ def make_prim(
     doc: str = "",
     tags: Sequence[torch.Tag] | None = None,
 ):
-    if isinstance(return_type, tuple):
+    if return_type is _prims.RETURN_TYPE.INPLACE:
+        meta = impl_aten
+    elif isinstance(return_type, tuple):
 
         def meta(*args, **kwargs):
             return tuple(_prims.TensorMeta(o) for o in impl_aten(*args, **kwargs))
@@ -236,6 +238,7 @@ _unsafe_index_put_ = make_prim(
     lambda self, indices, values, accumulate=False: torch.ops.aten.index_put_(
         self, indices, values, accumulate
     ),
+    return_type=_prims.RETURN_TYPE.INPLACE,
     doc="Unsafe index_put_ (doesn't issue device asserts)",
 )
 fma = make_prim(

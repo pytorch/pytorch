@@ -81,7 +81,7 @@ class _InternalRPCPickler:
         loads and returns the ScriptModule.
         """
         f = io.BytesIO(script_module_serialized)
-        m = torch.jit.load(f)
+        m = torch.jit._serialization.load(f)
         return m
 
     def _script_module_reducer(self, script_module):
@@ -89,7 +89,7 @@ class _InternalRPCPickler:
         Serializes a ScriptModule.
         """
         f = io.BytesIO()
-        torch.jit.save(script_module, f)
+        torch.jit._serialization.save(script_module, f)
         return (_InternalRPCPickler._script_module_receiver, (f.getvalue(),))
 
     def serialize(self, obj):

@@ -16,15 +16,15 @@ torch.ops.load_library("//caffe2/torch/fb/operators:decode_bundled_image")
 
 def model_size(sm):
     buffer = io.BytesIO()
-    torch.jit.save(sm, buffer)
+    torch.jit._serialization.save(sm, buffer)
     return len(buffer.getvalue())
 
 
 def save_and_load(sm):
     buffer = io.BytesIO()
-    torch.jit.save(sm, buffer)
+    torch.jit._serialization.save(sm, buffer)
     buffer.seek(0)
-    return torch.jit.load(buffer)
+    return torch.jit._serialization.load(buffer)
 
 
 """Return an InflatableArg that contains a tensor of the compressed image and the way to decode it
@@ -73,7 +73,7 @@ class TestBundledImages(TestCase):
         tensor = torch.from_numpy(im)
         inflatable_arg = bundle_jpeg_image(tensor, 90)
         input = [(inflatable_arg,)]
-        sm = torch.jit.script(SingleTensorModel())
+        sm = torch.jit._script.script(SingleTensorModel())
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(sm, input)
         loaded = save_and_load(sm)
         inflated = loaded.get_all_bundled_inputs()
