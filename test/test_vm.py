@@ -15861,9 +15861,12 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                     twice = [calls(*eager) for _ in range(2)]
                     expected = [shorter(a, b) for a, b in zip(*twice)]
                     self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
-                    # The key is compared in every call it is there in.
-                    logged = sum(len(row[2]) for row in expected)
-                    self.assertEqual(logged, 14 if when == "always" else 2, msg=msg)
+                    # The key is compared in every call it is there in, and
+                    # in no other: once, or as often as the probes of the
+                    # lookup come to a key that is equal to nothing.
+                    there = [at for at, row in enumerate(expected) if row[2]]
+                    wanted = list(range(14)) if when == "always" else [7, 10]
+                    self.assertEqual(there, wanted, msg=msg)
                     if when == "late" and (behind or graded):
                         # With plain keys the whole function is one graph.
                         found = [g for g in torch.vm.regions(compiled) if "ops" in g]
