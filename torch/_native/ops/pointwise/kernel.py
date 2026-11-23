@@ -480,6 +480,7 @@ def tma_eligible(
     force: bool = False,
     out_strides: Shape | None = None,
 ) -> TmaLayout | None:
+    """Classify caller-validated CUDA operands and supplied output metadata."""
     tensors = [t for t in inputs if t.numel() != 1]
     if not tensors or len(shape) < 1:
         return None
@@ -497,14 +498,9 @@ def tma_eligible(
         return None
     if any(
         t.device != ref.device
-        or t.is_neg()
-        or t.is_conj()
-        or not can_use_32bit_indexing(t)
         or (t.numel() != 1 and (t.dtype != ref.dtype or tuple(t.shape) != shape))
         for t in inputs
     ):
-        return None
-    if not ref.is_cuda:
         return None
     hw = _hw.caps(ref.device)
     if hw.cc[0] not in POINTWISE_ARCH_MAJORS:
@@ -540,7 +536,7 @@ def tma_eligible(
     if any(
         orientation is not None and const_data_ptr(t) % (128 if orientation else 16)
         for t, orientation in zip(inputs, layout.transposed)
-    ) or (target is not None and const_data_ptr(target) % 16):
+    ) or (target is not None and not _is_16b_aligned(target)):
         return None
     ntma = sum(t is not None for t in layout.transposed)
     smem = ntma * (TMA_STAGES * TMA_TILE**2 * ref.element_size() + TMA_SMEM_ALIGNMENT)
@@ -884,8 +880,10 @@ def run(
     *,
     load: Load | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    r"""Run on current CUDA with CPU scalars and exact broadcast-shaped outputs.
-    Loads round through common dtype unless casts are explicit; callers check aliases."""
+    r"""Run with broadcast outputs and default common-dtype casts; callers check aliases.
+    load=None is automatic, 'direct' disables TMA, and 'tma' requests it with fallback."""
+    if load not in (None, "direct", "tma"):
+        raise ValueError(f"invalid pointwise load mode: {load!r}")
     ref, shape = _validate_operands(
         nin, nout, inputs, out_dtypes, out, input_casts, result_dtypes
     )
@@ -910,6 +908,12 @@ def run(
         )
         for t in (*inputs, *(out or ()))
     )
+    aliases = (
+        load != "direct"
+        and nout == 1
+        and not with_index
+        and any(torch._C._is_alias_of(o, t) for o in (out or ()) for t in inputs)
+    )
     plan_key = (
         device,
         key,
@@ -925,7 +929,7 @@ def run(
         vec_bits,
         load,
         layouts,
-        tuple(torch._C._is_alias_of(o, t) for o in (out or ()) for t in inputs),
+        aliases,
         input_casts,
         result_dtypes,
     )
