@@ -32,6 +32,7 @@ from torch._inductor.utils import (
     is_big_gpu,
 )
 from torch.testing._internal.common_utils import (
+    EXPANDABLE_SEGMENTS,
     instantiate_parametrized_tests,
     parametrize,
     skipIfNoCuteDSL,
@@ -2411,10 +2412,15 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
         )
 
         a_numel = total_rows * K
+        # Use a 10 MiB, 2 MiB-aligned allocation so the final A slice can be
+        # placed at the end of a fresh CUDA allocation.
         allocation_bytes = max(
             10 * 2**20,
             ((a_numel * dtype.itemsize + 2**21 - 1) // 2**21) * 2**21,
         )
+
+        if EXPANDABLE_SEGMENTS:
+            self.skipTest("allocation-end regression requires non-expandable segments")
 
         def grouped_gemm_fn(A, B, offs):
             return torch.nn.functional.grouped_mm(A, B, offs=offs)
@@ -2427,9 +2433,23 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
                 "autotune_fallback_to_aten": False,
             }
         ), fresh_cache():
+            torch.cuda.empty_cache()
             storage = torch.randn(
                 allocation_bytes // dtype.itemsize, device=device, dtype=dtype
             )
+            storage_ptr = storage.untyped_storage().data_ptr()
+            storage_nbytes = storage.numel() * dtype.itemsize
+            terminal_segments = [
+                segment
+                for segment in torch.cuda.memory_snapshot(include_traces=False)
+                if segment["address"]
+                <= storage_ptr
+                < segment["address"] + segment["total_size"]
+                and storage_ptr + storage_nbytes
+                == segment["address"] + segment["total_size"]
+            ]
+            if not terminal_segments:
+                self.skipTest("storage was not allocated at a CUDA segment boundary")
             A = storage[-a_numel:].view(total_rows, K)
             B = torch.randn(2, K, N, device=device, dtype=dtype)
             expected = grouped_gemm_fn(A, B, offsets)
