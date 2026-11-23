@@ -69,7 +69,10 @@ def _to_fake_cute_tensor(t, assumed_align=16):
 
 def _to_fake_gemm_tensor(t, assumed_align=16):
     """Build a symbolic layout for a descriptor-seed GEMM operand."""
-    shape = tuple(1 if int(size) == 1 else cute.sym_int64() for size in t.shape)
+    shape = tuple(
+        1 if dim == t.ndim - 1 else cute.sym_int64()
+        for dim in range(t.ndim)
+    )
     leading_dim = next(
         (
             dim
@@ -84,7 +87,7 @@ def _to_fake_gemm_tensor(t, assumed_align=16):
         if dim == leading_dim
         else cute.sym_int64(
             divisibility=(
-                stride_divisibility if int(t.shape[dim]) != 1 else 1
+                stride_divisibility if dim != t.ndim - 1 else 1
             )
         )
         for dim in range(t.ndim)
@@ -353,6 +356,14 @@ def launch_build_group_ptrs_from_bases(
     )
     gemm_executor = disk_cache_get(_gemm_fn_cache, __file__, _KERNEL_CONFIG_KEY, gemm_cache_key, dev_idx)
 
+    a_unsq = input_a.unsqueeze(-1)
+    b_unsq = input_b[0].unsqueeze(-1)
+    c_unsq = {{get_output()}}.unsqueeze(-1)
+    # Keep alignment-sized descriptor seeds alive outside CUDA graph capture.
+    seed_a = _get_gemm_seed_tensor(a_unsq)
+    seed_b = _get_gemm_seed_tensor(b_unsq)
+    seed_c = _get_gemm_seed_tensor(c_unsq)
+
     if gemm_executor is None:
         grouped_gemm = GroupedGemmKernel(
             acc_dtype=ACC_DTYPE,
@@ -362,13 +373,6 @@ def launch_build_group_ptrs_from_bases(
             tensormap_update_mode=TENSORMAP_UPDATE_MODE,
         )
 
-        a_unsq = input_a.unsqueeze(-1)
-        b_unsq = input_b[0].unsqueeze(-1)
-        c_unsq = {{get_output()}}.unsqueeze(-1)
-        # Keep alignment-sized descriptor seeds alive outside CUDA graph capture.
-        seed_a = _get_gemm_seed_tensor(a_unsq)
-        seed_b = _get_gemm_seed_tensor(b_unsq)
-        seed_c = _get_gemm_seed_tensor(c_unsq)
         gemm_executor = cute.compile(
             grouped_gemm,
             _to_fake_gemm_tensor(seed_a),
@@ -388,9 +392,9 @@ def launch_build_group_ptrs_from_bases(
         disk_cache_set(_gemm_fn_cache, __file__, _KERNEL_CONFIG_KEY, gemm_cache_key, gemm_executor, dev_idx)
 
     gemm_executor(
-        input_a.unsqueeze(-1),
-        input_b[0].unsqueeze(-1),
-        {{get_output()}}.unsqueeze(-1),
+        seed_a,
+        seed_b,
+        seed_c,
         probs_t,
         strides_t,
         ptrs_t,

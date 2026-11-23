@@ -2398,6 +2398,46 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
 
         torch.testing.assert_close(c_eager, c_compiled)
 
+    def test_grouped_gemm_descriptor_seed_at_allocation_end(self):
+        device = "cuda"
+        dtype = torch.bfloat16
+        group_sizes = (504, 8)
+        K, N = 4096, 1024
+        total_rows = sum(group_sizes)
+        offsets = torch.tensor(
+            [*torch.tensor(group_sizes).cumsum(0).tolist()],
+            device=device,
+            dtype=torch.int32,
+        )
+
+        a_numel = total_rows * K
+        allocation_bytes = max(
+            10 * 2**20,
+            ((a_numel * dtype.itemsize + 2**21 - 1) // 2**21) * 2**21,
+        )
+
+        def grouped_gemm_fn(A, B, offs):
+            return torch.nn.functional.grouped_mm(A, B, offs=offs)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTEDSL",
+                "test_configs.autotune_choice_name_regex": "cutedsl",
+                "autotune_fallback_to_aten": False,
+            }
+        ), fresh_cache():
+            storage = torch.randn(
+                allocation_bytes // dtype.itemsize, device=device, dtype=dtype
+            )
+            A = storage[-a_numel:].view(total_rows, K)
+            B = torch.randn(2, K, N, device=device, dtype=dtype)
+            expected = grouped_gemm_fn(A, B, offsets)
+            compiled = torch.compile(grouped_gemm_fn, backend="inductor", dynamic=False)
+            actual = compiled(A, B, offsets)
+
+        torch.testing.assert_close(actual, expected)
+
 
 if __name__ == "__main__":
     run_tests()
