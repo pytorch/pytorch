@@ -4325,10 +4325,11 @@ def load(
     backend and the capture's ``mode`` or ``options`` (recorded in the
     artifact's ``INDUCTOR_OPTIONS``), as ``torch.compile`` would, under the
     process-wide stance like any other compile. ``INDUCTOR_OPTIONS`` also
-    holds the ``triton.cudagraphs`` and ``triton.cudagraph_trees`` the
-    capture's own compiles ran under, wherever they came from, so a miss is
-    lowered with CUDA graphs exactly when the capture's graphs were. Dynamo
-    traces it under the loading process's own config, though: for an artifact
+    holds ``triton.cudagraphs`` and ``triton.cudagraph_trees`` as the capture
+    resolved them when ``capture()`` was called (its options over
+    ``torch._inductor.config``), so a miss is lowered with CUDA graphs when
+    the capture asked for them, wherever it asked. Dynamo traces it under the
+    loading process's own config, though: for an artifact
     captured with CUDA graphs on and ``graph_partition`` off, turn
     ``triton.cudagraphs`` on in the loading process too, or a Python float
     argument becomes a CPU scalar input that keeps the serve-time graph out

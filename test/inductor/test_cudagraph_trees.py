@@ -5111,6 +5111,37 @@ if HAS_CUDA_AND_TRITON:
             # One graph for forward (backward is disabled)
             self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
+        @torch._functorch.config.patch("enable_autograd_cache", True)
+        @torch._inductor.config.patch("fx_graph_cache", True)
+        @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        @torch._dynamo.config.patch("specialize_float", True)
+        def test_cudagraph_annotation_disable_bwd_only_cache_hit(self):
+            # A cache hit post-compiles the backward with its forward's cudagraphs
+            # box, though the override compiled it without them.
+            @torch._dynamo.override_cudagraphs(bwd=False)
+            def helper(x):
+                return (x * x).sin()
+
+            def fn(x):
+                return helper(x)
+
+            AOTAutogradCache.clear()
+            for hits in (0, 1):
+                torch._dynamo.reset()
+                counters.clear()
+                fn_compiled = torch.compile(fn, mode="reduce-overhead")
+                for _ in range(3):
+                    inp = torch.randn(4, 4, device="cuda", requires_grad=True)
+                    torch.compiler.cudagraph_mark_step_begin()
+                    out = fn_compiled(inp)
+                    out.sum().backward()
+                self.assertEqual(out, inp.detach().pow(2).sin())
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], hits)
+                # The override is reported once, on a hit as on a compile.
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+                # One graph for forward (backward is disabled)
+                self.assertEqual(self.get_manager().new_graph_id().id, 1)
+
         def test_cudagraph_annotation_disable_fwd_only(self):
             @torch._dynamo.override_cudagraphs(fwd=False)
             def helper(x):
