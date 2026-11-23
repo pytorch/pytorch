@@ -379,7 +379,8 @@ void CUDAGraph::instantiate() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-#if !defined(USE_ROCM)
+  // HIP before ROCm 10.2 rejects combined instantiate flags with hipErrorInvalidValue.
+#if !defined(USE_ROCM) || ROCM_VERSION >= 100200
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch | cudaGraphInstantiateFlagUseNodePriority));
@@ -444,6 +445,14 @@ cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
       has_graph_exec_,
       "You cannot access the raw cudaGraphExec_t instance until instantiate() has been called");
   return graph_exec_;
+}
+
+void CUDAGraph::set_raw_cuda_graph_exec(cudaGraphExec_t graph_exec) {
+  TORCH_CHECK(capture_ended_, "capture_end() must have been called before setting a graph executable");
+  TORCH_CHECK(keep_graph_, "set_raw_cuda_graph_exec() requires keep_graph=True");
+  TORCH_CHECK(has_graph_, "set_raw_cuda_graph_exec() requires a retained cudaGraph_t");
+  graph_exec_ = graph_exec;
+  has_graph_exec_ = graph_exec != nullptr;
 }
 
 void CUDAGraph::reset() {
