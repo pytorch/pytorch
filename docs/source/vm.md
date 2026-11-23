@@ -1886,10 +1886,12 @@ such a check runs the instructions. Where the read goes through what a store
 changed in the very call the path is taken down in (`h.__dict__["n"] = 7`
 and then `h.n`; `a.append(1)` and then `len(a)`), the path ends in front of
 the read, and so it does for an iterator or a view from outside the path,
-of which it is not known what it goes over, and for a read of an attribute
-of an object whose class reads its attributes in a function of its own (a
-`__getattribute__` written in Python): what that function gives under a
-name need not be what was stored under it. A store at a place of a list
+of which it is not known what it goes over. A read of an attribute of an
+object whose class reads its attributes in a function of its own (a
+`__getattribute__` written in Python) is not given what was stored: the
+path goes into the function, and what that reads of the object is looked
+at behind the stores ("Classes that read their attributes themselves"). A
+store at a place of a list
 (`l[0] = v`) is to a place the list has by then, the items that the stores
 of the path in front of it append counted.
 
@@ -2270,6 +2272,33 @@ settings.hidden = 3.0
 torch.equal(g(x, settings), reads_settings(x, settings))  # True: what the function reads is read at every call
 ```
 
+Behind a store of the path such a read goes into the function too. What the
+function reads with `super().__getattribute__(key)` is then looked at as a
+read of that attribute of the object: it goes on where no store of the path
+can have changed it, under the checks a plain read has ("Stores into
+objects"), and ends the path where one may have. A decoder that stores into
+a cache and then reads its configuration is such code:
+
+```python
+class Cache:
+    def __init__(self):
+        self.keys = None
+
+
+def keeps_and_reads(x, settings, cache):
+    y = (x.sin() + 1).cos()
+    cache.keys = y
+    return (y * settings.hidden).tanh().exp()
+
+
+cache = Cache()
+g = torch.vm(keeps_and_reads, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(x, settings, cache), keeps_and_reads(x, settings, cache))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, cache.keys is not None, found["ops"], found["why"]  # (True, True, 6, 'the function returns')
+```
+
 ### Variables an inner function could take
 
 A function with a variable that an inner function could take (a nested
@@ -2417,6 +2446,62 @@ is of the turns inside that one process.
 | resnet50, bfloat16, `Graphs()`, images a second | 2874, 2754, 2799 | 2887, 2779, 2819 | 1.00x, 1.01x, 1.01x |
 | resnet18, `Graphs()`, steps a second | 136.2, 142.1, 142.3 | 141.1, 143.0, 143.0 | 1.04x, 1.01x, 1.01x |
 
+The models of timm and the transformer models have other code around their
+operations than the convolutional models above, and the graphs they get are
+counted here without times: on the CPU, in float32 with a batch of 2, the
+models loaded and called as the benchmark runner of `benchmarks/dynamo` does,
+with a pass that returns the graph. The operations of a call are the
+operators that Python calls in one call of the model in eager mode, as the
+profiler counts them (a figure can come out a few over that count, where the
+profiler counts an operation of a graph as less than one):
+
+| model | graphs that run | runs of a graph in a call | operations of a call in them |
+|---|---|---|---|
+| mobilenetv2_100 (timm) | 1 | 1 | 152 of 152 |
+| adv_inception_v3 (timm) | 1 | 1 | 314 of 314 |
+| deit_base_distilled_patch16_224 (timm) | 1 | 1 | 233 of 233 |
+| DistillGPT2 (HuggingFace) | 4 | 9 | 249 of 247 |
+| hf_DistilBert (TorchBench) | 3 | 13 | 132 of 136 |
+| MobileBertForMaskedLM (HuggingFace) | 3 | 3 | 1295 of 1250 |
+| whisper-tiny (HuggingFace) | 5 | 22 | 342 of 385 |
+
+The outputs are those of eager mode bit for bit. A timm model and the vision
+transformer are one graph, the whole forward. A transformer language model
+has all or nearly all of its operations in graphs, but in several per call:
+one per layer or per stack of layers, and a few around them. What their
+paths end at is `getattr(config, name, default)` where the configuration
+raises for a name it does not have (at the start of every model, where the
+attention mask is made), a branch on what the mask holds, the objects the
+models construct for their outputs, and library code such as
+`inspect.signature` ("Limits"). A training step has fewer of its operations
+in graphs: for DistillGPT2, 5 graphs that run 15 times in a step, with 189
+of the about 820 operators that the profiler counts in one step of eager
+mode (forward, loss, backward and update together), since a dropout that
+drops and an attention with a dropout rate are operations only where
+nothing that can fail has been taken down in front of them ("Writes").
+
+With the models on a GPU (one H100, counted the same way) the timm models,
+the vision transformer and hf_DistilBert have the graphs of the table above.
+The models that call `scaled_dot_product_attention` with `**` have fewer of
+their operations in graphs there, in the build of torch they were counted
+with, which has no fused attention kernels: the attention comes down to
+`bmm`, whose CUDA kernel is entered through a Python function, so the call
+is no operation ("What a call names with a dict"), and the graph of a layer
+ends in front of it and another starts behind it:
+
+| model, on a GPU | graphs that run | runs of a graph in a call | operations of a call in them |
+|---|---|---|---|
+| DistillGPT2 | 5 | 15 | 189 of 253 |
+| MobileBertForMaskedLM | 7 | 170 | 1127 of 1274 |
+| whisper-tiny | 6 | 30 | 173 of 389 |
+| Qwen3-0.6B (HuggingFace) | 4 | 31 | 2097 of 2217 |
+
+The outputs are eager's bit for bit there as well. With a GPU present
+`torch.cuda.is_current_stream_capturing()`, which the mask code of a
+transformer asks on its way, is a call that a path does not go through,
+where on a machine without one it raises: the path ends there either way.
+No times are given for these models: they have not been timed on a GPU.
+
 ### Limits
 
 What graphs do not do at this stage:
@@ -2441,6 +2526,24 @@ What graphs do not do at this stage:
   every call to go through another dict or list than the store changes, a
   check per store ("Stores into objects"); a read through what a store
   changed ends the path.
+- A raise that is caught ends a path: `getattr(obj, name, default)` and
+  `hasattr` where a `__getattribute__` written in Python raises
+  `AttributeError`, a `try` around a call that raises, `Mapping.get` of a key
+  that is not there. So do constructing an object (a dataclass of outputs,
+  a named tuple, `functools.partial`), making an inner function or a
+  lambda, a `with` block, and library code a path is not known to be able
+  to call (`inspect.signature`). These are what the paths of transformer
+  models end at ("Models").
+- A call with `*` or `**` is an operation only where the operator it runs
+  enters no Python code. On a GPU the kernel of `bmm` is entered through a
+  Python function, so such a call of `bmm`, or of what comes down to it,
+  ends a path ("Methods read off a tensor, and what a call spreads";
+  "Models" has what that costs a transformer).
+- An operation that draws random numbers is one of a path only where
+  nothing that can fail has been taken down in front of it ("Writes"). In
+  the layers of a transformer in training mode that is seldom so, and their
+  paths end at a dropout that drops or at an attention with a dropout rate
+  ("Models" has what a training step of one looks like).
 - A graph does not take a call in which it would let go of the last
   reference that Python has to a tensor which requires a gradient ("Passes
   over graphs"), also where what the graph gives keeps the history of that

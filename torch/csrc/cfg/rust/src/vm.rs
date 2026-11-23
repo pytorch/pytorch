@@ -7271,6 +7271,12 @@ impl Compiled {
                 if bound && t.stores.iter().any(named) {
                     return ends();
                 }
+                // A read that goes into the `__getattribute__` of the class
+                // reads nothing itself: what that function reads is looked
+                // at where it reads it.
+                if self.asks_its_class(held) {
+                    return None;
+                }
                 return match self.stored(t, regs, *a, f.consts[*name as usize].as_ptr(), true, inst.bc) {
                     Behind::Clear => None,
                     Behind::Ends => ends(),
@@ -7320,24 +7326,50 @@ impl Compiled {
             Op::Call { callee, args, .. } if args.len() >= 2 && graph::reads_attribute(reg(regs, *callee)) => {
                 let name = reg(regs, args[1]);
                 let named = !name.is_null() && !capi::is_unboxed(name) && ffi::PyUnicode_CheckExact(name) != 0;
+                if named && self.asks_its_class(reg(regs, args[0])) {
+                    return None;
+                }
                 if !named || !matches!(self.stored(t, regs, args[0], name, true, inst.bc), Behind::Clear) {
                     return ends();
                 }
             }
             // What `object.__getattribute__` reads of the object it is
-            // bound to is not looked for among the stores.
-            Op::Call { callee, .. } if !reg(regs, *callee).is_null() => {
-                let reader = graph::generic_reader(reg(regs, *callee));
-                xdecref(reader);
+            // bound to (`super().__getattribute__(key)`): an attribute of
+            // that object, read as `object` reads it. Only what no store
+            // of the path can have changed goes on.
+            Op::Call { callee, args, .. } | Op::CallMethod { recv: callee, args, .. } if !reg(regs, *callee).is_null() => {
+                let held = reg(regs, *callee);
+                let method = matches!(inst.op, Op::CallMethod { .. });
+                let bound = !capi::is_unboxed(held) && ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(ffi::PySuper_Type);
+                let named = |name: u32| graph::same_value(f.consts[name as usize].as_ptr(), graph::specials().getattribute.as_ptr());
+                let reader = match &inst.op {
+                    Op::CallMethod { name, .. } if bound && named(*name) => ffi::PyObject_GetAttrString(held, c"__self__".as_ptr()),
+                    Op::CallMethod { .. } => null_mut(),
+                    _ => graph::generic_reader(held),
+                };
+                ffi::PyErr_Clear();
                 if !reader.is_null() {
-                    return ends();
-                }
-            }
-            Op::CallMethod { recv, name, .. } => {
-                let held = reg(regs, *recv);
-                let bound = !held.is_null() && !capi::is_unboxed(held) && ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(ffi::PySuper_Type);
-                if bound && graph::same_value(f.consts[*name as usize].as_ptr(), graph::specials().getattribute.as_ptr()) {
-                    return ends();
+                    let _kept = PyObj::from_owned(reader);
+                    // The value of the path that the object is: what
+                    // `super()` was made with.
+                    let made = |t: &Trace, v: PathValue| t.body.iter().find(|other| other.dst == v && v != NONE).map(|other| other.op.clone());
+                    let mut from = t.mapped(*callee);
+                    if !method {
+                        from = match made(t, from) {
+                            Some(Op::LoadAttr(of, _)) => of,
+                            _ => NONE,
+                        };
+                    }
+                    let this = match made(t, from) {
+                        Some(Op::SuperObject { this, .. }) => this,
+                        _ => NONE,
+                    };
+                    let key = if args.len() == 1 { reg(regs, args[0]) } else { null_mut() };
+                    let text = !key.is_null() && !capi::is_unboxed(key) && ffi::PyUnicode_CheckExact(key) != 0;
+                    let same = this != NONE && t.rec.values[this as usize] == reader;
+                    if !(text && same && matches!(self.stored_of(t, reader, this, key, true, inst.bc), Behind::Clear)) {
+                        return ends();
+                    }
                 }
             }
             // A dict that was stored into may be the one the globals are
@@ -7417,6 +7449,15 @@ impl Compiled {
         from.into_iter().all(|v| v == value || Self::sources(t, v, found))
     }
 
+    /// Whether a read of an attribute of an object goes into the
+    /// `__getattribute__` of its class (see `Form::Getattribute`).
+    unsafe fn asks_its_class(&self, held: Obj) -> bool {
+        let names = graph::specials();
+        !held.is_null()
+            && !graph::special(held, &names.getattribute).is_null()
+            && pyffi::_PyType_Lookup(ffi::Py_TYPE(held), names.getattr.as_ptr()).is_null()
+    }
+
     /// What a read of an attribute of an object (or of an entry of a
     /// dict), behind the stores of the path, is. Of the stores under the
     /// same name, the last one whose dict the read looks into decides: if
@@ -7446,6 +7487,13 @@ impl Compiled {
         if attribute && !graph::special(held, &graph::specials().getattribute).is_null() {
             return Behind::Ends;
         }
+        let by = self.path_value(t, regs, object);
+        self.stored_of(t, held, by, key, attribute, bc)
+    }
+
+    /// `stored` for an object and the value of the path that it is, read
+    /// as `object` reads an attribute (or as a dict is read).
+    unsafe fn stored_of(&self, t: &mut Trace, held: Obj, by: PathValue, key: Obj, attribute: bool, bc: u32) -> Behind {
         if attribute && pyffi::str_to_string(key) == "__dict__" {
             // The dict itself: what is read of it later is looked at then,
             // unless a store of the path is into it.
@@ -7457,7 +7505,6 @@ impl Compiled {
             .filter(|at| t.stores[*at].key.as_ref().is_some_and(|other| other.as_ptr() == key || graph::same_value(other.as_ptr(), key)))
             .collect();
         let last = alike.iter().rev().copied().find(|at| !graph::apart(held, attribute, t.stores[*at].object, t.stores[*at].keeps));
-        let by = self.path_value(t, regs, object);
         let mut given = None;
         if let Some(at) = last {
             let store = &t.stores[at];
