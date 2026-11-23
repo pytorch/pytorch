@@ -663,11 +663,12 @@ def get_redistribute_planner(
         return DTensorRedistributePlanner(device_mesh, dtensor_meta)
 
     cache_key = (weakref.ref(device_mesh), dtensor_meta)
-    if cache_key not in _planner_cache:
-        planner = DTensorRedistributePlanner(device_mesh, dtensor_meta)
-        _planner_cache[cache_key] = planner
+    cached = _planner_cache.get(cache_key)
+    if cached is None or cached._device_mesh_ref() is None:
+        cached = DTensorRedistributePlanner(device_mesh, dtensor_meta)
+        _planner_cache[cache_key] = cached
 
-    return _planner_cache[cache_key]
+    return cached
 
 
 def clear_redistribute_planner_cache() -> None:
@@ -843,7 +844,7 @@ class DTensorRedistributePlanner:
             device_mesh: The device mesh for this planner
             dtensor_meta: TensorMeta of the DTensor to redistribute
         """
-        self.device_mesh = device_mesh
+        self._device_mesh_ref: weakref.ReferenceType[DeviceMesh] = weakref.ref(device_mesh)
         if not device_mesh._is_current_rank_part_of_mesh():
             raise AssertionError
         if dtensor_meta is None:
@@ -853,6 +854,16 @@ class DTensorRedistributePlanner:
         self.strided_shard_placements_in_target: set[_StridedShard] = set()
         self.partial_reduce_ops_in_target: set[str] = set()
         self.setup_cost_callbacks()
+
+    @property
+    def device_mesh(self) -> DeviceMesh:
+        mesh = self._device_mesh_ref()
+        if mesh is None:
+            raise RuntimeError(
+                "DTensorRedistributePlanner outlived its DeviceMesh. The planner" \
+                "cache should have rebuilt this entry against the live mesh."
+            )
+        return mesh
 
     def setup_cost_callbacks(
         self,
