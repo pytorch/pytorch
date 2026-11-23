@@ -538,8 +538,9 @@ A path does not go into every call. It ends in front of a call
   small functions of plain Python on the way through a model (an argument
   check, the `__iter__` of a container) are the ones that are demoted, and
   the graph of the model goes through them. A call in which a graph of a
-  function waits, or a path of it is taken down, is no sample of that
-  measurement: it says nothing about how fast the function is going to be;
+  function waits, a path of it is taken down, or what was made of a graph
+  runs one of its first eight runs is no sample of that measurement: it
+  says nothing about how fast the function is going to be ("Limits");
 - of a function that is on the path eight times already: a function that
   calls itself is gone into that often, and an `nn.Sequential` inside an
   `nn.Sequential` is on a path twice;
@@ -3325,7 +3326,8 @@ handed to no compiler ("Limits"). The graph of deit is its whole forward,
 deit takes 6.28, 6.29 ms where eager's takes 6.68, 6.73. The graph of a
 layer of hf_DistilBert, 17 operations, keeps eager's tape for the same node;
 it is no faster than the instructions it stands for, so the measurement
-leaves the layer to the interpreter, and the 2 graphs that run hold 0.25 of
+leaves the layer to the interpreter, at its second look as at its first
+("Limits"), and the 2 graphs that run hold 0.25 of
 the 4.02 ms of a call. DistillGPT2's training step has 1.7 of its 29.8 ms in
 what stands for its graphs: a layer's MLP is a graph of 15 operations that
 runs 6 times in a step, but the attention of a layer is in none (the
@@ -3397,6 +3399,34 @@ What graphs do not do at this stage:
   it takes what the attention gave, and gives way. Counted without this rule
   the step has 6 graphs that run 21 times, with 227 of its operations in
   them, where it has the 5 that "Models" counts.
+- What is made of a graph is slow at first, most of all in a first process
+  with an empty compiler cache, where `Inductor()` compiles during the first
+  runs. The measurement against the interpreter (`demote`) does not give a
+  function up for that. A call in which a form runs one of its first eight
+  runs is no sample against the function. A sample of a function with such
+  a graph that is more than 1/8 faster than the best before it starts the
+  samples of the compiled side over, so the function does not lose while
+  its times are still coming down. And a function that loses while it has
+  a graph with a form runs in the interpreter for 64 of its calls and is
+  then measured a second time, which decides for good.
+  `stats()["second_looks"]` names each such function with `"to come"`,
+  `"under way"`, `"lost"` or `"won"`; until its second look is over,
+  `stats()["measuring"]` is true and `stats()["demoted_callees"]` lists it.
+  A second look stays `"to come"` where every function that calls the
+  function was itself left to the interpreter, which then runs it with
+  them. The case these rules are for is yolov3 with gradients recorded,
+  whose graph is its whole forward: in a first process with an empty cache
+  the first runs of its form that would have been samples took 3.6 s,
+  131 ms and 36.5 ms where the interpreter takes 11.5 ms, which would have
+  left the model to the interpreter for the rest of the process. It runs
+  its graph in such a process as in a later one: at 1.52 to 1.57 times
+  eager's speed in five first processes and at 1.51 to 1.56 in five with
+  the cache they filled. These figures are no rows of "Models": they were
+  taken beside other jobs (a load average of 40 to 90), without the lock
+  for timed runs. A function that is slower with its graph for good is
+  measured twice: with gradients recorded the layers of hf_DistilBert lose
+  both times ("Models"), and the model settles after 147 to 159 calls
+  where one measurement took 136.
 - A path lets go of an object from outside it only where the end of the
   object cannot run Python code, or the object stays alive. Whether it
   stays alive is looked at in front of what stands for the graph: for a
