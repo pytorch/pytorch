@@ -777,6 +777,41 @@ class ForeachTests(TestCase):
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
     @torch._dynamo.config.patch("assume_static_by_default", False)
     @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
+    @parametrize("cap,expected_kernels", [(4, 3), (16, 1)])
+    def test_dynamic_cat_combo_kernel_cap(self, cap, expected_kernels):
+        def fn(*xs):
+            return torch.cat(xs, dim=1)
+
+        inputs = [torch.rand(8, 4 * (i + 1), device=GPU_TYPE) for i in range(12)]
+        from torch._inductor.codegen.triton_combo_kernel import ComboKernel
+
+        with mock.patch.object(ComboKernel, "MAX_DYNAMIC_SUBKERNELS", cap):
+            self.check_model_gpu(fn, inputs)
+        self.assertEqual(
+            torch._inductor.metrics.generated_kernel_count, expected_kernels
+        )
+
+    def test_combo_kernel_cap_counts_only_dynamic_subkernels(self):
+        from torch._inductor.codegen.triton_combo_kernel import (
+            ComboKernel,
+            PartitionState,
+        )
+
+        state = PartitionState([], [], 0)
+        # Static subkernels never trigger the cap: three dynamic ones are split
+        # 2 + 1 no matter how many static ones sit between them.
+        with mock.patch.object(ComboKernel, "MAX_DYNAMIC_SUBKERNELS", 2):
+            for i, is_dynamic in enumerate(
+                [False, True, False, False, True, True, False]
+            ):
+                ComboKernel._update_partition(state, 1, i, is_dynamic)
+        state.finalize()
+        self.assertEqual(state.partitions, [[0, 1, 2, 3, 4], [5, 6]])
+
+    @requires_gpu
+    @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
+    @torch._dynamo.config.patch("assume_static_by_default", False)
+    @torch._inductor.config.patch("combo_kernel_foreach_dynamic_shapes", True)
     @torch._inductor.config.patch("cpp_wrapper", True)
     def test_enable_dynamic_shapes_cpp_wrapper_cuda(self, op=torch._foreach_add):
         def fn(a0, a1, b0, b1):
