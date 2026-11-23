@@ -449,6 +449,11 @@ The limits of this stage:
   with many sizes uses up `max_variants`. Sizes of the tensors the graph
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from.
+- Where what the passes made runs in place of the operations of a graph, a
+  variable that the graph binds and that nothing reads behind it is not in
+  the frame of the function there: `locals()`, a callee that reads its
+  caller's frame (`sys._getframe(1).f_locals`) and the frame of a traceback
+  do not have it.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
