@@ -62,6 +62,11 @@ on:
         required: false
         type: boolean
         default: false
+      vm:
+        description: Run torch.vm with Inductor graphs?
+        required: false
+        type: boolean
+        default: false
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -100,8 +105,8 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm90
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.2-py3.12-gcc11-sm90
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11-inductor-benchmarks
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '9.0'
       test-matrix: |
@@ -130,7 +135,7 @@ jobs:
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
       build-additional-packages: "vision audio fbgemm torchao"
-      python-version: "3.11"
+      python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.2"
     secrets: inherit
@@ -154,7 +159,7 @@ jobs:
       monitor-data-collect-interval: 4
       export-profiler-trace: "1"
       enable-torch-trace: "1"
-      python-version: "3.11"
+      python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.2"
     secrets: inherit
@@ -178,7 +183,7 @@ jobs:
       monitor-data-collect-interval: 4
       export-profiler-trace: "1"
       enable-torch-trace: "1"
-      python-version: "3.11"
+      python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.2"
     secrets: inherit
@@ -194,7 +199,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
-      dashboard-tag: training-${{ github.event_name != 'workflow_dispatch' || inputs.training }}-inference-${{ github.event_name != 'workflow_dispatch' || inputs.inference }}-default-${{ github.event_name != 'workflow_dispatch' || inputs.default }}-dynamic-${{ github.event_name != 'workflow_dispatch' || inputs.dynamic }}-cudagraphs-${{ github.event_name != 'workflow_dispatch' || inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-deterministic_perf-${{ inputs.deterministic_perf || 'false' }}-batch_invariant_accuracy-${{ inputs.batch_invariant_accuracy || 'false' }}
+      dashboard-tag: training-${{ github.event_name != 'workflow_dispatch' || inputs.training }}-inference-${{ github.event_name != 'workflow_dispatch' || inputs.inference }}-default-${{ github.event_name != 'workflow_dispatch' || inputs.default }}-dynamic-${{ github.event_name != 'workflow_dispatch' || inputs.dynamic }}-cudagraphs-${{ github.event_name != 'workflow_dispatch' || inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}-deterministic_perf-${{ inputs.deterministic_perf || 'false' }}-batch_invariant_accuracy-${{ inputs.batch_invariant_accuracy || 'false' }}-vm-${{ inputs.vm || 'false' }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720
@@ -204,7 +209,7 @@ jobs:
       monitor-data-collect-interval: 4
       export-profiler-trace: "1"
       enable-torch-trace: "1"
-      python-version: "3.11"
+      python-version: "3.12"
       compiler: gcc11
       cuda-version: "13.2"
     secrets: inherit

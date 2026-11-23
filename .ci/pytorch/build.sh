@@ -23,6 +23,14 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-sm90 ]]; then
+  # The build the H100 perf workflow measures carries the runtime of torch.vm,
+  # a Rust crate. The image's cargo keeps its registry where a build cannot
+  # write.
+  export CARGO_HOME="$HOME/.cargo"
+  export USE_TORCH_VM=1
+fi
+
 echo "Python version:"
 python --version
 
