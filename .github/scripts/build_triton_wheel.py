@@ -18,6 +18,8 @@ def read_triton_pin(device: str = "cuda") -> str:
     triton_file = "triton.txt"
     if device == "xpu":
         triton_file = "triton-xpu.txt"
+    elif device == "rocm" and sys.platform == "win32":
+        triton_file = "triton-windows.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
         return f.read().strip()
 
@@ -26,6 +28,8 @@ def read_triton_version(device: str = "cuda") -> str:
     triton_version_file = "triton_version.txt"
     if device == "xpu":
         triton_version_file = "triton_xpu_version.txt"
+    elif device == "rocm" and sys.platform == "win32":
+        triton_version_file = "triton_windows_version.txt"
     with open(REPO_DIR / ".ci" / "docker" / triton_version_file) as f:
         return f.read().strip()
 
@@ -75,6 +79,12 @@ def build_triton(
     if device == "xpu" and "TRITON_PARALLEL_LINK_JOBS" not in env:
         env["TRITON_PARALLEL_LINK_JOBS"] = str(max_jobs // 2 or 1)
 
+    # Windows ROCm builds triton-windows, the Windows fork of Triton.
+    is_windows_rocm = device == "rocm" and sys.platform == "win32"
+    if is_windows_rocm:
+        for flag in ("TRITON_BUILD_PROTON", "TRITON_BUILD_UT", "TRITON_BUILD_BINARY"):
+            env.setdefault(flag, "0")
+
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
@@ -82,6 +92,8 @@ def build_triton(
         triton_repo = "https://github.com/openai/triton"
         if device == "rocm":
             triton_pkg_name = "triton-rocm"
+            if is_windows_rocm:
+                triton_repo = "https://github.com/triton-lang/triton-windows"
         elif device == "xpu":
             triton_pkg_name = "triton-xpu"
             triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"
@@ -96,13 +108,26 @@ def build_triton(
                     ["git", "checkout", f"release/{ver}.{rev}.{patch}"],
                     cwd=triton_basedir,
                 )
+            elif is_windows_rocm:
+                check_call(
+                    ["git", "checkout", f"release/{ver}.{rev}.x-windows"],
+                    cwd=triton_basedir,
+                )
             else:
                 check_call(
                     ["git", "checkout", f"release/{ver}.{rev}.x"], cwd=triton_basedir
                 )
         else:
             check_call(["git", "fetch", "origin", commit_hash], cwd=triton_basedir)
-            check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
+            if is_windows_rocm:
+                # triton-windows' setup.py drops the +git<sha> version suffix
+                # when the first ref containing HEAD is a release branch.
+                check_call(
+                    ["git", "checkout", "-B", "pytorch-pin", commit_hash],
+                    cwd=triton_basedir,
+                )
+            else:
+                check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
@@ -117,7 +142,7 @@ def build_triton(
             expected_version=read_triton_version(device),
         )
 
-        if device == "rocm":
+        if device == "rocm" and not is_windows_rocm:
             check_call(
                 [f"{SCRIPT_DIR}/amd/package_triton_wheel.sh"],
                 cwd=triton_basedir,
@@ -140,7 +165,7 @@ def build_triton(
         whl_path = next(iter((triton_setupdir / "dist").glob("*.whl")))
         shutil.copy(whl_path, Path.cwd())
 
-        if device == "rocm":
+        if device == "rocm" and not is_windows_rocm:
             check_call(
                 [f"{SCRIPT_DIR}/amd/patch_triton_wheel.sh", Path.cwd()],
                 cwd=triton_basedir,
