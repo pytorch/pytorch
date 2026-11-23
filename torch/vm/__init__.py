@@ -72,9 +72,11 @@ default list::
 
 A list of one's own is the default one with more passes. The engine makes
 graphs of the tensor work of each block when it is asked to, and runs them
-itself, with the results of eager mode::
+itself, with the results of eager mode; the pass that hands such a graph to
+Inductor is the one to ask for when the last bits of a result may differ::
 
-    passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+    P = torch.vm.passes
+    passes = (*torch.vm.DEFAULT_PASSES, P.Graphs(), P.Inductor())
 
 
     @torch.vm(passes=passes)
@@ -265,10 +267,10 @@ def is_available() -> bool:
 
 
 def _over_graph(one: Any) -> bool:
-    """Whether a pass of one's own is over a graph: its signature says so,
-    ``(gm, input_types) -> gm``."""
+    """Whether a pass is over a graph: one of the engine's says so, and the
+    signature of one's own does, ``(gm, input_types) -> gm``."""
     if isinstance(one, BuiltinPass):
-        return False
+        return one.kind == "graph"
     try:
         parameters = inspect.signature(one).parameters.values()
     except (TypeError, ValueError):
@@ -312,6 +314,11 @@ def _plan(
             whole[one.engine] = True
             settings.update(dataclasses.asdict(one))
 
+    def said(one: Any) -> str:
+        if isinstance(one, BuiltinPass):
+            return repr(one)
+        return getattr(one, "__name__", type(one).__name__)
+
     def place(one: Any) -> int:
         return next(i for i, other in enumerate(listed) if other is one)
 
@@ -324,11 +331,22 @@ def _plan(
         listed = (*listed[:at], found, *listed[at:])
     for one in over_graph:
         if place(one) < place(found):
-            name = getattr(one, "__name__", type(one).__name__)
             raise ValueError(
-                f"passes has {name} in front of {found!r}: a pass over a graph "
+                f"passes has {said(one)} in front of {found!r}: a pass over a graph "
                 "is given the graphs that Graphs makes, so it goes behind it"
             )
+    compiling = [one for one in over_graph if getattr(one, "compiles", False)]
+    if len(compiling) > 1:
+        raise ValueError(
+            f"passes has {said(compiling[0])} and {said(compiling[1])}: a graph is "
+            "compiled once, by the last pass over it"
+        )
+    if compiling and over_graph[-1] is not compiling[0]:
+        raise ValueError(
+            f"passes has {said(over_graph[-1])} behind {said(compiling[0])}: what a "
+            "pass that compiles a graph returns is run, not rewritten, so it is the "
+            "last pass over a graph"
+        )
     block = [
         one
         for one in listed
@@ -374,7 +392,9 @@ def vm(
             block, with a :class:`Type` per input, to be returned rewritten,
             under the guards it adds with :func:`guard`. The passes over a
             graph go behind ``Graphs`` (which is taken to be in the list when
-            one of them is) and are applied in their order. A
+            one of them is) and are applied in their order; one that compiles
+            the graph (:class:`torch.vm.passes.AOTAutograd`,
+            :class:`torch.vm.passes.Inductor`) is the last of them. A
             callable ``pass_(region) -> bool`` looks at the instructions of one
             basic block and at what was observed of them, rewrites them, and
             returns whether it changed anything; it can be written in Rust
@@ -468,7 +488,7 @@ def vm(
     if over_graph:
         # Only a pass over graphs has the engine hand a graph to Python.
         _export = importlib.import_module("torch.vm._export")
-        export = _export.exporter(tuple(over_graph))
+        export = _export.exporter(tuple(over_graph), runtime)
     try:
         return runtime.compile(
             fn,
@@ -538,13 +558,14 @@ def memory(fn: Any) -> dict[str, int] | None:
 
 def is_exact(passes: Iterable[Any] | None = None) -> bool:
     """Whether a list of passes computes what the interpreter computes, bit for
-    bit: ``torch.vm.is_exact()`` is true.
+    bit: ``torch.vm.is_exact()`` is true, and with
+    ``torch.vm.passes.Inductor()`` in the list it is not.
 
     True when every pass is one of the engine's own that leaves every result
     what it was: they change how the same kernels are reached, not which ones
     run or in what order. ``torch.vm.passes.Graphs()`` is such a pass: the
-    engine runs its graphs with those kernels. A pass of one's own is not
-    taken to be one.
+    engine runs its graphs with those kernels. A pass that compiles a graph
+    is not, and a pass of one's own is not taken to be one.
     """
     listed = DEFAULT_PASSES if passes is None else tuple(passes)
     return all(getattr(one, "exact", False) is True for one in listed)

@@ -3,19 +3,23 @@
 A pass says what it is over. One over the control-flow graph of a function
 (``kind`` is ``"cfg"``) rewrites the function once, before it runs. One over a
 basic block (``"block"``) rewrites a block once its first runs were watched, in
-the order of the list, and again until no pass changes the block anymore.
+the order of the list, and again until no pass changes the block anymore. One
+over a graph (``"graph"``) is given the ``torch.fx.GraphModule`` of a graph
+that :class:`Graphs` made, and returns what runs in its place.
 :data:`torch.vm.DEFAULT_PASSES` is the default list.
 """
 
 import dataclasses
-from typing import ClassVar
+from typing import Any, ClassVar
 
 
 __all__ = [
+    "AOTAutograd",
     "BuiltinPass",
     "DCE",
     "Fold",
     "Graphs",
+    "Inductor",
     "Inline",
     "MethodCalls",
     "ModuleShortcuts",
@@ -31,8 +35,9 @@ class BuiltinPass:
 
     # The name it goes by in the engine.
     engine: ClassVar[str]
-    # What it is over: the control-flow graph of the function, once, or one
-    # basic block after it was profiled.
+    # What it is over: the control-flow graph of the function, once; one
+    # basic block after it was profiled; or a graph of the tensor work of a
+    # block.
     kind: ClassVar[str] = "block"
     # A pass of the engine leaves every result what the interpreter computes.
     exact: ClassVar[bool] = True
@@ -109,7 +114,7 @@ class Graphs(BuiltinPass):
 
     A graph leaves the engine only for a pass over graphs, which stands behind
     this one in the list: a function ``pass_(gm, input_types) -> gm`` of
-    one's own. The graph is then
+    one's own, :class:`AOTAutograd` or :class:`Inductor`. The graph is then
     exported as a ``torch.fx.GraphModule`` of the operators the function
     called (``torch.ops.aten.linear.default``, not what a kernel decomposes
     into), for the tensors of one call of it. The passes are applied in the
@@ -150,9 +155,82 @@ class Graphs(BuiltinPass):
             given = getattr(self, name)
             if isinstance(given, bool) or not isinstance(given, int):
                 kind = type(given).__name__
-                raise TypeError(f"Graphs takes {name} as a number, not {kind}")
+                raise TypeError(
+                    f"Graphs takes {name} as a number, not {kind}: what compiles "
+                    "its graphs is a pass of its own, behind it in the list "
+                    "(torch.vm.passes.Inductor())"
+                )
             if given < least:
                 raise ValueError(f"Graphs({name}={given}): at least {least}")
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class AOTAutograd(BuiltinPass):
+    """A pass over a graph: AOTAutograd traces the graph and its backward ahead
+    of time, and the eager kernels run both. With gradients enabled, the
+    tensors a graph returns have one compiled autograd function as their
+    ``grad_fn``.
+
+    It is called as every pass over a graph is, ``pass_(gm, input_types)``,
+    and returns a graph whose forward calls what it compiled. It compiles
+    for the tensors of the call the graph was exported on. A pass that
+    compiles is the last pass over a graph in the list, and there is one at
+    most. ``torch._functorch.aot_autograd`` is imported when the pass first
+    runs.
+    """
+
+    engine: ClassVar[str] = "aot_autograd"
+    kind: ClassVar[str] = "graph"
+    # What it runs is a trace of the operations, decomposed.
+    exact: ClassVar[bool] = False
+    compiles: ClassVar[bool] = True
+
+    def __call__(self, gm: Any, input_types: list[Any]) -> Any:
+        from torch._dynamo.backends.debugging import boxed_nop
+        from torch._functorch.aot_autograd import aot_module_simplified
+
+        from . import _export
+
+        # What the graph writes to its inputs is written back behind it,
+        # once: kept in the graph, the write moves the version counter of
+        # an input twice.
+        compiled = aot_module_simplified(
+            gm,
+            _export.examples(input_types),
+            fw_compiler=boxed_nop,
+            keep_inference_input_mutations=False,
+        )
+        return _export.calling(gm, compiled)
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class Inductor(BuiltinPass):
+    """A pass over a graph: Inductor compiles the graph, and with gradients
+    enabled its backward, which AOTAutograd traces for it.
+
+    This is the pass that makes a function faster than its kernels allow, and
+    one that may change its numerics: what a graph compiler makes of the
+    operations is not what eager runs. It is called as every pass over a
+    graph is, ``pass_(gm, input_types)``, and returns a graph whose forward
+    calls what it compiled. It compiles for the tensors of the call the graph
+    was exported on. A pass that compiles is the last pass over a graph in
+    the list, and there is one at most. ``torch._inductor`` is imported when
+    the pass first runs.
+    """
+
+    engine: ClassVar[str] = "inductor"
+    kind: ClassVar[str] = "graph"
+    # The kernels of a graph compiler are not the ones eager runs.
+    exact: ClassVar[bool] = False
+    compiles: ClassVar[bool] = True
+
+    def __call__(self, gm: Any, input_types: list[Any]) -> Any:
+        import torch._inductor
+
+        from . import _export
+
+        compiled = torch._inductor.compile(gm, _export.examples(input_types))
+        return _export.calling(gm, compiled)
 
 
 @dataclasses.dataclass(frozen=True, repr=False)

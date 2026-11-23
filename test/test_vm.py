@@ -5126,6 +5126,10 @@ class GraphScaled:
         self.reads = 0
 
 
+def graph_casts(x, w):
+    return (torch.mm(torch.mm(x, w), w).relu() * 2 + 1).tanh()
+
+
 class GraphCalls(TorchFunctionMode):
     def __init__(self):
         super().__init__()
@@ -5330,6 +5334,53 @@ class TestVmGraphs(TestCase):
         self.assertIn("GraphNet.forward", where)
         # A call of a Python function is in no graph: its blocks have theirs.
         self.assertIn("calls Conv2d.forward", self.left(compiled))
+
+    def test_no_graph_compiler_is_imported_for_the_graphs_of_the_engine(self):
+        script = """
+import json, sys, torch
+P, DEFAULT = torch.vm.passes, torch.vm.DEFAULT_PASSES
+
+def f(x, w):
+    return torch.tanh(x @ w).sum() + (x * 2).mean()
+
+def loaded(*more):
+    names = ("torch._inductor", "torch._functorch.aot_autograd", "torch._dynamo")
+    names += ("torch.vm._regions", *more)
+    return [name for name in names if name in sys.modules]
+
+x, w = torch.randn(4, 8), torch.randn(8, 8, requires_grad=True)
+found = {}
+compiled = torch.vm(f, passes=(*DEFAULT, P.Graphs()), fallback=False)
+for _ in range(4):
+    out = compiled(x, w)
+out.backward()
+found["graphs"] = [r["state"] for r in torch.vm.regions(compiled)]
+found["engine"] = loaded("torch.vm._export")
+keep = lambda gm, input_types: gm
+compiled = torch.vm(f, passes=(*DEFAULT, keep), fallback=False)
+for _ in range(4):
+    compiled(x, w)
+found["exported"] = [r["state"] for r in torch.vm.regions(compiled)]
+found["pass"] = loaded()
+compiled = torch.vm(f, passes=(*DEFAULT, P.Graphs(), P.AOTAutograd()), fallback=False)
+found["listed"] = loaded()
+for _ in range(4):
+    compiled(x, w)
+found["compiled"] = loaded()
+print(json.dumps(found))
+"""
+        ran = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, check=True
+        )
+        found = __import__("json").loads(ran.stdout.strip().split("\n")[-1])
+        self.assertEqual(found["graphs"], ["built"])
+        self.assertEqual(found["engine"], [])
+        # A pass over graphs of one's own brings the export, and nothing
+        # else; a pass that compiles brings its compiler when it first runs.
+        self.assertEqual(found["exported"], ["compiled"])
+        self.assertEqual((found["pass"], found["listed"]), ([], []))
+        self.assertIn("torch._functorch.aot_autograd", found["compiled"])
+        self.assertNotIn("torch.vm._regions", found["compiled"])
 
     def test_a_pass_over_a_graph_rewrites_it(self):
         seen = []
@@ -5574,8 +5625,19 @@ class TestVmGraphs(TestCase):
             return gm
 
         f = graph_mixed
+        aot, inductor = P.AOTAutograd(), P.Inductor()
         with self.assertRaisesRegex(ValueError, "keep in front of .*Graphs"):
             torch.vm(f, passes=(*DEFAULT, keep, P.Graphs()))
+        with self.assertRaisesRegex(ValueError, "AOTAutograd.. in front of"):
+            torch.vm(f, passes=(aot, *DEFAULT, P.Graphs()))
+        with self.assertRaisesRegex(ValueError, "a graph is compiled once"):
+            torch.vm(f, passes=(*DEFAULT, P.Graphs(), aot, inductor))
+        with self.assertRaisesRegex(ValueError, "keep behind .*Inductor"):
+            torch.vm(f, passes=(*DEFAULT, P.Graphs(), inductor, keep))
+        with self.assertRaisesRegex(ValueError, "Inductor is given more than once"):
+            torch.vm(f, passes=(*DEFAULT, P.Graphs(), inductor, P.Inductor()))
+        with self.assertRaisesRegex(TypeError, "a pass of its own, behind it"):
+            P.Graphs("inductor")
         with self.assertRaisesRegex(ValueError, "at least 1"):
             P.Graphs(min_ops=0)
         # Without the graph pass, the passes over a graph have it in front
@@ -5591,6 +5653,41 @@ class TestVmGraphs(TestCase):
         compiled = torch.vm(f, passes=(P.Graphs(), *DEFAULT), fallback=False)
         compiled(x, w)
         self.assertEqual(len(self.graphs(compiled, "built")), 1)
+
+    def test_what_the_passes_over_a_graph_say_of_themselves(self):
+        self.assertEqual(repr(P.Graphs()), "torch.vm.passes.Graphs()")
+        said = "torch.vm.passes.Graphs(min_ops=2)"
+        self.assertEqual(repr(P.Graphs(min_ops=2)), said)
+        self.assertEqual(repr(P.Inductor()), "torch.vm.passes.Inductor()")
+        for one in (P.AOTAutograd(), P.Inductor()):
+            self.assertEqual((one.kind, one.exact), ("graph", False))
+        # The engine runs its graphs with the kernels of eager mode. What a
+        # pass over them returns is something else.
+        self.assertTrue(torch.vm.is_exact(GRAPHS))
+        self.assertFalse(torch.vm.is_exact((*GRAPHS, P.AOTAutograd())))
+        self.assertFalse(torch.vm.is_exact((*GRAPHS, P.Inductor())))
+        self.assertFalse(torch.vm.is_exact((*GRAPHS, lambda gm, input_types: gm)))
+
+    def test_a_pass_that_compiles_returns_a_graph_that_calls_what_it_made(self):
+        graph = torch.fx.Graph()
+        x, w = graph.placeholder("x"), graph.placeholder("w")
+        product = graph.call_function(torch.ops.aten.matmul.default, (x, w))
+        graph.output((graph.call_function(torch.ops.aten.tanh.default, (product,)),))
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        cpu = torch.device("cpu")
+        sizes = lambda *ns: tuple(torch.vm.Interval(n, n) for n in ns)  # noqa: E731
+        types = [
+            torch.vm.TensorType(torch.float32, cpu, False, sizes(4, 8)),
+            torch.vm.TensorType(torch.float32, cpu, True, sizes(8, 8)),
+        ]
+        made = P.AOTAutograd()(gm, types)
+        self.assertIsInstance(made, torch.fx.GraphModule)
+        nodes = [node.op for node in made.graph.nodes]
+        self.assertEqual(nodes, ["placeholder", "placeholder", "call_module", "output"])
+        a, b = torch.randn(4, 8), torch.randn(8, 8, requires_grad=True)
+        (out,) = made(a, b)
+        self.assertEqual(out, torch.tanh(a @ b))
+        self.assertEqual(type(out.grad_fn).__name__, "CompiledFunctionBackward")
 
     def test_a_read_that_runs_python_code_is_not_run_out_of_its_place(self):
         graphs = []
@@ -5716,7 +5813,7 @@ class TestVmGraphs(TestCase):
         with GraphSeen() as mode:
             graph_mixed(x, w)
         eager = mode.seen
-        for behind in (sigmoid_for_tanh,):
+        for behind in (sigmoid_for_tanh, P.Inductor()):
             passes = (*DEFAULT, P.Graphs(), behind)
             compiled = torch.vm(graph_mixed, passes=passes, fallback=False)
             for _ in range(3):
@@ -5738,7 +5835,7 @@ class TestVmGraphs(TestCase):
         with GraphCalls() as mode:
             graph_mixed(x, w)
         eager = mode.seen
-        passes = (*DEFAULT, P.Graphs(), sigmoid_for_tanh)
+        passes = (*DEFAULT, P.Graphs(), P.Inductor())
         compiled = torch.vm(graph_mixed, passes=passes, fallback=False)
         for _ in range(3):
             compiled(x, w)
@@ -6037,6 +6134,64 @@ class TestVmGraphResults(TestCase):
         self.assertEqual((graph["state"], graph["variants"]), ("compiled", 1))
         self.assertGreaterEqual(graph["hits"], 3)
         self.assertEqual(graphs, [[(torch.float32, str(x.device))] * 2])
+
+    @parametrize("compiler", ("AOTAutograd", "Inductor"))
+    def test_a_pass_that_compiles_a_graph(self, device, compiler):
+        passes = (*DEFAULT, P.Graphs(), getattr(P, compiler)())
+        compiled = torch.vm(graph_mixed, passes=passes, fallback=False)
+        x = torch.randn(4, 8, device=device, requires_grad=True)
+        w = torch.randn(8, 8, device=device, requires_grad=True)
+        nodes = []
+        for _ in range(6):
+            out, grads = self.step(compiled, x, w)
+            expected = self.step(graph_mixed, x, w)
+            self.assertEqual(out, expected[0], rtol=1e-4, atol=1e-5)
+            self.assertEqual(grads, expected[1], rtol=1e-4, atol=1e-5)
+            nodes.append(type(out.grad_fn).__name__)
+        # The profiling run and the run that was exported are the block's
+        # own; then the backward is the one that was traced ahead of time.
+        self.assertEqual(nodes[:2], ["AddBackward0"] * 2)
+        self.assertEqual(nodes[2:], ["CompiledFunctionBackward"] * 4)
+        (graph,) = torch.vm.regions(compiled)
+        self.assertEqual((graph["state"], graph["variants"]), ("compiled", 1))
+        self.assertEqual((graph["hits"], graph["misses"]), (4, 1))
+        # Without gradients it is another graph, with no backward.
+        with torch.no_grad():
+            for _ in range(3):
+                out = compiled(x, w)
+                self.assertEqual(out, graph_mixed(x, w), rtol=1e-4, atol=1e-5)
+        self.assertIsNone(out.grad_fn)
+        self.assertEqual(torch.vm.regions(compiled)[0]["variants"], 2)
+
+    def test_a_graph_is_for_the_dtype_autocast_casts_to(self, device):
+        kind = torch.device(device).type
+        passes = (*DEFAULT, P.Graphs(), P.Inductor())
+        compiled = torch.vm(graph_casts, passes=passes, fallback=False)
+        x, w = torch.randn(4, 8, device=device), torch.randn(8, 8, device=device)
+        for dtype in (torch.bfloat16, torch.float16, torch.bfloat16):
+            with torch.autocast(kind, dtype=dtype):
+                for _ in range(4):
+                    got = compiled(x, w)
+                expected = graph_casts(x, w)
+            self.assertEqual(got.dtype, expected.dtype)
+            self.assertEqual(got.dtype, dtype)
+            self.assertEqual(got.float(), expected.float(), rtol=0.05, atol=0.05)
+        (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
+        # One form per dtype; the first dtype again is the first form.
+        self.assertEqual(graph["variants"], 2)
+        # Without autocast, and where operations have to be deterministic,
+        # the graph is another one as well.
+        for _ in range(3):
+            self.assertEqual(compiled(x, w), graph_casts(x, w), rtol=1e-4, atol=1e-5)
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+            for _ in range(3):
+                got = compiled(x, w)
+                self.assertEqual(got, graph_casts(x, w), rtol=1e-4, atol=1e-5)
+        finally:
+            torch.use_deterministic_algorithms(False)
+        (graph,) = [r for r in torch.vm.regions(compiled) if "ops" in r]
+        self.assertEqual(graph["variants"], 4)
 
     def test_a_key_that_comes_to_be_compared_in_python_is_compared_once(self, device):
         def keep(gm, input_types):
