@@ -243,6 +243,16 @@ class TestCuTeDSLReductionWiring(TestCase):
         for call in calls:
             self._check(call, **tolerance)
 
+    @parametrize("op", ["sum", "mean", "prod", "amax", "amin"])
+    def test_keepdim_results_do_not_alias(self, device, op):
+        """Return fresh keepdim results, as ATen does, also below autograd (a custom_op
+        forward), where reshape returns a view."""
+        x = torch.randn(8, 64, device=device)
+        with torch._C._AutoDispatchBelowAutograd():
+            out, fires = self._run(lambda: getattr(torch, op)(x, -1, keepdim=True))
+        self.assertEqual(fires, 1)
+        self.assertIsNone(out._base)
+
     @parametrize("op", ["amax", "amin"])
     def test_nan_propagates(self, device, op):
         """Propagate NaN through dimension and full reductions like ATen."""
