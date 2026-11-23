@@ -1511,6 +1511,104 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("window_size", [(-1, -1), (-1, 0)])
+    @parametrize("paged", [False, True])
+    @parametrize("empty_sequence", [False, True])
+    def test_fa2_gqa_decode_matches_mha(
+        self, device, dtype, window_size, paged, empty_sequence
+    ):
+        """FA2 runs a GQA call with one query token per sequence on its packed path:
+        the query heads of a KV head become one query. varlen_attn_out must fill the
+        caller's ``out`` there, and the output and LSE must match the same call with
+        the KV heads repeated to MHA, which FA2 runs unpacked. A sequence with no
+        query token keeps the call off the packed path."""
+        torch.manual_seed(42)
+        num_heads, num_kv_heads, head_dim, page_size = 8, 2, 64, 256
+        kv_lens = [300, 1, 520, 256]
+        q_lens = [1, 0, 1, 1] if empty_sequence else [1, 1, 1, 1]
+        batch_size = len(kv_lens)
+        group = num_heads // num_kv_heads
+
+        q = torch.randn(sum(q_lens), num_heads, head_dim, device=device, dtype=dtype)
+        cu_seq_q = torch.tensor(
+            [0, *torch.tensor(q_lens).cumsum(0).tolist()],
+            device=device,
+            dtype=torch.int32,
+        )
+        if paged:
+            pages_per_seq = (max(kv_lens) + page_size - 1) // page_size
+            max_k = pages_per_seq * page_size
+            k = torch.randn(
+                batch_size * pages_per_seq,
+                page_size,
+                num_kv_heads,
+                head_dim,
+                device=device,
+                dtype=dtype,
+            )
+            v = torch.randn_like(k)
+            # FA2 needs cu_seq_k for paged KV: each sequence spans its whole page row.
+            cu_seq_k = torch.arange(
+                0,
+                (batch_size + 1) * max_k,
+                max_k,
+                device=device,
+                dtype=torch.int32,
+            )
+            paged_kwargs = {
+                "seqused_k": torch.tensor(kv_lens, device=device, dtype=torch.int32),
+                "block_table": torch.randperm(
+                    batch_size * pages_per_seq, device=device, dtype=torch.int32
+                ).view(batch_size, pages_per_seq),
+            }
+        else:
+            max_k = max(kv_lens)
+            k = torch.randn(
+                sum(kv_lens), num_kv_heads, head_dim, device=device, dtype=dtype
+            )
+            v = torch.randn_like(k)
+            cu_seq_k = torch.tensor(
+                [0, *torch.tensor(kv_lens).cumsum(0).tolist()],
+                device=device,
+                dtype=torch.int32,
+            )
+            paged_kwargs = {}
+
+        def run(key, value, enable_gqa):
+            out = torch.full_like(q, float("nan"))
+            with _use_backend("fa2"), torch.no_grad():
+                _, lse = varlen_attn_out(
+                    out,
+                    q,
+                    key,
+                    value,
+                    cu_seq_q,
+                    cu_seq_k,
+                    1,
+                    max_k,
+                    window_size=window_size,
+                    enable_gqa=enable_gqa,
+                    return_aux=AuxRequest(lse=True),
+                    num_splits=1,
+                    **paged_kwargs,
+                )
+            return out, lse
+
+        out_gqa, lse_gqa = run(k, v, enable_gqa=True)
+        heads_dim = k.dim() - 2
+        out_mha, lse_mha = run(
+            k.repeat_interleave(group, dim=heads_dim),
+            v.repeat_interleave(group, dim=heads_dim),
+            enable_gqa=False,
+        )
+        self.assertFalse(out_gqa.isnan().any())
+        self.assertEqual(out_gqa, out_mha)
+        self.assertEqual(lse_gqa, lse_mha)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(

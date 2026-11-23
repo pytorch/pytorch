@@ -667,14 +667,22 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     const int page_block_size = !paged_KV ? 1 : k.size(1);
     TORCH_CHECK(!paged_KV || page_block_size % 256 == 0, "Paged KV cache block size must be divisible by 256");
 
-    if (max_seqlen_q == 1 && !alibi_slopes_.has_value()) { is_causal = false; }  // causal=true is the same as causal=false in this case
+    // A one-token query is the last position of its sequence (masks align to the bottom
+    // right), so causal masking and any right window mask nothing. Dropping both lets GQA
+    // take the packed path below.
+    if (max_seqlen_q == 1 && !alibi_slopes_.has_value()) {
+        is_causal = false;
+        window_size_right = -1;
+    }
     if (is_causal) { window_size_right = 0; }
 
     void *cu_seqlens_q_d = cu_seqlens_q.data_ptr();
 
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
     // H/t Daniel Haziza
-    const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
+    // The packed layout drops cu_seqlens_q, so every sequence needs exactly one query token
+    // (total_q == batch_size); a sequence with none would break the reshape below.
+    const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && q.size(0) == batch_size && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
     at::Tensor temp_q = q;
     const int ngroups = num_heads / num_heads_k;
     if (seqlenq_ngroups_swapped) {
@@ -727,9 +735,9 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
         CHECK_ALIGNED(out);
         CHECK_SHAPE(out, sizes[0], sizes[1], head_size_og);
-        if (seqlenq_ngroups_swapped) {
-            out = out.reshape({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2).reshape({batch_size * ngroups, num_heads_k, head_size_og});
-        }
+        // The packed layout (b * ngroups, nheads_kv, d) is not a view of out
+        // (b, nheads_kv * ngroups, d): compute into a temporary, copied into out_ below.
+        if (seqlenq_ngroups_swapped) { out = at::empty_like(q_padded); }
         if (head_size_og % 8 != 0) { out = at::empty_like(q_padded); }
     } else {
         out = at::empty_like(q_padded);
@@ -831,8 +839,19 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     if (seqlenq_ngroups_swapped) {
         std::array<int64_t, 4> size_before = {batch_size, max_seqlen_q, num_heads_k, head_size_og};
         std::array<int64_t, 3> size_after = {batch_size, num_heads_k * max_seqlen_q, head_size_og};
-        out = out.reshape(size_before).transpose(1, 2).reshape(size_after);
+        if (out_.has_value()) {
+            out_.value().view({batch_size, num_heads_k, max_seqlen_q, head_size_og}).copy_(out.reshape(size_before).transpose(1, 2));
+            out = out_.value();
+        } else {
+            out = out.reshape(size_before).transpose(1, 2).reshape(size_after);
+        }
         q_padded = q_padded.reshape(size_before).transpose(1, 2).reshape(size_after);
+        // The other kernels write the packed LSE as (nheads_kv, ngroups, b). Paged KV runs the
+        // split-KV kernel; without splits it skips the combine kernel and writes the LSE in
+        // packed-token order, (nheads_kv, b, ngroups).
+        if (paged_KV && params.num_splits <= 1) {
+            softmax_lse = softmax_lse.view({num_heads, batch_size, max_seqlen_q}).transpose(1, 2);
+        }
         softmax_lse = softmax_lse.reshape({num_heads * max_seqlen_q, batch_size});
     }
 
