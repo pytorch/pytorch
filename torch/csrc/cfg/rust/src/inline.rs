@@ -60,6 +60,7 @@ fn shift_consts(op: &mut Op, offset: u32) {
         | Op::LoadAttr(_, c)
         | Op::StoreGlobal(c, _)
         | Op::CheckBound(_, c)
+        | Op::CellGet(_, c)
         | Op::StoreAttr { name: c, .. }
         | Op::Call { kwnames: c, .. } => shift(c),
         Op::CallMethod { name, kwnames, .. } => {

@@ -805,6 +805,17 @@ impl Compiled {
         result
     }
 
+    /// The cell at index `i` of the function's closure (borrowed).
+    unsafe fn closure_cell(&self, i: u32) -> Result<Obj, ()> {
+        match &self.func.closure {
+            Some(c) => Ok(ffi::PyTuple_GET_ITEM(c.as_ptr(), i as isize)),
+            None => {
+                set_error(ffi::PyExc_SystemError, "function has no closure".to_string());
+                Err(())
+            }
+        }
+    }
+
     unsafe fn exec_op(&self, regs: &mut [Obj], op: &Op) -> OpResult {
         let f = &self.func;
         match op {
@@ -843,27 +854,97 @@ impl Compiled {
                 Ok(new_ref(v))
             }
             Op::LoadDeref(i) => {
-                let closure = match &f.closure {
-                    Some(c) => c.as_ptr(),
-                    None => {
-                        set_error(ffi::PyExc_SystemError, "function has no closure".to_string());
-                        return Err(());
-                    }
-                };
-                let cell = ffi::PyTuple_GET_ITEM(closure, *i as isize);
+                let cell = self.closure_cell(*i)?;
                 let v = pyffi::PyCell_Get(cell);
                 if v.is_null() {
                     if ffi::PyErr_Occurred().is_null() {
                         set_error(
                             ffi::PyExc_NameError,
-                            "cannot access free variable where it is not associated with a value \
-                             in enclosing scope"
-                                .to_string(),
+                            format!(
+                                "cannot access free variable '{}' where it is not associated \
+                                 with a value in enclosing scope",
+                                f.freevars.get(*i as usize).map_or("?", |s| s.as_str())
+                            ),
                         );
                     }
                     return Err(());
                 }
                 Ok(v)
+            }
+            Op::StoreDeref(i, v) => {
+                let cell = self.closure_cell(*i)?;
+                if pyffi::PyCell_Set(cell, self.obj(regs, *v)) < 0 {
+                    return Err(());
+                }
+                Ok(null_mut())
+            }
+            Op::LoadClosure(i) => Ok(new_ref(self.closure_cell(*i)?)),
+            Op::MakeCell(v) => {
+                let initial = if *v == UNDEF { null_mut() } else { self.obj(regs, *v) };
+                checked(pyffi::PyCell_New(initial))
+            }
+            Op::CellGet(cell, name) => {
+                let v = pyffi::PyCell_Get(self.obj(regs, *cell));
+                if v.is_null() {
+                    if ffi::PyErr_Occurred().is_null() {
+                        set_error(
+                            ffi::PyExc_UnboundLocalError,
+                            format!(
+                                "cannot access local variable '{}' where it is not associated \
+                                 with a value",
+                                pyffi::str_to_string(f.consts[*name as usize].as_ptr())
+                            ),
+                        );
+                    }
+                    return Err(());
+                }
+                Ok(v)
+            }
+            Op::CellSet(cell, v) => {
+                let value = self.obj(regs, *v);
+                if pyffi::PyCell_Set(self.obj(regs, *cell), value) < 0 {
+                    return Err(());
+                }
+                Ok(null_mut())
+            }
+            Op::MakeFunction { code, defaults, kwdefaults, annotations, closure } => {
+                let func = ffi::PyFunction_New(self.obj(regs, *code), f.globals.as_ptr());
+                if func.is_null() {
+                    return Err(());
+                }
+                let mut ok = true;
+                if *closure != NONE {
+                    ok &= ffi::PyFunction_SetClosure(func, self.obj(regs, *closure)) == 0;
+                }
+                if *defaults != NONE {
+                    ok &= ffi::PyFunction_SetDefaults(func, self.obj(regs, *defaults)) == 0;
+                }
+                if *kwdefaults != NONE {
+                    ok &= ffi::PyFunction_SetKwDefaults(func, self.obj(regs, *kwdefaults)) == 0;
+                }
+                if *annotations != NONE {
+                    // The bytecode passes a tuple of names and values.
+                    let pairs = self.obj(regs, *annotations);
+                    let dict = ffi::PyDict_New();
+                    ok &= !dict.is_null();
+                    let n = if ok && ffi::PyTuple_Check(pairs) != 0 { ffi::PyTuple_GET_SIZE(pairs) } else { 0 };
+                    let mut i = 0;
+                    while ok && i + 1 < n {
+                        ok &= ffi::PyDict_SetItem(
+                            dict,
+                            ffi::PyTuple_GET_ITEM(pairs, i),
+                            ffi::PyTuple_GET_ITEM(pairs, i + 1),
+                        ) == 0;
+                        i += 2;
+                    }
+                    ok = ok && ffi::PyFunction_SetAnnotations(func, dict) == 0;
+                    xdecref(dict);
+                }
+                if !ok {
+                    ffi::Py_DECREF(func);
+                    return Err(());
+                }
+                Ok(func)
             }
             Op::LoadAttr(a, name) => {
                 let obj = self.obj(regs, *a);
