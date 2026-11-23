@@ -3009,6 +3009,29 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    def test_blackwell_bmm_reduction_epilogue_tma_loads_inputs(self):
+        """With enable_tma_load_for_template_epilogue, a full-tile input the
+        epilogue reads is TMA-loaded, as with the mm template."""
+        kernels, code = self._run_bmm_reduction(
+            lambda a, b, w: ((a @ b).float() * w).sum(0),
+            300,
+            96,
+            64,
+            128,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_tma_load_for_template_epilogue": True,
+            },
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertRegex(code, r"tma_descriptor\d+\.load\(")
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     def test_blackwell_bmm_reduction_epilogue_many_extra_outputs(self):
         """A reduction epilogue with many fp32 extra outputs still fuses under
         TMA stores: one staged fp32 128x128 tile each would overflow shared

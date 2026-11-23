@@ -199,6 +199,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "TWO_CTAS": two_ctas,
                 "RANK3_TMA_OUTPUT": tma_store and rank3_output,
                 "tma_store": tma_store,
+                "tma_load_for_template_epilogue": config.triton.enable_tma_load_for_template_epilogue,
                 **descriptor_options,
             }
             if two_ctas:
