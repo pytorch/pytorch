@@ -4,6 +4,7 @@
 # trait into combine_equal, a closed-form merge of equal-count states. Other names mirror
 # SharedReduceOps.h. Accumulator dtypes provide their identities. Scalar conditionals lower
 # only inside cute.jit methods; cute.arch.fmax suppresses NaNs, so traits handle them.
+# leaf_is_reduce_init: leaf(x) is reduce(init, x) up to a sum's -0.0 and NaN payloads.
 
 import cutlass
 import cutlass.cute as cute
@@ -45,6 +46,7 @@ def _neg_id(acc):
 class SumOps:
     # acc = (sum,). Validates vs torch.sum(x, dim=-1).
     nfields = 1
+    leaf_is_reduce_init = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -311,6 +313,7 @@ class ArgMaxOps:
 class ProdOps:
     # acc = (product,). Validates vs torch.prod(x, dim=-1).
     nfields = 1
+    leaf_is_reduce_init = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -344,6 +347,7 @@ class ProdOps:
 class MeanOps:
     # acc = (sum,); factor applied in project. Validates vs torch.mean(x, dim=-1).
     nfields = 1
+    leaf_is_reduce_init = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -377,6 +381,7 @@ class MeanOps:
 class NanSumOps:
     # acc = (sum,); NaN inputs map to 0. Validates vs torch.nansum(x, dim=-1).
     nfields = 1
+    leaf_is_reduce_init = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -412,6 +417,7 @@ class AllOps:
     # acc is the min of 0/1 truth flags; NaN is truthy, matching torch.all. Ordered
     # columns ran a product fold at 0.22-0.59x of the indexed tree on B200.
     nfields = 1
+    leaf_is_reduce_init = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -446,6 +452,7 @@ class AllOps:
 class AnyOps:
     # acc = (1.0 if any-true,). OR via max of 0/1 flags. Validates vs torch.any.
     nfields = 1
+    leaf_is_reduce_init = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -480,6 +487,7 @@ class AnyOps:
 class CountNonzeroOps:
     # acc = (nonzero count,); also serves p=0 norm. NaN counts as nonzero.
     nfields = 1
+    leaf_is_reduce_init = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -640,6 +648,7 @@ class AMaxOps:
     # acc = (max,). Avoiding an unused index halves shuffle/smem traffic and enables the
     # value-only cross-CTA path.
     nfields = 1
+    leaf_is_reduce_init = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
@@ -678,6 +687,7 @@ class AMaxOps:
 class AMinOps:
     # acc = (min,), the single-field NaN-propagating AMaxOps mirror.
     nfields = 1
+    leaf_is_reduce_init = True
 
     def __init__(self, acc=Float32):
         self.acc = acc
