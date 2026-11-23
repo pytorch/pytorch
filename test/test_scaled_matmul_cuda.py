@@ -54,6 +54,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     skipCUDAIf,
     skipMPS,
+    skipXPU,
     skipXPUIf,
     skipCUDAIfNotRocm,
 )
@@ -69,6 +70,7 @@ from torch.testing._internal.common_utils import (
     NAVI_ARCH,
     parametrize,
     instantiate_parametrized_tests,
+    subtest,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
     runOnRocmArch,
@@ -250,7 +252,7 @@ def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
     instead of relying on `infer_scale_swizzle`, whose element counts do not
     distinguish the two where their paddings coincide.
     """
-    if not torch.version.hip and "xpu" not in device:
+    if not torch.version.hip and "xpu" not in device and "mps" not in device:
         return SwizzleType.SWIZZLE_32_4_4
     if torch.version.hip and evaluate_gfx_arch_within(["gfx1250"]) and rocm_mx_swizzle(mat_dtype):
         return SwizzleType.SWIZZLE_128
@@ -1125,6 +1127,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
+    @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [2048, 2049])
@@ -1210,14 +1213,14 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("M", [16640])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
-    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda or torch.version.xpu else []))
     @parametrize("use_out", [False, True])
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
-        block_size = 32
+        block_size = 16 if format == "nvfp4" else 32
         total_M = M  # Alias for clarity that M dim contains groups.
         X = torch.randn((total_M, K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((G, N, K), dtype=torch.bfloat16, device=device) * 0.01
@@ -1304,6 +1307,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             return xh, xq, x_scale, x_global_scales
 
         xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
+
+        if torch.device(device).type == "xpu":
+            # XPU OneDNN GroupedMM expects weight scales in [G, K/blocks, N] layout;
+            # the helper above returns them as [G, N, K/blocks], so transpose them here.
+            w_blocked_scales = w_blocked_scales.transpose(-2, -1)
 
         if format in ["mxfp8", "mxfp4"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
@@ -2621,7 +2629,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
     @onlyAccelerator
-    @skipMPS
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
         # Nice shapes
@@ -2693,7 +2700,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
     @onlyAccelerator
-    @skipMPS
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
         "a_eye_b_eye",
@@ -2752,6 +2758,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: 'xpu' in p['device'] and p['recipe'] == 'nvfp4' and (not Xe2_Or_Later),
     )
     @decorateIf(
+        unittest.skip('MXFP4 is not supported on MPS'),
+        lambda p: 'mps' in p['device'] and p['recipe'] == 'mxfp4',
+    )
+    @decorateIf(
         unittest.skip('K must be divisible by 32 for nvfp4 cublas gemm, skipping'),
         lambda p: p['recipe'] == 'nvfp4' and p['mkn'][1] % 32 != 0,
     )
@@ -2779,6 +2789,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
             if recipe == "nvfp4" and not Xe2_Or_Later:
                 raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
+        if "mps" in device and recipe == "mxfp4":
+            raise unittest.SkipTest("MXFP4 is not supported on MPS")
         M, K, N = mkn
         if recipe == "nvfp4" and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
@@ -2984,7 +2996,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         C_ref = A_ref @ B_ref.t()
 
         # convert to swizzled format
-        if rocm_mx_swizzle(A.dtype) or (not torch.version.hip and "xpu" not in device):
+        if rocm_mx_swizzle(A.dtype) or (not torch.version.hip and "xpu" not in device and "mps" not in device):
             A_scale = mx_scale_swizzle(A_scale, A.dtype, BLOCK_SIZE)
             B_scale = mx_scale_swizzle(B_scale, B.dtype, BLOCK_SIZE)
 
@@ -3011,6 +3023,32 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @parametrize("M", [2, 31, 128])
+    def test_blockwise_mxfp8_special_scales(self, M, device) -> None:
+        # e8m0 scales of 2^120 and 2^-120 multiply to 1 without overflowing their product, and the NaN
+        # code 0xff makes its row of A or column of B NaN
+        K, N = 128, 128
+        a = torch.ones(M, K, device=device).to(torch.float8_e4m3fn)
+        b = torch.ones(N, K, device=device).to(torch.float8_e4m3fn)
+        sa = torch.full((M, K // 32), 127 + 120, dtype=torch.uint8, device=device)
+        sb = torch.full((N, K // 32), 127 - 120, dtype=torch.uint8, device=device)
+        sa[0, 1] = sb[1, 2] = 0xFF
+        swizzle = mx_swizzle_for(device, a.dtype)
+
+        def scales(s):
+            s = s.view(torch.float8_e8m0fnu)
+            return s if swizzle == SwizzleType.NO_SWIZZLE else mx_scale_swizzle(s, a.dtype)
+
+        out = scaled_mm_wrap(
+            a, b.t(), scales(sa), scales(sb),
+            scale_recipe_a=ScalingType.BlockWise1x32, scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=swizzle, swizzle_b=swizzle, out_dtype=torch.bfloat16,
+        )
+        expected = torch.full_like(out, K)
+        expected[0, :] = expected[:, 1] = float("nan")
+        self.assertEqual(out, expected, equal_nan=True)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
@@ -3149,6 +3187,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3191,7 +3230,13 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    @parametrize("wrap_v2", [True, False])
+    @parametrize(
+        "wrap_v2",
+        [
+            True,
+            subtest(False, decorators=[skipXPU]),  # v1 _scaled_grouped_mm has no XPU kernel
+        ],
+    )
     def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2, device):
 
         fp8_dtype = e4m3_type
@@ -3233,6 +3278,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 3d x 3d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3259,6 +3305,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 3d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3348,11 +3395,17 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
         lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
     )
+    @decorateIf(
+        unittest.skip('MXFP4 is not supported on MPS'),
+        lambda p: 'mps' in p['device'] and p['recipe'] == 'mxfp4',
+    )
     def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
         if recipe == "nvfp4" and torch.version.hip and not rocm_nvfp4_supported():
             raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if "mps" in device and recipe == "mxfp4":
+            raise unittest.SkipTest("MXFP4 is not supported on MPS")
 
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
@@ -3662,6 +3715,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     def test_scaled_grouped_mm_v2_fullgraph(self, device) -> None:
         fp8_dtype = e4m3_type
@@ -5457,8 +5511,71 @@ print("tunableop_keys_ok")
                 output_dtype=torch.bfloat16,
             )
 
+
+class TestFP8MatmulMpsOnly(TestCase):
+
+    hw_classification = HardwareClassification.MPS
+
+    @parametrize("recipe", ["mxfp8", "nvfp4"])
+    @parametrize("layout", ["dense", "padded", "unaligned"])
+    @parametrize("mnk", [(1, 7, 2048), (3, 130, 1024), (4, 64, 512), (8, 100, 256), (64, 96, 2048)],
+                 name_fn=lambda mnk: f"{mnk[0]}_{mnk[1]}_{mnk[2]}")
+    def test_blockwise_layouts(self, recipe, layout, mnk, device) -> None:
+        # MPS picks a decode kernel for M <= 4, MPP or tiles otherwise, and the native
+        # Metal 4.1 kernel for dense MXFP8; padded and unaligned operands must take or
+        # fall back to a kernel that handles them.
+        M, N, K = mnk
+        block = 16 if recipe == "nvfp4" else 32
+        packed = 2 if recipe == "nvfp4" else 1
+        dtype = torch.float4_e2m1fn_x2 if recipe == "nvfp4" else torch.float8_e4m3fn
+        scale_dtype = torch.float8_e4m3fn if recipe == "nvfp4" else torch.float8_e8m0fnu
+        pad = {"dense": 0, "padded": 32, "unaligned": 0}[layout]
+        offset = 1 if layout == "unaligned" else 0
+
+        def operand(rows):
+            codes = torch.randint(0, 256, (rows * (K // packed + pad) + offset,), dtype=torch.uint8)
+            if recipe == "mxfp8":
+                # avoid the NaN codes 0x7f and 0xff
+                codes = codes.view(torch.float8_e4m3fn).float().nan_to_num().to(torch.float8_e4m3fn).view(torch.uint8)
+            # take the views on the device too: copying a view to MPS makes it dense
+
+            def view(t):
+                return t[offset:].view(rows, K // packed + pad)[:, : K // packed].view(dtype)
+
+            return view(codes), view(codes.to(device))
+
+        def scales(rows):
+            if recipe == "nvfp4":
+                s = (torch.rand(rows, K // block) + 0.25).to(scale_dtype)
+            else:
+                s = torch.randint(118, 128, (rows, K // block), dtype=torch.uint8).view(scale_dtype)
+            return s, s.to(device)
+
+        def dequant(data, s):
+            if recipe == "nvfp4":
+                u8 = data.view(torch.uint8)
+                codes = torch.stack([u8 & 0xF, u8 >> 4], -1).flatten(-2)
+                values = _floatx_unpacked_to_f32(codes, 2, 1).double()
+            else:
+                values = data.double()
+            return (values.unflatten(-1, (-1, block)) * s.double().unsqueeze(-1)).flatten(-2)
+
+        (a, a_dev), (b, b_dev) = operand(M), operand(N)
+        (sa, sa_dev), (sb, sb_dev) = scales(M), scales(N)
+        recipe_enum = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
+        out = torch._scaled_mm_v2(
+            a_dev, b_dev.t(), [sa_dev], [recipe_enum], [SwizzleType.NO_SWIZZLE],
+            [sb_dev], [recipe_enum], [SwizzleType.NO_SWIZZLE], None, torch.float32,
+        )
+        ref = dequant(a, sa) @ dequant(b, sb).t()
+        # float32 accumulation over K: measure the error against the output's magnitude
+        err = ((out.cpu().double() - ref).abs() / (ref.abs() + ref.abs().mean())).max().item()
+        self.assertLess(err, 1e-5)
+
+
 instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestFP8MatmulCudaOnly, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestFP8MatmulMpsOnly, globals(), only_for=("mps",), allow_mps=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
