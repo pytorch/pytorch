@@ -28,6 +28,10 @@ namespace {
     class SqrtAndReciprocal : public ::testing::Test {};
     template <typename T>
     class SqrtAndReciprocalReal : public ::testing::Test {};
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+    template <typename T>
+    class ReciprocalReducedFloat : public ::testing::Test {};
+#endif
     template <typename T>
     class FractionAndRemainderReal : public ::testing::Test {};
     template <typename T>
@@ -106,6 +110,9 @@ namespace {
     TYPED_TEST_SUITE(Rounding, RealFloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocal, FloatTestedTypes);
     TYPED_TEST_SUITE(SqrtAndReciprocalReal, RealFloatTestedTypes);
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+    TYPED_TEST_SUITE(ReciprocalReducedFloat, ReducedFloatTestedTypes);
+#endif
     TYPED_TEST_SUITE(FractionAndRemainderReal, RealFloatTestedTypes);
     TYPED_TEST_SUITE(Trigonometric, RealFloatTestedTypes);
     TYPED_TEST_SUITE(ErrorFunctions, RealFloatTestedTypes);
@@ -360,6 +367,53 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()),
             RESOLVE_OVERLOAD(filter_zero));
     }
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
+    // Checks every positive and negative normal input against the exact result.
+    // Results are computed in fp32 and rounded once, so they can exceed half a
+    // ULP only by the small double rounding margin allowed here.
+    template <typename vec, typename Exact, typename Op>
+    void test_reduced_float_accuracy(bool positive_only, Exact exact, Op op) {
+        using T = ValueType<vec>;
+        constexpr int digits = std::numeric_limits<T>::digits;
+        const double min_normal = static_cast<float>(std::numeric_limits<T>::min());
+        const double max_finite = static_cast<float>(std::numeric_limits<T>::max());
+        const auto n = static_cast<size_t>(vec::size());
+        std::vector<uint16_t> bits(n);
+        std::vector<T> out(n);
+        for (uint32_t i = 0; i < 65536; i++) {
+            std::fill(bits.begin(), bits.end(), static_cast<uint16_t>(i));
+            T in;
+            std::memcpy(&in, bits.data(), sizeof(T));
+            const double x = static_cast<float>(in);
+            if (!std::isfinite(x) || std::abs(x) < min_normal || (positive_only && x < 0)) {
+                continue;
+            }
+            const double expected = exact(x);
+            if (std::abs(expected) < min_normal || std::abs(expected) > max_finite) {
+                continue;
+            }
+            op(vec::loadu(bits.data())).store(out.data());
+            const double got = static_cast<float>(out[0]);
+            const double ulp = std::ldexp(1.0, std::ilogb(expected) - (digits - 1));
+            ASSERT_LE(std::abs(got - expected), (0.5 + 1e-3) * ulp)
+                << "input " << x << " got " << got << " expected " << expected;
+        }
+    }
+    TYPED_TEST(ReciprocalReducedFloat, Reciprocal) {
+        using vec = TypeParam;
+        test_reduced_float_accuracy<vec>(
+            false,
+            [](double x) { return 1.0 / x; },
+            [](vec v) { return v.reciprocal(); });
+    }
+    TYPED_TEST(ReciprocalReducedFloat, RSqrt) {
+        using vec = TypeParam;
+        test_reduced_float_accuracy<vec>(
+            true,
+            [](double x) { return 1.0 / std::sqrt(x); },
+            [](vec v) { return v.rsqrt(); });
+    }
+#endif
     TYPED_TEST(FractionAndRemainderReal, Frac) {
       using vec = TypeParam;
       test_unary<vec>(
@@ -595,6 +649,43 @@ namespace {
             [](const vec& v) { return v.exp_u20(); },
             test_case
         );
+
+        if constexpr (std::is_same_v<VT, float>) {
+            // Near and below ln(FLT_MIN), results must not flush to zero, and
+            // NaN must propagate. Also cover both ends of the exponent range
+            // (2^-125 and 2^128 scaling). Mix the inputs in one vector so
+            // lanes take different paths.
+            const VT inputs[] = {
+                VT(-86.64), VT(-86.8), VT(-86.99), VT(-87.0), VT(-87.2),
+                VT(-87.5), VT(-88.0), VT(-90.0), VT(-100.0), VT(-103.9),
+                VT(-110.0), -std::numeric_limits<VT>::infinity(),
+                std::numeric_limits<VT>::quiet_NaN(), VT(-1.0), VT(0.5),
+                VT(10.0), VT(88.0), VT(88.37), VT(88.5), VT(88.72)};
+            constexpr size_t num_inputs = std::size(inputs);
+            CACHE_ALIGN VT in[vec::size()];
+            CACHE_ALIGN VT out[vec::size()];
+            for (size_t base = 0; base < num_inputs; base += vec::size()) {
+                for (const auto i : c10::irange(vec::size())) {
+                    in[i] = inputs[(base + i) % num_inputs];
+                }
+                vec::loadu(in).exp_u20().store(out);
+                for (const auto i : c10::irange(vec::size())) {
+                    if (std::isnan(in[i])) {
+                        EXPECT_TRUE(std::isnan(out[i])) << "x=" << in[i];
+                        continue;
+                    }
+                    // Within 2 ulp; subnormals are 2^-149 apart.
+                    const double expected = std::exp(static_cast<double>(in[i]));
+                    const VT rounded = static_cast<VT>(expected);
+                    const double ulp = std::max<double>(
+                        std::nextafter(rounded, std::numeric_limits<VT>::infinity()) - rounded,
+                        std::numeric_limits<VT>::denorm_min());
+                    EXPECT_LE(std::abs(out[i] - expected), 2 * ulp) << "x=" << in[i];
+                    // The tolerance alone would accept a flush to zero.
+                    EXPECT_EQ(out[i] == 0, rounded == 0) << "x=" << in[i];
+                }
+            }
+        }
     }
     TYPED_TEST(ErrorFunctions, Erf) {
         using vec = TypeParam;
@@ -645,6 +736,48 @@ namespace {
           AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
+#if defined(__aarch64__) || defined(__x86_64__) || defined(_M_X64)
+    TYPED_TEST(Nan, OrNanIf) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT test_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT select_vals[vec::size()];
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT actual_vals[vec::size()];
+        const VT specials[] = {
+            (VT)1.5,
+            -(VT)0.0,
+            std::numeric_limits<VT>::infinity(),
+            -std::numeric_limits<VT>::infinity(),
+            std::numeric_limits<VT>::quiet_NaN(),
+            std::numeric_limits<VT>::denorm_min(),
+            -std::numeric_limits<VT>::max(),
+        };
+        constexpr int num_specials = sizeof(specials) / sizeof(specials[0]);
+        // The mask comes from a comparison so that on SVE it is a predicate.
+        auto vals = 1 << (vec::size());
+        for (const auto val : c10::irange(vals)) {
+          for (int i = 0; i < vec::size(); ++i) {
+            test_vals[i] = specials[(i + val) % num_specials];
+            select_vals[i] = (val & (1 << i)) ? (VT)1 : (VT)0;
+          }
+          const auto mask = vec::loadu(select_vals) != vec((VT)0);
+          vec::loadu(test_vals).or_nan_if(mask).store(actual_vals);
+          for (int i = 0; i < vec::size(); ++i) {
+            CACHE_ALIGN VT expected_val = test_vals[i];
+            if (val & (1 << i)) {
+              std::memset(static_cast<void*>(&expected_val), 0xFF, sizeof(VT));
+            }
+            ASSERT_EQ(
+                0, std::memcmp(&expected_val, &actual_vals[i], sizeof(VT)))
+                << "or_nan_if, mask: " << val << ", lane: " << i
+                << ", input: " << test_vals[i] << ", got: " << actual_vals[i];
+          }
+        }
+    }
+#endif
 #if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE128) && \
     !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_ZVECTOR)
     TYPED_TEST(Nan, ReduceMax) {
@@ -985,25 +1118,52 @@ namespace {
             createDefaultTernaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_clamp));
     }
+    // Lane masks to test: all of them for up to 16 lanes. For more (2^32 masks
+    // for 32 lanes would take hours), all-false, all-true, alternating, each
+    // lane alone true or false, and fixed pseudo-random masks.
+    std::vector<uint64_t> test_masks(int lanes) {
+        const uint64_t all = lanes >= 64 ? ~0ULL : (1ULL << lanes) - 1;
+        std::vector<uint64_t> masks;
+        if (lanes <= 16) {
+            for (uint64_t m = 0; m <= all; m++) {
+                masks.push_back(m);
+            }
+            return masks;
+        }
+        masks = {0, all, all & 0x5555555555555555ULL, all & 0xAAAAAAAAAAAAAAAAULL};
+        for (const auto i : c10::irange(lanes)) {
+            masks.push_back(1ULL << i);
+            masks.push_back(all & ~(1ULL << i));
+        }
+        std::mt19937_64 gen(0);
+        for ([[maybe_unused]] const auto i : c10::irange(1000)) {
+            masks.push_back(gen() & all);
+        }
+        return masks;
+    }
     TYPED_TEST(BitwiseFloatsAdditional, ZeroMask) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT test_vals[vec::size()];
-        //all sets will be within 0  2^(n-1)
-        auto power_sets = 1UL << (vec::size());
-        for (const auto expected : c10::irange(power_sets)) {
+        static_assert(vec::size() <= 32, "masks are compared in 32 bits");
+        for (const auto mask : test_masks(vec::size())) {
+            // Compared in 32 bits: GCC 13.3 miscompiles the zero extension of
+            // AVX-512 masks to 64 bits here (a 16-bit spill reloaded whole).
+            const auto expected = static_cast<uint32_t>(mask);
             // generate test_val based on expected
             for (int i = 0; i < vec::size(); ++i)
             {
-                if (expected & (1 << i)) {
+                if (expected & (1UL << i)) {
                     test_vals[i] = (VT)0;
                 }
                 else {
                     test_vals[i] = (VT)0.897;
                 }
             }
-            int actual = vec::loadu(test_vals).zero_mask();
+            // zero_mask returns an int, whose sign bit is the mask of lane 31
+            // for 32 lanes (Half and BFloat16 on AVX-512).
+            uint32_t actual = vec::loadu(test_vals).zero_mask();
             ASSERT_EQ(expected, actual) << "Failure Details:\n"
                 << std::hex << "Expected:\n#\t" << expected
                 << "\nActual:\n#\t" << actual;
@@ -1124,18 +1284,19 @@ namespace {
             RESOLVE_OVERLOAD(filter_fmadd));
     }
 #endif
+    // Returns false on a mismatch.
     template<typename vec, typename VT, int64_t mask>
-    typename std::enable_if_t<(mask < 0 || mask> 255), void>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()])
-    {
-    }
-    template<typename vec, typename VT, int64_t mask>
-    typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
-        // generate expected_val
-        int64_t m = mask;
+    bool test_blend(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
+        // generate expected_val. This works around a compiler bug rather than
+        // being the natural way to write it: GCC 13 to 15 miscompile this loop
+        // on SVE256 for some constant masks (for 253, the vectorized loop's
+        // predicate leaves lane 5 unset; see
+        // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=128913). Reading the
+        // mask through a volatile makes it a run-time value, which GCC can't
+        // fold into the loop.
+        volatile int64_t mask_v = mask;
+        int64_t m = mask_v;
         for (int64_t i = 0; i < vec::size(); i++) {
             expected_val[i] = (m & 0x01) ? b[i] : a[i];
             m = m >> 1;
@@ -1146,11 +1307,16 @@ namespace {
         auto expected = vec::loadu(expected_val);
         auto actual = vec::template blend<mask>(vec_a, vec_b);
         auto mask_str = std::string("\nblend mask: ") + std::to_string(mask);
-        if (AssertVectorized<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
-        test_blend<vec, VT, mask - 1>(expected_val, a, b);
+        return !AssertVectorized<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check();
     }
-    template<typename vec, typename VT, int64_t idx, int64_t N>
-    std::enable_if_t<(!is_complex<VT>::value && idx == N), bool>
+    template<typename vec, typename VT, int64_t... masks>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+    void test_blend_masks(std::integer_sequence<int64_t, masks...>, VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()]) {
+        // Stops at the first mismatch.
+        (test_blend<vec, VT, masks>(expected_val, a, b) && ...);
+    }
+    template<typename vec, typename VT>
+    std::enable_if_t<!is_complex<VT>::value, bool>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
         using bit_rep = BitType<VT>;
@@ -1175,24 +1341,6 @@ namespace {
         }
         return true;
     }
-    template<typename vec, typename VT, int64_t idx, int64_t N>
-    std::enable_if_t<(!is_complex<VT>::value && idx != N), bool>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
-        // shuffle mask and do blendv test
-        VT m = mask[idx];
-        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
-        if (m != (VT)0) {
-          mask[idx] = (VT)0;
-        }
-        else {
-          uint64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
-          std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
-        }
-        if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
-        mask[idx] = m;
-        return true;
-    }
     template<typename T, int N>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     void blend_init(T(&a)[N], T(&b)[N]) {
@@ -1215,7 +1363,15 @@ namespace {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
         blend_init(a, b);
-        test_blendv<vec, VT, 0, vec::size()>(expected_val, a, b, mask);
+        for (const auto m : test_masks(vec::size())) {
+            for (const auto i : c10::irange(vec::size())) {
+                uint64_t hex_mask = (m >> i) & 1 ? 0xFFFFFFFFFFFFFFFF : 0;
+                std::memcpy(&mask[i], &hex_mask, sizeof(VT));
+            }
+            if (!test_blendv<vec, VT>(expected_val, a, b, mask)) {
+                return;
+            }
+        }
     }
     TYPED_TEST(BitwiseFloatsAdditional2, Blend) {
         using vec = TypeParam;
@@ -1227,8 +1383,17 @@ namespace {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN VT expected_val[vec::size()];
         blend_init(a, b);
-        constexpr int64_t power_sets = 1LL << (vec::size());
-        test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
+        if constexpr (vec::size() <= 8) {
+            test_blend_masks<vec, VT>(std::make_integer_sequence<int64_t, 1 << vec::size()>{}, expected_val, a, b);
+        } else {
+            // blend takes its mask as a template argument, so each mask is a
+            // separate instantiation: check representative masks rather than
+            // all 2^16 (Blendv, whose mask is a run-time value, checks all).
+            static_assert(vec::size() == 16);
+            test_blend_masks<vec, VT>(
+                std::integer_sequence<int64_t, 0x0000, 0xFFFF, 0x5555, 0xAAAA, 0x00FF, 0xFF00, 0x0001, 0x8000, 0xFFFE, 0x7FFF>{},
+                expected_val, a, b);
+        }
     }
     template<typename vec, typename VT>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
