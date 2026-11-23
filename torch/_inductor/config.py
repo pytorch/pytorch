@@ -1989,7 +1989,7 @@ avoid_32bit_indexing_guards: bool = False
 # So far covers Triton reduction kernels from the main SIMD codegen path; other kernels
 # keep the default behavior (see avoid_32bit_indexing_guards). Skips are logged at
 # debug level (TORCH_LOGS="+inductor").
-dual_index_dtype: bool = False
+dual_index_dtype_kernels: bool = False
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
