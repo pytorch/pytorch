@@ -20193,7 +20193,9 @@ A.last
     @parametrize("op", ["sdpa", "torch_sum", "tensor_sum", "dropout"])
     def test_symbool_as_bool_arg(self, op):
         fns = {
-            "sdpa": lambda x: F.scaled_dot_product_attention(x, x, x, is_causal=x.shape[2] > 1),
+            "sdpa": lambda x: F.scaled_dot_product_attention(
+                x, x, x, is_causal=x.shape[2] > 1
+            ),
             "torch_sum": lambda x: torch.sum(x, 0, keepdim=x.shape[0] > 1),
             "tensor_sum": lambda x: x.sum(0, keepdim=x.shape[0] > 1),
             "dropout": lambda x: F.dropout(x, 0.0, training=x.shape[0] > 1),
