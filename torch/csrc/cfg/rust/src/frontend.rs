@@ -85,6 +85,9 @@ struct Builder<'a> {
 
     out_insts: Vec<Vec<Inst>>,
     out_terms: Vec<Option<Term>>,
+    /// What the interpreter has on its stack where each block ends, behind
+    /// what the last instruction of the block took off it.
+    exit_stacks: Vec<Vec<V>>,
     extra_consts: Vec<PyObj>,
     nconsts: u32,
     /// Locals kept in frame slots instead of SSA values, and their slots.
@@ -349,6 +352,24 @@ impl<'a> Builder<'a> {
             match ins.op {
                 Bc::Cache | Bc::Resume | Bc::Nop | Bc::CopyFreeVars | Bc::ExtendedArg => {}
                 Bc::PopTop => {
+                    // A value lives as long as the interpreter keeps it:
+                    // one that it kept on its stack for longer than the
+                    // instruction that made it (the iterator of a `for`
+                    // that the function breaks out of or returns from, the
+                    // subject of a `match`, the middle of `a < b < c`) is
+                    // let go of here, where it is popped, not behind the
+                    // last instruction that reads it.
+                    let v = pop!();
+                    let lasting = v != NULLMARK && v != UNDEF && !self.const_values.contains(&v) && insts.last().is_none_or(|last| last.dst != v);
+                    // Not the iterator behind the draw that found it
+                    // exhausted: that draw read it last, and the edge that
+                    // leaves the loop is where it is popped.
+                    let exhausted = idx > start && self.instrs[idx - 1].op == Bc::EndForOne;
+                    if lasting && !exhausted {
+                        effect!(off, Op::Hold(vec![v]));
+                    }
+                }
+                Bc::EndForOne => {
                     pop!();
                 }
                 Bc::PushNull => stack.push(NULLMARK),
@@ -1093,6 +1114,7 @@ impl<'a> Builder<'a> {
                 _ => {}
             }
         }
+        self.exit_stacks[b] = stack.iter().copied().filter(|v| *v != NULLMARK && *v != UNDEF && !self.const_values.contains(v)).collect();
         self.out_insts[b] = insts;
         self.out_terms[b] = Some(term);
         Ok(())
@@ -1462,6 +1484,7 @@ fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, genera
             bool_values: HashSet::new(),
             out_insts: (0..nblocks).map(|_| Vec::new()).collect(),
             out_terms: (0..nblocks).map(|_| None).collect(),
+            exit_stacks: vec![Vec::new(); nblocks],
             generator,
             extra_consts: Vec::new(),
             nconsts,
@@ -1638,6 +1661,11 @@ fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, genera
     slots.sort_unstable();
     let nvalues = builder.forward.len() as u32;
     let value_names = std::mem::take(&mut builder.value_names);
+    let exit_stacks: Vec<Vec<V>> = builder
+        .exit_stacks
+        .iter()
+        .map(|stack| stack.iter().map(|v| builder.resolve(*v)).filter(|v| *v != NULLMARK && *v != UNDEF).collect())
+        .collect();
     drop(builder);
 
     let globals = func.getattr("__globals__")?;
@@ -1670,7 +1698,7 @@ fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, genera
     let _ = py;
     let name: String = code.getattr("co_name")?.extract()?;
     let filename: String = code.getattr("co_filename")?.extract()?;
-    Ok(Function {
+    let mut function = Function {
         origins: vec![Origin { name: name.clone(), filename: filename.clone(), call_bc: 0 }],
         unrolled: 0,
         name,
@@ -1697,7 +1725,37 @@ fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, genera
         has_varargs,
         has_varkw,
         param_names,
-    })
+    };
+    hold_stacks(&mut function, &exit_stacks);
+    Ok(function)
+}
+
+/// A value lives as long as the interpreter keeps it. A register is let go
+/// of behind the last instruction that uses its value, so each place where
+/// the interpreter lets go of a value later than that is a use
+/// (`Op::Hold`): of a variable where it is bound again or deleted and
+/// where the function is left (`translate_block`); of a value on the stack
+/// where it is popped without being read (`POP_TOP`); and here, of a value
+/// that is still on the stack where a block ends and that nothing takes
+/// off it from there on, because the function raises or goes round a loop
+/// that only a raise leaves. The interpreter takes such a value off its
+/// stack when it unwinds, the topmost first: so are they held, each by
+/// itself. Where an instruction takes the value off later (the next draw
+/// of a `for`, a call that is handed it) that instruction is its use, and
+/// nothing is added.
+fn hold_stacks(func: &mut Function, exits: &[Vec<V>]) {
+    if exits.iter().all(|stack| stack.is_empty()) {
+        return;
+    }
+    let live = crate::analysis::analyze(func);
+    for (b, stack) in exits.iter().enumerate() {
+        let bc = func.blocks[b].term_bc;
+        for v in stack.iter().rev() {
+            if !live.live_out[b].contains(*v) {
+                func.blocks[b].insts.push(Inst { dst: NONE, op: Op::Hold(vec![*v]), bc, kills: Vec::new() });
+            }
+        }
+    }
 }
 
 fn remove_dead_phis(blocks: &mut [Block], nvalues: usize) {
