@@ -446,11 +446,14 @@ impl CfgFunction {
         // The graphs of the function and of what it called: how many there
         // are, how many times one was handed to the passes over graphs, how
         // many calls ran what those made (`hits`) and how many came to a
-        // graph and ran its instructions (`misses`), and how many graphs
-        // are no longer exported.
+        // graph and ran its instructions (`misses`), how many graphs are
+        // no longer exported, and how many calls took a path down
+        // (`taken`: of every graph, also of what turned out to be none).
         let (mut built, mut exported, mut hits, mut misses, mut given_up) = (0usize, 0u64, 0u64, 0u64, 0usize);
+        let mut taken = 0u64;
         let held = self.held();
         for (cf, _, _, site) in self.graph_sites() {
+            taken += site.taken.load(Ordering::Relaxed);
             // One whose operations a graph of a caller holds is no graph
             // of its own.
             if site.outer().is_some() || site.short().is_some() || Self::holder(&held, &cf, &site).is_some() {
@@ -468,6 +471,7 @@ impl CfgFunction {
         graphs.set_item("hits", hits)?;
         graphs.set_item("misses", misses)?;
         graphs.set_item("given_up", given_up)?;
+        graphs.set_item("taken", taken)?;
         out.set_item("graphs", graphs)?;
         Ok(out.into_any().unbind())
     }
@@ -677,6 +681,7 @@ impl CfgFunction {
                     d.set_item("hits", site.hits.load(Ordering::Relaxed))?;
                     d.set_item("misses", site.misses.load(Ordering::Relaxed))?;
                     d.set_item("exports", site.exports.load(Ordering::Relaxed))?;
+                    d.set_item("taken", site.taken.load(Ordering::Relaxed))?;
                     if crate::graph::timed() {
                         let times: Vec<u64> = site.times.iter().map(|t| t.load(Ordering::Relaxed)).collect();
                         d.set_item("times", times)?;
