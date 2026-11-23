@@ -421,6 +421,11 @@ pub struct Callees {
     /// Code objects the frontend does not support, by address: their
     /// functions run in the interpreter.
     interpreted: Shared<HashMap<usize, PyObj>>,
+    /// The code of generators that a path went over where they were made
+    /// (`Compiled::generator_form`), compiled, or None for what the
+    /// frontend turned down. Never what a call runs: a call of a generator
+    /// function makes a generator.
+    generators: Shared<HashMap<(usize, usize), Option<Callee>>>,
     /// Code objects that are left to the interpreter for where they are
     /// from (see `leave_to_interpreter`), by address.
     left: Shared<HashMap<usize, PyObj>>,
@@ -451,6 +456,7 @@ impl Callees {
             entries: Shared::new(HashMap::new()),
             recent: (0..RECENT_CALLEES).map(|_| std::cell::Cell::new((0, 0, std::ptr::null()))).collect(),
             interpreted: Shared::new(HashMap::new()),
+            generators: Shared::new(HashMap::new()),
             left: Shared::new(HashMap::new()),
             call_name: unsafe {
                 PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__call__".as_ptr()))
@@ -1092,6 +1098,26 @@ thread_local! {
     /// code but the runtime's: a pass, a region, an import, a call that is
     /// measured in the interpreter.
     static HOOKED: std::cell::Cell<*const Compiled> = const { std::cell::Cell::new(std::ptr::null()) };
+}
+
+thread_local! {
+    /// What goes over the generators whose code the VM runs in their
+    /// place, one inside the other: for a generator that `tuple` or `list`
+    /// goes over to its end where it is made, the list that keeps what it
+    /// gives.
+    static SINKS: std::cell::RefCell<Vec<Obj>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Hands a value that the code of a generator gives to what goes over it.
+/// False with an error set where that fails.
+unsafe fn sink_takes(given: Obj) -> bool {
+    SINKS.with(|sinks| match sinks.borrow().last() {
+        Some(list) => ffi::PyList_Append(*list, given) == 0,
+        None => {
+            set_error(ffi::PyExc_SystemError, "a generator gives a value to nothing".to_string());
+            false
+        }
+    })
 }
 
 /// What `exec_profiled` takes down in front of an instruction that can run
@@ -3652,6 +3678,26 @@ impl Compiled {
                 Ok(null_mut())
             }
             Op::ListToTuple(l) => checked(ffi::PyList_AsTuple(self.obj(regs, *l))),
+            Op::Yield(v) => {
+                let given = self.obj(regs, *v);
+                if sink_takes(given) { Ok(new_ref(ffi::Py_None())) } else { Err(()) }
+            }
+            Op::StopIterationError(v) => {
+                // As the interpreter has it for a generator: a StopIteration
+                // that leaves the code is an error of the code.
+                let exc = self.obj(regs, *v);
+                if ffi::PyErr_GivenExceptionMatches(exc, ffi::PyExc_StopIteration) == 0 {
+                    return Ok(new_ref(exc));
+                }
+                let message = ffi::PyUnicode_FromString(c"generator raised StopIteration".as_ptr());
+                let error = if message.is_null() { null_mut() } else { ffi::PyObject_CallOneArg(ffi::PyExc_RuntimeError, message) };
+                xdecref(message);
+                if !error.is_null() {
+                    ffi::PyException_SetCause(error, new_ref(exc));
+                    ffi::PyException_SetContext(error, new_ref(exc));
+                }
+                checked(error)
+            }
             Op::SuperObject { global_super, class, this, explicit } => {
                 let callee = self.obj(regs, *global_super);
                 let args = [self.obj(regs, *class), self.obj(regs, *this)];
@@ -5009,6 +5055,10 @@ impl Compiled {
             Op::ListAppend(..) | Op::IterNext(_) => true,
             // A cell is made, and one that is a cell is put into, in C.
             Op::MakeCell(_) => true,
+            // The function of a generator, of code and nothing else.
+            Op::MakeFunction { code, defaults, kwdefaults, annotations, annotate, closure } => {
+                graph::generator_code(at(*code)) && [defaults, kwdefaults, annotations, annotate, closure].iter().all(|v| **v == NONE)
+            }
             Op::CellSet(cell, value) => {
                 *value != UNDEF && !at(*cell).is_null() && ffi::Py_TYPE(at(*cell)) == std::ptr::addr_of_mut!(pyffi::PyCell_Type)
             }
@@ -6254,6 +6304,26 @@ impl Compiled {
                 t.kill(*v);
             }
         };
+        if let Op::Yield(v) = &inst.op {
+            // The code of a generator that `tuple` or `list` goes over:
+            // what it gives is put into the list of the path that keeps it.
+            let Some(list) = t.drains.last().copied() else {
+                return Taken::Ends("a generator gives a value to nothing".to_string());
+            };
+            let item = self.path_value(t, regs, *v);
+            frames.top().at(inst.bc & OFFSET_MASK);
+            let Ok(nothing) = self.exec_op(regs, &inst.op) else {
+                return Taken::Raised;
+            };
+            t.defs[list as usize].fixed &= t.defs[item as usize].fixed;
+            t.push(Op::ListAppend(list, item), NONE, Kind::Residual, inst.bc);
+            ffi::Py_XINCREF(nothing);
+            let dst = t.define(inst.dst, Def::default(), nothing);
+            t.push(Op::Const(self.func.const_none), dst, Kind::Pure, inst.bc);
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], nothing));
+            kill(t, regs);
+            return Taken::Went;
+        }
         // What only renames, binds or holds.
         match &inst.op {
             Op::Graph(_) => return Taken::Went,
@@ -6605,6 +6675,13 @@ impl Compiled {
                 makes = true;
                 Some(Kind::Pure)
             }
+            // The function of a generator expression that takes nothing
+            // of the function around it: the path's own, and calling it
+            // makes a generator and runs nothing.
+            Op::MakeFunction { .. } if self.quiet(regs, &inst.op, api) => {
+                makes = true;
+                Some(Kind::Pure)
+            }
             Op::CellSet(cell, value) => (made(t, *cell) && *value != UNDEF).then_some(Kind::Residual),
             Op::ListAppend(target, _)
             | Op::MapAdd(target, ..)
@@ -6866,6 +6943,9 @@ impl Compiled {
         });
         let fixed = match (&renamed, kind) {
             (Op::Const(_) | Op::Object(_), _) => true,
+            // The function of a generator expression is of the same code
+            // at every call, and of nothing else.
+            (Op::MakeFunction { .. }, _) => true,
             // What stands at a place of a tuple that is the same in every
             // call is the same in every call, in front of the callable
             // too: a name of the names a call is written with.
@@ -7153,9 +7233,32 @@ impl Compiled {
             graph::reads(&renamed, |v| fixed &= v == *into || t.defs[v as usize].fixed);
             t.defs[*into as usize].fixed &= fixed;
         }
+        let taken = match &renamed {
+            Op::IterNext(over) if dst != NONE => Some(*over),
+            _ => None,
+        };
         t.push(renamed, dst, kind, inst.bc);
         if let (Some(names), Some(last)) = (names, t.body.last_mut()) {
             last.named = Some(names);
+        }
+        if let Some(over) = taken {
+            // What is gone over is a tuple the path built: the item is
+            // what was put there, as many items in as the path has taken.
+            let from = t.body.iter().find(|other| other.dst == over).and_then(|other| match &other.op {
+                Op::GetIter(sequence) => Some(*sequence),
+                _ => None,
+            });
+            let whole = from.filter(|sequence| {
+                let held = t.rec.values[*sequence as usize];
+                !held.is_null() && ffi::PyTuple_CheckExact(held) != 0
+            });
+            let items = whole.and_then(|sequence| self.built(t, sequence));
+            let before = t.body.iter().filter(|other| matches!(&other.op, Op::IterNext(of) if *of == over)).count() - 1;
+            if let Some(item) = items.and_then(|items| items.get(before).copied()) {
+                if t.rec.values[item as usize] == t.rec.values[dst as usize] {
+                    t.rename(inst.dst, item);
+                }
+            }
         }
         kill(t, regs);
         Taken::Went
@@ -7646,6 +7749,12 @@ impl Compiled {
             Op::Call { callee, args, kwnames } if !graph::fresh_new(reg(regs, *callee)).is_null() => {
                 return self.record_makes(t, site, at, *callee, args, *kwnames, regs, frames, api);
             }
+            Op::Call { callee, args, kwnames } if *kwnames == NONE && args.len() == 1 && graph::keeps_all(reg(regs, *callee)).is_some() => {
+                if let Some(taken) = self.record_drains(t, site, at, *callee, args[0], regs, frames, api) {
+                    return Some(taken);
+                }
+                Form::Call { callee: *callee, args, kwnames: *kwnames }
+            }
             Op::Call { callee, args, kwnames } => {
                 let held = reg(regs, *callee);
                 let plain = *kwnames == NONE && !held.is_null() && !capi::is_unboxed(held);
@@ -7800,6 +7909,179 @@ impl Compiled {
             capi::release(result);
         } else {
             capi::release(std::mem::replace(&mut regs[inst.dst as usize], result));
+            t.rename(inst.dst, value);
+        }
+        for v in &inst.kills {
+            capi::release(take(regs, *v));
+            t.kill(*v);
+        }
+        Some(Taken::Went)
+    }
+
+    /// The compiled form of the code of a generator function, for what
+    /// goes over a generator of it where it is made. None for code the
+    /// frontend turns down.
+    unsafe fn generator_form(&self, func: Obj) -> Option<*const Compiled> {
+        if !graph::generator_function(func) {
+            return None;
+        }
+        let callees = &self.callees;
+        let (code, globals) = (ffi::PyFunction_GetCode(func), ffi::PyFunction_GetGlobals(func));
+        let key = (code as usize, globals as usize);
+        if let Some(known) = callees.generators.borrow().get(&key) {
+            return known.as_ref().map(|callee| Arc::as_ptr(&callee.compiled));
+        }
+        let py = pyo3::Python::assume_attached();
+        let bound = pyo3::Bound::from_borrowed_ptr(py, func);
+        let _nobody = Hooked::nobody();
+        let lowered = frontend::build_generator(py, &callees.table, &bound);
+        let made = lowered.ok().map(|function| Callee {
+            code: PyObj::from_borrowed(code),
+            _globals: PyObj::from_borrowed(globals),
+            compiled: Arc::new(Compiled::new(function, self.options.clone(), self.pipeline.clone(), callees.clone())),
+        });
+        let found = made.as_ref().map(|callee| Arc::as_ptr(&callee.compiled));
+        callees.generators.borrow_mut().insert(key, made);
+        found
+    }
+
+    /// `tuple(g)` and `list(g)` of a generator that the path made of a
+    /// generator expression and that has not run: the path goes into the
+    /// code of the generator (`generator_form`), in a frame of its
+    /// function, and what the code gives is kept in a list of the path
+    /// (`Op::Yield`), which is what `list` gives and what `tuple` makes a
+    /// tuple of. The generator itself is never run: what it would go over
+    /// is gone over here. Where the path does not go on in the code, the
+    /// code runs to its end off the path, into the same list, and the path
+    /// ends in front of the call. None, with nothing done, for anything
+    /// else.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn record_drains(
+        &self,
+        t: &mut Trace,
+        site: &Arc<GraphSite>,
+        at: (usize, *const BlockCode, usize),
+        callee: V,
+        given: V,
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+    ) -> Option<Taken> {
+        let inst = &(&(*at.1).insts)[at.2];
+        let bc = inst.bc;
+        let whole = graph::keeps_all(reg(regs, callee))?;
+        let made = |t: &Trace, v: PathValue| t.body.iter().rev().find(|other| other.dst == v && v != NONE).map(|other| other.op.clone());
+        // The generator: what a call of a function the path made gave,
+        // with what the generator goes over.
+        let generator = t.mapped(given);
+        let Some(Op::Call { callee: function, args, kwnames: NONE }) = made(t, generator) else {
+            return None;
+        };
+        if args.len() != 1 || !matches!(made(t, function), Some(Op::MakeFunction { .. })) {
+            return None;
+        }
+        let (func, over) = (t.rec.values[function as usize], t.rec.values[args[0] as usize]);
+        let fresh = ffi::PyGen_CheckExact(reg(regs, given)) != 0 && !over.is_null() && !func.is_null();
+        if !fresh || capi::traced() || !capi::has_frames() || t.acts.len() >= MAX_PATH_DEPTH {
+            return None;
+        }
+        let compiled = self.generator_form(func)?;
+        let c = &*compiled;
+        let cf = &c.func;
+        let nregs = cf.nvalues as usize + 1;
+        let mut inner = c.frames.borrow_mut().pop().unwrap_or_else(|| vec![null_mut(); nregs]);
+        inner[nregs - 1] = new_ref(func);
+        let done = |inner: Vec<Obj>| {
+            let mut inner = inner;
+            for r in inner.iter_mut() {
+                capi::release(std::mem::replace(r, null_mut()));
+            }
+            c.frames.borrow_mut().push(inner);
+        };
+        let items = [over];
+        let positional = Args { receiver: null_mut(), items: items.as_ptr(), n: 1 };
+        if cf.argcount != 1 || c.bind_args(&mut inner, func, &positional, null_mut()).is_err() {
+            ffi::PyErr_Clear();
+            done(inner);
+            return None;
+        }
+        let kept = ffi::PyList_New(0);
+        if kept.is_null() {
+            done(inner);
+            return Some(Taken::Raised);
+        }
+        if t.outermost() && t.mark.is_none() {
+            t.mark(at, 0);
+        }
+        let list = t.derive(Op::BuildList(Vec::new()), Kind::Pure, true, new_ref(kept), bc);
+        t.defs[list as usize].fixed = true;
+        t.enter(compiled, cf.nvalues as usize, function);
+        t.rename(cf.params[0], args[0]);
+        frames.top().at(bc & OFFSET_MASK);
+        if self.unbound.any.get() {
+            self.bind();
+        }
+        let Ok(frame) = Frame::push(func) else {
+            done(inner);
+            ffi::Py_DECREF(kept);
+            return Some(Taken::Raised);
+        };
+        if !frame.locals.is_null() {
+            *frame.locals = frame_ref(new_ref(over));
+        }
+        SINKS.with(|sinks| sinks.borrow_mut().push(kept));
+        t.drains.push(list);
+        let mut below = Frames::new(frame);
+        let walked = c.walk(t, site, &mut inner, &mut below, api, 0, None);
+        let (result, back) = match walked {
+            Walked::Returned(result, _) => (result, Ok(())),
+            Walked::Ended { block, code, pc, afresh, reason } => {
+                t.provisional |= afresh && reason == NOT_PROFILED;
+                let landing = Landing { block, code, pc: if afresh { AFRESH } else { pc } };
+                (c.exec_blocks(&mut inner, &mut below, Some(PathEnd::Landed(landing))), Err(reason))
+            }
+            Walked::Left { block, code, call, reason } => {
+                let landing = Landing { block, code, pc: call + 1 };
+                (c.exec_blocks(&mut inner, &mut below, Some(PathEnd::Landed(landing))), Err(reason))
+            }
+            Walked::Raised(block, bc) => {
+                (c.exec_blocks(&mut inner, &mut below, Some(PathEnd::Raised(block, bc))), Err("it raised".to_string()))
+            }
+            Walked::Deopt(block, at) => {
+                (c.exec_blocks(&mut inner, &mut below, Some(PathEnd::Deopt(block, at))), Err("a guard of its code failed".to_string()))
+            }
+        };
+        while below.depth > 0 {
+            c.leave(&mut below);
+        }
+        let result = c.returned(frame, result);
+        done(inner);
+        t.drains.pop();
+        SINKS.with(|sinks| sinks.borrow_mut().pop());
+        let ended = !result.is_null();
+        xdecref(result);
+        // What the call gives: the list, or a tuple of what is in it.
+        let gave = if !ended {
+            ffi::Py_DECREF(kept);
+            null_mut()
+        } else if whole {
+            let tuple = ffi::PyList_AsTuple(kept);
+            ffi::Py_DECREF(kept);
+            tuple
+        } else {
+            kept
+        };
+        match back {
+            Ok(()) if !gave.is_null() => t.leave(),
+            Ok(()) => return Some(Taken::Raised),
+            Err(reason) => return Some(Taken::Cut(gave, format!("in {}: {}", cf.name, reason))),
+        }
+        let value = if whole { t.derive(Op::ListToTuple(list), Kind::Pure, false, new_ref(gave), bc) } else { list };
+        t.unmark();
+        if inst.dst == NONE {
+            capi::release(gave);
+        } else {
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], gave));
             t.rename(inst.dst, value);
         }
         for v in &inst.kills {

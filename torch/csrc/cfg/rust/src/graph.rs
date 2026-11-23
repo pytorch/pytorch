@@ -2602,6 +2602,37 @@ unsafe fn builtin_named(which: Builtin) -> usize {
     found[BUILTINS.iter().position(|(_, other)| *other == which).unwrap()]
 }
 
+/// Whether an object is code of a generator (and of no coroutine, nor of
+/// an asynchronous generator).
+pub unsafe fn generator_code(code: Obj) -> bool {
+    const CO_GENERATOR_LIKE: std::os::raw::c_long = 0x20 | 0x80 | 0x100 | 0x200;
+    if code.is_null() || capi::is_unboxed(code) || ffi::Py_TYPE(code) != std::ptr::addr_of_mut!(ffi::PyCode_Type) {
+        return false;
+    }
+    let flags = ffi::PyObject_GetAttrString(code, c"co_flags".as_ptr());
+    let found = if flags.is_null() { -1 } else { ffi::PyLong_AsLong(flags) };
+    xdecref(flags);
+    ffi::PyErr_Clear();
+    found >= 0 && found & CO_GENERATOR_LIKE == 0x20
+}
+
+/// Whether an object is a Python function whose code is a generator's.
+pub unsafe fn generator_function(callee: Obj) -> bool {
+    !callee.is_null() && !capi::is_unboxed(callee) && ffi::PyFunction_Check(callee) != 0 && generator_code(ffi::PyFunction_GetCode(callee))
+}
+
+/// Whether a callee is the builtin `tuple` (true) or `list` (false), which
+/// go over what they are given to its end and keep what it gives.
+pub unsafe fn keeps_all(callee: Obj) -> Option<bool> {
+    if callee.is_null() {
+        return None;
+    }
+    if builtin_named(Builtin::Tuple) == callee as usize {
+        return Some(true);
+    }
+    (builtin_named(Builtin::List) == callee as usize).then_some(false)
+}
+
 /// Whether a callee is the builtin `zip`.
 pub unsafe fn is_zip(callee: Obj) -> bool {
     !callee.is_null() && builtin_named(Builtin::Zip) == callee as usize
@@ -2704,6 +2735,11 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, 
         let fine = named && (api.tensor_info)(reader, &mut info) == 0 && quiet_generic(reader, args[0]);
         xdecref(reader);
         return fine.then_some(false);
+    }
+    // A call of a generator function makes a generator, the path's own,
+    // and runs nothing of the function.
+    if generator_function(callee) {
+        return Some(true);
     }
     if ffi::PyCFunction_Check(callee) != 0 {
         let function = callee as *mut ffi::PyCFunctionObject;
@@ -5380,6 +5416,10 @@ pub struct Trace {
     /// that the class is: what the class has for its objects is read of
     /// the class, in front of whatever is stored into the object.
     pub classes: Vec<(PathValue, PathValue)>,
+    /// What goes over the generators whose code the trace is in, one
+    /// inside the other: the list of the path that keeps what the
+    /// generator gives.
+    pub drains: Vec<PathValue>,
     /// The run is no run to make a form of (an operation that is no part
     /// of the path changed what kind of tensor one of its tensors is): the
     /// path is taken down again at the next call.
@@ -5494,6 +5534,7 @@ impl Trace {
             stores: Vec::new(),
             apart: Vec::new(),
             classes: Vec::new(),
+            drains: Vec::new(),
             again: false,
             abandoned: None,
             writes: false,
@@ -6052,6 +6093,17 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
         }
         Op::CellGet(a, n) => Op::CellGet(f(*a), *n),
         Op::MakeCell(a) => Op::MakeCell(if *a == UNDEF { UNDEF } else { f(*a) }),
+        Op::MakeFunction { code, defaults, kwdefaults, annotations, annotate, closure } => {
+            let mut of = |v: V| if v == NONE { NONE } else { f(v) };
+            Op::MakeFunction {
+                code: of(*code),
+                defaults: of(*defaults),
+                kwdefaults: of(*kwdefaults),
+                annotations: of(*annotations),
+                annotate: of(*annotate),
+                closure: of(*closure),
+            }
+        }
         Op::CellSet(a, b) if *b != UNDEF => Op::CellSet(f(*a), f(*b)),
         Op::LoadAttr(a, n) => Op::LoadAttr(f(*a), *n),
         Op::Binary(k, a, b) => Op::Binary(*k, f(*a), f(*b)),
