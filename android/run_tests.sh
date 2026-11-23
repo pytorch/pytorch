@@ -52,6 +52,6 @@ $ADB_PATH wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; d
   # The test currently takes about 10 minutes
   retry $GRADLE_PATH -PABI_FILTERS=x86 -p $PYTORCH_ANDROID_DIR connectedAndroidTest
 } || {
-  echo "::error::Check https://github.com/pytorch/pytorch/tree/master/test/mobile/model_test to see how to fix the failed mobile test"
+  echo "::error::Android instrumented tests failed; inspect the Gradle output above."
   exit 1
 }

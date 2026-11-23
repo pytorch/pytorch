@@ -40,12 +40,13 @@ from torch.utils._config_module import (
 class TestConfigModule(TestCase):
     def tearDown(self):
         # Config changes get persisted between test cases
-        for k in config._config:
-            config._config[k].user_override.set(_UNSET_SENTINEL)
-            config._config[k].hide = False
-        config._hash_cache_var.set(None)
-        config._get_dict_dirty_keys_var.set(None)
-        config._get_dict_cache_var.set(None)
+        for mod in (config, config2):
+            for k in mod._config:
+                mod._config[k].user_override.set(_UNSET_SENTINEL)
+                mod._config[k].hide = False
+            mod._hash_cache_var.set(None)
+            mod._get_dict_dirty_keys_var.set(None)
+            mod._get_dict_cache_var.set(None)
         # Reset deprecation warning flags
         for k in config._config:
             config._config[k]._deprecation_warned = False
@@ -550,6 +551,27 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         with config.patch(e_aliased_bool=True):
             self.assertTrue(config2.e_aliasing_bool)
 
+    def test_patch_restores_unset_override(self):
+        # Exiting a patch must not leave behind a user override equal to the
+        # default; Dynamo guards on whether the override is set.
+        with config.patch(e_bool=True):
+            pass
+        self.assertIs(config._config["e_bool"].user_override.get(), _UNSET_SENTINEL)
+
+        target = config2._config["e_aliasing_bool"]
+        self.assertIs(target.user_override.get(), _UNSET_SENTINEL)
+        with config.patch(e_aliased_bool=False):
+            pass
+        self.assertIs(target.user_override.get(), _UNSET_SENTINEL)
+
+    def test_patch_deprecation_error_applies_nothing(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", FutureWarning)
+            with self.assertRaisesRegex(FutureWarning, "e_deprecated is deprecated"):
+                with config.patch(e_bool=False, e_deprecated=False):
+                    pass
+        self.assertTrue(config.e_bool)
+
     def test_reference_is_default(self):
         t = config.e_dict
         self.assertTrue(config._is_default("e_dict"))
@@ -627,6 +649,26 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertIn("e_deprecated_alias", str(w[0].message))
             self.assertIn("use something else instead", str(w[0].message))
 
+    def test_deprecated_alias_fields_from(self):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            self.assertTrue(config.nested_alias.e_bool)
+            self.assertEqual(len(w), 1)
+            self.assertIn("use nested.e_bool instead", str(w[0].message))
+
+            config.nested_alias.e_bool = False
+            self.assertFalse(config.nested.e_bool)
+            config.nested.e_bool = True
+            self.assertTrue(config.nested_alias.e_bool)
+            with config.patch({"nested_alias.e_bool": False}):
+                self.assertFalse(config.nested.e_bool)
+            self.assertTrue(config.nested.e_bool)
+            with patch.object(config.nested_alias, "e_bool", False):
+                self.assertFalse(config.nested.e_bool)
+            self.assertTrue(config.nested_alias.e_bool)
+            self.assertEqual(len(w), 1)
+        self.assertNotIn("nested_alias.e_bool", config.get_config_copy())
+
     def test_no_warnings_for_normal_user_code(self):
         """Test that normal user operations don't produce deprecation warnings."""
         import torch
@@ -667,6 +709,17 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         self.assertTrue(config.e_bool)
         with config.patch(e_bool=False):
             self.assertFalse(config._is_default("e_bool"))
+
+    def test_save_restore_user_overrides(self):
+        config.e_list = [1, 2]
+        saved = config._save_user_overrides()
+        config.e_bool = False
+        config.e_list.append(3)
+        config._restore_user_overrides(saved)
+        self.assertTrue(config.e_bool)
+        self.assertEqual(config.e_list, [1, 2])
+        override = config._config["e_env_default"].user_override
+        self.assertIs(override.get(), _UNSET_SENTINEL)
 
     def test_dict_patch(self):
         self.assertTrue(config.e_bool)

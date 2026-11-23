@@ -3,7 +3,7 @@ import gc
 import json
 import os
 from abc import ABC, abstractmethod
-from typing_extensions import Self
+from typing import Self
 
 from sympy.core.cache import clear_cache as clear_sympy_cache
 

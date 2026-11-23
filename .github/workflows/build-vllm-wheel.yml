@@ -125,7 +125,13 @@ jobs:
             "${RUNNER_TEMP}"/artifacts/torch-*.whl \
             "${RUNNER_TEMP}"/artifacts/torchvision-*.whl \
             "${RUNNER_TEMP}"/artifacts/torchaudio-*.whl
-          "${PYTHON_EXECUTABLE}" use_existing_torch.py
+          # vLLM moved use_existing_torch.py into tools/ (vllm-project/vllm#58572).
+          # TODO: keep only the tools/ path once the vLLM pin includes that change.
+          if [ -f tools/use_existing_torch.py ]; then
+            "${PYTHON_EXECUTABLE}" tools/use_existing_torch.py
+          else
+            "${PYTHON_EXECUTABLE}" use_existing_torch.py
+          fi
           "${PYTHON_EXECUTABLE}" -m pip install -r requirements/build/cuda.txt
 
           # sccache (S3 compiler cache) is best-effort: install if missing, never fail on it.

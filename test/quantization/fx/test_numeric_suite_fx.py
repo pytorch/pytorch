@@ -861,7 +861,6 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
         self, m, data, prepared_expected_node_occurrence=None, results_len=0,
         should_log_inputs=False,
         qconfig_dict=None,
-        skip_scripting=False,
         prepare_fn=prepare_fx,
     ):
         if qconfig_dict is None:
@@ -892,11 +891,6 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
             self.checkGraphModuleNodes(
                 mq_ns, expected_node_occurrence=prepared_expected_node_occurrence)
 
-        if not skip_scripting:
-            m_ns = torch.jit.script(m_ns)
-            mp_ns = torch.jit.script(mp_ns)
-            mq_ns = torch.jit.script(mq_ns)
-
         # calibrate
         m_ns(*data)
         mp_ns2(*data)
@@ -924,7 +918,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
 
     def _test_match_shadow_activations(
         self, m, data, prepared_expected_node_occurrence=None, results_len=None,
-        should_log_inputs=False, qconfig_dict=None, skip_scripting=False,
+        should_log_inputs=False, qconfig_dict=None,
         prepare_fn=prepare_fx, compare_fp32_vs_fp32_prepared=True,
     ):
         if qconfig_dict is None:
@@ -955,11 +949,6 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
                     m_shadows_mp, expected_node_occurrence=prepared_expected_node_occurrence)
             self.checkGraphModuleNodes(
                 mp_shadows_mq, expected_node_occurrence=prepared_expected_node_occurrence)
-
-        if not skip_scripting:
-            if compare_fp32_vs_fp32_prepared:
-                m_shadows_mp = torch.jit.script(m_shadows_mp)
-            mp_shadows_mq = torch.jit.script(mp_shadows_mq)
 
         # calibrate
         if compare_fp32_vs_fp32_prepared:
@@ -1390,48 +1379,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def test_int8_shadows_int8_fun(self):
         m = LinearFunctional().eval()
         self._test_int8_shadows_int8_impl(m)
-
-    @skipIfNoFBGEMM
-    def test_user_module_scriptable(self):
-        # Logging of the output of this class is not supported, because it is
-        # neither a tensor or an RNN return type.
-        class M1(nn.Module):
-            def forward(self, x):
-                x1 = x * 2
-                x2 = x * 4
-                return (x1, x2)
-
-        class M2(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.m1 = M1()
-
-            def forward(self, x):
-                x1, x2 = self.m1(x)
-                return x1, x2
-
-        m = M2().eval()
-        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
-        prepare_custom_config_dict = {
-            'non_traceable_module_class': [M1],
-        }
-        example_inputs = (torch.randn(1),)
-        mp1 = prepare_fx(
-            m,
-            qconfig_dict,
-            example_inputs=example_inputs,
-            prepare_custom_config=prepare_custom_config_dict)
-        mp2 = copy.deepcopy(mp1)
-        unmatchable_types_map = get_unmatchable_types_map()
-        unmatchable_types_map['mods_unmatchable'].add(M1)
-        mp1_ns, mp2_ns = _add_loggers_impl(
-            'a', mp1, 'b', mp2, OutputLogger, should_log_inputs=False,
-            unmatchable_types_map=unmatchable_types_map)
-
-        # Scripting a model with loggers should succeed. If it fails because of
-        # incorrect dtypes, we can blocklist the associated types from being instrumented.
-        mp1_ns_scripted = torch.jit.script(mp1_ns)
-        mp2_ns_scripted = torch.jit.script(mp2_ns)
 
     @skipIfNoFBGEMM
     def test_user_module(self):
@@ -2841,10 +2788,8 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
         m = LSTMwithHiddenDynamicModel().eval()
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
-        # TODO(future PR): enable scripting (quant prepared LSTM not scriptable)
         res = self._test_match_activations(
-            m, (lstm_input, lstm_hidden), results_len=1, qconfig_dict=qconfig_dict,
-            skip_scripting=True)
+            m, (lstm_input, lstm_hidden), results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_compare_shadow_activations_conv(self):
@@ -2878,10 +2823,8 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
         m = LSTMwithHiddenDynamicModel().eval()
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
-        # TODO(future PR): enable scripting (quant prepared LSTM not scriptable)
         res = self._test_match_shadow_activations(
-            m, (lstm_input, lstm_hidden), results_len=1, qconfig_dict=qconfig_dict,
-            skip_scripting=True)
+            m, (lstm_input, lstm_hidden), results_len=1, qconfig_dict=qconfig_dict)
 
     @skipIfNoFBGEMM
     def test_sparsenn_compare_activations(self):

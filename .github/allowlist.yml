@@ -39,6 +39,11 @@
 L1:
   - riseproject-dev/pytorch-ci
   - NVIDIA-dev/pytorch-oot-internal
+  - RBLN-SW/torch-rbln
+  - ROCm/pytorch-windows-ci
+  - versi379/pytorch-tccl-ci:
+      events:
+        - nightly
 
 L2:
   - NVIDIA/pytorch-windows-ci:
@@ -62,10 +67,13 @@ L2:
       events:
         - pull_request
         - nightly
+  - aws-neuron/private-torch-neuronx:
+      events:
+        - nightly
 
 L3:
+  npu:
+    Ascend/pytorch: [huangjingwei, kerer-ai, zyw-hw]
   # Canonical test repos for CRCR.
   crcr-test:
     pytorch/crcr-test: [atalman, can-gaa-hou, fffrog, jewelkm89, KarhouTam, subinz1]
-  npu:
-    Ascend/pytorch: [huangjingwei, kerer-ai, zyw-hw]

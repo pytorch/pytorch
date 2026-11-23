@@ -39,13 +39,6 @@ from torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc
 from torch.testing._internal.distributed.rpc.faulty_agent_rpc_test import (
     FaultyAgentRpcTest,
 )
-from torch.testing._internal.distributed.rpc.jit.dist_autograd_test import (
-    JitDistAutogradTest,
-)
-from torch.testing._internal.distributed.rpc.jit.rpc_test import JitRpcTest
-from torch.testing._internal.distributed.rpc.jit.rpc_test_faulty import (
-    JitFaultyAgentRpcTest,
-)
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -110,8 +103,6 @@ GENERIC_TESTS = [
     ParameterServerTest,
     DistAutogradTest,
     DistOptimizerTest,
-    JitRpcTest,
-    JitDistAutogradTest,
     RemoteModuleTest,
     ThreeWorkersRemoteModuleTest,
     DdpUnderDistAutogradTest,
@@ -147,7 +138,6 @@ TENSORPIPE_CUDA_TESTS = [
 FAULTY_AGENT_TESTS = [
     FaultyAgentRpcTest,
     FaultyAgentDistAutogradTest,
-    JitFaultyAgentRpcTest,
 ]
 
 

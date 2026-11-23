@@ -19,7 +19,7 @@ from .standalone_compile import (
 
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
     from torch.export import ExportedProgram
     from torch.export.pt2_archive._package import AOTICompiledModel
     from torch.export.pt2_archive._package_weights import Weights
@@ -278,8 +278,9 @@ def aoti_load_package(
     Args:
         path: Path to the .pt2 package or extracted package directory.
         run_single_threaded (bool): Whether the model should be run without
-            thread synchronization logic. This is useful to avoid conflicts with
-            CUDAGraphs.
+            thread synchronization logic. This is useful to avoid conflicts
+            when capturing calls with torch.cuda.graph, and incompatible with
+            run_with_lazy_cuda_graphs.
         device_index (int): The index of the device to which the PT2 package is
             to be loaded. By default, `device_index=-1` is used, which corresponds
             to the device `cuda` when using CUDA. Passing `device_index=1` would
@@ -442,7 +443,7 @@ def standalone_compile(
     options: dict[str, Any] | None = None,
     aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
     donate_graph_module: bool = False,
-    fake_mode: FakeTensorMode | None = None,
+    fake_mode: FakeTensorMode | CppFakeTensorMode | None = None,
 ) -> CompiledArtifact:
     """
     Precompilation API for inductor.

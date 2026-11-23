@@ -195,11 +195,6 @@ at::Tensor prod_backward(
     at::Tensor result,
     int64_t dim,
     bool keepdim);
-at::Tensor solve_jvp(
-    const Tensor& X,
-    const Tensor& A,
-    const Tensor& dA,
-    const Tensor& dB);
 at::Tensor solve_backward_A(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -1222,5 +1217,12 @@ mkldnn_rnn_layer_differentiable_backward(
     const at::Tensor& workspace);
 
 Tensor values_backward(const Tensor& grad, const Tensor& self);
+
+std::tuple<Tensor, Tensor> philox_uniform_bounds_backward(
+    const Tensor& grad,
+    const Tensor& key,
+    const Tensor& low,
+    const Tensor& high,
+    std::array<bool, 2> grad_input_mask);
 
 } // namespace torch::autograd::generated::details

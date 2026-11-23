@@ -28,8 +28,6 @@ torch.cuda.memory <torch_cuda_memory>
 mps
 xpu
 mtia
-mtia.memory
-mtia.mtia_graph
 meta
 torch.backends <backends>
 torch.export <user_guide/torch_compiler/export>
@@ -65,17 +63,6 @@ sparse
 storage
 torch.testing <testing>
 torch.utils <utils>
-torch.utils.benchmark <benchmark_utils>
-torch.utils.checkpoint <checkpoint>
-torch.utils.cpp_extension <cpp_extension>
-torch.utils.data <data>
-torch.utils.deterministic <deterministic>
-torch.utils.jit <jit_utils>
-torch.utils.dlpack <dlpack>
-torch.utils.mobile_optimizer <mobile_optimizer>
-torch.utils.model_zoo <model_zoo>
-torch.utils.tensorboard <tensorboard>
-torch.utils.module_tracker <module_tracker>
 type_info
 torch.__config__ <config_mod>
 torch.__future__ <future_mod>

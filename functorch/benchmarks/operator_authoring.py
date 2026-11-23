@@ -36,10 +36,6 @@ def inplace_addnorm(a, b, mean, std, out):
     return out
 
 
-ts_addnorm = torch.jit.script(eager_addnorm)
-ts_ip_addnorm = torch.jit.script(inplace_addnorm)
-
-
 def maybe_synced(fn):
     if CUDA:
         synchronize = torch.cuda.synchronize
@@ -142,7 +138,6 @@ def test_backwards(make_args, nnc=nnc_add, aten=torch.add):
 
 def main():
     torch.set_num_threads(1)  # TODO(jansel): add parallel support
-    torch._C._jit_override_can_fuse_on_cpu(True)
 
     device = "cuda" if CUDA else "cpu"
     I = partial(torch.randint, 0, 100, device=device)
@@ -210,14 +205,6 @@ def main():
             ),
         ),
         (
-            "fused addnorm (vs TS)",
-            test(
-                lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
-                nnc=nnc_addnorm,
-                aten=ts_addnorm,
-            ),
-        ),
-        (
             "fused addnorm out=",
             test_out(
                 lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
@@ -227,28 +214,11 @@ def main():
             ),
         ),
         (
-            "fused addnorm out= (vs TS)",
-            test_out(
-                lambda n: (R(n, n), R(n, n), R(n, n), R(n, n)),
-                nnc=nnc_addnorm,
-                aten=ts_ip_addnorm,
-                out=lambda n: R(n, n),
-            ),
-        ),
-        (
             "fused addnorm backward",
             test_backwards(
                 lambda n: (R(n, n), R(n, n, requires_grad=True), R(n, n), R(n, n)),
                 nnc=nnc_addnorm,
                 aten=eager_addnorm,
-            ),
-        ),
-        (
-            "fused addnorm backward (vs TS)",
-            test_backwards(
-                lambda n: (R(n, n), R(n, n, requires_grad=True), R(n, n), R(n, n)),
-                nnc=nnc_addnorm,
-                aten=ts_addnorm,
             ),
         ),
     ]

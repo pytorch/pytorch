@@ -173,7 +173,10 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
     if dist.get_world_size() < 2:
         return local_hit
 
-    from torch._dynamo.distributed import get_compile_sync_pg
+    from torch._dynamo.distributed import (
+        _compile_sync_pg_available,
+        get_compile_sync_pg,
+    )
 
     if not config._sync_cache_decision_cross_ranks:
         # Nothing to decide, but _sync_decision_cross_ranks builds this same group lazily
@@ -181,9 +184,10 @@ def sync_cache_decision_cross_ranks(local_hit: bool) -> bool:
         # missed: a subset of ranks building a group hangs in the rendezvous, and worse,
         # advances _world.group_count only on those ranks, which is the salt every later
         # group name is derived from. Build it here instead, where every rank is. Skipped
-        # without gloo so such a build keeps failing where it did before, in the
-        # partitioner and only for the graphs it actually syncs.
-        if config._sync_decision_cross_ranks and dist.is_gloo_available():
+        # where the group cannot be built (a real world without gloo), so such a build
+        # keeps failing where it did before, in the partitioner and only for the graphs
+        # it actually syncs.
+        if config._sync_decision_cross_ranks and _compile_sync_pg_available():
             get_compile_sync_pg()
         return local_hit
 
@@ -1474,32 +1478,39 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             CacheArtifactRecorder(
                 AOTAutogradCacheArtifact.type(), key
             ).record_if_present(pickled_content)
-            if pickled_content is not None:
-                if (
-                    should_bundle_autograd_cache()
-                    and aot_config is not None
-                    and aot_config.precompile_backend_id is not None
-                ):
-                    # NB: We don't want to use the cached aot_config.precompile_backend_id
-                    # 1. because we set it to None on save 2. even if we didn't, this new run
-                    # that cache hit has a *new* backend id associated with it.
-                    PrecompileContext.record_artifact(
-                        BundledAOTAutogradCacheArtifact(
-                            aot_config.precompile_backend_id, entry
-                        ),
-                    )
+            if entry is not None:
+                AOTAutogradCache._record_precompile_artifact(entry, aot_config)
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
             if config.strict_autograd_cache:
                 raise e
-        if entry is not None:
-            if pickled_content is None:
-                raise AssertionError(
-                    "pickled_content must not be None when entry is not None"
-                )
-            return (entry, pickled_content)
-        else:
+        if entry is None:
             return None
+        if pickled_content is None:
+            raise AssertionError(
+                "pickled_content must not be None when entry is not None"
+            )
+        return (entry, pickled_content)
+
+    @staticmethod
+    def _record_precompile_artifact(
+        entry: GenericAOTAutogradResult[Any, Any], aot_config: AOTConfig | None
+    ) -> None:
+        """
+        On a cache hit while bundling for precompile, record the entry under the
+        current run's precompile backend id.
+        """
+        if (
+            should_bundle_autograd_cache()
+            and aot_config is not None
+            and aot_config.precompile_backend_id is not None
+        ):
+            # NB: We don't want to use the cached aot_config.precompile_backend_id
+            # 1. because we set it to None on save 2. even if we didn't, this new run
+            # that cache hit has a *new* backend id associated with it.
+            PrecompileContext.record_artifact(
+                BundledAOTAutogradCacheArtifact(aot_config.precompile_backend_id, entry)
+            )
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:

@@ -993,7 +993,8 @@ Tensor mean_backward(
     bool keepdim) {
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
   auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
-  return sum_backward(grad, shape, opt_dim, keepdim) / std::move(n);
+  // Keep double backward finite for empty reductions.
+  return sum_backward(grad / n.max(1), shape, opt_dim, keepdim);
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
@@ -1108,22 +1109,6 @@ Tensor prod_backward(
   } else {
     return prod_safe_zeros_backward(grad, input, dim);
   }
-}
-
-template <typename solve_f>
-static Tensor generic_solve_jvp(
-    solve_f solve,
-    const Tensor& X,
-    const Tensor& A,
-    const Tensor& dA,
-    const Tensor& dB) {
-  auto is_vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
-  auto dA_contrib =
-      is_vector_case ? dA.matmul(X.unsqueeze(-1)).squeeze(-1) : dA.matmul(X);
-  // In general,
-  // dX = solve(A, dB - dA_contrib), but this behavior is different for
-  // lu_solve. For refer to lu_solve_jvp for more details on this.
-  return solve(A, dB, dA_contrib);
 }
 
 Tensor cumsum_backward(const Tensor& grad, int64_t dim) {
@@ -2712,24 +2697,31 @@ Tensor binary_cross_entropy_with_logits_backward(
     return at::_efficientzerotensor(input.sizes(), input.options());
   }
 
-  // -w * [ pos * y * (1 -sigmoid(x)) - (1 - y) sigmoid(x)] * grad
+  // [(1 - y) * sigmoid(x) - pos * y * sigmoid(-x)] * grad
+  // Using sigmoid(-x) instead of 1 - sigmoid(x) avoids cancellation
+  // when sigmoid(x) rounds to 1.
+  //
+  // for eg, when x = 37.42994775023705;
+  //              sigmoid(x) = 1 (approx)
+  //              sigmoid(x) - 1 = 0.0 (gradient loss)
+  //              sigmoid(-x) = 5.55112e-17 (approx)
 
   // If there are subclassed tensors use the out of place version
-  Tensor grad_input;
+  const bool out_of_place = at::areAnyTensorSubclassLike({input, target}) ||
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      (isDefined(pos_weight) && at::isTensorSubclassLike(*pos_weight)) ||
+      at::GradMode::is_enabled();
+  auto neg_part = out_of_place ? input.neg().sigmoid().mul(target)
+                               : input.neg().sigmoid_().mul_(target);
+
   if (isDefined(pos_weight)) {
-    // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    auto t = pos_weight->mul(target);
-    grad_input = at::areAnyTensorSubclassLike({input, target}) ||
-            at::GradMode::is_enabled()
-        ? t.add(1).sub(target).mul(input.sigmoid()).sub(t)
-        : t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t);
-  } else {
-    grad_input = at::areAnyTensorSubclassLike({input, target}) ||
-            at::GradMode::is_enabled()
-        ? input.sigmoid().sub(target)
-        : input.sigmoid().sub_(target);
+    neg_part = neg_part.mul(*pos_weight);
   }
+
+  auto grad_input = out_of_place
+      ? input.sigmoid().mul(at::rsub(target, 1)).sub(neg_part)
+      : input.sigmoid().mul_(at::rsub(target, 1)).sub_(neg_part);
 
   if (at::isTensorSubclassLike(grad) || at::GradMode::is_enabled()) {
     grad_input = grad_input.mul(grad);
@@ -4952,15 +4944,17 @@ Tensor triangular_solve_jvp(
     const bool upper,
     const bool transpose,
     const bool unitriangular) {
-  return generic_solve_jvp(
-      [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-        return std::get<0>(at::triangular_solve(
-            dB - dA_contrib, A, upper, transpose, unitriangular));
-      },
-      X,
-      A,
-      dA,
-      dB);
+  at::NoTF32Guard disable_tf32;
+  // Keep only the part of dA the op reads (strict when unitriangular)
+  auto dA_read = upper ? dA.triu(static_cast<int>(unitriangular))
+                       : dA.tril(-static_cast<int>(unitriangular));
+  if (transpose) {
+    dA_read = dA_read.mT();
+  }
+  // Unlike linalg.solve, triangular_solve has no vector case. A B of shape
+  // A.shape[:-1] is one matrix broadcast over the batch.
+  return std::get<0>(at::triangular_solve(
+      dB - dA_read.matmul(X), A, upper, transpose, unitriangular));
 }
 
 Tensor linalg_solve_triangular_forward_AD(
@@ -5056,10 +5050,12 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
       Tensor common_term = at::matmul(grad_self, result.mH());
       common_term = common_term + common_term.mH();
 
+      // The op reads one triangle of input2. See
+      // [Note: Forward / Backward AD solve_triangular]
       if (upper) {
-        grad_input2 = -at::matmul(input2, common_term);
+        grad_input2 = at::matmul(input2.triu(), -common_term).triu();
       } else {
-        grad_input2 = -at::matmul(common_term, input2);
+        grad_input2 = at::matmul(-common_term, input2.tril()).tril();
       }
     }
   }
@@ -5073,16 +5069,13 @@ Tensor cholesky_solve_jvp(
     const Tensor& dB,
     const bool upper) {
   at::NoTF32Guard disable_tf32;
-  auto dK = upper ? dU.mH().matmul(U) : dU.matmul(U.mH());
+  // Keep only the triangle of U and dU the op reads
+  auto dK =
+      upper ? dU.triu().mH().matmul(U.triu()) : dU.tril().matmul(U.tril().mH());
   auto dA = dK + dK.mH();
-  return generic_solve_jvp(
-      [&](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-        return at::cholesky_solve(dB - dA_contrib, A, upper);
-      },
-      X,
-      /*A=*/U,
-      dA,
-      dB);
+  // Unlike linalg.solve, cholesky_solve has no vector case. A B of shape
+  // A.shape[:-1] is one matrix broadcast over the batch.
+  return at::cholesky_solve(dB - dA.matmul(X), U, upper);
 }
 
 Tensor fft_c2r_backward(
@@ -5523,9 +5516,8 @@ std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
   Tensor dgamma;
 
   std::vector<int64_t> rstd_view_shape = rstd.sizes().vec();
-  for (int i = 0;
-       i < std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0);
-       ++i) {
+  for ([[maybe_unused]] const auto _ : c10::irange(
+           std::max(static_cast<int>(normalized_ndim - rstd.dim()), 0))) {
     rstd_view_shape.push_back(1);
   }
   Tensor rstd_broadcast = rstd.view(rstd_view_shape);
@@ -6692,21 +6684,6 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
   return std::make_tuple(
       A_requires_grad ? std::move(gA_) : Tensor{},
       B_requires_grad ? matrix_to_vector(gB_) : Tensor{});
-}
-
-Tensor solve_jvp(
-    const Tensor& X,
-    const Tensor& A,
-    const Tensor& dA,
-    const Tensor& dB) {
-  return generic_solve_jvp(
-      [](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-        return at::linalg_solve(A, dB - dA_contrib);
-      },
-      X,
-      A,
-      dA,
-      dB);
 }
 
 Tensor lu_unpack_backward(
@@ -7960,7 +7937,7 @@ mkldnn_rnn_layer_differentiable_backward(
       seq_length);
   std::vector<std::tuple<Tensor, Tensor>> layer_states(seq_length + 1);
   layer_states[0] = std::make_tuple(hx_, cx_tmp);
-  for (int64_t seq = 1; seq < seq_length + 1; seq++) {
+  for (const auto seq : c10::irange(1, seq_length + 1)) {
     auto hx = hx_prev;
     auto cx = cx_prev;
     auto x_index = reverse ? seq_length - seq : seq - 1;
@@ -9054,6 +9031,23 @@ Tensor grid_sampler_3d_jvp(
       align_corners,
       {true, false, false}));
   return result_t.defined() ? result_t : at::zeros_like(result);
+}
+
+std::tuple<Tensor, Tensor> philox_uniform_bounds_backward(
+    const Tensor& grad,
+    const Tensor& key,
+    const Tensor& low,
+    const Tensor& high,
+    std::array<bool, 2> grad_input_mask) {
+  if (!grad.defined()) {
+    return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
+  }
+  // The standard sample is regenerated from the key rather than saved.
+  auto u = at::empty_like(grad)._philox_uniform_(key);
+  return {
+      grad_input_mask[0] ? at::sum_to(grad * (1 - u), low.sym_sizes())
+                         : Tensor(),
+      grad_input_mask[1] ? at::sum_to(grad * u, high.sym_sizes()) : Tensor()};
 }
 
 } // namespace torch::autograd::generated::details
