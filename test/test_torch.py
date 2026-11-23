@@ -10504,6 +10504,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     @xfailIfS390X
     def test_qengine(self):
         qengines = torch.backends.quantized.supported_engines
+        if not qengines:
+            self.skipTest("No quantization engine is available in this build")
         original_qe = torch.backends.quantized.engine
         for qe in qengines:
             torch.backends.quantized.engine = qe
