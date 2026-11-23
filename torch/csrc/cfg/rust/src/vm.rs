@@ -1846,6 +1846,13 @@ unsafe fn take(regs: &mut [Obj], v: V) -> Obj {
     std::mem::replace(regs.get_unchecked_mut(v as usize), null_mut())
 }
 
+/// Whether a torch function mode is on: the dispatcher state word has the
+/// number of them from bit 16 on.
+#[inline(always)]
+unsafe fn modes_on(api: &TcfgApi) -> bool {
+    (api.call_modes)() >> 16 != 0
+}
+
 /// The raw content of a register: a Python object, null, or an unboxed
 /// tensor. Only for code that handles all three; see `Compiled::obj`.
 #[inline(always)]
@@ -4809,6 +4816,12 @@ impl Compiled {
     // Guards, versions, specialization
     // ------------------------------------------------------------------
 
+    /// Whether a value is what a version of a block is for: a tensor that
+    /// has no Python object or is of exactly `Tensor` or `Parameter`
+    /// (`tensor_info`), with the rank or the size the guard names. A size
+    /// stands for what a read of it gave, which a comparison was folded
+    /// for: it is that only where the read ran no Python code
+    /// (`reads_quietly`).
     #[inline(always)]
     unsafe fn guard_holds(cond: &GuardCond, regs: &[Obj], api: Option<&TcfgApi>) -> bool {
         let Some(api) = api else {
@@ -4822,9 +4835,65 @@ impl Compiled {
         match cond {
             GuardCond::TensorRank { min_rank, .. } => info.ndim as u32 >= *min_rank,
             GuardCond::DimRange { dim, lo, hi, .. } => {
-                matches!(info.size(*dim), Some(size) if size >= *lo && size <= *hi)
+                matches!(info.size(*dim), Some(size) if size >= *lo && size <= *hi) && Self::reads_quietly(Some(api))
             }
         }
+    }
+
+    /// Whether the interpreter would run no Python code at a read of the
+    /// sizes of a tensor of exactly `Tensor` or `Parameter` (`x.shape[i]`,
+    /// `x.size(i)`, `x.dim()`, `x.ndim`): no torch function mode is on,
+    /// which it asks at every such read, and the tensor classes have under
+    /// the names of the reads what the class under every tensor defines
+    /// (`graph::sizes_are_own`). What a specialized block puts in the
+    /// place of such a read (`Op::TensorSize`, `Op::TensorDim`) is valid
+    /// only then: asked at every run of it, where the read is
+    /// (`read_again`).
+    #[inline(always)]
+    unsafe fn reads_quietly(api: Option<&TcfgApi>) -> bool {
+        api.is_some_and(|api| !modes_on(api)) && graph::sizes_are_own()
+    }
+
+    /// Runs the instructions that a read of a size in a specialized block
+    /// stands for, as they are written: the load of the attribute, the
+    /// constants, and the item, the call or the read itself (`last`, the
+    /// place of the last of them in the generic block), where the
+    /// interpreter would run Python code at the read (`reads_quietly`):
+    /// torch asks the mode, or calls what the class has under the name.
+    /// Gives what the last of them gives; on an error, where it was raised.
+    /// The block has none of them (`TensorAccessors` takes the load out).
+    #[cold]
+    unsafe fn read_again(&self, block: usize, last: usize, regs: &mut [Obj], frames: &mut Frames) -> Result<Obj, u32> {
+        let generic = &self.generic.get_unchecked(block).insts;
+        let loaded = match &generic[last].op {
+            Op::GetItem(shape, _) => *shape,
+            Op::Call { callee, .. } => *callee,
+            _ => NONE,
+        };
+        let first = if loaded == NONE { last } else { generic[..last].iter().rposition(|inst| inst.dst == loaded).unwrap_or(last) };
+        let mut made: Vec<V> = Vec::new();
+        let mut result = Ok(null_mut());
+        for (at, inst) in generic.iter().enumerate().take(last + 1).skip(first) {
+            frames.top().at(inst.bc & OFFSET_MASK);
+            if self.unbound.any.get() && self.looks(regs, &inst.op) {
+                self.bind();
+            }
+            match self.exec_op(regs, &inst.op) {
+                Ok(obj) if at != last => {
+                    capi::release(std::mem::replace(regs.get_unchecked_mut(inst.dst as usize), obj));
+                    made.push(inst.dst);
+                }
+                Ok(obj) => result = Ok(obj),
+                Err(()) => {
+                    result = Err(inst.bc);
+                    break;
+                }
+            }
+        }
+        for v in made {
+            capi::release(take(regs, v));
+        }
+        result
     }
 
     #[inline(always)]
@@ -4873,7 +4942,11 @@ impl Compiled {
         if !bs.versions.is_empty() {
             bs.entry_misses += 1;
         }
-        let mode = if bs.respec_left > 0 { Mode::Profile } else { Mode::Generic };
+        // A version that is not entered because a read would run Python
+        // code (`reads_quietly`: a torch function mode is on) says nothing
+        // about the profile: the block is not profiled again for it.
+        let profiled = bs.respec_left > 0 && (bs.versions.is_empty() || Self::reads_quietly(api));
+        let mode = if profiled { Mode::Profile } else { Mode::Generic };
         if mode == Mode::Profile {
             // What the block is entered with is part of its profile.
             let live: Vec<V> = self.analysis.live_in[b].iter().collect();
@@ -5006,6 +5079,12 @@ impl Compiled {
             return PathEnd::Miss;
         }
         if site.missed.load(Ordering::Relaxed) == serial {
+            return PathEnd::Miss;
+        }
+        // A path reads the sizes of its tensors itself: not while a tensor
+        // class has something of somebody's under the name of such a read,
+        // which the instructions call.
+        if !graph::sizes_are_own() {
             return PathEnd::Miss;
         }
         let modes = (api.call_modes)();
@@ -6767,6 +6846,11 @@ impl Compiled {
                 t.kill(*v);
             }
         };
+        // A read of a size where the interpreter would run Python code is
+        // no instruction of a path: the block loop runs what it stands for.
+        if matches!(inst.op, Op::TensorSize { .. } | Op::TensorDim(_)) && !Self::reads_quietly(Some(api)) {
+            return Taken::Ends("a read of a size runs Python code".to_string());
+        }
         if let Op::Yield(v) = &inst.op {
             // The code of a generator that `tuple` or `list` goes over:
             // what it gives is put into the list of the path that keeps it.
@@ -10944,6 +11028,19 @@ impl Compiled {
                                 Ok(null_mut())
                             }
                             Op::CaughtLasti => Ok(frames.top().lasti()),
+                            // A read of a size where the interpreter would
+                            // run Python code: the instructions it stands
+                            // for run.
+                            Op::TensorSize { .. } | Op::TensorDim(_) if !Self::reads_quietly(api) && *code_ref.origins.get_unchecked(pc) != NONE => {
+                                let last = *code_ref.origins.get_unchecked(pc) as usize;
+                                match self.read_again(cur, last, regs, frames) {
+                                    Ok(obj) => Ok(obj),
+                                    Err(bc) => {
+                                        self.fail(frames, bc);
+                                        raised!('blocks, cur);
+                                    }
+                                }
+                            }
                             op => {
                                 frames.top().at(inst.bc & OFFSET_MASK);
                                 // What is called can look at the frames, and
@@ -11097,10 +11194,14 @@ impl Compiled {
                     continue;
                 }
                 // A guard failed: this block goes back to the generic tier,
-                // from the instruction the guard names.
+                // from the instruction the guard names. Where a read would
+                // run Python code (`reads_quietly`) that says nothing about
+                // the version, which stays as it is for the calls in which
+                // it runs none: the block is not profiled again.
+                let quiet = Self::reads_quietly(api);
                 let mut st = self.state.borrow_mut();
                 st.blocks[cur].deopts += 1;
-                mode = if st.blocks[cur].respec_left > 0 { Mode::Profile } else { Mode::Generic };
+                mode = if quiet && st.blocks[cur].respec_left > 0 { Mode::Profile } else { Mode::Generic };
                 drop(st);
                 code = Arc::as_ptr(self.generic.get_unchecked(cur));
                 pc = resume.unwrap();
