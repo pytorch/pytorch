@@ -16,11 +16,13 @@
 #include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_philox_normal_native.h>
 #include <ATen/ops/_philox_randint_native.h>
 #include <ATen/ops/_philox_uniform_native.h>
+#include <ATen/ops/empty.h>
 #endif
 
 namespace at::native {
@@ -180,17 +182,22 @@ void philox_distribution_kernel(
         op_name, ": key batch shape ", key_batch,
         " is not broadcastable with output shape ", self.sizes());
   }
+  at::assert_no_internal_overlap(self);
 
   if (self.numel() == 0) {
     return;
   }
 
-  // Ensure contiguous, aligned output for vectorized stores. Clone if needed
-  // to ensure alignment; the result is copied back into self afterwards.
+  // Vectorized stores need a contiguous, aligned output.
   constexpr int vec_bytes = elems_per_call<scalar_t> * sizeof(scalar_t);
-  auto output = self.contiguous();
-  if (reinterpret_cast<uintptr_t>(output.data_ptr()) % vec_bytes != 0) {
-    output = output.clone();
+  bool aligned = reinterpret_cast<uintptr_t>(self.data_ptr()) % vec_bytes == 0;
+  Tensor output = self.is_contiguous() && aligned ? self : at::empty(self.sizes(), self.options());
+
+  // The kernels read each (seed, offset) pair from adjacent elements, and the
+  // single-key kernel loads it with ld_vec<16>, which needs 16-byte alignment.
+  auto key_contig = key.contiguous();
+  if (reinterpret_cast<uintptr_t>(key_contig.data_ptr()) % 16 != 0) {
+    key_contig = key_contig.clone();
   }
 
   constexpr int block_size = 256;
@@ -201,7 +208,6 @@ void philox_distribution_kernel(
     int64_t num_chunks = (self.numel() + epc - 1) / epc;
     int num_blocks = static_cast<int>((num_chunks + block_size - 1) / block_size);
 
-    auto key_contig = key.contiguous();
     philox_single_key_kernel<scalar_t>
         <<<num_blocks, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
         output.mutable_data_ptr<scalar_t>(),
@@ -229,7 +235,7 @@ void philox_distribution_kernel(
     for (int64_t i = 0; i < key_dims; i++) {
       int64_t dim = key_dims - 1 - i;
       oc_sizes[i] = self.size(dim);
-      oc_strides[i] = key.size(dim) > 1 ? key.stride(dim) : 0;
+      oc_strides[i] = key_contig.size(dim) > 1 ? key_contig.stride(dim) : 0;
     }
     const int64_t* oc_strides_ptr = oc_strides.data();
     auto key_offset_calc = OffsetCalculator<1>(
@@ -243,7 +249,7 @@ void philox_distribution_kernel(
     philox_multi_key_kernel<scalar_t>
         <<<num_blocks, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
         output.mutable_data_ptr<scalar_t>(),
-        key.const_data_ptr<uint64_t>(),
+        key_contig.const_data_ptr<uint64_t>(),
         num_keys, elems_per_key,
         sample_func, param_func, key_offset_calc);
   }

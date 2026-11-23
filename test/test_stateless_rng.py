@@ -801,6 +801,32 @@ class TestStatelessRNGDistribution(TestCase):
         actual = getattr(random, f"{op}_")(key, out, **{arg: out[:, :1]})
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
+    @parametrize("op", ["uniform", "normal", "randint"])
+    def test_noncontig_key(self, device, op):
+        # A strided or 8-byte-aligned key must give the same values as a contiguous one.
+        gen = getattr(random, op)
+        kwargs = {"low": 0, "high": 100} if op == "randint" else {}
+        keys = random.split(random.key(42, device=device), 4)
+        strided = torch.stack([keys, keys], -1)[..., 0].unsqueeze(1)
+        expected = gen(keys.unsqueeze(1), (4, 33), **kwargs)
+        self.assertEqual(gen(strided, (4, 33), **kwargs), expected, atol=0, rtol=0)
+        misaligned = keys.view(-1)[1:3]
+        expected = gen(misaligned.clone(), (33,), **kwargs)
+        self.assertEqual(gen(misaligned, (33,), **kwargs), expected, atol=0, rtol=0)
+
+    @parametrize("op", ["uniform", "normal", "randint"])
+    def test_internal_overlap_output(self, device, op):
+        # Eager and fake must both reject an output whose elements share memory.
+        gen_ = getattr(random, f"{op}_")
+        kwargs = {"low": 0, "high": 100} if op == "randint" else {}
+        dtype = torch.int64 if op == "randint" else torch.float32
+        for mode in (contextlib.nullcontext(), FakeTensorMode()):
+            with mode:
+                key = random.key(42, device=device)
+                out = torch.zeros(1, 3, dtype=dtype, device=device).expand(4, 3)
+                with self.assertRaisesRegex(RuntimeError, "single memory location"):
+                    gen_(key, out, **kwargs)
+
     @dtypes(*all_floating_dtypes)
     @parametrize("batched", [False, True])
     @onlyAccelerator
