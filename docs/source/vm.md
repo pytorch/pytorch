@@ -41,6 +41,10 @@
 ```
 
 ```{eval-rst}
+.. autoclass:: torch.vm.passes.ModuleShortcuts
+```
+
+```{eval-rst}
 .. autoclass:: torch.vm.passes.ResolveDispatch
 ```
 

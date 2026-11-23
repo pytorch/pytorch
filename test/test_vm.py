@@ -2247,7 +2247,8 @@ class TestVmWith(TestCase):
             return module(x) + 1
 
         linear = torch.nn.Linear(3, 2)
-        compiled = torch.vm(run, fallback=False)
+        # Without the shortcut through Module.__call__, that is compiled too.
+        compiled = torch.vm(run, fallback=False, passes=without(P.ModuleShortcuts))
         x = torch.randn(4, 3)
         for _ in range(3):
             self.assertEqual(compiled(linear, x), run(linear, x))
@@ -2949,6 +2950,166 @@ instantiate_parametrized_tests(TestVmFrames)
 instantiate_parametrized_tests(TestVmLifetimes)
 
 
+class ShortcutNet(torch.nn.Module):
+    kind = "net"
+
+    def __init__(self):
+        super().__init__()
+        self.inner = torch.nn.Linear(3, 2)
+        self.scale = torch.nn.Parameter(torch.full((2,), 2.0))
+        self.register_buffer("shift", torch.ones(2))
+        self.plain = 5
+
+    @property
+    def doubled(self):
+        return self.plain * 2
+
+    def forward(self, x):
+        return self.inner(x) * self.scale + self.shift
+
+
+def shortcut_call(module, x):
+    return module(x)
+
+
+def shortcut_attributes(module):
+    return (
+        module.inner,
+        module.scale,
+        module.shift,
+        module.plain,
+        module.kind,
+        module.doubled,
+        module.forward.__func__,
+    )
+
+
+def shortcut_missing(module):
+    return module.no_such_thing
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class TestVmShortcuts(TestCase):
+    """Module.__call__ and Module.__getattr__ are skipped when a few checks show what they would do."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_nn_module_is_what_the_shortcuts_were_written_for(self):
+        # If this fails, nn.Module.__call__ or __getattr__ changed: read the
+        # change and bring torch/vm/_shortcuts.py in line with it.
+        self.assertTrue(torch.vm._shortcuts.unchanged())
+
+    def test_module_call_goes_straight_to_forward(self):
+        net, x = ShortcutNet(), torch.randn(4, 3)
+        compiled = torch.vm(shortcut_call, fallback=False)
+        for _ in range(3):
+            self.assertEqual(compiled(net, x), net(x))
+        callees = compiled.stats()["compiled_callees"]
+        self.assertEqual(callees, ["Linear.forward", "ShortcutNet.forward"])
+        self.assertEqual(compiled.stats()["interpreted_callees"], [])
+
+    def test_module_with_hooks_is_called_the_long_way(self):
+        net, x = ShortcutNet(), torch.randn(4, 3)
+        compiled = torch.vm(shortcut_call, fallback=False)
+        plain = net(x)
+        self.assertEqual(compiled(net, x), plain)
+        handle = net.register_forward_hook(lambda module, args, output: output + 100)
+        self.assertEqual(compiled(net, x), plain + 100)
+        self.assertIn("Module._call_impl", compiled.stats()["compiled_callees"])
+        handle.remove()
+        self.assertEqual(compiled(net, x), plain)
+        # A hook on every module, and one on the submodule only.
+        handle = torch.nn.modules.module.register_module_forward_hook(
+            lambda module, args, output: output * 0
+        )
+        try:
+            self.assertEqual(compiled(net, x), net(x))
+            self.assertEqual(compiled(net, x), torch.zeros(4, 2))
+        finally:
+            handle.remove()
+        handle = net.inner.register_forward_pre_hook(
+            lambda module, args: (args[0] * 0,)
+        )
+        self.assertEqual(compiled(net, x), net(x))
+        handle.remove()
+        self.assertEqual(compiled(net, x), plain)
+
+    def test_forward_replaced_on_the_instance(self):
+        net, x = ShortcutNet(), torch.randn(4, 3)
+        compiled = torch.vm(shortcut_call, fallback=False)
+        self.assertEqual(compiled(net, x), net(x))
+        net.forward = lambda x: x.sum()
+        self.assertEqual(compiled(net, x), x.sum())
+        del net.forward
+        self.assertEqual(compiled(net, x), net(x))
+
+    def getattr_calls(self, fn, *args):
+        """How often the interpreter entered Module.__getattr__ during a call."""
+        code = torch.nn.Module.__getattr__.__code__
+        calls = []
+
+        def profile(frame, event, arg):
+            if event == "call" and frame.f_code is code:
+                calls.append(frame)
+
+        sys.setprofile(profile)
+        try:
+            fn(*args)
+        finally:
+            sys.setprofile(None)
+        return len(calls)
+
+    def test_parameters_buffers_and_submodules_are_found(self):
+        net = ShortcutNet()
+        compiled = torch.vm(shortcut_attributes, fallback=False)
+        for _ in range(2):
+            for got, expected in zip(compiled(net), shortcut_attributes(net)):
+                self.assertIs(got, expected)
+        self.assertEqual(self.getattr_calls(compiled, net), 0)
+        plain = torch.vm(
+            shortcut_attributes, fallback=False, passes=without(P.ModuleShortcuts)
+        )
+        self.assertEqual(self.getattr_calls(plain, net), 3)
+        net.scale = torch.nn.Parameter(torch.zeros(2))
+        net.plain = 7
+        self.assertIs(compiled(net)[1], net.scale)
+        self.assertEqual(compiled(net)[3:6], (7, "net", 14))
+        missing = torch.vm(shortcut_missing, fallback=False)
+        self.assertEqual(
+            call_outcome(missing, net), call_outcome(shortcut_missing, net)
+        )
+        self.assertEqual(call_outcome(missing, net)[0], AttributeError)
+
+    def test_property_that_raises_is_read_once(self):
+        class Guarded(torch.nn.Module):
+            reads = 0
+
+            @property
+            def fragile(self):
+                type(self).reads += 1
+                raise AttributeError("not now")
+
+        def read(module):
+            return module.fragile
+
+        # The normal lookup runs the property; when it raises AttributeError,
+        # Module.__getattr__ is asked, without the property being run again.
+        module = Guarded()
+        compiled = torch.vm(read, fallback=False)
+        expected = call_outcome(read, module)
+        self.assertEqual(Guarded.reads, 1)
+        self.assertEqual(call_outcome(compiled, module), expected)
+        self.assertEqual(Guarded.reads, 2)
+
+    def test_without_shortcuts(self):
+        net, x = ShortcutNet(), torch.randn(4, 3)
+        compiled = torch.vm(
+            shortcut_call, fallback=False, passes=without(P.ModuleShortcuts)
+        )
+        self.assertEqual(compiled(net, x), net(x))
+        self.assertIn("Module._call_impl", compiled.stats()["compiled_callees"])
+
+
 def e2e_halve(x):
     return x * 0.5
 
@@ -3042,11 +3203,12 @@ class TestVmEndToEnd(TestCase):
         for name in (
             "E2ENet.forward",
             "Linear.forward",
-            "Module._call_impl",
             "Optimizer.zero_grad",
             optimizer_step,
         ):
             self.assertIn(name, callees)
+        # The modules have no hooks: their calls went straight to forward.
+        self.assertNotIn("Module._call_impl", callees)
 
 
 instantiate_parametrized_tests(TestVmEndToEnd)

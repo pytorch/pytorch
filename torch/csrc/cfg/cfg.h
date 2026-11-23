@@ -82,7 +82,7 @@ struct TcfgTensorInfo {
   uint64_t key_set;
 };
 
-#define TCFG_API_VERSION 3
+#define TCFG_API_VERSION 4
 
 struct TcfgApi {
   uint32_t version;
@@ -145,6 +145,10 @@ struct TcfgApi {
   void (*frame_pop)(void* frame, PyObject* kept);
   // Whether something other than the stack refers to the frame.
   int32_t (*frame_held)(void* frame);
+
+  // Whether torch.jit.trace is recording on this thread: one of the things
+  // nn.Module.__call__ looks at before it calls forward.
+  int32_t (*is_tracing)();
 };
 
 } // extern "C"

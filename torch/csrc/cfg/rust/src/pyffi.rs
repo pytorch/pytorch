@@ -110,6 +110,8 @@ pub unsafe fn str_to_string(s: Obj) -> String {
 }
 
 extern "C" {
+    pub fn _PyObject_GenericGetAttrWithDict(obj: Obj, name: Obj, dict: Obj, suppress: std::os::raw::c_int) -> Obj;
+    pub fn _PyObject_GetDictPtr(obj: Obj) -> *mut Obj;
     pub fn _PyDict_MergeEx(mp: Obj, other: Obj, override_: std::os::raw::c_int) -> std::os::raw::c_int;
     pub fn _PyObject_FunctionStr(x: Obj) -> Obj;
 }
