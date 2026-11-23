@@ -1289,6 +1289,13 @@ class TestCuTeDSLPointwise(TestCase):
                 cached = len(transpose_copy._PLANS)
             self.assertEqual(len(transpose_copy._PLANS), cached)
 
+    def test_integer_cuda_scalar_division_promotion(self, device: str) -> None:
+        x = torch.ones(96, 64, device=device, dtype=torch.int32).t()
+        y = torch.tensor(2**32 + 1, device=device, dtype=torch.int64)
+        with _disabled():
+            expected = torch.div(x, y)
+        self.assertEqual(torch.div(x, y), expected, atol=0, rtol=0)
+
 
 instantiate_device_type_tests(TestCuTeDSLPointwise, globals(), only_for=("cuda",))
 
