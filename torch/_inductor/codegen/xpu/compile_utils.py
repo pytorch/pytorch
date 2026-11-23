@@ -6,7 +6,7 @@ import shutil
 import subprocess
 
 from torch._inductor import config
-from torch._inductor.codegen.xpu.xpu_env import get_xpu_arch
+from torch._inductor.codegen.xpu.xpu_env import get_xpu_arch_for_sycl_tla
 from torch._inductor.utils import is_linux
 
 from ..cuda.compile_utils import _cutlass_include_paths
@@ -77,7 +77,7 @@ def _sycl_lib_options() -> list[str]:
 
 def _sycl_arch_as_compile_option() -> str:
     arc_option_map = {"Xe12": "pvc", "Xe20": "bmg-g21,bmg-g31"}
-    arch = get_xpu_arch()
+    arch = get_xpu_arch_for_sycl_tla()
     return arc_option_map.get(arch, "pvc")
 
 

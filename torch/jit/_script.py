@@ -1316,61 +1316,7 @@ def script(
         The ``@torch.jit.script`` decorator will construct a :class:`ScriptFunction`
         by compiling the body of the function.
 
-        Example (scripting a function):
-
-        .. testcode::
-
-            import torch
-
-            @torch.jit.script
-            def foo(x, y):
-                if x.max() > y.max():
-                    r = x
-                else:
-                    r = y
-                return r
-
-            print(type(foo))  # torch.jit.ScriptFunction
-
-            # See the compiled graph as Python code
-            print(foo.code)
-
-            # Call the function using the TorchScript interpreter
-            foo(torch.ones(2, 2), torch.ones(2, 2))
-
-        .. testoutput::
-            :hide:
-
-            ...
-
     ****Scripting a function using example_inputs**
-        Example inputs can be used to annotate a function arguments.
-
-        Example (annotating a function before scripting):
-
-        .. testcode::
-
-            import torch
-
-            def test_sum(a, b):
-                return a + b
-
-            # Annotate the arguments to be int
-            scripted_fn = torch.jit.script(test_sum, example_inputs=[(3, 4)])
-
-            print(type(scripted_fn))  # torch.jit.ScriptFunction
-
-            # See the compiled graph as Python code
-            print(scripted_fn.code)
-
-            # Call the function using the TorchScript interpreter
-            scripted_fn(20, 100)
-
-        .. testoutput::
-            :hide:
-
-            ...
-
     **Scripting an nn.Module**
         Scripting an ``nn.Module`` by default will compile the ``forward`` method and recursively
         compile any methods, submodules, and functions called by ``forward``. If a ``nn.Module`` only uses
@@ -1378,110 +1324,6 @@ def script(
         will construct :class:`ScriptModule` that has copies of the attributes, parameters, and methods of
         the original module.
 
-        Example (scripting a simple module with a Parameter):
-
-        .. testcode::
-
-            import torch
-
-            class MyModule(torch.nn.Module):
-                def __init__(self, N, M):
-                    super().__init__()
-                    # This parameter will be copied to the new ScriptModule
-                    self.weight = torch.nn.Parameter(torch.rand(N, M))
-
-                    # When this submodule is used, it will be compiled
-                    self.linear = torch.nn.Linear(N, M)
-
-                def forward(self, input):
-                    output = self.weight.mv(input)
-
-                    # This calls the `forward` method of the `nn.Linear` module, which will
-                    # cause the `self.linear` submodule to be compiled to a `ScriptModule` here
-                    output = self.linear(output)
-                    return output
-
-            scripted_module = torch.jit.script(MyModule(2, 3))
-
-        Example (scripting a module with traced submodules):
-
-        .. testcode::
-
-            import torch
-            import torch.nn as nn
-            import torch.nn.functional as F
-
-            class MyModule(nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-                    # torch.jit.trace produces a ScriptModule's conv1 and conv2
-                    self.conv1 = torch.jit.trace(nn.Conv2d(1, 20, 5), torch.rand(1, 1, 16, 16))
-                    self.conv2 = torch.jit.trace(nn.Conv2d(20, 20, 5), torch.rand(1, 20, 16, 16))
-
-                def forward(self, input):
-                    input = F.relu(self.conv1(input))
-                    input = F.relu(self.conv2(input))
-                    return input
-
-            scripted_module = torch.jit.script(MyModule())
-
-        To compile a method other than ``forward`` (and recursively compile anything it calls), add
-        the :func:`@torch.jit.export <torch.jit.export>` decorator to the method. To opt out of compilation
-        use :func:`@torch.jit.ignore <torch.jit.ignore>` or :func:`@torch.jit.unused <torch.jit.unused>`.
-
-        Example (an exported and ignored method in a module)::
-
-            import torch
-            import torch.nn as nn
-
-
-            class MyModule(nn.Module):
-                def __init__(self) -> None:
-                    super().__init__()
-
-                @torch.jit.export
-                def some_entry_point(self, input):
-                    return input + 10
-
-                @torch.jit.ignore
-                def python_only_fn(self, input):
-                    # This function won't be compiled, so any
-                    # Python APIs can be used
-                    import pdb
-
-                    pdb.set_trace()
-
-                def forward(self, input):
-                    if self.training:
-                        self.python_only_fn(input)
-                    return input * 99
-
-
-            scripted_module = torch.jit.script(MyModule())
-            print(scripted_module.some_entry_point(torch.randn(2, 2)))
-            print(scripted_module(torch.randn(2, 2)))
-
-        Example ( Annotating forward of nn.Module using example_inputs)::
-
-            import torch
-            import torch.nn as nn
-            from typing import NamedTuple
-
-            class MyModule(NamedTuple):
-            result: List[int]
-
-            class TestNNModule(torch.nn.Module):
-                def forward(self, a) -> MyModule:
-                    result = MyModule(result=a)
-                    return result
-
-            pdt_model = TestNNModule()
-
-            # Runs the pdt_model in eager model with the inputs provided and annotates the arguments of forward
-            scripted_model = torch.jit.script(pdt_model, example_inputs={pdt_model: [([10, 20, ], ), ], })
-
-            # Run the scripted_model with actual inputs
-            print(scripted_model([20]))
     """
     if sys.version_info >= (3, 14):
         warnings.warn(
@@ -1608,41 +1450,6 @@ def interface(obj: _T) -> _T:
     It is sometimes used to implement "Callables" - functions or modules that implement
     an interface but whose implementations differ and which can be swapped out.
 
-    Example:
-    .. testcode::
-
-        import torch
-        from typing import List
-
-        @torch.jit.interface
-        class InterfaceType:
-            def run(self, x: torch.Tensor) -> torch.Tensor:
-                pass
-
-        # implements InterfaceType
-        @torch.jit.script
-        class Impl1:
-            def run(self, x: torch.Tensor) -> torch.Tensor:
-                return x.relu()
-
-        class Impl2(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.val = torch.rand(())
-
-            @torch.jit.export
-            def run(self, x: torch.Tensor) -> torch.Tensor:
-                return x + self.val
-
-        def user_fn(impls: List[InterfaceType], idx: int, val: torch.Tensor) -> torch.Tensor:
-            return impls[idx].run(val)
-
-        user_fn_jit = torch.jit.script(user_fn)
-
-        impls = [Impl1(), torch.jit.script(Impl2())]
-        val = torch.rand(4, 4)
-        user_fn_jit(impls, 0, val)
-        user_fn_jit(impls, 1, val)
     """
     warnings.warn(
         "`torch.jit.interface` is deprecated. Please use `torch.compile` instead.",

@@ -27,6 +27,7 @@ typedef SSIZE_T ssize_t;
 #include <cstdlib>
 #include <functional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace c10d {
@@ -795,17 +796,38 @@ void recvBytes(int socket, T* buffer, size_t length) {
   }
 }
 
+// Overloads for stream types (e.g. a socket with TLS) that provide
+// sendBytes(data, length, moreData) and recvBytes(data, length).
+template <typename T, typename Stream>
+  requires std::is_class_v<Stream>
+void sendBytes(
+    const Stream& stream,
+    const T* buffer,
+    size_t length,
+    bool moreData = false) {
+  stream.sendBytes(buffer, sizeof(T) * length, moreData);
+}
+
+template <typename T, typename Stream>
+  requires std::is_class_v<Stream>
+void recvBytes(const Stream& stream, T* buffer, size_t length) {
+  stream.recvBytes(buffer, sizeof(T) * length);
+}
+
 // send a vector's length and data
-template <typename T>
-void sendVector(int socket, const std::vector<T>& vec, bool moreData = false) {
+template <typename T, typename Socket>
+void sendVector(
+    const Socket& socket,
+    const std::vector<T>& vec,
+    bool moreData = false) {
   SizeType size = vec.size();
   sendBytes<SizeType>(socket, &size, 1, true);
   sendBytes<T>(socket, vec.data(), size, moreData);
 }
 
 // receive a vector as sent in sendVector
-template <typename T>
-std::vector<T> recvVector(int socket) {
+template <typename T, typename Socket>
+std::vector<T> recvVector(const Socket& socket) {
   SizeType valueSize = 0;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<T> value(valueSize);
@@ -814,21 +836,22 @@ std::vector<T> recvVector(int socket) {
 }
 
 // this is only for convenience when sending rvalues
-template <typename T>
-void sendValue(int socket, const T& value, bool moreData = false) {
+template <typename T, typename Socket>
+void sendValue(const Socket& socket, const T& value, bool moreData = false) {
   sendBytes<T>(socket, &value, 1, moreData);
 }
 
-template <typename T>
-T recvValue(int socket) {
+template <typename T, typename Socket>
+T recvValue(const Socket& socket) {
   T value;
   recvBytes<T>(socket, &value, 1);
   return value;
 }
 
 // send a string's length and data
-inline void sendString(
-    int socket,
+template <typename Socket>
+void sendString(
+    const Socket& socket,
     const std::string& str,
     bool moreData = false) {
   SizeType size = str.size();
@@ -837,7 +860,8 @@ inline void sendString(
 }
 
 // receive a string as sent in sendString
-inline std::string recvString(int socket) {
+template <typename Socket>
+std::string recvString(const Socket& socket) {
   SizeType valueSize = 0;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<char> value(valueSize);

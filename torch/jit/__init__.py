@@ -21,15 +21,15 @@ from torch._jit_internal import (
     is_scripting,
     unused,
 )
-from torch.jit._async import fork, wait
+from torch.jit._async import fork as _fork, wait as _wait
 from torch.jit._await import _awaitable, _awaitable_nowait, _awaitable_wait
 from torch.jit._decomposition_utils import _register_decomposition
-from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
+from torch.jit._freeze import run_frozen_optimizations
 from torch.jit._fuser import (
     fuser,
     last_executed_optimized_graph,
     optimized_execution,
-    set_fusion_strategy,
+    set_fusion_strategy as _set_fusion_strategy,
 )
 from torch.jit._ir_utils import _InsertPoint
 from torch.jit._script import (
@@ -37,19 +37,14 @@ from torch.jit._script import (
     _unwrap_optional,
     Attribute,
     CompilationUnit,
-    interface,
     RecursiveScriptClass,
     RecursiveScriptModule,
-    script,
-    script_method,
     ScriptFunction,
     ScriptModule,
     ScriptWarning,
 )
 from torch.jit._serialization import (
     jit_module_from_flatbuffer,
-    load,
-    save,
     save_jit_module_to_flatbuffer,
 )
 from torch.jit._trace import (
@@ -60,8 +55,6 @@ from torch.jit._trace import (
     is_tracing,
     ONNXTracedModule,
     TopLevelTracedModule,
-    trace,
-    trace_module,
     TracedModule,
     TracerWarning,
     TracingCheckError,
@@ -80,29 +73,13 @@ __all__ = [
     "enable_onednn_fusion",
     "export",
     "export_opnames",
-    "fork",
-    "freeze",
-    "interface",
     "ignore",
     "isinstance",
-    "load",
     "onednn_fusion_enabled",
-    "optimize_for_inference",
-    "save",
-    "script",
     "script_if_tracing",
-    "set_fusion_strategy",
     "strict_fusion",
-    "trace",
-    "trace_module",
     "unused",
-    "wait",
 ]
-
-# For backwards compatibility
-_fork = fork
-_wait = wait
-_set_fusion_strategy = set_fusion_strategy
 
 
 def export_opnames(m):
@@ -153,19 +130,8 @@ def annotate(the_type, the_value):
         import torch
         from typing import Dict
 
-        @torch.jit.script
-        def fn():
-            # Telling TorchScript that this empty dictionary is a (str -> int) dictionary
-            # instead of default dictionary type of (str -> Tensor).
-            d = torch.jit.annotate(Dict[str, int], {})
-
-            # Without `torch.jit.annotate` above, following statement would fail because of
-            # type mismatch.
-            d["name"] = 20
-
-    .. testcleanup::
-
-        del fn
+        d = torch.jit.annotate(Dict[str, int], {})
+        d["name"] = 20
 
     Args:
         the_type: Python type that should be passed to TorchScript compiler as type hint for `the_value`
@@ -184,12 +150,7 @@ def script_if_tracing(fn):
     .. deprecated:: 2.5
         TorchScript is deprecated, please use ``torch.compile`` instead.
 
-    ``torch.jit.script`` has a non-negligible start up time when it is first called due to
-    lazy-initializations of many compiler builtins. Therefore you should not use
-    it in library code. However, you may want to have parts of your library work
-    in tracing even if they use control flow. In these cases, you should use
-    ``@torch.jit.script_if_tracing`` to substitute for
-    ``torch.jit.script``.
+    Compiles ``fn`` on its first call from an internal tracing consumer.
 
     Args:
         fn: A function to compile.
@@ -239,7 +200,7 @@ def isinstance(obj, target_type):
                     for val in input.values():
                         print(val)
 
-        m = torch.jit.script(MyModule())
+        m = MyModule()
         x = [torch.rand(3,3), torch.rand(4,3)]
         m(x)
         y = {"key1":"val1","key2":"val2"}
@@ -255,16 +216,7 @@ class strict_fusion:
     .. deprecated:: 2.5
         TorchScript is deprecated, please use ``torch.compile`` instead.
 
-    Example:
-    Forcing fusion of additions.
-
-    .. code-block:: python
-
-        @torch.jit.script
-        def foo(x):
-            with torch.jit.strict_fusion():
-                return x + x + x
-
+    Forcing fusion in retained scripted source is supported.
     """
 
     def __init__(self) -> None:
