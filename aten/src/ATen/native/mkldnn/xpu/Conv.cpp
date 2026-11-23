@@ -346,9 +346,11 @@ Tensor _convolution_out(
   auto input_c = with_canonical_strides(input, mfmt);
   auto weight_c = with_canonical_strides(weight, mfmt);
   // Best-effort: oneDNN wrappers re-derive the layout from the tensors; use the
-  // re-strided ones only if that still equals mfmt, else keep the originals.
+  // re-strided ones only if that still equals mfmt (and a user-provided output
+  // already has it, as dst is tagged from src/weight), else keep the originals.
   if (use_channels_last_for_conv(input_c, weight_c) ==
-      is_channels_last_suggested) {
+          is_channels_last_suggested &&
+      (!output_r.defined() || output_r.is_contiguous(mfmt))) {
     input = input_c;
     weight = weight_c;
   }

@@ -1548,6 +1548,34 @@ class TestConvolutionNNDeviceType(NNTestCase):
             self.assertEqual(res[1][1].cpu(), res[0][1])
 
     @dtypes(torch.float)
+    def test_conv_pointwise_binary_inplace_size1_input(self, device, dtype):
+        # in-place binary conv writes into `other`, whose layout must match the
+        # one oneDNN derives from an all-size-1 channels-last-like input
+        for other_mf in (torch.contiguous_format, torch.channels_last):
+            xb = torch.randn(2, 2, 1, 1, device=device, dtype=dtype)
+            x = xb.to(memory_format=torch.channels_last)[:, :1]
+            w = torch.randn(4, 1, 2, 2, device=device, dtype=dtype)
+            other = torch.randn(2, 4, 2, 2, device=device, dtype=dtype)
+            other = other.contiguous(memory_format=other_mf)
+            ref = F.conv2d(x.cpu(), w.cpu(), padding=1) + other.cpu()
+            torch.ops.mkldnn._convolution_pointwise_.binary(
+                other,
+                x,
+                w,
+                None,
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                1,
+                "add",
+                None,
+                None,
+                [],
+                None,
+            )
+            self.assertEqual(other.cpu(), ref)
+
+    @dtypes(torch.float)
     def test_conv_cow_input(self, device, dtype):
         # 1D
         x1 = torch.randn(2, 4, 16, device=device, dtype=dtype)
