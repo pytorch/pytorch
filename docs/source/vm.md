@@ -3581,6 +3581,35 @@ What graphs do not do at this stage:
   makes for itself (`untyped_storage`, `layout`, `is_quantized`,
   `is_nested`, `is_mkldnn`, `grad`, `_base`) of a tensor that the function
   read off its argument (`x.T`, `x.data`).
+- What a process puts on `torch.Tensor` or on `torch.nn.Parameter` under
+  `shape`, `ndim`, `dim` or `size` (a property, a function), and a
+  `__getattribute__` that it puts on `torch.Tensor`, is not called where the
+  default pass `TensorAccessors` has put an accessor in place of the read:
+  the function computes with the tensor's own sizes.
+- Where the class of a tensor that the function was called with is assigned
+  (`x.__class__ = Sub`) in front of a read of `x.shape[i]`, `x.ndim`,
+  `x.dim()` or `x.size(i)` in the same block of instructions, the read
+  raises a `SystemError` ("torch.vm: tensor_size ran without its guard", or
+  "tensor_dim"), where eager mode reads through the new class. For a tensor
+  that an operation of the function made, and where a branch lies between
+  the two, the read is eager's.
+- A function whose first call runs under a `TorchFunctionMode` takes, in
+  every later call without a mode, 1.5 to 1.7 times what it takes in a
+  function that never ran under one (measured on a function of six
+  operations, where that is more than eager mode takes), and gets no graph
+  with `Graphs()`; a mode that is entered after the first calls costs
+  nothing in the calls behind it. `torch.set_default_device` installs such a
+  mode for the whole process, and `with torch.device(...)` for its block: a
+  function that is first called with a default device set is specialized in
+  almost none of its runs, gets no graph, and takes what eager mode takes;
+  set after the first calls, the function keeps its blocks and takes about
+  15 percent more than eager mode while the device is set.
+- While a `TorchFunctionMode` is on and `Graphs()` alone is in the list, the
+  first call under a mode that is entered after a graph was built asks the
+  mode for seven reads that the engine makes for itself (`untyped_storage`,
+  `layout`, `is_quantized`, `is_nested`, `is_mkldnn`, `grad`, `_base`) of a
+  view that a function of `torch.nn.functional` such as `F.dropout2d` is
+  given.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
