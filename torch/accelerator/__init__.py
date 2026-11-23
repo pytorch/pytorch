@@ -16,6 +16,7 @@ from .memory import (
     empty_cache,
     empty_host_cache,
     get_memory_info,
+    ipc_collect,
     max_memory_allocated,
     max_memory_reserved,
     memory_allocated,
