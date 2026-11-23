@@ -59,6 +59,7 @@ from torch._dynamo.exc import (
     TensorifyScalarRestartAnalysis,
 )
 from torch._guards import InlinedCodeCache, tracing, TracingContext
+from torch._utils import _to_posix_separators
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
@@ -5387,7 +5388,7 @@ class InstructionTranslatorBase(
     def is_co_filename_from_nn_modules(self) -> bool:
         filename = getattr(self.f_code, "co_filename", "<unknown>")
         nn_modules_pattern = re.compile(r".*torch/nn/modules.*")
-        return nn_modules_pattern.match(filename) is not None
+        return nn_modules_pattern.match(_to_posix_separators(filename)) is not None
 
     def store_global_weakref_by_id(self, prefix: str, value: object) -> str:
         global_name = self.output.install_global_by_id(prefix, weakref.ref(value))

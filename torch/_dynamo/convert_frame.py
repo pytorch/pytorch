@@ -64,6 +64,7 @@ from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._higher_order_ops.utils import _in_hop_compile
 from torch._logging import structured
+from torch._utils import _to_posix_separators
 from torch._utils_internal import (
     compile_time_strobelight_meta,
     maybe_upload_prof_stats_to_manifold,
@@ -2174,7 +2175,7 @@ def _compile(
         # torch/_logging/_internal.py:1064 in trace_structured
         # torch/_dynamo/convert_frame.py:780 in <lambda>
         stack_trace = log_dynamo_start(code, skip)
-        start_time_ns = time.time_ns()
+        start_time_ns = time.perf_counter_ns()
         fail_type: str | None = None
         fail_reason: str | None = None
         exception_stack_trace: list[str] | None = None
@@ -2332,7 +2333,9 @@ def _compile(
                 compliant_custom_ops = set({})
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted
-                dynamo_time_before_restart = (time.time_ns() - start_time_ns) / 1e9
+                dynamo_time_before_restart = (
+                    time.perf_counter_ns() - start_time_ns
+                ) / 1e9
 
             metrics = {
                 "frame_key": frame_key,
@@ -2726,7 +2729,9 @@ class CatchErrorsWrapper:
         if (
             frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__"
         ) or (
-            frame.f_code.co_filename.endswith("collections/__init__.py")
+            _to_posix_separators(frame.f_code.co_filename).endswith(
+                "collections/__init__.py"
+            )
             and frame.f_code.co_name == "_make"
         ):
             return self._handle_skip(

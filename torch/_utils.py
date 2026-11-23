@@ -19,6 +19,10 @@ from typing_extensions import deprecated, ParamSpec
 import torch
 
 
+def _to_posix_separators(path: str) -> str:
+    return path.replace(os.sep, "/")
+
+
 def _type(self, dtype=None, non_blocking=False, **kwargs):
     """Returns the type if `dtype` is not provided, else casts this object to
     the specified type.
