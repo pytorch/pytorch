@@ -9,7 +9,6 @@ from torch._prims_common import (
     is_cpu_scalar_tensor as _is_wrapped_scalar,
     is_non_overlapping_and_dense_or_false,
 )
-from torch._tensor_iterator import nullary_op
 
 from ... import cutedsl_utils as cu
 from ...cutedsl.config import POINTWISE_ARCH_MAJORS as _ARCH_MAJORS
@@ -653,11 +652,8 @@ def _range_out_serveable(out: torch.Tensor | None) -> bool:
         and cap.on_current_device(out)
     ):
         return False
-    try:
-        nullary_op(out)
-    except RuntimeError:
-        return False
-    return True
+    # Match TensorIterator's rejection of definite internal overlap.
+    return torch._debug_has_internal_overlap(out) != 1
 
 
 def _range_compute(dtype: torch.dtype) -> torch.dtype:
