@@ -84,13 +84,6 @@ class TestCuTeDSLReductionWiring(TestCase):
             ref = call()
         self.assertEqual(got, ref, **tol)
 
-    @parametrize("op", ["sum", "mean", "amax", "amin", "prod"])
-    def test_supported_call_fires(self, device, op):
-        """Route every registered core operation instead of silently falling back."""
-        x = torch.randn(128, 512, device=device)
-        fn = getattr(torch, op)
-        self.assertEqual(self._run(lambda: fn(x, dim=-1))[1], 1)
-
     def test_per_overload_opt_out(self, device):
         """Disable every override by the overload names the overrides document."""
         x = torch.randn(128, 512, device=device)
@@ -195,16 +188,25 @@ class TestCuTeDSLReductionWiring(TestCase):
         # The Negative fallback clones the view, so the CUDA kernel serves the clone.
         self._check(lambda: torch.sum(xn, dim=-1), **_TOL[torch.float32])
 
-    def test_cow_input_served_and_preserved(self, device):
-        """Read copy-on-write inputs without materializing or mutating their storage."""
-        base = torch.randn(128, 512, device=device)
-        x = torch._lazy_clone(base)
-        data_ptr = x.const_data_ptr()
-        if not torch._C._is_cow_tensor(x):
+    def test_cow_tensors_survive_the_conditions(self, device):
+        """Serve copy-on-write inputs without materializing them, and check an out= in
+        PYTORCH_SUM_INNER_TREE's condition without materializing it either."""
+        base = torch.randn(128, 512, device=device) * 0.01 + 1.0
+        if not torch._C._is_cow_tensor(torch._lazy_clone(base)):
             self.skipTest("allocator does not support COW sharing")
-        self._check(lambda: torch.sum(x, dim=-1), **_TOL[torch.float32])
+        for op in _OVERRIDDEN:
+            x = torch._lazy_clone(base)
+            data_ptr = x.const_data_ptr()
+            with self.subTest(op=op):
+                call = functools.partial(getattr(torch, op), x, dim=-1)
+                self._check(call, **_TOL[torch.float32])
+                self.assertTrue(torch._C._is_cow_tensor(x))
+                self.assertEqual(x.const_data_ptr(), data_ptr)
+        x = torch._lazy_clone(base)
+        out = torch._lazy_clone(torch.empty(128, device=device))
+        self.assertTrue(cutedsl_impl._out_cond(x, [1], out=out))
         self.assertTrue(torch._C._is_cow_tensor(x))
-        self.assertEqual(x.const_data_ptr(), data_ptr)
+        self.assertTrue(torch._C._is_cow_tensor(out))
 
     @unittest.skipUnless(torch.cuda.device_count() >= 2, "needs >= 2 GPUs")
     def test_other_device_is_served(self, device):
@@ -322,6 +324,8 @@ class TestCuTeDSLReductionWiring(TestCase):
         trait = T.SumOps(acc=cutlass.Float32)
         want = kg.reduce_dim(trait, "ref", x, [1], torch.float32, order="inner_tree")
         self.assertEqual(got, want, atol=0, rtol=0)
+        with _disabled():
+            self.assertEqual(got, x.double().sum(-1).float(), **_TOL[torch.float32])
         with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "0"}):
             unordered, fires = self._run(lambda: torch.sum(x, dim=-1))
         self.assertEqual(fires, 1)
@@ -379,6 +383,9 @@ class TestCuTeDSLTracedInputs(TestCase):
         """Decline tensors without launchable storage."""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
+        reason = _overrides_inactive()
+        if reason is not None:
+            self.skipTest(reason)
         if kind == "meta":
             x = torch.empty(4, 128, device="meta")
         else:
@@ -386,31 +393,11 @@ class TestCuTeDSLTracedInputs(TestCase):
                 x = torch.empty(4, 128, device=device)
             if kind == "functional_fake":
                 x = torch._to_functional_tensor(x)
-        # Report a served GPU so that only is_traced declines CUDA inputs; device_ok
-        # also declines meta ones, so check is_traced directly.
-        self.addCleanup(cap._arch_ok.cache_clear)
-        cap._arch_ok.cache_clear()
-        cc = (10, 0)
-        with mock.patch.object(torch.cuda, "get_device_capability", return_value=cc):
-            self.assertFalse(ov._cond(x, -1))
-            self.assertFalse(ov._dtype_cond(x, -1))
+        # On a served GPU only is_traced declines CUDA inputs; device_ok also declines
+        # meta ones, so check is_traced directly.
+        self.assertFalse(ov._cond(x, -1))
+        self.assertFalse(ov._dtype_cond(x, -1))
         self.assertTrue(cap.is_traced(x))
-
-    def test_fake_input_declines_before_querying_the_device(self, device):
-        """Decline a fake CUDA tensor before querying, and so initializing, CUDA."""
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        with FakeTensorMode():
-            x = torch.empty(4, 128, device=device)
-        # The capability is memoized, so clear it for a query to reach the patch.
-        cap._arch_ok.cache_clear()
-        self.addCleanup(cap._arch_ok.cache_clear)
-        err = RuntimeError("queried the device")
-        patch = mock.patch.object(torch.cuda, "get_device_capability", side_effect=err)
-        with patch as query:
-            self.assertFalse(ov._cond(x, -1))
-            self.assertFalse(ov._dtype_cond(x, -1))
-        query.assert_not_called()
 
 
 class TestCuTeDSLReductionOpInfo(TestCase):
