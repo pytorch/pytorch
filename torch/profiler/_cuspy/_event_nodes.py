@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 """Passive bridge: map a CUDA_EVENT record back to the CUDA-graph event-record node.
 
-CUPTI emits a ``CUDA_EVENT`` activity record for each event-record node executed in a
-graph (e.g. the nodes NCCL inserts under ``NCCL_GRAPH_MIXING_SUPPORT=1``), but the record
-carries only an ``event_id`` (keyed to the CUDA event object) -- never a ``graph_node_id``,
-so it cannot be joined to the graph node the way kernel/memcpy/memset records are. There is
+CUPTI before 13.5 emits a ``CUDA_EVENT`` activity record for each event-record node
+executed in a graph (e.g. the nodes NCCL inserts under ``NCCL_GRAPH_MIXING_SUPPORT=1``),
+but the record carries only an ``event_id`` (keyed to the CUDA event object), not a
+``graph_node_id``. It cannot be joined like kernel/memcpy/memset records can. There is
 also no API to query a CUevent's ``event_id``, and the events are owned by whoever built the
 graph (NCCL), so eagerly re-recording them to learn a mapping is unsafe.
 
@@ -36,8 +36,7 @@ a node -- keying on it would collapse every recycled record onto a single node. 
 resolved only when its event-record count matches the graph's node count; otherwise its
 records resolve to ``None``, never guessed.
 
-(If CUPTI ever adds ``graphNodeId`` to ``CUpti_ActivityCudaEvent`` this whole module goes
-away -- the record would join like any other graphed activity.)
+CUDA 13.5 supplies graph-node ids directly; this module remains for older CUPTI.
 """
 
 from __future__ import annotations
