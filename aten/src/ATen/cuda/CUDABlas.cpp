@@ -2346,6 +2346,40 @@ void int8_gemm(
 #endif
 }
 
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13040
+namespace {
+
+int grouped_scale_mode(CublasGroupedScaleLayout layout, bool use_fast_accum) {
+  switch (layout) {
+    case CublasGroupedScaleLayout::Scalar:
+      return CUBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+    case CublasGroupedScaleLayout::PerBatchScalar:
+      return CUBLASLT_MATMUL_MATRIX_SCALE_PER_BATCH_SCALAR_32F;
+    case CublasGroupedScaleLayout::Vec128F32:
+      TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with FP32 block scales");
+      return CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F;
+    case CublasGroupedScaleLayout::Block128x128F32:
+      TORCH_CHECK(!use_fast_accum, "scaled_gemm doesn't support fast accum with FP32 block scales");
+      return CUBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F;
+    case CublasGroupedScaleLayout::Vec32MnK4UE8M0:
+#if CUBLAS_VERSION >= 130801
+      return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_MN_K4_UE8M0;
+#else
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "packed MNxK4 scaling requires a build with cuBLASLt >= 13.8.1 headers");
+#endif
+    case CublasGroupedScaleLayout::Vec128MnK4UE8M0:
+#if CUBLAS_VERSION >= 130801
+      return CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_MN_K4_UE8M0;
+#else
+      TORCH_CHECK_NOT_IMPLEMENTED(false, "packed MNxK4 scaling requires a build with cuBLASLt >= 13.8.1 headers");
+#endif
+  }
+  TORCH_INTERNAL_ASSERT(false, "unsupported grouped GEMM scale layout");
+}
+
+} // namespace
+#endif
+
 void grouped_gemm(
     char transa,
     char transb,
@@ -2357,9 +2391,10 @@ void grouped_gemm(
     int64_t avgK,
     const int64_t *alphaArrayDev,
     const float *alphaScalar,
-    ScalarType input_dtype,
+    ScalarType A_dtype,
     const int64_t *APtrArrayDev,
     const void *ldaArrayDev,
+    ScalarType B_dtype,
     const int64_t *BPtrArrayDev,
     const void *ldbArrayDev,
     const int64_t *betaArrayDev,
@@ -2370,11 +2405,21 @@ void grouped_gemm(
     int64_t *DPtrArrayDev,
     const void *lddArrayDev,
     int batchCount,
-    bool use_int64_dims) {
+    bool use_int64_dims,
+    const std::optional<GroupedGemmScaleOptions>& scales) {
+  const bool scaled = scales.has_value();
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+#if CUDA_VERSION < 13040
+  TORCH_CHECK(!scaled, "scaled grouped cublasLtMatmul requires CUDA >= 13.4");
+#endif
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   const bool sm90 = prop->major == 9;
-  TORCH_CHECK(prop->major >= 9 && prop->major < 12, "grouped cublasLtMatmul requires SM 9.0-11.0");
+  TORCH_CHECK(cublaslt_grouped_gemm_arch_supported(), "grouped cublasLtMatmul requires SM9.x/SM10.x/SM11.x");
+  if (scaled) {
+    TORCH_INTERNAL_ASSERT(
+        scales->A_scale_ptr != nullptr && scales->B_scale_ptr != nullptr,
+        "scaled grouped cublasLtMatmul requires A and B scales");
+  }
 
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
@@ -2391,11 +2436,52 @@ void grouped_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE, alphaBatchStride);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE, betaBatchStride);
+  if (scaled) {
+#if CUDA_VERSION >= 13040
+    const int a_scale_mode = grouped_scale_mode(scales->A_layout, scales->use_fast_accum);
+    const int b_scale_mode = grouped_scale_mode(scales->B_layout, scales->use_fast_accum);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, scales->A_scale_ptr);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, scales->B_scale_ptr);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_MODE, a_scale_mode);
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_MODE, b_scale_mode);
+    // TODO: Add D scaling support
+    const int8_t fastAccuMode = scales->use_fast_accum ? 1 : 0;
+    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
+#endif
+  }
 
-  CuBlasLtGroupedMatrixLayout Adesc(ScalarTypeToCudaDataType(input_dtype), batchCount, mArrayDev, kArrayDev, ldaArrayDev, opa != CUBLAS_OP_N, use_int64_dims);
-  CuBlasLtGroupedMatrixLayout Bdesc(ScalarTypeToCudaDataType(input_dtype), batchCount, kArrayDev, nArrayDev, ldbArrayDev, opb != CUBLAS_OP_N, use_int64_dims);
-  CuBlasLtGroupedMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), batchCount, mArrayDev, nArrayDev, ldcArrayDev, false, use_int64_dims);
-  CuBlasLtGroupedMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), batchCount, mArrayDev, nArrayDev, lddArrayDev, false, use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Adesc(
+      ScalarTypeToCudaDataType(A_dtype),
+      batchCount,
+      mArrayDev,
+      kArrayDev,
+      ldaArrayDev,
+      opa != CUBLAS_OP_N,
+      use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Bdesc(
+      ScalarTypeToCudaDataType(B_dtype),
+      batchCount,
+      kArrayDev,
+      nArrayDev,
+      ldbArrayDev,
+      opb != CUBLAS_OP_N,
+      use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Cdesc(
+      ScalarTypeToCudaDataType(result_dtype),
+      batchCount,
+      mArrayDev,
+      nArrayDev,
+      ldcArrayDev,
+      false,
+      use_int64_dims);
+  CuBlasLtGroupedMatrixLayout Ddesc(
+      ScalarTypeToCudaDataType(result_dtype),
+      batchCount,
+      mArrayDev,
+      nArrayDev,
+      lddArrayDev,
+      false,
+      use_int64_dims);
 
   CuBlasLtMatmulPreference preference;
   auto ltworkspace = CublasLtWorkspace();
@@ -2451,10 +2537,15 @@ void grouped_gemm(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
       "CUDA error: ",
       at::cuda::blas::_cublasGetErrorEnum(cublasStatus),
-      " when calling grouped cublasLtMatmul");
+      " when calling ",
+      scaled ? "scaled grouped cublasLtMatmul" : "grouped cublasLtMatmul");
   return;
 #else
-  TORCH_CHECK(false, "grouped cublasLtMatmul requires CUDA >= 13.3 and is not supported on ROCm. Current build does not meet these requirements.");
+  TORCH_CHECK(
+      false,
+      scaled ? "scaled grouped cublasLtMatmul" : "grouped cublasLtMatmul",
+      " requires CUDA >= ", scaled ? "13.4" : "13.3",
+      " and is not supported on ROCm. Current build does not meet these requirements.");
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 }
 

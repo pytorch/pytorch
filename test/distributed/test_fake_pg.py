@@ -9,7 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch._C._distributed_c10d import FakeWork
+from torch._C._distributed_c10d import FakeWork, WorkResult
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import Shard
@@ -59,8 +59,12 @@ class TestFakePG(TestCase):
         dist.init_process_group(backend="fake", rank=1, world_size=2)
 
         output = torch.ones(3, 3) * dist.get_rank()
-        dist.all_reduce(output)
+        work = dist.all_reduce(output, async_op=True)
         self.assertEqual(tuple(output.shape), (3, 3))
+        # A fake op is done when issued.
+        fut = work.get_future_result()
+        self.assertTrue(fut.done())
+        self.assertEqual(WorkResult(fut.value()), WorkResult.SUCCESS)
 
     def test_compile_sync_pg_stays_fake(self):
         # One real rank under a fake default group sized to a larger world must not

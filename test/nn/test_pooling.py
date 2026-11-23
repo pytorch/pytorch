@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     expectedFailureXLA,
     instantiate_device_type_tests,
+    largeMPSBufferTest,
     largeTensorTest,
     onlyAccelerator,
     onlyCUDA,
@@ -39,15 +40,16 @@ from torch.testing._internal.common_nn import (
     NNTestCase,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     gcIfJetson,
     HardwareClassification,
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
-    skipIfMPS,
     slowTest,
     subtest,
+    TEST_WITH_TORCHDYNAMO,
     TEST_WITH_UBSAN,
     TestCase,
 )
@@ -758,8 +760,8 @@ class TestPoolingNNDevice(NNTestCase):
         self.assertFalse(torch.isnan(out).any())
 
     @onlyAccelerator
-    @skipIfMPS
     @largeTensorTest("10GB")
+    @largeMPSBufferTest(2 * 32769 * 65536 * torch.half.itemsize)
     def test_adaptive_avg_pool2d_backward_large_index_offsets(self, device):
         height = 32769
         width = 65536
@@ -962,7 +964,7 @@ class TestPoolingNNDevice(NNTestCase):
                 output_size=[1, 1, 1],
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_MaxPool3d_errors(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -987,7 +989,7 @@ class TestPoolingNNDevice(NNTestCase):
                 kernel_size=-1,
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_MaxPool2d_dilation_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -999,7 +1001,7 @@ class TestPoolingNNDevice(NNTestCase):
                 dilation=(1, 9223372036854775803),
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_AvgPool3d_stride_overflow(self, device):
         samples = torch.randn(1, 3, 10, 10, 10, device=device)
         with self.assertRaisesRegex(
@@ -1011,7 +1013,7 @@ class TestPoolingNNDevice(NNTestCase):
                 stride=(1, 1, 9223372036854775803),
             )(samples)
 
-    @onlyOn(["cpu", "cuda"])
+    @onlyOn(("cpu", "cuda"))
     def test_pooling_backward_overflow(self, device):
         input2d = torch.randn(1, 1, 4, 4, device=device)
         grad2d = torch.randn(1, 1, 2, 2, device=device)
@@ -1322,6 +1324,10 @@ torch.{device_type}.synchronize()
 
     @parametrize_test("kernel", ["max", "avg"])
     @parametrize_test("pooling_dims", [1, 2, 3])
+    @decorateIf(
+        unittest.skip("Skipping to avoid abort"),
+        lambda p: p["kernel"] == "max" and p["pooling_dims"] == 1,
+    )
     def test_pooling_shape(self, device, kernel, pooling_dims):
         """Test the output shape calculation for pooling functions"""
 
@@ -2276,6 +2282,12 @@ torch.{device_type}.synchronize()
 
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
+    # expectedFailureMeta already skips Dynamo; expose that skip before sharding.
+    @decorateIf(
+        unittest.skip("test doesn't currently work with dynamo"),
+        lambda p: TEST_WITH_TORCHDYNAMO
+        and torch.device(p["device"]).type in ("cpu", "cuda"),
+    )
     def test_fractional_max_pool2d(self, device):
         with set_default_dtype(torch.double):
             x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
@@ -2347,6 +2359,12 @@ torch.{device_type}.synchronize()
 
     @expectedFailureMPS  # float64
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
+    # expectedFailureMeta already skips Dynamo; expose that skip before sharding.
+    @decorateIf(
+        unittest.skip("test doesn't currently work with dynamo"),
+        lambda p: TEST_WITH_TORCHDYNAMO
+        and torch.device(p["device"]).type in ("cpu", "cuda"),
+    )
     def test_fractional_max_pool3d(self, device):
         with set_default_dtype(torch.double):
             x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)

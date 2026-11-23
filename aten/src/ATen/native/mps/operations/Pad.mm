@@ -92,9 +92,10 @@ static Tensor& pad_out_template(Tensor& output,
   const auto width = output.size(-1);
   const auto height = padding_dim >= 2 ? output.size(-2) : 1;
   const auto grid_x = c10::metal::ceil_div(width, static_cast<int64_t>(c10::metal::ILP_PER_THREAD));
-  const auto grid = MTLSizeMake(c10::safe_conv<uint32_t>(grid_x, "uint32_t"),
-                                c10::safe_conv<uint32_t>(height, "uint32_t"),
-                                c10::safe_conv<uint32_t>(output.numel() / (width * height), "uint32_t"));
+  const auto grid =
+      MTLSizeMake(c10::safe_conv<uint32_t>(grid_x, "padding dispatch width"),
+                  c10::safe_conv<uint32_t>(height, "result height"),
+                  c10::safe_conv<uint32_t>(output.numel() / (width * height), "result batch-channel count"));
   using namespace std::string_view_literals;
   const auto kernel_name = fmt::format("{}_pad{}d_{}_{}{}",
                                        is_reflection ? "reflection"sv : "replication"sv,
@@ -163,14 +164,14 @@ static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef paddi
   }
   TORCH_INTERNAL_ASSERT(input.dim() == 3 && output_c.dim() == 3);
 
-  const auto nbatch = c10::safe_conv<int32_t>(input.size(0), "int32_t");
-  const auto nplane = c10::safe_conv<int32_t>(input.size(1), "int32_t");
-  const auto input_W = c10::safe_conv<int32_t>(input.size(2), "int32_t");
-  const auto output_W = c10::safe_conv<int32_t>(output_c.size(2), "int32_t");
+  const auto nbatch = c10::safe_conv<int32_t>(input.size(0), "input batch size");
+  const auto nplane = c10::safe_conv<int32_t>(input.size(1), "input channel count");
+  const auto input_W = c10::safe_conv<int32_t>(input.size(2), "input width");
+  const auto output_W = c10::safe_conv<int32_t>(output_c.size(2), "output width");
   const std::array<int32_t, 4> sizes_pad = {input_W,
                                             output_W,
-                                            c10::safe_conv<int32_t>(padding[0], "int32_t"),
-                                            c10::safe_conv<int32_t>(padding[1], "int32_t")};
+                                            c10::safe_conv<int32_t>(padding[0], "padding[0]"),
+                                            c10::safe_conv<int32_t>(padding[1], "padding[1]")};
 
   auto pso = lib.getPipelineStateForFunc("replication_pad1d_forward_" + scalarToMetalTypeString(input));
   auto stream = getCurrentMPSStream();
@@ -207,14 +208,14 @@ static void replication_pad1d_backward_kernel_mps(const Tensor& grad_output_,
   }
   TORCH_INTERNAL_ASSERT(grad_output.dim() == 3 && grad_input_c.dim() == 3);
 
-  const auto nbatch = c10::safe_conv<int32_t>(grad_input_c.size(0), "int32_t");
-  const auto nplane = c10::safe_conv<int32_t>(grad_input_c.size(1), "int32_t");
-  const auto input_W = c10::safe_conv<int32_t>(grad_input_c.size(2), "int32_t");
-  const auto output_W = c10::safe_conv<int32_t>(grad_output.size(2), "int32_t");
+  const auto nbatch = c10::safe_conv<int32_t>(grad_input_c.size(0), "input batch size");
+  const auto nplane = c10::safe_conv<int32_t>(grad_input_c.size(1), "input channel count");
+  const auto input_W = c10::safe_conv<int32_t>(grad_input_c.size(2), "input width");
+  const auto output_W = c10::safe_conv<int32_t>(grad_output.size(2), "output width");
   const std::array<int32_t, 4> sizes_pad = {input_W,
                                             output_W,
-                                            c10::safe_conv<int32_t>(padding[0], "int32_t"),
-                                            c10::safe_conv<int32_t>(padding[1], "int32_t")};
+                                            c10::safe_conv<int32_t>(padding[0], "padding[0]"),
+                                            c10::safe_conv<int32_t>(padding[1], "padding[1]")};
 
   auto pso = lib.getPipelineStateForFunc("replication_pad1d_backward_" + scalarToMetalTypeString(grad_input_c));
   auto stream = getCurrentMPSStream();

@@ -116,6 +116,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     instantiate_device_type_tests,
     largeTensorTest,
+    preserves_device_selection,
     skipCUDAIf,
     skipMPS,
     skipXPUIf,
@@ -1346,6 +1347,8 @@ class DistributionsTestCase(TestCase):
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
 class TestDistributionsDevice(DistributionsTestCase):
+    setUp = preserves_device_selection(DistributionsTestCase.setUp)
+
     hw_classification = HardwareClassification.ACCELERATOR
 
     def test_default_device(self, device):
@@ -3432,9 +3435,11 @@ class TestDistributionsDevice(DistributionsTestCase):
 
     @skipMPS  # flaky failure
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4021")
-    @skipCUDAIf(True, "https://github.com/pytorch/pytorch/issues/200652")
+    @set_default_dtype_if_supported(torch.double)
     def test_wishart_stable_with_precision_matrix(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        # At seed 9 a naive cholesky(inverse(P)) rejects P, so the test fails
+        # without the stable path; recheck that before changing the seed.
+        set_rng_seed(9)
         ndim = 10
         x = torch.randn(ndim)
         P = torch.exp(-((x - x.unsqueeze(-1)) ** 2))  # RBF kernel

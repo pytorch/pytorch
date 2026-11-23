@@ -195,6 +195,20 @@ class TestInductorConfig(TestCase):
                 self.assertEqual(config.cpp.threads, 8999)
             self.assertEqual(config.cpp.threads, 9000)
 
+    @parametrize("subconfig", ("cuda", "xpu"))
+    def test_cutlass_options_aliases(self, subconfig):
+        name = f"{subconfig}.cutlass_max_profiling_configs"
+        with config.patch({name: 2}):
+            self.assertEqual(config.cutlass.cutlass_max_profiling_configs, 2)
+        with config.patch({"cutlass.cutlass_max_profiling_configs": 3}):
+            alias_config = getattr(config, subconfig)
+            self.assertEqual(alias_config.cutlass_max_profiling_configs, 3)
+
+        opts = {name: 2}
+        compiler_config = torch.compile(dummy_fn, options=opts).get_compiler_config()
+        self.assertEqual(compiler_config["cutlass.cutlass_max_profiling_configs"], 2)
+        self.assertNotIn(name, compiler_config)
+
     @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
     def test_compile_api(self):
         # these are mostly checking config processing doesn't blow up with exceptions

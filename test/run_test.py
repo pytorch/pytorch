@@ -58,6 +58,7 @@ from tools.stats.import_test_stats import (
 )
 from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.discover_tests import (
+    COMPILER_TEST_PREFIXES,
     CPP_TEST_PATH,
     CPP_TEST_PREFIX,
     CPP_TESTS_DIR,
@@ -73,6 +74,7 @@ from tools.testing.target_determination.heuristics.utils import (
     get_pr_number,
     td_enabled_default,
 )
+from tools.testing.target_determination.scorer import scorer_cut, TD_RESULTS_PATH
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
     calculate_shards,
@@ -129,10 +131,12 @@ NUM_PYTEST_RERUNS = int(os.getenv("PYTORCH_NUM_PYTEST_RERUNS", "2"))
 NUM_PROCESS_RETRIES = int(os.getenv("PYTORCH_NUM_PROCESS_RETRIES", "2"))
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-# The periodic config hosts slow-gated tests (test.sh sets
-# PYTORCH_TEST_WITH_SLOW for it), so it gets slow's per-file timeout budget.
+# The periodic configs host slow-gated tests (test.sh sets
+# PYTORCH_TEST_WITH_SLOW for them), so they get slow's per-file timeout budget.
 IS_SLOW = (
-    "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT or TEST_CONFIG == "periodic"
+    "slow" in TEST_CONFIG
+    or "slow" in BUILD_ENVIRONMENT
+    or TEST_CONFIG in ("periodic", "periodic_daily")
 )
 IS_S390X = platform.machine() == "s390x"
 
@@ -295,8 +299,64 @@ S390X_BLOCKLIST = [
 ]
 
 XPU_BLOCKLIST = [
-    "test_autograd",
-    "profiler/test_memory_profiler",
+    # Not applicable to XPU, tracked by
+    # https://github.com/intel/torch-xpu-ops/issues/5205
+    "distributed/rpc/cuda/test_tensorpipe_agent",
+    "distributed/rpc/test_faulty_agent",
+    "distributed/rpc/test_share_memory",
+    "distributed/rpc/test_tensorpipe_agent",
+    "distributed/test_c10d_fault_tolerance",
+    "distributed/test_c10d_gloo",
+    "distributed/test_c10d_nccl2",
+    "distributed/test_c10d_spawn_gloo",
+    "distributed/test_c10d_spawn_ucc",
+    "distributed/test_c10d_window",
+    "distributed/test_ce_colls",
+    "distributed/test_cupy_as_tensor",
+    "distributed/test_nccl",
+    "distributed/test_nvshmem",
+    "distributed/test_p2p_ipc",
+    "distributed/test_shmem_triton",
+    "distributed/test_token_switch",
+    "dynamo/test_cudagraphs",
+    "dynamo/test_cudagraphs_expandable_segments",
+    "functorch/test_control_flow_cuda_initialization",
+    "inductor/test_ck_backend",
+    "inductor/test_cudagraph_trees",
+    "inductor/test_cudagraph_trees_expandable_segments",
+    "inductor/test_custom_op_autotune",
+    "inductor/test_cutedsl_grouped_mm",
+    "inductor/test_cutedsl_template",
+    "inductor/test_cutlass_backend",
+    "inductor/test_cutlass_evt",
+    "inductor/test_cutlass_fallback",
+    "inductor/test_flex_gemm",
+    "inductor/test_halide",
+    "inductor/test_inductor_annotations",
+    "inductor/test_nv_universal_gemm",
+    "inductor/test_origami",
+    "inductor/test_pallas",
+    "nn/attention/test_fa4",
+    "python_native/test_quack_vendor",
+    "python_native/test_topk_cutedsl",
+    "quantization/core/test_quantized_tensor",
+    "quantization/core/test_workflow_module",
+    "quantization/core/test_workflow_ops",
+    "quantization/fx/test_numeric_suite_fx",
+    "test_cpp_extensions_mtia_backend",
+    "test_cpp_extensions_stream_and_event",
+    "test_cuda",
+    "test_cuda_compatibility",
+    "test_cuda_expandable_segments",
+    "test_cuda_graph_debug",
+    "test_cuda_graph_utils",
+    "test_cuda_nvml_based_avail",
+    "test_cuda_primary_ctx",
+    "test_cuda_sanitizer",
+    "test_functionalization_of_rng_ops",
+    "test_jiterator",
+    "test_sparse_semi_structured",
+    "test_stateless_rng",
 ]
 
 XPU_TEST = [
@@ -445,6 +505,7 @@ AOT_DISPATCH_TESTS = [
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
+COMPILER_TESTS = [test for test in TESTS if test.startswith(COMPILER_TEST_PREFIXES)]
 CPYTHON_TESTS = [test for test in TESTS if "cpython" in test]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
@@ -539,10 +600,9 @@ def _torchci_report_args(
 
 def _torchci_reports_default() -> str | None:
     # Every pytorch/pytorch CI job writes reports by default; upload-test-artifacts
-    # uploads this folder. Not XPU builds until their CI image has pyzes, which lets
-    # the writer count XPU devices with Level Zero Sysman instead of the runtime.
+    # uploads this folder.
     in_pytorch_ci = IS_CI and os.environ.get("GITHUB_REPOSITORY") == "pytorch/pytorch"
-    if not in_pytorch_ci or torch.version.xpu:
+    if not in_pytorch_ci:
         return None
     return str(REPO_ROOT / "test/torchci-reports")
 
@@ -1104,7 +1164,6 @@ def run_gloo_test(test_module, test_directory, options):
         (
             "ProcessGroupGlooTest",
             "ProcessGroupGlooLazyInitTest",
-            "ProcessGroupGlooFRTest",
             "DistributedDataParallelTest",
         ),
     )
@@ -1635,6 +1694,7 @@ CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": run_test_with_subprocess,
     "test_cuda_nvml_based_avail": run_test_with_subprocess,
     "test_gpu_trace": run_test_with_subprocess,
+    "profiler/test_kineto_registration": run_test_with_subprocess,
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
@@ -1733,6 +1793,11 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--compiler-tests",
+        action="store_true",
+        help="Run compiler, export, higher-order operator, and tracing test suites.",
+    )
+    parser.add_argument(
         "--functorch",
         "--functorch",
         action="store_true",
@@ -1813,7 +1878,7 @@ def parse_args():
         type=os.path.abspath,
         default=_torchci_reports_default(),
         metavar="DIR",
-        help="write test run reports to DIR (default in pytorch/pytorch CI, except on XPU builds: test/torchci-reports)",
+        help="write test run reports to DIR (default in pytorch/pytorch CI: test/torchci-reports)",
     )
     parser.add_argument(
         "-i",
@@ -2044,7 +2109,7 @@ def can_run_in_pytest(test):
 
 
 def get_selected_tests(options) -> list[str]:
-    selected_tests = options.include
+    selected_tests = options.include[:]
 
     # filter if there's JIT only and distributed only test options
     if options.jit:
@@ -2112,6 +2177,8 @@ def get_selected_tests(options) -> list[str]:
             "test_modules",
             "test_linalg",
             "test_scaled_matmul_cuda",
+            "test_stream",
+            "quantization/core/experimental/test_floatx",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
@@ -2279,7 +2346,16 @@ def get_selected_tests(options) -> list[str]:
         ]
 
     selected_tests = [parse_test_module(x) for x in selected_tests]
+    if options.compiler_tests:
+        selected_tests = [test for test in selected_tests if test in COMPILER_TESTS]
     return selected_tests
+
+
+def get_test_times_job_key() -> str | None:
+    job_name = os.environ.get("JOB_NAME")
+    if job_name is None or job_name == "":
+        return os.environ.get("BUILD_ENVIRONMENT")
+    return get_job_base_name(job_name)
 
 
 def load_test_times_from_file(file: str) -> dict[str, Any]:
@@ -2295,12 +2371,7 @@ def load_test_times_from_file(file: str) -> dict[str, Any]:
         test_times_file = cast(dict[str, Any], json.load(f))
     raw_job_name = os.environ.get("JOB_NAME")
     build_env = os.environ.get("BUILD_ENVIRONMENT")
-    job_name = raw_job_name
-    if job_name is None or job_name == "":
-        # If job name isn't available, use build environment as a backup
-        job_name = build_env
-    else:
-        job_name = get_job_base_name(job_name)
+    job_name = get_test_times_job_key()
     test_config = os.environ.get("TEST_CONFIG")
     print_to_stderr(f"JOB_NAME={raw_job_name}")
     print_to_stderr(f"BUILD_ENVIRONMENT={build_env}")
@@ -2442,7 +2513,10 @@ def run_tests(
         "multigpu": "multigpu",
         "not-multigpu": "not multigpu",
     }.get(getattr(options, "multigpu_filter", None))
-    periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
+    periodic_marker = {
+        "periodic": "periodic and not periodic_daily",
+        "periodic_daily": "periodic_daily",
+    }.get(TEST_CONFIG)
 
     # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
     # plugin (see test/conftest.py). 0 disables it, so it is a no-op unless a
@@ -2647,7 +2721,6 @@ def main():
 
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
-
     test_prioritizations = import_results()
     if len(test_prioritizations.get_all_tests()) == 0:
         options.enable_td = False
@@ -2702,11 +2775,26 @@ def main():
         else "Running all tests"
     )
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
+    scorer_info = None
+    if options.enable_td:
+        include, exclude, scorer_info = scorer_cut(
+            TD_RESULTS_PATH,
+            include,
+            exclude,
+            test_file_times_dict,
+            get_test_times_job_key() or "",
+            TEST_CONFIG,
+        )
+        print_to_stderr(f"TD scorer cut: {json.dumps(scorer_info)}")
 
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
     if IS_CI:
-        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
+        gen_ci_artifact(
+            [x.to_json() for x in include],
+            [x.to_json() for x in exclude],
+            scorer_info,
+        )
 
     print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
