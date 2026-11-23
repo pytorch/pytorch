@@ -359,6 +359,11 @@ def build(
         try:
             made = pass_(gm, types)
         except Exception as e:
+            # What the handler of a signal raised while the pass ran says
+            # nothing about the pass: it leaves the call, as it does
+            # wherever else in the call the signal comes.
+            if runtime.interrupted(e):
+                raise
             reason = f"the pass {name} raised {type(e).__name__}: {e}"
             reason = reason.split("\n")[0][:200]
             # Where it was raised, for a pass that raises from inside what
