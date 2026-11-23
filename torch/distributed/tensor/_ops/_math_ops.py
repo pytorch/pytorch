@@ -132,12 +132,16 @@ class _NormPartial(Partial):
         return f"_NormP({self.norm_type})"
 
 
-def _infer_reduction_dims(dims_arg: object, ndim: int) -> list[int] | None:
+def _infer_reduction_dims(
+    dims_arg: object, ndim: int, allow_empty: bool = False
+) -> list[int] | None:
     if dims_arg is None:
         return None
     dims = cast(list[int], as_list(dims_arg))
+    if not dims:
+        return [] if allow_empty else None
     dims = cast(list[int], normalize_dims(dims, ndim))
-    empty_dims = [[0], [-1], []]
+    empty_dims = [[0], [-1]]
     if ndim == 0 and dims_arg in empty_dims:
         return None
     return dims
@@ -584,7 +588,7 @@ def bool_reduction_single_dim_strategy(
 
     dims = None
     if len(args_schema) > 1:
-        dims = _infer_reduction_dims(args_schema[1], ndim)
+        dims = _infer_reduction_dims(args_schema[1], ndim, allow_empty=True)
 
     keep_dim = len(args_schema) > 2 and bool(args_schema[2])
     return _reduction_single_dim_strategy(

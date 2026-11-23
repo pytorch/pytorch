@@ -262,6 +262,57 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertEqual(partial.nansum().full_tensor(), partial.full_tensor().nansum())
 
     @with_comms
+    def test_reduction_empty_dim(self):
+        # Regression test for pytorch/pytorch#206325:
+        # Reductions with dim=[] reduce all dimensions (or zero dimensions for any/all),
+        # matching ATen semantics and avoiding mislabeled Shard placements or NaN gradients.
+        device_mesh = self.build_device_mesh()
+        x = torch.tensor(
+            [[1.0, 5.0, 2.0, 0.0], [3.0, 4.0, -1.0, 7.0]],
+            device=self.device_type,
+        )
+        dt = distribute_tensor(x, device_mesh, [Shard(1)])
+
+        # sum
+        s_keep = dt.sum(dim=[], keepdim=True)
+        self.assertEqual(s_keep.full_tensor(), x.sum(dim=[], keepdim=True))
+        self.assertEqual(s_keep.placements, (Partial("sum"),))
+        s_no_keep = dt.sum(dim=[])
+        self.assertEqual(s_no_keep.full_tensor(), x.sum(dim=[]))
+        self.assertEqual(s_no_keep.placements, (Partial("sum"),))
+
+        # mean, amax, amin, std, var, nansum
+        self.assertEqual(dt.mean(dim=[]).full_tensor(), x.mean(dim=[]))
+        self.assertEqual(dt.amax(dim=[]).full_tensor(), x.amax(dim=[]))
+        self.assertEqual(dt.amin(dim=[]).full_tensor(), x.amin(dim=[]))
+        self.assertEqual(dt.std(dim=[]).full_tensor(), x.std(dim=[]))
+        self.assertEqual(dt.var(dim=[]).full_tensor(), x.var(dim=[]))
+        self.assertEqual(torch.nansum(dt, dim=[]).full_tensor(), torch.nansum(x, dim=[]))
+
+        # backward of amax and amin
+        d_max = distribute_tensor(x, device_mesh, [Shard(1)]).requires_grad_()
+        d_max.amax().backward()
+        x_max = x.clone().requires_grad_()
+        x_max.amax().backward()
+        self.assertEqual(d_max.grad.full_tensor(), x_max.grad)
+
+        d_max_empty = distribute_tensor(x, device_mesh, [Shard(1)]).requires_grad_()
+        d_max_empty.amax(dim=[]).backward()
+        self.assertEqual(d_max_empty.grad.full_tensor(), x_max.grad)
+
+        d_min = distribute_tensor(x, device_mesh, [Shard(1)]).requires_grad_()
+        d_min.amin().backward()
+        x_min = x.clone().requires_grad_()
+        x_min.amin().backward()
+        self.assertEqual(d_min.grad.full_tensor(), x_min.grad)
+
+        # any / all with dim=[] does not reduce any dimension in ATen
+        b = torch.tensor([[True, False], [True, True]], device=self.device_type)
+        dt_b = distribute_tensor(b, device_mesh, [Shard(1)])
+        self.assertEqual(dt_b.any(dim=[]).shape, torch.Size([2, 2]))
+        self.assertEqual(dt_b.all(dim=[]).shape, torch.Size([2, 2]))
+
+    @with_comms
     def test_prims_amax_amin(self):
         device_mesh = self.build_device_mesh()
         tensor = torch.randn(12, 8, 8, device=self.device_type)
