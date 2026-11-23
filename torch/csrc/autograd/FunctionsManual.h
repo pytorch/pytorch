@@ -1225,4 +1225,23 @@ std::tuple<Tensor, Tensor> philox_uniform_bounds_backward(
     const Tensor& high,
     std::array<bool, 2> grad_input_mask);
 
+Tensor philox_uniform_bounds_jvp(
+    const Tensor& low_t,
+    const Tensor& high_t,
+    const Tensor& key,
+    const Tensor& result);
+
+std::tuple<Tensor, Tensor> philox_normal_params_backward(
+    const Tensor& grad,
+    const Tensor& key,
+    const Tensor& mean,
+    const Tensor& std,
+    std::array<bool, 2> grad_input_mask);
+
+Tensor philox_normal_params_jvp(
+    const Tensor& mean_t,
+    const Tensor& std_t,
+    const Tensor& key,
+    const Tensor& result);
+
 } // namespace torch::autograd::generated::details
