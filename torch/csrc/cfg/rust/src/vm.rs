@@ -5222,7 +5222,7 @@ impl Compiled {
                             Assert::Enters(..) => "the function a call enters",
                             Assert::Iterator(_) | Assert::Count(_) | Assert::Flag(_) => "what a function of a class returned",
                             Assert::Absent(..) => "an attribute left to __getattr__",
-                            Assert::Lacks(..) => "a class without a __getattr__",
+                            Assert::Lacks(..) => "a name that a class has nothing under",
                             Assert::Sequence(..) | Assert::Keys(..) => "what a call spreads",
                             Assert::Equals(..) => "the place of an item",
                             Assert::Is(..) => "an object that is computed with behind the callable",
@@ -8043,6 +8043,12 @@ impl Compiled {
                 }
             }
             Op::CallEx { callee, args, kwargs } => Form::Spread { callee: *callee, args: *args, kwargs: *kwargs },
+            // The truth of an object whose class says how many it holds
+            // and nothing else of its truth: the `__len__` of the class,
+            // and whether what it gives is not zero.
+            Op::ToBool(v) | Op::Unary(UnaryKind::Not, v) if special(*v, &names.len) && graph::lacks_truth(reg(regs, *v)) => {
+                Form::Special(&names.len, *v, None)
+            }
             Op::GetIter(v) if special(*v, &names.iter) => Form::Special(&names.iter, *v, None),
             Op::GetItem(a, key) if special(*a, &names.getitem) => Form::Special(&names.getitem, *a, Some(*key)),
             Op::Contains(item, container, _) if special(*container, &names.contains) => {
@@ -8142,6 +8148,16 @@ impl Compiled {
             }
             if !why.is_empty() {
                 t.check(check, inst.bc);
+            }
+            // The truth of what has a `__len__`: whether the count is not
+            // zero; `not` of it, whether it is.
+            if let (true, Op::ToBool(_) | Op::Unary(UnaryKind::Not, _)) = (std::ptr::eq(*name, &names.len), &inst.op) {
+                let not = matches!(inst.op, Op::Unary(UnaryKind::Not, _));
+                let truth = py_bool((ffi::PyObject_IsTrue(result) != 0) != not);
+                ffi::Py_DECREF(result);
+                result = new_ref(truth);
+                let op = if not { Op::Unary(UnaryKind::Not, value) } else { Op::ToBool(value) };
+                value = t.derive(op, Kind::Pure, false, new_ref(truth), inst.bc);
             }
             // `not in` is whether what was returned is not true.
             if std::ptr::eq(*name, &names.contains) && matches!(inst.op, Op::Contains(_, _, true)) {
@@ -8496,6 +8512,10 @@ impl Compiled {
                     return null_mut();
                 }
                 result
+            }
+            (Form::Special(name, ..), Op::ToBool(_) | Op::Unary(UnaryKind::Not, _)) if std::ptr::eq(*name, &names.len) => {
+                let count = counted(result);
+                if count.is_null() { count } else { truth(count, matches!(inst.op, Op::Unary(UnaryKind::Not, _))) }
             }
             (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.len) => counted(result),
             (Form::Special(name, ..), _) if std::ptr::eq(*name, &names.instancecheck) => truth(result, false),
@@ -9006,6 +9026,12 @@ impl Compiled {
                 given.push(self.path_value(t, regs, *v));
                 if let Some(key) = key {
                     given.push(self.path_value(t, regs, *key));
+                }
+                // The truth of an object is its `__len__` only while its
+                // class has nothing under `__bool__`, which the interpreter
+                // asks at every truth test: so does the path.
+                if matches!((&(*at.1).insts)[at.2].op, Op::ToBool(_) | Op::Unary(UnaryKind::Not, _)) {
+                    t.check(Assert::Lacks(given[0], names.truth.clone()), bc);
                 }
                 let part = match t.class_of(given[0]) {
                     Some(class) => Op::Part(Part::Member((*name).clone()), class),

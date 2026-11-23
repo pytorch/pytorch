@@ -3235,6 +3235,7 @@ pub struct Specials {
     pub instancecheck: PyObj,
     pub getattribute: PyObj,
     pub contains: PyObj,
+    pub truth: PyObj,
 }
 
 pub unsafe fn specials() -> &'static Specials {
@@ -3252,7 +3253,16 @@ pub unsafe fn specials() -> &'static Specials {
         instancecheck: name(c"__instancecheck__"),
         getattribute: name(c"__getattribute__"),
         contains: name(c"__contains__"),
+        truth: name(c"__bool__"),
     })
+}
+
+/// Whether the class of an object has nothing under `__bool__`, as the
+/// interpreter's own truth test finds it: its truth is whether its
+/// `__len__` gives what is not zero, where it has one. A path that takes
+/// the truth that way asks this again at every call (`Assert::Lacks`).
+pub unsafe fn lacks_truth(o: Obj) -> bool {
+    !o.is_null() && !capi::is_unboxed(o) && pyffi::_PyType_Lookup(ffi::Py_TYPE(o), specials().truth.as_ptr()).is_null()
 }
 
 /// The Python function that the class of an object has under a name, for

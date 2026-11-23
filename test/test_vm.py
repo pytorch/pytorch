@@ -11075,6 +11075,30 @@ def graph_draws_behind_a_branch(x):
     return torch.tanh(h) + 1
 
 
+class GraphCounted:
+    # Its truth is whether it holds anything.
+    def __init__(self):
+        self.items = []
+
+    def __len__(self):
+        return len(self.items)
+
+
+class GraphCountedLoudly(GraphCounted):
+    def __len__(self):
+        GRAPH_UNUSED_LOG.append("asked how many")
+        return len(self.items)
+
+
+def graph_asks_whether_any(held, x):
+    h = torch.relu(x) + 1
+    if held and not x.requires_grad:
+        h = h * 2 - 3
+    if not held:
+        h = h + 7
+    return torch.tanh(h) + h
+
+
 def graph_pinned_scaled(h, scale=2.0, shift=1.0):
     return h * scale + shift
 
@@ -14508,6 +14532,131 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             listed = torch.vm.regions(compiled)
             graphs = [g for g in listed if "ops" in g and "within" not in g]
             self.assertEqual([(g["ops"], g["why"]) for g in graphs], [(5, why)])
+
+    def test_the_truth_of_what_has_a_len_is_on_a_path(self, device):
+        # The truth of an object whose class has a `__len__` in Python and
+        # no `__bool__` is whether the `__len__` gives what is not zero: a
+        # path goes into the function, checks that what it gives is a
+        # count, and branches on it. What the function logs is logged at
+        # every call, where the instructions log it.
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        fn = graph_asks_whether_any
+        for made in (GraphCounted, GraphCountedLoudly):
+            for behind in ((), (keep,)):
+                passes = (*DEFAULT, P.Graphs(), *behind)
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                seen = []
+                for run in (compiled, fn):
+                    del GRAPH_UNUSED_LOG[:]
+                    held, given = made(), []
+                    for at in range(40):
+                        if at in (20, 30):
+                            held.items.append(at)
+                        if at == 35:
+                            del held.items[:]
+                        given.append((run(held, x), len(GRAPH_UNUSED_LOG)))
+                    seen.append(given)
+                for at, (got, expected) in enumerate(zip(*seen)):
+                    said = f"call {at}"
+                    self.assertEqual(got[1], expected[1], msg=said)
+                    self.assertEqual(got[0], expected[0], atol=0, rtol=0, msg=said)
+                listed = torch.vm.regions(compiled)
+                graphs = [g for g in listed if "ops" in g and "within" not in g]
+                if made is GraphCounted:
+                    ends = [g["why"] for g in graphs]
+                    self.assertEqual(ends, ["the function returns"], msg=str(graphs))
+                    if behind:
+                        self.assertGreaterEqual(graphs[0]["hits"], 30, msg=str(graphs))
+        del GRAPH_UNUSED_LOG[:]
+
+    def test_the_truth_of_what_has_a_len_is_asked_of_the_class_every_call(self, device):
+        # The truth of an object is its `__len__` only while its class has
+        # nothing under `__bool__`, and the interpreter asks that at every
+        # truth test. A class that gets a `__bool__` between two calls (on
+        # itself, on a class it is made of, by other bases; one that says
+        # False, one that is None, for which the test raises) has it asked
+        # from then on, and one that loses it again has its `__len__`
+        # asked: every call is eager's, the result or what is raised.
+        def keep(gm, input_types):
+            return gm
+
+        def says_no(self):
+            return False
+
+        def branches(x, held):
+            h = torch.relu(x) + 1
+            if held:
+                h = h * 3
+            return (torch.tanh(h + 2) * 2 - 1).sum()
+
+        def negates(x, held):
+            h = torch.relu(x) + 1
+            if not held:
+                h = h * 3
+            return (torch.tanh(h + 2) * 2 - 1).sum()
+
+        def chooses(x, held):
+            h = torch.relu(x) + 1
+            return (torch.tanh(h + (held and 4.0)) * 2 - 1).sum()
+
+        class Other:
+            __bool__ = says_no
+
+        def changes(lower, sized):
+            def on_the_class():
+                sized.__bool__ = says_no
+
+            def none_on_the_class():
+                sized.__bool__ = None
+
+            def on_a_base():
+                lower.__bool__ = says_no
+
+            def other_bases():
+                sized.__bases__ = (Other,)
+
+            return [on_the_class, none_on_the_class, on_a_base, other_bases]
+
+        def one(fn, x, held):
+            try:
+                return fn(x, held).item()
+            except TypeError as error:
+                return str(error)
+
+        for fn in (branches, negates, chooses):
+            for which in range(4):
+                for behind in ((), (keep,)):
+
+                    class Lower:
+                        pass
+
+                    class Sized(Lower):
+                        def __len__(self):
+                            return 3
+
+                    change = changes(Lower, Sized)[which]
+                    passes = (*DEFAULT, P.Graphs(), *behind)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    held = Sized()
+                    msg = f"{fn.__name__}, {change.__name__}, a pass: {bool(behind)}"
+                    for at in range(18):
+                        if at == 7:
+                            change()
+                        if at == 12 and which == 0:
+                            del Sized.__bool__
+                        x = torch.full((3, 4), 0.25 * (at + 1), device=device)
+                        got, expected = one(compiled, x, held), one(fn, x, held)
+                        said = f"{msg}, call {at}: {got}, {expected}"
+                        self.assertEqual(type(got), type(expected), msg=said)
+                        self.assertTrue(got == expected, msg=said)
+                    if behind:
+                        listed = torch.vm.regions(compiled)
+                        graphs = [g for g in listed if "ops" in g and "within" not in g]
+                        hits = sum(g["hits"] for g in graphs)
+                        self.assertGreaterEqual(hits, 4, msg=f"{msg}: {graphs}")
 
     def graph_thing_cases(self, device, group, debug=False):
         # The cases of a group of `GRAPH_THINGS` in a process of their own:
