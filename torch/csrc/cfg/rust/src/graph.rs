@@ -2349,8 +2349,10 @@ pub unsafe fn quiet_merge(into: Obj, more: Obj) -> bool {
 }
 
 /// Whether `import name` runs no Python code: the `__import__` of the
-/// interpreter is asked for a module that has no package around it and
-/// that was imported before, which it then only looks up.
+/// interpreter is asked for a module that was imported before, which it
+/// then only looks up. For a module in a package (`import a.b`) it looks
+/// up the module and then the outermost package, which is what the
+/// statement gives.
 pub unsafe fn quiet_import(builtins: Obj, name: Obj, fromlist: Obj, level: Obj) -> bool {
     let import = ffi::PyDict_GetItemString(builtins, c"__import__".as_ptr());
     let own = !import.is_null() && ffi::PyCFunction_Check(import) != 0 && {
@@ -2362,22 +2364,29 @@ pub unsafe fn quiet_import(builtins: Obj, name: Obj, fromlist: Obj, level: Obj) 
         && !level.is_null()
         && ffi::PyLong_CheckExact(level) != 0
         && ffi::PyLong_AsLong(level) == 0;
-    if !own || !whole || ffi::PyUnicode_CheckExact(name) == 0 || pyffi::str_to_string(name).contains('.') {
-        return false;
-    }
-    let module = ffi::PyDict_GetItemWithError(ffi::PyImport_GetModuleDict(), name);
-    if module.is_null() || ffi::PyModule_CheckExact(module) == 0 {
-        ffi::PyErr_Clear();
+    if !own || !whole || ffi::PyUnicode_CheckExact(name) == 0 {
         return false;
     }
     // One that is still being imported is waited for.
-    let spec = ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"__spec__".as_ptr());
-    let slot = if spec.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(spec) };
-    let done = !slot.is_null()
-        && !(*slot).is_null()
-        && ffi::PyDict_GetItemString(*slot, c"_initializing".as_ptr()) == ffi::Py_False();
-    ffi::PyErr_Clear();
-    done
+    let imported = |name: &str| {
+        let Ok(name) = std::ffi::CString::new(name) else {
+            return false;
+        };
+        let module = ffi::PyDict_GetItemString(ffi::PyImport_GetModuleDict(), name.as_ptr());
+        if module.is_null() || ffi::PyModule_CheckExact(module) == 0 {
+            ffi::PyErr_Clear();
+            return false;
+        }
+        let spec = ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"__spec__".as_ptr());
+        let slot = if spec.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(spec) };
+        let done = !slot.is_null()
+            && !(*slot).is_null()
+            && ffi::PyDict_GetItemString(*slot, c"_initializing".as_ptr()) == ffi::Py_False();
+        ffi::PyErr_Clear();
+        done
+    };
+    let name = pyffi::str_to_string(name);
+    imported(&name) && name.split('.').next().is_some_and(imported)
 }
 
 /// Whether `len(container)`, or unpacking it, runs no Python code.

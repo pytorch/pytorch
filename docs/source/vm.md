@@ -192,7 +192,10 @@ a list, a tuple or a `range` as often as the call does (and round a `while`
 loop on a count), with the test of the loop as a branch each time round. The
 number of times round is no input of the graph: it is the path. The calls of
 `len`, `range`, `enumerate`, `zip` and `isinstance` that such loops are
-written with are part of a path.
+written with are part of a path. So is an `import` of a module that was
+imported before, with or without a package around it (`import torch.fx`
+inside a function, as libraries write it to ask whether a tensor is the
+proxy of a tracer): the interpreter only looks the module up.
 
 Going over an iterator uses it up, so a path goes over an iterator only if
 it made it itself, of a list, a tuple, a dict or a `range` (`iter`,
