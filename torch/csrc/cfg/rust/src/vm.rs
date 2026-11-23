@@ -6482,15 +6482,28 @@ impl Compiled {
             // A dropout that is told not to drop anything draws nothing:
             // the form is checked for that operand, as for any number.
             Op::Dispatch(d) if d.slot.traits() == capi::SITE_RANDOM && d.slot.len() > 0 => {
-                let dropout = d.slot.operator().is_some_and(|name| graph::DROPOUTS.contains(&name.as_str()));
-                let idle = d.operands.last().is_some_and(|train| reg(regs, *train) == ffi::Py_False());
+                let name = d.slot.operator();
+                let dropout = name.as_ref().is_some_and(|name| graph::DROPOUTS.contains(&name.as_str()));
+                let idle = dropout && d.operands.last().is_some_and(|train| reg(regs, *train) == ffi::Py_False());
+                // One that draws at a rate draws nothing at a rate of zero,
+                // which is the rate where none is given: the operands are
+                // the function and then its arguments by their places.
+                let rate = name.as_ref().and_then(|name| graph::DRAWS_AT_A_RATE.iter().find(|(operator, ..)| *operator == name.as_str()));
+                let rests = rate.is_some_and(|(_, place, _)| match d.operands.get(place + 1) {
+                    None => true,
+                    Some(v) => {
+                        let held = reg(regs, *v);
+                        !held.is_null() && !capi::is_unboxed(held) && graph::is_number(held) && ffi::PyObject_IsTrue(held) == 0
+                    }
+                });
+                let idle = idle || rests;
                 // One that draws is an operation where the graph is made
                 // something of (what that is draws in its place; a pass
                 // that returns the graph draws eager's numbers), and like
                 // a write to a tensor from outside it cannot be taken back.
-                let draws = !(dropout && idle) && site.exports() && !t.fallible;
+                let draws = !idle && site.exports() && !t.fallible;
                 outside.set(draws);
-                ((dropout && idle) || draws).then_some(Kind::Node)
+                (idle || draws).then_some(Kind::Node)
             }
             Op::Call { .. } | Op::CallMethod { .. } | Op::GetItem(..) | Op::SetItem { .. } if operators.is_some() => {
                 Some(Kind::Node)

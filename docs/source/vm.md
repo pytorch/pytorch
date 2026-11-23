@@ -270,7 +270,8 @@ What ends a path:
   random numbers: whatever a form would have to check behind what was made
   of the graph, and such an operation behind a check of that kind ("Writes"
   below); with `Graphs()` alone, an operation that draws random numbers (a
-  dropout that is told not to drop draws none);
+  dropout that is told not to drop draws none, and neither does an attention
+  at a rate of zero or without one);
 - a store into an object that would run Python code, and a read of a list
   or a dict that a store of the path changed ("Stores into objects");
 - a number read from a tensor (`x.item()`, `float(x)`), and with it a branch
@@ -2213,8 +2214,10 @@ like one that is written out.
 A C function that is called with `**` is an operation where the path built
 the dict under names: the call with those names. An operator that draws
 random numbers only at a rate (`scaled_dot_product_attention` with its
-`dropout_p`) draws nothing at a rate of zero and is an operation like any
-other, with the rate checked at every call; at another rate it is one under
+`dropout_p`) draws nothing at a rate of zero, or where the call gives it
+none, and is an operation like any other, with the rate checked at every
+call, whether the call names it, hands it over with `**` or gives it by its
+place; at another rate it is one under
 the rule of "Writes", as every operation that only draws now is, whether it
 is a call site or not. A call with `**` is an operation under the condition
 of one with `*`, that the operator it runs enters no Python code: an
@@ -2901,8 +2904,10 @@ the about 2217 operations of a call in them.
 
 The outputs are eager's bit for bit there as well. With a GPU present
 `torch.cuda.is_current_stream_capturing()`, which the mask code of a
-transformer asks on its way, is a call that a path does not go through,
-where on a machine without one it raises: the path ends there either way.
+transformer asks on its way, is a question to torch's state that a path
+goes through: it runs at every call, in front of what stands for the graph,
+and the branch on what it says is checked. On a machine without a GPU it
+raises, and the path ends there.
 No times are given for these models: they have not been timed on a GPU.
 
 ### Limits

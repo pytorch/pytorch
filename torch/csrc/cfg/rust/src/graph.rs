@@ -2675,7 +2675,7 @@ unsafe fn quiet_modules() -> (usize, usize, usize) {
 /// an iterator, a `range`, an `enumerate`, a `zip`). `own` says of an
 /// argument whether the path made it: an iterator is only gone over then.
 pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, api: &TcfgApi) -> Option<bool> {
-    const ASKS: [&[u8]; 6] = [b"_has_torch_function", b"_get_", b"_is_", b"is_", b"get_", b"_has_"];
+    const ASKS: [&[u8]; 7] = [b"_has_torch_function", b"_get_", b"_is_", b"is_", b"get_", b"_has_", b"_cuda_is"];
     if callee.is_null() || capi::is_unboxed(callee) || args.iter().any(|o| o.is_null()) {
         return None;
     }
