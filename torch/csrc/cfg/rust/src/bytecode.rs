@@ -78,6 +78,9 @@ pub enum Bc {
     ReturnConst,
     RaiseVarargs,
     Reraise,
+    PushExcInfo,
+    PopExcept,
+    CheckExcMatch,
     LoadAssertionError,
     FormatValue,
     Other,
@@ -154,6 +157,9 @@ fn bc_from_name(name: &str) -> Bc {
         "RETURN_CONST" => Bc::ReturnConst,
         "RAISE_VARARGS" => Bc::RaiseVarargs,
         "RERAISE" => Bc::Reraise,
+        "PUSH_EXC_INFO" => Bc::PushExcInfo,
+        "POP_EXCEPT" => Bc::PopExcept,
+        "CHECK_EXC_MATCH" => Bc::CheckExcMatch,
         "LOAD_ASSERTION_ERROR" => Bc::LoadAssertionError,
         "FORMAT_VALUE" => Bc::FormatValue,
         _ => Bc::Other,
@@ -268,8 +274,16 @@ pub fn decode(table: &OpcodeTable, code: &Bound<'_, PyBytes>) -> Vec<Ins> {
     out
 }
 
+/// One entry of a code object's exception table: an exception raised by an
+/// instruction in [start, end) unwinds the stack to `depth`, pushes the offset
+/// of the instruction if `lasti`, pushes the exception, and continues at
+/// `target`. All offsets are in bytes.
 pub struct ExceptionEntry {
+    pub start: u32,
+    pub end: u32,
     pub target: u32,
+    pub depth: u32,
+    pub lasti: bool,
 }
 
 pub fn parse_exception_table(table: &[u8]) -> Vec<ExceptionEntry> {
@@ -288,12 +302,18 @@ pub fn parse_exception_table(table: &[u8]) -> Vec<ExceptionEntry> {
     };
     while pos < table.len() {
         // start, length, target, depth and lasti; offsets are in code units.
-        let (Some(_start), Some(_length), Some(target), Some(_depth_lasti)) =
+        let (Some(start), Some(length), Some(target), Some(depth_lasti)) =
             (varint(&mut pos), varint(&mut pos), varint(&mut pos), varint(&mut pos))
         else {
             break;
         };
-        entries.push(ExceptionEntry { target: target * 2 });
+        entries.push(ExceptionEntry {
+            start: start * 2,
+            end: (start + length) * 2,
+            target: target * 2,
+            depth: depth_lasti >> 1,
+            lasti: depth_lasti & 1 != 0,
+        });
     }
     entries
 }

@@ -131,9 +131,11 @@ impl Inliner<'_, '_> {
         // What the frontend cannot compile stays a call.
         let graph = frontend::build(self.py, self.table, &target).ok()?;
         let size: usize = graph.blocks.iter().map(|block| block.insts.len()).sum();
+        // A callee that catches exceptions keeps its own frame for now.
         if size > MAX_CALLEE_INSTS
             || self.added_insts + size > MAX_ADDED_INSTS
             || !graph.blocks[0].preds.is_empty()
+            || graph.exc_reg != NONE
         {
             return None;
         }
@@ -157,6 +159,8 @@ impl Inliner<'_, '_> {
         let origin = func.origins.len() as u32;
         let fallback = block_offset + callee.blocks.len() as B;
         let join = fallback + 1;
+        // What the call raised, the inlined body raises to the same handler.
+        let handler = func.blocks[b].handler;
 
         func.origins.push(Origin {
             name: callee.name.clone(),
@@ -217,7 +221,7 @@ impl Inliner<'_, '_> {
                     returns.push((this, v));
                     Term::Jump(join)
                 }
-                raise @ Term::Raise { .. } => raise,
+                raise @ (Term::Raise { .. } | Term::Reraise(_)) => raise,
             };
             let phis = block
                 .phis
@@ -226,7 +230,7 @@ impl Inliner<'_, '_> {
                 .collect();
             let preds =
                 if j == 0 { vec![b as B] } else { block.preds.iter().map(|p| p + block_offset).collect() };
-            func.blocks.push(Block { phis, insts, term, preds, bc_start: tag(block.bc_start) });
+            func.blocks.push(Block { phis, insts, term, preds, bc_start: tag(block.bc_start), handler });
         }
 
         // The rest of the caller's block runs after either side.
@@ -254,6 +258,7 @@ impl Inliner<'_, '_> {
             term: Term::Jump(join),
             preds: vec![b as B],
             bc_start: call.bc,
+            handler,
         });
         let mut preds: Vec<B> = returns.iter().map(|(block, _)| *block).collect();
         let mut srcs: Vec<V> = returns.iter().map(|(_, v)| *v).collect();
@@ -265,7 +270,20 @@ impl Inliner<'_, '_> {
             term,
             preds,
             bc_start: call.bc,
+            handler,
         });
+        // The handler catches from the new blocks as it does from this one.
+        if handler != NONE {
+            let caught = &mut func.blocks[handler as usize];
+            let slot = caught.preds.iter().position(|p| *p == b as B).unwrap();
+            for new in block_offset..=join {
+                caught.preds.push(new);
+                for phi in caught.phis.iter_mut() {
+                    let src = phi.srcs[slot];
+                    phi.srcs.push(src);
+                }
+            }
+        }
     }
 }
 
