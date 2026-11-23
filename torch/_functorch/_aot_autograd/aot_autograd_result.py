@@ -34,7 +34,7 @@ from torch._inductor.output_code import (
     CompiledFxGraphConstants,
     OutputCode,
 )
-from torch._inductor.utils import should_use_remote_fx_graph_cache
+from torch._inductor.utils import BoxedBool, should_use_remote_fx_graph_cache
 from torch._logging import getArtifactLogger
 
 from .codegen import aggregate_runtime_wrapper_sources
@@ -486,6 +486,11 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 **fx_config,
                 "is_backward": True,
             }
+            # As in the backward compile, an override_cudagraphs that keeps only
+            # the backward out gives it a box of its own.
+            bwd_override = fx_config.get("cudagraphs_bwd_override")
+            if bwd_override is not None:
+                bw_fx_config["cudagraphs"] = BoxedBool(bwd_override)
             compiled_fw_func = self.compiled_fw.post_compile(
                 compiled_fw_func, fw_fx_config
             )
@@ -702,7 +707,6 @@ def deserialize_bundled_cache_entry(
     from copy import deepcopy
 
     from torch._inductor.cudagraph_utils import BoxedDeviceIndex
-    from torch._inductor.utils import BoxedBool
 
     # In the precompile use case, guards are already serialized
     # by dynamo, so we don't need to add them to the environment
