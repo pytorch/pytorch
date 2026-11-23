@@ -241,10 +241,12 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   c10::intrusive_ptr<ProcessGroup> newGroup;
   std::string groupName = name.has_value()
       ? name.value()
-      : c10::str(getGroupName(), ":split:", fmt::format("{}", ranks));
+      : fmt::format("{}:split:{}", getGroupName(), ranks);
+  // The backend owns connection isolation; this prefix owns key isolation.
+  // Explicitly supplied group names must remain unique among siblings.
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
-      c10::make_intrusive<PrefixStore>(
-          fmt::format("{}/", groupName), store_->clone()));
+      c10::make_intrusive<PrefixStore>(fmt::format("{}/", groupName), store_));
+  auto op_id = firePreHook(HookOpName::SPLIT, /*async_op=*/false, /*root=*/-1);
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
@@ -295,12 +297,12 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     newGroup->setBackend(deviceType, backendType, splitBackend);
     splitBackends.emplace(backendType, splitBackend);
   }
-
-  if (!newGroup) {
-    return nullptr;
+  if (newGroup) {
+    newGroup->setGroupName(groupName);
+    newGroup->setGroupDesc(groupDesc);
   }
-  newGroup->setGroupName(groupName);
-  newGroup->setGroupDesc(groupDesc);
+  firePostHook(
+      HookOpName::SPLIT, /*async_op=*/false, op_id, /*work=*/nullptr, newGroup);
   return newGroup;
 }
 
@@ -562,8 +564,8 @@ size_t get_work_registry_size() {
 }
 
 void set_allow_inflight_collective_as_graph_input(bool value) {
-  return RankLocal<WorkRegistry>::get()
-      .set_allow_inflight_collective_as_graph_input(value);
+  RankLocal<WorkRegistry>::get().set_allow_inflight_collective_as_graph_input(
+      value);
 }
 
 bool allow_inflight_collective_as_graph_input() {
