@@ -1794,16 +1794,17 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        pre_len = len(self.items)
-        result = BaseListVariable.list_extend(self, tx, args, kwargs)
-        if result is None:
+        # deque_extend_impl: get the iterator and append each item with the
+        # native append, which trims to maxlen and bumps state per item. Unlike
+        # list_extend it never asks for a length hint. Extending a deque with
+        # itself iterates a snapshot, like CPython's PySequence_List copy.
+        # https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L472-L514
+        if not self.is_mutable():
             return None
-        # Capture growth before the clamp: extend of an empty iterable appends
-        # nothing and must not bump state (no mutation for live iterators).
-        if len(self.items) > pre_len:
-            self.state += 1
-        self._clamp_maxlen("right")
-        return result
+        unpack_and_apply_fn(
+            tx, args[0], lambda item: DequeVariable.append(self, tx, [item], {})
+        )
+        return ConstantVariable.create(None)
 
     def appendleft(
         self,
