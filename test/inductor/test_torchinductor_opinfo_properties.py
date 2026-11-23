@@ -57,7 +57,6 @@ from torch.testing._internal.common_utils import (
     getRocmVersion,
     HardwareClassification,
     IS_FBCODE,
-    IS_WINDOWS,
     isRocmArchAnyOf,
     MI200_ARCH,
     parametrize,
@@ -693,6 +692,10 @@ if TEST_WITH_ROCM and getRocmVersion() >= (7, 14):
     # the remaining default-mode numerical difference.
     del ROCM_UNARY_NUMERICAL_XFAILS["inductor_numerics"]["log10"]
 
+if isRocmArchAnyOf(("gfx1151",)):
+    # #191552 comes from packed FP32 code, which gfx1151 does not have.
+    del ROCM_BATCH_INVARIANCE_XFAILS["inductor_default"]["log1p"]
+
 
 # XPU compiled-vs-eager numerics differ from CUDA/ROCm; tracked in
 # https://github.com/intel/torch-xpu-ops/issues/5168. Like ROCm, XPU does not
@@ -823,7 +826,6 @@ def compile_fn(fn, backend):
         raise ValueError(f"Unknown backend: {backend}")
 
 
-@unittest.skipIf(IS_WINDOWS, "Skipped on Windows")
 @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
 @unittest.skipIf(not HAS_GPU, "Requires GPU")
 class TestOpInfoProperties(TestCase):

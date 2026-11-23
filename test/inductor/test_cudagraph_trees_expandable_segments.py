@@ -38,7 +38,7 @@ from tools.stats.import_test_stats import get_disabled_tests  # @manual
 sys.path.remove(str(REPO_ROOT))
 
 if __name__ == "__main__":
-    if not IS_WINDOWS and (
+    if not (IS_WINDOWS and torch.version.hip is None) and (
         (HAS_CUDA_AND_TRITON and not IS_JETSON) or HAS_XPU_AND_TRITON
     ):
         get_disabled_tests(".")

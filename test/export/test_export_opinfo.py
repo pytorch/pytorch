@@ -192,7 +192,7 @@ class TestExportOnFakeDevice(TestCase):
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
     @onlyAccelerator
     @unittest.skipIf(
-        IS_WINDOWS,
+        IS_WINDOWS and torch.version.hip is None,
         "Subprocess with simulated CPU machine imports op_db which triggers "
         "get_device_capability(); 0 devices raises Invalid device id on Windows.",
     )
@@ -263,7 +263,7 @@ for op in ops:
 
     @onlyAccelerator
     @unittest.skipIf(
-        IS_WINDOWS,
+        IS_WINDOWS and torch.version.hip is None,
         "Failing on Windows, device_count() changes from 0 to 1 ",
     )
     def test_preserve_original_behavior(self, device):

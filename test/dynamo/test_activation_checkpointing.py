@@ -899,7 +899,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
@@ -1038,7 +1037,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "requires_triton for CUDA and XPU",
         device_type=("cuda", "xpu"),
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
@@ -1098,7 +1096,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "requires_triton for CUDA and XPU",
         device_type=("cuda", "xpu"),
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
@@ -1154,7 +1151,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_triton()
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
@@ -1232,7 +1228,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "requires_triton for CUDA and XPU",
         device_type=("cuda", "xpu"),
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
@@ -1293,7 +1288,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "requires_triton for CUDA and XPU",
         device_type=("cuda", "xpu"),
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
@@ -1369,7 +1363,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "requires_triton for CUDA and XPU",
         device_type=("cuda", "xpu"),
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
@@ -1426,7 +1419,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "requires_triton for CUDA and XPU",
         device_type=("cuda", "xpu"),
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
@@ -1482,7 +1474,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "requires_triton for CUDA and XPU",
         device_type=("cuda", "xpu"),
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @parametrize(
         "partition_fn",
         [
@@ -1598,7 +1589,6 @@ class ActivationCheckpointingViaTagsTests(ActivationCheckpointingViaTagsTestBase
         "requires_triton for CUDA and XPU",
         device_type=("cuda", "xpu"),
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._inductor.config.patch(fallback_random=True)
     @parametrize(
         "partition_fn",

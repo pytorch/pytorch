@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    IS_WINDOWS,
     run_tests,
 )
 from torch.testing._internal.hop_db import (
@@ -46,7 +45,6 @@ hop_export_failures = {
 }
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestHOPDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR

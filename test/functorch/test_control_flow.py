@@ -57,6 +57,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.utils._triton import has_triton
+
+
+_WINDOWS_WITHOUT_TRITON = IS_WINDOWS and not has_triton()
 
 
 @contextlib.contextmanager
@@ -557,7 +561,6 @@ class _TestControlFlowBase(TestCase):
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlow(_TestControlFlowBase):
     hw_classification = HardwareClassification.GENERIC
@@ -3144,7 +3147,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
         self.assertEqual(cc.frame_count, 1)
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@unittest.skipIf(_WINDOWS_WITHOUT_TRITON, "requires Triton on Windows")
 @skipIfNoDynamoSupport
 class TestControlFlowDevice(_TestControlFlowBase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -5175,7 +5178,6 @@ class AssociativeScanModels:
             return results
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class AssociativeScanTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -5430,7 +5432,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(out, exp)
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+@unittest.skipIf(_WINDOWS_WITHOUT_TRITON, "requires Triton on Windows")
 @skipIfNoDynamoSupport
 class AssociativeScanTestsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -7508,7 +7510,6 @@ class AssociativeScanTestsDevice(TestCase):
             self.assertEqual(torch.compile(fn)(x), x)
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlowTraced(TestCase):
     def setUp(self):
@@ -12711,7 +12712,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(compiled(5, 7), g(5, 7))
 
 
-@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
 class TestControlFlowTracedDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR

@@ -64,7 +64,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
-    skipIfWindows,
     skipIfXpu,
     TEST_WITH_ROCM,
 )
@@ -759,7 +758,6 @@ class CompiledOptimizerTests(TestCase):
         SGD, kernel_count=1, lr=0.01, foreach=True
     )
 
-    @skipIfWindows
     @requires_gpu
     def test_static_address_finalizer(self):
         import gc

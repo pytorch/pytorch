@@ -90,11 +90,6 @@ device_type = (
 )
 
 
-def requires_compile(fun):
-    fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
-    return fun
-
-
 class AOTAutogradCopyNoIsPinnedWrapperSubclass(torch.Tensor):
     @staticmethod
     def __new__(cls, elem):
@@ -177,7 +172,6 @@ class CustomOpTestCaseBase(TestCase):
         return torch._custom_op.impl.get_op(qualname)
 
 
-@requires_compile
 class TestCustomOpTesting(CustomOpTestCaseBase):
     @parametrize("check_gradients", (False, "auto"))
     @parametrize("dynamic", (True, False))
@@ -989,7 +983,6 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
         with RedispatchMode():
             self.assertEqual(op(x), torch.full((2,), 3.0))
 
-    @requires_compile
     def test_functionalize_error(self):
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib:
             lib.define("foo(Tensor(a!) x) -> Tensor(a!)")
@@ -2269,7 +2262,6 @@ def forward(self, x_1):
     return numpy_view_copy""",
         )
 
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
         from torch._dynamo.utils import counters
@@ -3310,7 +3302,6 @@ class TestCustomOpAPI(TestCase):
             self.assertIsNot(f(fake_x), fake_x)
 
     @skipIfTorchDynamo("recursive dynamo")
-    @requires_compile
     @parametrize(
         "backend, fullgraph",
         [
@@ -3480,7 +3471,6 @@ class TestCustomOpAPI(TestCase):
             self.assertIs(fake_result, fake_out)
 
     @skipIfTorchDynamo("recursive dynamo")
-    @requires_compile
     @parametrize(
         "backend, fullgraph",
         [
@@ -4622,7 +4612,6 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("recursive dynamo")
-    @requires_compile
     def test_mutated_optional_list(self):
         @torch.library.custom_op(
             "_torch_testing::mutated_optional_list", mutates_args={"y"}
@@ -5466,7 +5455,6 @@ Please use `add.register_fake` to add an fake impl.""",
             self.assertTrue(abstract_called)
 
     @skipIfTorchDynamo("recursive dynamo")
-    @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
     def test_compile(self):
         called_impl = False
         called_abstract = False

@@ -44,6 +44,10 @@ from torch.testing._internal.common_utils import (
     xfailIfNoAcceleratorTriton,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
+from torch.utils._triton import has_triton
+
+
+_WINDOWS_WITHOUT_TRITON = IS_WINDOWS and not has_triton()
 
 
 if TYPE_CHECKING:
@@ -1009,7 +1013,7 @@ class TestWithEffectsDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @onlyAccelerator
-    @unittest.skipIf(IS_WINDOWS, "triton")
+    @unittest.skipIf(_WINDOWS_WITHOUT_TRITON, "requires Triton on Windows")
     @skipCUDAIf(not SM80OrLater, "triton")
     @skipIfNoDynamoSupport
     def test_register_effectful_custom_op(self, device):
@@ -1266,7 +1270,7 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
     @onlyAccelerator
-    @unittest.skipIf(IS_WINDOWS, "triton")
+    @unittest.skipIf(_WINDOWS_WITHOUT_TRITON, "requires Triton on Windows")
     @skipCUDAIf(not SM80OrLater, "triton")
     def test_effectful_op_with_flex_attention(self, device):
         """Test that effectful custom ops work with flex_attention."""
