@@ -16,7 +16,6 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCPU,
     dtypesIfCUDA,
     dtypesIfMPS,
-    expectedFailure,
     expectedFailureMPS,
     expectedFailureMPSComplex,
     instantiate_device_type_tests,
@@ -2005,8 +2004,6 @@ class TestUnaryUfuncsDeviceType(TestCase):
         )
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    # https://github.com/intel/torch-xpu-ops/issues/5497
-    @expectedFailure("xpu", torch.float16)
     def test_fp8_e4m3fn_conversion_subnormals(self, device, dtype):
         # Regression test for ptxas codegen bug on sm_100 where FADD in the
         # subnormal conversion path gets wrong source register for odd elements
@@ -2020,8 +2017,6 @@ class TestUnaryUfuncsDeviceType(TestCase):
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
-    # https://github.com/intel/torch-xpu-ops/issues/5497
-    @expectedFailure("xpu", torch.float16)
     def test_fp8_e5m2_conversion_subnormals(self, device, dtype):
         # Same regression test for e5m2.
         # e5m2 subnormals: |x| < 2^-14
