@@ -2181,6 +2181,10 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
     return;
   }
 
+  // Preserve the factor before writing to an output that shares its storage.
+  auto LU_ = at::native::borrow_else_clone(
+      LU.mT().is_contiguous() && !LU.is_alias_of(result), LU, LU, /*contig=*/false);
+
   // Solve A^H X = B^H. Then we return X^H
   if (!left) {
     adjoint = !adjoint;
@@ -2192,10 +2196,7 @@ TORCH_IMPL_FUNC(linalg_lu_solve_out)(const Tensor& LU,
     result.copy_(left ? B : B.mH());
   }
 
-  // Make LU / pivots F-contiguous
   auto pivots_ = pivots.expect_contiguous();
-  auto LU_ = at::native::borrow_else_clone(
-      LU.mT().is_contiguous(), LU, LU, /*contig=*/false);
 
   const auto trans = !adjoint ? TransposeType::NoTranspose :
                      LU.is_complex() ? TransposeType::ConjTranspose
