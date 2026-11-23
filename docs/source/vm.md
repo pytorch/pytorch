@@ -395,6 +395,16 @@ the `__iter__` for them only where the class has neither, which it checks
 at every call: of a module container, or of a tensor, they end the path in
 front of the call.
 
+`getattr(obj, name, default)` and `hasattr(obj, name)` are part of a path
+where the attribute is found without Python code running, where the class
+reads its attributes in a `__getattribute__` of its own (the path goes into
+it), and where the name is not there: `object` then raises `AttributeError`
+and does nothing else, the functions the path went into are left by that,
+the builtin gives the default (or `False`), and the path checks at every
+call that the name is still not there. A configuration object that is asked
+for an option it may not have (`getattr(config, "is_causal", True)`) does
+not end a path.
+
 The instruction that such a function runs for gives what the interpreter
 makes of what the function returned: `for` and `iter` raise `TypeError` for
 what is no iterator, `len` gives the `__index__` of what `__len__` returned
@@ -3096,11 +3106,13 @@ one per layer or per stack of layers, and a few around them. The six layers
 of DistillGPT2 are one graph of 231 operations, with the dropout in front of
 them and the last normalization behind: a graph starts behind the call of
 the helper that makes its mask ("Graphs that start behind a call"). What their
-paths end at is `getattr(config, name, default)` where the configuration
-raises for a name it does not have (at the start of every model, where the
-attention mask is made), a branch on what the mask holds, the objects the
-models construct for their outputs, and library code such as
-`inspect.signature` ("Limits"). A training step has fewer of its operations
+paths end at is the code around the attention mask at the start of every
+model (a wrapper that reads a member of an enumeration, a branch on what the
+mask holds), what a decoder asks of its cache at every layer (`isinstance`
+for an abstract class, a method of a dict that was bound earlier, the truth
+of the cache, which is a `__len__` in Python), the objects the models
+construct for their outputs, and library code such as `inspect.signature`
+and `copy.deepcopy` ("Limits"). A training step has fewer of its operations
 in graphs (counted on eager's tape, with `Graphs(backward=False)`): for
 DistillGPT2, 5 graphs that run 15 times in a step, with 191
 of the about 820 operators that the profiler counts in one step of eager
@@ -3110,9 +3122,14 @@ nothing that can fail has been taken down in front of them ("Writes").
 
 With the models on a GPU (one H100, counted the same way) every model of
 the table above has the graphs it has there, with the same number of runs
-in a call and the same operations in them; the profiler counts a few more
-operations in a call of eager mode for three of them (253 for DistillGPT2,
-1274 for MobileBertForMaskedLM, 389 for whisper-tiny). That holds for the
+in a call, and the same operations in them but for one graph of
+DistillGPT2: where its mask is made the path goes on to the branch on what
+the mask holds, 8 operations where the CPU has 5 (there a helper asks
+whether a CUDA stream is being captured, inside a `try`, which raises
+without CUDA), so that 257 operations are in its graphs. The profiler
+counts a few more operations in a call of eager mode for three of them
+(253 for DistillGPT2, 1274 for MobileBertForMaskedLM, 389 for
+whisper-tiny). That holds for the
 models that call `scaled_dot_product_attention` with `**` as well, in the
 build of torch they were counted with, which has no fused attention
 kernels: the attention comes down to `bmm` there, whose CUDA kernel is
@@ -3155,9 +3172,10 @@ What graphs do not do at this stage:
   check per store ("Stores into objects"); a read through what a store
   changed ends the path.
 - A raise that is caught ends a path: `getattr(obj, name, default)` and
-  `hasattr` where a `__getattribute__` written in Python raises
-  `AttributeError`, a `try` around a call that raises, `Mapping.get` of a key
-  that is not there. So do constructing an object of a class that a path
+  `hasattr` where a function of the class raises `AttributeError` itself
+  (the lookup of `object` that finds nothing does not: "Paths across
+  calls"), a `try` around a call that raises, `Mapping.get` of a key that is
+  not there. So do constructing an object of a class that a path
   does not make objects of ("Objects a path makes": a named tuple, a class
   with a `__setattr__` of its own or made of `dict`, as the output objects
   of the transformer models are), `functools.partial`, making an inner

@@ -1394,6 +1394,10 @@ enum Followed {
     /// It ran to its end without the trace coming back from it, for this
     /// reason: what it returned (null: it raised).
     Left(Obj, String),
+    /// A lookup of `object` that found nothing raised in it, as the path
+    /// checks (`Trace::absent`), and no handler of the function was in
+    /// the way: the trace is back, with the raise on its way further out.
+    Absent,
 }
 
 /// What became of a function that is taken down (see `Compiled::walk`).
@@ -5196,6 +5200,7 @@ impl Compiled {
                         graph::apart(reg(own, *read), *attributes, reg(own, *target), *keeps)
                     }
                     Assert::Plain(class, name) => graph::stores_plainly(reg(own, *class), name.as_ptr()),
+                    Assert::Missing(v, name) => graph::reads_nothing(reg(own, *v), name.as_ptr(), api),
                     Assert::Keys(v, names) => {
                         let held = reg(own, *v);
                         let dict = !held.is_null() && !capi::is_unboxed(held) && ffi::PyDict_CheckExact(held) != 0;
@@ -5223,6 +5228,7 @@ impl Compiled {
                             Assert::Is(..) => "an object that is computed with behind the callable",
                             Assert::Same(..) | Assert::Apart(..) => "which object a store of the path was into",
                             Assert::Plain(..) => "how a class keeps what is stored into its objects",
+                            Assert::Missing(..) => "an attribute that the lookup of object does not find",
                         };
                         let made = path.body.iter().find(|other| other.dst == assert.value() && other.dst != NONE);
                         let from = made.map_or(String::new(), |made| (&*path.owners[made.owner as usize]).func.op_repr(&made.op));
@@ -5271,6 +5277,12 @@ impl Compiled {
                 // call, and `object` says so itself: the read raises and
                 // does nothing else, where the instructions get to it.
                 Op::LoadAttr(of, name) if graph::plainly_absent(reg(own, *of), owner.func.consts[*name as usize].as_ptr()) => {
+                    return Staged::Failed;
+                }
+                // What `object` read for the path is not there at this
+                // call: the read raises and does nothing else, and the
+                // call is one the path is not for.
+                Op::Call { callee, args, kwnames } if *kwnames == NONE && args.len() == 1 && graph::reads_nothing(reg(own, *callee), reg(own, args[0]), api) => {
                     return Staged::Failed;
                 }
                 op => {
@@ -6771,6 +6783,11 @@ impl Compiled {
             graph::why_not(&self.func, &inst.op, found, reason, behind)
         };
         let ends = || Taken::Ends(why());
+        if kind.is_none() && !t.outermost() {
+            if let Some(taken) = self.record_missing(t, inst, regs, frames, api) {
+                return taken;
+            }
+        }
         let Some(kind) = kind else {
             return ends();
         };
@@ -7317,6 +7334,68 @@ impl Compiled {
         }
         kill(t, regs);
         Taken::Went
+    }
+
+    /// `object.__getattribute__(name)`, bound to an object that has nothing
+    /// under the name (`graph::reads_nothing`), in a function the path
+    /// went into: the call raises AttributeError and does nothing else.
+    /// The path checks at every call that it does (`Assert::Missing`),
+    /// and the raise is on its way out of the functions the path is in
+    /// (`Trace::absent`, `follow`): where it comes to a `getattr` with a
+    /// default or a `hasattr` that went into the `__getattribute__` of a
+    /// class, that gives the default, or False, and the path goes on
+    /// (`record_call`). The exception is made here, as the instruction
+    /// makes it; a path that is run never makes it. None for any other
+    /// instruction.
+    unsafe fn record_missing(&self, t: &mut Trace, inst: &Inst, regs: &mut [Obj], frames: &mut Frames, api: &TcfgApi) -> Option<Taken> {
+        let (callee, key, load) = match &inst.op {
+            Op::CallMethod { recv, name, args, kwnames } if *kwnames == NONE && args.len() == 1 => (*recv, args[0], Some(*name)),
+            Op::Call { callee, args, kwnames } if *kwnames == NONE && args.len() == 1 => (*callee, args[0], None),
+            _ => return None,
+        };
+        let (held, name) = (reg(regs, callee), reg(regs, key));
+        if held.is_null() || capi::is_unboxed(held) || name.is_null() {
+            return None;
+        }
+        // What is called: the value, or what it has under the name of the
+        // method where reading that runs no Python code.
+        let found = match load {
+            Some(method) => {
+                let load = Op::LoadAttr(callee, method);
+                let found = if self.quiet(regs, &load, api) { self.exec_op(regs, &load).unwrap_or(null_mut()) } else { null_mut() };
+                ffi::PyErr_Clear();
+                found
+            }
+            None => new_ref(held),
+        };
+        if found.is_null() {
+            return None;
+        }
+        let found = PyObj::from_owned(found);
+        if !graph::reads_nothing(found.as_ptr(), name, api) {
+            return None;
+        }
+        let (recv, asked) = (self.path_value(t, regs, callee), self.path_value(t, regs, key));
+        let early = |t: &Trace, v: PathValue| v != UNDEF && v != NONE && !t.defs[v as usize].late;
+        if !early(t, recv) || !early(t, asked) {
+            return None;
+        }
+        let name = PyObj::from_borrowed(name);
+        frames.top().at(inst.bc & OFFSET_MASK);
+        match self.exec_op(regs, &inst.op) {
+            Ok(result) => Some(Taken::Cut(result, "a lookup that finds nothing found something".to_string())),
+            Err(()) if ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) == 0 => Some(Taken::Raised),
+            Err(()) => {
+                let reader = match load {
+                    Some(method) => t.derive(Op::LoadAttr(recv, method), Kind::Read, false, new_ref(found.as_ptr()), inst.bc),
+                    None => recv,
+                };
+                t.check(Assert::Equals(asked, name.clone()), inst.bc);
+                t.check(Assert::Missing(reader, name), inst.bc);
+                t.absent = true;
+                Some(Taken::Raised)
+            }
+        }
     }
 
     /// A call of a `functools.lru_cache` wrapper that finds its entry in
@@ -7996,6 +8075,39 @@ impl Compiled {
             // what the function returned or raised.
             Followed::Left(result, reason) => return Some(Taken::Cut(self.makes_of(&form, inst, regs, result), reason)),
             Followed::Returned(result, value) => (result, value),
+            Followed::Absent => {
+                // What the interpreter makes of the raise for this
+                // instruction: nothing, and it goes on out of this function
+                // too; or the default of a `getattr`, the False of a
+                // `hasattr`, and the path goes on behind the instruction.
+                let made = self.makes_of(&form, inst, regs, null_mut());
+                if made.is_null() {
+                    return Some(Taken::Raised);
+                }
+                t.absent = false;
+                let (Form::Asks(..), Op::Call { callee, args, .. }) = (&form, &inst.op) else {
+                    return Some(Taken::Cut(made, "a function of the class answers for what is not found".to_string()));
+                };
+                let builtin = self.path_value(t, regs, *callee);
+                t.check(Assert::Is(builtin, PyObj::from_borrowed(reg(regs, *callee))), inst.bc);
+                let value = if graph::is_hasattr(reg(regs, *callee)) {
+                    t.derive(Op::Object(PyObj::from_borrowed(ffi::Py_False())), Kind::Pure, false, new_ref(ffi::Py_False()), inst.bc)
+                } else {
+                    self.path_value(t, regs, args[2])
+                };
+                t.unmark();
+                if inst.dst == NONE {
+                    capi::release(made);
+                } else {
+                    capi::release(std::mem::replace(&mut regs[inst.dst as usize], made));
+                    t.rename(inst.dst, value);
+                }
+                for v in &inst.kills {
+                    capi::release(take(regs, *v));
+                    t.kill(*v);
+                }
+                return Some(Taken::Went);
+            }
         };
         if let (Form::Asks(..), Op::Call { callee, .. }) = (&form, &inst.op) {
             // What was called is the builtin at every call; `hasattr`
@@ -8296,7 +8408,7 @@ impl Compiled {
                     }
                     t.check(Assert::Is(value, PyObj::from_borrowed(ffi::Py_None())), inst.bc);
                 }
-                Followed::Raised => {
+                Followed::Raised | Followed::Absent => {
                     ffi::Py_DECREF(object);
                     return Some(Taken::Raised);
                 }
@@ -8468,7 +8580,7 @@ impl Compiled {
             let form = Form::Special(&names.iter, *v, None);
             let (returned, value, stopped) = match self.follow(t, site, at, regs, frames, api, &form) {
                 Followed::Returned(returned, value) => (returned, value, "an __iter__ returns what is no iterator".to_string()),
-                Followed::Raised => return Taken::Raised,
+                Followed::Raised | Followed::Absent => return Taken::Raised,
                 Followed::Left(result, reason) if result.is_null() => return Taken::Cut(result, reason),
                 Followed::Left(result, reason) => (result, NONE, reason),
                 // No `__iter__` has been called: the call is the
@@ -9034,7 +9146,12 @@ impl Compiled {
                 let landing = Landing { block, code, pc: call + 1 };
                 (c.exec_blocks(&mut inner, &mut below, Some(PathEnd::Landed(landing))), Err(reason))
             }
+            // A lookup that found nothing raised, as the path checks, and
+            // the function has no handler there: it is left by the raise,
+            // and has nothing more to run.
+            Walked::Raised(block, _) if t.absent && cf.blocks[block].handler == NONE => (null_mut(), Err(String::new())),
             Walked::Raised(block, bc) => {
+                t.absent = false;
                 let raised = Some(PathEnd::Raised(block, bc));
                 (c.exec_blocks(&mut inner, &mut below, raised), Err("it raised".to_string()))
             }
@@ -9065,6 +9182,10 @@ impl Compiled {
                 Followed::Returned(result, value)
             }
             Ok(_) => Followed::Raised,
+            Err(_) if t.absent && result.is_null() => {
+                t.leave();
+                Followed::Absent
+            }
             Err(reason) => Followed::Left(result, format!("in {}: {}", cf.name, reason)),
         }
     }
