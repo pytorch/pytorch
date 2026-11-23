@@ -17,7 +17,7 @@ from torch.nativert.backends._lower_utils import (
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipGPUIf,
+    skipIf,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -282,7 +282,9 @@ class TestNativeRTDevice(TestCase):
         True,
         "nativert has no XPU support: https://github.com/intel/torch-xpu-ops/issues/5364",
     )
-    @skipGPUIf(not HAS_TRITON, "AOTI on an accelerator requires triton")
+    @skipIf(
+        not HAS_TRITON, "AOTI on an accelerator requires triton", device_type="cuda"
+    )
     @parametrize(
         "make_model",
         [_single_output_model, _multi_output_model, _pytree_model],
@@ -413,9 +415,7 @@ if is_fbcode():
     del test
 
 
-instantiate_device_type_tests(
-    TestNativeRTDevice, globals(), only_for=("cpu", "cuda", "xpu"), allow_xpu=True
-)
+instantiate_device_type_tests(TestNativeRTDevice, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":

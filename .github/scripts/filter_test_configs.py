@@ -716,7 +716,6 @@ def main() -> None:
     )
 
     filtered_test_matrix = enforce_lf_allowlist(filtered_test_matrix, args.lf_runners)
-
     # Set the filtered test matrix as the output
     set_output("test-matrix", json.dumps(filtered_test_matrix))
 

@@ -107,11 +107,12 @@ if (
     )
     ext_modules.append(cusolver_extension)
 
+# ROCm does the device link in the final hipcc link, so it does not need ninja.
 if (
-    USE_NINJA
+    (USE_NINJA or torch.version.hip is not None)
     and (not IS_WINDOWS)
     and torch.cuda.is_available()
-    and CUDA_HOME is not None
+    and (CUDA_HOME is not None or ROCM_HOME is not None)
 ):
     extension = CUDAExtension(
         name="torch_test_cpp_extension.cuda_dlink",

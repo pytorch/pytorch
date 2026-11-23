@@ -189,16 +189,11 @@ class PrecompileContext:
         dynamo_entries = cls._dynamo_cache_entries
         backend_artifacts = cls._backend_artifacts_by_key
 
-        num_artifacts = len(dynamo_entries)
-
         debug_info = PrecompileContext.dump_debug_info(
             dynamo_entries, backend_artifacts
         )
         debug_str = json.dumps(
-            {
-                "num_entries": num_artifacts,
-                "artifacts": debug_info,
-            },
+            {"num_entries": len(dynamo_entries), "artifacts": debug_info}
         )
         torch._logging.trace_structured(
             "artifact",
@@ -214,21 +209,12 @@ class PrecompileContext:
 
         for key, cache_entry in dynamo_entries.items():
             try:
-                result = PrecompileCacheEntry.from_cache_entry(
+                precompile_cache_entries[key] = PrecompileCacheEntry.from_cache_entry(
                     cache_entry, backend_artifacts
                 )
-                if result is not None:
-                    precompile_cache_entries[key] = result
             except Exception as e:
                 logger.warning("Failed to create cache entry %s", key, exc_info=True)
-
-                error = e
-                data = json.dumps(
-                    {
-                        "key": key,
-                        "error": str(error),
-                    }
-                )
+                data = json.dumps({"key": key, "error": str(e)})
                 torch._logging.trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
@@ -237,5 +223,4 @@ class PrecompileContext:
                     },
                     payload_fn=lambda: data,
                 )
-                continue
         return precompile_cache_entries, debug_info
