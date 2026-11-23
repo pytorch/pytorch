@@ -206,6 +206,45 @@ impl Callees {
     }
 }
 
+/// The interpreter frame a compiled function runs under. The VM keeps its
+/// instruction pointer on the bytecode of the instruction it executes; the
+/// locals of the frame stay empty, since they live in the VM's registers.
+#[derive(Clone, Copy)]
+struct Frame {
+    /// Null where frames are not supported.
+    ptr: *mut std::ffi::c_void,
+    instr: *mut *mut u16,
+    code: *mut u16,
+}
+
+impl Frame {
+    unsafe fn push(function: Obj) -> Result<Frame, ()> {
+        let mut frame = Frame { ptr: null_mut(), instr: null_mut(), code: null_mut() };
+        if let Some(push) = capi::api().and_then(|api| api.frame_push) {
+            frame.ptr = push(function, &mut frame.instr, &mut frame.code);
+            if frame.ptr.is_null() {
+                return Err(());
+            }
+        }
+        Ok(frame)
+    }
+
+    unsafe fn pop(self) {
+        if !self.ptr.is_null() {
+            (capi::api().unwrap_unchecked().frame_pop.unwrap_unchecked())(self.ptr);
+        }
+    }
+
+    /// Records that the instruction at this offset of the function's
+    /// bytecode is the one being executed.
+    #[inline(always)]
+    unsafe fn at(&self, offset: u32) {
+        if !self.instr.is_null() {
+            *self.instr = self.code.add(offset as usize / 2);
+        }
+    }
+}
+
 thread_local! {
     /// How many compiled functions are running on this thread, one inside the
     /// other.
@@ -697,7 +736,16 @@ impl Compiled {
         let mut regs = self.frames.borrow_mut().pop().unwrap_or_else(|| vec![null_mut(); nregs]);
         regs[nregs - 1] = new_ref(function);
         let result = match self.bind_args(&mut regs, function, args, kwargs) {
-            Ok(()) => self.exec(&mut regs),
+            Ok(()) => match Frame::push(function) {
+                Ok(frame) => {
+                    let result = self.exec(&mut regs, frame);
+                    // Before the registers are released, as the interpreter
+                    // unlinks a frame before it clears its locals.
+                    frame.pop();
+                    result
+                }
+                Err(()) => null_mut(),
+            },
             // Arguments that do not fit the signature: the interpreter turns
             // the call down before it runs anything, in its own words.
             Err(()) => {
@@ -755,12 +803,34 @@ impl Compiled {
         Some(handler as usize)
     }
 
-    unsafe fn fail(&self, bc: u32) -> Obj {
+    /// The offset in the function's own bytecode that stands for an
+    /// instruction: its own, or for an inlined one that of the call it was
+    /// inlined at.
+    #[inline(always)]
+    fn frame_offset(&self, bc: u32) -> u32 {
+        let mut bc = bc;
+        while bc >> ORIGIN_SHIFT != 0 {
+            bc = self.func.origins[(bc >> ORIGIN_SHIFT) as usize].call_bc;
+        }
+        bc
+    }
+
+    unsafe fn fail(&self, frame: Frame, bc: u32) -> Obj {
         // One entry per frame the interpreter would have had: the inlined
         // function the instruction came from, then each call it sits under.
+        // The function itself has a real frame where those are supported,
+        // which gives its entry the position within the line.
         let mut bc = bc;
         loop {
             let origin = (bc >> ORIGIN_SHIFT) as usize;
+            if origin == 0 && !frame.ptr.is_null() {
+                frame.at(bc);
+                let current = ffi::PyEval_GetFrame();
+                if !current.is_null() {
+                    ffi::PyTraceBack_Here(current);
+                }
+                break;
+            }
             let (name, filename) = &self.origin_c[origin];
             pyffi::_PyTraceback_Add(name.as_ptr(), filename.as_ptr(), self.func.line_of(bc));
             if origin == 0 {
@@ -2064,7 +2134,7 @@ impl Compiled {
     // The interpreter loop
     // ------------------------------------------------------------------
 
-    unsafe fn exec(&self, regs: &mut [Obj]) -> Obj {
+    unsafe fn exec(&self, regs: &mut [Obj], frame: Frame) -> Obj {
         let api = capi::api();
         let func = &self.func;
         if self.options.specialize {
@@ -2121,7 +2191,7 @@ impl Compiled {
                 if cur <= pred {
                     back_edges = back_edges.wrapping_add(1);
                     if back_edges & 63 == 0 && ffi::PyErr_CheckSignals() != 0 {
-                        self.fail(block.bc_start);
+                        self.fail(frame, block.bc_start);
                         raised!('blocks, cur);
                     }
                 }
@@ -2146,6 +2216,7 @@ impl Compiled {
                                 }
                             }
                             op => {
+                                frame.at(self.frame_offset(inst.bc));
                                 if mode == Mode::Profile {
                                     self.exec_profiled(cur, pc, inst, regs, api.unwrap())
                                 } else {
@@ -2167,7 +2238,7 @@ impl Compiled {
                                 }
                             }
                             Err(()) => {
-                                self.fail(inst.bc);
+                                self.fail(frame, inst.bc);
                                 raised!('blocks, cur);
                             }
                         }
@@ -2188,7 +2259,7 @@ impl Compiled {
                                 } else {
                                     let r = ffi::PyObject_IsTrue(c);
                                     if r < 0 {
-                                        self.fail(func.blocks[cur].bc_start);
+                                        self.fail(frame, func.blocks[cur].bc_start);
                                         raised!('blocks, cur);
                                     }
                                     r != 0
@@ -2217,12 +2288,12 @@ impl Compiled {
                                         ffi::PyExc_RuntimeError,
                                         "No active exception to reraise".to_string(),
                                     );
-                                    self.fail(bc);
+                                    self.fail(frame, bc);
                                 } else {
                                     let cause =
                                         if *cause == NONE { null_mut() } else { self.obj(regs, *cause) };
                                     do_raise(self.obj(regs, *exc), cause);
-                                    self.fail(bc);
+                                    self.fail(frame, bc);
                                 }
                                 raised!('blocks, cur);
                             }

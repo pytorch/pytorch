@@ -27,7 +27,7 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 2;
+pub const TCFG_API_VERSION: u32 = 3;
 
 #[repr(C)]
 pub struct TcfgPyOp {
@@ -81,6 +81,15 @@ pub struct TcfgApi {
     pub tensor_box: unsafe extern "C" fn(Obj) -> Obj,
     pub tensor_retain: unsafe extern "C" fn(Obj),
     pub tensor_release: unsafe extern "C" fn(Obj),
+    pub frame_push: Option<
+        unsafe extern "C" fn(Obj, *mut *mut *mut u16, *mut *mut u16) -> *mut std::ffi::c_void,
+    >,
+    pub frame_pop: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
+}
+
+/// Whether compiled functions run under an interpreter frame of their own.
+pub fn has_frames() -> bool {
+    api().is_some_and(|api| api.frame_push.is_some() && api.frame_pop.is_some())
 }
 
 static API: AtomicPtr<TcfgApi> = AtomicPtr::new(std::ptr::null_mut());

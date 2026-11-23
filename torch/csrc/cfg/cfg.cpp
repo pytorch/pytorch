@@ -13,6 +13,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -1697,6 +1698,61 @@ void tensorRelease(PyObject* tagged) {
   c10::raw::intrusive_ptr::decref(unboxedImpl(tagged));
 }
 
+#if IS_PYTHON_3_12_PLUS && !IS_PYTHON_3_13_PLUS
+#define TCFG_HAS_FRAMES 1
+
+extern "C" {
+// Copies of CPython internals that torch/csrc/dynamo/cpython_defs.c keeps.
+_PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
+    PyThreadState* tstate,
+    size_t size);
+void THP_PyFrame_Clear(_PyInterpreterFrame* frame);
+void THP_PyThreadState_PopFrame(
+    PyThreadState* tstate,
+    _PyInterpreterFrame* frame);
+}
+
+void* framePush(PyObject* func, uint16_t*** instr, uint16_t** code_start) {
+  PyThreadState* tstate = PyThreadState_Get();
+  auto* function = reinterpret_cast<PyFunctionObject*>(func);
+  auto* code = reinterpret_cast<PyCodeObject*>(function->func_code);
+  _PyInterpreterFrame* frame =
+      THP_PyThreadState_BumpFramePointerSlow(tstate, code->co_framesize);
+  if (frame == nullptr) {
+    return nullptr;
+  }
+  Py_INCREF(func);
+  _PyFrame_Initialize(frame, function, nullptr, code, 0);
+  // What COPY_FREE_VARS does. The other locals stay empty: the VM keeps them
+  // in its registers.
+  if (PyObject* closure = function->func_closure) {
+    Py_ssize_t n = PyTuple_GET_SIZE(closure);
+    Py_ssize_t first = code->co_nlocalsplus - n;
+    for (Py_ssize_t i = 0; i < n; i++) {
+      frame->localsplus[first + i] = Py_NewRef(PyTuple_GET_ITEM(closure, i));
+    }
+  }
+  // A frame that has not reached its RESUME counts as not started, and is
+  // skipped by whoever walks the stack.
+  frame->prev_instr = _PyCode_CODE(code) + code->_co_firsttraceable;
+  frame->previous = tstate->cframe->current_frame;
+  tstate->cframe->current_frame = frame;
+  *instr = reinterpret_cast<uint16_t**>(&frame->prev_instr);
+  *code_start = reinterpret_cast<uint16_t*>(_PyCode_CODE(code));
+  return frame;
+}
+
+void framePop(void* popped) {
+  auto* frame = static_cast<_PyInterpreterFrame*>(popped);
+  PyThreadState* tstate = PyThreadState_Get();
+  // Unlinked before it is cleared, as in the interpreter: clearing can run
+  // finalizers, which must not find a half-cleared frame on the stack.
+  tstate->cframe->current_frame = frame->previous;
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+}
+#endif
+
 const TcfgApi api_table = {
     TCFG_API_VERSION,
     &captureBegin,
@@ -1711,6 +1767,13 @@ const TcfgApi api_table = {
     &tensorBox,
     &tensorRetain,
     &tensorRelease,
+#ifdef TCFG_HAS_FRAMES
+    &framePush,
+    &framePop,
+#else
+    nullptr,
+    nullptr,
+#endif
 };
 
 } // namespace
