@@ -31,6 +31,13 @@ from torch._native.ops.reductions import (
 )
 
 
+# Views select() builds, each with the rule it takes without explicit geometry.
+_VIEWS = {
+    "default": ({}, "default"),
+    "b200": ({"cc": (10, 0), "columns": 4095}, "b200_ragged_c4095"),
+}
+
+
 class TestColumnConfig(TestCase):
     hw_classification = HardwareClassification.CUDA
 
@@ -77,19 +84,26 @@ class TestColumnConfig(TestCase):
                 self.select(rows=4, columns=1 << 31, npar=npar)
 
     @parametrize(
-        "kwargs,rule,geometry",
+        "view,kwargs,geometry",
         [
-            ({"threads_per_block": 128}, "explicit", (128, 4)),
-            ({"npar": 7}, "explicit", (7, 4)),
+            ("default", {"threads_per_block": 128}, (128, 4)),
+            ("default", {"npar": 7}, (7, 4)),
             # Two-wide vectors make 2048 lanes, which want 64 partitions, not 128.
-            ({"vec": 2}, "explicit", (64, 2)),
+            ("default", {"vec": 2}, (64, 2)),
+            # B200's anchors are odd widths, so they take no wider vectors.
+            ("b200", {"threads_per_block": 128}, (33, 1)),
+            ("b200", {"npar": 7}, (7, 1)),
+            ("b200", {"vec": 1}, (33, 1)),
         ],
+        name_fn=lambda view, kw, g: view + "".join(f"_{k}_{v}" for k, v in kw.items()),
     )
-    def test_explicit_geometry_disables_policy(self, kwargs, rule, geometry):
-        """Honor explicit stage-one geometry without rewriting it through policy, and
-        derive the free field from the explicit one."""
-        cfg = self.select(**kwargs)
-        self.assertEqual(cfg.rule, rule)
+    def test_explicit_geometry_disables_policy(self, view, kwargs, geometry):
+        """Honor explicit stage-one geometry without rewriting it through the rule the
+        view takes otherwise, and derive the free field from the explicit one."""
+        anchor, rule = _VIEWS[view]
+        self.assertEqual(self.select(**anchor).rule, rule)
+        cfg = self.select(**anchor, **kwargs)
+        self.assertEqual(cfg.rule, "explicit")
         self.assertEqual((cfg.npar, cfg.vec), geometry)
         for key, value in kwargs.items():
             self.assertEqual(getattr(cfg, key), value)

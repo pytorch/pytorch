@@ -63,6 +63,8 @@ _SHORT_R = 64
 _MIN_LANES = 64
 # Stage one chunks and ordered split partitions launch along grid y.
 _MAX_NPAR = 65535
+# Ordered split plans are verified bitwise for these input dtypes only.
+_ORDERED_SPLIT_DTYPES = (torch.float32, torch.bfloat16, torch.float16, torch.float64)
 # Use blocks per column below the measured 4096-16384 crossover, then threads per column.
 _C_THREAD_STAGE2 = 8192
 # Small blocks avoid idle threads on narrow columns; threads_per_block=256 took 17.3us versus 9.9us
@@ -155,8 +157,9 @@ def select_ordered_col_config(
     default mapping and split plans decline.
 
     Entries are keyed by trait type. Single-field split plans (partials > 1) without an
-    entry take a full-tile fallback on _B200_CCS that applies to any outputs; looped
-    plans take their entry's own full_tiles, and ragged splits are clamped regardless.
+    entry take a full-tile fallback on _B200_CCS for _B200_DTYPES that applies to any
+    outputs; looped plans take their entry's own full_tiles, and ragged splits are
+    clamped regardless.
     Mappings apply to unbatched _ORDERED_COL_DTYPES views with 32-bit accumulators and,
     if the mapping has out_dtypes, only to those outputs. With rows, B200 single-field
     split views take 16-column tiles at measured shapes and over a band, R 32768-65536
@@ -497,6 +500,8 @@ class _OrderedColReduce:
             raise ValueError("ordered columns replay tree vector folds only")
         if len(plan.batches) != 1:
             raise ValueError("ordered columns fold a single planner batch")
+        if plan.shape == "split" and plan.wpr == 1:
+            raise ValueError("a one-warp split plan would seed an extra identity")
         _check_ordered_mapping(worker_warps, tile_columns)
         self.trait = trait
         self.plan = plan
@@ -771,7 +776,8 @@ def reduce_ordered_col(
     warps and full tiles apply only to exact looped or evenly split plans. Otherwise
     select_ordered_col_config picks one for compute capability cc, x's device's by
     default. Split plans run only with a config, explicit or selected; looped plans
-    default to OrderedColConfig(0).
+    default to OrderedColConfig(0). Split plans decline for inputs outside
+    _ORDERED_SPLIT_DTYPES, Int32 partial-index overflow and over _MAX_NPAR partitions.
     """
     if config is not None:
         _check_ordered_mapping(config.worker_warps, config.tile_columns)
@@ -804,16 +810,15 @@ def reduce_ordered_col(
     # sums, fp32/bf16 amax). Multi-field traits roll lanes but replay a static lane tree
     # per load, taking 1.3 s at R = 8192 and 2.5-3.1 s at R = 8193-16384 (fp32). The
     # indexed tree takes 0.3-0.75 s, so cap replays at tile.MAX_UNROLL leaves (looped
-    # rows up to 8192).
+    # rows up to 8192). Split plans replay exactly tile.MAX_UNROLL leaves per warp, so
+    # they fit with no headroom.
     # Plans past one planner batch always exceed the cap.
     if sum(b[2] for b in plan.batches) * WARP * plan.vec > tile.MAX_UNROLL:
         return None
     split = plan.shape == "split"
-    # Split is verified bitwise for floating inputs only. Partials are indexed in Int32
-    # and partitions ride grid y.
-    floating = (torch.float32, torch.bfloat16, torch.float16, torch.float64)
+    # Partials are indexed in Int32 and partitions ride grid y.
     if split and (
-        x.dtype not in floating
+        x.dtype not in _ORDERED_SPLIT_DTYPES
         or B * C * plan.split[0] >= _INT32_LIMIT
         or plan.split[0] > _MAX_NPAR
     ):
