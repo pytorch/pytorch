@@ -1862,7 +1862,11 @@ class PythonKeyTracer(Tracer):
         if kind == "get_attr":
             if not isinstance(target, str):
                 raise AssertionError(f"Expected str, got {type(target)}")
-            attr = getattr(self.root, target)
+            # target is a qualified path as reported by named_modules(), so it
+            # can contain dots that a flat getattr cannot walk.
+            attr = self.root
+            for atom in target.split("."):
+                attr = getattr(attr, atom)
             if isinstance(attr, torch.Tensor):
                 with disable_proxy_modes_tracing():
                     node.meta["val"] = extract_val(attr)

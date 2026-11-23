@@ -5949,6 +5949,58 @@ class TestInlineSingleUseInvokeSubgraph(TestCase):
         res.sum().backward()
         self.assertEqual(x.grad, x_clone.grad)
 
+    def test_self_recursive_region_hoist_name_collision(self):
+        # A self-recursive region produces sibling subgraphs whose names collide
+        # with a grandparent's. hoist_submodules used to compare names only, so
+        # it re-registers an already correctly registered module under a
+        # suffixed alias (subgraph_N_0) while get_attr nodes elsewhere still
+        # referenced subgraph_N, leaving a dangling target. Added an identity
+        # check in hoist_submodules.
+        @nested_compile_region
+        def fib(x, n):
+            if n <= 0:
+                return torch.zeros_like(x)
+            if n == 1:
+                # HOPs forbid input->output aliasing, so clone.
+                return x.clone()
+            return fib(x, n - 1) + fib(x, n - 2)
+
+        x = torch.ones(4)
+        # n=3..7 each renamed a different submodule before the fix; above 7 the
+        # default max_reuse_entries=8 is hit first.
+        for n, expected in ((3, 2.0), (4, 3.0), (5, 5.0), (6, 8.0), (7, 13.0)):
+            torch._dynamo.reset()
+            res = torch.compile(fib, backend="eager", fullgraph=True)(x, n)
+            self.assertEqual(res, torch.full((4,), expected))
+
+    def test_hoist_submodules_renames_distinct_module(self):
+        # The identity check must not suppress a rename that is genuinely
+        # needed: when gm already owns a *different* module under the same
+        # name, the hoisted one still has to be given a fresh name and mapped.
+        from torch._higher_order_ops.passes.inline_invoke_subgraph import (
+            hoist_submodules,
+        )
+
+        gm = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+        subgraph = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+
+        shared = torch.nn.Linear(2, 2)
+        distinct = torch.nn.Linear(2, 2)
+        gm.add_module("same", shared)
+        gm.add_module("other", distinct)
+        subgraph.add_module("same", shared)  # identical object -> keep name
+        subgraph.add_module("other", torch.nn.Linear(2, 2))  # different -> rename
+
+        name_map = hoist_submodules(gm, subgraph)
+
+        self.assertEqual(name_map["same"], "same")
+        self.assertIs(gm.get_submodule("same"), shared)
+        self.assertNotEqual(name_map["other"], "other")
+        self.assertIs(gm.get_submodule("other"), distinct)
+        self.assertIs(
+            gm.get_submodule(name_map["other"]), subgraph.get_submodule("other")
+        )
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphReuseHashFn(TestCase):
