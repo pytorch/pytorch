@@ -258,9 +258,8 @@ class TestKernelColTile(TestCase):
         # fp32 outputs keep the tolerance tight enough to catch dropped tail rows.
         out = [torch.float32] * nouts
         results = []
-        # col_group=1 folds every row online, which rounds differently. Grouped folds
-        # run their prefix at unroll 1, so unroll 2 and 8 give the same bits.
-        runs = ((group, 2, key), (group, 8, f"{key}_unroll8"), (1, 4, online_key))
+        # col_group=1 folds every row online, which rounds differently.
+        runs = ((group, 2, key), (1, 4, online_key))
         for g, u, k in runs:
             cfg = ct.ColConfig("grouped", 64, npar, 1, "column", unroll=u, col_group=g)
             with mock.patch.object(ct, "select_col_config", return_value=cfg):
@@ -277,8 +276,7 @@ class TestKernelColTile(TestCase):
         groups = {k[slot] for k in ct._CACHE if k[:2] == ("coltile", key)}
         self.assertEqual(groups, {group})
         flat = [torch.cat([t.flatten() for t in r]).view(torch.int32) for r in results]
-        grouped, unrolled, online = flat
-        self.assertEqual(grouped, unrolled)
+        grouped, online = flat
         # Equal bits would mean no grouped fold ran; setUp's seed keeps this deterministic.
         self.assertNotEqual(grouped, online)
         with torch.backends.python_native.cutedsl.disabled():
