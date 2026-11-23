@@ -631,9 +631,11 @@ class TestGroupBatchFusion(TestCase):
             counters.clear()
 
     def test_batch_linear_lhs_default_is_xpu_only(self):
-        self.assertEqual(
-            config.post_grad_fusion_options["batch_linear_lhs"]["devices"], ("xpu",)
-        )
+        default = config.post_grad_fusion_options["batch_linear_lhs"]
+        self.assertEqual(default["devices"], ("xpu",))
+        self.assertEqual(default["min_fuse_set_size"], 2)
+        self.assertTrue(default["static_widths_only"])
+        self.assertEqual(default["max_fuse_tensor_size"], 1 << 24)
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -662,9 +664,15 @@ class TestGroupBatchFusion(TestCase):
         # A bare string is a single device, not a substring to search for.
         self.assertTrue(_option_matches_graph_devices({"devices": "xpu"}, {"xpu"}))
         self.assertFalse(_option_matches_graph_devices({"devices": "xpu"}, {"xp"}))
-        # Explicit None and unsupported container types keep the option on.
+        self.assertTrue(_option_matches_graph_devices({"devices": "xpu:0"}, {"xpu"}))
+        self.assertTrue(
+            _option_matches_graph_devices({"devices": torch.device("xpu")}, {"xpu"})
+        )
+        self.assertTrue(_option_matches_graph_devices({"devices": {"xpu"}}, {"xpu"}))
+        # Explicit None keeps the option on; invalid values are rejected.
         self.assertTrue(_option_matches_graph_devices({"devices": None}, {"cuda"}))
-        self.assertTrue(_option_matches_graph_devices({"devices": 7}, {"cuda"}))
+        with self.assertRaises(ValueError):
+            _option_matches_graph_devices({"devices": 7}, {"cuda"})
 
     @requires_gpu()
     @torch._inductor.config.patch(
@@ -718,36 +726,65 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         counters.clear()
 
-    def test_batch_linear_lhs_static_widths_only(self):
+    @parametrize("static_widths_only,expected_count", [(False, 1), (True, 0)])
+    def test_batch_linear_lhs_static_widths_only(
+        self, static_widths_only, expected_count
+    ):
         class M(torch.nn.Module):
             def forward(self, x, w1, w2):
                 return torch.mm(x, w1.t()), torch.mm(x, w2.t())
 
         module = M().eval()
         x = torch.randn(32, 64)
-        for static_widths_only, expected_count in [(False, 1), (True, 0)]:
-            with torch._inductor.config.patch(
-                post_grad_fusion_options={
-                    "batch_linear_lhs": {
-                        "devices": ("cpu",),
-                        "min_fuse_set_size": 2,
-                        "static_widths_only": static_widths_only,
-                    }
-                },
-            ):
-                w1 = torch.randn(16, 64)
-                w2 = torch.randn(32, 64)
-                torch._dynamo.mark_dynamic(w1, 0)
-                torch._dynamo.mark_dynamic(w2, 0)
-                counters.clear()
-                with torch.no_grad():
-                    expected = module(x, w1, w2)
-                    actual = torch.compile(module, fullgraph=True)(x, w1, w2)
-                self.assertEqual(actual, expected)
-                self.assertEqual(
-                    counters["inductor"]["batch_linear_lhs"], expected_count
-                )
+        with torch._inductor.config.patch(
+            post_grad_fusion_options={
+                "batch_linear_lhs": {
+                    "devices": ("cpu",),
+                    "min_fuse_set_size": 2,
+                    "static_widths_only": static_widths_only,
+                }
+            },
+        ):
+            w1 = torch.randn(16, 64)
+            w2 = torch.randn(32, 64)
+            torch._dynamo.mark_dynamic(w1, 0)
+            torch._dynamo.mark_dynamic(w2, 0)
             counters.clear()
+            with torch.no_grad():
+                expected = module(x, w1, w2)
+                actual = torch.compile(module, fullgraph=True)(x, w1, w2)
+            self.assertEqual(actual, expected)
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], expected_count)
+        counters.clear()
+
+    @parametrize("max_fuse_tensor_size,expected_count", [(100, 0), (10000, 1)])
+    def test_batch_linear_lhs_respects_max_fuse_tensor_size(
+        self, max_fuse_tensor_size, expected_count
+    ):
+        class M(torch.nn.Module):
+            def forward(self, x, w1, w2):
+                return torch.mm(x, w1.t()), torch.mm(x, w2.t())
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        w1 = torch.randn(16, 64)
+        w2 = torch.randn(32, 64)
+        with torch._inductor.config.patch(
+            post_grad_fusion_options={
+                "batch_linear_lhs": {
+                    "devices": ("cpu",),
+                    "min_fuse_set_size": 2,
+                    "max_fuse_tensor_size": max_fuse_tensor_size,
+                }
+            },
+        ):
+            counters.clear()
+            with torch.no_grad():
+                expected = module(x, w1, w2)
+                actual = torch.compile(module, fullgraph=True)(x, w1, w2)
+            self.assertEqual(actual, expected)
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], expected_count)
+        counters.clear()
 
     @parametrize("dynamic", [False, True])
     @torch._inductor.config.patch(

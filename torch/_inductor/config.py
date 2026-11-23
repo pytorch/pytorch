@@ -419,13 +419,15 @@ pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 # Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
 # batch_linear_lhs is enabled by default on XPU with static split widths.
-# Assigning a whole new dict here replaces these defaults; update or patch
-# individual keys to keep them.
+# Assign a merged dict to keep these defaults; assigning a new dict replaces
+# them. Keys: devices (device types or torch.device), min_fuse_set_size,
+# static_widths_only, and max_fuse_tensor_size (max fused weight elements).
 post_grad_fusion_options: dict[str, dict[str, Any]] = {
     "batch_linear_lhs": {
         "devices": ("xpu",),
         "min_fuse_set_size": 2,
         "static_widths_only": True,
+        "max_fuse_tensor_size": 1 << 24,
     },
 }
 
