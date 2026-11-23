@@ -409,11 +409,11 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             self.assertEqual(g.view(torch.int32), w.view(torch.int32))
 
     @parametrize("name", ["sum", "var1"])
-    @largeTensorTest("1GB", device="cuda")
+    @largeTensorTest("2GB", device="cuda")
     def test_sm107_profile_reaches_every_plan(self, device, name):
         """Thread SM107's selected profile, moved off every device row, through both
-        row entry points' split and combine builders, bitwise equal to the default
-        profile."""
+        row entry points' split and combine builders and the unstaged re-plan of an
+        underaligned row, bitwise equal to the default profile."""
         import cutlass
 
         from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
@@ -446,6 +446,20 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             # The ordered entry point compiles its own kernels under a distinct key.
             self.assertTrue(rt.reduce_row_itree(trait, key + "_ordered", x, ordered))
         self.assertEqual(ordered.view(torch.int32), got.view(torch.int32))
+        # A pitch past N underaligns the staged plan, so _run_itree re-plans it
+        # unstaged, still under the profile.
+        self.assertTrue(split.stage_e or split.stage_rows)
+        n = x.shape[1]
+        pitched = torch.empty(2, n + 1, device=device)[:1, :n]
+        pitched.copy_(x)
+        with mock.patch.object(rt, "_full_itree_arch", return_value=profile):
+            (got_p,) = rt.reduce_row_tile(
+                trait, key + "_pitched", pitched, [torch.float32], order="inner_tree"
+            )
+        self.assertEqual(got_p.view(torch.int32), got.view(torch.int32))
+        unstaged = rt.trait_itree_plan(trait, n, 1, 4, stage=False, arch=profile)
+        sigs = {e[-1] for e in rt._CACHE if e[:2] == ("rowitree1", key + "_pitched")}
+        self.assertEqual(sigs, {unstaged.sig})
         # Each stage's cache key ends with its plan's sig.
         for k in (key, key + "_ordered"):
             for tag, plan in (("rowitree1", split), ("rowitree2", c)):
