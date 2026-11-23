@@ -333,9 +333,13 @@ void philox_shard_kernel_launch(
   bool aligned = reinterpret_cast<uintptr_t>(self.data_ptr()) % vec_bytes == 0;
   Tensor output = self.is_contiguous() && aligned ? self : at::empty(self.sizes(), self.options());
 
+  const auto grid_dims = static_cast<int64_t>(layout.grid_sizes.size());
+  TORCH_CHECK(grid_dims <= MAX_DIMS,
+      op_name, ": shards support at most ", MAX_DIMS, " dims before the last split dim, got ",
+      grid_dims);
   const int64_t* grid_strides = layout.grid_strides.data();
   auto run_calc = OffsetCalculator<1, uint64_t>(
-      static_cast<int>(layout.grid_sizes.size()), layout.grid_sizes.data(), &grid_strides);
+      static_cast<int>(grid_dims), layout.grid_sizes.data(), &grid_strides);
   // Enough calls to cover a run starting at any position within a call.
   int64_t chunks_per_run = (layout.run_len + 2 * epc - 2) / epc;
   int64_t total_threads = layout.num_runs * chunks_per_run;

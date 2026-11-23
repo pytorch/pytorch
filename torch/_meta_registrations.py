@@ -787,11 +787,12 @@ def meta_philox_normal_tensor_(self, key, mean, std):
 
 
 def _check_philox_shard_args(op_name, self, key, global_shape, global_offset):
-    _check_philox_distribution_args(op_name, self, key)
+    # Before the shared checks, whose batched-key errors don't apply here.
     torch._check(
         key.shape == (2,),
         lambda: f"{op_name}: key must have shape (2,), got shape {key.shape}",
     )
+    _check_philox_distribution_args(op_name, self, key)
     torch._check(
         len(global_shape) == self.dim() and len(global_offset) == self.dim(),
         lambda: (
