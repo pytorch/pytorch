@@ -40,7 +40,6 @@ from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.profiler import kineto_available
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
-    IS_LINUX,
     MI300_ARCH,
     skipIfRocmArch,
     TEST_XPU,
@@ -2099,5 +2098,5 @@ class TestTemplateRender(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU and is_big_gpu():
+    if HAS_GPU and is_big_gpu():
         run_tests()

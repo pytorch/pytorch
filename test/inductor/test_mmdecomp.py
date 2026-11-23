@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
     parametrize,
     run_tests,
     TEST_XPU,
@@ -582,6 +581,4 @@ instantiate_device_type_tests(
 )
 
 if __name__ == "__main__":
-    # We don't support torch.compile() on Windows
-    if not IS_WINDOWS:
-        run_tests()
+    run_tests()

@@ -51,7 +51,6 @@ from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import skipCUDAIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
     subtest,
 )
@@ -4490,5 +4489,5 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if HAS_GPU:
         run_tests()

@@ -9,8 +9,8 @@ import torch
 import torch._dynamo
 import torch._inductor.config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_LINUX, IS_WINDOWS
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FUSED_ATTENTION
-from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 
 
@@ -71,5 +71,5 @@ class TestGraphTransformObserver(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX:
+    if IS_LINUX or IS_WINDOWS:
         run_tests()
