@@ -1,10 +1,10 @@
 # Reduction dispatcher and general-axis plan for the shared TileReduce kernel.
 # TensorIterator geometry handles every layout. Runtime values keep kernel count
 # O(op * dtype * pair-count), except that the gated general-axis inner-tree path
-# compiles per reduction length; cache_sig compiles decode depths, outputs, index mode,
-# projection/partial mode, and fold clamps. The uniform Welford tree also compiles
-# count // block and a tail flag, up to 127 kernels per configuration. Inputs must be on
-# the current device.
+# compiles per reduction length, and per output count below the plan's rows_per_block;
+# cache_sig compiles decode depths, outputs, index mode, projection/partial mode, and
+# fold clamps. The uniform Welford tree also compiles count // block and a tail flag, up
+# to 127 kernels per configuration. Inputs must be on the current device.
 
 import math
 from collections.abc import Sequence

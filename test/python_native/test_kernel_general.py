@@ -564,7 +564,8 @@ class TestKernelGeneral(TestCase):
             uniform_tree=True,
         )
         self.assertEqual(op.cache_sig, plain.cache_sig)
-        # The tree ran: count // block whole loads, and a masked tail for the rest.
+        # The plan compiles the tree: count // block whole loads, plus a masked tail
+        # load when count % block != 0.
         self.assertEqual(op.tile.uniform_tree_loads, count // block)
         self.assertEqual(op.tile.uniform_tree_tail, count % block != 0)
         key = ("test_uniform_welford_tree", type(trait).__name__, dtype) + op.cache_sig
