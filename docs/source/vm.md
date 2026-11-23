@@ -3215,6 +3215,23 @@ What graphs do not do at this stage:
   as well. The value of a `return` whose `finally` returns or breaks ends in
   front of the `finally` in the same way: what the interpreter keeps on its
   stack is let go of behind its last use, not where the interpreter pops it.
+- An `Exception` that the handler of a signal raises (a timeout) while a
+  pass over graphs runs, in the first run of what a pass made, in a later
+  run of it where the path stores into an object, or while the first
+  backward of a graph is compared with the autograd engine's, is swallowed:
+  the call returns as if no signal had come. A `KeyboardInterrupt` gets
+  through.
+- While a `TorchFunctionMode` is on, the default pass that puts an accessor
+  in place of a read of `shape` or `ndim` of a tensor, or of a call of its
+  `dim()` or `size(0)` (`TensorAccessors`), does not ask the mode from the
+  second call on: a mode that returns something else for them changes what
+  the function computes. With that pass left out of the list the mode is
+  asked for them as in eager mode.
+- While a `TorchFunctionMode` is on and `Graphs()` is in the list, the call
+  a path is taken down from asks the mode for seven reads that the engine
+  makes for itself (`untyped_storage`, `layout`, `is_quantized`,
+  `is_nested`, `is_mkldnn`, `grad`, `_base`) of a tensor that the function
+  read off its argument (`x.T`, `x.data`).
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
