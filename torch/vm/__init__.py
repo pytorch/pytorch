@@ -64,7 +64,8 @@ default list::
     def forward(model, x): ...
 
 A pass of one's own goes in the list as well: a Python callable taking a
-``Region``, the instructions of one basic block.
+``Region``, the instructions of one basic block (:func:`swap` makes one that
+puts a kernel in the place of a run of operations).
 """
 
 import functools
@@ -79,10 +80,21 @@ from typing import Any
 import torch
 
 from . import _shortcuts, passes
+from ._passes import fuse_checked, Mismatch, swap
 from .passes import BuiltinPass, Inline, Unroll
 
 
-__all__ = ["DEFAULT_PASSES", "Unsupported", "is_available", "memory", "passes", "vm"]
+__all__ = [
+    "DEFAULT_PASSES",
+    "Mismatch",
+    "Unsupported",
+    "fuse_checked",
+    "is_available",
+    "memory",
+    "passes",
+    "swap",
+    "vm",
+]
 
 
 class Unsupported(RuntimeError):
