@@ -399,6 +399,12 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
+// Gets forward grad mode on the current thread.
+AOTI_TORCH_EXPORT bool torch_is_fw_grad_mode_enabled();
+
+// Sets forward grad mode on the current thread.
+AOTI_TORCH_EXPORT void torch_set_fw_grad_mode_enabled(bool enabled);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus
