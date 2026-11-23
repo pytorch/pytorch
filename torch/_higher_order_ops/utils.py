@@ -160,6 +160,9 @@ class _VmapCombineFnWrapper:
         unbatched xs), the stale markers would silently reinterpret a batch axis as
         data. Passing ``expected_out_dims`` makes the wrapper raise a clear error on
         the first call instead, before the divergence corrupts a later level.
+      - ``__call__`` runs a GraphModule ``combine_fn`` through an interpreter, so
+        re-traced nodes keep their meta (annotate regions, recompute tags).
+        ``create_hop_joint_graph`` relies on this when scan runs under vmap.
     """
 
     def __init__(
