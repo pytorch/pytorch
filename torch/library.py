@@ -255,7 +255,7 @@ class Library:
         # Python __del__ can lead to weird things (globals and locals may already
         # be gone when __del__ actually gets called!). finalizers help the
         # situation because it lets us capture references and keeps them alive
-        weakref.finalize(
+        self._finalizer = weakref.finalize(
             self,
             _del_library,
             _impls,
@@ -603,15 +603,12 @@ class Library:
         self._registration_handles.append(handle)
 
     def _destroy(self):
-        if self.m is not None:
-            self.m.reset()
+        # Run the finalizer now so it cannot run again at GC time: a late run
+        # would drop _defs entries that a newer Library re-registered under the
+        # same qualname.
+        self._finalizer()
         self.m = None
-        for handle in self._registration_handles:
-            handle.destroy()
         self._registration_handles.clear()
-        global _impls
-        _impls -= self._op_impls
-        _clear_torch_ops_cache(self._op_defs)
 
 
 def _clear_torch_ops_cache(op_defs):

@@ -3,6 +3,7 @@
 
 import collections
 import contextlib
+import gc
 import io
 import itertools
 import os
@@ -6327,6 +6328,22 @@ Please use `add.register_fake` to add an fake impl.""",
                 RuntimeError, "no kernel for CUDA for test_invalid_kernel::cpu_only_op"
             ):
                 torch.library.get_kernel("test_invalid_kernel::cpu_only_op", "CUDA")
+
+    def test_library_destroy_then_redefine_survives_gc(self):
+        ns = "_test_destroy_redefine"
+        old = torch.library.Library(ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
+        old.define("foo(Tensor x) -> Tensor")
+        old._destroy()
+        new = torch.library.Library(ns, "FRAGMENT")  # noqa: SCOPED_LIBRARY
+        try:
+            new.define("foo(Tensor x) -> Tensor")
+            del old
+            gc.collect()
+            self.assertIn(f"{ns}::foo", torch.library._defs)
+            self.assertTrue(torch.ops._test_destroy_redefine.foo.default._defined_in_python)
+        finally:
+            new._destroy()
+        self.assertNotIn(f"{ns}::foo", torch.library._defs)
 
 
 class TestLibrarySourceLocation(TestCase):
