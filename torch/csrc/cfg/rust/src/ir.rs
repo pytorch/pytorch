@@ -416,6 +416,7 @@ impl Op {
             Op::Const(_)
                 | Op::LoadGlobal(_)
                 | Op::LoadAttr(..)
+                | Op::CellGet(..)
                 | Op::Binary(..)
                 | Op::Unary(..)
                 | Op::Compare(..)
@@ -469,6 +470,7 @@ impl Op {
 
 /// The code an instruction came from: the function itself (origin 0) or a
 /// function that was inlined into it.
+#[derive(Clone)]
 pub struct Origin {
     pub name: String,
     pub filename: String,
@@ -498,6 +500,7 @@ pub struct Phi {
     pub srcs: Vec<V>,
 }
 
+#[derive(Clone)]
 pub struct Block {
     pub phis: Vec<Phi>,
     pub insts: Vec<Inst>,
@@ -526,6 +529,7 @@ pub struct BlockCode {
     pub id: u32,
 }
 
+#[derive(Clone)]
 pub struct Function {
     pub name: String,
     pub qualname: String,
