@@ -1230,6 +1230,24 @@ class TestBasicGEMM(TestCase):
             torch.tensor(0.0, device=device), fn(torch.dot, (0,), (0,), test_out=True)
         )
 
+    # oneDNN cannot create grouped memory descriptors with zero-sized dims.
+    @dtypes(torch.bfloat16, torch.float32)
+    def test_grouped_mm_empty(self, device, dtype):
+        grouped_mm = torch.nn.functional.grouped_mm
+        offs = torch.zeros(4, device=device, dtype=torch.int32)
+        # 2d x 3d with no rows
+        a = torch.randn(0, 64, device=device, dtype=dtype)
+        b = torch.randn(4, 32, 64, device=device, dtype=dtype)
+        out = grouped_mm(a, b.transpose(-2, -1), offs=offs)
+        self.assertEqual(out.shape, (0, 32))
+        # 2d x 2d with an empty contraction: the result is zeros, not uninitialized memory.
+        # Strides are padded to 16 bytes as required by grouped_mm.
+        alignment = 16 // dtype.itemsize
+        a = torch.randn(16, alignment, device=device, dtype=dtype)[:, :0]
+        b = torch.randn(32, alignment, device=device, dtype=dtype)[:, :0]
+        out = grouped_mm(a, b.transpose(-2, -1), offs=offs)
+        self.assertEqual(out, torch.zeros(4, 16, 32, device=device, dtype=dtype))
+
     @tf32_on_and_off(0.005)
     def test_large_bmm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
@@ -1422,7 +1440,10 @@ class TestBasicGEMM(TestCase):
     @parametrize("q_group", [32, 64, 128])
     @parametrize("act_dtype", [torch.bfloat16, torch.float16])
     @parametrize("scale_dtype_fp32", [True, False])
-    def test__int4_mm(self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32):
+    @parametrize("a_col_major", [False, True])
+    def test__int4_mm(
+        self, device, m, k, n, q_group, act_dtype, scale_dtype_fp32, a_col_major
+    ):
         inner_k_tiles = 2
         torch.manual_seed(1)
         a_fp32 = torch.rand((m, k), dtype=torch.float32, device=device)
@@ -1443,6 +1464,12 @@ class TestBasicGEMM(TestCase):
         b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_fp32)
 
         a = a_fp32.to(dtype=act_dtype)
+        if a_col_major:
+            # Column-major (non-contiguous) A with stride (1, m), like the
+            # transposed emb_norm that transformers gemma-3n feeds to
+            # embedding_projection.
+            a = a.t().contiguous().t()
+            self.assertFalse(a.is_contiguous())
         b = b_fp32.to(dtype=act_dtype)
         scale_dtype = torch.float32 if scale_dtype_fp32 else act_dtype
         scales = b_scales.to(dtype=scale_dtype)

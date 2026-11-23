@@ -538,7 +538,7 @@ def annotation_for(tools_id: int) -> dict[str, Any] | None:
         return None if graph is None else graph.annotations.get(tools_id & 0xFFFFFFFF)
 
 
-# Node types we annotate (kernels, memcpys, memsets, batch mem ops, event
+# Node types we annotate (kernels, memcpys, memcpy batches, memsets, batch mem ops, event
 # record/wait nodes, and host nodes), as driver node-type enums. Event and host
 # nodes are stream-ordered but do not occupy the device; annotating them lets the
 # profiler place their spans on the intended stream lane. The enums are int subclasses, so
@@ -552,7 +552,7 @@ def _get_annotatable_types() -> set[Any]:
     global _ANNOTATABLE_TYPES
     if _ANNOTATABLE_TYPES is None:
         node_types = _cuda_driver.CUgraphNodeType  # pyrefly: ignore[missing-attribute]
-        _ANNOTATABLE_TYPES = {
+        annotatable = {
             node_types.CU_GRAPH_NODE_TYPE_KERNEL,
             node_types.CU_GRAPH_NODE_TYPE_MEMCPY,
             node_types.CU_GRAPH_NODE_TYPE_MEMSET,
@@ -561,6 +561,10 @@ def _get_annotatable_types() -> set[Any]:
             node_types.CU_GRAPH_NODE_TYPE_WAIT_EVENT,
             node_types.CU_GRAPH_NODE_TYPE_HOST,
         }
+        memcpy_batch = getattr(node_types, "CU_GRAPH_NODE_TYPE_MEMCPY_BATCH", None)
+        if memcpy_batch is not None:
+            annotatable.add(memcpy_batch)
+        _ANNOTATABLE_TYPES = annotatable
     return _ANNOTATABLE_TYPES
 
 
@@ -579,7 +583,8 @@ _NESTED_GRAPH_TYPES: set[Any] | None = None
 # graph memcpy node surfaces as either the MEMCPY or the MEMCPY2 (peer-to-peer) activity
 # kind depending on where its endpoints live, and only MEMCPY2 lacks the field -- the graph
 # node type cannot tell the two apart, so both get the alias and the non-P2P case just
-# carries a duplicate key. Lazily initialized like the sets above.
+# carries a duplicate key. Memcpy batches can also emit MEMCPY2 records.
+# Lazily initialized like the sets above.
 _SOURCELESS_NODE_TYPES: set[Any] | None = None
 
 
@@ -587,10 +592,14 @@ def _get_sourceless_node_types() -> set[Any]:
     global _SOURCELESS_NODE_TYPES
     if _SOURCELESS_NODE_TYPES is None:
         node_types = _cuda_driver.CUgraphNodeType  # pyrefly: ignore[missing-attribute]
-        _SOURCELESS_NODE_TYPES = {
+        sourceless = {
             node_types.CU_GRAPH_NODE_TYPE_HOST,
             node_types.CU_GRAPH_NODE_TYPE_MEMCPY,
         }
+        memcpy_batch = getattr(node_types, "CU_GRAPH_NODE_TYPE_MEMCPY_BATCH", None)
+        if memcpy_batch is not None:
+            sourceless.add(memcpy_batch)
+        _SOURCELESS_NODE_TYPES = sourceless
     return _SOURCELESS_NODE_TYPES
 
 
