@@ -11,7 +11,7 @@ from torch._prims_common import (
     is_non_overlapping_and_dense_or_false,
     make_contiguous_strides_for,
 )
-from torch._tensor_iterator import nullary_op, TensorIterator
+from torch._tensor_iterator import TensorIterator
 
 from ... import cutedsl_utils as cu
 from ...cutedsl.config import (
@@ -642,9 +642,9 @@ def _build_transpose_iterator_spec(
     out: torch.Tensor, src: torch.Tensor
 ) -> TransposeSpec | None:
     try:
+        # Only geometry is needed; const inputs preserve COW storage.
         iterator = TensorIterator(
-            outputs=[out],
-            const_inputs=[src],
+            const_inputs=[out, src],
             resize_outputs=False,
             check_all_same_dtype=False,
             check_all_same_device=False,
@@ -893,11 +893,8 @@ def _range_out_serveable(out: torch.Tensor | None) -> bool:
         and cap.on_current_device(out)
     ):
         return False
-    try:
-        nullary_op(out)
-    except RuntimeError:
-        return False
-    return True
+    # Match TensorIterator's rejection of definite internal overlap.
+    return torch._debug_has_internal_overlap(out) != 1
 
 
 def _range_compute(dtype: torch.dtype) -> torch.dtype:
