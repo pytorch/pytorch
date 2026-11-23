@@ -6196,6 +6196,25 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("passed through", out.stdout)
 
+    def test_a_graph_compiled_without_cudagraphs_loads_with_the_flag_on(self):
+        # Load post-compiles each graph under the loading process's
+        # triton.cudagraphs; one compiled without CUDA graphs has nothing to be
+        # wrapped with, and runs as it compiled.
+        from torch._dynamo.utils import counters
+
+        single = self.mod.single
+        with torch._inductor.config.patch({"triton.cudagraphs": False}):
+            with self._capture(single) as cap:
+                y = cap(self.model, self.x2)
+        counters.clear()
+        # A CPU graph is counted as a skip but is not an error, as when it has a
+        # reason against CUDA graphs.
+        flags = {"triton.cudagraphs": True, "triton.cudagraph_or_error": True}
+        with torch._inductor.config.patch(flags):
+            f = load(self.artifact, self.cache)
+            self.assertEqual(f(self.model, self.x2), y)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):
         single = self.mod.single
@@ -6594,6 +6613,7 @@ _CUDAGRAPH_LOADER = """
 import json
 import sys
 import torch
+from torch._dynamo.utils import counters
 from torch._inductor import cudagraph_trees
 
 tmp, module, artifact, cache, state = sys.argv[1:6]
@@ -6614,7 +6634,8 @@ manager = cudagraph_trees.get_manager(0, create_if_none_exists=False)
 nodes = [] if manager is None else [n for ns in manager.roots.values() for n in ns]
 for node in nodes:
     nodes.extend(child for children in node.children.values() for child in children)
-print(json.dumps({"recorded": len(nodes)}))
+skips = counters["inductor"]["cudagraph_skips"]
+print(json.dumps({"recorded": len(nodes), "skips": skips}))
 """
 
 
@@ -6653,7 +6674,7 @@ class TestPrecompileCudagraphs(TestCase):
     def _serve_in_fresh_process(self, expected, env=None, mark_step=False):
         # Calls the loaded artifact three times in a process run under env, and
         # returns what that process counted: "recorded" is the number of nodes in
-        # its CUDA graph tree.
+        # its CUDA graph tree, "skips" its cudagraph skips.
         state = os.path.join(self.dir, "state.pt")
         saved = {"x": self.x, "expected": expected, "mark_step": mark_step}
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
@@ -6683,6 +6704,15 @@ class TestPrecompileCudagraphs(TestCase):
         env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
         served = self._serve_in_fresh_process(y, env, mark_step)
         self.assertGreater(served["recorded"], 0)
+
+    def test_an_artifact_captured_without_cudagraphs_serves_none(self):
+        with torch._inductor.config.patch({"triton.cudagraphs": False}):
+            y, _ = self._capture_step(self.mod.step)
+        # Its graph compiled without CUDA graphs, so the loading process's flag
+        # finds nothing to wrap it with, and reports the skip.
+        env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
+        served = self._serve_in_fresh_process(y, env)
+        self.assertEqual((served["recorded"], served["skips"]), (0, 1))
 
 
 def _exception_chain(exc: BaseException | None) -> str:
