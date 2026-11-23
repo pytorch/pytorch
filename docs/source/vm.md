@@ -42,14 +42,17 @@ torch.vm.is_exact((*torch.vm.DEFAULT_PASSES, P.Graphs()))  # True
 torch.vm.regions(g)
 # [{'where': 'f (block 0)[2]', 'state': 'built', 'ops': 6,
 #   'operators': ['aten::matmul', 'aten::tanh', 'aten::sum',
-#   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'version': 1}]
+#   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'inputs': 3,
+#   'outputs': 1, 'variants': 0, 'hits': 0, 'misses': 0, 'version': 1}]
 ```
 
 `where` names the function, the block, and the instruction of the first
 operation of the graph (`g.dump()` shows them). The state
-`"built"` says that the engine runs the graph itself. What was left out of
-the graphs of a block that has tensor work on both sides of it is listed
-too, with the state `"vm"` and the reason:
+`"built"` says that the engine runs the graph itself. `inputs` and `outputs`
+are how many values the graph takes from the code in front of it (here `x`,
+`w` and the function `torch.tanh`) and how many the code behind it reads.
+What was left out of the graphs of a block that has tensor work on both
+sides of it is listed too, with the state `"vm"` and the reason:
 
 ```python
 def two(x):
@@ -90,6 +93,411 @@ for _ in range(3):
 sorted((found["where"], found["operators"]) for found in torch.vm.regions(g))
 # [('Linear.forward (block 0)[4]', ['aten::linear']), ('relu (block 4)[2]', ['aten::relu'])]
 ```
+
+### Passes over graphs
+
+A graph leaves the engine only for a pass over graphs: a function of two
+arguments, `pass_(gm, input_types) -> gm`, that stands behind `Graphs()` in
+the list. (With such a pass in the list and no `Graphs()`, the pass is taken
+to be there, in front of the first of them. A pass over graphs in front of
+`Graphs()` is a `ValueError`.) The engine then puts an instruction in front
+of each graph, which `dump()` shows as `graph f (block 0)[2:11]: 6
+operations`, and the graph is `"waiting"`.
+
+The next call that comes to the graph runs its operations as before, and the
+engine takes down what they did: the kernel call each operation made, and the
+values the operations took from outside the graph. From that one run it
+describes the graph to Python, where it becomes a `torch.fx.GraphModule`: a
+placeholder per tensor the graph takes, one `call_function` per operation, of
+the operator overload the function called (`torch.ops.aten.matmul.default`,
+not what a kernel decomposes into) with every argument of its schema, and as
+its output a tuple of the values that the code behind the graph reads.
+Nothing is traced for this: there are no fake tensors and no symbolic sizes.
+`input_types` has a `torch.vm.TensorType` per placeholder, with the dtype,
+the device, `requires_grad` and the sizes of the tensors of that call:
+
+```python
+shown = []
+
+
+def show(gm, input_types):
+    shown.append((gm.code, input_types))
+    return gm
+
+
+g = torch.vm(f, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), show))
+x, w = torch.randn(4, 8), torch.randn(8, 8)
+for _ in range(4):
+    out = g(x, w)
+print(shown[0][0])
+# def forward(self, x, w):
+#     matmul_default = torch.ops.aten.matmul.default(x, w);  w = None
+#     tanh_default = torch.ops.aten.tanh.default(matmul_default);  matmul_default = None
+#     sum_default = torch.ops.aten.sum.default(tanh_default, dtype = None);  tanh_default = None
+#     mul_tensor = torch.ops.aten.mul.Tensor(x, 2);  x = None
+#     mean_default = torch.ops.aten.mean.default(mul_tensor, dtype = None);  mul_tensor = None
+#     add_tensor = torch.ops.aten.add.Tensor(sum_default, mean_default, alpha = 1);  sum_default = mean_default = None
+#     return (add_tensor,)
+shown[0][1]  # [float32[4, 8], float32[8, 8]]
+torch.equal(out, f(x, w))  # True: the graph, as it was given, runs eager's kernels
+```
+
+The passes are applied in the order of the list. What the last one returns
+is what the engine calls in place of the operations from then on, with the
+tensors in the order of the placeholders. A pass rewrites the graph and
+returns it:
+
+```python
+def sigmoid_for_tanh(gm, input_types):
+    for node in gm.graph.nodes:
+        if node.target is torch.ops.aten.tanh.default:
+            node.target = torch.ops.aten.sigmoid.default
+    return gm
+
+
+g = torch.vm(f, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), sigmoid_for_tanh))
+for _ in range(4):
+    out = g(x, w)
+torch.equal(out, torch.sigmoid(x @ w).sum() + (x * 2).mean())  # True
+```
+
+What was made of a graph runs for calls like the one it was exported from,
+and for no others. Like it means: tensors of the same class, dtype, device,
+sizes, strides and `requires_grad`; the same state of the thread (gradients
+on or off, inference mode, autocast on or off and the dtype it casts to, the
+default dtype, whether algorithms have to be deterministic, the dispatch
+keys it adds); and the same
+numbers and objects where an operation takes one from outside the graph (the
+function a global names, a float; a list or a tuple of numbers by what is in
+it at the call, up to 64 lists, tuples and slices inside one another, not by
+which list it is: one that was changed in place since is another value, and
+one that goes deeper, or that holds itself, is never the value a form was
+made for). A call of another kind runs the
+operations and is exported in its turn, `max_variants` times at most (8
+unless `Graphs` is made with another number); calls of further kinds then
+run the operations every time. A pass states what else its rewrite depends
+on with `torch.vm.guard(gm, placeholder, torch.vm.Dim(0, range(16, 33)))`: a
+call that fails a guard runs the operations.
+
+```python
+(found,) = torch.vm.regions(g)
+found["state"], found["variants"], found["hits"], found["misses"]  # ('compiled', 1, 2, 1)
+for _ in range(3):
+    out = g(torch.randn(6, 8), w)  # another size: exported again
+(found,) = torch.vm.regions(g)
+found["state"], found["variants"], found["hits"], found["misses"]  # ('compiled', 2, 4, 2)
+```
+
+The states `torch.vm.regions` reports of a graph:
+
+- `"built"`: the engine runs the graph itself. This is the state of every
+  graph when the list has no pass over graphs.
+- `"waiting"`: the list has a pass over graphs, and the graph is exported at
+  the next call that comes to it.
+- `"compiled"`: what the passes made runs in place of the operations for
+  the kinds of calls that were exported; `variants` is how many there are.
+  A `reason` next to it says why no further kind of call is exported.
+- `"vm"`: the engine runs the operations, for the `reason` given. Either
+  the graph was given up: a pass raised (`the pass broken raised
+  RuntimeError: not today`) or returned something that is no graph of the
+  same inputs, what was made of the graph raised the first time it was
+  called (`the compiled graph failed: ...`), in which case the operations
+  ran in its place, or something between its operations could run Python
+  code (below). Or every kind of call it has seen is one that is not
+  exported (`a tensor of the call carries a forward-mode gradient`). The
+  entries for what is in no graph have this state too.
+
+`hits` counts the calls that ran what was made of the graph, and `misses`
+those that came to the graph and ran its operations, the calls that were
+exported among them.
+
+A pass that raises gives the graph up, and the reason says what it raised.
+For a pass that raised inside something it calls, the reason ends with the
+function and the line it was raised in:
+
+```python
+def helper(gm):
+    raise IndexError("list index out of range")
+
+
+def deep(gm, input_types):
+    return helper(gm)
+
+
+def small(x, w):
+    return ((x @ w).tanh() * 2).sin().sum()
+
+
+given_up = torch.vm(small, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), deep))
+left, right = torch.randn(4, 8), torch.randn(8, 8)
+for _ in range(3):
+    fine = torch.equal(given_up(left, right), small(left, right))
+said = torch.vm.regions(given_up)[0]
+raised, where = said["reason"].split(" (in ")
+fine, said["state"], raised, where.split(",")[0]
+# (True, 'vm', 'the pass deep raised IndexError: list index out of range', 'helper')
+```
+
+What the function does between its operations (it reads a global or an
+attribute, takes an item of a list, adds two numbers) is not in the graph.
+With something made of the graph in place of the operations, those
+instructions run in front of it or behind it, which is not where the function
+has them, and a second time when the call turns out to be one that nothing
+was exported for. That is right only for what runs no Python code. So the
+engine looks at each of them on every call before it runs it: an attribute
+that is found without a property, a descriptor or a `__getattr__` written in
+Python, an item of a list, a tuple or a dict under a number or a str,
+arithmetic on exact numbers. A dict or a set compares the key that is looked
+up with every key it holds under the same hash, and a key of a class with an
+`__eq__` does that in Python. So a lookup in a dict or a set
+(`d[k]`, `k in d`) runs no Python code only while every key in it is
+a number, a str or None, or a tuple of them: a dict that has only ever been
+given strs for keys is known to hold no other (CPython 3.13 and below say so
+of a dict; under 3.14 it counts as any other), any other dict and any set is
+looked through where it holds at most 32 keys, and is taken to run Python
+code where it holds more. A call in which one of these could run Python
+code runs the operations of the function as they are, every read once and
+where the function has it, and after three such calls in a row the graph is
+left to the engine:
+
+```python
+class Box:
+    def __init__(self):
+        self.scale = 0.5
+        self.made = 0
+
+    def __getattr__(self, name):  # asked when the attribute is not there
+        self.made += 1
+        return 0.5 + self.made
+
+
+def boxed(x, box):
+    return ((x.sin() * box.scale).cos() + box.scale).tanh() * 2
+
+
+def keep(gm, input_types):
+    return gm
+
+
+g = torch.vm(boxed, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+x, box, theirs = torch.randn(5), Box(), Box()
+for _ in range(4):
+    out = g(x, box)
+torch.vm.regions(g)[0]["state"]  # 'compiled'
+del box.scale, theirs.scale  # from here on a read of it runs __getattr__
+for _ in range(4):
+    same = torch.equal(g(x, box), boxed(x, theirs))
+same, box.made, theirs.made  # (True, 8, 8)
+found = torch.vm.regions(g)[0]
+found["state"], found["reason"]  # ('vm', 'load_attr could run Python code')
+```
+
+Where the function binds a variable anew between its operations, the variable
+lets go of what it held. If that was the last reference to an object whose
+end runs Python code (a `__del__`, a weak reference with a callback), the
+code runs at the binding, in front of what the function reads behind it.
+What was made of the graph binds the variable when it has run, behind every
+read. So the engine looks, on every call and before anything of it runs, at
+what the call would let go of that way, as it is at that call: nothing is
+remembered from one call to the next. An object that has a reference
+besides those the call lets go of stays alive, whatever it is and whatever
+it refers to, and so does one that the function still holds when the graph
+has run. The others end, and each has to end without Python code running:
+its class has no finalizer, no weak reference is told of its end, and what
+it refers to is looked at in the same way, as a garbage collector looks at
+a set of objects. So a list that a slice made of a list of layers ends
+quietly, since the layers stay. The entry of a weak container, which only
+takes itself out, is no such weak reference where the container is exactly
+a `WeakKeyDictionary`, a `WeakValueDictionary` or a `WeakSet` of `weakref`,
+torch's `WeakIdKeyDictionary`, or the dictionary in which dynamo notes
+every module that is made once `torch.compile` has been used; a container
+of a class derived from these, or written like them, is taken to run code.
+What goes with the entry (the value under a key, the key of a value) is
+looked at as well, and the key of a `WeakValueDictionary` has to be one
+that is hashed without Python code and is alone under its hash, since
+taking the entry out hashes and compares it. A tensor that ends has to be
+of the class `torch.Tensor` itself, require no gradient (what a history
+holds, a hook or what a `torch.autograd.Function` kept for its backward, is
+not to be seen), have memory that is torch's own (a tensor over a numpy
+array, a buffer or a DLPack capsule keeps their owner alive), and be one
+dense block (not sparse, quantized or nested, and no wrapper around another
+tensor); its attributes, its `.grad`, the Python object of its storage
+(which ends with the storage: what it has of its own, a weak reference on
+it that is told, a `weakref.finalize`) and, for a view, the tensor it is a
+view of are looked at, and while a level of forward-mode differentiation is
+open, in which a tensor may have a tangent, no tensor ends quietly. An object that shows the
+collector nothing (a capsule, a numpy array, a storage) is taken to end
+with Python code unless its class is known to hold nothing. A call for
+which that cannot be shown runs the operations of the function as they are:
+
+```python
+class Ends:
+    def __del__(self):
+        STATE[0] += 1.0  # what the function reads behind the binding
+
+
+STATE, HELD = [0.5], []
+
+
+def lets_go(x):
+    held = HELD.pop()
+    y = (x.sin() + 1).cos() * STATE[0]
+    held = None  # the last reference to what `pop` gave
+    return (y + STATE[0]).tanh(), held
+
+
+def eight_calls(fn):
+    STATE[0] = 0.5
+    outs = []
+    for at in range(8):
+        HELD.append(Ends() if at == 6 else 0)
+        outs.append(fn(x)[0])
+    return outs
+
+
+g = torch.vm(lets_go, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+x = torch.randn(5)
+got, expected = eight_calls(g), eight_calls(lets_go)
+all(torch.equal(a, b) for a, b in zip(got, expected)), STATE[0]  # (True, 1.5)
+```
+
+What an object refers to is what it shows the garbage collector, and no
+more than 4,096 objects that end are looked at (with more, the call runs
+the operations). Objects in a reference cycle end when the collector runs,
+as they do in eager mode. What a pass's own callable does is not looked at
+("Limits").
+
+Some kinds of calls are not exported: one whose operations write to what
+they are given, one with a tensor that carries a forward-mode gradient or is
+of a subclass of `torch.Tensor`, and one under a `TorchDispatchMode`, a
+`TorchFunctionMode` or a transform of `torch.func`, where the operations
+have to run as the function wrote them for the mode or the transform to see
+them. Such a kind of call is remembered like any other. The calls of the
+kind run the operations and are not looked at again, and the other kinds of
+calls go on being exported.
+
+```python
+from torch.utils._python_dispatch import TorchDispatchMode
+
+
+class Seen(TorchDispatchMode):
+    def __init__(self):
+        super().__init__()
+        self.seen = []
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.seen.append(func.__name__)
+        return func(*args, **(kwargs or {}))
+
+
+g = torch.vm(f, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), sigmoid_for_tanh))
+x, w = torch.randn(4, 8), torch.randn(8, 8)
+for _ in range(3):
+    out = g(x, w)
+torch.equal(out, f(x, w))  # False: the pass made a sigmoid of the tanh
+with Seen() as mode:
+    out = g(x, w)
+torch.equal(out, f(x, w))  # True: under the mode the operations of the function ran
+mode.seen
+# ['mm.default', 'tanh.default', 'sum.default', 'mul.Tensor', 'mean.default', 'add.Tensor']
+torch.equal(g(x, w), f(x, w))  # False: without the mode, what was exported runs again
+```
+
+The dtype that autocast casts to, and whether algorithms have to be
+deterministic, are part of the state of the thread because a compiler builds
+both into what it makes of a graph. A call under another dtype is another
+kind of call, and the first dtype finds what was made for it again:
+
+```python
+def cast(x, w):
+    return (torch.mm(torch.mm(x, w), w).relu() * 2 + 1).tanh()
+
+
+g = torch.vm(cast, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+kinds = []
+for dtype in (torch.bfloat16, torch.float16, torch.bfloat16):
+    with torch.autocast("cpu", dtype=dtype):
+        for _ in range(3):
+            out = g(x, w)
+    kinds.append((out.dtype, torch.vm.regions(g)[0]["variants"]))
+kinds  # [(torch.bfloat16, 1), (torch.float16, 2), (torch.bfloat16, 2)]
+```
+
+The limits of this stage:
+
+- One block. A graph does not go on through a call of a Python function, a
+  branch or a loop, as said above.
+- No effects. An operation that writes to one of its arguments is in no
+  graph, and a call whose operations turn out to write when they are taken
+  down is not exported: a batch norm in training, which updates its running
+  statistics, runs its operations on every call, and the same graph is
+  exported for the calls in eval mode.
+- A graph does not take a call in which it would let go of the last
+  reference that Python has to a tensor which requires a gradient ("Passes
+  over graphs"), also where what the graph gives keeps the history of that
+  tensor alive: who else holds the nodes of a history cannot be asked. That
+  is a graph which starts in the middle of a function, takes a tensor that
+  the operations in front of it gave, and lets go of the variable it was in.
+- A path lets go of an object from outside it only where the end of the
+  object cannot run Python code, or the object stays alive. Whether it
+  stays alive is looked at in front of what stands for the graph: for a
+  variable that the path binds anew, an object whose other reference is
+  dropped while what a pass made of the graph runs (by that code itself, or
+  by another thread it waits for) ends where the path lands.
+- Sizes are fixed per export. Every size a graph is called with is a kind of
+  call of its own, with a graph of its own, so a function that is called
+  with many sizes uses up `max_variants`. Sizes of the tensors the graph
+  computes are computed in it (`torch.ops.aten.sym_size.int`), but its
+  inputs have the sizes of the call it was exported from.
+- Where what the passes made runs in place of the operations of a graph, a
+  variable that the graph binds and that nothing reads behind it is not in
+  the frame of the function there: `locals()`, a callee that reads its
+  caller's frame (`sys._getframe(1).f_locals`) and the frame of a traceback
+  do not have it.
+- A `for` that is left by `break`, `return` or an exception has its
+  generator closed in front of the loop's body, not where the loop is left;
+  so ends any other iterator, and a list that only its iterator holds. A
+  function whose body, or a `finally` on its way out, reads what that end
+  changes computes other values than in eager mode, with the default passes
+  as well. The value of a `return` whose `finally` returns or breaks ends in
+  front of the `finally` in the same way: what the interpreter keeps on its
+  stack is let go of behind its last use, not where the interpreter pops it.
+- An `Exception` that the handler of a signal raises (a timeout) while a
+  pass over graphs runs, or in the first run of what a pass made, is
+  swallowed: the call returns as if no signal had come, and the graph is
+  left to the VM for good. A `KeyboardInterrupt` gets through.
+- While a `TorchFunctionMode` is on, the default pass that puts an accessor
+  in place of a read of `shape` or `ndim` of a tensor, or of a call of its
+  `dim()` or `size(0)` (`TensorAccessors`), does not ask the mode from the
+  second call on: a mode that returns something else for them changes what
+  the function computes. With that pass left out of the list the mode is
+  asked for them as in eager mode.
+- What a process puts on `torch.Tensor` or on `torch.nn.Parameter` under
+  `shape`, `ndim`, `dim` or `size` (a property, a function), and a
+  `__getattribute__` that it puts on `torch.Tensor`, is not called where the
+  default pass `TensorAccessors` has put an accessor in place of the read:
+  the function computes with the tensor's own sizes.
+- Where the class of a tensor that the function was called with is assigned
+  (`x.__class__ = Sub`) in front of a read of `x.shape[i]`, `x.ndim`,
+  `x.dim()` or `x.size(i)` in the same block of instructions, the read
+  raises a `SystemError` ("torch.vm: tensor_size ran without its guard", or
+  "tensor_dim"), where eager mode reads through the new class. For a tensor
+  that an operation of the function made, and where a branch lies between
+  the two, the read is eager's.
+- A function whose first call runs under a `TorchFunctionMode` takes, in
+  every later call without a mode, 1.5 to 1.7 times what it takes in a
+  function that never ran under one (measured on a function of six
+  operations, where that is more than eager mode takes), and gets no graph
+  with `Graphs()`; a mode that is entered after the first calls costs
+  nothing in the calls behind it. `torch.set_default_device` installs such a
+  mode for the whole process, and `with torch.device(...)` for its block: a
+  function that is first called with a default device set is specialized in
+  almost none of its runs, gets no graph, and takes what eager mode takes;
+  set after the first calls, the function keeps its blocks and takes about
+  15 percent more than eager mode while the device is set.
+- Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
+  `torch.func` the operations of the function run, so that those see them,
+  and the calls under one are not exported.
 
 ## API Reference
 

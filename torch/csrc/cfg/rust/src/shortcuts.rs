@@ -353,6 +353,46 @@ unsafe fn getattr_shortcut(ty: *mut ffi::PyTypeObject) -> usize {
     which
 }
 
+/// Whether a type looks attributes up as `object` does, before any
+/// `__getattr__` it has.
+pub unsafe fn plain_getattribute(ty: *mut ffi::PyTypeObject) -> bool {
+    static NAME: OnceLock<PyObj> = OnceLock::new();
+    let name = NAME.get_or_init(|| PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__getattribute__".as_ptr())));
+    let object = std::ptr::addr_of_mut!(ffi::PyBaseObject_Type);
+    pyffi::_PyType_Lookup(ty, name.as_ptr()) == pyffi::_PyType_Lookup(object, name.as_ptr())
+}
+
+/// Whether a getattr shortcut applies to the instances of a type.
+pub unsafe fn has_getattr(ty: *mut ffi::PyTypeObject) -> bool {
+    getattr_shortcut(ty) != 0
+}
+
+/// Whether one of the dicts of a getattr shortcut has the name, for an
+/// object of a type that has such a shortcut: the lookup then ends there,
+/// without the function the shortcut stands for.
+pub unsafe fn finds(obj: Obj, name: Obj) -> bool {
+    let which = getattr_shortcut(ffi::Py_TYPE(obj));
+    let shortcut = registry().borrow().getattrs.get(which.wrapping_sub(1)).copied();
+    let dict = instance_dict(obj);
+    let (Some(shortcut), false) = (shortcut, dict.is_null()) else {
+        return false;
+    };
+    for key in &shortcut.dicts {
+        let entries = ffi::PyDict_GetItemWithError(dict, key.as_ptr());
+        if entries.is_null() {
+            continue;
+        }
+        if ffi::PyDict_Check(entries) == 0 {
+            break;
+        }
+        if !ffi::PyDict_GetItemWithError(entries, name).is_null() {
+            return true;
+        }
+    }
+    ffi::PyErr_Clear();
+    false
+}
+
 /// `getattr(obj, name)` through a getattr shortcut. Returns a new reference;
 /// null without an error if no shortcut applies to the type of `obj`, null
 /// with an error if the lookup raised.

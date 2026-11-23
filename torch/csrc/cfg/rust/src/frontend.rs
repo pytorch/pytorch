@@ -1789,7 +1789,7 @@ pub fn rewrite_uses(op: &mut Op, f: &mut dyn FnMut(V) -> PyResult<V>) -> PyResul
             }
         }
         Op::CallEx { callee, args, kwargs } => r!(callee, args, kwargs),
-        Op::Dispatch(_) | Op::Guard(_) => {}
+        Op::Dispatch(_) | Op::Guard(_) | Op::Graph(_) => {}
     }
     Ok(())
 }
