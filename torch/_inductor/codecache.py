@@ -166,7 +166,7 @@ from .virtualized import V
 
 
 T = TypeVar("T")
-_GuardedCacheHintT = TypeVar("_GuardedCacheHintT")
+_GuardedCacheHintsT = TypeVar("_GuardedCacheHintsT", bound=Sequence[Any])
 
 
 class SystemDeviceInfo(TypedDict):
@@ -2065,8 +2065,8 @@ class GuardedCache(Generic[T]):
         key: str,
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
-        evaluate_guards: Callable[[str, list[_GuardedCacheHintT]], bool],
-        hints: list[_GuardedCacheHintT],
+        evaluate_guards: Callable[[str, _GuardedCacheHintsT], bool],
+        hints: _GuardedCacheHintsT,
     ) -> tuple[T | None, bytes | None, CacheInfo]:
         """
         Find the first cache entry in iterate_over_candidates that passes `evaluate_guards`.
