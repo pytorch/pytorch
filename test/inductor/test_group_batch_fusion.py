@@ -15,7 +15,9 @@ from torch._inductor import config
 from torch._inductor.fx_passes.group_batch_fusion import (
     _option_matches_graph_devices,
     apply_group_batch_fusion,
+    BatchLinearLHSFusion,
     BatchSubPostGradFusion,
+    default_graph_search_options,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -26,7 +28,11 @@ from torch.testing._internal.common_utils import (
     parametrize,
     recover_orig_fp32_precision,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_XPU_AND_TRITON,
+    requires_gpu,
+)
 
 
 try:
@@ -90,7 +96,7 @@ def _record_fusion_subsets():
 
     def spy(self, graph, subset):
         recorded.append(len(subset))
-        original_fuse(self, graph, subset)
+        return original_fuse(self, graph, subset)
 
     with mock.patch.object(rule_cls, "fuse", new=spy):
         yield recorded
@@ -610,7 +616,7 @@ class TestGroupBatchFusion(TestCase):
             self.compare_gradients(ref_module, traced, rtol=1e-5, atol=1e-5)
             counters.clear()
 
-    @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
+    @unittest.skipUnless(HAS_XPU_AND_TRITON, "requires XPU and Triton")
     def test_xpu_auto_enable_batch_linear_lhs(self):
         z = 10
         for has_bias in [True, False]:
@@ -635,7 +641,7 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(default["devices"], ("xpu",))
         self.assertEqual(default["min_fuse_set_size"], 2)
         self.assertTrue(default["static_widths_only"])
-        self.assertEqual(default["max_fuse_tensor_bytes"], 4 << 20)
+        self.assertEqual(default["max_fuse_tensor_bytes_batch_linear_lhs"], 4 << 20)
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -668,15 +674,22 @@ class TestGroupBatchFusion(TestCase):
         self.assertTrue(
             _option_matches_graph_devices({"devices": torch.device("xpu")}, {"xpu"})
         )
+        # A torch.device with an index selects the device type.
+        self.assertTrue(
+            _option_matches_graph_devices({"devices": torch.device("xpu:0")}, {"xpu"})
+        )
         self.assertTrue(_option_matches_graph_devices({"devices": {"xpu"}}, {"xpu"}))
         # Explicit None keeps the option on; invalid values are rejected.
         self.assertTrue(_option_matches_graph_devices({"devices": None}, {"cuda"}))
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "invalid devices 7"):
             _option_matches_graph_devices({"devices": 7}, {"cuda"})
+        with self.assertRaisesRegex(ValueError, "invalid devices entry"):
+            _option_matches_graph_devices({"devices": ("xpu", 7)}, {"cuda"})
 
-    @requires_gpu()
     @torch._inductor.config.patch(
-        post_grad_fusion_options={"batch_linear_lhs": {"min_fuse_set_size": 2}},
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
     )
     def test_batch_linear_lhs_leaves_cat_of_mm_alone(self):
         # cat over mm outputs with no other consumers keeps the zero-copy
@@ -685,12 +698,12 @@ class TestGroupBatchFusion(TestCase):
             def forward(self, a, b, c):
                 return torch.cat([torch.mm(a, b), torch.mm(a, c)], dim=1)
 
-        module = M().eval().to(GPU_TYPE)
+        module = M().eval()
         ref_module = copy.deepcopy(module)
         inputs = [
-            torch.randn(32, 64, device=GPU_TYPE),
-            torch.randn(64, 16, device=GPU_TYPE),
-            torch.randn(64, 16, device=GPU_TYPE),
+            torch.randn(32, 64),
+            torch.randn(64, 16),
+            torch.randn(64, 16),
         ]
         counters.clear()
         with torch.no_grad():
@@ -700,9 +713,10 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(actual, expected)
         counters.clear()
 
-    @requires_gpu()
     @torch._inductor.config.patch(
-        post_grad_fusion_options={"batch_linear_lhs": {"min_fuse_set_size": 2}},
+        post_grad_fusion_options={
+            "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 2},
+        },
     )
     def test_batch_linear_lhs_leaves_add_mm_for_addmm(self):
         # Any add user blocks the fusion; the addmm pattern matcher owns
@@ -711,12 +725,33 @@ class TestGroupBatchFusion(TestCase):
             def forward(self, a, b, c):
                 return torch.mm(a, b) + 1.0, torch.mm(a, c) + 2.0
 
-        module = M().eval().to(GPU_TYPE)
+        module = M().eval()
         ref_module = copy.deepcopy(module)
         inputs = [
-            torch.randn(32, 64, device=GPU_TYPE),
-            torch.randn(64, 16, device=GPU_TYPE),
-            torch.randn(64, 32, device=GPU_TYPE),
+            torch.randn(32, 64),
+            torch.randn(64, 16),
+            torch.randn(64, 32),
+        ]
+        counters.clear()
+        with torch.no_grad():
+            expected = ref_module(*inputs)
+            actual = torch.compile(module)(*inputs)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+        self.assertEqual(actual, expected)
+        counters.clear()
+
+        # add(mm, tensor bias) is the addmm pattern; it must stay unfused too.
+        class Bias(torch.nn.Module):
+            def forward(self, a, b, c, bias):
+                return torch.mm(a, b) + bias, torch.mm(a, c) + bias
+
+        module = Bias().eval()
+        ref_module = copy.deepcopy(module)
+        inputs = [
+            torch.randn(32, 64),
+            torch.randn(64, 16),
+            torch.randn(64, 16),
+            torch.randn(32, 16),
         ]
         counters.clear()
         with torch.no_grad():
@@ -757,7 +792,10 @@ class TestGroupBatchFusion(TestCase):
             self.assertEqual(counters["inductor"]["batch_linear_lhs"], expected_count)
         counters.clear()
 
-    @parametrize("max_fuse_tensor_bytes,expected_count", [(1024, 0), (20000, 1)])
+    # Weights sum to 12288 bytes and the returned [32, 16] and [32, 32]
+    # outputs each add a contiguous copy of 2048 and 4096 bytes, so the
+    # fused total is 18432 bytes.
+    @parametrize("max_fuse_tensor_bytes,expected_count", [(18431, 0), (18432, 1)])
     def test_batch_linear_lhs_respects_max_fuse_tensor_bytes(
         self, max_fuse_tensor_bytes, expected_count
     ):
@@ -774,7 +812,7 @@ class TestGroupBatchFusion(TestCase):
                 "batch_linear_lhs": {
                     "devices": ("cpu",),
                     "min_fuse_set_size": 2,
-                    "max_fuse_tensor_bytes": max_fuse_tensor_bytes,
+                    "max_fuse_tensor_bytes_batch_linear_lhs": max_fuse_tensor_bytes,
                 }
             },
         ):
@@ -784,6 +822,89 @@ class TestGroupBatchFusion(TestCase):
                 actual = torch.compile(module, fullgraph=True)(x, w1, w2)
             self.assertEqual(actual, expected)
             self.assertEqual(counters["inductor"]["batch_linear_lhs"], expected_count)
+        counters.clear()
+
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "batch_linear_lhs": {
+                "devices": ("cpu",),
+                "min_fuse_set_size": 2,
+                "max_fuse_tensor_bytes_batch_linear_lhs": 12288,
+            }
+        },
+    )
+    def test_batch_linear_lhs_declined_subset_not_retried(self):
+        # Each 5KB weight passes the per-node cap check, but the fused
+        # subset of all three is over the 12KB cap. The decline must be
+        # remembered so the same subset is not walked and declined again.
+        class M(torch.nn.Module):
+            def forward(self, x, w1, w2, w3):
+                return torch.mm(x, w1.t()), torch.mm(x, w2.t()), torch.mm(x, w3.t())
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        weights = [torch.randn(20, 64) for _ in range(3)]
+        counters.clear()
+        with torch.no_grad():
+            with _record_fusion_subsets() as subsets:
+                expected = module(x, *weights)
+                actual = torch.compile(module, fullgraph=True)(x, *weights)
+        self.assertEqual(actual, expected)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs_declined"], 1)
+        self.assertEqual(subsets, [3])
+        counters.clear()
+
+    def test_batch_linear_lhs_explicit_post_grad_options_win(self):
+        # An explicit post_grad_fusion_options entry that differs from the
+        # shipped default wins over the legacy pre_grad_fusion_options key,
+        # so min_fuse_set_size: 3 leaves the pair unfused.
+        class M(torch.nn.Module):
+            def forward(self, x, w1, w2):
+                return torch.mm(x, w1.t()), torch.mm(x, w2.t())
+
+        module = M().eval()
+        x = torch.randn(32, 64)
+        w1 = torch.randn(16, 64)
+        w2 = torch.randn(32, 64)
+        with torch._inductor.config.patch(
+            pre_grad_fusion_options={
+                "batch_linear_lhs": {"min_fuse_set_size": 2},
+            },
+            post_grad_fusion_options={
+                "batch_linear_lhs": {"devices": ("cpu",), "min_fuse_set_size": 3},
+            },
+        ):
+            counters.clear()
+            with torch.no_grad():
+                expected = module(x, w1, w2)
+                actual = torch.compile(module, fullgraph=True)(x, w1, w2)
+            self.assertEqual(actual, expected)
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], 0)
+        counters.clear()
+
+    def test_batch_linear_lhs_default_options_fuse_fake_xpu_graph(self):
+        # Pin the shipped post_grad_fusion_options against the pass without
+        # an XPU device: a fake-xpu graph under the defaults must produce
+        # exactly one fusion. Dropping a shipped key, or making the guards
+        # or cap over-restrictive, turns this into zero.
+        def f(x, w1, w2):
+            return torch.mm(x, w1.t()), torch.mm(x, w2.t())
+
+        with FakeTensorMode():
+            fake_inputs = [
+                torch.randn(32, 64, device="xpu"),
+                torch.randn(16, 64, device="xpu"),
+                torch.randn(32, 64, device="xpu"),
+            ]
+            gm = make_fx(f)(*fake_inputs)
+
+        counters.clear()
+        opts = default_graph_search_options.copy()
+        opts.update(config.post_grad_fusion_options["batch_linear_lhs"])
+        rule = BatchLinearLHSFusion(graph_search_options=opts)
+        apply_group_batch_fusion(gm.graph, rule)
+        self.assertEqual(counters["inductor"]["batch_linear_lhs"], 1)
         counters.clear()
 
     @parametrize("dynamic", [False, True])

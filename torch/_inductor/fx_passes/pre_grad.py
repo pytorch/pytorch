@@ -31,7 +31,11 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 from ..utils import is_cpu_device, pass_execution_and_save
-from .group_batch_fusion import group_batch_fusion_passes, PRE_GRAD_FUSIONS
+from .group_batch_fusion import (
+    _normalize_devices,
+    group_batch_fusion_passes,
+    PRE_GRAD_FUSIONS,
+)
 from .misc_patterns import numpy_compat_normalization
 from .split_cat import PRE_GRAD_PATTERNS
 
@@ -322,12 +326,10 @@ def _resolve_pre_grad_fusion_options(
 
     resolved = {}
     for pass_name, options in fusion_options.items():
-        devices = options.get("devices")
-        if (
-            devices is not None
-            and isinstance(devices, (list, tuple, OrderedSet))
-            and example_device_types.isdisjoint(OrderedSet(devices))
-        ):
+        # Same normalization as the post-grad "devices" filter, so the two
+        # parsers accept the same values.
+        devices = _normalize_devices(options.get("devices"))
+        if devices is not None and example_device_types.isdisjoint(devices):
             continue
         resolved[pass_name] = {k: v for k, v in options.items() if k != "devices"}
     return resolved

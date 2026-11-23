@@ -54,8 +54,6 @@ MAX_FUSE_SET_SIZE = 300
 MAX_FUSE_SEARCH_DEPTH = 5
 # The maximum tensor size that can go into the fusion group
 MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR = 4096
-# Maximum number of bytes in the concatenated weights of batch_linear_lhs.
-MAX_FUSE_TENSOR_BYTES_BATCH_LINEAR_LHS = 4 << 20
 # Whether we only fuse nodes with same parent node
 FUSE_NODES_WITH_SAME_PARENT = False
 # Whether we enable the add broadcast in batch linear
@@ -73,7 +71,6 @@ default_graph_search_options = {
     "max_fuse_set_size": MAX_FUSE_SET_SIZE,
     "max_fuse_search_depth": MAX_FUSE_SEARCH_DEPTH,
     "max_fuse_tensor_size_group_linear": MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR,
-    "max_fuse_tensor_bytes": MAX_FUSE_TENSOR_BYTES_BATCH_LINEAR_LHS,
     "fuse_nodes_with_same_parent": FUSE_NODES_WITH_SAME_PARENT,
     "shape_broadcast_batch_linear": SHAPE_BROADCAST_BATCH_LINEAR,
     "fuse_nodes_with_same_users": Fuse_NODES_WITH_SAME_USERS,
@@ -89,7 +86,8 @@ def _normalize_devices(devices: object) -> OrderedSet[str] | None:
         devices = (devices,)
     if not isinstance(devices, (list, tuple, AbstractSet, OrderedSet)):
         raise ValueError(
-            "devices must be a device type, a torch.device, or a sequence of them"
+            f"invalid devices {devices!r}: expected a device type, a torch.device, "
+            "or a sequence of them"
         )
     normalized = OrderedSet()
     for device in devices:
@@ -99,7 +97,7 @@ def _normalize_devices(devices: object) -> OrderedSet[str] | None:
             normalized.add(device.split(":", 1)[0])
         else:
             raise ValueError(
-                "devices must contain only device types or torch.device values"
+                f"invalid devices entry {device!r}: expected a device type or torch.device"
             )
     return normalized
 
@@ -142,6 +140,10 @@ class GroupBatchFusionBase:
         raise NotImplementedError("match called on base")
 
     def fuse(self, graph, subset):
+        """
+        Fuse the subset. A subclass may return False to decline the subset
+        without fusing; apply_group_batch_fusion then leaves it alone.
+        """
         raise NotImplementedError("fuse called on base")
 
 
@@ -553,14 +555,29 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 class BatchLinearLHSFusion(BatchFusion):
     """
     Post-grad batch linear left-hand side fusion. Fuses mm/addmm calls that
-    share an input and have static split widths into one wide GEMM, then splits
-    the result. Enabled by default on XPU with a fused-weight size cap.
+    share an input into one wide GEMM, then splits the result. Split widths
+    are static only when the static_widths_only option is set. Enabled by
+    default on XPU with a byte cap on the fused weights plus the copies added
+    for returned outputs.
     """
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._bound_symbols_cache: dict[torch.fx.Graph, OrderedSet] = {}
+        self._output_node_cache: dict[torch.fx.Graph, torch.fx.Node] = {}
         self._devices = _normalize_devices(self.graph_search_options.get("devices"))
+        max_bytes = self.graph_search_options.get(
+            "max_fuse_tensor_bytes_batch_linear_lhs"
+        )
+        if max_bytes is not None and (
+            isinstance(max_bytes, bool)
+            or not isinstance(max_bytes, int)
+            or max_bytes <= 0
+        ):
+            raise ValueError(
+                "max_fuse_tensor_bytes_batch_linear_lhs must be a positive int in "
+                f"bytes, got {max_bytes!r}"
+            )
 
     def _addmm_node_can_be_fused(self, node: torch.fx.Node) -> bool:
         # pyre-fixme[7]: Incompatible return type
@@ -626,11 +643,13 @@ class BatchLinearLHSFusion(BatchFusion):
                     pending.append(src)
         return False
 
-    @staticmethod
     def _reaches_user_visible_output(
-        node: torch.fx.Node, graph: torch.fx.Graph
+        self, node: torch.fx.Node, graph: torch.fx.Graph
     ) -> bool:
-        output_node = next(n for n in graph.nodes if n.op == "output")
+        output_node = self._output_node_cache.get(graph)
+        if output_node is None:
+            output_node = next(n for n in graph.nodes if n.op == "output")
+            self._output_node_cache[graph] = output_node
         args = output_node.args[0]
         if not isinstance(args, (tuple, list)):
             args = (args,)
@@ -736,8 +755,12 @@ class BatchLinearLHSFusion(BatchFusion):
         Return a group key for fusable mm/addmm nodes, or None to skip.
 
         The guards keep the fusion from stealing addmm, WOQ, or cat buffer-reuse
-        patterns and from crossing storage, alias, and stream boundaries.
+        patterns and from crossing storage, alias, and stream boundaries. The
+        wide GEMM this pass created is marked and never re-matched, so fusions
+        stay flat.
         """
+        if node.meta.get("from_batch_linear_lhs"):
+            return None
         # The mms only feed cat(s). Keep the zero-copy cat-mm buffer reuse
         # when each cat feeds the graph output directly; fusing here would
         # lower to cat + split_with_sizes and add copy kernels around the
@@ -796,6 +819,15 @@ class BatchLinearLHSFusion(BatchFusion):
         # otherwise it is a free symbol in a body subgraph and cannot lower.
         if not self._section_symbols_are_bound(node.graph, weight_val.shape[1]):
             return None
+        # Decline a single weight over the cap here: it is cheap, and the
+        # per-subset cap in fuse() then rarely fires.
+        max_bytes = self.graph_search_options.get(
+            "max_fuse_tensor_bytes_batch_linear_lhs"
+        )
+        if max_bytes is not None and not statically_known_true(
+            weight_val.numel() * weight_val.element_size() <= max_bytes
+        ):
+            return None
         if bias_m is not None:
             if not isinstance(bias_m, torch.fx.Node):
                 return None
@@ -821,7 +853,11 @@ class BatchLinearLHSFusion(BatchFusion):
         return group_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
-        """Fuse linear nodes into one wide GEMM and split the result."""
+        """
+        Fuse linear nodes into one wide GEMM and split the result. Returns
+        False to decline the subset when its fused weights plus the copies
+        added for returned outputs exceed the byte cap.
+        """
         batch_nodes = []
         batch_input = None
         batch_weights = []
@@ -844,14 +880,33 @@ class BatchLinearLHSFusion(BatchFusion):
             batch_biases.append(bias)
             split_sections.append(weight.meta["val"].shape[1])  # type: ignore[union-attr]
 
-        max_bytes = self.graph_search_options.get("max_fuse_tensor_bytes")
+        visible_flags = [
+            self._reaches_user_visible_output(node, graph) for node in batch_nodes
+        ]
+        max_bytes = self.graph_search_options.get(
+            "max_fuse_tensor_bytes_batch_linear_lhs"
+        )
         if max_bytes is not None:
+            # The fused form pays for the concatenated weights plus one
+            # contiguous copy of every split section that reaches a
+            # user-visible output; count both against the cap.
             total_bytes = 0
-            for weight in batch_weights:
-                value = weight.meta["val"]  # type: ignore[union-attr]
-                total_bytes += value.numel() * value.element_size()
-            if statically_known_true(total_bytes > max_bytes):
-                return
+            for node, weight, visible in zip(batch_nodes, batch_weights, visible_flags):
+                weight_val = weight.meta["val"]  # type: ignore[union-attr]
+                total_bytes += weight_val.numel() * weight_val.element_size()
+                if visible:
+                    input_val = batch_input.meta["val"]  # type: ignore[union-attr]
+                    out_dtype = torch.promote_types(input_val.dtype, weight_val.dtype)
+                    out_elem = torch.empty((), dtype=out_dtype).element_size()
+                    total_bytes += input_val.shape[0] * weight_val.shape[1] * out_elem
+            if not statically_known_true(total_bytes <= max_bytes):
+                counters["inductor"]["batch_linear_lhs_declined"] += 1
+                log.debug(
+                    "batch_linear_lhs declined: %s fused bytes exceed cap %s",
+                    total_bytes,
+                    max_bytes,
+                )
+                return False
 
         custom_context = _common_custom_context(batch_nodes)
 
@@ -894,6 +949,9 @@ class BatchLinearLHSFusion(BatchFusion):
                     batch_input.meta["val"],  # type: ignore[union-attr]
                     cat_weights.meta["val"],
                 )
+            # Do not re-match the wide GEMM this pass created into another
+            # group; that would build nested cats.
+            fused_lhs.meta["from_batch_linear_lhs"] = True
             fused_lhs_list = graph.call_function(  # type: ignore[operator]
                 aten.split_with_sizes.default,
                 args=(fused_lhs, split_sections, 1),
@@ -918,7 +976,7 @@ class BatchLinearLHSFusion(BatchFusion):
                 getitem.meta["example_value"] = split_values[i]
 
             new_node = getitem
-            if self._reaches_user_visible_output(node, graph):  # type: ignore[arg-type]
+            if visible_flags[i]:
                 # A user-visible output, possibly through a view chain, must
                 # keep eager strides and own storage. Lowering only enforces
                 # stride order for views and would accept the wide row stride,
@@ -1978,6 +2036,7 @@ def get_fusion_candidates(
 def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusionBase):
     stable_topological_sort(graph)  # type: ignore[arg-type]
     fused_set = OrderedSet[torch.fx.Node]()
+    declined = OrderedSet[torch.fx.Node]()
     log_to_scuba = False
 
     for node in reversed(graph.nodes):  # type: ignore[arg-type]
@@ -1990,7 +2049,18 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             for subset in find_independent_subset_greedy(
                 candidate_nodes, rule.graph_search_options
             ):
-                rule.fuse(graph, subset)
+                if any(n in declined for n in subset):
+                    # A previous decline rejected these nodes; skip the
+                    # re-match and the full-ancestor walk for them.
+                    continue
+                if rule.fuse(graph, subset) is False:
+                    declined.update(subset)
+                    log.debug(
+                        "%s declined a subset of %s nodes",
+                        rule.__class__.__name__,
+                        len(subset),
+                    )
+                    continue
                 fused_set.update(subset)
                 log.debug(
                     f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
@@ -2062,6 +2132,11 @@ def _option_matches_graph_devices(
 def group_batch_fusion_passes(
     graph: torch.fx.Graph, pre_grad=True, fusion_options=None
 ):
+    """
+    Build the group/batch fusion rules from the configured options and apply
+    them to the graph. Pre-grad keys that moved post grad keep working with a
+    warning.
+    """
     fusions: list[GroupBatchFusionBase] = []
     # we keep all current pre grad fusions to keep
     # current implementation, will remove this later
@@ -2075,11 +2150,15 @@ def group_batch_fusion_passes(
     else:
         post_grad_options = dict(config.post_grad_fusion_options)
         # Keep the old pre-grad key working for fusions that moved post grad.
+        # The pristine default is the option's registered default, not a
+        # module-level dict that users could patch.
+        pristine = config._config["post_grad_fusion_options"].default
         for name in _PRE_GRAD_OPTIONS_FORWARDED_TO_POST_GRAD:
             if name not in config.pre_grad_fusion_options:
                 continue
-            shipped = config.DEFAULT_POST_GRAD_FUSION_OPTIONS.get(name)
-            if name in post_grad_options and post_grad_options[name] != shipped:
+            if name in post_grad_options and post_grad_options[name] != pristine.get(
+                name
+            ):
                 warning_once(
                     log,
                     "Fusion option %s is post-grad; the explicit "
@@ -2088,13 +2167,23 @@ def group_batch_fusion_passes(
                     name,
                 )
                 continue
-            warning_once(
-                log,
-                "Fusion option %s is post-grad; running it post grad. "
-                "Move it from pre_grad_fusion_options to "
-                "post_grad_fusion_options.",
-                name,
-            )
+            if name in post_grad_options:
+                warning_once(
+                    log,
+                    "Fusion option %s is post-grad; the post_grad_fusion_options "
+                    "entry matching the shipped default was discarded in favor "
+                    "of pre_grad_fusion_options. Remove the "
+                    "pre_grad_fusion_options entry.",
+                    name,
+                )
+            else:
+                warning_once(
+                    log,
+                    "Fusion option %s is post-grad; running it post grad. "
+                    "Move it from pre_grad_fusion_options to "
+                    "post_grad_fusion_options.",
+                    name,
+                )
             post_grad_options[name] = config.pre_grad_fusion_options[name]
         # Device-scoped defaults must not pay for the search on other
         # devices. The "devices" filter applies to every group/batch fusion
