@@ -101,6 +101,26 @@ __device__ __forceinline__ int64_t reflect_index(int64_t x, int64_t len) {
   return (m < len) ? m : (two - m);
 }
 
+// Writes to `out`, in increasing order, the output indices along one dimension
+// that read input index `i` under reflection padding, and returns their count.
+__device__ __forceinline__ int reflection_pad_sources(
+    int64_t i, int64_t input_len, int64_t pad, int64_t output_len, int64_t* out) {
+  int n = 0;
+  const int64_t left = pad - i;
+  if (i >= 1 && left >= 0 && left < output_len) {
+    out[n++] = left;
+  }
+  const int64_t mid = pad + i;
+  if (mid >= 0 && mid < output_len) {
+    out[n++] = mid;
+  }
+  const int64_t right = pad + 2 * (input_len - 1) - i;
+  if (i <= input_len - 2 && right >= 0 && right < output_len) {
+    out[n++] = right;
+  }
+  return n;
+}
+
 template<typename scalar_t>
 __global__ void reflection_pad1d_out_kernel(
     const scalar_t * input, scalar_t * output,
@@ -138,44 +158,32 @@ __global__ void reflection_pad1d_flat(
   }
 }
 
+// Each grad_input element gathers the grad_output elements that reflect onto
+// it. Every element is written once and summed in a fixed order, so no atomics
+// are needed and the result is deterministic.
 template <typename scalar_t>
 __global__ void reflection_pad1d_backward_out_kernel(
-    scalar_t * grad_input, const scalar_t * grad_output,
-    int64_t input_w,
-    int64_t pad_l, int64_t pad_r) {
-  const int64_t output_x =
-      static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-  auto output_w = input_w + pad_l + pad_r;
-
-  if (output_x < output_w) {
-    auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l);
-    gpuAtomicAddNoReturn(
-      &grad_input[index_pair.first], grad_output[index_pair.second]);
-  }
-}
-
-template <typename scalar_t>
-__global__ void reflection_pad1d_backward_flat(
-    scalar_t* grad_input,
+    scalar_t* __restrict__ grad_input,
     const scalar_t* __restrict__ grad_output,
     int64_t input_w,
+    int64_t output_w,
     int64_t pad_l,
-    int64_t out_w,
     int64_t plane_count) {
-  const int64_t bx = blockDim.x;
-  const int64_t tx = threadIdx.x;
-
-  const int64_t total = plane_count * out_w;
-  const int64_t grid_stride = static_cast<int64_t>(bx) * gridDim.x;
-  int64_t linear = static_cast<int64_t>(blockIdx.x) * bx + tx;
-
-  for (; linear < total; linear += grid_stride) {
-    const int64_t plane = linear / out_w;
-    const int64_t x = linear - plane * out_w;
-    const int64_t j = reflect_index(x - pad_l, input_w);
-    gpuAtomicAddNoReturn(
-        &grad_input[plane * input_w + j], grad_output[plane * out_w + x]);
+  // The caller checks canUse32BitIndexMath(input), so the index fits in 32 bits.
+  const uint32_t linear = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linear >= plane_count * input_w) {
+    return;
   }
+
+  const int64_t plane = linear / static_cast<uint32_t>(input_w);
+  const int64_t x = linear - plane * input_w;
+  int64_t xs[3];
+  const int nx = reflection_pad_sources(x, input_w, pad_l, output_w, xs);
+  scalar_t sum = 0;
+  for (int i = 0; i < nx; i++) {
+    sum += grad_output[plane * output_w + xs[i]];
+  }
+  grad_input[linear] = sum;
 }
 
 template<typename scalar_t>
@@ -504,6 +512,7 @@ __global__ void reflection_pad3d_out_kernel(
       });
 }
 
+// See reflection_pad1d_backward_out_kernel.
 template <typename scalar_t>
 __global__ void reflection_pad3d_backward_out_kernel(
     PackedTensorAccessor64<scalar_t, 5> grad_input,
@@ -511,27 +520,31 @@ __global__ void reflection_pad3d_backward_out_kernel(
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
     int64_t y_shift, int64_t z_shift
 ) {
-  parallel_reflection_pad3d(
-      grad_input,
-      grad_output,
-      pad_left,
-      pad_top,
-      pad_front,
-      y_shift,
-      z_shift,
-      [&] __device__(
-          int64_t plane,
-          int64_t batch,
-          int64_t output_z,
-          int64_t output_y,
-          int64_t output_x,
-          int64_t input_z,
-          int64_t input_y,
-          int64_t input_x) {
-        auto value_to_add = grad_output[batch][plane][output_z][output_y][output_x];
-        auto target = &grad_input[batch][plane][input_z][input_y][input_x];
-        gpuAtomicAddNoReturn(target, value_to_add);
-      });
+  const int64_t input_id = threadIdx.x + ((int64_t) blockIdx.x) * blockDim.x;
+  if (input_id >= (grad_input.size(2) * grad_input.size(3) * grad_input.size(4))) {
+    return;
+  }
+
+  const int64_t x = input_id % grad_input.size(4);
+  const int64_t y = (input_id / grad_input.size(4)) % grad_input.size(3);
+  const int64_t z = input_id / (grad_input.size(3) * grad_input.size(4));
+  const int64_t plane = blockIdx.y + y_shift;
+  const int64_t batch = blockIdx.z + z_shift;
+
+  int64_t xs[3], ys[3], zs[3];
+  const int nx = reflection_pad_sources(x, grad_input.size(4), pad_left, grad_output.size(4), xs);
+  const int ny = reflection_pad_sources(y, grad_input.size(3), pad_top, grad_output.size(3), ys);
+  const int nz = reflection_pad_sources(z, grad_input.size(2), pad_front, grad_output.size(2), zs);
+
+  scalar_t sum = 0;
+  for (int k = 0; k < nz; k++) {
+    for (int j = 0; j < ny; j++) {
+      for (int i = 0; i < nx; i++) {
+        sum += grad_output[batch][plane][zs[k]][ys[j]][xs[i]];
+      }
+    }
+  }
+  grad_input[batch][plane][z][y][x] = sum;
 }
 
 void reflection_pad2d_out_template(
@@ -756,11 +769,6 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
     const Tensor& input,
     IntArrayRef padding,
     const Tensor& grad_input) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("reflection_pad1d_backward_out_cuda");
-  grad_input.zero_();
-
   if (grad_input.numel() == 0) {
     return;
   }
@@ -787,46 +795,22 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
 
   Tensor grad_output = grad_output_.contiguous();
 
+  const int64_t plane_count = nplane * nbatch;
   const int block_x =
-      static_cast<int>(std::min<int64_t>(256, std::max<int64_t>(1, output_w)));
-  const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-  const int max_x = prop->maxGridSize[0];
-  const int max_y = prop->maxGridSize[1];
-  const int max_z = prop->maxGridSize[2];
+      static_cast<int>(std::min<int64_t>(256, plane_count * input_w));
+  const int grid_x = static_cast<int>(
+      at::ceil_div(plane_count * input_w, static_cast<int64_t>(block_x)));
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
     grad_input.scalar_type(), "reflection_pad1d_backward_out_cuda", [&] {
-      auto stream = at::cuda::getCurrentCUDAStream();
-
-      const int64_t gx = at::ceil_div(output_w, static_cast<int64_t>(block_x));
-      const bool fits3d =
-          (nplane <= max_y) && (nbatch <= max_z) && (gx <= max_x);
-
-      dim3 block(block_x, 1, 1);
-      if (fits3d) {
-        dim3 grid(
-            gx, static_cast<unsigned>(nplane), static_cast<unsigned>(nbatch));
-        reflection_pad1d_backward_out_kernel<<<grid, block, 0, stream>>>(
-            grad_input.mutable_data_ptr<scalar_t>(),
-            grad_output.const_data_ptr<scalar_t>(),
-            input_w,
-            pad_l,
-            pad_r);
-      } else {
-        const int64_t plane_count = nplane * nbatch;
-        const int64_t total_blocks =
-            at::ceil_div(plane_count * output_w, static_cast<int64_t>(block_x));
-        const int grid_x = static_cast<int>(
-            std::min<int64_t>(max_x, std::max<int64_t>(1, total_blocks)));
-        dim3 grid(grid_x, 1, 1);
-        reflection_pad1d_backward_flat<<<grid, block, 0, stream>>>(
-            grad_input.mutable_data_ptr<scalar_t>(),
-            grad_output.const_data_ptr<scalar_t>(),
-            input_w,
-            pad_l,
-            output_w,
-            plane_count);
-      }
+      reflection_pad1d_backward_out_kernel<<<
+          dim3(grid_x), dim3(block_x), 0, at::cuda::getCurrentCUDAStream()>>>(
+          grad_input.mutable_data_ptr<scalar_t>(),
+          grad_output.const_data_ptr<scalar_t>(),
+          input_w,
+          output_w,
+          pad_l,
+          plane_count);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );
@@ -923,14 +907,12 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
 TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
   const Tensor& grad_output, const Tensor& input, IntArrayRef padding,
   const Tensor& grad_input) {
-  globalContext().alertNotDeterministic("reflection_pad3d_backward_out_cuda");
   TORCH_CHECK(canUse32BitIndexMath(input), "input tensor must fit into 32-bit index math");
   TORCH_CHECK(canUse32BitIndexMath(grad_output), "input tensor must fit into 32-bit index math");
 
   if (grad_input.numel() == 0) {
     return;
   }
-  grad_input.zero_();
 
   int64_t pad_left = padding[0];
   int64_t pad_top = padding[2];
@@ -949,18 +931,18 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
         auto grad_input_packed = grad_input_.packed_accessor64<scalar_t, 5>();
         auto grad_output_packed = grad_output_.packed_accessor64<const scalar_t, 5>();
 
-        int64_t output_plane_size = grad_output_packed.size(2) *
-            grad_output_packed.size(3) * grad_output_packed.size(4);
+        int64_t input_plane_size = grad_input_packed.size(2) *
+            grad_input_packed.size(3) * grad_input_packed.size(4);
         int64_t size_y = grad_input_packed.size(1);
         int64_t size_z = grad_input_packed.size(0);
-        dim3 block_size(output_plane_size > 256 ? 256 : output_plane_size);
+        dim3 block_size(input_plane_size > 256 ? 256 : input_plane_size);
 
         for (int64_t block_y = 0; block_y < size_y; block_y += 65535) {
           int64_t block_y_size = std::min(size_y - block_y, static_cast<int64_t>(65535));
           for (int64_t block_z = 0; block_z < size_z; block_z += 65535) {
             int64_t block_z_size = std::min(size_z - block_z, static_cast<int64_t>(65535));
 
-            dim3 grid_size(at::ceil_div(output_plane_size, static_cast<int64_t>(256)), \
+            dim3 grid_size(at::ceil_div(input_plane_size, static_cast<int64_t>(256)), \
                            block_y_size, block_z_size);
 
             reflection_pad3d_backward_out_kernel<<<

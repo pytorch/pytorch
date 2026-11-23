@@ -1788,10 +1788,11 @@ class TestTorchDeviceType(TestCase):
         res = module(input)
         grad = torch.ones_like(res)
 
+        # The CUDA backward no longer alerts; the XPU kernels live in torch-xpu-ops and still do.
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'reflection_pad1d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            should_alert=False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
@@ -1801,10 +1802,11 @@ class TestTorchDeviceType(TestCase):
         res = module(input)
         grad = torch.ones_like(res)
 
+        # The CUDA backward no longer alerts; the XPU kernels live in torch-xpu-ops and still do.
         self.check_nondeterministic_alert(
             lambda: res.backward(grad, retain_graph=True),
             'reflection_pad3d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
+            should_alert=False)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
