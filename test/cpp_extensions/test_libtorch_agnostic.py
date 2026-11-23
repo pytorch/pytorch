@@ -1305,7 +1305,7 @@ for warning in w:
     def test_stable_cpu_cache_sizes(self, device):
         import libtorch_agn_2_16 as libtorch_agnostic
 
-        capabilities = torch._C._cpu._get_cpu_capability()
+        capabilities = torch.cpu.get_capabilities()
         # The map may omit cache sizes; stable getters return 0 when absent.
         self.assertEqual(
             libtorch_agnostic.ops.my_l1d_cache_size(),
