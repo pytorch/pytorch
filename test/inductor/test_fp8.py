@@ -1868,6 +1868,7 @@ class TestFP8Lowering(TestCase):
                 "triton.enable_persistent_tma_matmul": True,
                 "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
                 "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm_min_sms": 0,
                 "max_autotune": True,
             }
         ):
