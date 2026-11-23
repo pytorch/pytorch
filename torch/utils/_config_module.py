@@ -980,22 +980,6 @@ class ConfigModule(ModuleType):
         # additional imports required
         imports = set()
 
-        def get_module_name(func: Callable, add_dot: bool) -> str:
-            module_name = func.__module__
-            if module_name == "builtins":
-                module_name = ""
-            if add_dot and module_name != "":
-                module_name += "."
-            return module_name
-
-        def add_import(func: Callable) -> None:
-            module_name = get_module_name(func, False)
-            if module_name:
-                imports.add(module_name)
-
-        def list_of_callables_to_string(v: list | set) -> list[str]:
-            return [f"{get_module_name(item, True)}{item.__name__}" for item in v]
-
         def importable_callable(v: Any) -> bool:
             # functools.partial has no attributes below but is a callable
             return callable(v) and hasattr(v, "__module__") and hasattr(v, "__name__")
@@ -1084,14 +1068,24 @@ class ConfigModule(ModuleType):
             if isinstance(v, functools.partial):
                 return get_partial_line(mod, k, v)
             elif importable_callable(v):
-                add_import(v)
-                return f"{mod}.{k} = {get_module_name(v, True)}{v.__name__}"
+                ref = importable_ref(v)
+                if ref is None:
+                    return f"# WARNING: {mod}.{k} omitted (callable cannot be re-imported), repro may not reproduce"
+                func_ref, import_name = ref
+                if import_name:
+                    imports.add(import_name)
+                return f"{mod}.{k} = {func_ref}"
             elif isinstance(v, (list, set)) and all(
                 importable_callable(item) for item in v
             ):
-                for item in v:
-                    add_import(item)
-                v_list = list_of_callables_to_string(v)
+                refs = [importable_ref(item) for item in v]
+                if any(ref is None for ref in refs):
+                    return f"# WARNING: {mod}.{k} entirely omitted (an element cannot be re-imported), repro may not reproduce"
+                v_list = []
+                for func_ref, import_name in refs:  # type: ignore[misc]
+                    if import_name:
+                        imports.add(import_name)
+                    v_list.append(func_ref)
                 if isinstance(v, list):
                     return f"{mod}.{k} = {v_list}"
                 else:
@@ -1190,6 +1184,21 @@ class ConfigModule(ModuleType):
 
     def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()
+
+    def _save_user_overrides(self) -> dict[str, Any]:
+        saved = {}
+        for k, e in self._config.items():
+            v = e.user_override.get()
+            if not isinstance(v, _IMMUTABLE_CONFIG_TYPES) and v is not _UNSET_SENTINEL:
+                v = copy.deepcopy(v)
+            saved[k] = v
+        return saved
+
+    def _restore_user_overrides(self, saved: dict[str, Any]) -> None:
+        self._hash_dirty_var.set(True)
+        self._get_dict_dirty_keys_var.set(None)
+        for k, v in saved.items():
+            self._config[k].user_override.set(v)
 
     def get_serializable_config_copy(self) -> dict[str, Any]:
         return self._get_dict(ignored_keys=getattr(self, "_save_config_ignore", []))
