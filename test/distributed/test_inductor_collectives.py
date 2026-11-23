@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import datetime
 import functools
+import time
 import unittest
 from collections import Counter
 from unittest import mock
@@ -1153,12 +1154,27 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             # Failure Case: Issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
-            _, _, out_compiled = _run_loop_collective_wait(
-                x, wait_fn=all_reduce_wait_compiled, expected_registry_size=0
-            )
             # In this case `.wait_tensor(y)` in compiled region will not be able to find the corresponding work object
             # to invoke the wait, thus the result will not match eager.
-            self.assertNotEqual(out_ref, out_compiled)
+            # The other ranks join the all_reduce only after rank 0's `y * y` has executed, so rank 0 reads the
+            # unreduced `y` regardless of CPU/GPU timing.
+            store = dist.distributed_c10d._get_default_store()
+            if self.rank != 0:
+                store.wait(["y_squared"])
+            work, y = all_reduce_non_functional_eager(x)
+            self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+            out_compiled = all_reduce_wait_compiled(work, y)
+            if self.rank == 0:
+                y_squared = torch.Event(device=self.device)
+                y_squared.record()
+                # Bounded so that a wait_tensor() that does wait fails the assert below instead of deadlocking.
+                deadline = time.monotonic() + 30
+                while not y_squared.query() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                store.set("y_squared", "1")
+            work.wait()
+            if self.rank == 0:
+                self.assertNotEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
