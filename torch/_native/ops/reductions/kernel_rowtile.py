@@ -231,6 +231,7 @@ class _ItreePlan(NamedTuple):
     # COMBINE shape only: partials per row per cp.async-staged smem tile. 0 folds straight from
     # global. Also bit-neutral -- staging moves where the operand is read from, not the chain.
     combine_tile: int = 0
+    # Staged fold unroll factor; 0 with a nonzero combine_tile unrolls a whole tile.
     combine_unroll: int = 0
 
     @property
