@@ -3,6 +3,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/Tensor.h>
+#include <c10/util/safe_numerics.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
 #include <cstdint>
@@ -74,11 +75,17 @@ inline PhiloxShardLayout philox_shard_layout(
       op_name, ": global_shape and global_offset must have one entry per output "
       "dim, got ", global_shape, " and ", global_offset, " for output shape ",
       self.sizes());
+  int64_t global_numel = 1;
   for (const auto d : c10::irange(ndim)) {
+    // Subtract rather than add so huge offsets can't overflow.
     TORCH_CHECK(
-        global_offset[d] >= 0 && global_offset[d] + self.size(d) <= global_shape[d],
+        global_offset[d] >= 0 && global_shape[d] >= 0 &&
+            self.size(d) <= global_shape[d] - global_offset[d],
         op_name, ": output of shape ", self.sizes(), " at global_offset ",
         global_offset, " does not fit in global_shape ", global_shape);
+    // Bounds every product in the layout below, which are all <= global_numel.
+    TORCH_CHECK(!c10::mul_overflows(global_numel, global_shape[d], &global_numel),
+        op_name, ": global_shape ", global_shape, " has too many elements");
   }
 
   PhiloxShardLayout layout;

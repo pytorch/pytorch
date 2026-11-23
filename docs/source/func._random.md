@@ -32,6 +32,8 @@ keys with shape ``(*batch, K)`` (e.g. from {func}`split`) instead.
      uniform_
      normal
      normal_
+     shard_uniform_
+     shard_normal_
      randint
      randint_
      bits
