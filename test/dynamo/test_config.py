@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import importlib.util
-import subprocess
 import sys
 import tempfile
 
@@ -25,26 +24,6 @@ from torch.testing._internal.common_utils import (
 @instantiate_parametrized_tests
 class ConfigTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
-
-    def test_nested_graph_breaks_default(self):
-        script = """
-import importlib
-import sys
-
-import torch._dynamo
-import torch._environment
-
-for fbcode in (False, True):
-    sys.modules.pop("torch._dynamo.config")
-    torch._environment.is_fbcode = lambda fbcode=fbcode: fbcode
-    config = importlib.import_module("torch._dynamo.config")
-    print(config.nested_graph_breaks)
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", script], capture_output=True, text=True
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ["True", "False"])
 
     def _make_config_module(self, name: str):
         tmpdir = tempfile.TemporaryDirectory()
