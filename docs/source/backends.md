@@ -503,8 +503,9 @@ the overload names `sum.dim_IntList`, `mean.dim`, `prod.dim_int`, `amax` and `am
 `torch.backends.python_native.cutedsl.enabled = False`, which turns off every
 conditional CuTeDSL override, not only these reductions (unconditional ones, such as
 `quantize_tensor`'s, stay). The `cutedsl.disabled()` context manager does the
-same while its block runs (process-wide), along with native AOT for every DSL. Setting
-`TORCH_DISABLE_NATIVE_JIT=1` before `import torch` registers no native DSL overrides.
+same while its block runs (process-wide), along with native AOT for every DSL except
+UNCONDITIONAL declarations. Setting `TORCH_DISABLE_NATIVE_JIT=1` before `import torch`
+registers no CuTeDSL, Triton, Helion or FlyDSL overrides.
 Builds with native-AOT reduction kernels also serve covered calls from them, including
 `out=` calls of the overloads above (`mean.dtype_out` as a full reduction), except while
 `PYTORCH_NATIVE_INNER_TREE` is set, since the kernels have no inner-tree order. Only
@@ -585,8 +586,9 @@ Each DSL controller provides the following methods:
 
 **disabled()**
     Context manager that temporarily disables the conditional operations from this DSL,
-    along with native AOT kernels for every DSL. Both are process-wide while the block
-    runs, and are automatically restored when exiting the context.
+    along with native AOT kernels for every DSL (except UNCONDITIONAL declarations).
+    Both are process-wide while the block runs, and are automatically restored when
+    exiting the context.
 
     Example::
 
