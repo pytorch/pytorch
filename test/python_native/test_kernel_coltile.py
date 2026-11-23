@@ -849,7 +849,8 @@ class TestOrderedColRoute(TestCase):
         ],
     )
     def test_constructor_invariants_raise(self, field, error):
-        # reduce_ordered_col declines these plans first; bad mappings come only from configs.
+        # reduce_ordered_col declines the first three plans and the planner builds no
+        # one-warp split; bad mappings come only from configs.
         from torch._native.ops.reductions import kernel_rowtile as rt
 
         trait = T.SumOps(acc=cutlass.Float32)
