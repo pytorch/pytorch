@@ -1802,9 +1802,10 @@ class DynamoStore(abc.ABC):
     This is an abstract base class for different storage implementations.
     """
 
-    def record_package(self, package: CompilePackage) -> None:
+    def record_package(self, package: CompilePackage) -> _DynamoCacheEntry:
         """
         Records a package to PrecompileContext, so that it can be serialized later.
+        Returns the recorded cache entry.
         """
         from torch._dynamo.precompile_context import PrecompileContext
 
@@ -1812,6 +1813,7 @@ class DynamoStore(abc.ABC):
         PrecompileContext.record_dynamo_cache_entry(
             cache_entry=cache_entry, key=package.source_id
         )
+        return cache_entry
 
     def record_eager_backend(self, backend_id: _BackendId, backend: Any) -> None:
         """
@@ -1874,9 +1876,7 @@ class DynamoStore(abc.ABC):
         """
         Saves a package to a given path. Grabs backends from PrecompileContext.
         """
-        self.record_package(package)
-        cache_entry = package.cache_entry()
-        self.save_cache_entry(cache_entry, key)
+        self.save_cache_entry(self.record_package(package), key)
 
     @abc.abstractmethod
     def read(self, path: str) -> PrecompileCacheEntry:
