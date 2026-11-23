@@ -2200,10 +2200,13 @@ torch.equal(g(x, [w[:1]], 2, 6), hands_on(x, [w[:1]], 2, 6))  # True: other item
 ```
 
 A call with `*` is an operation only where the operator it runs enters no
-Python code. On a GPU that is not so for `bmm`, and for what comes down to
-it (`matmul` of two stacks of matrices), whose CUDA kernel is entered
-through a Python function (`torch._native`): a path ends in front of such a
-call of them, where a call that is written out goes on.
+Python code. What a kernel enters by itself is not such code. On a GPU the
+kernel of `bmm`, and of what comes down to it (`matmul` of two stacks of
+matrices), is chosen at every call by a Python function of torch's own
+(the router of the operator, in `torch._native`), and an operator that
+warns has the `warnings` module make and show its message: those frames
+are the kernel's, and a call of such an operator with `*` is an operation
+like one that is written out.
 
 ### What a call names with a dict, and what gives back what it was handed
 
@@ -2214,9 +2217,10 @@ random numbers only at a rate (`scaled_dot_product_attention` with its
 other, with the rate checked at every call; at another rate it is one under
 the rule of "Writes", as every operation that only draws now is, whether it
 is a call site or not. A call with `**` is an operation under the condition
-of one with `*`, that the operator it runs enters no Python code: on a GPU
-the attention comes down to `bmm` where torch is built without the fused
-attention kernels, and a path then ends in front of a call of it with `**`.
+of one with `*`, that the operator it runs enters no Python code: an
+attention that comes down to `bmm` on a GPU, where torch is built without
+the fused attention kernels, is an operation there too, since the router
+of `bmm` is its kernel's.
 `contiguous` of a tensor that is contiguous runs no
 kernel and gives the tensor back; it is the operation all the same, which
 copies where the tensor of another call is laid out otherwise. A tuple that
@@ -2882,21 +2886,18 @@ mode (forward, loss, backward and update together), since a dropout that
 drops and an attention with a dropout rate are operations only where
 nothing that can fail has been taken down in front of them ("Writes").
 
-With the models on a GPU (one H100, counted the same way) the timm models,
-the vision transformer and hf_DistilBert have the graphs of the table above.
-The models that call `scaled_dot_product_attention` with `**` have fewer of
-their operations in graphs there, in the build of torch they were counted
-with, which has no fused attention kernels: the attention comes down to
-`bmm`, whose CUDA kernel is entered through a Python function, so the call
-is no operation ("What a call names with a dict"), and the graph of a layer
-ends in front of it and another starts behind it:
-
-| model, on a GPU | graphs that run | runs of a graph in a call | operations of a call in them |
-|---|---|---|---|
-| DistillGPT2 | 5 | 15 | 189 of 253 |
-| MobileBertForMaskedLM | 7 | 170 | 1127 of 1274 |
-| whisper-tiny | 6 | 30 | 173 of 389 |
-| Qwen3-0.6B (HuggingFace) | 4 | 31 | 2097 of 2217 |
+With the models on a GPU (one H100, counted the same way) every model of
+the table above has the graphs it has there, with the same number of runs
+in a call and the same operations in them; the profiler counts a few more
+operations in a call of eager mode for three of them (253 for DistillGPT2,
+1274 for MobileBertForMaskedLM, 389 for whisper-tiny). That holds for the
+models that call `scaled_dot_product_attention` with `**` as well, in the
+build of torch they were counted with, which has no fused attention
+kernels: the attention comes down to `bmm` there, whose CUDA kernel is
+chosen by the router of the operator, and the frames of the router are the
+kernel's ("What a call names with a dict"). Qwen3-0.6B (HuggingFace) was
+counted on a GPU only: 4 graphs that run 31 times in a call, with 2097 of
+the about 2217 operations of a call in them.
 
 The outputs are eager's bit for bit there as well. With a GPU present
 `torch.cuda.is_current_stream_capturing()`, which the mask code of a
@@ -2937,10 +2938,10 @@ What graphs do not do at this stage:
   to call (`inspect.signature`). These are what the paths of transformer
   models end at ("Models").
 - A call with `*` or `**` is an operation only where the operator it runs
-  enters no Python code. On a GPU the kernel of `bmm` is entered through a
-  Python function, so such a call of `bmm`, or of what comes down to it,
-  ends a path ("Methods read off a tensor, and what a call spreads";
-  "Models" has what that costs a transformer).
+  enters no Python code ("Methods read off a tensor, and what a call
+  spreads"). The router of an operator whose kernel is chosen in Python and
+  what shows a warning that a kernel gave are known by name and are the
+  kernel's; any other Python code that a kernel runs ends a path.
 - An operation that draws random numbers is one of a path only where
   nothing that can fail has been taken down in front of it ("Writes"). In
   the layers of a transformer in training mode that is seldom so, and their
