@@ -4811,7 +4811,7 @@ impl Compiled {
     /// of what it was given and its other arguments. An operator with a
     /// kernel of its own says so in its tags. One that is made of others
     /// is run once more, on tensors of the same sizes and dtypes that hold
-    /// nothing (`torch.vm._export.sized`): what needs to know what a
+    /// nothing (`asks::sized`): what needs to know what a
     /// tensor holds to size its result cannot run there. `asked` is None
     /// where that is not asked and taken to be so, false where it cannot
     /// be asked and is taken not to be.
@@ -4897,15 +4897,12 @@ impl Compiled {
             ffi::PyList_Append(operands, if held.is_null() { ffi::Py_None() } else { held });
         }
         let _nobody = Hooked::nobody();
-        let module = ffi::PyImport_ImportModule(c"torch.vm._export".as_ptr());
-        let said = if module.is_null() {
-            null_mut()
-        } else {
-            ffi::PyObject_CallMethod(module, c"sized".as_ptr(), c"sOOOO".as_ptr(), kind.as_ptr(), head, operands, kwnames, result)
-        };
-        let sized = !said.is_null() && ffi::PyObject_IsTrue(said) == 1;
+        // What is asked goes into the lists and tuples among the operands
+        // and into what the operation gave: not into one that holds itself.
+        let ends = !graph::holds_itself(operands) && !graph::holds_itself(result);
+        let sized = ends && crate::asks::sized(kind.to_str().unwrap_or(""), head, operands, kwnames, result);
         ffi::PyErr_Clear();
-        for held in [head, operands, kwnames, module, said] {
+        for held in [head, operands, kwnames] {
             xdecref(held);
         }
         sized
@@ -4913,7 +4910,7 @@ impl Compiled {
 
     /// Why a recorded run with writes in place is not exported, if what
     /// autograd saved of its operations is not what it was, or cannot be
-    /// shown to be (asked of `torch.vm._export.saved_changed`): a tensor
+    /// shown to be (`asks::saved_changed`): a tensor
     /// that an operation saved for its derivative and that a later one
     /// wrote to in place makes eager raise when it goes backward.
     unsafe fn saved_changed(&self, path: &Path, rec: &graph::Recording) -> Option<String> {
@@ -4925,17 +4922,9 @@ impl Compiled {
             }
         }
         let _nobody = Hooked::nobody();
-        let module = ffi::PyImport_ImportModule(c"torch.vm._export".as_ptr());
-        let said = if module.is_null() { null_mut() } else { ffi::PyObject_CallMethod(module, c"saved_changed".as_ptr(), c"O".as_ptr(), results) };
-        let why = if said.is_null() || ffi::PyUnicode_Check(said) == 0 {
-            Some("what autograd saved could not be asked for".to_string())
-        } else {
-            Some(pyffi::str_to_string(said)).filter(|why| !why.is_empty())
-        };
+        let why = crate::asks::saved_changed(results);
         ffi::PyErr_Clear();
-        for held in [results, module, said] {
-            xdecref(held);
-        }
+        xdecref(results);
         why
     }
 
