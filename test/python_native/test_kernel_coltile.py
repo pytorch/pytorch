@@ -33,19 +33,15 @@ class TestKernelColTile(TestCase):
     def test_reduce_col_tile_single_stage(self):
         # A misaligned input needs an element-aligned descriptor.
         raw = torch.randn(32 * 512 + 1, device="cuda")
-        x = raw[1:].view(32, 512)
-        self.assertEqual(
-            _L.supported_alignment(x, tile.align_bytes(512, x.element_size())),
-            x.element_size(),
-        )
-        out = ct.reduce_col_tile(
-            T.SumOps(acc=cutlass.Float32),
-            "smoke",
-            x,
-            torch.float32,
-            npar=1,
-        )
-        self.assertEqual(out, x.sum(dim=0), atol=1e-2, rtol=1e-2)
+        trait = T.SumOps(acc=cutlass.Float32)
+        for offset in (0, 1):
+            x = raw[offset : offset + 32 * 512].view(32, 512)
+            with self.subTest(offset=offset):
+                bound = tile.align_bytes(512, x.element_size())
+                aligned = _L.supported_alignment(x, bound) > x.element_size()
+                self.assertEqual(aligned, offset == 0)
+                out = ct.reduce_col_tile(trait, "smoke", x, torch.float32, npar=1)
+                self.assertEqual(out, x.sum(dim=0), atol=1e-2, rtol=1e-2)
 
     def test_reduce_col_tile_split_reduced_axis(self):
         # Exercise a ragged reduced-axis split and stage-2 partial combination.
