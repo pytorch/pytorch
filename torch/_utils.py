@@ -19,6 +19,9 @@ from typing_extensions import deprecated, ParamSpec
 import torch
 
 
+IS_WINDOWS = sys.platform == "win32"
+
+
 def _to_posix_separators(path: str) -> str:
     return path.replace(os.sep, "/")
 

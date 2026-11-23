@@ -1,12 +1,79 @@
 import os
 import signal
+import subprocess
+import sys
+from collections.abc import Sequence
 from threading import Thread
-from time import sleep
+from time import monotonic, sleep
+from typing import Any, IO
 
 from torch._inductor.compile_worker import watchdog
 
 
 _IN_TOPLEVEL_PROCESS = True
+
+
+def popen_pass_fds(fds: Sequence[int]) -> tuple[list[int], dict[str, Any]]:
+    """
+    Popen kwargs that pass the pipe fds `fds` to the child, and the values to give
+    it on its command line (see fd_from_parent). Windows has no pass_fds, so the
+    child inherits just these OS handles instead.
+    """
+    if sys.platform != "win32":
+        return list(fds), {"pass_fds": tuple(fds)}
+    import msvcrt
+
+    handles = [msvcrt.get_osfhandle(fd) for fd in fds]
+    for handle in handles:
+        os.set_handle_inheritable(handle, True)
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.lpAttributeList = {"handle_list": handles}
+    return handles, {"startupinfo": startupinfo, "close_fds": True}
+
+
+def fd_from_parent(value: int) -> int:
+    if sys.platform != "win32":
+        return value
+    import msvcrt
+
+    os.set_handle_inheritable(value, False)
+    return msvcrt.open_osfhandle(value, 0)
+
+
+def wait_readable_win32(pipe: IO[bytes], timeout: float) -> bool:
+    """Wait for data or EOF on a pipe; Windows select() only supports sockets."""
+    import _winapi
+    import msvcrt
+
+    handle = msvcrt.get_osfhandle(pipe.fileno())
+    deadline = monotonic() + timeout
+    while True:
+        try:
+            available, _ = _winapi.PeekNamedPipe(handle, 0)
+        except OSError:
+            return True  # broken pipe: a read returns EOF
+        if available:
+            return True
+        if monotonic() >= deadline:
+            return False
+        sleep(0.001)
+
+
+def parent_process_gone(orig_ppid: int) -> bool:
+    if sys.platform != "win32":
+        return orig_ppid != os.getppid()
+    # Windows does not reparent orphans, and a venv python.exe launcher is the
+    # real parent there, so check whether the original process still runs.
+    import _winapi
+
+    try:
+        handle = _winapi.OpenProcess(_winapi.SYNCHRONIZE, False, orig_ppid)
+    except OSError:
+        return True
+    try:
+        return _winapi.WaitForSingleObject(handle, 0) != _winapi.WAIT_TIMEOUT
+    finally:
+        _winapi.CloseHandle(handle)
 
 
 def in_toplevel_process() -> bool:
@@ -42,8 +109,8 @@ def _async_compile_initializer(orig_ppid: int, close_fds: tuple[int, ...] = ()) 
     def run() -> None:
         while True:
             sleep(60)
-            if orig_ppid != os.getppid():
-                os.kill(os.getpid(), signal.SIGKILL)
+            if parent_process_gone(orig_ppid):
+                os.kill(os.getpid(), getattr(signal, "SIGKILL", signal.SIGTERM))
 
     global _watchdog_thread, _original_parent
     _original_parent = orig_ppid
@@ -69,4 +136,4 @@ _original_parent: int | None = None
 
 
 def has_parent_changed() -> bool:
-    return _original_parent != os.getppid()
+    return _original_parent is None or parent_process_gone(_original_parent)

@@ -61,6 +61,7 @@ from torch._inductor.runtime.compile_tasks import (
 from torch._inductor.runtime.runtime_utils import triton_cache_dir
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
+from torch._utils import IS_WINDOWS
 from torch._utils_internal import log_triton_builds
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
@@ -338,6 +339,12 @@ class AsyncCompile:
                 "torch._inductor.config.worker_start_method = 'subprocess' "
                 "(or TORCHINDUCTOR_WORKER_START=subprocess) to use the "
                 "SubprocPool path, which is not affected by the daemon restriction."
+            )
+        if IS_WINDOWS and config.worker_start_method == "fork":
+            raise RuntimeError(
+                "torch._inductor.config.worker_start_method='fork' is not supported "
+                "on Windows, which has no fork(). Use 'subprocess' (the default) or "
+                "'spawn'."
             )
         AsyncCompile._ready_future = None
         log.info(

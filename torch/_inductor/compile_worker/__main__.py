@@ -15,7 +15,11 @@ from torch._inductor.compile_worker.subproc_pool import (
     SubprocMain,
     SubprocPickler,
 )
-from torch._inductor.compile_worker.utils import _async_compile_initializer
+from torch._inductor.compile_worker.utils import (
+    _async_compile_initializer,
+    fd_from_parent,
+    parent_process_gone,
+)
 from torch._inductor.runtime.compile_tasks import _set_triton_ptxas_path
 
 
@@ -61,10 +65,10 @@ def main():
         parser.add_argument("--write-fd", type=int)
         parser.add_argument("--torch-key", type=str)
         args = parser.parse_args()
-        if os.getppid() != args.parent:
+        if parent_process_gone(args.parent):
             sys.exit(0)
-        read_fd = os.fdopen(args.read_fd, "rb")
-        write_fd = os.fdopen(args.write_fd, "wb")
+        read_fd = os.fdopen(fd_from_parent(args.read_fd), "rb")
+        write_fd = os.fdopen(fd_from_parent(args.write_fd), "wb")
 
         pre_fork_setup()
 

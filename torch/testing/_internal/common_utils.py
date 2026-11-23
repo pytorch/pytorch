@@ -1770,7 +1770,7 @@ def run_tests(argv=None):
 
 
 IS_LINUX = sys.platform == "linux"
-IS_WINDOWS = sys.platform == "win32"
+from torch._utils import IS_WINDOWS
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386', 'AMD64')
