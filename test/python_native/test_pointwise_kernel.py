@@ -28,6 +28,17 @@ from torch.testing._internal.common_utils import (
 class TestPointwiseIndexing(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_row_first_grid_limit(self) -> None:
+        from torch._native.ops.pointwise.layout import tma_layout
+
+        # FP32 transpose + bool output selects rows_first with 192-column groups.
+        # grid.y = 65536 exceeds CUDA's launch limit.
+        shape = (32, 192 * 65535 + 32)
+        layout = tma_layout(
+            ((torch.float32, shape, (1, 32)),), shape, torch.bool, (shape[1], 1)
+        )
+        self.assertIsNone(layout)
+
     @parametrize(
         "shape,strides,expected",
         (((2**31,), (1,), False), ((2,), (2**31,), False), ((8, 8), (16, 1), True)),
@@ -60,6 +71,35 @@ class TestPointwiseIndexing(TestCase):
 
 class TestPointwiseKernel(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("name", ("isnan", "isinf", "rsub.Tensor", "add.Tensor"))
+    def test_output_dtype_admission_matches_native(
+        self, device: str, name: str
+    ) -> None:
+        from torch._native.ops.pointwise import overrides, table
+        from torch._native.registry import _resolve_overload
+
+        row = next(row for row in table.POINTWISE_DEF_TABLE if row.aten == name)
+        symbol = table.variant_aten_name(name, "out")
+        op = _resolve_overload("aten", symbol) if symbol is not None else None
+        if op is None:
+            self.fail(f"missing out overload for {name}")
+        inputs = [torch.ones(4, device=device)] * row.nin
+        with torch.backends.python_native.cutedsl.disabled():
+            result = getattr(torch, name.partition(".")[0])(*inputs)
+            wide = torch.full(result.shape, 7.0, dtype=torch.float64, device=device)
+            before = wide.clone()
+            try:
+                op(*inputs, out=torch.empty_like(wide))
+                allowed = True
+            except RuntimeError:
+                allowed = False
+        cond = overrides._make_cond(row, "out")
+        self.assertEqual(cond(*inputs, out=wide), allowed)
+        self.assertEqual(wide, before)
+        self.assertTrue(cond(*inputs, out=torch.empty_like(result)))
 
     @onlyCUDA
     @skipIfNoCuteDSL
