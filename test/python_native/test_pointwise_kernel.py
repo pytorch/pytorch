@@ -854,7 +854,11 @@ class TestPointwiseKernel(TestCase):
             load="direct",
         )
         with torch.backends.python_native.cutedsl.disabled():
-            self.assertEqual(actual, expected)
+            self.assertEqual(
+                actual,
+                expected,
+                msg=f"actual={actual.tolist()}, expected={expected.tolist()}",
+            )
 
     @onlyCUDA
     @skipIfNoCuteDSL
