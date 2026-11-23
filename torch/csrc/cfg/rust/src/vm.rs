@@ -505,11 +505,22 @@ impl Callees {
     /// Qualified names of the compiled functions that were measured to run
     /// faster in the interpreter and were left to it.
     pub fn demoted(&self) -> Vec<String> {
+        self.measured_as(TRIAL_DEMOTED)
+    }
+
+    /// Qualified names of the callees whose measurement against the
+    /// interpreter is in the phase in which each call of one is drawn to
+    /// run compiled or in the interpreter, with all it calls.
+    pub fn sampling(&self) -> Vec<String> {
+        self.measured_as(TRIAL_SAMPLING)
+    }
+
+    fn measured_as(&self, phase: u8) -> Vec<String> {
         let mut names: Vec<String> = self
             .entries
             .borrow()
             .values()
-            .filter(|c| c.compiled.settled.trial.get().phase == TRIAL_DEMOTED)
+            .filter(|c| c.compiled.settled.trial.get().phase == phase)
             .map(|c| unsafe {
                 let name = ffi::PyObject_GetAttrString(c.code.as_ptr(), c"co_qualname".as_ptr());
                 if name.is_null() {
