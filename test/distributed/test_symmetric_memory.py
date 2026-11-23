@@ -2477,6 +2477,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                 with self.assertRaisesRegex(ValueError, "expected"):
                     all_gather(A_q, A_scale[: A_scale.numel() // 2])
 
+                # Scale that is not e8m0.
+                with self.assertRaisesRegex(ValueError, "float8_e8m0fnu"):
+                    all_gather(A_q, A_scale.view(torch.uint8))
+
                 # Only the 32x4x4 layout can be gathered and sliced per rank.
                 mn_k4 = SwizzleType.SWIZZLE_MN_K4.value
                 with self.assertRaisesRegex(ValueError, "SWIZZLE_32_4_4"):

@@ -625,10 +625,13 @@ class _ScaleMode(Enum):
 _MX_ROW_TILE = 128
 
 
-def _is_mx_scaling(
+def _is_mx_compatible_scaling(
     scaling_type_a: int, swizzle_type_a: int, swizzle_type_b: int
 ) -> bool:
-    """Whether the scaled-matmul ops run MXFP8; validates its scale layouts."""
+    """Whether the scaling types select the MX path; validates the swizzles.
+
+    Operand dtypes are checked separately by ``_check_mxfp8_operand``.
+    """
     if ScalingType(scaling_type_a) != ScalingType.BlockWise1x32:
         return False
     swizzles = (SwizzleType(swizzle_type_a), SwizzleType(swizzle_type_b))
@@ -642,7 +645,7 @@ def _is_mx_scaling(
     return True
 
 
-def _check_mx_operand(
+def _check_mxfp8_operand(
     A: torch.Tensor, scale: torch.Tensor, dim: int, num_chunks: int
 ) -> None:
     """Validate an MXFP8 operand whose rows are split into `num_chunks` along `dim`."""
@@ -662,6 +665,8 @@ def _check_mx_operand(
         raise ValueError(
             f"MXFP8 async-TP requires float8_e4m3fn or float8_e5m2 data (got {A.dtype})"
         )
+    if scale.dtype != torch.float8_e8m0fnu:
+        raise ValueError(f"MXFP8 requires float8_e8m0fnu scales (got {scale.dtype})")
     if dim != 0:
         raise ValueError(
             f"MXFP8 requires gathering/scattering along dim 0 (got {dim}): other "
@@ -705,7 +710,7 @@ def _check_and_verify_fp8_all_gather_scale_mode(
         if list(scale.shape[:-1]) == full_shape[:-1]:
             return _ScaleMode.ROW_WISE_REPLICATED
     elif scaling_type == ScalingType.BlockWise1x32:
-        _check_mx_operand(shard, scale, gather_dim, num_chunks=1)
+        _check_mxfp8_operand(shard, scale, gather_dim, num_chunks=1)
         return _ScaleMode.MX_SWIZZLED
     raise ValueError(
         f"Invalid scale for fp8 all-gather with scaling type {scaling_type} "
@@ -1319,7 +1324,7 @@ def _fused_all_gather_scaled_matmul_fallback(
     use_fast_accum: list[bool],
 ) -> tuple[torch.Tensor, list[torch.Tensor]]:
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
-    if _is_mx_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b):
+    if _is_mx_compatible_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b):
         # fp8 (the operand dtype) is not a valid block-scaled output dtype.
         out_dtypes = [dt or torch.bfloat16 for dt in out_dtypes]
 
@@ -1439,7 +1444,7 @@ def _fused_all_gather_scaled_matmul(
     Otherwise A_shard needs to be copied once.
     """
     out_dtypes = _maybe_convert_scalar_types_to_dtypes(out_dtypes)
-    if _is_mx_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b):
+    if _is_mx_compatible_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b):
         # fp8 (the operand dtype) is not a valid block-scaled output dtype.
         out_dtypes = [dt or torch.bfloat16 for dt in out_dtypes]
 
@@ -1683,7 +1688,7 @@ def _fused_scaled_matmul_reduce_scatter(
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
-    if _is_mx_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b):
+    if _is_mx_compatible_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b):
         # fp8 (the operand dtype) is not a valid block-scaled output dtype.
         out_dtype = out_dtype or torch.bfloat16
     if _is_test_mode:
@@ -1750,7 +1755,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     out_dtype: torch.dtype | None = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
-    is_mx = _is_mx_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b)
+    is_mx = _is_mx_compatible_scaling(scaling_type_a, swizzle_type_a, swizzle_type_b)
     if is_mx:
         # fp8 (the operand dtype) is not a valid block-scaled output dtype.
         out_dtype = out_dtype or torch.bfloat16
@@ -1764,7 +1769,7 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
         A_scale = A_scale.flatten(0, -2).contiguous()
     elif is_mx:
         group_size = c10d._get_group_size_by_name(group_name)
-        _check_mx_operand(A, A_scale, scatter_dim_after_maybe_reshape, group_size)
+        _check_mxfp8_operand(A, A_scale, scatter_dim_after_maybe_reshape, group_size)
     elif A_scale.numel() != 1:
         raise ValueError(
             "Invalid A_scale shape "
@@ -1865,7 +1870,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     elif scaling_type_a == ScalingType.BlockWise1x32:
         # Each rank's slice of the swizzled scale is the scale of its rows; see
         # _MX_ROW_TILE.
-        _check_mx_operand(A, A_scale, scatter_dim_after_maybe_reshape, group.size())
+        _check_mxfp8_operand(A, A_scale, scatter_dim_after_maybe_reshape, group.size())
         A_scale_shards = list(A_scale.flatten().chunk(group.size()))
     else:
         raise ValueError(f"Unsupported scaling_type_a: {scaling_type_a}")
