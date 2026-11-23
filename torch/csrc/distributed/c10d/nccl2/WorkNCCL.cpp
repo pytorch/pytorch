@@ -190,7 +190,9 @@ void WorkNCCL::recordEnd() {
   }
 }
 
-bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
+bool WorkNCCL::State::setTerminalStatus(
+    WorkStatus terminal_status,
+    const std::optional<std::string>& message) {
   TORCH_INTERNAL_ASSERT(
       terminal_status == WorkStatus::COMPLETED ||
       terminal_status == WorkStatus::TIMEDOUT ||
@@ -209,8 +211,8 @@ bool WorkNCCL::State::setTerminalStatus(WorkStatus terminal_status) {
         "Watchdog caught collective operation timeout: NCCL operation "
         "timed out"));
   } else if (terminal_status == WorkStatus::ERROR) {
-    workException = std::make_exception_ptr(
-        C10_BUILD_ERROR(DistBackendError, "NCCL operation failed"));
+    workException = std::make_exception_ptr(C10_BUILD_ERROR(
+        DistBackendError, message.value_or("NCCL operation failed")));
   }
   workStatus.store(terminal_status, std::memory_order_release);
   return true;
@@ -465,8 +467,11 @@ bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
   }
 
   WorkStatus current = checkStatus(wait_timeout);
+  // A cancelled work is not a failure of the current comm, and its result
+  // callbacks run inside reconfigure(), which holds reconfigure_mutex_.
   if (state_->blockingWait &&
-      (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR)) {
+      (current == WorkStatus::TIMEDOUT || current == WorkStatus::ERROR) &&
+      !state_->cancelledByReconfigure) {
     state_->comm->handleBlockingWaitFailure(current, state_->reconfigureUuid);
   }
   if (state_->blockingWait) {

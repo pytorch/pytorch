@@ -18,6 +18,7 @@ from torch._dynamo.testing import (
     expectedFailureDynamic,
     rand_strided,
 )
+from torch._dynamo.utils import guard_failures
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
 from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import (
@@ -42,7 +43,11 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     preserves_device_selection,
 )
-from torch.testing._internal.common_utils import compare_equal_outs_and_grads
+from torch.testing._internal.common_utils import (
+    compare_equal_outs_and_grads,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -67,6 +72,7 @@ lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
 
 
+@instantiate_parametrized_tests
 class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
@@ -1734,6 +1740,83 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                     self.assertEqual(opt_out, ref_out)
                     self.assertEqual(base, base_ref)
                     self.assertEqual(compiler.frame_count, 2)
+
+    def test_compute_overlapping_tensor_groups_contiguous_ranges(self):
+        base = torch.empty(32)
+        # Shuffled ranges include a chain of overlaps, nested ranges and adjacency.
+        views = [
+            base[18:24],
+            base[8:12],
+            base[24:26],
+            base[:10],
+            base[19:20],
+            base[11:15],
+            base[15:18],
+            base[2:3],
+            base[:2],
+        ]
+        groups = torch._C._dynamo.guards.compute_overlapping_tensor_groups(
+            views, symbolic=False
+        )
+        self.assertEqual(groups, [[0, 4], [1, 3, 5, 7, 8]])
+
+    def test_compute_overlapping_tensor_groups_strided_and_empty(self):
+        left = torch.empty(44)
+        right = torch.empty(32)
+        empty = right[:0]
+        strided_bucket = [left[:12:2], left[10:11], *left[12:].split(4)]
+        empty_bucket = [empty, right[:0], empty, *right.split(4)]
+        first_empty = len(strided_bucket)
+        groups = torch._C._dynamo.guards.compute_overlapping_tensor_groups(
+            strided_bucket + empty_bucket, symbolic=False
+        )
+        self.assertEqual(groups, [[0, 1], [first_empty, first_empty + 2]])
+
+    @parametrize("tiled", [False, True])
+    @torch.no_grad()
+    def test_foreach_input_mutation_storage_overlap_recompiles(self, tiled):
+        def step(params, buffers):
+            torch._foreach_add_(params, buffers)
+
+        def make_inputs(reverse, overlap):
+            storage = torch.arange(72, dtype=torch.float64)
+            if tiled:
+                grid = storage.view(6, 12)
+                buffers = tuple(
+                    grid[row : row + 2, col : col + 2]
+                    for row in range(0, 6, 2)
+                    for col in range(0, 12, 4)
+                )
+            else:
+                buffers = tuple(slot[:4].view(2, 2) for slot in storage.split(8))
+            if reverse:
+                buffers = buffers[::-1]
+            params = [
+                torch.empty_strided(
+                    buffer.shape, buffer.stride(), dtype=storage.dtype
+                ).zero_()
+                for buffer in buffers
+            ]
+            columns = torch.zeros(2, 4, dtype=storage.dtype)
+            params[1], params[2] = columns[:, :2], columns[:, 2:]
+            if overlap:
+                params[0] = buffers[0].view_as(buffers[0])
+            return tuple(params), buffers, storage
+
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(step, backend=counter, fullgraph=True, dynamic=False)
+        for reverse, overlap in ((False, False), (True, False), (True, True)):
+            eager = make_inputs(reverse, overlap)
+            actual = make_inputs(reverse, overlap)
+            for _ in range(2):
+                step(*eager[:2])
+                compiled(*actual[:2])
+                self.assertEqual(actual, eager)
+                self.assertEqual(counter.frame_count, 2 if overlap else 1)
+
+        failures = guard_failures[step.__code__]
+        self.assertEqual(len(failures), 1)
+        self.assertRegex(failures[0], r"___check_storage_overlap_partition\(.*, \(\)\)")
 
     def test_input_mutation_storage_overlap_full_view_recompiles(self):
         def f(field, indices, gain, workspace):
