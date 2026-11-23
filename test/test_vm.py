@@ -4900,6 +4900,28 @@ class TestVmRegions(TestCase):
 
     hw_classification = HardwareClassification.GENERIC
 
+    def test_what_types_and_checks_say(self):
+        interval = torch.vm.Interval(16, 32)
+        self.assertEqual(interval.samples(3), [16, 24, 32])
+        self.assertEqual((20 in interval, 33 in interval), (True, False))
+        t = torch.vm.TensorType(torch.float32, torch.device("cpu"), False, (interval,))
+        self.assertEqual(
+            (repr(t), t.nbytes("lo"), t.nbytes()), ("float32[16..32]", 64, 128)
+        )
+        self.assertEqual(torch.vm.materialize(t, dim0=24).shape, (24,))
+        # The type as guards: what a pass that specializes to it adds.
+        checks = t.as_checks()
+        dtype, device = torch.vm.Dtype(torch.float32), torch.vm.Device(t.device)
+        self.assertEqual(checks, [dtype, device, torch.vm.Dim(0, interval)])
+        self.assertTrue(all(check.holds(torch.zeros(20)) for check in checks))
+        self.assertFalse(all(check.holds(torch.zeros(40)) for check in checks))
+        x = torch.zeros(4, 6)[:, ::2]
+        self.assertTrue(torch.vm.Dim(-1, {3}).holds(x))
+        self.assertTrue(torch.vm.Stride(-1, {2}).holds(x))
+        self.assertFalse(torch.vm.Contiguous().holds(x))
+        self.assertTrue(torch.vm.Dtype(torch.float32).holds(x))
+        self.assertTrue(torch.vm.Device("cpu").holds(x))
+
     def test_numbers_of_a_call(self):
         runtime = importlib.import_module("torch._cfg_rs")
         torch.vm(region_small)
