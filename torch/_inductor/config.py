@@ -1927,11 +1927,12 @@ avoid_32bit_indexing_guards: bool = False
 # 32-bit and 64-bit indexing and have the wrapper launch the 32-bit kernel whenever every
 # size fits, instead of guarding on the sizes. Costs a second compile of each covered
 # kernel (of every variant, with triton.multi_kernel).
-# So far covers Triton reductions generated through the main SIMD path. Everything else
-# keeps the default behavior (see avoid_32bit_indexing_guards): other kernel types,
-# mix-order / nested / native-matmul-epilogue reductions, templates, user Triton kernels,
-# the cpp wrapper and AOTInductor, the FX wrapper, and triton.autotune_at_compile_time.
-# Skips are logged at debug level (TORCH_LOGS="+inductor").
+# So far covers Triton pointwise and reduction kernels generated through the main SIMD
+# path. Everything else keeps the default behavior (see avoid_32bit_indexing_guards):
+# combo / foreach kernels, mix-order / nested / native-matmul-epilogue reductions,
+# templates, user Triton kernels, the cpp wrapper and AOTInductor, the FX wrapper,
+# triton.autotune_at_compile_time and assume_32bit_indexing. Skips are logged at debug
+# level (TORCH_LOGS="+inductor").
 dual_index_dtype: bool = True
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
