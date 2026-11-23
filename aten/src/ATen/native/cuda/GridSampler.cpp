@@ -47,14 +47,52 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
                               const Tensor& grid, int64_t interpolation_mode, int64_t padding_mode,
                               bool align_corners, std::array<bool, 2> output_mask) {
   auto input_requires_grad = output_mask[0];
+#ifdef USE_ROCM
+  // Decide the kernel once, so the allocation and the launch agree. The
+  // channel-parallel launcher below receives that decision's buffer and does
+  // not repeat it.
+  const auto dispatch =
+      rocm_grid_sampler_2d_backward_dispatch(
+          input, grid, interpolation_mode, input_requires_grad);
+  // The channel-parallel kernel coalesces its atomics only into a
+  // channels-last gradient. The returned gradient stays contiguous on every
+  // architecture, because Meta/FakeTensor strides cannot depend on the GPU
+  // architecture, so eligible calls accumulate into a channels-last scratch
+  // and copy it out. The scratch is a transient second grad_input-sized
+  // buffer, which raises the call's peak memory.
+  Tensor grad_input_scratch;
+#endif
   Tensor grad_input = ([&]() {
     if (input_requires_grad) {
+#ifdef USE_ROCM
+      if (dispatch.scratch) {
+        grad_input_scratch = at::zeros_like(input, at::MemoryFormat::ChannelsLast);
+        // Fully overwritten by the copy below, so it needs no zeroing.
+        return at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      }
+#endif
       return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     } else {
       return Tensor();
     }
   })();
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+#ifdef USE_ROCM
+  if (dispatch.channel_lane) {
+    const Tensor& grad_input_arg =
+        dispatch.scratch ? grad_input_scratch : grad_input;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !dispatch.scratch ||
+        grad_input_arg.is_contiguous(at::MemoryFormat::ChannelsLast));
+    launch_grid_sampler_2d_backward_channel_lane(
+        grad_input_arg, grad_grid, grad_output, input,
+        grid, interpolation_mode, padding_mode, align_corners, output_mask);
+    if (dispatch.scratch) {
+      grad_input.copy_(grad_input_scratch);
+    }
+    return std::make_tuple(std::move(grad_input), std::move(grad_grid));
+  }
+#endif
   launch_grid_sampler_2d_backward_kernel(
       grad_input, grad_grid, grad_output, input,
       grid, interpolation_mode, padding_mode, align_corners, output_mask);
