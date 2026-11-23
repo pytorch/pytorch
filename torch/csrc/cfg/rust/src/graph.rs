@@ -486,7 +486,8 @@ pub enum GraphState {
     /// As `Built`: exporting it failed, for this reason.
     GivenUp(String),
     /// The path from its first operation has this many operations, fewer
-    /// than a graph has.
+    /// than a graph has; or the graph starts behind a call and its path
+    /// is that of a graph that starts further on (`GraphSite::twin`).
     Small(usize),
 }
 
@@ -544,6 +545,9 @@ pub fn timed() -> bool {
 /// How many times a graph is taken down again because its path ended at a
 /// block that had not been profiled.
 const MAX_PROVISIONAL: u32 = 3;
+/// How often a path of a graph is taken down again to land in a new
+/// version of a block.
+const MAX_MOVES: u32 = 8;
 
 /// How many operations with several results a graph ends its paths in front
 /// of because what they gave was needed whole (`GraphSite::shunned`).
@@ -584,6 +588,9 @@ pub struct GraphSite {
     /// graph has given way (`gave_way`).
     turned: AtomicU32,
     provisional: AtomicU32,
+    /// How often a path was taken down again to land in a new version of
+    /// a block (`retakes`).
+    moves: AtomicU32,
     /// How many times it was handed to the exporter, and how many calls
     /// ran what was made of it and how many ran its instructions.
     pub exports: AtomicU64,
@@ -634,6 +641,7 @@ impl GraphSite {
             unsure: AtomicU32::new(0),
             turned: AtomicU32::new(0),
             provisional: AtomicU32::new(0),
+            moves: AtomicU32::new(0),
             exports: AtomicU64::new(0),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
@@ -752,6 +760,28 @@ impl GraphSite {
         self.turned.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// For a graph that starts behind a call (`Graphs::build`): the graph
+    /// among `over`, those its path went through, that has a path with
+    /// the same operations up to the same place. That one was there
+    /// first and has what was made of the operations: this graph stands
+    /// back for it (`stand_back`).
+    pub fn twin(&self, path: &Path, over: &[Arc<GraphSite>]) -> bool {
+        let behind_a_call = self.entry && self.root != (0, 0);
+        behind_a_call
+            && !path.provisional
+            && self.variants.borrow().is_empty()
+            && over.iter().any(|other| {
+                let theirs = other.variants.borrow();
+                let known = matches!(*other.state.borrow(), GraphState::Built | GraphState::Waiting);
+                known && theirs.iter().any(|had| !had.provisional && had.land == path.land && had.operators == path.operators)
+            })
+    }
+
+    /// The graph is none: the graphs that start further on are their own.
+    pub fn stand_back(&self, count: usize) {
+        *self.state.borrow_mut() = GraphState::Small(count);
+    }
+
     /// Whether the graph has given way (`turned_down`).
     pub fn gave_way(&self) -> bool {
         self.turned.load(Ordering::Relaxed) >= MAX_TURNED
@@ -835,6 +865,13 @@ impl GraphSite {
         }
         let path = paths.remove(at);
         paths.insert(0, path);
+    }
+
+    /// Whether a path of the graph may be dropped and taken down again at
+    /// the next call, so that it lands in a new version of a block: a
+    /// few times per graph. Counts the time it says yes.
+    pub fn retakes(&self) -> bool {
+        self.moves.fetch_add(1, Ordering::Relaxed) < MAX_MOVES
     }
 
     /// Whether the graph is being taken down again because its path ended
@@ -4698,6 +4735,19 @@ impl Graphs {
             let run = seeds.first().map_or(0, |(_, seed, _)| seed.land.1);
             seeds.insert(0, (0, Path::empty((0, 0), (0, run)), true));
         }
+        // And one behind each instruction that a path of the function
+        // ended in front of, where no graph starts there anyway.
+        let wanted = cx.cf.state.borrow().blocks[unit.block].wanted.clone();
+        for origin in wanted {
+            let Some(at) = origins.iter().position(|other| *other == origin) else {
+                continue;
+            };
+            if !seeds.iter().any(|(first, ..)| *first == at) {
+                let place = (unit.block, origin as usize);
+                seeds.push((at, Path::empty(place, place), true));
+            }
+        }
+        seeds.sort_by_key(|(first, ..)| *first);
         for (first, seed, entry) in seeds {
             let root = seed.root.1 as u32;
             let mut state = cx.cf.state.borrow_mut();
@@ -5571,6 +5621,9 @@ pub struct Trace {
     /// of the path changed what kind of tensor one of its tensors is): the
     /// path is taken down again at the next call.
     pub again: bool,
+    /// The graphs of the first function whose first instruction the trace
+    /// went through: they are part of the graph the trace is of.
+    pub over: Vec<Arc<GraphSite>>,
     /// An operation of the path writes to a tensor from outside it (or
     /// draws random numbers): from there on nothing may be taken down
     /// that can fail behind the callable, since the write cannot be taken
@@ -5683,6 +5736,7 @@ impl Trace {
             classes: Vec::new(),
             drains: Vec::new(),
             again: false,
+            over: Vec::new(),
             abandoned: None,
             writes: false,
             fallible: false,

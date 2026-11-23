@@ -110,6 +110,9 @@ pub struct BlockState {
     /// its first operation stands for: the versions of the block share
     /// them, so what was recorded for one is there for the next.
     pub graphs: Vec<(u32, Arc<GraphSite>)>,
+    /// The generic instructions behind those that a path of the function
+    /// ended in front of: a graph may start at each (`Compiled::record`).
+    pub wanted: Vec<u32>,
 }
 
 pub struct State {
@@ -1403,6 +1406,8 @@ const MAX_PATH_STEPS: usize = 200_000;
 /// calls of one function.
 const MAX_PATH_DEPTH: usize = 48;
 const MAX_PATH_AGAIN: usize = 8;
+/// How many graphs a block may get that start behind where a path ended.
+const MAX_WANTED: usize = 4;
 
 const NOT_PROFILED: &str = "a block that was not profiled yet";
 
@@ -1970,6 +1975,7 @@ impl Compiled {
                 rejected: None,
                 note: None,
                 graphs: Vec::new(),
+                wanted: Vec::new(),
             })
             .collect();
         let state = State {
@@ -6299,6 +6305,7 @@ impl Compiled {
             for other in code.graphs.iter().filter(|other| other.root == (block, origin as usize)) {
                 if !Arc::ptr_eq(other, site) {
                     *other.within.borrow_mut() = Arc::downgrade(site);
+                    t.over.push(other.clone());
                 }
             }
         } else {
@@ -9543,6 +9550,44 @@ impl Compiled {
             None if left => (went.block, went.code, went.pc - 1, false, ends),
             None => (went.block, went.code, if went.pc == AFRESH { 0 } else { went.pc }, went.pc == AFRESH, ends),
         };
+        // A graph may start behind a call that this path went into and
+        // was cut back in front of (the function that is called does what
+        // no path goes through): what the function does from there on is
+        // otherwise in a graph only if an operation of the function itself
+        // comes before its next call, since graphs start at those.
+        // The block gets a version that enters such a graph, and this
+        // path is taken down again at the next call, so that it lands in
+        // that version.
+        let behind = match cut {
+            Some((_, false)) if !(afresh || t.provisional || t.again) => {
+                (&(*code).origins).get(pc + 1..).and_then(|rest| rest.iter().find(|o| **o != NONE)).copied()
+            }
+            _ => None,
+        };
+        let mut moved = false;
+        if let Some(origin) = behind.filter(|origin| !(&(*code).graphs).iter().any(|other| other.root == (b, *origin as usize))) {
+            let (known, room, current) = {
+                let st = self.state.borrow();
+                let bs = &st.blocks[b];
+                let runs = |version: &Arc<BlockCode>| {
+                    Arc::as_ptr(version) == code || version.entering.as_ref().is_some_and(|copy| Arc::as_ptr(copy) == code)
+                };
+                // The code of a version of the block, or the block's own
+                // code where specializing it changed nothing (with a
+                // graph to enter, it changes something).
+                let plain = Arc::as_ptr(&self.generic[b]) == code && bs.versions.is_empty() && bs.profile_runs > 0 && bs.respec_left == 0;
+                (bs.wanted.contains(&origin), bs.wanted.len() < MAX_WANTED, bs.versions.iter().any(runs) || plain)
+            };
+            if !known && room && current {
+                self.state.borrow_mut().blocks[b].wanted.push(origin);
+                self.respecialize(b);
+            }
+            let entered = |version: &Arc<BlockCode>| version.graphs.iter().any(|other| other.root == (b, origin as usize));
+            moved = self.state.borrow().blocks[b].versions.iter().any(entered) && site.retakes();
+            if graph::debug() {
+                eprintln!("torch.vm graph {}: a graph may start behind where its path ends, at ({}, {}): the block is specialized again {}, the path is taken down again {}", site.name, b, origin, !known && room && current, moved);
+            }
+        }
         // A call that was not gone into because the function it enters is
         // still measured against the interpreter is gone into later.
         let afresh_path = (afresh && ends == NOT_PROFILED) || t.provisional;
@@ -9598,6 +9643,11 @@ impl Compiled {
         if whole.is_some_and(|place| site.shun(place, "what an operation with several results gives is used whole")) || t.again {
             return PathEnd::Landed(landing);
         }
+        if moved {
+            // Taken down again at the next call, in the version of the
+            // block that enters the graph behind where this path ends.
+            return PathEnd::Landed(landing);
+        }
         // Whether a tensor the path takes needs a gradient, with gradients
         // enabled: the engine derives the backward of such a call.
         let graded = world.0 & 1 != 0
@@ -9613,6 +9663,16 @@ impl Compiled {
             // stand for goes further than what is only reported: through
             // an operation that draws random numbers, say).
             site.needs_gradients();
+            return PathEnd::Landed(landing);
+        }
+        if site.twin(&path, &t.over) {
+            // The operations behind the call are a graph already, from the
+            // first of them on: a second one from the call on would be the
+            // same operations made into a callable once more.
+            if graph::debug() {
+                eprintln!("torch.vm graph {}: its path is that of a graph that starts further on, which stays the graph", site.name);
+            }
+            site.stand_back(path.operators.len());
             return PathEnd::Landed(landing);
         }
         let finished = path.provisional || path.operators.len() < site.min_ops || !site.exports();

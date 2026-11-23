@@ -553,7 +553,7 @@ same, exported  # (True, [9]): the model, once
 handle = net.a.register_forward_hook(lambda module, args, output: output * 2)
 for _ in range(4):
     same = torch.equal(g(v), net(v))
-same, exported  # (True, [9, 4, 4]): with the hook the path of the model is not for the call
+same, exported  # (True, [9, 4, 4, 5]): with the hook the path of the model is not for the call
 handle.remove()
 whole = [found for found in torch.vm.regions(g) if found["where"].startswith("Net.forward")][0]
 hits = whole["hits"]
@@ -2329,6 +2329,62 @@ a call that hands arguments over by name, of one whose arguments or whose
 cache's keys hash or compare in Python, and of one into a cache of more
 than 256 entries.
 
+### Graphs that start behind a call
+
+Graphs start at the first instruction of a function and at the first
+operation of each run of operations of the function itself. A path that
+goes into a call and finds there what no path goes through (a raise that is
+caught, a branch on what a tensor holds) is cut back to in front of the
+call. Behind such a call a graph starts as well, at the next instruction of
+the function, also where the function has no operation of its own from
+there on and only calls functions that have some:
+
+```python
+CAUGHT = []
+
+
+def catches(n):
+    try:
+        raise KeyError(n)
+    except KeyError:
+        CAUGHT.append(n)
+        return 2.0
+
+
+def one_layer(h, scale):
+    return torch.tanh(h * scale)
+
+
+def goes_on(x, at):
+    h = (torch.relu(x) + 1) * 2 - 1
+    scale = catches(at % 3)
+    for _ in range(3):
+        h = one_layer(h, scale)
+    return one_layer(h, 0.5)
+
+
+g = torch.vm(goes_on, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+x = torch.randn(3, 4)
+same = all([torch.equal(g(x, at), goes_on(x, at)) for at in range(40)])
+ran = [f for f in torch.vm.regions(g) if "ops" in f and "within" not in f and f["hits"]]
+same, sorted((f["ops"], f["why"]) for f in ran)
+# (True, [(4, 'in catches: a call that runs no kernel'), (8, 'the function returns')])
+```
+
+The block the call is in is specialized once more for the new graph, and the
+path in front of the call is taken down once more so that it lands in that
+code: a function with such a call settles a call or two later than without.
+Behind an instruction of the function itself that ends a path nothing new
+starts, since the next run of operations has its graph already; and where
+the function goes on behind the call with an operation of its own, the
+graph from that operation is the one, and none starts behind the call that
+would have the same operations. This is
+what makes the layers of a transformer one graph where the model calls a
+helper between its embeddings and its layers ("Models"). The model with a
+forward hook on its first block ("Paths across calls") is such a function
+too: behind the call of the hooked block a graph of 5 operations starts, the
+second block and the head, and is exported after the blocks' own graphs.
+
 ### Methods read off a tensor, and what a call spreads
 
 `y.to(device)` is a call of a method by its name. Where the code reads the
@@ -3025,15 +3081,18 @@ profiler counts an operation of a graph as less than one):
 | mobilenetv2_100 (timm) | 1 | 1 | 152 of 152 |
 | adv_inception_v3 (timm) | 1 | 1 | 314 of 314 |
 | deit_base_distilled_patch16_224 (timm) | 1 | 1 | 233 of 233 |
-| DistillGPT2 (HuggingFace) | 4 | 9 | 251 of 247 |
-| hf_DistilBert (TorchBench) | 3 | 13 | 132 of 136 |
+| DistillGPT2 (HuggingFace) | 4 | 4 | 254 of 247 |
+| hf_DistilBert (TorchBench) | 4 | 14 | 136 of 136 |
 | MobileBertForMaskedLM (HuggingFace) | 3 | 3 | 1295 of 1250 |
-| whisper-tiny (HuggingFace) | 5 | 22 | 342 of 385 |
+| whisper-tiny (HuggingFace) | 5 | 22 | 346 of 385 |
 
 The outputs are those of eager mode bit for bit. A timm model and the vision
 transformer are one graph, the whole forward. A transformer language model
 has all or nearly all of its operations in graphs, but in several per call:
-one per layer or per stack of layers, and a few around them. What their
+one per layer or per stack of layers, and a few around them. The six layers
+of DistillGPT2 are one graph of 231 operations, with the dropout in front of
+them and the last normalization behind: a graph starts behind the call of
+the helper that makes its mask ("Graphs that start behind a call"). What their
 paths end at is `getattr(config, name, default)` where the configuration
 raises for a name it does not have (at the start of every model, where the
 attention mask is made), a branch on what the mask holds, the objects the
@@ -3056,8 +3115,9 @@ build of torch they were counted with, which has no fused attention
 kernels: the attention comes down to `bmm` there, whose CUDA kernel is
 chosen by the router of the operator, and the frames of the router are the
 kernel's ("What a call names with a dict"). Qwen3-0.6B (HuggingFace) was
-counted on a GPU only: 4 graphs that run 31 times in a call, with 2097 of
-the about 2217 operations of a call in them.
+counted on a GPU only: 3 graphs that run once each in a call, with 2097 of
+the about 2217 operations of a call in them. Its 28 layers are one graph of
+2080 operations, which starts behind a call as well.
 
 The outputs are eager's bit for bit there as well. With a GPU present
 `torch.cuda.is_current_stream_capturing()`, which the mask code of a
@@ -3119,6 +3179,11 @@ What graphs do not do at this stage:
   tensor alive: who else holds the nodes of a history cannot be asked. That
   is a graph which starts in the middle of a function, takes a tensor that
   the operations in front of it gave, and lets go of the variable it was in.
+  In a training step of DistillGPT2 the graph that starts behind the call
+  of the attention in each layer ("Graphs that start behind a call") is one:
+  it takes what the attention gave, and gives way. Counted without this rule
+  the step has 6 graphs that run 21 times, with 227 of its operations in
+  them, where it has the 5 that "Models" counts.
 - A path lets go of an object from outside it only where the end of the
   object cannot run Python code, or the object stays alive. Whether it
   stays alive is looked at in front of what stands for the graph: for a
