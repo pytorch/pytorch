@@ -1688,7 +1688,8 @@ eager's. With a pass over graphs in the list it is an operation of the
 graph, in the order of the function. A pass that returns the graph has it
 run on the kernels of eager mode, so with the same seed the numbers are
 eager's too, and so are those of `AOTAutograd()`, which runs the kernel of
-the draw as it is. What `Inductor()` makes of a dropout draws other numbers.
+the draw as it is. What `Inductor()` makes of a draw (of a dropout, of
+`torch.rand_like`, of `torch.bernoulli`) draws other numbers.
 `torch.vm.is_exact` is false for every list with a compiler in it:
 
 ```python
@@ -1993,8 +1994,8 @@ function, and the path checks that what it returned is a bool: for anything
 else `isinstance` gives whether it is true, as the interpreter does, and the
 path ends in front of the call. A C function
 that is called with what the code spreads (`torch.add(*pair)`) is an
-operation where no keyword is spread ("Methods read off a tensor, and what a
-call spreads" has what may be spread):
+operation ("Methods read off a tensor, and what a call spreads" has what may
+be spread, "What a call names with a dict" what `**` may hand over):
 
 ```python
 class Meta(type):
@@ -2168,6 +2169,53 @@ Python code. On a GPU that is not so for `bmm`, and for what comes down to
 it (`matmul` of two stacks of matrices), whose CUDA kernel is entered
 through a Python function (`torch._native`): a path ends in front of such a
 call of them, where a call that is written out goes on.
+
+### What a call names with a dict, and what gives back what it was handed
+
+A C function that is called with `**` is an operation where the path built
+the dict under names: the call with those names. An operator that draws
+random numbers only at a rate (`scaled_dot_product_attention` with its
+`dropout_p`) draws nothing at a rate of zero and is an operation like any
+other, with the rate checked at every call; at another rate it is one under
+the rule of "Writes", as every operation that only draws now is, whether it
+is a call site or not. A call with `**` is an operation under the condition
+of one with `*`, that the operator it runs enters no Python code: on a GPU
+the attention comes down to `bmm` where torch is built without the fused
+attention kernels, and a path then ends in front of a call of it with `**`.
+`contiguous` of a tensor that is contiguous runs no
+kernel and gives the tensor back; it is the operation all the same, which
+copies where the tensor of another call is laid out otherwise. A tuple that
+a function gives back and its caller unpacks is the values it was made of,
+so a tensor that comes back next to something else is still the operation
+that gave it, and a method of a tensor that is written in Python
+(`Tensor.split`) can be read off such a tensor and called later:
+
+```python
+def gives_two(y, **kwargs):
+    left, right = y.split(2, dim=-1)
+    return (left * right).transpose(0, 1).contiguous(), None
+
+
+def attends(q, weight):
+    y = (q.sin() + 1).cos()
+    rate = {"dropout_p": 0.0}
+    out = torch.nn.functional.scaled_dot_product_attention(y, y, y, **rate)
+    out, nothing = gives_two(out, scale=None)
+    return torch.nn.functional.linear(*(out, weight), **{"bias": None}).tanh()
+
+
+g = torch.vm(attends, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+q, weight = torch.randn(2, 2, 5, 4), torch.randn(3, 2)
+for _ in range(6):
+    same = torch.equal(g(q, weight), attends(q, weight))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 10, 'the function returns')
+```
+
+A list or a tuple that the path put together of sizes of what the graph
+computes and of numbers from in front of it (`(*x.shape[:-1], -1,
+self.heads)`) is the same in every call where the path checks those numbers,
+which it does when an operation takes such a sequence.
 
 ### The order of the list
 
