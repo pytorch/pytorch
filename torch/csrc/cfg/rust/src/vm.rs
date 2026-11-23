@@ -4980,6 +4980,11 @@ impl Compiled {
             // What changes a list, or draws on an iterator, does so to one
             // the path made: `record` takes down no other.
             Op::ListAppend(..) | Op::IterNext(_) => true,
+            // A cell is made, and one that is a cell is put into, in C.
+            Op::MakeCell(_) => true,
+            Op::CellSet(cell, value) => {
+                *value != UNDEF && !at(*cell).is_null() && ffi::Py_TYPE(at(*cell)) == std::ptr::addr_of_mut!(pyffi::PyCell_Type)
+            }
             Op::ListToTuple(l) => !at(*l).is_null() && ffi::PyList_CheckExact(at(*l)) != 0,
             // Onto a list, or into a dict, that the path made.
             Op::ListExtend(l, more) => {
@@ -6364,6 +6369,27 @@ impl Compiled {
                 }
             }
         }
+        if let Op::CellGet(cell, _) = &inst.op {
+            // What is read of a cell the path made is what the path put
+            // into it last.
+            let own = t.mapped(*cell);
+            if own != NONE && t.defs[own as usize].made {
+                let held = t.body.iter().rev().find_map(|other| match &other.op {
+                    Op::CellSet(target, value) if *target == own => Some(*value),
+                    Op::MakeCell(value) if other.dst == own => Some(*value),
+                    _ => None,
+                });
+                if let Some(value) = held.filter(|value| *value != UNDEF && *value != NONE) {
+                    let Ok(read) = self.exec_op(regs, &inst.op) else {
+                        return Taken::Raised;
+                    };
+                    capi::release(std::mem::replace(&mut regs[inst.dst as usize], read));
+                    t.rename(inst.dst, value);
+                    kill(t, regs);
+                    return Taken::Went;
+                }
+            }
+        }
         if let Op::TupleGet(unpacked, at) = &inst.op {
             // What is unpacked of a tuple or a list the path built is what
             // it was built of.
@@ -6499,6 +6525,14 @@ impl Compiled {
                 makes = true;
                 Some(Kind::Pure)
             }
+            // The cell of a variable that an inner function could take:
+            // the path's own, and what is put into it is what is read of
+            // it, for as long as no function is made that has it.
+            Op::MakeCell(_) => {
+                makes = true;
+                Some(Kind::Pure)
+            }
+            Op::CellSet(cell, value) => (made(t, *cell) && *value != UNDEF).then_some(Kind::Residual),
             Op::ListAppend(target, _)
             | Op::MapAdd(target, ..)
             | Op::IterNext(target)

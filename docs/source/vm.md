@@ -555,9 +555,9 @@ same, whole["hits"] - hits  # (True, 3): and without it, it is again
 
 ### What a function makes
 
-A list, a dict, an iterator: what the instructions of a path make between
-its operations is the path's own. One model says what a path does with such
-a thing.
+A list, a dict, an iterator, the cell of a variable that an inner function
+shares: what the instructions of a path make between its operations is the
+path's own. One model says what a path does with such a thing.
 
 **Which values are the thing.** A thing is known by the instruction that
 made it. Other values of the function may be that thing, or hold it: an item
@@ -575,11 +575,12 @@ to go over them: the iterator, the `enumerate`, a list or the `**kwargs` of
 a call built of such objects.
 
 **What runs.** What changes a thing (an append, `[*a, b]`, an entry of a
-dict it builds, the next item of an iterator) runs in a run of the path
-whenever anything that runs takes the thing, or what may be it or hold it,
-in front of the change or behind it. It is left out only together with the
-thing. A list that the function stores into an object and appends to
-afterwards is held there by reference, and has the item.
+dict it builds, a variable that an inner function shares being bound, the
+next item of an iterator) runs in a run of the path whenever anything that
+runs takes the thing, or what may be it or hold it, in front of the change
+or behind it. It is left out only together with the thing. A list that the
+function stores into an object and appends to afterwards is held there by
+reference, and has the item.
 
 **On which side of the graph.** The instructions that take nothing the graph
 gives run in front of what stands for the graph, the others behind it
@@ -2267,6 +2268,42 @@ for _ in range(6):
 same, found["ops"], found["why"]  # (True, 7, 'the function returns')
 settings.hidden = 3.0
 torch.equal(g(x, settings), reads_settings(x, settings))  # True: what the function reads is read at every call
+```
+
+### Variables an inner function could take
+
+A function with a variable that an inner function could take (a nested
+function, a lambda, a generator expression) keeps it in a cell, which it
+makes when it is entered, whether or not the inner function is ever made.
+Such a cell is the path's own: making it, storing into it and reading it
+are instructions of a path, and a read is what the path put into it last,
+so a tensor that goes through a cell is still the operation that gave it.
+Making the inner function ends the path in front of it.
+
+```python
+def adds_up(y, scale, more):
+    total = y * scale
+    if more:
+
+        def bump():
+            nonlocal total
+            total = total + 1
+
+        bump()
+    return total + scale
+
+
+def has_cells(x, more):
+    y = (x.sin() + 1).cos()
+    return (adds_up(y, 2.0, more) * 2).tanh().exp()
+
+
+g = torch.vm(has_cells, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(x, False), has_cells(x, False))
+same, [(found["ops"], found["why"]) for found in torch.vm.regions(g) if "ops" in found]
+# (True, [(8, 'the function returns')])
+torch.equal(g(x, True), has_cells(x, True))  # True: where the inner function is made, the instructions make it
 ```
 
 ### The order of the list

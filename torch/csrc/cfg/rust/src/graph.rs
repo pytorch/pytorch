@@ -4539,6 +4539,8 @@ pub fn infallible(op: &Op) -> bool {
             | Op::BuildList(_)
             | Op::BuildSlice(..)
             | Op::ListAppend(..)
+            | Op::MakeCell(_)
+            | Op::CellSet(..)
             | Op::TupleGet(..)
             | Op::IsNone(..)
             | Op::Is(..)
@@ -4563,12 +4565,12 @@ fn idle(op: &Op) -> bool {
 /// Whether a change of something the path made can be left out of a run
 /// together with the thing: like every instruction that is left out
 /// (`idle`), only one that cannot fail and runs no Python code whatever it
-/// is given. An append is such. An entry that is put into a dict is one
-/// only under a key that is the same at every call (a constant): any other
-/// key may be one that cannot be hashed at another call, or that is hashed
-/// in Python. What goes over a value from outside the path to extend a list
-/// or to fill a dict is none. `own` says whether the path built or made a
-/// value.
+/// is given. An append and a variable that is bound are such. An entry that
+/// is put into a dict is one only under a key that is the same at every
+/// call (a constant): any other key may be one that cannot be hashed at
+/// another call, or that is hashed in Python. What goes over a value from
+/// outside the path to extend a list or to fill a dict is none. `own` says
+/// whether the path built or made a value.
 fn leaves_quietly(op: &Op, defs: &[Def], own: impl Fn(PathValue) -> bool) -> bool {
     match op {
         Op::MapAdd(_, key, _) => defs[*key as usize].fixed,
@@ -5262,19 +5264,19 @@ pub struct Trace {
     pub pins: Vec<(PathValue, PyObj, bool)>,
 }
 
-/// The things a path made (a list, a dict, an iterator) and the values of
-/// the path that may be one of them or may hold one, at this call or at
-/// another, in families: two things are of one family once one may hold
-/// the other, or one value may be or hold both. A value can be a thing, or
-/// hold one, in four ways only: an instruction of the path made it; it was
-/// taken out of a value of a family in which something holds a thing (an
-/// item, what an iterator gives); it is an attribute of one (a method
-/// bound to it); or an instruction that is no operation of the graph was
-/// handed one and may give it back or keep it (a call, a tuple that is
-/// built). What comes from in front of the path, and what is read of an
-/// object from outside, is none: nothing of the path's is stored there
-/// before the path lands. Kept as the trace goes, so a value is what it
-/// may be where its instruction stands.
+/// The things a path made (a list, a dict, an iterator, a cell) and the
+/// values of the path that may be one of them or may hold one, at this
+/// call or at another, in families: two things are of one family once one
+/// may hold the other, or one value may be or hold both. A value can be a
+/// thing, or hold one, in four ways only: an instruction of the path made
+/// it; it was taken out of a value of a family in which something holds a
+/// thing (an item, what an iterator gives, what a cell holds); it is an
+/// attribute of one (a method bound to it); or an instruction that is no
+/// operation of the graph was handed one and may give it back or keep it
+/// (a call, a tuple that is built). What comes from in front of the path,
+/// and what is read of an object from outside, is none: nothing of the
+/// path's is stored there before the path lands. Kept as the trace goes,
+/// so a value is what it may be where its instruction stands.
 ///
 /// A family is the unit of three things: which changes run in a run
 /// (`Path::of`: those of a family that something that runs takes a value
@@ -5882,6 +5884,8 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
             Op::BuildSlice(parts[0], parts[1], if *c == NONE { NONE } else { all(&[*c])[0] })
         }
         Op::CellGet(a, n) => Op::CellGet(f(*a), *n),
+        Op::MakeCell(a) => Op::MakeCell(if *a == UNDEF { UNDEF } else { f(*a) }),
+        Op::CellSet(a, b) if *b != UNDEF => Op::CellSet(f(*a), f(*b)),
         Op::LoadAttr(a, n) => Op::LoadAttr(f(*a), *n),
         Op::Binary(k, a, b) => Op::Binary(*k, f(*a), f(*b)),
         Op::Unary(k, a) => Op::Unary(*k, f(*a)),
