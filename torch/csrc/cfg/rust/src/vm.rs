@@ -68,6 +68,10 @@ impl Default for Options {
 
 pub struct BlockState {
     pub versions: Vec<Arc<BlockCode>>,
+    /// Versions that were replaced. They are kept: an activation further up
+    /// the stack may still be running one, and the block loop holds plain
+    /// pointers to the code it runs. At most `max_respecializations` exist.
+    pub retired: Vec<Arc<BlockCode>>,
     pub slots: Vec<Option<Arc<SiteSlot>>>,
     /// Why an instruction that made dispatcher calls did not become a site.
     pub reasons: Vec<Option<String>>,
@@ -105,6 +109,25 @@ impl LoadCache {
     const EMPTY: LoadCache =
         LoadCache { owner: null_mut(), version: u64::MAX, builtins_version: u64::MAX, value: null_mut() };
 }
+
+/// What the block loop needs to enter a block whose choice of code no
+/// longer depends on anything: the code (null while the block still has to
+/// be looked at), whether it is a specialized version, and how often it was
+/// entered this way. Only touched with the GIL held.
+#[derive(Clone, Copy)]
+struct Settled {
+    code: *const BlockCode,
+    specialized: bool,
+    entries: u64,
+}
+
+struct SettledBlocks {
+    blocks: Vec<std::cell::Cell<Settled>>,
+    calls: std::cell::Cell<u64>,
+}
+
+unsafe impl Send for SettledBlocks {}
+unsafe impl Sync for SettledBlocks {}
 
 /// Per-name caches; only touched with the GIL held.
 struct LoadCaches(Vec<std::cell::Cell<LoadCache>>);
@@ -646,6 +669,7 @@ pub struct Compiled {
     pub func: Function,
     pub analysis: Analysis,
     pub generic: Vec<Arc<BlockCode>>,
+    settled: SettledBlocks,
     pub state: Shared<State>,
     pub options: Options,
     pub pipeline: Arc<Pipeline>,
@@ -857,6 +881,7 @@ impl Compiled {
             .iter()
             .map(|block| BlockState {
                 versions: Vec::new(),
+                retired: Vec::new(),
                 slots: vec![None; block.insts.len()],
                 reasons: vec![None; block.insts.len()],
                 capture_attempts: vec![0; block.insts.len()],
@@ -913,6 +938,10 @@ impl Compiled {
                 .collect(),
             func,
             analysis,
+            settled: SettledBlocks {
+                blocks: (0..generic.len()).map(|_| std::cell::Cell::new(Settled { code: std::ptr::null(), specialized: false, entries: 0 })).collect(),
+                calls: std::cell::Cell::new(0),
+            },
             generic,
             state: Shared::new(state),
             options,
@@ -2529,22 +2558,40 @@ impl Compiled {
         }
     }
 
-    unsafe fn select(
-        &self,
-        b: usize,
-        regs: &[Obj],
-        api: Option<&TcfgApi>,
-    ) -> (Arc<BlockCode>, Mode) {
+    #[inline(always)]
+    unsafe fn select(&self, b: usize, regs: &[Obj], api: Option<&TcfgApi>) -> (*const BlockCode, Mode) {
+        let slot = self.settled.blocks.get_unchecked(b);
+        let settled = slot.get();
+        if !settled.code.is_null() {
+            slot.set(Settled { entries: settled.entries + 1, ..settled });
+            return (settled.code, if settled.specialized { Mode::Spec } else { Mode::Generic });
+        }
+        self.select_slow(b, regs, api)
+    }
+
+    unsafe fn select_slow(&self, b: usize, regs: &[Obj], api: Option<&TcfgApi>) -> (*const BlockCode, Mode) {
+        let generic = Arc::as_ptr(self.generic.get_unchecked(b));
+        let settle = |code: *const BlockCode, specialized: bool| {
+            self.settled.blocks.get_unchecked(b).set(Settled { code, specialized, entries: 0 });
+        };
         if !self.options.specialize || api.is_none() {
-            return (self.generic[b].clone(), Mode::Generic);
+            settle(generic, false);
+            return (generic, Mode::Generic);
         }
         let mut st = self.state.borrow_mut();
         let bs = &mut st.blocks[b];
         bs.execs += 1;
+        // One version that is entered unconditionally, or none and no more
+        // attempts at one: from now on there is nothing to decide.
+        if bs.versions.len() == 1 && bs.versions[0].entry_guards.is_empty() {
+            settle(Arc::as_ptr(&bs.versions[0]), true);
+        } else if bs.versions.is_empty() && bs.respec_left == 0 {
+            settle(generic, false);
+        }
         for version in &bs.versions {
             if version.entry_guards.iter().all(|g| Self::guard_holds(g, regs, api)) {
                 bs.spec_execs += 1;
-                return (version.clone(), Mode::Spec);
+                return (Arc::as_ptr(version), Mode::Spec);
             }
         }
         if !bs.versions.is_empty() {
@@ -2558,7 +2605,19 @@ impl Compiled {
                 st.obs[v as usize].observe(reg(regs, v));
             }
         }
-        (self.generic[b].clone(), mode)
+        (generic, mode)
+    }
+
+    /// How often block `b` was entered, and how often in a specialized
+    /// version, counting the entries that did not go through the state.
+    pub fn block_entries(&self, b: usize, bs: &BlockState) -> (u64, u64) {
+        let settled = self.settled.blocks[b].get();
+        let specialized = if settled.specialized { settled.entries } else { 0 };
+        (bs.execs + settled.entries, bs.spec_execs + specialized)
+    }
+
+    pub fn calls(&self) -> u64 {
+        self.settled.calls.get()
     }
 
     /// Called when a block finished a run in the profiling tier: runs the
@@ -2592,16 +2651,19 @@ impl Compiled {
             }
         };
         let mut st = self.state.borrow_mut();
+        let unsettled = Settled { code: std::ptr::null(), ..self.settled.blocks[b].get() };
+        self.settled.blocks[b].set(unsettled);
         match outcome {
             Ok(Some(code)) => {
                 let guarded = !code.entry_guards.is_empty()
                     || code.insts.iter().any(|i| matches!(i.op, Op::Guard(_)));
                 let bs = &mut st.blocks[b];
                 bs.versions.insert(0, Arc::new(code));
-                bs.versions.truncate(self.options.max_versions);
-                if !guarded {
-                    // Nothing can send this version back to profiling.
-                    bs.versions.truncate(1);
+                // Nothing can send an unguarded version back to profiling.
+                let keep = if guarded { self.options.max_versions } else { 1 };
+                if bs.versions.len() > keep {
+                    let replaced = bs.versions.split_off(keep);
+                    bs.retired.extend(replaced);
                 }
             }
             Ok(None) => st.blocks[b].respec_left = 0,
@@ -2632,7 +2694,7 @@ impl Compiled {
         let api = capi::api();
         let func = &self.func;
         if self.options.specialize {
-            self.state.borrow_mut().calls += 1;
+            self.settled.calls.set(self.settled.calls.get() + 1);
         }
         let mut cur: usize = 0;
         let mut pred: usize = usize::MAX;
@@ -2696,7 +2758,7 @@ impl Compiled {
             let next: usize = loop {
                 let mut resume: Option<usize> = None;
                 {
-                    let code_ref: &BlockCode = &code;
+                    let code_ref: &BlockCode = &*code;
                     let insts = &code_ref.insts;
                     while pc < insts.len() {
                         let inst = insts.get_unchecked(pc);
@@ -2833,7 +2895,7 @@ impl Compiled {
                 st.blocks[cur].deopts += 1;
                 mode = if st.blocks[cur].respec_left > 0 { Mode::Profile } else { Mode::Generic };
                 drop(st);
-                code = self.generic[cur].clone();
+                code = Arc::as_ptr(self.generic.get_unchecked(cur));
                 pc = resume.unwrap();
             };
             pred = cur;
