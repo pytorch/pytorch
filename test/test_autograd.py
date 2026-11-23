@@ -16498,13 +16498,12 @@ class TestMultithreadAutogradDevice(TestCase):
             return x
 
         _self = self
-        replica_counts = []
 
         class Model(torch.nn.Module):
             def forward(self, x):
                 with warnings.catch_warnings(record=True) as w:
                     y = x * x
-                    if replica_counts[0] >= 2:
+                    if len(model.device_ids) >= 2:
                         # DataParallel calls forward in separate threads without propagating TLS.
                         _self.assertEqual(len(w), 0)
                     else:
@@ -16512,7 +16511,6 @@ class TestMultithreadAutogradDevice(TestCase):
 
         x = torch.ones(5, 5, requires_grad=True, device=device)
         model = torch.nn.DataParallel(Model().to(device))
-        replica_counts.append(len(model.device_ids))
 
         with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
             model(x)
