@@ -21922,6 +21922,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 y > 50,
                 (~x).float(),
                 (x << 3).float(),
+                ((x << 4) >> 4).float(),
                 (x - 100).float(),
             ]
 
