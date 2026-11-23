@@ -171,6 +171,13 @@ impl CfgFunction {
         self.wrapped.clone_ref(py)
     }
 
+    /// Everything this object does not define itself is read from the
+    /// function it was compiled from: `__code__`, `__defaults__`, `__dict__`
+    /// and what decorators stored in it.
+    fn __getattr__(&self, py: Python<'_>, name: &Bound<'_, pyo3::types::PyString>) -> PyResult<PyObject> {
+        self.wrapped.bind(py).getattr(name).map(|v| v.unbind())
+    }
+
     #[getter]
     fn __name__(&self) -> String {
         self.inner.func.name.clone()
