@@ -32,6 +32,7 @@ use crate::ir::*;
 use crate::pyffi::{self, new_ref, xdecref, Obj, PyObj, Shared};
 use crate::shapes::{key_of, ShapeGuard, KIND_BYTES};
 use crate::spec::{CalleeFact, CfgPass, InstFacts, Kernels, PassCx, Unit, ValueObs};
+use crate::vm::Compiled;
 use pyo3::ffi;
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -72,12 +73,26 @@ pub enum Assert {
     Null(PathValue, bool),
     /// A guard of the code the path was taken down from.
     Guard(GuardCond),
+    /// A Python function that runs as this compiled function when it is
+    /// called, and has this many defaults for its last parameters: what a
+    /// call that the path goes into enters, and how it binds what it is
+    /// not handed.
+    Enters(PathValue, *const Compiled, usize),
+    /// What a call hands on with `*`: exactly of this class, a tuple or a
+    /// list, with this many items. With `**`: an exact dict with these
+    /// names, in this order.
+    Sequence(PathValue, usize, usize),
+    Keys(PathValue, Vec<PyObj>),
 }
 
 impl Assert {
     pub fn value(&self) -> PathValue {
         match self {
-            Assert::Truth(v, _) | Assert::Null(v, _) => *v,
+            Assert::Truth(v, _)
+            | Assert::Null(v, _)
+            | Assert::Enters(v, ..)
+            | Assert::Sequence(v, ..)
+            | Assert::Keys(v, _) => *v,
             Assert::Guard(cond) => cond.value(),
         }
     }
@@ -107,6 +122,9 @@ pub struct PathInst {
     pub in_graph: bool,
     /// For `Kind::Check`.
     pub assert: Option<Assert>,
+    /// Which function it is an instruction of (`Path::owners`): the one
+    /// whose constants and names it refers to.
+    pub owner: u32,
 }
 
 /// What a check looks at and a callable is handed: a value, or one of the
@@ -137,8 +155,8 @@ impl Place {
     }
 
     /// A name for it: that of the value of the function it stands for.
-    pub fn text(&self, func: &Function, path: &Path) -> String {
-        let value = func.value_name(path.source.get(self.value as usize).copied().unwrap_or(self.value));
+    pub unsafe fn text(&self, path: &Path) -> String {
+        let value = path.label(self.value);
         match self.item {
             NONE => value,
             item => format!("{}[{}]", value, item),
@@ -274,10 +292,17 @@ pub struct Path {
     /// Which instructions it is, of which code: two runs with the same
     /// numbers are the same path.
     pub shape: Vec<u32>,
-    /// Per value: the value of the function it stood for when it was made.
-    pub source: Vec<V>,
+    /// The functions it goes through: the one it starts and ends in first,
+    /// then those its calls enter, in the order they are first entered. The
+    /// function it is a path of keeps them all for as long as it lives.
+    pub owners: Vec<*const Compiled>,
+    /// Per value: the function and the value of it that it stood for when
+    /// it was made (NONE for one that is no value of a function).
+    pub source: Vec<(u32, V)>,
     /// How many branches and loop tests it goes through.
     pub branches: usize,
+    /// How many calls of Python functions it goes into.
+    pub calls: usize,
     /// The block and the instruction of its first operation, where that
     /// is one of the function it starts in: what the graph is named by.
     pub first: Option<(usize, u32)>,
@@ -946,7 +971,7 @@ unsafe fn frozen_row(o: Obj) -> PyObj {
     PyObj::from_owned(copy)
 }
 
-unsafe fn sequence_item(s: Obj, i: isize) -> Obj {
+pub unsafe fn sequence_item(s: Obj, i: isize) -> Obj {
     if ffi::PyTuple_CheckExact(s) != 0 {
         ffi::PyTuple_GET_ITEM(s, i)
     } else {
@@ -2020,6 +2045,54 @@ pub unsafe fn quiet_item(container: Obj, key: Obj) -> bool {
     is_plain_container(container) && is_plain_key(key) && (ffi::PyDict_Check(container) == 0 || quiet_keys(container))
 }
 
+/// Whether the entries of one dict go into another without Python code
+/// running: exact dicts, the names of a call as the keys.
+pub unsafe fn quiet_merge(into: Obj, more: Obj) -> bool {
+    let exact = |o: Obj| !o.is_null() && !capi::is_unboxed(o) && ffi::PyDict_CheckExact(o) != 0;
+    if !exact(into) || !exact(more) {
+        return false;
+    }
+    let (mut at, mut key, mut value) = (0, null_mut(), null_mut());
+    while ffi::PyDict_Next(more, &mut at, &mut key, &mut value) != 0 {
+        if ffi::PyUnicode_CheckExact(key) == 0 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether `import name` runs no Python code: the `__import__` of the
+/// interpreter is asked for a module that has no package around it and
+/// that was imported before, which it then only looks up.
+pub unsafe fn quiet_import(builtins: Obj, name: Obj, fromlist: Obj, level: Obj) -> bool {
+    let import = ffi::PyDict_GetItemString(builtins, c"__import__".as_ptr());
+    let own = !import.is_null() && ffi::PyCFunction_Check(import) != 0 && {
+        let function = import as *mut ffi::PyCFunctionObject;
+        let of = (*function).m_self;
+        !of.is_null() && ffi::PyModule_CheckExact(of) != 0 && ffi::PyModule_GetDict(of) == builtins
+    };
+    let whole = fromlist == ffi::Py_None()
+        && !level.is_null()
+        && ffi::PyLong_CheckExact(level) != 0
+        && ffi::PyLong_AsLong(level) == 0;
+    if !own || !whole || ffi::PyUnicode_CheckExact(name) == 0 || pyffi::str_to_string(name).contains('.') {
+        return false;
+    }
+    let module = ffi::PyDict_GetItemWithError(ffi::PyImport_GetModuleDict(), name);
+    if module.is_null() || ffi::PyModule_CheckExact(module) == 0 {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    // One that is still being imported is waited for.
+    let spec = ffi::PyDict_GetItemString(ffi::PyModule_GetDict(module), c"__spec__".as_ptr());
+    let slot = if spec.is_null() { std::ptr::null_mut() } else { pyffi::_PyObject_GetDictPtr(spec) };
+    let done = !slot.is_null()
+        && !(*slot).is_null()
+        && ffi::PyDict_GetItemString(*slot, c"_initializing".as_ptr()) == ffi::Py_False();
+    ffi::PyErr_Clear();
+    done
+}
+
 /// Whether `len(container)`, or unpacking it, runs no Python code.
 pub unsafe fn quiet_sized(container: Obj) -> bool {
     is_plain_container(container) || (!capi::is_unboxed(container) && ffi::PyAnySet_CheckExact(container) != 0)
@@ -2058,24 +2131,48 @@ pub unsafe fn quiet_compare(a: Obj, b: Obj) -> bool {
 }
 
 /// Whether iterating over a value runs no Python code: Some(false) for a
-/// list, a tuple, a dict, a str or a range; Some(true) for an `enumerate`
-/// or a `zip`, of which that is only known where a path made it (see
+/// list, a tuple, a dict, a view of a dict, a str or a range; Some(true)
+/// for an iterator over one of those, an `enumerate` or a `zip`, which is
+/// used up by it and of which that is only known where a path made it (see
 /// `pure_call`).
 pub unsafe fn quiet_iter(o: Obj) -> Option<bool> {
+    const VIEWS: [&[u8]; 6] = [b"dict_keys", b"dict_values", b"dict_items", b"odict_keys", b"odict_values", b"odict_items"];
+    const ITERATORS: [&[u8]; 14] = [
+        b"list_iterator",
+        b"list_reverseiterator",
+        b"tuple_iterator",
+        b"range_iterator",
+        b"longrange_iterator",
+        b"dict_keyiterator",
+        b"dict_valueiterator",
+        b"dict_itemiterator",
+        b"odict_iterator",
+        b"str_ascii_iterator",
+        b"str_iterator",
+        b"enumerate",
+        b"zip",
+        b"reversed",
+    ];
     if capi::is_unboxed(o) {
         return None;
     }
     let ty = ffi::Py_TYPE(o);
     let plain = ffi::PyList_CheckExact(o) != 0
         || ffi::PyTuple_CheckExact(o) != 0
-        || ffi::PyDict_CheckExact(o) != 0
+        || is_plain_dict(o)
         || ffi::PyUnicode_CheckExact(o) != 0
         || ty == std::ptr::addr_of_mut!(ffi::PyRange_Type);
     if plain {
         return Some(false);
     }
-    let made = [Builtin::Enumerate, Builtin::Zip].iter().any(|which| builtin_named(*which) == ty as usize);
-    made.then_some(true)
+    if !is_static(ty) {
+        return None;
+    }
+    let name = std::ffi::CStr::from_ptr((*ty).tp_name).to_bytes();
+    if VIEWS.contains(&name) {
+        return Some(false);
+    }
+    ITERATORS.contains(&name).then_some(true)
 }
 
 /// The functions of the interpreter that a path may call: they run no
@@ -2088,14 +2185,42 @@ enum Builtin {
     Enumerate,
     Zip,
     IsInstance,
+    Iter,
+    Int,
+    Float,
+    Bool,
+    Tuple,
+    List,
+    Type,
+    Callable,
+    GetAttr,
+    HasAttr,
+    Abs,
+    Min,
+    Max,
+    Str,
 }
 
-const BUILTINS: [(&std::ffi::CStr, Builtin); 5] = [
+const BUILTINS: [(&std::ffi::CStr, Builtin); 19] = [
     (c"len", Builtin::Len),
     (c"range", Builtin::Range),
     (c"enumerate", Builtin::Enumerate),
     (c"zip", Builtin::Zip),
     (c"isinstance", Builtin::IsInstance),
+    (c"iter", Builtin::Iter),
+    (c"int", Builtin::Int),
+    (c"float", Builtin::Float),
+    (c"bool", Builtin::Bool),
+    (c"tuple", Builtin::Tuple),
+    (c"list", Builtin::List),
+    (c"type", Builtin::Type),
+    (c"callable", Builtin::Callable),
+    (c"getattr", Builtin::GetAttr),
+    (c"hasattr", Builtin::HasAttr),
+    (c"abs", Builtin::Abs),
+    (c"min", Builtin::Min),
+    (c"max", Builtin::Max),
+    (c"str", Builtin::Str),
 ];
 
 /// The address of one of them.
@@ -2119,16 +2244,58 @@ unsafe fn builtin_named(which: Builtin) -> usize {
     found[BUILTINS.iter().position(|(_, other)| *other == which).unwrap()]
 }
 
+/// The modules whose functions a path may call on any arguments (`torch._C`:
+/// those that ask about the state of the thread or of what they are given)
+/// or on numbers (`math`).
+unsafe fn quiet_modules() -> (usize, usize, usize) {
+    static FOUND: std::sync::OnceLock<(usize, usize, usize)> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| {
+        let [state, math, operator] = [c"torch._C", c"math", c"_operator"].map(|name| {
+            let module = ffi::PyImport_ImportModule(name.as_ptr());
+            // The interpreter keeps it.
+            xdecref(module);
+            module as usize
+        });
+        ffi::PyErr_Clear();
+        (state, math, operator)
+    })
+}
+
 /// Whether a call is one of a function a path may call, with arguments on
-/// which it runs no Python code: Some, with whether it makes something to
-/// iterate over that is the path's own (a `range`, an `enumerate`, a
-/// `zip`).
-pub unsafe fn pure_call(callee: Obj, args: &[Obj], api: &TcfgApi) -> Option<bool> {
-    if callee.is_null() || args.iter().any(|o| o.is_null()) {
+/// which it runs no Python code and changes nothing: Some, with whether it
+/// makes something that is the path's own to change or to use up (a list,
+/// an iterator, a `range`, an `enumerate`, a `zip`). `own` says of an
+/// argument whether the path made it: an iterator is only gone over then.
+pub unsafe fn pure_call(callee: Obj, args: &[Obj], own: impl Fn(usize) -> bool, api: &TcfgApi) -> Option<bool> {
+    const ASKS: [&[u8]; 6] = [b"_has_torch_function", b"_get_", b"_is_", b"is_", b"get_", b"_has_"];
+    if callee.is_null() || capi::is_unboxed(callee) || args.iter().any(|o| o.is_null()) {
         return None;
     }
+    if ffi::PyCFunction_Check(callee) != 0 {
+        let function = callee as *mut ffi::PyCFunctionObject;
+        let (state, math, operator) = quiet_modules();
+        let of = (*function).m_self as usize;
+        if of != 0 && of == state {
+            let name = std::ffi::CStr::from_ptr((*(*function).m_ml).ml_name).to_bytes();
+            return ASKS.iter().any(|asks| name.starts_with(asks)).then_some(false);
+        }
+        if of != 0 && of == math {
+            return args.iter().all(|o| is_number(*o)).then_some(false);
+        }
+        if of != 0 && of == operator {
+            let name = std::ffi::CStr::from_ptr((*(*function).m_ml).ml_name).to_bytes();
+            let ints = args.len() == 1 && !capi::is_unboxed(args[0]) && ffi::PyLong_CheckExact(args[0]) != 0;
+            return (name == b"index" && ints).then_some(false);
+        }
+    }
     let which = BUILTINS.iter().map(|(_, which)| *which).find(|which| builtin_named(*which) == callee as usize)?;
-    let sequence = |o: Obj| !capi::is_unboxed(o) && (ffi::PyList_CheckExact(o) != 0 || ffi::PyTuple_CheckExact(o) != 0);
+    let numbers = || args.iter().all(|o| is_number(*o));
+    // What is gone over without anything but the path's own being used up.
+    let lasting = |i: usize| match quiet_iter(args[i]) {
+        Some(used_up) => !used_up || own(i),
+        None => false,
+    };
+    let all = || (0..args.len()).all(lasting);
     let fine = match which {
         Builtin::Len => {
             let mut info = TcfgTensorInfo::empty();
@@ -2137,14 +2304,31 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], api: &TcfgApi) -> Option<bool
         Builtin::Range => {
             (1..=3).contains(&args.len()) && args.iter().all(|o| !capi::is_unboxed(*o) && ffi::PyLong_CheckExact(*o) != 0)
         }
-        Builtin::Enumerate => args.len() == 1 && sequence(args[0]),
-        Builtin::Zip => !args.is_empty() && args.iter().all(|o| sequence(*o)),
+        Builtin::Enumerate | Builtin::Iter => args.len() == 1 && all(),
+        Builtin::Zip => !args.is_empty() && all(),
+        Builtin::Tuple | Builtin::List => args.len() <= 1 && all(),
+        Builtin::Int | Builtin::Float | Builtin::Abs => args.len() == 1 && numbers(),
+        Builtin::Str => args.len() == 1 && (numbers() || ffi::PyUnicode_CheckExact(args[0]) != 0),
+        Builtin::Min | Builtin::Max => args.len() >= 2 && numbers(),
+        Builtin::Bool => args.len() == 1 && quiet_truth(args[0]),
+        Builtin::Type | Builtin::Callable => args.len() == 1,
+        Builtin::GetAttr | Builtin::HasAttr => {
+            let found = which == Builtin::GetAttr && args.len() == 3;
+            (args.len() == 2 || found)
+                && !capi::is_unboxed(args[1])
+                && ffi::PyUnicode_CheckExact(args[1]) != 0
+                && quiet_attr(args[0], args[1], api)
+        }
         Builtin::IsInstance => {
             static CLASS: std::sync::OnceLock<PyObj> = std::sync::OnceLock::new();
             let name = CLASS.get_or_init(|| PyObj::from_owned(ffi::PyUnicode_InternFromString(c"__class__".as_ptr())));
-            // A class whose instances `type` itself tells.
+            // A class whose instances `type` itself tells; any class tells
+            // what is exactly of it without being asked.
             let class = |o: Obj| {
-                !capi::is_unboxed(o) && ffi::Py_TYPE(o) == std::ptr::addr_of_mut!(ffi::PyType_Type)
+                !capi::is_unboxed(o)
+                    && ffi::PyType_Check(o) != 0
+                    && (ffi::Py_TYPE(o) == std::ptr::addr_of_mut!(ffi::PyType_Type)
+                        || (!capi::is_unboxed(args[0]) && ffi::Py_TYPE(args[0]) as Obj == o))
             };
             let classes = |o: Obj| {
                 class(o)
@@ -2155,7 +2339,35 @@ pub unsafe fn pure_call(callee: Obj, args: &[Obj], api: &TcfgApi) -> Option<bool
             args.len() == 2 && classes(args[1]) && quiet_attr(args[0], name.as_ptr(), api)
         }
     };
-    fine.then_some(matches!(which, Builtin::Range | Builtin::Enumerate | Builtin::Zip))
+    fine.then_some(matches!(
+        which,
+        Builtin::Range | Builtin::Enumerate | Builtin::Zip | Builtin::Iter | Builtin::List
+    ))
+}
+
+/// Whether a call of a method runs no Python code, no kernel, and changes
+/// nothing: what a dict has, as a view or under a key; what a tensor says
+/// of itself.
+pub unsafe fn pure_method(recv: Obj, name: Obj, args: &[Obj], api: &TcfgApi) -> bool {
+    const SAYS: [&str; 8] =
+        ["size", "dim", "ndimension", "numel", "nelement", "is_floating_point", "is_complex", "element_size"];
+    if recv.is_null() || args.iter().any(|o| o.is_null()) {
+        return false;
+    }
+    let name = pyffi::str_to_string(name);
+    let mut info = TcfgTensorInfo::empty();
+    if (api.tensor_info)(recv, &mut info) != 0 {
+        let ints = args.iter().all(|o| !capi::is_unboxed(*o) && ffi::PyLong_CheckExact(*o) != 0);
+        return SAYS.contains(&name.as_str()) && args.len() <= 1 && ints;
+    }
+    if capi::is_unboxed(recv) || !is_plain_dict(recv) {
+        return false;
+    }
+    match name.as_str() {
+        "keys" | "values" | "items" => args.is_empty(),
+        "get" => (1..=2).contains(&args.len()) && is_plain_key(args[0]) && quiet_keys(recv),
+        _ => false,
+    }
 }
 
 /// Whether what a type has under a name is given out by Python code: a
@@ -2494,6 +2706,48 @@ pub struct Described {
 }
 
 impl Path {
+    /// A name for a value of the path that a reader can find in the code:
+    /// the variable it is, in the function the path starts in; for a value
+    /// of a function the path goes into, that function with it; for what
+    /// was read off an object, the object and the attribute
+    /// (`self.conv1.weight`), as far back as that goes.
+    pub unsafe fn label(&self, value: PathValue) -> String {
+        if let Some(name) = self.named(value).filter(|name| name.contains('.')) {
+            // Read off an object: by the object and the attributes, with
+            // the function the object is a variable of if it is a called one.
+            let mut base = value;
+            while let Some(PathInst { op: Op::LoadAttr(object, _), .. }) = self.body.iter().find(|inst| inst.dst == base) {
+                base = *object;
+            }
+            return match self.source.get(base as usize) {
+                Some((owner, _)) if *owner != 0 => format!("{}:{}", (*self.owners[*owner as usize]).func.qualname, name),
+                _ => name,
+            };
+        }
+        match self.source.get(value as usize) {
+            Some((0, v)) if *v != NONE => (*self.owners[0]).func.value_name(*v),
+            Some((owner, v)) if *v != NONE => {
+                let func = &(*self.owners[*owner as usize]).func;
+                format!("{}:{}", func.qualname, func.value_name(*v))
+            }
+            Some(_) => format!("%{}", value),
+            None => (*self.owners[0]).func.value_name(value),
+        }
+    }
+
+    /// The name of a value as the code has it: the variable, or the object
+    /// and the attribute that was read off it. None for what has no name.
+    unsafe fn named(&self, value: PathValue) -> Option<String> {
+        let read = self.body.iter().find(|inst| inst.dst == value && value != NONE);
+        if let Some(PathInst { op: Op::LoadAttr(object, name), owner, .. }) = read {
+            let func = &(*self.owners[*owner as usize]).func;
+            return Some(format!("{}.{}", self.named(*object)?, pyffi::str_to_string(func.consts[*name as usize].as_ptr())));
+        }
+        let (owner, v) = self.source.get(value as usize).copied()?;
+        let func = &(*self.owners[owner as usize]).func;
+        func.value_names.get(v as usize).and_then(|name| name.clone())
+    }
+
     /// What the exporter is handed for a recorded run, with the checks the
     /// exported form holds under and the values the callable is called
     /// with. A dict:
@@ -2515,14 +2769,14 @@ impl Path {
     ///     tensor, dim) each.
     /// A run that cannot be exported is described by its checks alone: the
     /// form made of them has the calls like it run the instructions.
-    pub unsafe fn describe(&self, name: &str, func: &Function, rec: &Recording, api: &TcfgApi) -> Described {
+    pub unsafe fn describe(&self, name: &str, rec: &Recording, api: &TcfgApi) -> Described {
         let mut checks: Vec<Check> = Vec::new();
         let mut tensors = vec![false; self.feeds.len()];
         let mut items: Vec<Place> = Vec::new();
         let mut closed = rec.failed.clone();
         let mut wrote = rec.wrote;
         let nodes = match &closed {
-            None => self.nodes(func, rec, api, &mut checks, &mut tensors, &mut items, &mut wrote),
+            None => self.nodes(rec, api, &mut checks, &mut tensors, &mut items, &mut wrote),
             Some(_) => Ok(PyObj::from_owned(ffi::PyList_New(0))),
         };
         let nodes = nodes.unwrap_or_else(|why| {
@@ -2576,9 +2830,10 @@ impl Path {
             };
             ffi::PyList_Append(ids.as_ptr(), id);
             ffi::Py_DECREF(id);
-            let source = self.source.get(place.value as usize).copied().unwrap_or(place.value);
-            let label = match func.value_names.get(source as usize).and_then(|n| n.as_ref()) {
-                Some(label) => label.clone(),
+            // By the variable, or by where it was read from: the function
+            // and the attributes (`self.conv1.weight`), as an identifier.
+            let label = match self.named(place.value) {
+                Some(name) => name.chars().map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' }).collect(),
                 None => format!("v{}", place.value),
             };
             let label = if place.item == NONE { text(&label) } else { text(&format!("{}_{}", label, place.item)) };
@@ -2670,7 +2925,6 @@ impl Path {
     /// whether a normalization updated its statistics. The reason, if the run cannot be exported.
     unsafe fn nodes(
         &self,
-        func: &Function,
         rec: &Recording,
         api: &TcfgApi,
         checks: &mut Vec<Check>,
@@ -2809,6 +3063,7 @@ impl Path {
         let did_not_run = || "an operation of the graph did not run".to_string();
         for inst in &self.body {
             let value = inst.dst as i64;
+            let func = &(*self.owners[inst.owner as usize]).func;
             match &inst.op {
                 Op::Dispatch(d) if inst.kind == Kind::Node => {
                     let (site, meta) = recorded.next().ok_or_else(did_not_run)?;
@@ -2962,7 +3217,7 @@ impl Exported {
     }
 
     /// What its checks ask of a call, as text.
-    pub unsafe fn conditions(&self, func: &Function, path: &Path) -> Vec<String> {
+    pub unsafe fn conditions(&self, path: &Path) -> Vec<String> {
         const DTYPES: [&str; 12] = [
             "uint8", "int8", "int16", "int32", "int64", "float16", "float32", "float64", "complex32",
             "complex64", "complex128", "bool",
@@ -2973,7 +3228,7 @@ impl Exported {
         self.checks
             .iter()
             .map(|check| {
-                let value = check.target.text(func, path);
+                let value = check.target.text(path);
                 match &check.cond {
                     Cond::Is(expected) => format!("{} is {}", value, short(expected)),
                     Cond::ValueEq(expected) => format!("{} == {}", value, short(expected)),
@@ -3339,6 +3594,7 @@ pub fn infallible(op: &Op) -> bool {
     matches!(
         op,
         Op::Const(_)
+            | Op::Object(_)
             | Op::Hold(_)
             | Op::BuildTuple(_)
             | Op::BuildList(_)
@@ -3354,15 +3610,32 @@ pub fn infallible(op: &Op) -> bool {
     )
 }
 
+/// Whether an instruction of a path that gives what nothing uses can be
+/// left out of a run: it cannot fail whatever it is given, or it is a part
+/// of how a call binds its arguments that the checks of the call stand for
+/// (`Assert::Enters`, `Assert::Sequence`, `Assert::Keys`). Not a default
+/// by its name or a variable of an outer function, which may not be there.
+fn idle(op: &Op) -> bool {
+    match op {
+        Op::Part(Part::Cell(_) | Part::KwDefault(_), _) => false,
+        Op::Part(..) => true,
+        op => infallible(op),
+    }
+}
+
 /// Whether a change of something the path made can be left out of a run
-/// together with the thing: only one that cannot fail and runs no Python
-/// code whatever it is given. An append is such. An entry that is put into
-/// a dict is one only under a key that is a constant of the function: any
-/// other key may be one that cannot be hashed at another call, or that is
-/// hashed in Python.
-fn leaves_quietly(op: &Op, constant: &[bool]) -> bool {
+/// together with the thing: like every instruction that is left out
+/// (`idle`), only one that cannot fail and runs no Python code whatever it
+/// is given. An append is such. An entry that is put into a dict is one
+/// only under a key that is a constant of the function: any other key may
+/// be one that cannot be hashed at another call, or that is hashed in
+/// Python. What goes over a value from outside the path to extend a list or
+/// to fill a dict is none. `own` says whether the path built or made a
+/// value.
+fn leaves_quietly(op: &Op, constant: &[bool], own: impl Fn(PathValue) -> bool) -> bool {
     match op {
         Op::MapAdd(_, key, _) => constant[*key as usize],
+        Op::ListExtend(_, more) | Op::DictMerge(_, more, _) => own(*more),
         _ => true,
     }
 }
@@ -3563,6 +3836,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
             stage: Stage::Before,
             in_graph: false,
             assert: None,
+            owner: 0,
         });
     }
     let late = |inst: &PathInst| {
@@ -3703,8 +3977,10 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         operators,
         ends,
         shape: Vec::new(),
+        owners: vec![cx.cf as *const Compiled],
         source: Vec::new(),
         branches: 0,
+        calls: 0,
         first: None,
         provisional: false,
         exported: Shared::new(Vec::new()),
@@ -3727,29 +4003,75 @@ pub enum Held {
     Empty,
 }
 
-/// The instructions of a function from the first operation of a graph on,
-/// as they are taken down while they run (`Compiled::record`): renamed to
-/// the values of the path, which are numbered from 1 in the order they are
-/// made or first read (0 is the undefined value).
+/// One activation of a function along a trace: the function, the value of
+/// the path that the function object is (UNDEF for the first, whose
+/// function the registers have), and per value of the function the value of
+/// the path it is, or NONE.
+pub struct Act {
+    pub owner: u32,
+    pub function: PathValue,
+    pub map: Vec<PathValue>,
+}
+
+/// Where a trace was when its first function called a function that the
+/// trace went into, or came to a call that is inlined in it: what it is
+/// cut back to if the path ends in there.
+pub struct Mark {
+    /// The instruction: its block, the code, and its place in the code.
+    pub at: (usize, *const BlockCode, usize),
+    /// How many inlined calls the trace is in since then; 0 for the mark of
+    /// a call it went into.
+    pub frames: usize,
+    body: usize,
+    values: usize,
+    nodes: usize,
+    operators: usize,
+    bound: usize,
+    shape: usize,
+    inputs: usize,
+    wrote: bool,
+    failed: Option<String>,
+    map: Vec<PathValue>,
+    held: Vec<Held>,
+}
+
+/// The instructions of a function from the first instruction of a graph on,
+/// and of the functions it calls, as they are taken down while they run
+/// (`Compiled::record`): renamed to the values of the path, which are
+/// numbered from 1 in the order they are made or first read (0 is the
+/// undefined value).
 pub struct Trace {
     pub body: Vec<PathInst>,
     /// Per value of the path.
     pub defs: Vec<Def>,
-    pub source: Vec<V>,
+    pub source: Vec<(u32, V)>,
     pub inputs: Vec<(V, PathValue)>,
-    /// Per value of the function: the value of the path it is, or NONE; and
-    /// what it holds where the trace has got to.
-    pub map: Vec<PathValue>,
+    /// The activations the trace is in, the first function's first.
+    pub acts: Vec<Act>,
+    pub owners: Vec<*const Compiled>,
+    /// Per value of the first function: what it holds where the trace has
+    /// got to.
     pub held: Vec<Held>,
-    /// The variables that were bound, in order.
+    /// The variables of the first function that were bound, in order.
     pub bound: Vec<(u32, PathValue)>,
     pub operators: Vec<String>,
     pub shape: Vec<u32>,
     pub rec: Recording,
-    /// The trace was let go of (`abandon`), and why.
-    pub abandoned: Option<String>,
+    pub mark: Option<Mark>,
     /// See `Path::first`.
     pub first: Option<(usize, u32)>,
+    /// Per inlined call the trace is in, in its first function: how many
+    /// variables were bound when it began. Those bound in it are of its
+    /// frame, which is gone when it ends.
+    pub inlined: Vec<usize>,
+    /// A called function read a value that the path does not have: the
+    /// trace is of no use from there on.
+    pub lost: bool,
+    /// The trace was let go of (`abandon`), and why.
+    pub abandoned: Option<String>,
+    /// The path ends where a later one will go on: at a block, or a call
+    /// of a function, that the tiers have not decided on yet.
+    pub provisional: bool,
     /// The things the path made and what may be them or hold them, in
     /// families (see `Family`).
     pub things: Family,
@@ -3812,22 +4134,31 @@ impl Family {
 }
 
 impl Trace {
-    pub fn new(nvalues: usize) -> Trace {
+    pub fn new(root: *const Compiled, nvalues: usize) -> Trace {
         Trace {
             body: Vec::new(),
             defs: vec![Def::default()],
-            source: vec![UNDEF],
+            source: vec![(0, UNDEF)],
             inputs: Vec::new(),
-            map: vec![NONE; nvalues],
+            acts: vec![Act { owner: 0, function: UNDEF, map: vec![NONE; nvalues] }],
+            owners: vec![root],
             held: vec![Held::Untouched; nvalues],
             bound: Vec::new(),
             operators: Vec::new(),
             shape: Vec::new(),
             rec: Recording { values: vec![null_mut()], kept: HashMap::new(), nodes: Vec::new(), failed: None, wrote: false },
             abandoned: None,
+            mark: None,
             first: None,
+            inlined: Vec::new(),
+            lost: false,
+            provisional: false,
             things: Family { first: vec![NONE], since: vec![u32::MAX], ..Family::default() },
         }
+    }
+
+    fn act(&mut self) -> &mut Act {
+        self.acts.last_mut().expect("a trace is in a function")
     }
 
     /// The family of a value becomes late from the instruction `from` on:
@@ -3874,6 +4205,26 @@ impl Trace {
         self.things.values.entry(first).or_default().push(v);
     }
 
+    /// For a call of a method of a dict the path made that gives an entry
+    /// of the dict or what the call was handed (`get`, `pop`): the dict.
+    /// The path made the dict, so it is of exactly that class at every
+    /// call, and the method is read off it by its name.
+    fn entry_of(&self, op: &Op, dst: PathValue) -> Option<PathValue> {
+        let dict = match op {
+            Op::CallMethod { recv, .. } => *recv,
+            Op::Call { callee, .. } => match self.body.iter().rev().find(|inst| inst.dst == *callee).map(|inst| &inst.op) {
+                Some(Op::LoadAttr(of, _)) => *of,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        let (held, gave) = (self.rec.values[dict as usize], self.rec.values[dst as usize]);
+        let exact = self.defs[dict as usize].made && !held.is_null() && unsafe { ffi::PyDict_CheckExact(held) != 0 };
+        // `keys()`, `values()` and `items()` give a view.
+        let view = gave.is_null() || unsafe { std::ffi::CStr::from_ptr((*ffi::Py_TYPE(gave)).tp_name).to_bytes().starts_with(b"dict_") };
+        (exact && !view).then_some(dict)
+    }
+
     /// What an instruction that is about to be added to the path means
     /// for the things the path made (`Family`): which family what it gives
     /// is of, which families it makes one, and on which side of the
@@ -3892,10 +4243,8 @@ impl Trace {
     /// family. An operation of the graph runs between the two sides, and
     /// puts the families of the lists and other things it is handed
     /// behind it.
-    pub fn note(&mut self, op: &Op, dst: PathValue, kind: Kind) {
+    fn note(&mut self, op: &Op, dst: PathValue, kind: Kind) {
         let at = self.body.len() as u32;
-        self.things.first.resize(self.defs.len(), NONE);
-        self.things.since.resize(self.defs.len(), u32::MAX);
         if dst != NONE && self.defs[dst as usize].late && self.things.since[dst as usize] == u32::MAX {
             self.things.since[dst as usize] = at;
         }
@@ -3991,7 +4340,7 @@ impl Trace {
             }
             // What is taken out of something is a thing only where the
             // family has one that is held.
-            Op::GetItem(of, _) | Op::IterNext(of) | Op::TupleGet(of, _) | Op::CellGet(of, _) | Op::Unpack(of, _) | Op::ListToTuple(of) => {
+            Op::GetItem(of, _) | Op::IterNext(of) | Op::TupleGet(of, _) | Op::CellGet(of, _) | Op::Unpack(of, _) | Op::ListToTuple(of) | Op::Part(Part::Index(_) | Part::Entry(_) | Part::Cell(_), of) => {
                 if dst != NONE && self.things.has(*of) && nested(&self.things, *of) {
                     self.belongs(dst, *of);
                 }
@@ -3999,9 +4348,23 @@ impl Trace {
             // An attribute may be a part of the thing (the dict of an
             // object) or hold it (a bound method), and what a method is
             // bound to may be the thing.
-            Op::LoadAttr(of, _) => {
+            Op::LoadAttr(of, _) | Op::Part(_, of) => {
                 if dst != NONE {
                     self.belongs(dst, *of);
+                }
+            }
+            // A method of a dict the path made (`get`, and `pop`, which
+            // is a change of it): what it gives was in the dict, as
+            // above, or is the default it was handed. Not a view of the
+            // dict, which goes over it as an iterator does.
+            Op::Call { args, .. } | Op::CallMethod { args, .. } if dst != NONE && self.entry_of(op, dst).is_some() => {
+                let dict = self.entry_of(op, dst).expect("just asked");
+                if nested(&self.things, dict) {
+                    self.belongs(dst, dict);
+                }
+                for v in args.iter().filter(|v| self.things.has(**v)).copied().collect::<Vec<PathValue>>() {
+                    self.belongs(dst, v);
+                    self.joins(dst, v);
                 }
             }
             // What cannot hold anything: a number, a text, a flag.
@@ -4029,22 +4392,75 @@ impl Trace {
         }
     }
 
-    /// A new value of the path, which a value of the function is from here
-    /// on; `kept` is what it is in this run (a reference of its own, or
-    /// null).
-    pub fn define(&mut self, v: V, def: Def, kept: Obj) -> PathValue {
+    /// Whether the trace is in the function it started in.
+    pub fn outermost(&self) -> bool {
+        self.acts.len() == 1
+    }
+
+    pub fn owner(&self) -> u32 {
+        self.acts.last().map_or(0, |act| act.owner)
+    }
+
+    /// The value of the path that the function it is in is: UNDEF in the
+    /// function it started in.
+    pub fn function(&self) -> PathValue {
+        self.acts.last().map_or(UNDEF, |act| act.function)
+    }
+
+    /// A value that the path reads from before it, in the function it
+    /// started in: `kept` is what it is in this run.
+    pub fn input(&mut self, v: V, kept: Obj) -> PathValue {
+        let made = self.value(Def::default(), kept);
+        self.source[made as usize] = (0, v);
+        self.acts[0].map[v as usize] = made;
+        self.inputs.push((v, made));
+        made
+    }
+
+    /// The value of the path that a value of the function it is in is, or
+    /// NONE.
+    pub fn mapped(&self, v: V) -> PathValue {
+        self.acts.last().map_or(NONE, |act| act.map[v as usize])
+    }
+
+    /// A new value of the path that is no value of a function; `kept` is
+    /// what it is in this run (a reference of its own, or null).
+    pub fn value(&mut self, def: Def, kept: Obj) -> PathValue {
         let made = self.defs.len() as PathValue;
         self.defs.push(def);
-        self.things.first.resize(self.defs.len(), NONE);
-        self.things.since.resize(self.defs.len(), u32::MAX);
-        self.source.push(v);
+        self.things.first.push(NONE);
+        self.things.since.push(u32::MAX);
+        self.source.push((self.owner(), NONE));
         self.rec.values.push(kept);
         if !kept.is_null() && !capi::is_unboxed(kept) {
             self.rec.kept.entry(kept as usize).or_insert((0, made)).0 += 1;
         }
-        self.map[v as usize] = made;
-        self.held[v as usize] = Held::Value(made);
         made
+    }
+
+    /// A new value of the path, which a value of the function it is in is
+    /// from here on.
+    pub fn define(&mut self, v: V, def: Def, kept: Obj) -> PathValue {
+        let made = self.value(def, kept);
+        self.source[made as usize] = (self.owner(), v);
+        self.rename(v, made);
+        made
+    }
+
+    /// A value of the function becomes the one another is: a variable of an
+    /// edge, a slot, a parameter, the result of a call.
+    pub fn rename(&mut self, v: V, to: PathValue) {
+        self.act().map[v as usize] = to;
+        if self.outermost() {
+            self.held[v as usize] = if to == UNDEF { Held::Empty } else { Held::Value(to) };
+        }
+    }
+
+    /// The function lets go of a value.
+    pub fn kill(&mut self, v: V) {
+        if self.outermost() {
+            self.held[v as usize] = Held::Empty;
+        }
     }
 
     /// Lets go of every reference the trace holds to the values of the
@@ -4064,24 +4480,129 @@ impl Trace {
         self.abandoned = Some(why);
     }
 
-    /// A value of the function becomes the one another is: a variable of an
-    /// edge, or a slot.
-    pub fn rename(&mut self, v: V, to: PathValue) {
-        self.map[v as usize] = to;
-        self.held[v as usize] = if to == UNDEF { Held::Empty } else { Held::Value(to) };
+    pub fn push(&mut self, op: Op, dst: PathValue, kind: Kind, bc: u32) {
+        let owner = self.owner();
+        self.note(&op, dst, kind);
+        self.body.push(PathInst { op, dst, kind, bc, stage: Stage::Before, in_graph: false, assert: None, owner });
     }
 
     pub fn check(&mut self, assert: Assert, bc: u32) {
-        let inst = PathInst {
-            op: Op::Hold(Vec::new()),
-            dst: NONE,
-            kind: Kind::Check,
-            bc,
-            stage: Stage::Before,
-            in_graph: false,
-            assert: Some(assert),
+        // What the instructions that follow were made from tells the paths
+        // apart: how many items were taken out of a list, which names out
+        // of a dict.
+        match &assert {
+            Assert::Sequence(_, class, count) => self.shape.extend([u32::MAX - 3, *class as u32, *count as u32]),
+            Assert::Keys(_, names) => {
+                self.shape.push(u32::MAX - 4);
+                self.shape.extend(names.iter().map(|name| name.as_ptr() as usize as u32));
+            }
+            // How a call binds what it is not handed.
+            Assert::Enters(_, _, defaults) => self.shape.extend([u32::MAX - 8, *defaults as u32]),
+            _ => {}
+        }
+        self.push(Op::Hold(Vec::new()), NONE, Kind::Check, bc);
+        self.body.last_mut().expect("just pushed").assert = Some(assert);
+    }
+
+    /// What an instruction of the path gives, from what it takes: a value
+    /// that depends on a node if one of those does, and that the graph
+    /// computes if `computed` says so.
+    pub fn derive(&mut self, op: Op, kind: Kind, made: bool, kept: Obj, bc: u32) -> PathValue {
+        let mut late = false;
+        reads(&op, |v| late |= self.defs[v as usize].late);
+        let graph = late && computed(&op, &self.defs, |_| false);
+        let dst = self.value(Def { node: false, late, graph, made }, kept);
+        self.push(op, dst, kind, bc);
+        dst
+    }
+
+    /// The trace goes into a function that a call enters.
+    pub fn enter(&mut self, compiled: *const Compiled, nvalues: usize, function: PathValue) {
+        let known = self.owners.iter().position(|other| *other == compiled);
+        let owner = known.unwrap_or_else(|| {
+            self.owners.push(compiled);
+            self.owners.len() - 1
+        }) as u32;
+        self.acts.push(Act { owner, function, map: vec![NONE; nvalues] });
+        // Which function it is tells the paths apart, not the place it has
+        // among those of this trace.
+        let which = compiled as usize as u64;
+        self.shape.extend([u32::MAX - 1, which as u32, (which >> 32) as u32]);
+    }
+
+    pub fn leave(&mut self) {
+        self.acts.pop();
+        self.shape.push(u32::MAX - 2);
+    }
+
+    /// Takes down where the trace is, in its first function, in front of a
+    /// call it goes into or of one that is inlined (`frames`: 1).
+    pub fn mark(&mut self, at: (usize, *const BlockCode, usize), frames: usize) {
+        self.mark = Some(Mark {
+            at,
+            frames,
+            body: self.body.len(),
+            values: self.defs.len(),
+            nodes: self.rec.nodes.len(),
+            operators: self.operators.len(),
+            bound: self.bound.len(),
+            shape: self.shape.len(),
+            inputs: self.inputs.len(),
+            wrote: self.rec.wrote,
+            failed: self.rec.failed.clone(),
+            map: self.acts[0].map.clone(),
+            held: self.held.clone(),
+        });
+    }
+
+    /// Lets go of the mark of a call that the trace has come back from,
+    /// into the function it started in.
+    pub fn unmark(&mut self) {
+        if self.outermost() && self.mark.as_ref().is_some_and(|mark| mark.frames == 0) {
+            self.mark = None;
+        }
+    }
+
+    /// Cuts the trace back to its mark: the path ends in front of the call.
+    pub unsafe fn back(&mut self) {
+        let Some(mark) = self.mark.take() else {
+            return;
         };
-        self.body.push(inst);
+        self.body.truncate(mark.body);
+        if self.operators.is_empty() {
+            self.first = None;
+        }
+        self.defs.truncate(mark.values);
+        // A family is kept under its first value, which is still there
+        // when a later one is not. What was joined or put behind the
+        // callable since the mark stays so: nothing is taken down behind
+        // this, and the path is staged by the instruction (`Family::late`).
+        self.things.first.truncate(mark.values);
+        self.things.since.truncate(mark.values);
+        self.source.truncate(mark.values);
+        for kept in self.rec.values.drain(mark.values..) {
+            if let Some(count) = self.rec.kept.get_mut(&(kept as usize)) {
+                count.0 -= 1;
+                if count.0 == 0 {
+                    self.rec.kept.remove(&(kept as usize));
+                }
+            }
+            xdecref(kept);
+        }
+        for (_, meta) in self.rec.nodes.drain(mark.nodes..) {
+            xdecref(meta);
+        }
+        self.operators.truncate(mark.operators);
+        self.bound.truncate(mark.bound);
+        self.shape.truncate(mark.shape);
+        self.inputs.truncate(mark.inputs);
+        self.rec.wrote = mark.wrote;
+        self.rec.failed = mark.failed;
+        self.acts.truncate(1);
+        self.acts[0].map = mark.map;
+        self.held = mark.held;
+        self.inlined.clear();
+        self.lost = false;
     }
 }
 
@@ -4091,7 +4612,8 @@ impl Trace {
 pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
     let mut all = |vs: &[V]| vs.iter().map(|v| f(*v)).collect::<Vec<V>>();
     Some(match op {
-        Op::Const(_) | Op::LoadGlobal(_) | Op::LoadDeref(_) => op.clone(),
+        Op::Const(_) | Op::Object(_) | Op::LoadGlobal(_) | Op::LoadDeref(_) => op.clone(),
+        Op::Part(part, v) => Op::Part(part.clone(), f(*v)),
         Op::Hold(_) => Op::Hold(Vec::new()),
         Op::BuildTuple(vs) => Op::BuildTuple(all(vs)),
         Op::BuildList(vs) => Op::BuildList(all(vs)),
@@ -4122,7 +4644,12 @@ pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
         Op::ToBool(a) => Op::ToBool(f(*a)),
         Op::IsNone(a, invert) => Op::IsNone(f(*a), *invert),
         Op::GetItem(a, b) => Op::GetItem(f(*a), f(*b)),
+        Op::ImportName { name, fromlist, level } => {
+            Op::ImportName { name: *name, fromlist: f(*fromlist), level: f(*level) }
+        }
         Op::ListAppend(a, b) => Op::ListAppend(f(*a), f(*b)),
+        Op::ListExtend(a, b) => Op::ListExtend(f(*a), f(*b)),
+        Op::DictMerge(a, b, c) => Op::DictMerge(f(*a), f(*b), f(*c)),
         Op::MapAdd(a, b, c) => Op::MapAdd(f(*a), f(*b), f(*c)),
         Op::ListToTuple(a) => Op::ListToTuple(f(*a)),
         Op::Unpack(a, n) => Op::Unpack(f(*a), *n),
@@ -4189,8 +4716,10 @@ impl Path {
             operators: Vec::new(),
             ends: String::new(),
             shape: Vec::new(),
+            owners: Vec::new(),
             source: Vec::new(),
             branches: 0,
+            calls: 0,
             first: None,
             provisional: false,
             exported: Shared::new(Vec::new()),
@@ -4218,7 +4747,6 @@ impl Path {
     ) -> Path {
         // A value that is late is so from some instruction on: from the
         // first, where nothing says from which.
-        trace.things.since.resize(trace.defs.len(), u32::MAX);
         for v in 0..trace.defs.len() {
             if trace.defs[v].late && trace.things.since[v] == u32::MAX {
                 trace.things.since[v] = 0;
@@ -4308,7 +4836,7 @@ impl Path {
         // The values that are no tensors and that the graph computes.
         let mut wanted = vec![false; nregs];
         let (mut outputs, mut exits) = (Vec::new(), Vec::new());
-        let mut branches = 0;
+        let (mut branches, mut calls) = (0, 0);
         loop {
             for (at, inst) in trace.body.iter_mut().enumerate().rev() {
                 inst.in_graph = false;
@@ -4354,6 +4882,7 @@ impl Path {
                             }
                             _ => {
                                 branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
+                                calls += matches!(assert, Assert::Enters(..)) as usize;
                                 need[v] = true;
                                 if late(v as PathValue, at) { Stage::After } else { Stage::Before }
                             }
@@ -4366,7 +4895,7 @@ impl Path {
                         // the path's.
                         let target = changes(inst);
                         let taken = target != NONE && (need[target as usize] || alive[thing(target) as usize]);
-                        let fails = !leaves_quietly(&inst.op, &constant);
+                        let fails = !leaves_quietly(&inst.op, &constant, |v| defs[v as usize].made || built[v as usize]);
                         if (needed || taken || fails) && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..)) {
                             uses(&inst.op, &mut need)
                         } else {
@@ -4403,7 +4932,7 @@ impl Path {
                     // gives, which the operation that calls it stands for,
                     // or off a list, a dict or a set the path made (the
                     // `append` of a list that a loop fills).
-                    _ if !infallible(&inst.op) && !bound_method(&inst.op, dst) => uses(&inst.op, &mut need),
+                    _ if !idle(&inst.op) && !bound_method(&inst.op, dst) => uses(&inst.op, &mut need),
                     _ => Stage::Skipped,
                 };
             }
@@ -4417,7 +4946,7 @@ impl Path {
             need = first_need.clone();
             wanted.iter_mut().for_each(|wanted| *wanted = false);
             (outputs.clear(), exits.clear());
-            branches = 0;
+            (branches, calls) = (0, 0);
         }
         outputs.reverse();
         exits.reverse();
@@ -4463,8 +4992,10 @@ impl Path {
             operators: std::mem::take(&mut trace.operators),
             ends,
             shape: std::mem::take(&mut trace.shape),
+            owners: trace.owners.clone(),
             source: trace.source.clone(),
             branches,
+            calls,
             first: trace.first,
             provisional,
             exported: Shared::new(Vec::new()),

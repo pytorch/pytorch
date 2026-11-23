@@ -200,11 +200,39 @@ pub enum Op {
     TensorSize { t: V, dim: i64 },
     TensorDim(V),
     Guard(Box<GuardOp>),
+    /// Only on a path: a part of an object, read where the path follows a
+    /// call (see `Part`).
+    Part(Part, V),
+    /// Only on a path: an object the path has itself, a name that a call
+    /// hands a value under.
+    Object(PyObj),
     /// In front of the first operation of a graph: runs what was made of
     /// the graph in place of its instructions when it holds for the values
     /// of the call, or has the instructions that follow recorded as a path,
     /// and otherwise does nothing (see `Compiled::enter_graph`).
     Graph(Arc<GraphSite>),
+}
+
+/// What a path reads of an object where it follows a call into the function
+/// that the call enters: none of these runs Python code.
+#[derive(Clone)]
+pub enum Part {
+    /// What cell `i` of the closure of a function holds.
+    Cell(u32),
+    /// The object a bound method is bound to.
+    Receiver,
+    /// The Python function that calling the object enters: the function
+    /// itself, the function of a bound method, or for an instance of a
+    /// class what its `__call__` comes down to (`Compiled::target`).
+    Target,
+    /// A default of a function: `__defaults__[i]`, or the keyword-only
+    /// default of a name.
+    Default(u32),
+    KwDefault(PyObj),
+    /// An item of an exact tuple or list, an entry of an exact dict: what
+    /// a call hands on with `*` and `**`.
+    Index(u32),
+    Entry(PyObj),
 }
 
 /// A call of a post-dispatch kernel. `operands` feed the prepared call sites
@@ -299,6 +327,7 @@ impl Op {
         };
         match self {
             Op::Const(_)
+            | Op::Object(_)
             | Op::LoadGlobal(_)
             | Op::LoadDeref(_)
             | Op::LoadClosure(_)
@@ -343,6 +372,7 @@ impl Op {
             | Op::CheckBound(a, _)
             | Op::IsFunction { v: a, .. }
             | Op::TensorSize { t: a, .. }
+            | Op::Part(_, a)
             | Op::TensorDim(a) => f(*a),
             Op::Binary(_, a, b)
             | Op::Compare(_, a, b)
@@ -482,6 +512,8 @@ impl Op {
                 | Op::FrameLeave
                 | Op::TensorSize { .. }
                 | Op::TensorDim(_)
+                | Op::Part(..)
+                | Op::Object(_)
                 | Op::Guard(_)
         )
     }
@@ -870,6 +902,8 @@ impl Function {
             Op::TensorSize { t, dim } => format!("tensor_size {} {}", n(t), dim),
             Op::TensorDim(t) => format!("tensor_dim {}", n(t)),
             Op::Guard(g) => format!("guard {}    ; else resume generic at {}", self.guard_repr(&g.cond), g.resume),
+            Op::Part(_, a) => format!("part {}", n(a)),
+            Op::Object(_) => "object".to_string(),
             Op::Graph(site) => format!("graph {}", site.describe()),
         }
     }

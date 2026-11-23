@@ -438,8 +438,11 @@ impl CfgFunction {
         // graph and ran its instructions (`misses`), and how many graphs
         // are no longer exported.
         let (mut built, mut exported, mut hits, mut misses, mut given_up) = (0usize, 0u64, 0u64, 0u64, 0usize);
-        for (_, _, _, site) in self.graph_sites() {
-            if site.outer().is_some() || site.short().is_some() {
+        let held = self.held();
+        for (cf, _, _, site) in self.graph_sites() {
+            // One whose operations a graph of a caller holds is no graph
+            // of its own.
+            if site.outer().is_some() || site.short().is_some() || Self::holder(&held, &cf, &site).is_some() {
                 continue;
             }
             built += 1;
@@ -528,7 +531,10 @@ impl CfgFunction {
     /// it is not exported, or not for the calls it has seen), `ops` and
     /// `operators` of the path that ran last, `inputs` and `outputs` (how
     /// many values that takes and gives), `branches` (how many branches and
-    /// loop tests it goes through), `paths` (how many paths were taken
+    /// loop tests it goes through) and `calls` (how many calls of Python
+    /// functions it goes into), `within` (for a graph of a function whose
+    /// operations a path of a caller holds: the caller's graph, which is
+    /// the one that runs them), `paths` (how many paths were taken
     /// down), `ends` (per path, the block and instruction the function goes
     /// on at behind it) and `why` (the last one ends there), `variants` (how
     /// many exported forms it has), `hits` and `misses` (how many calls ran
@@ -563,8 +569,13 @@ impl CfgFunction {
         };
         let mut functions = vec![self.inner.clone()];
         functions.extend(self.inner.callees.compiled());
+        let held = self.held();
         for cf in &functions {
             let func = &cf.func;
+            let holds = |b: usize, lo: usize, hi: usize| {
+                let insts = &func.blocks[b].insts[lo..hi.min(func.blocks[b].insts.len())];
+                insts.iter().any(|inst| held.iter().any(|(owner, bc, ..)| *owner == Arc::as_ptr(cf) && *bc == inst.bc))
+            };
             let versions: Vec<(usize, Arc<BlockCode>)> = {
                 let state = cf.state.borrow();
                 let blocks = state.blocks.iter().enumerate();
@@ -590,6 +601,9 @@ impl CfgFunction {
                         // A run that is too short to be a graph, and that
                         // no path from it made longer.
                         let seed = site.seed.borrow().clone();
+                        if seed.root.0 == seed.land.0 && holds(b, seed.root.1, seed.land.1) {
+                            continue;
+                        }
                         let (place, inst) = place(b, seed.root.1, seed.land.1);
                         let reason = format!("{} operations, fewer than min_ops ({})", count, site.min_ops);
                         left(py, place, reason, inst.map(|inst| func.op_repr(&inst.op)))?;
@@ -621,6 +635,15 @@ impl CfgFunction {
                     };
                     d.set_item("where", named)?;
                     d.set_item("state", state)?;
+                    if let Some((caller, graph)) = Self::holder(&held, cf, site) {
+                        // Its operations are those of a graph of a caller,
+                        // which is the one that runs them.
+                        let name = match graph.path().first {
+                            Some((block, first)) => format!("{} (block {})[{}]", caller.func.qualname, block, first),
+                            None => graph.name.clone(),
+                        };
+                        d.set_item("within", name)?;
+                    }
                     if let Some(reason) = reason {
                         d.set_item("reason", reason)?;
                     }
@@ -629,6 +652,7 @@ impl CfgFunction {
                     d.set_item("inputs", path.inputs.len())?;
                     d.set_item("outputs", path.outputs.len())?;
                     d.set_item("branches", path.branches)?;
+                    d.set_item("calls", path.calls)?;
                     d.set_item("paths", paths.len())?;
                     let mut ends: Vec<(usize, usize)> = paths.iter().map(|path| path.land).collect();
                     if ends.is_empty() {
@@ -645,7 +669,7 @@ impl CfgFunction {
                     let listed = PyList::empty(py);
                     for (path, form) in &forms {
                         let one = PyDict::new(py);
-                        one.set_item("checks", unsafe { form.conditions(func, path) })?;
+                        one.set_item("checks", unsafe { form.conditions(path) })?;
                         one.set_item("hits", form.hits.load(Ordering::Relaxed))?;
                         if let Some(reason) = &form.closed {
                             one.set_item("reason", reason.clone())?;
@@ -656,6 +680,17 @@ impl CfgFunction {
                     out.append(d)?;
                 }
                 for entry in &version.left {
+                    // What a path of a graph of the block goes through, or
+                    // takes as an operation, is not left out.
+                    let taken = version.graphs.iter().filter(|site| !site.gave_way()).any(|site| {
+                        site.paths().iter().any(|path| {
+                            let behind = path.land.0 != b || (entry.lo as usize) < path.land.1;
+                            path.root.0 == b && path.root.1 <= entry.lo as usize && behind && path.operators.len() >= site.min_ops
+                        })
+                    });
+                    if taken || holds(b, entry.lo as usize, entry.hi as usize) {
+                        continue;
+                    }
                     let (place, inst) = place(b, entry.lo as usize, entry.hi as usize);
                     left(py, place, entry.reason.clone(), inst.map(|inst| func.op_repr(&inst.op)))?;
                 }
@@ -666,6 +701,57 @@ impl CfgFunction {
 }
 
 impl CfgFunction {
+    /// The operations that the paths of graphs hold, each by its function
+    /// and its place in the code of it, with the graph and the function it
+    /// is a graph of: also the operations of functions a path went into.
+    fn held(&self) -> Vec<(*const Compiled, u32, Arc<Compiled>, Arc<GraphSite>)> {
+        let mut held = Vec::new();
+        for (cf, _, _, site) in self.graph_sites() {
+            // A graph that gave way runs nothing: its operations are those
+            // of the graphs that start further on and of the functions it
+            // went into.
+            if matches!(*site.state.borrow(), GraphState::GivenUp(_) | GraphState::Small(_)) || site.outer().is_some() || site.gave_way() {
+                continue;
+            }
+            for path in site.paths().iter().filter(|path| path.operators.len() >= site.min_ops) {
+                let nodes = path.body.iter().filter(|inst| inst.kind == crate::graph::Kind::Node);
+                held.extend(nodes.map(|inst| (path.owners[inst.owner as usize], inst.bc, cf.clone(), site.clone())));
+            }
+        }
+        held
+    }
+
+    /// The graph of a caller, with its function, whose path holds the first
+    /// operation of a graph of a function it went into: where that one
+    /// runs, this one's operations are its own.
+    fn holder(
+        held: &[(*const Compiled, u32, Arc<Compiled>, Arc<GraphSite>)],
+        cf: &Arc<Compiled>,
+        site: &Arc<GraphSite>,
+    ) -> Option<(Arc<Compiled>, Arc<GraphSite>)> {
+        // The first operation of this graph, which may be one of a
+        // function it goes into itself, is on a path of a graph of another
+        // function, behind an instruction of this function: the path
+        // goes through this function to that operation. A path that was
+        // cut back in front of the call has no instruction of this
+        // function (`Path::owners` still lists every function the trace
+        // entered), and an operation of a function that both call is
+        // on it for another reason.
+        let path = site.path();
+        let node = path.body.iter().find(|inst| inst.kind == crate::graph::Kind::Node)?;
+        let (first, function) = ((path.owners[node.owner as usize], node.bc), Arc::as_ptr(cf));
+        let through = |path: &crate::graph::Path| {
+            let of = |inst: &crate::graph::PathInst| path.owners[inst.owner as usize];
+            let entered = path.body.iter().position(|inst| of(inst) == function);
+            let reached = path.body.iter().rposition(|inst| inst.kind == crate::graph::Kind::Node && (of(inst), inst.bc) == first);
+            matches!((entered, reached), (Some(entered), Some(reached)) if entered <= reached)
+        };
+        let of_caller = |(owner, at, caller, graph): &&(*const Compiled, u32, Arc<Compiled>, Arc<GraphSite>)| {
+            (*owner, *at) == first && !Arc::ptr_eq(caller, cf) && graph.paths().iter().any(|path| through(path))
+        };
+        held.iter().find(of_caller).map(|(_, _, caller, graph)| (caller.clone(), graph.clone()))
+    }
+
     /// The graphs of the live block versions of the function and of the
     /// functions it called, each with its function, block and version.
     fn graph_sites(&self) -> Vec<(Arc<Compiled>, usize, u32, Arc<GraphSite>)> {

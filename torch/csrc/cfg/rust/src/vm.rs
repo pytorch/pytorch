@@ -16,7 +16,7 @@
 use crate::analysis::{self, Analysis};
 use crate::bytecode::OpcodeTable;
 use crate::capi::{self, SiteSlot, TcfgApi, TcfgPyOp, TcfgTensorInfo};
-use crate::graph::{self, Assert, Cond, Def, Exported, GraphSite, Held, Kind, Path, PathInst, PathValue, Stage, Trace};
+use crate::graph::{self, Assert, Cond, Def, Exported, GraphSite, Kind, Path, PathValue, Stage, Trace};
 use crate::ir::*;
 use crate::pyffi::{self, new_ref, py_bool, xdecref, Obj, PyObj, Shared};
 use crate::{frontend, inline, unroll};
@@ -1225,10 +1225,64 @@ enum Taken {
     Ends(String),
     Raised,
     Deopt(usize),
+    /// A call that the trace went into has run without the trace coming
+    /// back from it, for this reason: what it returned (null: it raised).
+    Cut(Obj, String),
+}
+
+/// What a path goes into in place of an instruction (see
+/// `Compiled::follow`): a call; a call of a method.
+enum Form<'a> {
+    Call { callee: V, args: &'a [V], kwnames: u32 },
+    Method { recv: V, name: u32, args: &'a [V], kwnames: u32 },
+    /// A call that hands on a sequence with `*` and a dict with `**`.
+    Spread { callee: V, args: V, kwargs: V },
+}
+
+impl Form<'_> {
+    fn text(&self) -> &'static str {
+        match self {
+            Form::Call { .. } | Form::Spread { .. } => "a call",
+            Form::Method { .. } => "a call of a method",
+        }
+    }
+}
+
+/// What became of a function that a path was to go into.
+enum Followed {
+    /// It was not gone into, and nothing has run.
+    Not,
+    /// It returned on the trace: what, and the value of the path that is.
+    Returned(Obj, PathValue),
+    Raised,
+    /// It ran to its end without the trace coming back from it, for this
+    /// reason: what it returned (null: it raised).
+    Left(Obj, String),
+}
+
+/// What became of a function that is taken down (see `Compiled::walk`).
+enum Walked {
+    /// A called function returned: what, and the value of the path that is.
+    Returned(Obj, PathValue),
+    /// The path ends in front of instruction `pc` of `code`, or in front of
+    /// the block, which was not profiled yet.
+    Ended { block: usize, code: *const BlockCode, pc: usize, afresh: bool, reason: String },
+    /// The trace did not come back from the call at instruction `call`,
+    /// which has run: the function goes on behind it.
+    Left { block: usize, code: *const BlockCode, call: usize, reason: String },
+    Raised(usize, u32),
+    Deopt(usize, usize),
 }
 
 /// How many instructions a path has at most.
 const MAX_PATH_STEPS: usize = 200_000;
+
+/// How many calls a path is inside of at most, and how many of them may be
+/// calls of one function.
+const MAX_PATH_DEPTH: usize = 48;
+const MAX_PATH_AGAIN: usize = 8;
+
+const NOT_PROFILED: &str = "a block that was not profiled yet";
 
 /// Says, for as long as it lives, whom the frames that the interpreter
 /// starts on this thread are offered to.
@@ -2043,7 +2097,14 @@ impl Compiled {
     /// frame.
     #[inline(always)]
     unsafe fn run(&self, regs: &mut [Obj], frame: Frame) -> Obj {
-        let mut result = self.exec(regs, frame);
+        let result = self.exec(regs, frame);
+        self.returned(frame, result)
+    }
+
+    /// What is done when the function has run in a frame: pops the frame.
+    #[inline(always)]
+    unsafe fn returned(&self, frame: Frame, result: Obj) -> Obj {
+        let mut result = result;
         // A debugger that was entered below this call has its trace function
         // on the frame, and is told that the function returns.
         if !frame.object.is_null() && !(*frame.object).is_null() && !result.is_null() {
@@ -2237,6 +2298,18 @@ impl Compiled {
         if !self.options.callees || REPLAY_DEPTH.with(|d| d.get()) > 0 {
             return None;
         }
+        let (func, receiver, kind) = self.target(callee)?;
+        if profiled {
+            self.note_callee(func, kind);
+        }
+        self.compiled_function(func).map(|compiled| (compiled, func, receiver))
+    }
+
+    /// What calling `callee` comes down to, if that is a Python function:
+    /// the function, the object it is bound to (null for a plain function),
+    /// and which of the three kinds of callee it is.
+    #[inline(always)]
+    unsafe fn target(&self, callee: Obj) -> Option<(Obj, Obj, CalleeKind)> {
         let (func, receiver, kind) = if ffi::PyFunction_Check(callee) != 0 {
             (callee, null_mut(), CalleeKind::Function)
         } else if ffi::Py_TYPE(callee) == std::ptr::addr_of_mut!(pyffi::PyMethod_Type) {
@@ -2259,10 +2332,7 @@ impl Compiled {
         if func.is_null() || ffi::PyFunction_Check(func) == 0 {
             return None;
         }
-        if profiled {
-            self.note_callee(func, kind);
-        }
-        self.compiled_function(func).map(|compiled| (compiled, func, receiver))
+        Some((func, receiver, kind))
     }
 
     #[cold]
@@ -3542,6 +3612,54 @@ impl Compiled {
                 Ok(t)
             }
             Op::TupleGet(t, i) => Ok(new_ref(ffi::PyTuple_GET_ITEM(self.obj(regs, *t), *i as isize))),
+            Op::Object(o) => Ok(new_ref(o.as_ptr())),
+            Op::Part(part, v) => {
+                let held = self.obj(regs, *v);
+                let function = ffi::PyFunction_Check(held) != 0;
+                let item = |tuple: Obj, i: u32| {
+                    let there = !tuple.is_null() && ffi::PyTuple_GET_SIZE(tuple) > i as isize;
+                    if there { ffi::PyTuple_GET_ITEM(tuple, i as isize) } else { null_mut() }
+                };
+                let found = match part {
+                    Part::Cell(i) if function => {
+                        let cell = item(ffi::PyFunction_GetClosure(held), *i);
+                        if cell.is_null() { null_mut() } else { pyffi::PyCell_Get(cell) }
+                    }
+                    Part::Default(i) if function => {
+                        let default = item(ffi::PyFunction_GetDefaults(held), *i);
+                        ffi::Py_XINCREF(default);
+                        default
+                    }
+                    Part::KwDefault(name) if function => {
+                        let defaults = ffi::PyFunction_GetKwDefaults(held);
+                        let default =
+                            if defaults.is_null() { null_mut() } else { ffi::PyDict_GetItemWithError(defaults, name.as_ptr()) };
+                        ffi::Py_XINCREF(default);
+                        default
+                    }
+                    Part::Receiver if ffi::Py_TYPE(held) == std::ptr::addr_of_mut!(pyffi::PyMethod_Type) => {
+                        new_ref(pyffi::PyMethod_Self(held))
+                    }
+                    Part::Target => self.target(held).map_or(null_mut(), |(func, ..)| new_ref(func)),
+                    Part::Index(i) => {
+                        let plain = ffi::PyTuple_CheckExact(held) != 0 || ffi::PyList_CheckExact(held) != 0;
+                        let there = plain && ffi::PyObject_Size(held) > *i as isize;
+                        let found = if there { graph::sequence_item(held, *i as isize) } else { null_mut() };
+                        ffi::Py_XINCREF(found);
+                        found
+                    }
+                    Part::Entry(key) if ffi::PyDict_CheckExact(held) != 0 => {
+                        let found = ffi::PyDict_GetItemWithError(held, key.as_ptr());
+                        ffi::Py_XINCREF(found);
+                        found
+                    }
+                    _ => null_mut(),
+                };
+                if found.is_null() && ffi::PyErr_Occurred().is_null() {
+                    set_error(ffi::PyExc_SystemError, "a function is not what a path took it for".to_string());
+                }
+                checked(found)
+            }
             Op::Call { callee, args, kwnames } => {
                 let callee = self.obj(regs, *callee);
                 checked(self.vectorcall(regs, callee, args, *kwnames))
@@ -4476,6 +4594,8 @@ impl Compiled {
             | Op::IsNone(..)
             | Op::Is(..)
             | Op::IsFunction { .. }
+            | Op::Part(..)
+            | Op::Object(_)
             | Op::CheckBound(..) => true,
             // Of what is there: a register that is empty is nothing to
             // build of.
@@ -4485,6 +4605,19 @@ impl Compiled {
             // the path made: `record` takes down no other.
             Op::ListAppend(..) | Op::IterNext(_) => true,
             Op::ListToTuple(l) => !at(*l).is_null() && ffi::PyList_CheckExact(at(*l)) != 0,
+            // Onto a list, or into a dict, that the path made.
+            Op::ListExtend(l, more) => {
+                let plain = |o: Obj| !o.is_null() && !capi::is_unboxed(o);
+                plain(at(*l))
+                    && plain(at(*more))
+                    && ffi::PyList_CheckExact(at(*l)) != 0
+                    && (ffi::PyList_CheckExact(at(*more)) != 0 || ffi::PyTuple_CheckExact(at(*more)) != 0)
+            }
+            Op::DictMerge(d, more, _) => graph::quiet_merge(at(*d), at(*more)),
+            Op::ImportName { name, fromlist, level } => {
+                let f = &self.func;
+                graph::quiet_import(f.builtins.as_ptr(), f.consts[*name as usize].as_ptr(), at(*fromlist), at(*level))
+            }
             Op::BuildMap(vs) => vs.iter().step_by(2).all(|k| !at(*k).is_null() && graph::is_plain_key(at(*k))),
             Op::MapAdd(_, k, _) => !at(*k).is_null() && graph::is_plain_key(at(*k)),
             Op::GetIter(v) => !at(*v).is_null() && graph::quiet_iter(at(*v)).is_some_and(|used_up| !used_up || own(*v)),
@@ -4500,9 +4633,15 @@ impl Compiled {
                 !at(*item).is_null() && !at(*container).is_null() && graph::quiet_contains(at(*item), at(*container))
             }
             Op::GetLen(v) | Op::Unpack(v, _) => !at(*v).is_null() && graph::quiet_sized(at(*v)),
+            // An iterator among the arguments is gone over only if the
+            // path made it.
             Op::Call { callee, args, kwnames } => {
                 let given: Vec<Obj> = args.iter().map(|v| at(*v)).collect();
-                *kwnames == NONE && graph::pure_call(at(*callee), &given, api).is_some()
+                *kwnames == NONE && graph::pure_call(at(*callee), &given, |i| own(args[i]), api).is_some()
+            }
+            Op::CallMethod { recv, name, args, kwnames } => {
+                let given: Vec<Obj> = args.iter().map(|v| at(*v)).collect();
+                *kwnames == NONE && graph::pure_method(at(*recv), self.func.consts[*name as usize].as_ptr(), &given, api)
             }
             _ => false,
         }
@@ -4521,11 +4660,33 @@ impl Compiled {
         api: &TcfgApi,
     ) -> Staged {
         for inst in path.staged(stage) {
+            let owner = &*path.owners[inst.owner as usize];
             if let Some(assert) = &inst.assert {
                 let holds = match assert {
                     Assert::Truth(v, way) => reg(own, *v) == if *way { ffi::Py_True() } else { ffi::Py_False() },
                     Assert::Null(v, exhausted) => reg(own, *v).is_null() == *exhausted,
                     Assert::Guard(cond) => Self::guard_holds(cond, own, Some(api)),
+                    Assert::Enters(v, compiled, defaults) => {
+                        let function = reg(own, *v);
+                        !function.is_null() && self.follows(function) == Some(*compiled) && Self::defaults_of(function) == *defaults
+                    }
+                    Assert::Sequence(v, class, count) => {
+                        let held = reg(own, *v);
+                        !held.is_null()
+                            && !capi::is_unboxed(held)
+                            && ffi::Py_TYPE(held) as usize == *class
+                            && ffi::PyObject_Size(held) as usize == *count
+                    }
+                    Assert::Keys(v, names) => {
+                        let held = reg(own, *v);
+                        let dict = !held.is_null() && !capi::is_unboxed(held) && ffi::PyDict_CheckExact(held) != 0;
+                        dict && ffi::PyDict_Size(held) as usize == names.len() && {
+                            let (mut at, mut key, mut value) = (0, null_mut(), null_mut());
+                            names.iter().all(|name| {
+                                ffi::PyDict_Next(held, &mut at, &mut key, &mut value) != 0 && key == name.as_ptr()
+                            })
+                        }
+                    }
                 };
                 if !holds {
                     return Staged::Failed;
@@ -4540,15 +4701,15 @@ impl Compiled {
                     let held = if there { pyffi::PyCell_Get(ffi::PyTuple_GET_ITEM(closure, *i as isize)) } else { null_mut() };
                     checked(held)
                 }
-                op if self.quiet_of(own, op, &|v| path.made.get(v as usize).is_some_and(|made| *made), api) => self.exec_op(own, op),
+                op if owner.quiet_of(own, op, &|v| path.made.get(v as usize).is_some_and(|made| *made), api) => owner.exec_op(own, op),
                 // An attribute that the path read is not there at this
                 // call, and `object` says so itself: the read raises and
                 // does nothing else, where the instructions get to it.
-                Op::LoadAttr(of, name) if graph::plainly_absent(reg(own, *of), self.func.consts[*name as usize].as_ptr()) => {
+                Op::LoadAttr(of, name) if graph::plainly_absent(reg(own, *of), owner.func.consts[*name as usize].as_ptr()) => {
                     return Staged::Failed;
                 }
                 op => {
-                    let text = self.func.op_repr(op);
+                    let text = owner.func.op_repr(op);
                     site.unsure(text.split_whitespace().next().unwrap_or("an instruction"));
                     return Staged::Unsure;
                 }
@@ -5037,21 +5198,46 @@ impl Compiled {
         if v == UNDEF {
             return UNDEF;
         }
-        let known = t.map[v as usize];
+        let known = t.mapped(v);
         if known != NONE {
             return known;
         }
-        let kept = if reg(regs, v).is_null() { null_mut() } else { new_ref(self.obj(regs, v)) };
-        let made = t.defs.len() as PathValue;
-        t.defs.push(Def::default());
-        t.source.push(v);
-        t.rec.values.push(kept);
-        if !kept.is_null() && !capi::is_unboxed(kept) {
-            t.rec.kept.entry(kept as usize).or_insert((0, made)).0 += 1;
+        if !t.outermost() {
+            // A called function has nothing from before the path.
+            t.lost |= !reg(regs, v).is_null();
+            return UNDEF;
         }
-        t.map[v as usize] = made;
-        t.inputs.push((v, made));
-        made
+        let kept = if reg(regs, v).is_null() { null_mut() } else { new_ref(self.obj(regs, v)) };
+        t.input(v, kept)
+    }
+
+    /// How many defaults a Python function has for its last parameters.
+    unsafe fn defaults_of(function: Obj) -> usize {
+        let defaults = ffi::PyFunction_GetDefaults(function);
+        if defaults.is_null() || ffi::PyTuple_Check(defaults) == 0 { 0 } else { ffi::PyTuple_GET_SIZE(defaults) as usize }
+    }
+
+    /// The compiled form of a function that a path goes into, which is what
+    /// a path checks of every call it holds. One that is still measured
+    /// against the interpreter, or was measured to run faster there and is
+    /// left to it, is gone into all the same: a path does not run it in
+    /// the VM, it has its instructions among its own, and reads and checks
+    /// what they read at every call. None for what the frontend turned
+    /// down and for what is left to the interpreter by place
+    /// (`leave_to_interpreter`), of which there is no compiled form.
+    unsafe fn follows(&self, function: Obj) -> Option<*const Compiled> {
+        if ffi::PyFunction_Check(function) == 0 || capi::traced() {
+            return None;
+        }
+        let form = self.function_form(function);
+        if form == INTERPRETED {
+            return None;
+        }
+        if form != DEMOTED {
+            return Some(form);
+        }
+        let key = (ffi::PyFunction_GetCode(function) as usize, ffi::PyFunction_GetGlobals(function) as usize);
+        self.callees.entries.borrow().get(&key).map(|callee| Arc::as_ptr(&callee.compiled))
     }
 
     /// The values that the instructions of some code of a block read from
@@ -5135,16 +5321,26 @@ impl Compiled {
     ) -> Taken {
         let inst = &code.insts[pc];
         let origin = code.origins[pc];
-        // A graph that starts further on is part of this one.
-        for other in code.graphs.iter().filter(|other| other.root == (block, origin as usize)) {
-            if !Arc::ptr_eq(other, site) {
-                *other.within.borrow_mut() = Arc::downgrade(site);
+        // A graph that starts further on in the function is part of this
+        // one. One of a called function is not: it is met where the
+        // function runs without a path around it.
+        if t.outermost() {
+            for other in code.graphs.iter().filter(|other| other.root == (block, origin as usize)) {
+                if !Arc::ptr_eq(other, site) {
+                    *other.within.borrow_mut() = Arc::downgrade(site);
+                }
+            }
+        } else {
+            let mut unknown = false;
+            inst.op.for_each_use(|v| unknown |= v != UNDEF && t.mapped(v) == NONE && !reg(regs, v).is_null());
+            if unknown {
+                return Taken::Ends("a called function reads what the path does not have".to_string());
             }
         }
         let kill = |t: &mut Trace, regs: &mut [Obj]| {
             for v in &inst.kills {
                 capi::release(take(regs, *v));
-                t.held[*v as usize] = Held::Empty;
+                t.kill(*v);
             }
         };
         // What only renames, binds or holds.
@@ -5152,6 +5348,42 @@ impl Compiled {
             Op::Graph(_) => return Taken::Went,
             Op::Hold(_) => {
                 kill(t, regs);
+                return Taken::Went;
+            }
+            Op::FrameEnter(function) => {
+                // The frame of a call that is inlined. A path that ends in
+                // there ends in front of it: where a path ends, the frames
+                // are those of the function alone.
+                if frames.enter(self.func.consts[*function as usize].as_ptr()).is_err() {
+                    return Taken::Raised;
+                }
+                if t.outermost() {
+                    match &mut t.mark {
+                        Some(mark) => mark.frames += 1,
+                        None => t.mark((block, code as *const BlockCode, pc), 1),
+                    }
+                    t.inlined.push(t.bound.len());
+                }
+                return Taken::Went;
+            }
+            Op::FrameLeave => {
+                // A path that began inside the call does not take its frame
+                // away: it ends here.
+                if t.outermost() && t.inlined.is_empty() {
+                    return Taken::Ends("the end of a call that is inlined".to_string());
+                }
+                self.leave(frames);
+                if t.outermost() {
+                    if let Some(bound) = t.inlined.pop() {
+                        t.bound.truncate(bound);
+                    }
+                    if t.mark.as_mut().is_some_and(|mark| {
+                        mark.frames -= 1;
+                        mark.frames == 0
+                    }) {
+                        t.mark = None;
+                    }
+                }
                 return Taken::Went;
             }
             Op::Guard(g) => {
@@ -5165,8 +5397,11 @@ impl Compiled {
             }
             Op::StoreLocal(slot, v) => {
                 self.store_local(frames.top(), *slot, reg(regs, *v));
-                let bound = self.path_value(t, regs, *v);
-                t.bound.push((*slot, bound));
+                // The frame of a called function is gone where the path ends.
+                if t.outermost() {
+                    let bound = self.path_value(t, regs, *v);
+                    t.bound.push((*slot, bound));
+                }
                 kill(t, regs);
                 return Taken::Went;
             }
@@ -5190,7 +5425,7 @@ impl Compiled {
             _ => {}
         }
         // What the instruction is to a path, or why it is no part of one.
-        let made = |t: &Trace, v: V| t.map[v as usize] != NONE && t.defs[t.map[v as usize] as usize].made;
+        let made = |t: &Trace, v: V| t.mapped(v) != NONE && t.defs[t.mapped(v) as usize].made;
         if let Some((list, item)) = self.appends(t, inst, regs).filter(|(list, _)| made(t, *list)) {
             // `list.append(item)` on a list the path made: the list gets
             // the item, and the call gives None.
@@ -5202,37 +5437,85 @@ impl Compiled {
             // What is read of a list that holds what an operation gave is
             // read behind the graph, and so is what is put into it later
             // (`Trace::note`).
-            let append = Op::ListAppend(list, item);
-            t.note(&append, NONE, Kind::Residual);
-            t.body.push(PathInst { op: append, dst: NONE, kind: Kind::Residual, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None });
+            t.push(Op::ListAppend(list, item), NONE, Kind::Residual, inst.bc);
             ffi::Py_XINCREF(nothing);
             let dst = t.define(inst.dst, Def::default(), nothing);
-            let none = Op::Const(self.func.const_none);
-            t.note(&none, dst, Kind::Pure);
-            t.body.push(PathInst { op: none, dst, kind: Kind::Pure, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None });
+            t.push(Op::Const(self.func.const_none), dst, Kind::Pure, inst.bc);
             capi::release(std::mem::replace(&mut regs[inst.dst as usize], nothing));
             kill(t, regs);
             return Taken::Went;
         }
         let operators = self.operation(block, origin, inst, regs, api);
+        if operators.is_none() {
+            if let Some(taken) = self.record_call(t, site, (block, code as *const BlockCode, pc), regs, frames, api) {
+                return taken;
+            }
+        }
+        if let (Op::CallMethod { recv, name, args, kwnames }, None) = (&inst.op, &operators) {
+            // A call of what an object has under a name, where that is a
+            // function a path may call: the read, and then the call.
+            let load = Op::LoadAttr(*recv, *name);
+            let held = reg(regs, *recv);
+            let read = *kwnames == NONE && !held.is_null() && !capi::is_unboxed(held) && self.quiet(regs, &load, api);
+            let found = if read { self.exec_op(regs, &load).unwrap_or(null_mut()) } else { null_mut() };
+            ffi::PyErr_Clear();
+            let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
+            let own = graph::pure_call(found, &given, |i| made(t, args[i]), api);
+            if let Some(own) = own {
+                frames.top().at(inst.bc & OFFSET_MASK);
+                let Ok(result) = self.exec_op(regs, &inst.op) else {
+                    ffi::Py_DECREF(found);
+                    return Taken::Raised;
+                };
+                let recv = self.path_value(t, regs, *recv);
+                let callee = t.derive(Op::LoadAttr(recv, *name), Kind::Read, false, found, inst.bc);
+                let args: Vec<PathValue> = args.iter().map(|v| self.path_value(t, regs, *v)).collect();
+                ffi::Py_XINCREF(result);
+                let dst = t.derive(Op::Call { callee, args, kwnames: NONE }, Kind::Pure, own, result, inst.bc);
+                if inst.dst == NONE {
+                    capi::release(result);
+                } else {
+                    capi::release(std::mem::replace(&mut regs[inst.dst as usize], result));
+                    t.rename(inst.dst, dst);
+                }
+                kill(t, regs);
+                return Taken::Went;
+            }
+            xdecref(found);
+        }
         let mut makes = false;
         let kind = match &inst.op {
             Op::Dispatch(d) if d.slot.traits() == 0 && d.slot.len() > 0 => Some(Kind::Node),
+            // A dropout that is told not to drop anything draws nothing:
+            // the form is checked for that operand, as for any number.
+            Op::Dispatch(d) if d.slot.traits() == capi::SITE_RANDOM && d.slot.len() > 0 => {
+                const DROPOUTS: [&str; 4] =
+                    ["aten::dropout", "aten::feature_dropout", "aten::alpha_dropout", "aten::feature_alpha_dropout"];
+                let dropout = d.slot.operator().is_some_and(|name| DROPOUTS.contains(&name.as_str()));
+                let idle = d.operands.last().is_some_and(|train| reg(regs, *train) == ffi::Py_False());
+                (dropout && idle).then_some(Kind::Node)
+            }
             Op::Call { .. } | Op::CallMethod { .. } | Op::GetItem(..) if operators.is_some() => Some(Kind::Node),
             Op::Call { callee, args, kwnames } if *kwnames == NONE => {
                 let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
-                graph::pure_call(reg(regs, *callee), &given, api).map(|iterable| {
-                    makes = iterable;
+                graph::pure_call(reg(regs, *callee), &given, |i| made(t, args[i]), api).map(|own| {
+                    makes = own;
                     Kind::Pure
                 })
+            }
+            Op::CallMethod { recv, name, args, kwnames } if *kwnames == NONE => {
+                let given: Vec<Obj> = args.iter().map(|v| reg(regs, *v)).collect();
+                graph::pure_method(reg(regs, *recv), self.func.consts[*name as usize].as_ptr(), &given, api).then_some(Kind::Pure)
             }
             Op::BuildList(_) | Op::BuildMap(_) if self.quiet(regs, &inst.op, api) => {
                 makes = true;
                 Some(Kind::Pure)
             }
-            Op::ListAppend(target, _) | Op::MapAdd(target, ..) | Op::IterNext(target) => {
-                (made(t, *target) && self.quiet(regs, &inst.op, api)).then_some(Kind::Residual)
-            }
+            Op::ListAppend(target, _)
+            | Op::MapAdd(target, ..)
+            | Op::IterNext(target)
+            | Op::ListExtend(target, _)
+            | Op::DictMerge(target, ..) => (made(t, *target) && self.quiet(regs, &inst.op, api)).then_some(Kind::Residual),
             Op::GetIter(v) => match graph::quiet_iter(reg(regs, *v)) {
                 Some(of_path) if !of_path || made(t, *v) => {
                     makes = true;
@@ -5241,9 +5524,12 @@ impl Compiled {
                 _ => None,
             },
             Op::LoadGlobal(_) | Op::LoadDeref(_) | Op::CellGet(..) => Some(Kind::Read),
-            Op::LoadAttr(..) | Op::GetItem(..) | Op::Contains(..) | Op::GetLen(_) | Op::Unpack(..) => {
-                self.quiet(regs, &inst.op, api).then_some(Kind::Read)
-            }
+            Op::LoadAttr(..)
+            | Op::GetItem(..)
+            | Op::Contains(..)
+            | Op::GetLen(_)
+            | Op::Unpack(..)
+            | Op::ImportName { .. } => self.quiet(regs, &inst.op, api).then_some(Kind::Read),
             op => self.quiet(regs, op, api).then_some(Kind::Pure),
         };
         let ends = || {
@@ -5259,27 +5545,40 @@ impl Compiled {
         let Some(mut renamed) = graph::renamed(&inst.op, &mut |v| self.path_value(t, regs, v)) else {
             return ends();
         };
+        if let (Op::LoadDeref(cell), false) = (&inst.op, t.outermost()) {
+            // The closure of a called function is that of the function the
+            // call was found to enter.
+            renamed = Op::Part(Part::Cell(*cell), t.function());
+        }
         if kind == Kind::Node {
             // A list the path made and filled is handed over as what it
             // holds: the graph has those values, not the list.
             let mut lists: Vec<(PathValue, PathValue)> = Vec::new();
             graph::reads(&renamed, |v| {
-                if let Some(items) = self.listed(t, v) {
+                // One that was also extended is taken item by item, as it
+                // is by now.
+                let extended = t.body.iter().any(|inst| matches!(&inst.op, Op::ListExtend(target, _) if *target == v));
+                let held = t.rec.values[v as usize];
+                let items = if extended && !held.is_null() && ffi::PyList_CheckExact(held) != 0 {
+                    let count = ffi::PyList_GET_SIZE(held) as usize;
+                    t.check(Assert::Sequence(v, ffi::Py_TYPE(held) as usize, count), inst.bc);
+                    let item = |t: &mut Trace, i: usize| {
+                        let kept = new_ref(ffi::PyList_GET_ITEM(held, i as isize));
+                        t.derive(Op::Part(Part::Index(i as u32), v), Kind::Pure, false, kept, inst.bc)
+                    };
+                    Some((0..count).map(|i| item(t, i)).collect())
+                } else {
+                    self.listed(t, v)
+                };
+                if let Some(items) = items {
                     let late = items.iter().any(|item| t.defs[*item as usize].late);
                     let op = Op::BuildList(items);
                     let graph = late && graph::computed(&op, &t.defs, |_| false);
                     let kept = t.rec.values[v as usize];
                     ffi::Py_XINCREF(kept);
-                    let list = t.defs.len() as PathValue;
-                    t.defs.push(Def { node: false, late, graph, made: false });
-                    t.source.push(t.source[v as usize]);
-                    t.rec.values.push(kept);
-                    if !kept.is_null() && !capi::is_unboxed(kept) {
-                        t.rec.kept.entry(kept as usize).or_insert((0, list)).0 += 1;
-                    }
-                    let inst = PathInst { op, dst: list, kind: Kind::Pure, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None };
-                    t.note(&inst.op, inst.dst, inst.kind);
-                    t.body.push(inst);
+                    let list = t.value(Def { node: false, late, graph, made: false }, kept);
+                    t.source[list as usize] = t.source[v as usize];
+                    t.push(op, list, Kind::Pure, inst.bc);
                     lists.push((v, list));
                 }
             });
@@ -5376,15 +5675,384 @@ impl Compiled {
                 Op::Dispatch(d) => d.slot.operator().unwrap_or_else(|| "?".to_string()),
                 _ => operators.unwrap_or_else(|| "?".to_string()),
             });
-            if t.operators.len() == 1 && origin != NONE {
+            if t.operators.len() == 1 && t.outermost() && origin != NONE {
                 t.first = Some((block, origin));
             }
         }
-        let taken = PathInst { op: renamed, dst, kind, bc: inst.bc, stage: Stage::Before, in_graph: false, assert: None };
-        t.note(&taken.op, taken.dst, taken.kind);
-        t.body.push(taken);
+        t.push(renamed, dst, kind, inst.bc);
         kill(t, regs);
         Taken::Went
+    }
+
+    /// Takes down, in place of an instruction that enters a Python
+    /// function, the instructions of that function (`follow`): a call, a
+    /// call of a method. None for
+    /// any other instruction, which is then looked at as it was before.
+    unsafe fn record_call(
+        &self,
+        t: &mut Trace,
+        site: &Arc<GraphSite>,
+        at: (usize, *const BlockCode, usize),
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+    ) -> Option<Taken> {
+        let inst = &(&(*at.1).insts)[at.2];
+        let form = match &inst.op {
+            Op::Call { callee, args, kwnames } => Form::Call { callee: *callee, args, kwnames: *kwnames },
+            Op::CallMethod { recv, name, args, kwnames } => {
+                Form::Method { recv: *recv, name: *name, args, kwnames: *kwnames }
+            }
+            Op::CallEx { callee, args, kwargs } => Form::Spread { callee: *callee, args: *args, kwargs: *kwargs },
+            _ => return None,
+        };
+        let (result, value) = match self.follow(t, site, at, regs, frames, api, &form) {
+            Followed::Not => return None,
+            Followed::Raised => return Some(Taken::Raised),
+            Followed::Left(result, reason) => return Some(Taken::Cut(result, reason)),
+            Followed::Returned(result, value) => (result, value),
+        };
+        t.unmark();
+        if inst.dst == NONE {
+            capi::release(result);
+        } else {
+            capi::release(std::mem::replace(&mut regs[inst.dst as usize], result));
+            t.rename(inst.dst, value);
+        }
+        for v in &inst.kills {
+            capi::release(take(regs, *v));
+            t.kill(*v);
+        }
+        Some(Taken::Went)
+    }
+
+    /// Goes into the Python function that an instruction enters, if that
+    /// function runs compiled, is not being measured against the
+    /// interpreter and is not already on the trace: runs it as `enter`
+    /// does, with its instructions taken down and its parameters being
+    /// the values the instruction hands it. The path checks, where it is
+    /// run, that what is called still comes down to a function that runs
+    /// as the same compiled function (`Assert::Enters`), and reads the
+    /// receiver, the defaults and the closure from what is called then.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn follow(
+        &self,
+        t: &mut Trace,
+        site: &Arc<GraphSite>,
+        at: (usize, *const BlockCode, usize),
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+        form: &Form,
+    ) -> Followed {
+        let f = &self.func;
+        let bc = (&(*at.1).insts)[at.2].bc;
+        let not = |why: &str| {
+            if graph::debug() {
+                eprintln!("torch.vm graph {}: {} is not gone into: {}", site.name, form.text(), why);
+            }
+            Followed::Not
+        };
+        if capi::traced() || !capi::has_frames() || t.acts.len() >= MAX_PATH_DEPTH {
+            return not("frames are traced, or the path is too deep");
+        }
+        // What is called, what it comes down to, and what it is handed.
+        let mut read: Vec<PyObj> = Vec::new();
+        let (mut called, receiver): (Obj, Obj);
+        let mut items: Vec<Obj> = Vec::new();
+        // The names of the values that are handed over under one, which
+        // are the last of them.
+        let mut keys: Vec<Obj> = Vec::new();
+        let func = match form {
+            Form::Call { callee, args, kwnames: kw } | Form::Method { recv: callee, args, kwnames: kw, .. } => {
+                let held = reg(regs, *callee);
+                if held.is_null() || capi::is_unboxed(held) {
+                    return Followed::Not;
+                }
+                called = held;
+                if let Form::Method { recv, name, .. } = form {
+                    let load = Op::LoadAttr(*recv, *name);
+                    if !self.quiet(regs, &load, api) {
+                        return Followed::Not;
+                    }
+                    let Ok(found) = self.exec_op(regs, &load) else {
+                        ffi::PyErr_Clear();
+                        return Followed::Not;
+                    };
+                    read.push(PyObj::from_owned(found));
+                    called = found;
+                }
+                let Some((func, bound, _)) = self.target(called) else {
+                    return Followed::Not;
+                };
+                receiver = bound;
+                if !receiver.is_null() {
+                    items.push(receiver);
+                }
+                for v in args.iter() {
+                    items.push(self.obj(regs, *v));
+                }
+                if *kw != NONE {
+                    let names = f.consts[*kw as usize].as_ptr();
+                    keys.extend((0..ffi::PyTuple_GET_SIZE(names)).map(|k| ffi::PyTuple_GET_ITEM(names, k)));
+                }
+                func
+            }
+            Form::Spread { callee, args, kwargs } => {
+                called = reg(regs, *callee);
+                let given = reg(regs, *args);
+                let plain = |o: Obj| !o.is_null() && !capi::is_unboxed(o);
+                let sequence = plain(given) && (ffi::PyTuple_CheckExact(given) != 0 || ffi::PyList_CheckExact(given) != 0);
+                let Some((func, bound, _)) = (if plain(called) && sequence { self.target(called) } else { None }) else {
+                    return Followed::Not;
+                };
+                receiver = bound;
+                if !receiver.is_null() {
+                    items.push(receiver);
+                }
+                items.extend((0..ffi::PyObject_Size(given)).map(|i| graph::sequence_item(given, i)));
+                if *kwargs != NONE {
+                    let named = reg(regs, *kwargs);
+                    if !plain(named) || ffi::PyDict_CheckExact(named) == 0 {
+                        return Followed::Not;
+                    }
+                    let (mut at, mut key, mut value) = (0, null_mut(), null_mut());
+                    while ffi::PyDict_Next(named, &mut at, &mut key, &mut value) != 0 {
+                        if ffi::PyUnicode_CheckExact(key) == 0 {
+                            return Followed::Not;
+                        }
+                        keys.push(key);
+                        items.push(value);
+                    }
+                }
+                func
+            }
+        };
+        if func.is_null() || ffi::PyFunction_Check(func) == 0 {
+            return not("it comes down to no Python function");
+        }
+        let Some(compiled) = self.follows(func) else {
+            return not("the function is left to the interpreter");
+        };
+        let c = &*compiled;
+        let here = std::ptr::addr_of!(compiled) as usize;
+        // A function that the trace is in may be gone into again (a
+        // `Sequential` inside a `Sequential`), a few times.
+        let again = t.acts.iter().filter(|act| t.owners[act.owner as usize] == compiled).count();
+        if again >= MAX_PATH_AGAIN {
+            return not("the path is in that function too many times already");
+        }
+        if here < STACK_FLOOR.with(|floor| *floor) + STACK_MARGIN {
+            return not("the native stack is nearly used up");
+        }
+        // The arguments are bound as `enter` binds them.
+        let cf = &c.func;
+        let nkw = keys.len();
+        let total = items.len() - nkw;
+        let kwargs = if nkw == 0 { null_mut() } else { ffi::PyDict_New() };
+        for k in 0..nkw {
+            ffi::PyDict_SetItem(kwargs, keys[k], items[total + k]);
+        }
+        let nregs = cf.nvalues as usize + 1;
+        let mut inner = c.frames.borrow_mut().pop().unwrap_or_else(|| vec![null_mut(); nregs]);
+        inner[nregs - 1] = new_ref(func);
+        let done = |inner: Vec<Obj>| {
+            let mut inner = inner;
+            for r in inner.iter_mut() {
+                capi::release(std::mem::replace(r, null_mut()));
+            }
+            c.frames.borrow_mut().push(inner);
+        };
+        let positional = Args { receiver: null_mut(), items: items.as_ptr(), n: total };
+        let fits = c.bind_args(&mut inner, func, &positional, kwargs).is_ok();
+        xdecref(kwargs);
+        let rest = cf.argcount + cf.kwonlyargcount;
+        if !fits {
+            // The call says what does not fit where the instructions make it.
+            ffi::PyErr_Clear();
+            done(inner);
+            return not("the arguments do not fit");
+        }
+        // The same binding, of the values of the path.
+        if t.outermost() && t.mark.is_none() {
+            t.mark(at, 0);
+        }
+        let mut given: Vec<PathValue> = Vec::new();
+        let function = match form {
+            Form::Call { callee, args, .. } | Form::Method { recv: callee, args, .. } => {
+                let mut value = self.path_value(t, regs, *callee);
+                if let Form::Method { name, .. } = form {
+                    value = t.derive(Op::LoadAttr(value, *name), Kind::Read, false, new_ref(called), bc);
+                }
+                let function = t.derive(Op::Part(Part::Target, value), Kind::Read, false, new_ref(func), bc);
+                if receiver == called {
+                    given.push(value);
+                } else if !receiver.is_null() {
+                    given.push(t.derive(Op::Part(Part::Receiver, value), Kind::Read, false, new_ref(receiver), bc));
+                }
+                for v in args.iter() {
+                    given.push(self.path_value(t, regs, *v));
+                }
+                function
+            }
+            Form::Spread { callee, args, kwargs } => {
+                let value = self.path_value(t, regs, *callee);
+                let function = t.derive(Op::Part(Part::Target, value), Kind::Read, false, new_ref(func), bc);
+                if receiver == called {
+                    given.push(value);
+                } else if !receiver.is_null() {
+                    given.push(t.derive(Op::Part(Part::Receiver, value), Kind::Read, false, new_ref(receiver), bc));
+                }
+                // What the path built itself is taken apart as it was
+                // built; anything else is checked to be made alike.
+                let first = given.len();
+                let sequence = self.path_value(t, regs, *args);
+                match self.built(t, sequence).filter(|built| built.len() == total - first) {
+                    Some(built) => given.extend(built),
+                    None => {
+                        let class = ffi::Py_TYPE(reg(regs, *args)) as usize;
+                        t.check(Assert::Sequence(sequence, class, total - first), bc);
+                        for i in first..total {
+                            let part = Op::Part(Part::Index((i - first) as u32), sequence);
+                            given.push(t.derive(part, Kind::Pure, false, new_ref(items[i]), bc));
+                        }
+                    }
+                }
+                if *kwargs != NONE {
+                    let named = self.path_value(t, regs, *kwargs);
+                    let pinned = self.pins_keys(t, named);
+                    let entries = self.entries(t, named).filter(|entries| {
+                        pinned && entries.len() == nkw && entries.iter().zip(&keys).all(|((key, _), name)| key == name)
+                    });
+                    match entries {
+                        Some(entries) => given.extend(entries.iter().map(|(_, value)| *value)),
+                        None => {
+                            let names = keys.iter().map(|key| PyObj::from_borrowed(*key)).collect();
+                            t.check(Assert::Keys(named, names), bc);
+                            for k in 0..nkw {
+                                let part = Op::Part(Part::Entry(PyObj::from_borrowed(keys[k])), named);
+                                given.push(t.derive(part, Kind::Pure, false, new_ref(items[total + k]), bc));
+                            }
+                        }
+                    }
+                }
+                function
+            }
+        };
+        t.check(Assert::Enters(function, compiled, Self::defaults_of(func)), bc);
+        t.enter(compiled, cf.nvalues as usize, function);
+        for i in 0..total.min(cf.argcount) {
+            t.rename(cf.params[i], given[i]);
+        }
+        let kept = |v: V| new_ref(reg(&inner, v));
+        if cf.has_varargs {
+            let more = given[cf.argcount.min(total)..total].to_vec();
+            let tuple = t.derive(Op::BuildTuple(more), Kind::Pure, false, kept(cf.params[rest]), bc);
+            t.rename(cf.params[rest], tuple);
+        }
+        // A name the function has no parameter for goes into its dict of
+        // those, in the order of the call.
+        let mut spare: Vec<PathValue> = Vec::new();
+        for k in 0..nkw {
+            let name = keys[k];
+            let named = (cf.posonlyargcount..rest).find(|j| {
+                let param = cf.param_names[*j].as_ptr();
+                param == name || ffi::PyObject_RichCompareBool(param, name, ffi::Py_EQ) > 0
+            });
+            match named {
+                Some(j) => t.rename(cf.params[j], given[total + k]),
+                None => {
+                    let key = t.derive(Op::Object(PyObj::from_borrowed(name)), Kind::Pure, false, new_ref(name), bc);
+                    spare.extend([key, given[total + k]]);
+                }
+            }
+        }
+        if cf.has_varkw {
+            let v = cf.params[rest + cf.has_varargs as usize];
+            let dict = t.derive(Op::BuildMap(spare), Kind::Pure, true, kept(v), bc);
+            t.rename(v, dict);
+        }
+        let defaults = ffi::PyFunction_GetDefaults(func);
+        let ndefaults = if defaults.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(defaults) as usize };
+        for j in 0..rest {
+            let v = cf.params[j];
+            if t.mapped(v) != NONE || reg(&inner, v).is_null() {
+                continue;
+            }
+            let part = if j < cf.argcount {
+                Part::Default((j + ndefaults - cf.argcount) as u32)
+            } else {
+                Part::KwDefault(cf.param_names[j].clone())
+            };
+            let default = t.derive(Op::Part(part, function), Kind::Read, false, kept(v), bc);
+            t.rename(v, default);
+        }
+        // The function runs in a frame of its own, as `enter` and `run`
+        // have it, with its instructions taken down.
+        frames.top().at(bc & OFFSET_MASK);
+        if self.unbound.any.get() {
+            self.bind();
+        }
+        let Ok(frame) = Frame::push(func) else {
+            done(inner);
+            return Followed::Raised;
+        };
+        if !frame.locals.is_null() {
+            for (slot, v) in cf.params.iter().enumerate() {
+                let o = reg(&inner, *v);
+                if !o.is_null() {
+                    *frame.locals.add(slot) = frame_ref(new_ref(o));
+                }
+            }
+        }
+        let mut below = Frames::new(frame);
+        let walked = c.walk(t, site, &mut inner, &mut below, api, 0, None);
+        // Where the trace does not come back, the function runs to its end
+        // without it.
+        let (result, back) = match walked {
+            Walked::Returned(result, value) => (result, Ok(value)),
+            Walked::Ended { block, code, pc, afresh, reason } => {
+                t.provisional |= afresh;
+                let landing = Landing { block, code, pc: if afresh { AFRESH } else { pc } };
+                (c.exec_blocks(&mut inner, &mut below, Some(PathEnd::Landed(landing))), Err(reason))
+            }
+            Walked::Left { block, code, call, reason } => {
+                let landing = Landing { block, code, pc: call + 1 };
+                (c.exec_blocks(&mut inner, &mut below, Some(PathEnd::Landed(landing))), Err(reason))
+            }
+            Walked::Raised(block, bc) => {
+                let raised = Some(PathEnd::Raised(block, bc));
+                (c.exec_blocks(&mut inner, &mut below, raised), Err("it raised".to_string()))
+            }
+            Walked::Deopt(block, at) => {
+                let deopt = Some(PathEnd::Deopt(block, at));
+                (c.exec_blocks(&mut inner, &mut below, deopt), Err("a guard of its code failed".to_string()))
+            }
+        };
+        while below.depth > 0 {
+            c.leave(&mut below);
+        }
+        // What the call held ends with it, also where the trace keeps it.
+        let mut suspects: Vec<Obj> = inner.iter().copied().filter(|held| !held.is_null() && !capi::is_unboxed(*held)).collect();
+        if !frame.locals.is_null() {
+            let variables = (0..cf.params.len()).map(|slot| frame_owned(*frame.locals.add(slot)));
+            suspects.extend(variables.filter(|held| !held.is_null() && !capi::is_unboxed(*held)));
+        }
+        let sweep = Self::ends_for_good(t, &suspects);
+        let result = c.returned(frame, result);
+        done(inner);
+        if self.overdue(t, &mut suspects, sweep) {
+            let reason = t.abandoned.clone().unwrap_or_default();
+            return if result.is_null() { Followed::Raised } else { Followed::Left(result, format!("in {}: {}", cf.name, reason)) };
+        }
+        match back {
+            Ok(value) if !result.is_null() => {
+                t.leave();
+                Followed::Returned(result, value)
+            }
+            Ok(_) => Followed::Raised,
+            Err(reason) => Followed::Left(result, format!("in {}: {}", cf.name, reason)),
+        }
     }
 
     /// For `list.append(item)` on an exact list, however the code has it:
@@ -5417,12 +6085,109 @@ impl Compiled {
                 let Some(Op::LoadAttr(recv, name)) = self.analysis.def_op(&self.func, *callee) else {
                     return None;
                 };
-                let (held, read_off) = (ffi::PyCFunction_GetSelf(bound), t.map[*recv as usize]);
+                let (held, read_off) = (ffi::PyCFunction_GetSelf(bound), t.mapped(*recv));
                 let same = read_off != NONE && !held.is_null() && t.rec.values[read_off as usize] == held;
                 same.then(|| (*recv, *name, args.as_slice(), held))
             }
             _ => None,
         }
+    }
+
+    /// For a tuple or a list that a path built: the values it holds where
+    /// the trace has got to.
+    fn built(&self, t: &Trace, sequence: PathValue) -> Option<Vec<PathValue>> {
+        Self::built_by(t, sequence, t.body.len())
+    }
+
+    /// `built` as the first `upto` instructions of the trace left it. A
+    /// list that was spread into another (`[*a, b]`, `tuple(a)`) gave it
+    /// the items it held where that instruction stands, so what it held
+    /// is asked as of there: every step from one sequence to another goes
+    /// on in front of the instruction it comes from, and so this ends,
+    /// whatever the path put into what.
+    fn built_by(t: &Trace, sequence: PathValue, upto: usize) -> Option<Vec<PathValue>> {
+        let mut items: Option<Vec<PathValue>> = None;
+        for (at, inst) in t.body[..upto].iter().enumerate() {
+            match &inst.op {
+                Op::BuildTuple(vs) | Op::BuildList(vs) if inst.dst == sequence => items = Some(vs.clone()),
+                Op::ListToTuple(list) if inst.dst == sequence => items = Self::built_by(t, *list, at),
+                Op::ListAppend(target, v) if *target == sequence => items.as_mut()?.push(*v),
+                Op::ListExtend(target, more) if *target == sequence => items.as_mut()?.extend(Self::built_by(t, *more, at)?),
+                _ => {}
+            }
+        }
+        items
+    }
+
+    /// For a dict that a path built: its keys, as they were in this run,
+    /// and the values it holds under them where the trace has got to.
+    fn entries(&self, t: &Trace, dict: PathValue) -> Option<Vec<(Obj, PathValue)>> {
+        Self::entries_by(t, dict, t.body.len())
+    }
+
+    /// `entries` as the first `upto` instructions of the trace left it:
+    /// a dict that was merged into another gave it the entries it had
+    /// where that instruction stands (see `built_by`, also for why this
+    /// ends).
+    fn entries_by(t: &Trace, dict: PathValue, upto: usize) -> Option<Vec<(Obj, PathValue)>> {
+        let mut entries: Option<Vec<(Obj, PathValue)>> = None;
+        let key = |v: PathValue| t.rec.values[v as usize];
+        for (at, inst) in t.body[..upto].iter().enumerate() {
+            match &inst.op {
+                Op::BuildMap(vs) if inst.dst == dict => {
+                    entries = Some(vs.chunks(2).map(|pair| (key(pair[0]), pair[1])).collect());
+                }
+                Op::MapAdd(target, k, v) if *target == dict => {
+                    let entries = entries.as_mut()?;
+                    match entries.iter_mut().find(|(other, _)| *other == key(*k)) {
+                        Some(entry) => entry.1 = *v,
+                        None => entries.push((key(*k), *v)),
+                    }
+                }
+                Op::DictMerge(target, more, _) if *target == dict => entries.as_mut()?.extend(Self::entries_by(t, *more, at)?),
+                _ => {}
+            }
+        }
+        entries
+    }
+
+    /// Whether the keys under which a path put entries into a dict it made,
+    /// and took them out, are the same at every call: each is a constant.
+    /// What `entries` says of the dict holds at another call only with
+    /// this: with other keys the same instructions leave other entries.
+    /// False for any other key, and for a dict that took the entries of
+    /// one of which this is not so.
+    unsafe fn pins_keys(&self, t: &Trace, dict: PathValue) -> bool {
+        if dict == NONE || dict == UNDEF {
+            return false;
+        }
+        let (mut keys, mut merged): (Vec<PathValue>, Vec<(usize, PathValue)>) = (Vec::new(), Vec::new());
+        for (at, inst) in t.body.iter().enumerate() {
+            match &inst.op {
+                Op::BuildMap(vs) if inst.dst == dict => keys.extend(vs.iter().step_by(2)),
+                Op::MapAdd(target, key, _) if *target == dict => keys.push(*key),
+                Op::CallMethod { recv, args, .. } if *recv == dict && inst.kind == Kind::Residual => keys.extend(args.first()),
+                Op::DictMerge(target, more, _) if *target == dict => merged.push((at, *more)),
+                _ => {}
+            }
+        }
+        // The dict that was merged was put together in front of the merge.
+        for (at, more) in merged {
+            let built = t.body[..at].iter().any(|inst| inst.dst == more && matches!(inst.op, Op::BuildMap(_)));
+            if !built || !self.pins_keys(t, more) {
+                return false;
+            }
+        }
+        // A constant of its function is one wherever the path took it
+        // from (a path that starts behind it has it as an input).
+        let constant = |key: PathValue| {
+            let (owner, v) = t.source[key as usize];
+            v != NONE && v != UNDEF && {
+                let function = &*t.owners[owner as usize];
+                matches!(function.analysis.def_op(&function.func, v), Some(Op::Const(_)))
+            }
+        };
+        keys.into_iter().all(|key| constant(key) || t.body.iter().any(|inst| inst.dst == key && matches!(inst.op, Op::Const(_))))
     }
 
     /// For a list that a path made: the values it holds where the trace has
@@ -5444,12 +6209,174 @@ impl Compiled {
         items.filter(|_| appended)
     }
 
+    /// Takes the instructions of the function down as they run, as the
+    /// block loop would run them, through the blocks as this call goes
+    /// through them: from instruction `pc` of some code of `block`
+    /// (`from`), or from the start of the block in the code that is
+    /// selected for it. Up to the first instruction that can be no part of
+    /// a path, or, in a called function, to where it returns.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn walk(
+        &self,
+        t: &mut Trace,
+        site: &Arc<GraphSite>,
+        regs: &mut [Obj],
+        frames: &mut Frames,
+        api: &TcfgApi,
+        block: usize,
+        from: Option<(*const BlockCode, usize)>,
+    ) -> Walked {
+        let func = &self.func;
+        let mut b = block;
+        let (mut code, mut pc) = match from {
+            Some(from) => from,
+            None => {
+                let (found, mode) = self.select(b, regs, Some(api));
+                if mode == Mode::Profile {
+                    return Walked::Ended { block: b, code: found, pc: 0, afresh: true, reason: NOT_PROFILED.to_string() };
+                }
+                (found, 0)
+            }
+        };
+        // The guards a version was entered under hold for the values the
+        // path starts with, whichever version enters it later.
+        let guards = |t: &mut Trace, regs: &mut [Obj], code: &BlockCode, bc: u32| {
+            for cond in &code.entry_guards {
+                if !reg(regs, cond.value()).is_null() {
+                    let cond = graph::renamed_guard(cond, &mut |v| self.path_value(t, regs, v));
+                    t.check(Assert::Guard(cond), bc);
+                }
+            }
+        };
+        let ended = |block: usize, code: *const BlockCode, pc: usize, reason: &str| {
+            Walked::Ended { block, code, pc, afresh: false, reason: reason.to_string() }
+        };
+        guards(t, regs, &*code, (&(*code).insts).get(pc).map_or(func.blocks[b].term_bc, |inst| inst.bc));
+        t.shape.extend([b as u32, (*code).id, pc as u32]);
+        let mut suspects: Vec<Obj> = Vec::new();
+        loop {
+            let c = &*code;
+            while pc < c.insts.len() {
+                if t.body.len() >= MAX_PATH_STEPS {
+                    return ended(b, code, pc, "the path is as long as a path may be");
+                }
+                // What the function lets go of here must end here, also
+                // where the trace keeps it.
+                let sweep = self.lets_go(t, &c.insts[pc], regs, frames.top(), &mut suspects);
+                let taken = self.record_inst(t, site, b, c, pc, regs, frames, api);
+                if matches!(taken, Taken::Went) && self.overdue(t, &mut suspects, sweep) {
+                    let reason = t.abandoned.clone().unwrap_or_default();
+                    return Walked::Left { block: b, code, call: pc, reason };
+                }
+                match taken {
+                    Taken::Went => pc += 1,
+                    Taken::Ends(reason) => return Walked::Ended { block: b, code, pc, afresh: false, reason },
+                    Taken::Raised => return Walked::Raised(b, c.insts[pc].bc),
+                    Taken::Deopt(at) => return Walked::Deopt(b, at),
+                    Taken::Cut(result, reason) => {
+                        // The call has run: the function has what it gave.
+                        let inst = &c.insts[pc];
+                        if result.is_null() {
+                            return Walked::Raised(b, inst.bc);
+                        }
+                        if inst.dst == NONE {
+                            capi::release(result);
+                        } else {
+                            capi::release(std::mem::replace(&mut regs[inst.dst as usize], result));
+                        }
+                        for v in &inst.kills {
+                            capi::release(take(regs, *v));
+                        }
+                        self.overdue(t, &mut suspects, sweep);
+                        return Walked::Left { block: b, code, call: pc, reason };
+                    }
+                }
+            }
+            let bc = func.blocks[b].term_bc;
+            let next = match &c.term {
+                Term::Jump(next) => *next,
+                Term::Br { cond, then_, else_ } => {
+                    let held = reg(regs, *cond);
+                    if held != ffi::Py_True() && held != ffi::Py_False() {
+                        return ended(b, code, pc, "a branch on what is no bool");
+                    }
+                    let way = held == ffi::Py_True();
+                    let cond = self.path_value(t, regs, *cond);
+                    t.check(Assert::Truth(cond, way), bc);
+                    if way { *then_ } else { *else_ }
+                }
+                Term::BrNull { v, null, nonnull } => {
+                    let exhausted = reg(regs, *v).is_null();
+                    let v = self.path_value(t, regs, *v);
+                    t.check(Assert::Null(v, exhausted), bc);
+                    if exhausted { *null } else { *nonnull }
+                }
+                Term::Return(_) if t.outermost() => return ended(b, code, pc, "the function returns"),
+                Term::Return(v) => {
+                    let value = self.path_value(t, regs, *v);
+                    if t.lost || reg(regs, *v).is_null() {
+                        return ended(b, code, pc, "a called function returns what the path does not have");
+                    }
+                    self.obj(regs, *v);
+                    return Walked::Returned(take(regs, *v), value);
+                }
+                Term::Raise { .. } | Term::Reraise(..) => return ended(b, code, pc, "the block raises"),
+            } as usize;
+            if t.lost {
+                return ended(b, code, pc, "a called function branches on what the path does not have");
+            }
+            // The edge, as the block loop takes it.
+            let pi = func.blocks[next].preds.iter().position(|p| *p as usize == b).unwrap_or(0);
+            let moves = &self.analysis.edge_moves[next][pi];
+            let cleared = c.term_kills.iter().chain(&self.analysis.edge_kills[next][pi]).chain(moves.iter().map(|(dst, _)| dst));
+            suspects.extend(cleared.map(|v| reg(regs, *v)).filter(|held| !held.is_null() && !capi::is_unboxed(*held)));
+            let sweep = Self::ends_for_good(t, &suspects);
+            for v in &c.term_kills {
+                capi::release(take(regs, *v));
+                t.kill(*v);
+            }
+            let moved: Vec<(Obj, PathValue)> = moves
+                .iter()
+                .map(|(_, src)| {
+                    let held = reg(regs, *src);
+                    capi::retain(held);
+                    (held, self.path_value(t, regs, *src))
+                })
+                .collect();
+            for ((dst, _), (held, value)) in moves.iter().zip(moved) {
+                capi::release(std::mem::replace(&mut regs[*dst as usize], held));
+                t.rename(*dst, value);
+            }
+            for v in &self.analysis.edge_kills[next][pi] {
+                capi::release(take(regs, *v));
+                t.kill(*v);
+            }
+            b = next;
+            let (found, mode) = self.select(b, regs, Some(api));
+            if self.overdue(t, &mut suspects, sweep) {
+                let reason = t.abandoned.clone().unwrap_or_default();
+                return Walked::Ended { block: b, code: found, pc: 0, afresh: true, reason };
+            }
+            if mode == Mode::Profile {
+                return Walked::Ended { block: b, code: found, pc: 0, afresh: true, reason: NOT_PROFILED.to_string() };
+            }
+            code = found;
+            pc = 0;
+            if t.lost {
+                return ended(b, code, pc, "a called function reads what the path does not have");
+            }
+            guards(t, regs, &*code, func.blocks[b].bc_start);
+            t.shape.extend([b as u32, (*code).id]);
+        }
+    }
+
     /// Takes a path down: runs the instructions of the function from
-    /// instruction `pc` of `code`, the first operation of a graph, as the
-    /// block loop would, through the blocks as this call goes through them,
-    /// up to the first instruction that can be no part of a path, and
-    /// keeps what an exported form is made from. The function goes on
-    /// where that instruction is. With a pass over graphs, the path is
+    /// instruction `pc` of `code`, the first operation of a graph, and
+    /// those of the functions it calls (`walk`), up to the first
+    /// instruction that can be no part of a path, and keeps what an
+    /// exported form is made from. A path that would end inside a called
+    /// function ends in front of the call. The function goes on where
+    /// this run of it has got to. With a pass over graphs, the path is
     /// handed to it; a run that cannot be exported gets a form without a
     /// callable, so that the calls like it are not taken down again.
     #[allow(clippy::too_many_arguments)]
@@ -5465,112 +6392,49 @@ impl Compiled {
         world: (u64, u64, u64, u64),
     ) -> PathEnd {
         let func = &self.func;
-        let mut t = Trace::new(func.nvalues as usize);
+        let mut t = Trace::new(self as *const Compiled, func.nvalues as usize);
         // Under a mode, or a transform, the operations run as they are: the
         // run is only looked at for what kind of call it is.
         let mode = (world.0 >> 16 != 0).then_some("a torch function mode is on");
         t.rec.failed = mode.or_else(|| graph::interposed()).map(|why| why.to_string());
-        let (mut b, mut code, mut pc) = (block, code, pc);
         let root = (block, (&(*code).origins)[pc..].iter().find(|o| **o != NONE).map_or(0, |o| *o as usize));
-        // The guards a version was entered under hold for the values the
-        // path starts with, whichever version enters it later.
-        let guards = |t: &mut Trace, regs: &mut [Obj], code: &BlockCode, bc: u32| {
-            for cond in &code.entry_guards {
-                if !reg(regs, cond.value()).is_null() {
-                    let cond = graph::renamed_guard(cond, &mut |v| self.path_value(t, regs, v));
-                    t.check(Assert::Guard(cond), bc);
-                }
+        // Where this run of the function has got to.
+        let (went, ends) = match self.walk(&mut t, site, regs, frames, api, block, Some((code, pc))) {
+            Walked::Ended { block, code, pc, afresh, reason } => {
+                (Landing { block, code, pc: if afresh { AFRESH } else { pc } }, reason)
             }
+            Walked::Left { block, code, call, reason } => (Landing { block, code, pc: call + 1 }, reason),
+            Walked::Raised(block, bc) => return PathEnd::Raised(block, bc),
+            Walked::Deopt(block, at) => return PathEnd::Deopt(block, at),
+            Walked::Returned(..) => unreachable!("the function a path starts in is not left by it"),
         };
-        guards(&mut t, regs, &*code, (&(*code).insts)[pc].bc);
-        t.shape.extend([b as u32, (*code).id, pc as u32]);
-        let mut afresh = false;
-        let mut suspects: Vec<Obj> = Vec::new();
-        let ends = 'path: loop {
-            let c = &*code;
-            while pc < c.insts.len() {
-                if t.body.len() >= MAX_PATH_STEPS {
-                    break 'path "the path is as long as a path may be".to_string();
-                }
-                // What the function lets go of here must end here, also
-                // where the trace keeps it.
-                let sweep = self.lets_go(&t, &c.insts[pc], regs, frames.top(), &mut suspects);
-                let taken = self.record_inst(&mut t, site, b, c, pc, regs, frames, api);
-                if matches!(taken, Taken::Went) && self.overdue(&mut t, &mut suspects, sweep) {
-                    pc += 1;
-                    break 'path t.abandoned.clone().unwrap_or_default();
-                }
-                match taken {
-                    Taken::Went => pc += 1,
-                    Taken::Ends(reason) => break 'path reason,
-                    Taken::Raised => return PathEnd::Raised(b, c.insts[pc].bc),
-                    Taken::Deopt(at) => return PathEnd::Deopt(b, at),
+        if t.abandoned.is_some() {
+            // The function let go of an object whose end may run Python
+            // code, which the trace kept: nothing is made of this run.
+            // The call was one the graph could not take, as a call is
+            // that a path is turned down for.
+            site.turned_down();
+            if site.gave_way() {
+                for slot in &self.settled.blocks {
+                    slot.set(Settled { code: std::ptr::null(), ..slot.get() });
                 }
             }
-            let bc = func.blocks[b].term_bc;
-            let next = match &c.term {
-                Term::Jump(next) => *next,
-                Term::Br { cond, then_, else_ } => {
-                    let held = reg(regs, *cond);
-                    if held != ffi::Py_True() && held != ffi::Py_False() {
-                        break 'path "a branch on what is no bool".to_string();
-                    }
-                    let way = held == ffi::Py_True();
-                    let cond = self.path_value(&mut t, regs, *cond);
-                    t.check(Assert::Truth(cond, way), bc);
-                    if way { *then_ } else { *else_ }
-                }
-                Term::BrNull { v, null, nonnull } => {
-                    let exhausted = reg(regs, *v).is_null();
-                    let v = self.path_value(&mut t, regs, *v);
-                    t.check(Assert::Null(v, exhausted), bc);
-                    if exhausted { *null } else { *nonnull }
-                }
-                Term::Return(_) => break 'path "the function returns".to_string(),
-                Term::Raise { .. } | Term::Reraise(..) => break 'path "the block raises".to_string(),
-            } as usize;
-            // The edge, as the block loop takes it.
-            let pi = func.blocks[next].preds.iter().position(|p| *p as usize == b).unwrap_or(0);
-            let moves = &self.analysis.edge_moves[next][pi];
-            let cleared = c.term_kills.iter().chain(&self.analysis.edge_kills[next][pi]).chain(moves.iter().map(|(dst, _)| dst));
-            suspects.extend(cleared.map(|v| reg(regs, *v)).filter(|held| !held.is_null() && !capi::is_unboxed(*held)));
-            let sweep = Self::ends_for_good(&t, &suspects);
-            for v in &c.term_kills {
-                capi::release(take(regs, *v));
-                t.held[*v as usize] = Held::Empty;
+            return PathEnd::Landed(went);
+        }
+        // Where the path ends: there, or in front of the call that the
+        // trace is still in, or that is inlined around where it is.
+        let cut = t.mark.as_ref().map(|mark| (mark.at, mark.frames > 0));
+        let (b, code, pc, afresh, ends) = match cut {
+            Some(((block, code, pc), inlined)) => {
+                t.back();
+                (block, code, pc, false, if inlined { format!("in a call that is inlined: {}", ends) } else { ends })
             }
-            let moved: Vec<(Obj, PathValue)> = moves
-                .iter()
-                .map(|(_, src)| {
-                    let held = reg(regs, *src);
-                    capi::retain(held);
-                    (held, self.path_value(&mut t, regs, *src))
-                })
-                .collect();
-            for ((dst, _), (held, value)) in moves.iter().zip(moved) {
-                capi::release(std::mem::replace(&mut regs[*dst as usize], held));
-                t.rename(*dst, value);
-            }
-            for v in &self.analysis.edge_kills[next][pi] {
-                capi::release(take(regs, *v));
-                t.held[*v as usize] = Held::Empty;
-            }
-            b = next;
-            let (found, mode) = self.select(b, regs, Some(api));
-            if self.overdue(&mut t, &mut suspects, sweep) {
-                afresh = true;
-                break 'path t.abandoned.clone().unwrap_or_default();
-            }
-            if mode == Mode::Profile {
-                afresh = true;
-                break 'path "a block that was not profiled yet".to_string();
-            }
-            code = found;
-            pc = 0;
-            guards(&mut t, regs, &*code, func.blocks[b].bc_start);
-            t.shape.extend([b as u32, (*code).id]);
+            None => (went.block, went.code, if went.pc == AFRESH { 0 } else { went.pc }, went.pc == AFRESH, ends),
         };
-        t.shape.extend([u32::MAX, b as u32, if afresh { u32::MAX } else { pc as u32 }]);
+        // A call that was not gone into because the function it enters is
+        // still measured against the interpreter is gone into later.
+        let afresh_path = afresh || t.provisional;
+        t.shape.extend([u32::MAX, b as u32, if afresh { u32::MAX } else { pc as u32 }, t.body.len() as u32]);
         let c = &*code;
         let (land, resume, live) = if afresh {
             ((b, 0), None, self.without_holds().1.live_in[b].clone())
@@ -5584,21 +6448,8 @@ impl Compiled {
         for slot in &func.slots {
             live.insert(*slot);
         }
-        let landing = Landing { block: b, code, pc: if afresh { AFRESH } else { pc } };
-        if t.abandoned.is_some() {
-            // The function let go of an object whose end may run Python
-            // code, which the trace kept: nothing is made of this run.
-            // The call was one the graph could not take, as a call is
-            // that a path is turned down for.
-            site.turned_down();
-            if site.gave_way() {
-                for slot in &self.settled.blocks {
-                    slot.set(Settled { code: std::ptr::null(), ..slot.get() });
-                }
-            }
-            return PathEnd::Landed(landing);
-        }
-        let path = Path::of(&mut t, root, land, resume, &live, ends, afresh);
+        let landing = went;
+        let path = Path::of(&mut t, root, land, resume, &live, ends, afresh_path);
         if graph::debug() {
             let (steps, ops) = (path.body.len(), path.operators.len());
             eprintln!(
@@ -5615,8 +6466,9 @@ impl Compiled {
             );
             if std::env::var_os("TORCH_VM_GRAPH_DEBUG").is_some_and(|v| v == "2") {
                 for inst in path.staged(Stage::Before).chain(path.staged(Stage::After)) {
+                    let owner = &*path.owners[inst.owner as usize];
                     let what = if inst.assert.is_some() { "check" } else { "run" };
-                    eprintln!("    {:?} {}: %{} = {}", inst.stage, what, inst.dst, self.func.op_repr(&inst.op));
+                    eprintln!("    {:?} {} in {}: %{} = {}", inst.stage, what, owner.func.qualname, inst.dst, owner.func.op_repr(&inst.op));
                 }
             }
         }
@@ -5625,7 +6477,7 @@ impl Compiled {
             site.install(path, None);
             return PathEnd::Landed(landing);
         }
-        let mut described = path.describe(&site.name, func, &t.rec, api);
+        let mut described = path.describe(&site.name, &t.rec, api);
         let mut changing: Vec<graph::Place> = Vec::new();
         if described.closed.is_none() {
             // One more form for nothing but another number, with none of
@@ -5697,7 +6549,7 @@ impl Compiled {
 
     unsafe fn exec(&self, regs: &mut [Obj], frame: Frame) -> Obj {
         let mut frames = Frames::new(frame);
-        let result = self.exec_blocks(regs, &mut frames);
+        let result = self.exec_blocks(regs, &mut frames, None);
         // Every path out of an inlined function pops its frame; this is for
         // the one that was not thought of.
         while frames.depth > 0 {
@@ -5706,7 +6558,9 @@ impl Compiled {
         result
     }
 
-    unsafe fn exec_blocks(&self, regs: &mut [Obj], frames: &mut Frames) -> Obj {
+    /// Runs the function: from its first block, or from where a path that
+    /// was taken down through this call of it left off (`start`).
+    unsafe fn exec_blocks(&self, regs: &mut [Obj], frames: &mut Frames, start: Option<PathEnd>) -> Obj {
         let api = capi::api();
         let func = &self.func;
         if self.options.specialize {
@@ -5716,6 +6570,7 @@ impl Compiled {
         let mut cur: usize = 0;
         let mut pred: usize = usize::MAX;
         let mut back_edges: u32 = 0;
+        let mut start = start;
         // An exception either continues in the handler of the block it was
         // raised in, entered like the first block, or leaves the function.
         macro_rules! raised {
@@ -5776,9 +6631,40 @@ impl Compiled {
                 }
             }
 
-            let (mut code, mut mode) = self.select(cur, regs, api);
+            let mut begin: Option<(*const BlockCode, Mode, usize)> = None;
+            if let Some(end) = start.take() {
+                match end {
+                    PathEnd::Miss => {}
+                    PathEnd::Raised(block, bc) => {
+                        self.fail(frames, bc);
+                        raised!('blocks, block);
+                    }
+                    PathEnd::Landed(landing) => {
+                        cur = landing.block;
+                        if landing.pc != AFRESH {
+                            let generic = Arc::as_ptr(self.generic.get_unchecked(cur));
+                            let code = if landing.code.is_null() { generic } else { landing.code };
+                            let mode = if code == generic { Mode::Generic } else { Mode::Spec };
+                            begin = Some((code, mode, landing.pc));
+                        }
+                    }
+                    PathEnd::Deopt(block, at) => {
+                        cur = block;
+                        let mut st = self.state.borrow_mut();
+                        st.blocks[cur].deopts += 1;
+                        let mode = if st.blocks[cur].respec_left > 0 { Mode::Profile } else { Mode::Generic };
+                        begin = Some((Arc::as_ptr(self.generic.get_unchecked(cur)), mode, at));
+                    }
+                }
+            }
+            let (mut code, mut mode, mut pc) = match begin {
+                Some(begin) => begin,
+                None => {
+                    let (code, mode) = self.select(cur, regs, api);
+                    (code, mode, 0)
+                }
+            };
             let _profiling = Profiling::enter(mode == Mode::Profile);
-            let mut pc: usize = 0;
             let next: usize = loop {
                 let mut resume: Option<usize> = None;
                 let mut leap: Option<Landing> = None;

@@ -525,8 +525,11 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     with the function), ``state``, ``ops`` (how many operations the path
     that ran last has) and ``operators`` (which, as the dispatcher names
     them), ``inputs`` and ``outputs`` (how many values it takes and gives),
-    ``branches`` (how many branches and loop tests it goes through),
-    ``paths`` (how many ways
+    ``branches`` (how many branches and loop tests it goes through) and
+    ``calls`` (how many calls of Python functions it goes into), ``within``
+    (only for a graph of a called function whose operations a graph of a
+    caller holds: that graph, which is the one that runs them; such a graph
+    is listed, and its operations are not further ones), ``paths`` (how many ways
     through the function were taken down), ``ends`` (per path, the block and
     the instruction the function goes on at behind it) and ``why`` (it ends
     there: what the instruction behind it is),

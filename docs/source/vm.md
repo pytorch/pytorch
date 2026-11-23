@@ -52,7 +52,7 @@ torch.vm.regions(g)
 # [{'where': 'f (block 0)[2]', 'state': 'built', 'ops': 6,
 #   'operators': ['aten::matmul', 'aten::tanh', 'aten::sum',
 #   'aten::mul.Tensor', 'aten::mean', 'aten::add.Tensor'], 'inputs': 2,
-#   'outputs': 1, 'branches': 0, 'paths': 1, 'ends': [(0, 12)],
+#   'outputs': 1, 'branches': 0, 'calls': 0, 'paths': 1, 'ends': [(0, 12)],
 #   'why': 'the function returns', 'variants': 0, 'hits': 0, 'misses': 1,
 #   'exports': 0, 'version': 1, 'forms': []}]
 ```
@@ -139,9 +139,10 @@ run, and raise where they stand. What changes something the path made
 itself (an append to a list it built, the next item of an iterator it
 made) is left out only together with the thing ("What a function makes"),
 and only where it cannot fail either: an entry that is put into a dict under
-a key that is no constant of the function runs in every run, used or not, so
-that a call in which the key cannot be hashed runs the instructions, which
-raise.
+a key that is no constant of the function and a list or a dict that is
+filled from a value from outside (`[*xs]`, `{**d}`) run in every run, used
+or not, so that a call in which the key cannot be hashed or the value cannot
+be gone over runs the instructions, which raise.
 
 ```python
 class Settings:
@@ -178,8 +179,8 @@ number of times round is no input of the graph: it is the path. The calls of
 written with are part of a path.
 
 Going over an iterator uses it up, so a path goes over an iterator only if
-it made it itself, of a list, a tuple, a dict or a `range` (`enumerate`,
-`zip`, the loop's own). Where the value that was a list when
+it made it itself, of a list, a tuple, a dict or a `range` (`iter`,
+`enumerate`, `zip`, the loop's own). Where the value that was a list when
 the path was taken down is an iterator of the caller's at a later call,
 that call runs the instructions, which use the iterator up once.
 
@@ -222,8 +223,8 @@ found["operators"][-3:]  # ['aten::cat', 'aten::tanh', 'aten::sum']
 
 What ends a path:
 
-- a call of a Python function, which has graphs of its own, or of
-  something else that is no operation, like `print`;
+- a call that the path does not go into ("Paths across calls" below says
+  which), or of something that is no operation, like `print`;
 - an operation that writes to one of its arguments or draws random numbers,
   one with several results (`x.split(2)`, `torch.max(x, 0)`), a store into
   an object or a subscript;
@@ -278,26 +279,6 @@ found = torch.vm.regions(g)[0]
 found["where"], found["ops"], found["why"]  # ('looked_up (block 0)[1]', 7, 'the function returns')
 ```
 
-A graph does not go on through a call of a Python function: the function
-that is called has graphs of its own. A model made of modules therefore has
-its operations spread over the `forward` of each module, one or two to a
-function, and none of those is a graph unless `min_ops` is lowered:
-
-```python
-model = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.ReLU(), torch.nn.Linear(8, 2))
-
-
-def infer(model, x):
-    return model(x)
-
-
-g = torch.vm(infer, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(min_ops=1)))
-for _ in range(3):
-    g(model, torch.randn(4, 8))
-sorted((found["where"], found["operators"]) for found in torch.vm.regions(g))
-# [('Linear.forward (block 0)[4]', ['aten::linear']), ('relu (block 4)[2]', ['aten::relu'])]
-```
-
 Graphs start in one's own code and in the code of models that torch has
 (`torch.nn`, `torch.optim`, `torch.distributions`, `torch.func`,
 `torch.functional`, the methods of `torch.Tensor`). The rest of the library is
@@ -317,6 +298,182 @@ sorted({found["where"].split(" (")[0] for found in torch.vm.regions(g)})
 # ['Tensor.__format__', 'Tensor.__iter__', 'printed']
 ```
 
+### Paths across calls
+
+A path goes into the Python functions that its instructions call. The call
+is no instruction of the path; the instructions of the function are, and its
+parameters are the values the call hands over: positional and keyword
+arguments, defaults, `*args` and `**kwargs`. What the function returns is a
+value of the path like any other, so the operations in front of a call,
+inside it and behind it are one graph, and `min_ops` counts them all:
+
+```python
+def scaled(x, scale=2.0, *, shift=1.0):
+    return (x * scale + shift).tanh()
+
+
+def calls(x):
+    y = scaled(x.sin())
+    y = scaled(y, 3.0)
+    return scaled(y, shift=0.5).sum()
+
+
+g = torch.vm(calls, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+x = torch.randn(4, 4)
+for _ in range(4):
+    same = torch.equal(g(x), calls(x))
+found = torch.vm.regions(g)[0]
+found["where"], found["ops"], found["why"]  # ('calls (block 0)[2]', 11, 'the function returns')
+```
+
+What a path goes into is what the engine itself would run compiled when the
+call is made: a function, a bound method, an object with a `__call__`. A
+call of a module comes down to its `forward` while neither the module nor
+torch has a hook registered, so a model whose modules call each other is one
+graph. A call that the engine has inlined is part of the path like the other
+instructions of the function, and so is a function of torch that graphs do
+not start in.
+
+```python
+class Block(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.first = torch.nn.Linear(8, 8)
+        self.second = torch.nn.Linear(8, 8)
+
+    def forward(self, x):
+        return self.second(torch.relu(self.first(x))) + x
+
+
+class Net(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.a = Block()
+        self.b = Block()
+        self.head = torch.nn.Linear(8, 2)
+
+    def forward(self, x):
+        return self.head(self.b(self.a(x)))
+
+
+net = Net().eval()
+g = torch.vm(net, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs()))
+v = torch.randn(4, 8)
+for _ in range(4):
+    same = torch.equal(g(v), net(v))
+[(found["where"], found["ops"]) for found in torch.vm.regions(g) if "ops" in found]
+# [('Block.forward (block 0)[0]', 4), ('Net.forward (block 0)[0]', 9)]
+```
+
+On every later call the path checks, in front of each function it went into,
+that what is called still comes down to that function. A hook that was
+registered on a module since, a module of another class in its place, a
+function that was swapped: the call is none for this path. The reads of
+attributes between the calls are instructions of the path like any other, so
+a submodule that was replaced by assignment is read at every call. In the
+text of `regions`, `calls` counts these checks, one per call the path goes
+into; `branches` counts the branches and the loop tests.
+
+A path does not go into every call. It ends in front of a call
+
+- of a function that the engine does not compile: one it does not support
+  (a generator, such as `children()` and `named_modules()` of a module), and
+  the places it leaves to the interpreter. A function that it compiled and
+  then **left to the interpreter because it measured it to run faster there
+  (`demote`, which is on by default) is gone into like any other**: a path
+  does not run the function in the VM, it has the instructions of the
+  function among its own, so what was measured says nothing about it. The
+  small functions of plain Python on the way through a model (an argument
+  check, the `__iter__` of a container) are the ones that are demoted, and
+  the graph of the model goes through them;
+- of a function that is on the path eight times already: a function that
+  calls itself is gone into that often, and an `nn.Sequential` inside an
+  `nn.Sequential` is on a path twice;
+- more than 48 calls deep;
+- of a `functools.partial`, of a class (constructing an object), of
+  `super()`, and of a function that was made on the path (a closure that
+  the function defines and calls);
+- whose arguments do not fit the function: the call raises the `TypeError`
+  where the function has it;
+- that hands on `**kwargs` from a dict whose keys are no strs;
+- that the interpreter makes for an object without it being written: a
+  `for` over an object whose class has an `__iter__` in Python (an
+  `nn.Sequential`, an `nn.ModuleList`), its `len`, an item of it, a
+  property;
+- while a trace function is set (a debugger, coverage).
+
+A path starts and ends in one function. Where it would end inside a function
+that it went into (at an instruction that can be no part of a path, at a
+block that this call is the first to run, at an exception), that function
+runs on to its end as instructions, and the path is cut back to in front of
+the outermost call it was in, where it ends. `why` then says in which
+function, and what it was:
+
+```python
+class Notes:
+    def __init__(self):
+        self.calls = 0
+
+    def noted(self, y):
+        print(end="")
+        self.calls += 1
+        return y.exp()
+
+
+NOTES = Notes()
+
+
+def noting(x):
+    return NOTES.noted(x.sin().cos() * 2 + 1).tanh().cos().sum()
+
+
+g = torch.vm(noting, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(min_ops=3)))
+for _ in range(4):
+    same = torch.equal(g(x), noting(x))
+same, NOTES.calls  # (True, 8): the method runs once a call, here and in the function itself
+first, second = [found for found in torch.vm.regions(g) if "ops" in found]
+first["ops"], first["why"]  # (4, 'in noted: a call that runs no kernel')
+second["ops"], second["why"]  # (3, 'the function returns')
+```
+
+A function that is called has graphs of its own, as it had before, and they
+are met exactly when the function runs as instructions: where it is called
+from code that has no path through the call, and where the path of the
+caller was not for this call. While a path of a caller holds the call, the
+function does not run, and its graphs do nothing: `regions` lists such a
+graph with the key `within`, the graph of the caller that holds its
+operations and runs them, and `stats()["graphs"]` does not count it. A call
+that a path goes through is not among what `regions` lists as left out.
+The functions that are called are warm before their callers are, so with a
+pass over graphs their graphs are exported first, and the graph of the
+caller, which holds the same operations, a few calls later.
+
+```python
+exported = []
+
+
+def count(gm, input_types):
+    exported.append(len([n for n in gm.graph.nodes if n.op.startswith("call")]))
+    return gm
+
+
+g = torch.vm(net, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), count))
+for _ in range(8):
+    same = torch.equal(g(v), net(v))
+same, exported  # (True, [4, 9]): a block first, then the model, which is what runs from then on
+handle = net.a.register_forward_hook(lambda module, args, output: output * 2)
+for _ in range(4):
+    same = torch.equal(g(v), net(v))
+same, exported  # (True, [4, 9, 4, 4]): with the hook the path of the model is not for the call
+handle.remove()
+whole = [found for found in torch.vm.regions(g) if found["where"].startswith("Net.forward")][0]
+hits = whole["hits"]
+for _ in range(3):
+    same = torch.equal(g(v), net(v))
+whole = [found for found in torch.vm.regions(g) if found["where"].startswith("Net.forward")][0]
+same, whole["hits"] - hits  # (True, 3): and without it, it is again
+```
+
 ### What a function makes
 
 A list, a dict, an iterator: what the instructions of a path make between
@@ -326,13 +483,14 @@ a thing.
 **Which values are the thing.** A thing is known by the instruction that
 made it. Other values of the function may be that thing, or hold it: an item
 or an attribute that is taken out of something that holds it, what an
-iterator over such a holder gives, a method that is bound to it, a tuple, a
-list or a dict that is built of it. Such a value counts as the thing
-wherever it may be it at some call. What the function had before the path,
-and what it reads of objects from outside, is never one: nothing of the
-path's is stored there before the path ends. So what an iterator of the path
-gives is from outside where what it goes over is: `for i, layer in
-enumerate(self.layers)` gives the layers.
+iterator over such a holder gives, a method that is bound to it, what a call
+that was handed it gives back (`d.get(k, made)`), a tuple, a list or a dict
+that is built of it. Such a value counts as the thing wherever it may be it
+at some call. What the function had before the path, and what it reads of
+objects from outside, is never one: nothing of the path's is stored there
+before the path ends. So what an iterator of the path gives is from outside
+where what it goes over is: `for i, layer in enumerate(self.layers)` gives
+the layers.
 
 **What runs.** What changes a thing (an append, `[*a, b]`, an entry of a
 dict it builds, the next item of an iterator) runs in a run of the path
@@ -465,6 +623,11 @@ a loop as many times as the call went round,
 and it takes as inputs only what its operations take: a flag that a branch
 is on is none.
 A variable of a loop names one input per time round (`x`, `x_2`, `x_3`).
+The operations of the functions that the path went into are in the graph
+where they ran, and a tensor that is no variable of a function (a weight
+that a module keeps) is an input named by where it was read (`module_weight`
+for `module.weight`); the checks of a form name it that way too, and a value
+of a called function with the function (`Linear.forward:%5`).
 On a later call the engine first runs what the path has in front of its
 operations (the reads, the arithmetic on numbers), on registers of the
 path's own, and checks that the branches go the way they went. Then what was
@@ -689,7 +852,7 @@ Python, an item of a list, a tuple or a dict under a number or a str,
 arithmetic on exact numbers. A dict or a set compares the key that is looked
 up with every key it holds under the same hash, and a key of a class with an
 `__eq__` does that in Python. So a lookup in a dict or a set
-(`d[k]`, `k in d`) runs no Python code only while every key in it is
+(`d[k]`, `k in d`, `d.get(k)`) runs no Python code only while every key in it is
 a number, a str or None, or a tuple of them: a dict that has only ever been
 given strs for keys is known to hold no other (CPython 3.13 and below say so
 of a dict; under 3.14 it counts as any other), any other dict and any set is
@@ -960,8 +1123,8 @@ torch.vm(f, passes=(*default, keep, P.Inductor())).passes
 
 What graphs do not do at this stage:
 
-- One function. A graph does not go on through a call of a Python function,
-  as said above.
+- A path starts and ends in one function, and a call that it cannot go
+  into ends it ("Paths across calls").
 - A path per way. A function whose calls go many ways through it has a path
   and an export for each, and they share the `max_variants` of the graph.
   So does a loop that goes round another number of times on every call.
@@ -971,7 +1134,10 @@ What graphs do not do at this stage:
   statistics, runs its operations on every call, and the same graph is
   exported for the calls in eval mode. A store into a subscript (`x[0] =
   y`) ends a graph, and so does an operation with several results
-  (`x.split(2)`, `torch.max(x, 0)`).
+  (`x.split(2)`, `torch.max(x, 0)`). A write to a tensor that the path made
+  itself ends it like any other: a model whose layers work in place
+  (`nn.ReLU(inplace=True)`, `x += y`) has its paths end there, which for the
+  models of the usual collections is after one to three operations.
 - A graph does not take a call in which it would let go of the last
   reference that Python has to a tensor which requires a gradient ("Passes
   over graphs"), also where what the graph gives keeps the history of that
