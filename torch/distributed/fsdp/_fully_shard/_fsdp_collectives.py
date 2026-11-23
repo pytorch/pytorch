@@ -19,6 +19,7 @@ from torch.distributed.tensor import DTensor
 
 from ._all_gather_layout import (
     _adopt_layout_outputs,
+    _can_use_param_contiguous_output,
     _check_layout_refill,
     _DefaultAllGatherCopyPlan,
     _PersistentBuffers,
@@ -28,6 +29,7 @@ from ._all_gather_layout import (
     AllGatherParamMetadata,
     BackendOwnedAllGatherLayout,
     DEFAULT_ALL_GATHER_LAYOUT,
+    DefaultAllGatherLayout,
 )
 from ._fsdp_api import _ReduceOp
 from ._fsdp_common import _to_dtype_if_needed
@@ -422,6 +424,14 @@ def foreach_all_gather(
                 all_gather_inputs = [*chain.from_iterable(param_all_gather_inputs)]
             inp_split_sizes = [t.numel() for t in all_gather_inputs]
             all_gather_input_numel = sum(inp_split_sizes)
+            param_contiguous = not isinstance(
+                layout, DefaultAllGatherLayout
+            ) and _can_use_param_contiguous_output(
+                fsdp_params,
+                param_all_gather_input_dtypes,
+                param_all_gather_input_numels,
+                dtype,
+            )
             # Copies, since copy_in and the default copy-out read these lists
             copy_in, call_layout, output_metadata = layout.prepare(
                 AllGatherInputMetadata(
@@ -431,6 +441,7 @@ def foreach_all_gather(
                     world_size=world_size,
                     dtype=dtype,
                     device=device,
+                    can_use_param_contiguous_output=param_contiguous,
                 )
             )
             if output_metadata is not None:  # the layout finalizes the output

@@ -39,6 +39,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from weakref import ref, ReferenceType
 
 import torch
 
@@ -279,8 +280,22 @@ class BackendOwnedAllGatherLayout(AllGatherLayout):
     preserves version counters around input packing and the collective, which
     may write storage that saved parameters alias, and calls ``release_output``.
     Later finalizes may return new views; FSDP copies them into the adopted
-    outputs if their storage moved.
+    outputs if their storage moved. The output lease is per parameter group, so
+    an instance binds to the one group it is installed on.
     """
+
+    # Weak, so that the layout does not keep the group or its parameters alive
+    _owner: ReferenceType[object] | None = None
+
+    def _bind_owner(self, owner: object) -> None:
+        if self._owner is None:
+            self._owner = ref(owner)
+        elif self._owner() is not owner:
+            raise ValueError(
+                "a BackendOwnedAllGatherLayout cannot be shared across FSDP "
+                "parameter groups; create one per group and install it with "
+                "recurse=False"
+            )
 
     @abstractmethod
     def release_output(self) -> None:
@@ -401,6 +416,40 @@ def _plan_rank_major_outputs(
         )
         plan.outer_sizes.extend(param.outer_sizes)
     return plan, new_buffers
+
+
+def _can_use_param_contiguous_output(
+    fsdp_params: list[FSDPParam],
+    param_input_dtypes: list[list[torch.dtype]],
+    param_input_numels: list[list[int]],
+    output_dtype: torch.dtype,
+) -> bool:
+    from torch._dynamo.compiled_autograd import (
+        compiled_autograd_enabled,
+        in_compiled_autograd_region,
+    )
+
+    from ._fsdp_param import ShardedState
+
+    if compiled_autograd_enabled or in_compiled_autograd_region:
+        return False
+    if not (len(fsdp_params) == len(param_input_dtypes) == len(param_input_numels)):
+        return False
+    for fsdp_param, input_dtypes, input_numels in zip(
+        fsdp_params, param_input_dtypes, param_input_numels
+    ):
+        if (
+            len(input_dtypes) != 1
+            or len(input_numels) != 1
+            or input_dtypes[0] != output_dtype
+            or fsdp_param.fsdp_placement.dim != 0
+            or fsdp_param.is_dtensor
+            or hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+            or hasattr(fsdp_param._sharded_local_tensor, "fsdp_post_all_gather")
+            or fsdp_param.sharded_state == ShardedState.SHARDED_POST_FORWARD
+        ):
+            return False
+    return True
 
 
 def _adopt_layout_outputs(

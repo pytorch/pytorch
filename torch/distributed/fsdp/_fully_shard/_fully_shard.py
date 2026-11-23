@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import contract
 
+from ._all_gather_layout import BackendOwnedAllGatherLayout
 from ._fsdp_api import (
     AllGather,
     AllReduce,
@@ -975,8 +976,10 @@ class FSDPModule:
         custom layouts before the first unshard: layouts change only between
         iterations, while no all-gather is pending and parameters are resharded,
         and never after parameters adopt outputs from a custom layout, since
-        only the layout that created those outputs can refill them. FSDP checks
-        every group before changing any.
+        only the layout that created those outputs can refill them. A layout
+        whose backend owns its outputs binds to one parameter group, so install
+        one on each module with ``recurse=False``. FSDP checks every group
+        before changing any.
 
         Args:
             layout (AllGatherLayout): Layout to install; pass
@@ -998,6 +1001,17 @@ class FSDPModule:
                 if layout is not fsdp_param_group._all_gather_layout:
                     fsdp_param_group._check_all_gather_replaceable()
                 groups.append(fsdp_param_group)
+        if isinstance(layout, BackendOwnedAllGatherLayout):
+            # Jointly sharded modules can refer to the same parameter group
+            groups = list(dict.fromkeys(groups))
+            if len(groups) > 1:
+                raise ValueError(
+                    "a BackendOwnedAllGatherLayout cannot be shared across FSDP "
+                    "parameter groups; create one per group and install it with "
+                    "recurse=False"
+                )
+            for fsdp_param_group in groups:
+                layout._bind_owner(fsdp_param_group)
         for fsdp_param_group in groups:
             fsdp_param_group._all_gather_layout = layout
 
