@@ -599,6 +599,20 @@ class TestValueRanges(TestCase):
                 r = ValueRangeAnalysis.python_mod(ValueRanges(x, x), y_range)
                 self.assertIn(result, r, lambda msg: f"{msg}\nx={x}, y={y}, result={result}, range={r}")
 
+        # Test with float divisors
+        # result is in range [0, y) for y > 0 and (y, 0] for y < 0
+        r = ValueRangeAnalysis.python_mod(ValueRanges(0.0, 100.0), ValueRanges(0.5, 0.5))
+        self.assertEqual(r, ValueRanges(0.0, 0.5))
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100.0, 100.0), ValueRanges(-0.5, -0.5))
+        self.assertEqual(r, ValueRanges(-0.5, 0.0))
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(-2.5, 0.25))
+        self.assertEqual(r, ValueRanges(-2.5, 0.25))
+        for x in range(-20, 21):
+            for y in [0.25, 0.5, 1.5, -0.25, -0.5, -1.5]:
+                result = float(x) % y
+                r = ValueRangeAnalysis.python_mod(ValueRanges(float(x), float(x)), ValueRanges(y, y))
+                self.assertIn(x % y, r)
+
     def test_bound_sympy_mod_subtraction(self):
         s0 = sympy.Symbol("s0", integer=True)
         s1 = sympy.Symbol("s1", integer=True)

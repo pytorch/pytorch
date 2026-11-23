@@ -784,13 +784,17 @@ class SymPyValueRangeAnalysis:
     def python_mod(cls, x, y):
         """Python-style modulo: result has same sign as divisor.
 
-        Assumes valid input where y is never 0.
-        - When y > 0: result is in [0, y - 1]
-        - When y < 0: result is in [y + 1, 0]
+        Assumes valid input where y is never 0. The result is bounded by:
+        - When y > 0: [0, y - 1] for ints; [0, y) for floats.
+        - When y < 0: [y + 1, 0] for ints; (y, 0] for floats.
         """
 
         x = ValueRanges.wrap(x)
         y = ValueRanges.wrap(y)
+        if not (x.is_int and y.is_int):
+            lower = min(0, y.lower)
+            upper = max(0, y.upper)
+            return ValueRanges(sympy.Float(lower), sympy.Float(upper))
         if x.lower >= 0 and y.lower >= 0:
             return SymPyValueRangeAnalysis.mod(x, y)
         lower = y.lower + 1 if y.lower < 0 else 0

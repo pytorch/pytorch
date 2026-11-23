@@ -1261,6 +1261,24 @@ else:
         self.assertEqual(compiled(t, 1.5), fn(t, 1.5))
 
     @torch._dynamo.config.patch(specialize_float=False)
+    def test_symint_python_mod_float_less_than_one(self):
+        def fn(x, s):
+            if int(x.shape[0] ** 0.5) % s != 0:
+                raise ValueError
+            if s == 0.5:
+                return x * 2
+            return x
+
+        x = torch.randn(16)
+
+        for backend in ("eager", "inductor"):
+            with self.subTest(backend=backend):
+                compiled = torch.compile(
+                    fn, backend=backend, dynamic=True, fullgraph=True
+                )
+                self.assertEqual(compiled(x, 0.5), fn(x, 0.5))
+
+    @torch._dynamo.config.patch(specialize_float=False)
     def test_unspec_roundtrip_float_input(self):
         def f(x, y):
             if y == 5.0:
