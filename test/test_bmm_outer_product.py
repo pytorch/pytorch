@@ -12,7 +12,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     skipCUDAIfNotRocm,
     skipXPUIf,
 )
@@ -221,7 +220,6 @@ class TestBmmOuterProductDevice(TestCase):
 class TestBmmOuterProductCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
 
-    @onlyCUDA
     @skipCUDAIfNotRocm
     def test_hip_grid_limit_fallback(self, device):
         from torch._native.ops.bmm_outer_product.triton_kernels import (
@@ -279,6 +277,7 @@ class TestOuterProductDetection(TestCase):
 
 
 instantiate_device_type_tests(TestBmmOuterProductDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestBmmOuterProductCUDA, globals(), only_for="cuda")
 
 if __name__ == "__main__":
     run_tests()
