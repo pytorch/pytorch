@@ -324,15 +324,13 @@ Tensor& _philox_uniform_tensor_cuda_(
   TORCH_CHECK(self.is_floating_point(),
       "_philox_uniform_: self must be a floating point tensor, got ",
       self.scalar_type());
-  philox_check_bound("_philox_uniform_", "low", low, self);
-  philox_check_bound("_philox_uniform_", "high", high, self);
+  auto lo = philox_prepare_bound("_philox_uniform_", "low", low, self, self.scalar_type()).expand(self.sizes());
+  auto hi = philox_prepare_bound("_philox_uniform_", "high", high, self, self.scalar_type()).expand(self.sizes());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
     auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
       return uniform_sample<scalar_t>(seed, offset);
     };
-    auto lo = low.to(self.scalar_type()).expand(self.sizes());
-    auto hi = high.to(self.scalar_type()).expand(self.sizes());
     const scalar_t* lo_ptr = lo.const_data_ptr<scalar_t>();
     const scalar_t* hi_ptr = hi.const_data_ptr<scalar_t>();
     auto index_type = canUse32BitIndexMath(lo) && canUse32BitIndexMath(hi) ? kInt : kLong;
@@ -378,8 +376,6 @@ Tensor& _philox_normal_tensor_cuda_(
   TORCH_CHECK(self.is_floating_point(),
       "_philox_normal_: self must be a floating point tensor, got ",
       self.scalar_type());
-  philox_check_bound("_philox_normal_", "mean", mean, self);
-  philox_check_bound("_philox_normal_", "std", std, self);
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
     using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
@@ -388,8 +384,8 @@ Tensor& _philox_normal_tensor_cuda_(
     };
     // Like the scalar overload, the parameters keep compute_t precision.
     constexpr auto compute_dtype = c10::CppTypeToScalarType<compute_t>::value;
-    auto mu = mean.to(compute_dtype).expand(self.sizes());
-    auto sigma = std.to(compute_dtype).expand(self.sizes());
+    auto mu = philox_prepare_bound("_philox_normal_", "mean", mean, self, compute_dtype).expand(self.sizes());
+    auto sigma = philox_prepare_bound("_philox_normal_", "std", std, self, compute_dtype).expand(self.sizes());
     const compute_t* mu_ptr = mu.const_data_ptr<compute_t>();
     const compute_t* sigma_ptr = sigma.const_data_ptr<compute_t>();
     auto index_type = canUse32BitIndexMath(mu) && canUse32BitIndexMath(sigma) ? kInt : kLong;
