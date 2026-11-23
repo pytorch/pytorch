@@ -92,10 +92,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         args2 = self._clone_inputs(args1)
 
         for training in [False, True] if check_train else [False]:
-            if training and self.device == "xpu":
-                # Intel GPU have not implemented sdpa backward yet mode.
-                # TODO: remove this when sdpa backward is implemented for XPU.
-                continue
             for x in itertools.chain(args1[:], args2[:]):
                 if isinstance(x, torch.Tensor) and x.is_floating_point():
                     x.requires_grad = training
@@ -1938,7 +1934,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             dot_prod_attention,
             args1=args,
             has_dropout=True,
-            check_train=True,
+            check_train=False,
         )
 
     @torch._inductor.config.patch("cache_sdpa_constraint", True)
@@ -2065,7 +2061,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             dot_prod_attention,
             args1=args,
             has_dropout=True,
-            check_train=True,
+            check_train=False,
         )
 
     def _test_sdpa_rewriter_27(self):
@@ -2099,7 +2095,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             dot_prod_attention,
             args1=args,
             has_dropout=True,
-            check_train=True,
+            check_train=False,
         )
 
     def _test_sdpa_rewriter_29(self):

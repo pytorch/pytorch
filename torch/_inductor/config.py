@@ -8,8 +8,8 @@ import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
 from torch.utils._config_module import (
     Config,
+    deprecated_alias_fields_from,
     get_tristate_env,
-    inherit_fields_from,
     install_config_module,
 )
 from torch.utils._triton import triton_compile_iq_enabled
@@ -2446,8 +2446,7 @@ class triton:
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
     #   - max_tiles=2
-    #   - max_tiles=3 is experimental and may have bugs
-    # higher values are unsupported
+    #   - max_tiles > 3 is experimental and may have bugs
 
     #  We use a max of 3 if coalesce_tiling_analysis is True, and 2 otherwise.
     #  Note - coalesce_tiling_analysis does not yet apply to dynamic shapes.
@@ -3029,14 +3028,15 @@ class cutlass:
     # Whether to use fast math.
     use_fast_math = False
 
-    # Path to the CUTLASS repo root directory.
+    # Path to the CUTLASS repo root directory (SYCL-TLA on XPU).
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
             os.path.join(
                 os.path.dirname(torch.__file__),
-                "../third_party/cutlass/",
+                "../third_party",
+                "sycl-tla" if torch.xpu._is_compiled() else "cutlass",
             ),
         )
     )
@@ -3146,7 +3146,7 @@ class cutlass:
     enable_caching_codegen: bool = True
 
 
-@inherit_fields_from(cutlass)
+@deprecated_alias_fields_from(cutlass)
 class cuda(cutlass):
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
@@ -3179,7 +3179,7 @@ class cuda(cutlass):
     autotune_tunableop_dynamic_dims_wildcard: bool = False
 
 
-@inherit_fields_from(cutlass)
+@deprecated_alias_fields_from(cutlass)
 class xpu(cutlass):
     # Xe arch to use for SYCL kernel compilation.
     # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
@@ -3190,8 +3190,6 @@ class xpu(cutlass):
 
     # Path to Intel OneAPI.
     oneapi_root: str | None = None
-
-    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
 
 
 class rocm:
@@ -3515,9 +3513,7 @@ _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
-    "cuda.cutlass_dir",
     "cutlass.cutlass_dir",
-    "xpu.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",

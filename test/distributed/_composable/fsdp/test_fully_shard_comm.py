@@ -3149,7 +3149,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
 @skipCUDAIf(not PLATFORM_SUPPORTS_FSDP_SYMM_MEM, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str | None:
+    def backend_str(cls, device) -> str | None:
         return "nccl"
 
     @classmethod

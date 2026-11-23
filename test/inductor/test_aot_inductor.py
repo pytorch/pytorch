@@ -7664,17 +7664,22 @@ class AOTInductorTestsTemplate:
             package_path: str = AOTIRunnerUtil.compile(
                 model, (x,), dynamic_shapes=dynamic_shapes
             )
-        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        aot_inductor_module = torch._inductor.aoti_load_package(
+            package_path, num_runners=1
+        )
         # dynamic dim works fine
         _ = aot_inductor_module(y0)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "unmatched dim value at 1"):
             aot_inductor_module(y1)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "unmatched stride value at 1"):
             aot_inductor_module(y2)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "dim value is too large at 0"):
             aot_inductor_module(y3)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "dim value is too large at 0"):
             aot_inductor_module(y4)
+        # The package runs one model instance, so each rejected call must have
+        # returned it to the pool for this call to run.
+        self.assertEqual(aot_inductor_module(y0), y0)
 
     @skip_if_device(
         lambda device: device != GPU_TYPE or device == "mps",
