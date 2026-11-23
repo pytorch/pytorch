@@ -172,6 +172,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_MULTIGPU,
     HAS_TPU,
     IS_BIG_GPU,
+    platform_supports_tensor_descriptor,
     requires_block_ptr,
     requires_gpu,
     RUN_CPU,
@@ -1116,6 +1117,15 @@ def check_model_gpu(
 
 
 check_model_cuda = check_model_gpu
+
+
+def _run_and_assert_direct_indexing_unless_avoided(test_case, func, *args, **kwargs):
+    # a backend that keeps %, // and abs of an index tensor behind an indirect
+    # variable (InductorChoices.use_modular_indexing) does not fold them into
+    # the address
+    if not V.choices.use_modular_indexing(test_case.device, kind="index"):
+        return func(*args)
+    return _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs)
 
 
 def _run_and_assert_no_indirect_indexing(
@@ -2369,7 +2379,7 @@ class CommonTemplate:
         # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
         has_assert = ifdynstaticdefault(False, True)
         # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(
+        actual = _run_and_assert_direct_indexing_unless_avoided(
             self, repeat_interleave_opt, x, 3, has_assert=has_assert
         )
         expect = torch.repeat_interleave(x, 3, dim=0)
@@ -2388,7 +2398,7 @@ class CommonTemplate:
         # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
         has_assert = ifdynstaticdefault(False, True)
         # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(
+        actual = _run_and_assert_direct_indexing_unless_avoided(
             self, repeat_opt, x, 3, has_wrapping=False, has_assert=has_assert
         )
         expect = x.repeat(3, 1)
@@ -2407,7 +2417,7 @@ class CommonTemplate:
         # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
         has_assert = ifdynstaticdefault(False, True)
         # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(
+        actual = _run_and_assert_direct_indexing_unless_avoided(
             self, opt_fn, x, 3, has_wrapping=False, has_assert=has_assert
         )
         expect = reflection_pad_left(x, 3)
@@ -2435,6 +2445,11 @@ class CommonTemplate:
             fn, inps, has_assert: bool, has_wrapping: bool, vectorize: bool = True
         ):
             fn_opt = torch.compile(fn)
+            if not V.choices.use_modular_indexing(self.device, kind="index"):
+                # the wrapping stays behind an indirect variable; the codegen
+                # checks below describe the inlined index
+                self.assertEqual(fn_opt(*inps), fn(*inps))
+                return
             if is_halide_backend(self.device):
                 pass  # no device asserts in halide
             elif is_mps_backend(self.device):
@@ -6219,6 +6234,11 @@ for dtype in (torch.int32, torch.int64):
             raise unittest.SkipTest(
                 "only the native CPU kernel preserves the input memory format"
             )
+        if config.avoid_modular_indexing and is_halide_backend(self.device):
+            # idx // W and idx % W no longer fold back into idx, and Halide
+            # refuses to reorder the RVars of a scatter indexed by two
+            # indirect variables
+            raise unittest.SkipTest("Halide cannot schedule the scatter")
 
         def fn(p, i):
             return torch.nn.functional.max_unpool2d(p, i, (8, 8))
@@ -10014,7 +10034,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
             self.common(fn, (x,))
-            assertGeneratedKernelCountEqual(self, 1)
+            if V.choices.use_modular_indexing(self.device, kind="view"):
+                # otherwise the merge after the stack is realized
+                assertGeneratedKernelCountEqual(self, 1)
 
     def test_hardtanh(self):
         def fn(x):
@@ -16010,7 +16032,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    def test_index_dynamic_shapes(self):
+    @parametrize("prefer_nd_tiling", [False, True])
+    def test_index_dynamic_shapes(self, prefer_nd_tiling):
+        if prefer_nd_tiling and not is_triton_backend(self.device):
+            self.skipTest("prefer_nd_tiling requires a Triton backend")
+
         # Repro from vision_maskrcnn
         def fn(arg0_1):
             unsqueeze = arg0_1.unsqueeze(0)
@@ -16067,10 +16093,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (select,)
 
         x = torch.randn(15, 20, 3)
-        self.common(
-            fn,
-            [x],
-        )
+        with config.patch({"triton.prefer_nd_tiling": prefer_nd_tiling}):
+            self.common(
+                fn,
+                [x],
+            )
 
     @skip_if_halide  # log2 not yet implemented
     @skip_if_triton_cpu  # log2 implemented only in Dec 2024
@@ -16709,7 +16736,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         args = [rand_strided(sh, st) for (sh, st) in args]
         args.append(256)
 
-        if is_cpp_backend(self.device):
+        # the realized merged view changes the C++ kernels
+        if is_cpp_backend(self.device) and not config.avoid_modular_indexing:
             opt_fn = torch.compile(fn, backend="inductor")
             _, code = run_and_get_cpp_code(opt_fn, *args)
             num = (
@@ -23204,6 +23232,11 @@ if RUN_GPU:
             eager_out = apply_rotary_pos_emb(q, k, cos, sin, pos_ids)
             self.assertEqual(compiled_out, eager_out)
 
+            if not V.choices.use_modular_indexing(GPU_TYPE, kind="reindex"):
+                # the pointwise dim expansion that fuses rope indexes the
+                # expanded dim with Mod and is undone
+                return
+
             # make sure that rope is fused into 1 kernel
             code = run_and_get_triton_code(compiled_fn, q, k, cos, sin, pos_ids)
             if config.cpp_wrapper:
@@ -24360,16 +24393,25 @@ if RUN_GPU:
                 "triton.prefer_nd_tiling": True,
                 "triton.max_tiles": 3,
                 "triton.tile_reductions": True,
+                "assume_aligned_inputs": True,
             }
         )
-        def test_3d_reduction_respects_tensor_rank_limit(self):
-            """Keep three reduction tiles while limiting total tensor rank to five.
-
-            max_tiles=3 applies independently to the pointwise and reduction
-            tilings. With R0/R1/R2 present, the three pointwise dimensions must
-            therefore collapse to Y/X rather than producing a sixth tensor axis.
-            """
-
+        @parametrize(
+            "tensor_descriptor",
+            [
+                False,
+                subtest(
+                    True,
+                    decorators=[
+                        unittest.skipUnless(
+                            platform_supports_tensor_descriptor(),
+                            "requires CUDA tensor descriptor support",
+                        )
+                    ],
+                ),
+            ],
+        )
+        def test_3d_pointwise_and_reduction_tiling(self, tensor_descriptor):
             def reduce_3d(x):
                 return torch.sum(x, dim=(3, 4, 5))
 
@@ -24379,13 +24421,25 @@ if RUN_GPU:
                 device=GPU_TYPE,
             ).normal_()
 
-            actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
+            with config.patch({"triton.use_tensor_descriptor": tensor_descriptor}):
+                actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
 
             torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
-            for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
+            for block_arg in (
+                "Z0_BLOCK",
+                "YBLOCK",
+                "XBLOCK",
+                "R0_BLOCK",
+                "R1_BLOCK",
+                "R2_BLOCK",
+            ):
                 self.assertIn(block_arg, code[0])
-            self.assertNotIn("Z0_BLOCK", code[0])
-            self.assertIn("tl.load", code[0])
+            self.assertIn("tl.load(in_ptr0", code[0])
+            self.assertNotIn("tl.make_tensor_descriptor(in_ptr0", code[0])
+            if tensor_descriptor:
+                self.assertIn("tl.make_tensor_descriptor(out_ptr0", code[0])
+            else:
+                self.assertIn("tl.store(out_ptr0", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_median_decompose_sort_ops(self):

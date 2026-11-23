@@ -1361,25 +1361,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_set_cause_with_arg(self):
         @torch.compile(backend="eager", fullgraph=True)
-        def fn(t, err):
+        def fn(t):
+            err = TypeError("abcd")
             err.__cause__ = ValueError()
-            return t.sin()
+            return t.sin(), err
 
         t = torch.randn(2)
-        e = TypeError("abcd")
-        fn(t, e)
+        _, e = fn(t)
         self.assertIsInstance(e.__cause__, ValueError)
 
     def test_set_cause_with_arg_error(self):
         @torch.compile(backend="eager", fullgraph=True)
-        def fn(t, err):
+        def fn(t):
+            err = TypeError("abcd")
             err.__cause__ = 2
-            return t.sin()
+            return t.sin(), err
 
         t = torch.randn(2)
-        e = TypeError("abcd")
-        with self.assertRaisesRegex(TypeError, "exception cause must be"):
-            fn(t, e)
+        with self.assertRaisesRegex(Unsupported, "exception cause must be"):
+            fn(t)
 
     @parametrize(
         "ex",
@@ -1993,22 +1993,20 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(e.bar, 7)
         self.assertEqual(y, x + 1)
 
-    def test_exception_setstate_non_string_key_diverges_from_eager(self):
-        # Eager's BaseException.__setattr__ requires string names, so
-        # __setstate__ with a non-string key raises TypeError. Dynamo currently
-        # stores non-string constant keys in the side-effect dict without error
-        # -- a known divergence from eager, to be fixed alongside tp_setattro.
+    def test_exception_setstate_non_string_key(self):
+        # BaseException.__setattr__ requires string names, so __setstate__
+        # with a non-string key raises TypeError.
         def fn(x):
             e = RuntimeError("boom")
-            e.__setstate__({1: 2})
-            return x + 1
+            try:
+                e.__setstate__({1: 2})
+            except TypeError as err:
+                return x + 1, str(err)
+            return x, ""
 
         x = torch.randn(4)
-        with self.assertRaisesRegex(TypeError, "attribute name must be string"):
-            fn(x)
-
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        opt_fn(x)  # diverges: Dynamo does not raise
+        self.assertEqual(opt_fn(x), fn(x))
 
     @parametrize("attr", WRITABLE_BASE_EXCEPTION_ATTRS)
     def test_exception_attr_read_after_write(self, attr):
