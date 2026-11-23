@@ -5,12 +5,14 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
@@ -18,6 +20,7 @@
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
+#include <cstdint>
 #include <cstring>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -391,6 +394,42 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   }
   r.copy_(src, non_blocking);
   return r;
+}
+
+Tensor& copy_out(const Tensor& self, const Tensor& src, bool non_blocking, Tensor& out) {
+  // Avoid cloning self's storage when neither conversion nor a snapshot of src
+  // is needed. Non-resizable storages can alias through separate memory mappings.
+  if (!areAnyTensorSubclassLike({self, src, out}) &&
+      self.layout() == kStrided && src.layout() == kStrided && out.layout() == kStrided &&
+      !self.is_nested() && !src.is_nested() && !out.is_nested() &&
+      (self.device().is_cpu() || self.device().is_cuda()) &&
+      self.device() == src.device() && self.device() == out.device() &&
+      self.scalar_type() == src.scalar_type() &&
+      self.scalar_type() == out.scalar_type() &&
+      !self.is_quantized() && !isShellType(self.scalar_type()) &&
+      self.is_contiguous() && src.is_contiguous() && out.is_contiguous() &&
+      self.sizes().equals(src.sizes()) && self.sizes().equals(out.sizes()) &&
+      !self.is_conj() && !src.is_conj() && !out.is_conj() &&
+      !self.is_neg() && !src.is_neg() && !out.is_neg() &&
+      !self._is_zerotensor() && !src._is_zerotensor() && !out._is_zerotensor() &&
+      self.storage().nbytes() % self.itemsize() == 0 &&
+      src.storage().resizable() && out.storage().resizable()) {
+    // Storage identity alone does not detect all aliases.
+    const auto src_ptr = reinterpret_cast<std::uintptr_t>(src.const_data_ptr());
+    const auto out_ptr = reinterpret_cast<std::uintptr_t>(out.const_data_ptr());
+    const auto distance = src_ptr < out_ptr ? out_ptr - src_ptr : src_ptr - out_ptr;
+    if (distance >= src.nbytes()) {
+      return out.copy_(src, non_blocking);
+    }
+  }
+
+  auto result = at::copy(self, src, non_blocking);
+  resize_output(out, result.sizes());
+  TORCH_CHECK(result.dtype() == out.dtype(),
+      "Expected out tensor to have dtype ", result.dtype(), ", but got ", out.dtype(), " instead");
+  TORCH_CHECK(result.device() == out.device(),
+      "Expected out tensor to have device ", result.device(), ", but got ", out.device(), " instead");
+  return out.copy_(result);
 }
 
 ::std::vector<at::Tensor> _foreach_copy(at::TensorList self, at::TensorList src, bool non_blocking) {
