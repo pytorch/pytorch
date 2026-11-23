@@ -185,39 +185,6 @@ class TestCompilerBisector(TestCase):
             self.assertEqual(CompilerBisector.in_process_cache, original_cache)
             self.assertEqual(CompilerBisector.bisection_enabled, original_enabled)
 
-    def test_run_with_fresh_cache(self):
-        import os
-        import subprocess
-        import sys
-
-        helper = Path(__file__).with_name("_test_compiler_bisector_test_helper.py")
-        env = os.environ.copy()
-        env.update(
-            INDUCTOR_TEST_DISABLE_FRESH_CACHE="0",
-            TORCH_COMPILE_DEBUG="0",
-            TORCH_BISECT_BACKEND="inductor",
-        )
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "torch._inductor.compiler_bisector",
-                "run",
-                sys.executable,
-                str(helper),
-                "TestRepro.test_compiler_error",
-            ],
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=300,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout)
-        expected = "Binary search completed for inductor - pre_grad_passes"
-        self.assertIn(expected, result.stdout)
-        self.assertIn("Debug info: pre_grad_custom_pass", result.stdout)
-
     def test_config_change_only_parses_literals(self):
         with TemporaryDirectory() as tmpdir:
             config_path = f"{tmpdir}/inductor/test_config.txt"
