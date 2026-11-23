@@ -671,8 +671,20 @@ engine itself looks under a key only where the key is of one of the
 interpreter's own exact classes (a number, a text, `None`, a tuple of such)
 and every key of the dict is, which it asks at every call, at the
 instruction; a key of any other class (a subclass of `str` with a `__hash__`
-of its own) is left to the instructions. A method that is read off the thing
-first and called later (`take = kwargs.pop`, or `kwargs.pop(name,
+of its own) is left to the instructions. The same holds for every dict the
+engine looks a name up in, whoever made it: the dict of an object, of a
+module or of a class behind `super()`, the dicts a module keeps its
+parameters in, the globals of the function. Where one of its keys is no such
+plain value (a subclass of `str` with an `__eq__` of its own, hashing as an
+attribute's name), the engine does not look into the dict, neither to show
+what a read or a store will do nor in its place, and remembers nothing it
+found there: the instruction runs as the interpreter runs it, and the path
+ends in front of it. A dict that has taken a key that is no text is gone
+through for this only where it has no more than 32 keys; a larger one counts
+as having such a key (the globals of a module that have a number among their
+keys and more than 32 names: nothing is inlined into the functions of that
+module, and no loop of theirs is unrolled). A method that is read off the
+thing first and called later (`take = kwargs.pop`, or `kwargs.pop(name,
 default_of(config))`, where the default is computed between the two) is the
 same change; a method of another list or dict that an object of the function
 merely holds (`holder.append = outside.append`) is a change of that other
@@ -3294,26 +3306,26 @@ which is what the dashboard's runner does:
 | adv_inception_v3 (timm) | 21.27, 21.13 ms | 8.66, 8.62 ms | 2.45x, 2.45x | 8.45, 8.39 ms | 2.52x, 2.52x | 0.97, 0.97 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm) | 6.68, 6.73 ms | 6.28, 6.29 ms | 1.07x, 1.07x | 6.21, 6.21 ms | 1.08x, 1.08x | 0.99, 0.99 | 233 x1 |
 
-One step before the code of this commit, which since changed what `regions`
-says of a graph within another, what a run leaves out with a thing that
-nothing uses and how the keys of a dict are asked (the graphs of these
-models are the same on both), by another job with the same tool, which
-enters the runner's own grad mode around the calls: one measurement each, on
-16 cores, with the load average between 3 and 5 and nothing else on the GPU.
-The graphs that run are those counted above (DistillGPT2 with the operations
-it has on a GPU; of hf_DistilBert the graph of a layer and the one of its
-feed-forward part run six times each in a call):
+One step before the code of this commit, which since changed which dicts the
+engine looks a name up in (none whose keys are not all plain; the graphs of
+these models are the same on both), by another job with the same tool, which
+enters the runner's own grad mode around the calls: the median of three
+turns in one process, on 16 cores, with the load average between 1.5 and 20,
+falling, and nothing else on the GPU. The graphs that run are those counted
+above (DistillGPT2 with the operations it has on a GPU; of hf_DistilBert the
+graph of a layer and the one of its feed-forward part run six times each in
+a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
-| resnet18 (TorchBench) | 2.42 ms | 1.02 ms | 2.37x | 0.98 ms | 2.47x | 0.96 | 69 x1 |
-| resnet50 (TorchBench) | 6.04 ms | 2.66 ms | 2.27x | 2.54 ms | 2.38x | 0.95 | 175 x1 |
-| yolov3 (TorchBench) | 9.88 ms | 4.26 ms | 2.32x | 3.94 ms | 2.51x | 0.92 | 328 x1 |
-| hf_DistilBert (TorchBench) | 3.35 ms | 3.25 ms | 1.03x | 1.71 ms | 1.96x | 0.52 | 17 x6, 6 x1, 4 x6, 4 x1 |
-| DistillGPT2 (HuggingFace) | 13.89 ms | 4.65 ms | 2.99x | 3.76 ms | 3.69x | 0.81 | 231 x1, 10 x1, 8 x1, 8 x1 |
-| MobileBertForMaskedLM (HuggingFace) | 29.91 ms | 14.88 ms | 2.01x | 13.09 ms | 2.28x | 0.88 | 1272 x1, 16 x1, 7 x1 |
-| whisper-tiny (HuggingFace) | 8.91 ms | 4.92 ms | 1.81x | 3.09 ms | 2.88x | 0.63 | 237 x1, 126 x1, 8 x1 |
-| Qwen3-0.6B (HuggingFace) | 32.60 ms | 9.70 ms | 3.36x | 7.28 ms | 4.48x | 0.75 | 2080 x1, 11 x1, 6 x1 |
+| resnet18 (TorchBench) | 2.47 ms | 1.05 ms | 2.35x | 1.00 ms | 2.46x | 0.96 | 69 x1 |
+| resnet50 (TorchBench) | 6.20 ms | 2.74 ms | 2.26x | 2.60 ms | 2.38x | 0.95 | 175 x1 |
+| yolov3 (TorchBench) | 10.14 ms | 4.34 ms | 2.34x | 3.96 ms | 2.56x | 0.91 | 328 x1 |
+| hf_DistilBert (TorchBench) | 3.27 ms | 3.13 ms | 1.04x | 1.64 ms | 1.99x | 0.52 | 17 x6, 6 x1, 4 x6, 4 x1 |
+| DistillGPT2 (HuggingFace) | 13.91 ms | 4.55 ms | 3.06x | 3.78 ms | 3.68x | 0.83 | 231 x1, 10 x1, 8 x1, 8 x1 |
+| MobileBertForMaskedLM (HuggingFace) | 29.80 ms | 14.12 ms | 2.11x | 13.15 ms | 2.27x | 0.93 | 1272 x1, 16 x1, 7 x1 |
+| whisper-tiny (HuggingFace) | 8.95 ms | 4.89 ms | 1.83x | 3.07 ms | 2.92x | 0.63 | 237 x1, 126 x1, 8 x1 |
+| Qwen3-0.6B (HuggingFace) | 32.28 ms | 10.03 ms | 3.22x | 7.68 ms | 4.21x | 0.77 | 2080 x1, 11 x1, 6 x1 |
 
 As a check that these rows are the runner's mode, the runner's own lines for
 the same models (`python benchmarks/dynamo/torchbench.py --performance
@@ -3330,6 +3342,11 @@ what the tool has:
 | deit_base_distilled_patch16_224 | 1.06x | 1.07x, 1.07x | 1.08x | 1.08x, 1.08x |
 | DistillGPT2 | 2.98x | 2.99x | 3.71x | 3.69x |
 
+The line of DistillGPT2 is of the code before the two reads of a
+configuration were found once ("Classes that read their attributes
+themselves"): the runner's lines and the tool's figures of that code, where
+the row above is of the code behind it.
+
 With gradients recorded: the same calls without `torch.no_grad()` (the tool
 calls the `forward_pass` of the torchbench and timm suites directly, which
 does not enter it), and the training steps. A forward that records gradients
@@ -3345,16 +3362,21 @@ altogether ("Limits"):
 | adv_inception_v3 (timm), gradients recorded | 21.21, 21.23 ms | 12.82, 12.85 ms | 1.66x, 1.65x | 8.72, 8.72 ms | 2.43x, 2.43x | 0.68, 0.68 | 314 x1 |
 | deit_base_distilled_patch16_224 (timm), gradients recorded | 6.80, 6.82 ms | 6.95, 6.84 ms | 0.98x, 1.00x | 6.21, 6.22 ms | 1.10x, 1.10x | 0.89, 0.91 | 233 x1 |
 | hf_DistilBert (TorchBench), gradients recorded | 3.88 ms | 3.97 ms | 0.98x | 1.99 ms | 1.95x | 0.50 | 6 x1, 4 x1 |
+| yolov3 (TorchBench), gradients recorded, the process that fills the compiler's cache | 11.74 ms | 7.67 ms | 1.53x | 4.46 ms | 2.64x | 0.58 | 328 x1 |
+| yolov3 (TorchBench), gradients recorded, with the cache filled | 11.89 ms | 7.73 ms | 1.54x | 4.59 ms | 2.59x | 0.59 | 328 x1 |
 | resnet18 (TorchBench), a training step | 8.50, 8.35 ms | 5.48, 5.37 ms | 1.55x, 1.56x | 5.42, 5.22 ms | 1.57x, 1.60x | 0.99, 0.97 | 89 x1 |
 | resnet50 (TorchBench), a training step | 23.48, 22.99 ms | 15.74, 15.68 ms | 1.49x, 1.47x | 13.98, 13.37 ms | 1.68x, 1.72x | 0.89, 0.85 | 228 x1 |
-| DistillGPT2, a training step | 53.30 ms | 29.73 ms | 1.79x | 17.97 ms | 2.97x | 0.60 | 15 x6, 10 x1, 8 x1, 8 x1 |
+| DistillGPT2, a training step | 53.35 ms | 29.71 ms | 1.80x | 17.98 ms | 2.97x | 0.61 | 15 x6, 10 x1, 8 x1, 8 x1 |
 
-The rows of hf_DistilBert and of DistillGPT2's training step are one
-measurement each, made by another job with the same tool on the same code as
-the rows of this job (the Rust of its build is that tree's byte for byte),
-on 16 cores, with the load average between 5 and 6 and nothing else on the
-GPU. With gradients recorded only 2 small graphs of hf_DistilBert run (6 x1,
-4 x1), and its call takes what eager's takes.
+The row of hf_DistilBert is one measurement, made by another job with the
+same tool on the same code as the rows of this job (the Rust of its build is
+that tree's byte for byte), on 16 cores, with the load average between 5 and
+6 and nothing else on the GPU. With gradients recorded only 2 small graphs
+of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
+The rows of yolov3 and of DistillGPT2's training step are of the measurement
+of the eight rows above, one step before the code of this commit. yolov3
+with gradients recorded runs its graph in the process that fills the
+compiler's cache as in a later one ("Limits").
 
 That gradients are recorded is why deit and hf_DistilBert are at eager's
 speed in their rows with gradients. Their attention is
@@ -3367,18 +3389,17 @@ deit takes 6.28, 6.29 ms where eager's takes 6.68, 6.73. The graph of a
 layer of hf_DistilBert, 17 operations, keeps eager's tape for the same node;
 it is no faster than the instructions it stands for, so the measurement
 leaves the layer to the interpreter, at its second look as at its first
-("Limits"), and the 2 graphs that run hold 0.25 of
-the 4.02 ms of a call. DistillGPT2's training step has 1.7 of its 29.8 ms in
-what stands for its graphs: a layer's MLP is a graph of 15 operations that
-runs 6 times in a step, but the attention of a layer is in none (the
-operator draws random numbers, and the call around it runs kernels and is no
-call site), and neither are the kernels of the optimizer's update, which are
-no call sites.
+("Limits"), and the 2 graphs that run hold 0.25 of the 4.02 ms of a call.
+DistillGPT2's training step has 1.7 of its 29.7 ms in what stands for its
+graphs: a layer's MLP is a graph of 15 operations that runs 6 times in a
+step, but the attention of a layer is in none (the operator draws random
+numbers, and the call around it runs kernels and is no call site), and
+neither are the kernels of the optimizer's update, which are no call sites.
 
 In the runner's mode the layers of hf_DistilBert are graphs (17 operations,
 and the 4 of the feed-forward part, six times each in a call), and a call
-takes 3.25 ms where eager's takes 3.35: of the 3.22 ms of a call that the
-tool takes apart, 1.94 are in what stands for the graphs, 0.43 in front of
+takes 3.13 ms where eager's takes 3.27: of the 3.15 ms of a call that the
+tool takes apart, 1.93 are in what stands for the graphs, 0.37 in front of
 them and 0.82 between them.
 
 ### Limits
@@ -3459,11 +3480,9 @@ What graphs do not do at this stage:
   the first runs of its form that would have been samples took 3.6 s,
   131 ms and 36.5 ms where the interpreter takes 11.5 ms, which would have
   left the model to the interpreter for the rest of the process. It runs
-  its graph in such a process as in a later one: at 1.52 to 1.57 times
-  eager's speed in five first processes and at 1.51 to 1.56 in five with
-  the cache they filled. These figures are no rows of "Models": they were
-  taken beside other jobs (a load average of 40 to 90), without the lock
-  for timed runs. A function that is slower with its graph for good is
+  its graph in such a process as in a later one: at 1.53 times eager's
+  speed in the process that fills the cache and at 1.54 with the cache
+  filled ("Models"). A function that is slower with its graph for good is
   measured twice: with gradients recorded the layers of hf_DistilBert lose
   both times ("Models"), and the model settles after 147 to 159 calls
   where one measurement took 136.
