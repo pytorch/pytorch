@@ -32,7 +32,11 @@ from torch.cuda._utils import (
     _cuda_bindings_driver as drv,
     _HAS_CUDA_BINDINGS,
 )
-from torch.distributed._functional_collectives import all_gather_single
+from torch.distributed._functional_collectives import (
+    all_gather_single,
+    all_gather_tensor,
+    reduce_scatter_tensor,
+)
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_all_gather_scaled_matmul_fallback,
@@ -1832,6 +1836,19 @@ _FLY_AG_SHAPES = {
     "k384_n768_col": (8192, 384, 768, "col"),
     "k1152_n1280_row": (16384, 1152, 1280, "row"),
 }
+# layout -> TP -> (M, K, N, B layout) that _fused_flydsl admits for the reduce-scatter
+_FLY_RS_SHAPES = {
+    "row": {
+        8: (2048, 128, 1024, "row"),
+        4: (4096, 128, 256, "row"),
+        2: (8192, 128, 256, "row"),
+    },
+    "col": {
+        8: (4096, 640, 3072, "col"),
+        4: (8192, 640, 768, "col"),
+        2: (8192, 640, 768, "col"),
+    },
+}
 
 
 def _fly_weight(k, n, lay, device=device_type):
@@ -2325,10 +2342,12 @@ class FlyDSLAsyncTPTest(MultiProcContinuousTest):
     _init_process = AsyncTPTest._init_process
     _assert_matmul_accuracy = AsyncTPTest._assert_matmul_accuracy
 
-    def _init_flydsl(self) -> None:
+    def _init_flydsl(self, tp: int | None = None) -> None:
         self._init_process()
         if self.world_size not in _fused_flydsl.WORLDS:
             self.skipTest(f"the FlyDSL kernels take TP {_fused_flydsl.WORLDS}")
+        if tp is not None and self.world_size != tp:
+            self.skipTest(f"needs {tp} ranks, one per GPU")
 
     def _fly_ag(self, A_shard, Bs, gather_dim, return_A, flydsl=True):
         with mock.patch.object(
@@ -2387,6 +2406,68 @@ class FlyDSLAsyncTPTest(MultiProcContinuousTest):
         ag, mm = self._fly_ag(A_shard, [B], gather_dim, return_A)
         self._fly_check_ag(A_shard, [B], gather_dim, ag, mm, return_A)
 
+    def _fly_rs(self, A, B, scatter_dim, flydsl=True):
+        with mock.patch.object(
+            _fused_flydsl,
+            "matmul_reduce_scatter",
+            wraps=_fused_flydsl.matmul_reduce_scatter,
+        ) as fly:
+            out = torch.ops.symm_mem.fused_matmul_reduce_scatter(
+                A, B, "sum", scatter_dim, dist.group.WORLD.group_name
+            )
+        self.assertEqual(fly.call_count, int(flydsl), "FlyDSL branch")
+        return out
+
+    def _fly_check_rs(self, A, B, scatter_dim, out):
+        out0 = _fused_matmul_reduce_scatter_fallback(
+            A, B, "sum", scatter_dim, dist.group.WORLD.group_name
+        )
+        # The stock path and the fallback sum fp32 partials in different orders.
+        tol = {"rtol": 1e-5, "atol": 1e-3} if out0.dtype == torch.float32 else {}
+        torch.testing.assert_close(out, out0, **tol)
+        self.assertEqual(out.stride(), out0.stride())
+
+    def _fly_rs_inputs(self, layout, scatter_dim=0):
+        m, k, n, lay = _FLY_RS_SHAPES[layout][self.world_size]
+        if scatter_dim == 0:
+            A = torch.rand(m, k, dtype=torch.bfloat16, device=device_type)
+        else:  # [2, M / 2, K] restrided for the scatter as the micro-pipeline pass does
+            A = restride_A_for_fused_matmul_reduce_scatter(
+                torch.rand(2, m // 2, k, dtype=torch.bfloat16, device=device_type), 1
+            )
+        return A, _fly_weight(k, n, lay)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("layout", list(_FLY_RS_SHAPES))
+    @parametrize("scatter_dim", [0, 1])
+    @skip_if_no_flydsl
+    @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
+    def test_fused_matmul_reduce_scatter_flydsl(
+        self, layout: str, scatter_dim: int
+    ) -> None:
+        self._init_flydsl()
+        A, B = self._fly_rs_inputs(layout, scatter_dim)
+        self._fly_check_rs(A, B, scatter_dim, self._fly_rs(A, B, scatter_dim))
+
+    # TP 4: these need 4 GPUs and FlyDSL (skipped without them). The distributed_4gpu job's --multigpu-min-gpus 3 filter
+    # keeps the tests that declare skip_if_lt_x_gpu(>= 3), and the class runs one rank per visible GPU, so four there.
+    @skip_if_lt_x_gpu(4)
+    @skip_if_no_flydsl
+    @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
+    def test_fused_all_gather_matmul_flydsl_tp4(self) -> None:
+        self._init_flydsl(tp=4)
+        A_shard, B = self._fly_ag_inputs("k384_n768_col")
+        ag, mm = self._fly_ag(A_shard, [B], 0, True)
+        self._fly_check_ag(A_shard, [B], 0, ag, mm, True)
+
+    @skip_if_lt_x_gpu(4)
+    @skip_if_no_flydsl
+    @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
+    def test_fused_matmul_reduce_scatter_flydsl_tp4(self) -> None:
+        self._init_flydsl(tp=4)
+        A, B = self._fly_rs_inputs("col")
+        self._fly_check_rs(A, B, 0, self._fly_rs(A, B, 0))
+
     @skip_if_lt_x_gpu(2)
     @skip_if_no_flydsl
     @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
@@ -2407,48 +2488,84 @@ class FlyDSLAsyncTPTest(MultiProcContinuousTest):
     @skip_if_no_flydsl
     @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
     def test_fused_flydsl_repeated_calls(self) -> None:
-        """Calls on one state reuse its staging (call 3 writes call 1's half) and accumulate its epoch and flags; a
-        misaligned A (alignment can differ between ranks) is admitted and copied before the kernel."""
+        """Calls on one state reuse its staging (AG: call 3 writes call 1's half) and accumulate its epoch, flags and
+        counters; a misaligned A (alignment can differ between ranks) is admitted and copied before the kernel."""
         self._init_flydsl()
         A_shard, B = self._fly_ag_inputs("k1152_n1280_row")
+        A, Br = self._fly_rs_inputs("row")
         for i in range(4):
             A_shard.copy_(torch.rand_like(A_shard))
             ag, mm = self._fly_ag(A_shard, [B], 0, i % 2 == 0)
             self._fly_check_ag(A_shard, [B], 0, ag, mm, i % 2 == 0)
-        buf = torch.empty(A_shard.numel() + 4, dtype=A_shard.dtype, device=device_type)
-        off = 1 + self.rank % 4
-        A_shard = buf[off : off + A_shard.numel()].view_as(A_shard).copy_(A_shard)
-        self.assertNotEqual(A_shard.data_ptr() % 16, 0)
+            A.copy_(torch.rand_like(A))
+            self._fly_check_rs(A, Br, 0, self._fly_rs(A, Br, 0))
+
+        def misaligned(t):
+            buf = torch.empty(t.numel() + 4, dtype=t.dtype, device=device_type)
+            off = 1 + self.rank % 4
+            moved = buf[off : off + t.numel()].view_as(t).copy_(t)
+            self.assertNotEqual(moved.data_ptr() % 16, 0)
+            return moved
+
+        A_shard, A = misaligned(A_shard), misaligned(A)
         ag, mm = self._fly_ag(A_shard, [B], 0, True)
         self._fly_check_ag(A_shard, [B], 0, ag, mm, True)
+        self._fly_check_rs(A, Br, 0, self._fly_rs(A, Br, 0))
 
     @skip_if_lt_x_gpu(2)
     @skip_if_no_flydsl
     @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
     def test_fused_flydsl_graph_capture(self) -> None:
-        """One eager call builds the state; then the op in a CUDA graph, replayed with new inputs."""
+        """One eager call per op builds the states; then both ops in one CUDA graph, replayed with new inputs."""
         self._init_flydsl()
         A_shard, B = self._fly_ag_inputs("k384_n768_col", 1)
+        A, Br = self._fly_rs_inputs("col", 1)
         self._fly_ag(A_shard, [B], 1, True)
+        self._fly_rs(A, Br, 1)
         torch.cuda.synchronize()
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             ag, mm = self._fly_ag(A_shard, [B], 1, True)
+            out = self._fly_rs(A, Br, 1)
         for _ in range(3):
-            for t in (A_shard, B):
+            for t in (A_shard, B, A, Br):
                 t.copy_(torch.rand_like(t))
             graph.replay()
             torch.cuda.synchronize()
             self._fly_check_ag(A_shard, [B], 1, ag, mm, True)
+            self._fly_check_rs(A, Br, 1, out)
+
+    @skip_if_lt_x_gpu(2)
+    @skip_if_no_flydsl
+    @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
+    def test_fused_flydsl_two_streams(self) -> None:
+        """Two calls on one state, the second on another stream: _order_streams orders the second after the first."""
+        self._init_flydsl()
+        A_shard, B = self._fly_ag_inputs("k384_n768_col")
+        A_shard2 = torch.rand_like(A_shard)
+        ag, mm = self._fly_ag(A_shard, [B], 0, True)
+        with torch.cuda.stream(torch.cuda.Stream()):
+            ag2, mm2 = self._fly_ag(A_shard2, [B], 0, True)
+        torch.cuda.synchronize()
+        self._fly_check_ag(A_shard, [B], 0, ag, mm, True)
+        self._fly_check_ag(A_shard2, [B], 0, ag2, mm2, True)
+        A, Br = self._fly_rs_inputs("col")
+        A2 = torch.rand_like(A)
+        out = self._fly_rs(A, Br, 0)
+        with torch.cuda.stream(torch.cuda.Stream()):
+            out2 = self._fly_rs(A2, Br, 0)
+        torch.cuda.synchronize()
+        self._fly_check_rs(A, Br, 0, out)
+        self._fly_check_rs(A2, Br, 0, out2)
 
     @skip_if_lt_x_gpu(2)
     @skip_if_no_flydsl
     @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
     def test_fused_flydsl_fall_through(self) -> None:
-        """Calls the predicate rejects take the next branch: fp32, K % 128, N above AG_MAX_N, an ND shard not
-        restrided for its gather dim, a last-dim gather (fp32: the stock path sums K per rank); and test mode. Shards
-        stay under 1 MiB (a stock peer copy_ of that size segfaults on ROCm 10.1): the K % 128 one has valid rows (64
-        columns), the others fail whatever their rows."""
+        """Calls the predicates reject take the next branch: fp32, K % 128, N above AG_MAX_N, an ND operand not
+        restrided for its gather / scatter dim, a last-dim gather (fp32: the stock path sums K per rank) or scatter;
+        and test mode. The tensors the stock path moves between ranks stay under 1 MiB (a peer copy_ of that size
+        segfaults on ROCm 10.1): the AG K % 128 one has valid rows (64 columns), the others fail whatever their rows."""
         self._init_flydsl()
         m, k, n, lay = _FLY_AG_SHAPES["k384_n768_col"]
         lm, f32, max_n = m // self.world_size, torch.float32, _fused_flydsl.AG_MAX_N
@@ -2465,21 +2582,83 @@ class FlyDSLAsyncTPTest(MultiProcContinuousTest):
         ):
             ag, mm = self._fly_ag(A_shard, [B], dim, True, flydsl=False)
             self._fly_check_ag(A_shard, [B], dim, ag, mm, True)
+        m, k, n, lay = _FLY_RS_SHAPES["col"][self.world_size]
+        for A, B, dim in (
+            (r(256, k, dtype=f32), r(k, n, dtype=f32), 0),
+            (r(2, 128, k), _fly_weight(k, n, lay), 1),
+            (r(256, k), _fly_weight(k, n, lay), 1),
+        ):
+            self._fly_check_rs(A, B, dim, self._fly_rs(A, B, dim, flydsl=False))
         A_shard, B = self._fly_ag_inputs("k384_n768_col")
+        A, Br = self._fly_rs_inputs("col")
         with _test_mode():
             ag, mm = self._fly_ag(A_shard, [B], 0, True, flydsl=False)
+            out = self._fly_rs(A, Br, 0, flydsl=False)
         self._fly_check_ag(A_shard, [B], 0, ag, mm, True)
+        self._fly_check_rs(A, Br, 0, out)
+
+    @skip_if_lt_x_gpu(2)
+    @skip_if_no_flydsl
+    @mock.patch.dict(os.environ, {_FLY_ENV: "1"})
+    @torch._inductor.config.patch(_micro_pipeline_tp=True)
+    @fresh_cache()
+    def test_fused_flydsl_micro_pipeline_tp(self) -> None:
+        """A sequence-parallel block with separate q / k / v under the micro-pipeline pass: the fused ops it emits
+        (3D, gather / scatter dim 1, several Bs) take the FlyDSL branches."""
+        self._init_flydsl()
+        group_name = dist.group.WORLD.group_name
+
+        # Positive, so bf16 relative errors stay bounded through the block.
+        def rand(*shape):
+            return torch.rand(*shape, dtype=torch.bfloat16, device=device_type) / 32
+
+        x = rand(2, 8192 // self.world_size, 1024) * 32
+        wq, wk, wv, wo = (
+            rand(512, 1024),
+            rand(128, 1024),
+            rand(128, 1024),
+            rand(1024, 512),
+        )
+
+        def block(x, wq, wk, wv, wo):
+            x = all_gather_tensor(x, 1, group_name)
+            h = (x @ wq.t()) * (x @ wk.t() + x @ wv.t()).repeat(1, 1, 4)
+            return reduce_scatter_tensor(h @ wo.t(), "sum", 1, group_name)
+
+        args = (x, wq, wk, wv, wo)
+        compiled = torch.compile(block, fullgraph=True)
+        with (
+            mock.patch.object(
+                _fused_flydsl,
+                "all_gather_matmul",
+                wraps=_fused_flydsl.all_gather_matmul,
+            ) as ag_fly,
+            mock.patch.object(
+                _fused_flydsl,
+                "matmul_reduce_scatter",
+                wraps=_fused_flydsl.matmul_reduce_scatter,
+            ) as rs_fly,
+        ):
+            code = run_and_get_triton_code(compiled, *args)
+        self.assertIn("fused_all_gather_matmul", code)
+        self.assertIn("fused_matmul_reduce_scatter", code)
+        self.assertGreater(ag_fly.call_count, 0, "FlyDSL AG")
+        self.assertGreater(rs_fly.call_count, 0, "FlyDSL RS")
+        torch.testing.assert_close(compiled(*args), block(*args), rtol=4e-2, atol=1e-2)
 
 
 class FlyDSLAsyncTPPredicateTest(TestCase):
-    """_fused_flydsl's predicate at every TP on meta tensors (no GPU, no FlyDSL), and its host-side helpers."""
+    """_fused_flydsl's predicates at every TP on meta tensors (no GPU, no FlyDSL), and its host-side helpers."""
 
     def test_fused_flydsl_off_without_env(self) -> None:
-        """Off without TORCH_SYMM_MEM_ENABLE_FLYDSL_ASYNC_TP or with TORCH_DISABLE_NATIVE_JIT=1, ag_supported aside."""
-        gate = symm_mem._should_use_flydsl_all_gather_matmul
+        """Off without TORCH_SYMM_MEM_ENABLE_FLYDSL_ASYNC_TP or with TORCH_DISABLE_NATIVE_JIT=1, the predicates aside."""
+        ag_gate = symm_mem._should_use_flydsl_all_gather_matmul
+        rs_gate = symm_mem._should_use_flydsl_matmul_reduce_scatter
+        t = torch.empty(0)
         with (
             mock.patch.object(torch.version, "hip", "7.0"),
             mock.patch.object(_fused_flydsl, "ag_supported", return_value=True),
+            mock.patch.object(_fused_flydsl, "rs_supported", return_value=True),
         ):
             for env, on in (
                 ({}, False),
@@ -2487,7 +2666,8 @@ class FlyDSLAsyncTPPredicateTest(TestCase):
                 ({_FLY_ENV: "1", "TORCH_DISABLE_NATIVE_JIT": "1"}, False),
             ):
                 with mock.patch.dict(os.environ, env, clear=True):
-                    self.assertEqual(gate(torch.empty(0), [], 0, "g"), on, env)
+                    self.assertEqual(ag_gate(t, [], 0, "g"), on, env)
+                    self.assertEqual(rs_gate(t, t, "sum", 0, "g"), on, env)
 
     def test_ag_predicate(self) -> None:
         def meta(*shape, dtype=torch.bfloat16):
@@ -2547,6 +2727,75 @@ class FlyDSLAsyncTPPredicateTest(TestCase):
                 got = ok(meta(rows, 128), [wt(128, n)], 0, w) is not None
                 self.assertEqual(got, admitted, f"TP {w}: shard {rows} x 128")
 
+    def test_rs_predicate(self) -> None:
+        def meta(*shape, dtype=torch.bfloat16):
+            return torch.empty(*shape, dtype=dtype, device="meta")
+
+        def wt(k, n, lay="col"):
+            return _fly_weight(k, n, lay, "meta")
+
+        ok = _fused_flydsl._rs_meta
+        for w in (2, 4, 8):
+            m, k, n, lay = _FLY_RS_SHAPES["row"][w]
+            self.assertEqual(ok(meta(m, k), wt(k, n, lay), "sum", 0, w), (k, n, False))
+            m, k, n, lay = _FLY_RS_SHAPES["col"][w]
+            A, B = meta(m, k), wt(k, n, lay)
+            # [2, M / 2, K], restrided for scatter dim 1
+            A3 = meta(m // 2, 2, k).movedim(0, 1)
+            self.assertEqual(ok(A, B, "sum", 0, w), (k, n, True), f"TP {w}")
+            self.assertEqual(ok(A3, B, "sum", 1, w), (k, n, True), f"TP {w}")
+            for what, args in (
+                ("fp32", (meta(m, k, dtype=torch.float32), B, "sum", 0)),
+                ("last-dim scatter", (A, B, "sum", 1)),
+                ("avg", (A, B, "avg", 0)),
+                ("K % 128", (meta(m, k + 64), wt(k + 64, n, lay), "sum", 0)),
+                ("M 0", (meta(0, k), B, "sum", 0)),
+                ("N 0", (A, wt(k, 0), "sum", 0)),
+                ("K 0", (meta(m, 0), wt(0, n, "row"), "sum", 0)),
+                (
+                    "B on another device",
+                    (A, torch.empty(k, n, dtype=torch.bfloat16), "sum", 0),
+                ),
+                ("A not contiguous", (meta(k, m).t(), B, "sum", 0)),
+                ("ND not restrided", (meta(2, m // 2, k), B, "sum", 1)),
+                ("scatter dim of size 1", (meta(1, m, k).movedim(0, 1), B, "sum", 1)),
+            ):
+                self.assertIsNone(ok(*args, w), f"TP {w}: {what}")
+            self.assertIsNone(ok(A, B, "sum", 0, 3), "TP 3")
+            # 32-bit bounds: A and the staging are addressed per tile; B and the output chunk (M / TP x N) are
+            # rejected at 4 GiB.
+            rows, B = 2**32 // (2 * 65536), wt(128, 65536)
+            self.assertIsNotNone(ok(meta(rows, 128), B, "sum", 0, w), f"TP {w}: 4 GiB")
+            self.assertIsNone(ok(meta(rows * w, 128), B, "sum", 0, w), f"TP {w}: chunk")
+            for cols, admitted in ((65536 - 1024, True), (65536, False)):
+                got = ok(meta(8192, 32768), wt(32768, cols), "sum", 0, w) is not None
+                self.assertEqual(got, admitted, f"TP {w}: B 32768 x {cols}")
+        # M alone moves the boundary: M % (8 * RS_UNIT_ROWS) == 0, and at TP 8 N % 1024 too.
+        for w, n, m_ok, m_bad in (
+            (2, 4096, 8192, 10240),
+            (4, 4096, 4096, 6144),
+            (8, 1024, 2048, 2304),
+        ):
+            self.assertIsNotNone(
+                ok(meta(m_ok, 128), wt(128, n), "sum", 0, w), f"TP {w}: M {m_ok}"
+            )
+            self.assertIsNone(
+                ok(meta(m_bad, 128), wt(128, n), "sum", 0, w), f"TP {w}: M {m_bad}"
+            )
+        for n, admitted in ((1024, True), (768, False)):
+            got = ok(meta(2048, 128), wt(128, n), "sum", 0, 8) is not None
+            self.assertEqual(got, admitted, f"TP 8: N {n}")
+
+    def test_tables(self) -> None:
+        """Entries the kernels' maps rely on: KC a multiple of TP - 1 (and at least that), R at least 1."""
+        for table in (_fused_flydsl.KC, _fused_flydsl.KC_DEFAULT):
+            for key, kc in table.items():
+                world = key if isinstance(key, int) else key[2]
+                self.assertTrue(kc % (world - 1) == 0 and kc >= world - 1, (key, kc))
+        for table in (_fused_flydsl.R, _fused_flydsl.R_DEFAULT):
+            for key, r in table.items():
+                self.assertGreaterEqual(r, 1, key)
+
     def test_helpers(self) -> None:
         """Operand alignment, the timeouts, and the ranks' agreement check before a state's rendezvous."""
         a = torch.rand(32 * 32 + 1, dtype=torch.bfloat16)[1:].view(32, 32)
@@ -2593,7 +2842,12 @@ class FlyDSLAsyncTPPredicateTest(TestCase):
             )
             store.set("symm_mem_flydsl/2/1", "state a")
             agree("op", group, "state a")
-            self.assertEqual(_fused_flydsl.barrier_ms(group), 200)  # the store's
+            # The barrier's timeout is the store's, in ms, clamped to [0, 2^31 - 1].
+            self.assertEqual(_fused_flydsl.barrier_ms(group), 200)
+            store.set_timeout(timedelta(days=100))
+            self.assertEqual(_fused_flydsl.barrier_ms(group), 2**31 - 1)
+            store.set_timeout(timedelta(seconds=-1))
+            self.assertEqual(_fused_flydsl.barrier_ms(group), 0)
 
 
 # [READ ME FIRST]

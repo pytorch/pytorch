@@ -1,17 +1,19 @@
 # mypy: allow-untyped-defs
-"""FlyDSL kernel for symm_mem::fused_all_gather_matmul on ROCm gfx950 (AsyncTP).
+"""FlyDSL kernels for symm_mem::fused_all_gather_matmul and fused_matmul_reduce_scatter on ROCm gfx950 (AsyncTP).
 
-Opt-in: _fused_all_gather_matmul (__init__.py) calls all_gather_matmul only with TORCH_SYMM_MEM_ENABLE_FLYDSL_ASYNC_TP
-set, and only for calls ag_supported() admits (bf16, the gather dim first in memory, the kernel's tile multiples,
-TP 2/4/8); anything else takes the wrapper's next branch. This module imports only torch: FlyDSL, triton and the
-kernels (_fused_flydsl_kernels.py, built on torch's vendored FlyDSL GEMM) are imported on the first admitted call.
+Opt-in: the ops' wrappers (__init__.py) call all_gather_matmul / matmul_reduce_scatter only with
+TORCH_SYMM_MEM_ENABLE_FLYDSL_ASYNC_TP set, and only for calls ag_supported() / rs_supported() admit (bf16, the
+gather / scatter dim first in memory, "sum", the kernels' tile multiples, TP 2/4/8); anything else takes the
+wrapper's next branch. This module imports only torch: FlyDSL, triton and the kernels (_fused_flydsl_kernels.py,
+built on torch's vendored FlyDSL GEMM) are imported on the first admitted call.
 
 Every rank of a group must make the same call (shapes, A and B layouts, env vars, the FlyDSL and triton installs): the
 route and the state are chosen from each rank's own arguments and environment. Ranks that differ do not compute a wrong
 result: they fail with an error from check_group_agrees() (a store timeout, or different states) or at the barrier's
 timeout.
 
-One state per (K, N, TP, B layout, rows per rank, group, device), running one kernel (agmm_gfx950): the first KC blocks
+All-gather + matmul (_AGState): one state per (K, N, TP, B layout, rows per rank, group, device), running one kernel
+(agmm_gfx950): the first KC blocks
 (rounded up to a multiple of 8) only pull the peers' shards into the gathered A chunk by chunk and then exit; every
 other block computes one tile, peer tiles waiting on their chunk flag. One call, all on the current stream: stage the
 shard into half ((epoch + 1) & 1) of the symmetric buffer and into this rank's rows of the gathered A, flush (one L2
@@ -26,6 +28,18 @@ A chunk flag still missing after wait_ms() fails the launch with a [FATAL] line 
 bounded by the group's store timeout (barrier_ms()). Both traps act alike on ROCm: with core dumps off torch raises at
 the next sync, with them on the HIP runtime aborts the process. A state takes no lock: every call on it must come from
 one thread at a time and in the same order on every rank, as the stock path's shared per-group workspace requires.
+
+Matmul + reduce-scatter (_RSState): one state per (K, N, TP, B layout, rows, group, device), running one kernel
+(rsmm_gfx950): the first R blocks (rounded up to a multiple of 8) only reduce; every other block computes one tile
+of this rank's partial into its symmetric staging buffer in reduce-scatter order and signals the chunk's owner. The
+order is 2D: G row groups x C column slabs make G * C steps, a step covering one row group and one column slab of EVERY
+chunk (every owner's link is busy from the first step, and a step's rows of A stay in the Infinity Cache for the slabs
+that share them); the owner's reducers sum a step's block of every source's staging once that step's tiles from every
+source are in. One call, all on the current stream: the symmetric-memory barrier (every peer is done reading this
+rank's staging from the previous call), bump the device epoch, the kernel. The staging buffer is M x N bf16 per
+state. Its first call compiles and runs the kernel once with no reducers and every counter add into local scratch;
+the rest is as for the all-gather: the ranks agree again once the state is built, a step counter still short after
+wait_ms() fails the launch, and the barrier is bounded by the group's store timeout (barrier_ms()).
 """
 
 from __future__ import annotations
@@ -57,6 +71,33 @@ KC = {
     (4096, 14336, 2): 6,
 }
 KC_DEFAULT = {8: 28, 4: 12, 2: 8}
+# _rs_meta admits exactly M (the scatter dim) % (8 * RS_UNIT_ROWS) == 0: M of 2048 / 4096 / 8192 at TP 8 / 4 / 2, so a
+# chunk (M / TP) is a multiple of 256 / 1024 / 4096 rows (the shapes the kernel is validated on).
+RS_UNIT_ROWS = {8: 256, 4: 512, 2: 1024}
+# The reduce-scatter's step grid: RS_G row groups x RS_C column slabs (RS_C_WIDE for an N of RS_WIDE_N or more), fitted
+# down to divisors of the call's tile rows / columns that make every step a multiple of 8 tiles. Measured at TP 8, M 65536.
+RS_G = 8
+RS_C = 4
+RS_C_WIDE = 16
+RS_WIDE_N = 16384
+# (K, N, TP) -> reducer blocks, measured per shape at M 65536 (Llama 3.1), where the best is not R_DEFAULT. At TP 8,
+# calls whose GEMM is at least as long as their reduction (down / gate-up, K large for their N) want few reducers, as
+# every reducer is a CU the GEMM does not have; o / qkv (K small) are bound by the reduction and take R_DEFAULT. TP 4
+# and 2 do not follow it: their 70B o and qkv-dgrad entries and (14336, 8192, 4) are 16, above R_DEFAULT's 12 / 8.
+R = {
+    (3584, 8192, 8): 16,
+    (7168, 8192, 8): 16,
+    (6656, 16384, 8): 16,
+    (13312, 16384, 8): 16,
+    (3584, 4096, 8): 16,
+    (2048, 8192, 4): 16,
+    (7168, 8192, 4): 8,
+    (2560, 8192, 4): 16,
+    (14336, 8192, 4): 16,
+    (4096, 8192, 2): 16,
+    (5120, 8192, 2): 16,
+}
+R_DEFAULT = {8: 28, 4: 12, 2: 8}
 
 _states: dict = {}
 _states_built: collections.Counter = collections.Counter()
@@ -166,9 +207,59 @@ def ag_supported(
     return _ag_meta(A_shard, Bs, gather_dim, world) is not None
 
 
+def _rs_config(k, n, world):
+    """(G, C, R) of a reduce-scatter state: the step grid and the reducer blocks."""
+    return (
+        RS_G,
+        RS_C_WIDE if n >= RS_WIDE_N else RS_C,
+        R.get((k, n, world), R_DEFAULT[world]),
+    )
+
+
+def _rs_meta(A, B, reduce_op, scatter_dim, world):
+    """(K, N, B transposed) if the fused matmul + reduce-scatter kernel takes this call, else None. Reads only
+    metadata."""
+    a = _flat(A, scatter_dim)
+    if a is None or reduce_op != "sum" or world not in WORLDS or not _operands_ok(a, B):
+        return None
+    b_t = _b_transposed(B)
+    (m, k), n = a.shape, B.shape[1]
+    br = RS_UNIT_ROWS[world]
+    # Tiles per unit of a chunk: the XCD-interleaved order takes them in groups of 8 g.
+    g = br // 256 * (n // 256)
+    # The flattened rows split into the ranks' chunks only where the scatter dim does.
+    if b_t is None or A.shape[scatter_dim] % world or (m // world) % br:
+        return None
+    if n % 256 or k % 128 or (m // 256) * (n // 256) % (8 * g):
+        return None
+    # A and the staging are addressed per tile. B's buffer offsets (one descriptor over K x N) are 32-bit, and so is the
+    # reducers' element offset into a chunk (rs_boff, M / TP x N elements) at every TP; at TP 8 a chunk is also read
+    # through one buffer descriptor, 4 GiB at most.
+    if not (_fits(k, n) and _fits(m // world, n)):
+        return None
+    # TP 8: N % 1024, the shapes the kernel is validated on; others stay on the stock path.
+    if world == 8 and world * g % 32:
+        return None
+    return k, n, b_t
+
+
+def rs_supported(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    reduce_op: str,
+    scatter_dim: int,
+    group_name: c10d.GroupName,
+) -> bool:
+    """Whether matmul_reduce_scatter takes this call, from this rank's arguments and environment (see module doc)."""
+    if A.device.type != "cuda" or not _available(A.device.index):
+        return False
+    world = c10d._resolve_process_group(group_name).size()
+    return _rs_meta(A, B, reduce_op, scatter_dim, world) is not None
+
+
 def wait_ms() -> int:
-    """TORCH_SYMM_MEM_FLYDSL_TIMEOUT_MS, read once per state before its rendezvous: how long (default 60000 ms) a
-    fused kernel's tile waits for a peer before it prints a [FATAL] line and traps; 0 disables it (the kernels get
+    """TORCH_SYMM_MEM_FLYDSL_TIMEOUT_MS, read once per state before its rendezvous: how long (default 60000 ms) a fused
+    kernel's tile / reducer waits for a peer before it prints a [FATAL] line and traps; 0 disables it (the kernels get
     2^31 - 1 ms). It bounds the in-kernel waits only; the barrier takes barrier_ms() (traps: see the module doc)."""
     raw = os.environ.get(TIMEOUT_ENV, "60000")
     try:
@@ -222,10 +313,11 @@ def _control_block(ms):
 
 def _order_streams(st):
     """Order this call on state `st` (current device) after the state's previous call: a state's epoch and staging
-    assume in-order calls (one state on two unordered streams hangs the AG); different states are independent. Under
-    CUDA graph capture nothing is waited on: torch.cuda.graph synchronizes before capture, and a capturing stream may
-    not wait on uncaptured work, so within one capture keep a state's calls on one stream. Nor is a replay ordered
-    against eager calls: don't replay a graph while eager calls (or another replay) on the same state may run."""
+    assume in-order calls (one state on two unordered streams hangs the AG and corrupts the RS); different states are
+    independent. Under CUDA graph capture nothing is waited on: torch.cuda.graph synchronizes before capture, and a
+    capturing stream may not wait on uncaptured work, so within one capture keep a state's calls on one stream. Nor
+    is a replay ordered against eager calls: don't replay a graph while eager calls (or another replay) on the same
+    state may run."""
     cur = torch.cuda.current_stream()
     if (
         st.stream is not None
@@ -396,3 +488,143 @@ def all_gather_matmul(
     gat, c = _ag_2d(a, _aligned(Bs[i]), k, n, b_t, group)
     outs = [c if j == i else torch.mm(gat, b) for j, b in enumerate(Bs)]
     return (unflatten(gat) if return_A else None), [unflatten(o) for o in outs]
+
+
+class _RSState:
+    def __init__(self, m, k, n, b_t, r, grid, group, a0, b):
+        import flydsl.compiler as flyc
+
+        import torch.distributed._symmetric_memory as symm_mem
+        from torch.distributed._symmetric_memory import _fused_flydsl_kernels as K
+
+        rank, world = group.rank(), group.size()
+        self.K, self.m, self.k, self.n, self.r = K, m, k, n, r
+        self.rank, self.world, self.group = rank, world, group
+        self.ms, self.bar_ms = wait_ms(), barrier_ms(group)
+        self.lm = m // world
+        nm, npn = self.lm // 256, n // 256
+
+        # The requested (G, C) fitted down to divisors of the tile rows per chunk and the tile columns that make a step
+        # (world * tile rows per group * tile columns per slab tiles) a multiple of 8. The slab counts to try are the
+        # divisors of the tile columns in 2..C, widest first (up to 16 if there is none); C = 1 only for one tile column.
+        # `fit` is non-empty for every call _rs_meta admits.
+        def _cols(npn, cap):
+            cs = [c for c in range(min(cap, npn), 1, -1) if npn % c == 0]
+            return cs or [c for c in range(min(16, npn), 1, -1) if npn % c == 0] or [1]
+
+        fit = [
+            (g_, c_)
+            for g_ in range(min(grid[0], nm), 0, -1)
+            for c_ in _cols(npn, grid[1])
+            if nm % g_ == 0
+            and npn % c_ == 0
+            and world * (nm // g_) * (npn // c_) % 8 == 0
+        ]
+        # nb = G * C steps (step t = g * C + c), rpb = tile columns per column slab.
+        self.nb, self.rpb = fit[0][0] * fit[0][1], npn // fit[0][1]
+        what = f"fused_matmul_reduce_scatter M {m} K {k} N {n} B transposed {b_t}"
+        check_group_agrees("fused_matmul_reduce_scatter", group, what)
+        self.buf = symm_mem.empty(
+            m * n + self.nb * 32 * 2,
+            dtype=torch.bfloat16,
+            device=torch.device("cuda"),
+        )
+        self.hdl = _rendezvous(self.buf, group.group_name)
+        self.stage = self.buf[: m * n].view(m, n)
+        self.cnt = self.buf[m * n :].view(torch.int32)
+        self.cnt.zero_()  # peers add only after this call's barrier, which this rank reaches after the zeroing
+        self.cnt_off = m * n * 2
+        self.ep = _control_block(self.ms)
+        self.prm = K.gemm_param(m, n, k, b_t)
+        self.stream = None
+        # Compiling also runs the kernel once with no reducers and every peer entry on this rank's own staging, counter
+        # offset 0: counter adds land on staging words every call rewrites.
+        table = torch.full(
+            (world,), self.stage.data_ptr(), dtype=torch.int64, device="cuda"
+        )
+        s = torch.cuda.current_stream().cuda_stream
+        self.gemm = flyc.compile(
+            K.rsmm_gfx950,
+            K.arg(self.stage),
+            K.arg(a0),
+            K.arg(b),
+            table.data_ptr(),
+            0,
+            self.ep.data_ptr(),
+            self.stage.data_ptr(),
+            rank,
+            world,
+            0,
+            self.nb,
+            self.rpb,
+            self.lm,
+            self.prm,
+            s,
+        )
+        torch.cuda.synchronize()
+        check_group_agrees("fused_matmul_reduce_scatter", group, what + " built")
+
+    def __call__(self, a, b):
+        # _bump advances the epoch for good (every wait target is a multiple of it) and runs after the barrier, right
+        # before the launch, so only the launch itself can raise after it; a raise before it leaves the epoch as it was.
+        out = torch.empty(self.lm, self.n, dtype=torch.bfloat16, device="cuda")
+        self.hdl.barrier(channel=0, timeout_ms=self.bar_ms)
+        self.K._bump[(1,)](self.ep, num_warps=1)
+        self.gemm(
+            self.stage,
+            a,
+            b,
+            self.hdl.buffer_ptrs_dev,
+            self.cnt_off,
+            self.ep.data_ptr(),
+            out.data_ptr(),
+            self.rank,
+            self.world,
+            self.r,
+            self.nb,
+            self.rpb,
+            self.lm,
+            self.prm,
+            torch.cuda.current_stream().cuda_stream,
+        )
+        return out
+
+
+def _rs_2d(a, b, k, n, b_t, group):
+    """This rank's chunk [M / TP, N] of the sum over ranks of a @ b, for a contiguous, aligned 2D a."""
+    world, m = group.size(), a.shape[0]
+    g, c, r = _rs_config(k, n, world)
+    skey = ("rs", k, n, world, b_t, m // world, group.group_name, a.device.index)
+    with torch.cuda.device(a.device):
+        st = _states.get(skey)
+        # A group destroyed and re-created under the same name: the state's handles belong to the old one.
+        if st is None or st.group is not group:
+            if torch.cuda.is_current_stream_capturing():
+                raise RuntimeError(
+                    f"fused_matmul_reduce_scatter (FlyDSL): the first call at (K {k}, N {n}, TP {world}, rows "
+                    f"{m // world}) is under CUDA graph capture; it compiles and rendezvouses, so make one eager "
+                    "call first"
+                )
+            st = _RSState(m, k, n, b_t, r, (g, c), group, a, b)
+            _states[skey] = st
+        _order_streams(st)
+        out = st(a, b)
+    return out
+
+
+def matmul_reduce_scatter(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    reduce_op: str,
+    scatter_dim: int,
+    group_name: c10d.GroupName,
+) -> torch.Tensor:
+    """symm_mem::fused_matmul_reduce_scatter for a call rs_supported() admits, with the Meta kernel's output strides."""
+    group = c10d._resolve_process_group(group_name)
+    k, n, b_t = _rs_meta(A, B, reduce_op, scatter_dim, group.size())
+    # As _fused_matmul_reduce_scatter_impl: scatter dim first, flattened to 2D; this rank's rows are its share of it.
+    lead = list(A.movedim(scatter_dim, 0).shape[:-1])
+    lead[0] //= group.size()
+    out = _rs_2d(_aligned(_flat(A, scatter_dim)), _aligned(B), k, n, b_t, group)
+    # Contiguous like the Meta kernel's output: a copy only for a batch scattered on a dim after the first.
+    return out.view(*lead, -1).movedim(0, scatter_dim).contiguous()
