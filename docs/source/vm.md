@@ -2942,6 +2942,10 @@ What graphs do not do at this stage:
   the frame of the function there: `locals()`, a callee that reads its
   caller's frame (`sys._getframe(1).f_locals`) and the frame of a traceback
   do not have it.
+- While `builtins.__import__` is a function written in Python (a lazy-import
+  shim, a test harness that patches it), a function with `Graphs()` in the
+  list does not come back from the call that takes its path down: the
+  engine imports through it there, and waits for itself.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
