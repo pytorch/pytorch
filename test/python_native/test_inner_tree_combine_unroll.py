@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import (
 
 @unittest.skipUnless(TEST_CUTEDSL, "requires CuTeDSL")
 class TestInnerTreeCombineUnroll(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CUDA
 
     @parametrize(
         "unroll,rows",
