@@ -4112,6 +4112,19 @@ def capture(
     :func:`load` lists the CUDA graph settings that stay the loading
     process's.
 
+    Dynamo traces the captured calls under ``torch._inductor.config``, as
+    under :func:`torch.compile`, whose ``mode`` and ``options`` reach only
+    Inductor. So when they turn CUDA graphs on with ``graph_partition`` on, a
+    Python float argument that changes between calls becomes one dynamic
+    input, which the partitioned graph copies to the device outside its CUDA
+    graph. With ``graph_partition`` off that CPU scalar would keep the graph
+    out of CUDA graphs, so such a capture's calls are traced under
+    ``triton.cudagraphs``: Dynamo then specializes every Python float
+    argument, and each distinct value is its own captured variant, as it is
+    whenever that flag is on in ``torch._inductor.config``. To keep such a
+    value one input there, pass it as a tensor on the device or turn
+    ``graph_partition`` on.
+
     As under :func:`torch.compile`, a graph's outputs are overwritten by its
     next replay, so clone what you keep across calls or call
     :func:`torch.compiler.cudagraph_mark_step_begin` between iterations; a
