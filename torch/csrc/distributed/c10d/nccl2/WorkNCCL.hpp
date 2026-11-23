@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -162,7 +163,9 @@ class WorkNCCL : public c10d::Work {
 
     WorkStatus status() const;
     std::exception_ptr exception() const;
-    bool setTerminalStatus(WorkStatus status);
+    bool setTerminalStatus(
+        WorkStatus status,
+        const std::optional<std::string>& message = std::nullopt);
     // Returns ownedEphemeralTimeout to the comm, at most once.
     void releaseEphemeralTimeout();
     WorkStatus checkStatus(
@@ -192,6 +195,7 @@ class WorkNCCL : public c10d::Work {
     c10::intrusive_ptr<c10::ivalue::Future> futureWorkResult;
     std::atomic<bool> resultPublished{false};
     bool hostBlocking{false};
+    std::atomic<bool> cancelledByReconfigure{false};
   };
   struct TrackedWork {
     std::shared_ptr<State> state;
@@ -224,6 +228,8 @@ class WorkNCCLQueue {
   WorkNCCL::WorkStatus garbageCollect();
   // Finalize function can only be called from the main thread
   WorkNCCL::WorkStatus finalize();
+  // Cancels the queued work that has not completed; finalize() dequeues it.
+  void cancelPending();
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
