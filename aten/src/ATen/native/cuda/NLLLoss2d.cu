@@ -330,10 +330,17 @@ void nll_loss2d_forward_out_cuda_template(
   int total_blocks = blocks_per_sample * batch_size;
 
   // Accumulate in fp32 for half/bfloat16. Cast total_weight back to the
-  // caller's dtype once; float already matches and skips the copy.
+  // caller's dtype once. float/double already match and reuse output.
   const auto acc_dtype = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
-  Tensor acc_output = at::empty({}, input.options().dtype(acc_dtype));
-  acc_output.zero_();
+  Tensor acc_output;
+  if (output.scalar_type() == input.scalar_type() &&
+      output.scalar_type() == acc_dtype) {
+    output.zero_();
+    acc_output = output;
+  } else {
+    acc_output = at::empty({}, input.options().dtype(acc_dtype));
+    acc_output.zero_();
+  }
   Tensor acc_total_weight;
   if (total_weight.scalar_type() == acc_dtype) {
     total_weight.zero_();

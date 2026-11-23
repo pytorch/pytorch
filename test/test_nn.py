@@ -50,7 +50,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipCUDAIfNotRocm, largeMPSBufferTest, skipMPS, \
-    onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
+    onlyNativeDeviceTypes, onlyOn, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric, toleranceOverride, tol
 from torch.testing import make_tensor
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -12925,7 +12925,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(grad_input[-1, 0, 0, 0], -1)
 
     # Ref: https://github.com/pytorch/pytorch/issues/201120
-    @onlyNativeDeviceTypes
+    @onlyOn(["cpu", "cuda", "mps"])
     @dtypes(torch.float16, torch.bfloat16)
     def test_nll_loss_half_mean_past_fp16_max(self, device, dtype):
         # Mean used to add the loss and the count in the input dtype. Past
@@ -12936,30 +12936,63 @@ class TestNNDeviceType(NNTestCase):
         reduction = F._Reduction.get_enum("mean")
         input_1d = torch.full((count, classes), -1, device=device, dtype=dtype)
         target_1d = torch.zeros(count, dtype=torch.long, device=device)
+
+        def ref_mean(inp, tgt, weight=None):
+            # fp64 on CPU. MPS has no float64.
+            return F.nll_loss(
+                inp.detach().cpu().to(dtype=torch.float64),
+                tgt.detach().cpu(),
+                weight=None if weight is None else weight.detach().cpu().to(dtype=torch.float64),
+            )
+
         loss_1d = F.nll_loss(input_1d, target_1d)
-        ref_1d = F.nll_loss(input_1d.double(), target_1d)
+        ref_1d = ref_mean(input_1d, target_1d)
         out_1d, tw_1d = torch.ops.aten.nll_loss_forward(
             input_1d, target_1d, None, reduction, -100)
         self.assertEqual(loss_1d.dtype, dtype)
         self.assertEqual(out_1d.dtype, dtype)
         self.assertEqual(tw_1d.dtype, dtype)
         self.assertTrue(torch.isfinite(loss_1d).item())
-        self.assertEqual(loss_1d, ref_1d.to(dtype))
-        self.assertEqual(out_1d, ref_1d.to(dtype))
+        self.assertEqual(loss_1d, ref_1d.to(device=device, dtype=dtype))
+        self.assertEqual(out_1d, ref_1d.to(device=device, dtype=dtype))
 
         side = 256
         input_2d = torch.full((1, classes, side, side), -1, device=device, dtype=dtype)
         target_2d = torch.zeros((1, side, side), dtype=torch.long, device=device)
         loss_2d = F.nll_loss(input_2d, target_2d)
-        ref_2d = F.nll_loss(input_2d.double(), target_2d)
+        ref_2d = ref_mean(input_2d, target_2d)
         out_2d, tw_2d = torch.ops.aten.nll_loss2d_forward(
             input_2d, target_2d, None, reduction, -100)
         self.assertEqual(loss_2d.dtype, dtype)
         self.assertEqual(out_2d.dtype, dtype)
         self.assertEqual(tw_2d.dtype, dtype)
         self.assertTrue(torch.isfinite(loss_2d).item())
-        self.assertEqual(loss_2d, ref_2d.to(dtype))
-        self.assertEqual(out_2d, ref_2d.to(dtype))
+        self.assertEqual(loss_2d, ref_2d.to(device=device, dtype=dtype))
+        self.assertEqual(out_2d, ref_2d.to(device=device, dtype=dtype))
+
+        # Weight 2 makes the summed weight 2 * 65536, past the fp16 max.
+        weight = torch.full((classes,), 2, device=device, dtype=dtype)
+        loss_w = F.nll_loss(input_1d, target_1d, weight=weight)
+        ref_w = ref_mean(input_1d, target_1d, weight)
+        self.assertEqual(loss_w.dtype, dtype)
+        self.assertTrue(torch.isfinite(loss_w).item())
+        self.assertEqual(loss_w, ref_w.to(device=device, dtype=dtype))
+        w_out, w_tw = torch.ops.aten.nll_loss_forward(
+            input_1d, target_1d, weight, reduction, -100)
+        self.assertEqual(w_out.dtype, dtype)
+        self.assertEqual(w_tw.dtype, dtype)
+        self.assertEqual(w_out, ref_w.to(device=device, dtype=dtype))
+
+        loss_w2 = F.nll_loss(input_2d, target_2d, weight=weight)
+        ref_w2 = ref_mean(input_2d, target_2d, weight)
+        self.assertEqual(loss_w2.dtype, dtype)
+        self.assertTrue(torch.isfinite(loss_w2).item())
+        self.assertEqual(loss_w2, ref_w2.to(device=device, dtype=dtype))
+        w_out2, w_tw2 = torch.ops.aten.nll_loss2d_forward(
+            input_2d, target_2d, weight, reduction, -100)
+        self.assertEqual(w_out2.dtype, dtype)
+        self.assertEqual(w_tw2.dtype, dtype)
+        self.assertEqual(w_out2, ref_w2.to(device=device, dtype=dtype))
 
         _, tw_none = torch.ops.aten.nll_loss_forward(
             input_1d[:4], target_1d[:4], None, F._Reduction.get_enum("none"), -100)
@@ -12967,6 +13000,25 @@ class TestNNDeviceType(NNTestCase):
         _, tw_sum = torch.ops.aten.nll_loss2d_forward(
             input_2d, target_2d, None, F._Reduction.get_enum("sum"), -100)
         self.assertEqual(tw_sum.dtype, dtype)
+
+        # 256x256, 21-class fp16 repro. The decomp must match eager.
+        if dtype == torch.float16:
+            torch.manual_seed(0)
+            logits = torch.randn(1, 21, side, side, device=device, dtype=dtype)
+            repro_target = torch.randint(0, 21, (1, side, side), device=device)
+            log_probs = logits.log_softmax(1)
+            eager = F.nll_loss(log_probs, repro_target)
+            ref = F.nll_loss(logits.cpu().double().log_softmax(1), repro_target.cpu())
+            from torch._decomp.decompositions import nll_loss2d_forward
+
+            decomposed, decomposed_tw = nll_loss2d_forward(
+                log_probs, repro_target, None, reduction, -100)
+            self.assertEqual(decomposed.dtype, dtype)
+            self.assertEqual(decomposed_tw.dtype, dtype)
+            self.assertTrue(torch.isfinite(eager).item())
+            self.assertTrue(torch.isfinite(decomposed).item())
+            self.assertEqual(eager, ref.to(device=device, dtype=dtype))
+            self.assertEqual(decomposed, eager)
 
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
         input = torch.rand(input_size, requires_grad=True, device=device, dtype=dtype)
