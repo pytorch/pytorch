@@ -60,8 +60,6 @@ class ReduceBlock:
         self.npairs_kept = len(self.kept_pairs)
         self.wide_count = count >= _INT32_LIMIT
         self.wide_output = num_o >= _INT32_LIMIT
-        self.wide_red = any(ext >= _INT32_LIMIT for ext, _ in self.red_pairs)
-        self.wide_kept = any(ext >= _INT32_LIMIT for ext, _ in self.kept_pairs)
         index_extent = limit if limit is not None else count
         if getattr(trait, "has_index", False) and index_extent > _INT32_LIMIT:
             raise ValueError(
@@ -93,8 +91,6 @@ class ReduceBlock:
             npairs_kept=self.npairs_kept,
             wide_count=self.wide_count,
             wide_output=self.wide_output,
-            wide_red=self.wide_red,
-            wide_kept=self.wide_kept,
             gidx_from=gidx_from,
             flat_tail=flat_tail,
             ragged_chunk=ragged_chunk,
@@ -160,16 +156,19 @@ def _strides(pairs: Pairs) -> list[Any] | None:
 
 def _geom_args(op: ReduceBlock) -> tuple[Any, ...]:
     # Runtime geometry: both decodes' extents/strides and scalar bounds.
-    grid_x = min(op.num_o, _GRID_X_MAX) if op.wide_output else None
+    # Wide outputs take the fewest grid rows and split them evenly, so fewer than
+    # grid_y dead blocks fold without storing.
+    grid_y = -(-op.num_o // _GRID_X_MAX) if op.wide_output else None
+    grid_x = None if grid_y is None else -(-op.num_o // grid_y)
     return (
         (Int64 if op.wide_count else Int32)(op.count),
         None,
         Int64(op.project_n),
         None if grid_x is None else Int32(grid_x),
-        None if grid_x is None else Int32(-(-op.num_o // grid_x)),
-        _exts(op.red_pairs, op.wide_count or op.wide_red),
+        None if grid_y is None else Int32(grid_y),
+        _exts(op.red_pairs, op.wide_count),
         _strides(op.red_pairs),
-        _exts(op.kept_pairs, op.wide_output or op.wide_kept),
+        _exts(op.kept_pairs, op.wide_output),
         _strides(op.kept_pairs),
         Int64(op.in_base),
         Int64(op.limit),
