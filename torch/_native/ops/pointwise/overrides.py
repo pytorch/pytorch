@@ -12,6 +12,7 @@ from torch._prims_common import (
 
 from ... import cutedsl_utils as cu
 from ...cutedsl.config import POINTWISE_ARCH_MAJORS as _ARCH_MAJORS
+from ...registry import _resolve_overload
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
 from ...utils.scalar import check_scalar
@@ -196,6 +197,9 @@ def _has_partial_overlap(out: torch.Tensor, inp: torch.Tensor) -> bool:
 
 
 def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bool]:
+    out_name = variant_aten_name(row.aten, variant) if variant == "out" else None
+    out_op = _resolve_overload("aten", out_name) if out_name is not None else None
+    generated_out = out_op is not None and torch.Tag.generated in out_op.tags
     base = _SUPPORTED if row.dtypes is None else row.dtypes
     ints = row.int_dtypes or (_INT_DTYPES if row.int_via_float else ())
     dtypes = tuple(base) + tuple(ints)
@@ -300,7 +304,8 @@ def _make_cond(row: PointwiseDef, variant: PointwiseVariant) -> Callable[..., bo
                 return False
             if not torch.can_cast(result, tgt.dtype):
                 return False
-            if row.output_dispatch and tgt.dtype != result:
+            # Generated out kernels use copy_arg, which requires an exact dtype.
+            if (row.output_dispatch or generated_out) and tgt.dtype != result:
                 return False
             if _needs_native_narrowing(result, tgt.dtype):
                 return False
