@@ -33,6 +33,10 @@
 ```
 
 ```{eval-rst}
+.. autoclass:: torch.vm.passes.Inline
+```
+
+```{eval-rst}
 .. autoclass:: torch.vm.passes.ResolveDispatch
 ```
 

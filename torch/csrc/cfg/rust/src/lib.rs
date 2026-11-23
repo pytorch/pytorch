@@ -10,6 +10,7 @@ mod analysis;
 mod bytecode;
 mod capi;
 mod frontend;
+mod inline;
 mod ir;
 mod pyapi;
 mod pyffi;

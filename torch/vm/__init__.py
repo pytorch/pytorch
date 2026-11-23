@@ -27,10 +27,11 @@ Nothing is specialized on shapes unless a pass asks for it: every dimension is
 dynamic. A pass can narrow a dimension to a range by attaching a guard; when
 such a guard fails, only the basic block that carries it is rewritten again.
 
-What is done to a function is one ordered list of passes, ``passes=``. They
-rewrite one basic block at a time, after its first runs were watched: tensor
-operations become direct calls of their kernels. The bare decorator is the
-default list::
+What is done to a function is one ordered list of passes, ``passes=``, and a
+pass says what it is over. One over the control-flow graph rewrites the
+function once, before it runs: calls are inlined. One over a basic block
+rewrites a block after its first runs were watched: tensor operations become
+direct calls of their kernels. The bare decorator is the default list::
 
     @torch.vm(passes=torch.vm.DEFAULT_PASSES)
     def forward(model, x): ...
@@ -61,14 +62,16 @@ class Unsupported(RuntimeError):
 
 
 DEFAULT_PASSES: tuple[BuiltinPass, ...] = (
+    passes.Inline(),
     passes.ResolveDispatch(),
     passes.TensorAccessors(),
     passes.MethodCalls(),
     passes.Fold(),
     passes.DCE(),
 )
-"""What ``@torch.vm`` does to each basic block of a function once it was profiled,
-in this order and again until no pass changes the block anymore."""
+"""What ``@torch.vm`` does to a function: the passes over its control-flow graph,
+once, and then the passes over each basic block once it was profiled, in this
+order and again until no pass changes the block anymore."""
 
 
 _runtime: Any = None
@@ -101,10 +104,11 @@ def is_available() -> bool:
     return True
 
 
-def _plan(given: Iterable[Any]) -> list[Any]:
+def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool]]:
     """Checks a list of passes, and sorts it into what the engine is given.
 
-    Returns the passes over a block in their order (the engine's own by name).
+    Returns the passes over a block in their order (the engine's own by name),
+    and which of the passes over the control-flow graph are asked for.
     """
     listed = tuple(given)
     for one in listed:
@@ -118,9 +122,17 @@ def _plan(given: Iterable[Any]) -> list[Any]:
     twice = sorted({kind.__name__ for kind in own if own.count(kind) > 1})
     if twice:
         raise ValueError(f"torch.vm.passes.{twice[0]} is given more than once")
-    block = list(listed)
+    whole = dict.fromkeys(("inline",), False)
+    for one in listed:
+        if isinstance(one, BuiltinPass) and one.kind == "cfg":
+            whole[one.engine] = True
+    block = [
+        one
+        for one in listed
+        if not (isinstance(one, BuiltinPass) and one.kind == "cfg")
+    ]
     engine = [one.engine if isinstance(one, BuiltinPass) else one for one in block]
-    return engine
+    return engine, whole
 
 
 def vm(
@@ -143,16 +155,17 @@ def vm(
             ``forward`` is taken; calling the result skips module hooks). Can
             be omitted to use ``torch.vm`` as a decorator with options.
         passes: what is done to the function: one ordered list. Defaults to
-            :data:`DEFAULT_PASSES`. They are applied to a basic block in the
-            order of the list, and again until none changes the block, once the
-            block has run and was watched. An entry is one of
-            :mod:`torch.vm.passes` (``torch.vm.passes.Fold()``), or a pass of
-            one's own: a callable ``pass_(region) -> bool`` that looks at the
-            instructions of one basic block and at what was observed of them,
-            rewrites them, and returns whether it changed anything. With an
-            empty list nothing is rewritten: the function runs in the generic
-            tier of the VM, which does what the interpreter does, without
-            profiling and without direct kernel calls.
+            :data:`DEFAULT_PASSES`. The passes over the control-flow graph of
+            the function are applied once, before it runs; the passes over a
+            basic block in the order of the list, and again until none changes
+            the block, once the block has run and was watched. An entry is one
+            of :mod:`torch.vm.passes` (``torch.vm.passes.Fold()``), or a pass
+            of one's own: a callable ``pass_(region) -> bool`` that looks at
+            the instructions of one basic block and at what was observed of
+            them, rewrites them, and returns whether it changed anything. With
+            an empty list nothing is rewritten: the function runs in the
+            generic tier of the VM, which does what the interpreter does,
+            without profiling and without direct kernel calls.
         fallback: if the function uses something that is not supported, warn
             and return it unchanged instead of raising :class:`Unsupported`.
         skip_autograd: let a call site enter below the Autograd kernel when the
@@ -186,7 +199,7 @@ def vm(
         return types.MethodType(vm(fn.__func__, **options), fn.__self__)
     if not isinstance(fn, types.FunctionType):
         raise TypeError(f"torch.vm expects a function, not {type(fn).__name__}")
-    block = _plan(passes)
+    block, whole = _plan(passes)
     runtime = _load_runtime()
     try:
         return runtime.compile(
@@ -195,6 +208,7 @@ def vm(
             specialize=bool(block),
             skip_autograd=skip_autograd,
             unboxed=unboxed,
+            inline=whole["inline"],
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )
