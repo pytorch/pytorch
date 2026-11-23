@@ -25,7 +25,6 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     skip_if_lt_x_gpu,
@@ -36,7 +35,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils.checkpoint import checkpoint
 
 
@@ -349,25 +348,31 @@ class ReplicateTestCPU(ReplicateTest):
 class ReplicateTestGPU(ReplicateTest):
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "Inductor+CUDA needs triton and recent CUDA arch"
+    )
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
     )
-    def test_compile_gpu(self, device):
-        self._test_compile(no_sync=False, checkpoint=False, device=device)
+    def test_compile_gpu(self):
+        self._test_compile(no_sync=False, checkpoint=False, device="cuda")
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "Inductor+CUDA needs triton and recent CUDA arch"
+    )
     @skip_if_lt_x_gpu(2)
     @torch._inductor.config.patch(
         reorder_for_locality=False, reorder_for_peak_memory=False
     )
-    def test_compile_gpu_ac(self, device):
-        self._test_compile(no_sync=False, checkpoint=True, device=device)
+    def test_compile_gpu_ac(self):
+        self._test_compile(no_sync=False, checkpoint=True, device="cuda")
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "Inductor+CUDA needs triton and recent CUDA arch"
+    )
     @skip_if_lt_x_gpu(2)
-    def test_compile_bf16(self, device):
+    def test_compile_bf16(self):
         major, _ = torch.cuda.get_device_capability()
         if major < 8 and torch.version.hip is None:
             self.skipTest("bf16 requires compute capability >= 8.0")
@@ -380,11 +385,13 @@ class ReplicateTestGPU(ReplicateTest):
                 None, ddp_default_hooks.bf16_compress_hook
             )
 
-        self._test_compile(no_sync=False, setup_func=setup, device=device)
+        self._test_compile(no_sync=False, setup_func=setup, device="cuda")
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "Inductor+CUDA needs triton and recent CUDA arch"
+    )
     @skip_if_lt_x_gpu(2)
-    def test_compile_fp16(self, device):
+    def test_compile_fp16(self):
         def setup(model, compiled_replicate_model, compiled_ddp_model) -> None:
             model.register_comm_hook(None, ddp_default_hooks.fp16_compress_hook)
             compiled_m = compiled_replicate_model._orig_mod
@@ -394,16 +401,15 @@ class ReplicateTestGPU(ReplicateTest):
             )
 
         self._test_compile(
-            no_sync=False, setup_func=setup, no_inductor=True, device=device
+            no_sync=False, setup_func=setup, no_inductor=True, device="cuda"
         )
 
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        not HAS_CUDA_AND_TRITON, "Inductor+CUDA needs triton and recent CUDA arch"
+    )
     @skip_if_lt_x_gpu(2)
-    def test_compile_backward_only(self, device):
-        self._test_compile(no_sync=False, no_compile_forward=True, device=device)
-
-
-instantiate_device_type_tests(ReplicateTestGPU, globals(), only_for="cuda")
+    def test_compile_backward_only(self):
+        self._test_compile(no_sync=False, no_compile_forward=True, device="cuda")
 
 
 class DDP_TP_Test(InductorTestCase):
@@ -429,12 +435,11 @@ class DDP_TP_Test(InductorTestCase):
     @unittest.skip(
         "Temporarily disabled due to SymInt error: `unhashable type: non-nested SymInt`"
     )
-    def test_ddp_tp(self, device):
-        device = torch.device(device).type
+    def test_ddp_tp(self):
         ref_model = Net()
         compiled_replicate_model = deepcopy(ref_model)
         mesh_2d = init_device_mesh(
-            device, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+            "cuda", (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
@@ -453,7 +458,7 @@ class DDP_TP_Test(InductorTestCase):
             compiled_replicate_model, device_mesh=dp_mesh
         )
         compiled_replicate_model = torch.compile(compiled_replicate_model)
-        data = torch.randn([1, DIM], device=device)
+        data = torch.randn([1, DIM], device="cuda")
         with compiled_autograd._enable(compiler_fn()):
             loss = compiled_replicate_model(data).sum()
             # TODO: We need "pre-dispatch tracing of backward graph" to make this work:
@@ -470,9 +475,6 @@ class DDP_TP_Test(InductorTestCase):
         #     ref_model.parameters(), compiled_replicate_model.parameters()
         # ):
         #     self.assertEqual(p1.grad, p2.grad)
-
-
-instantiate_device_type_tests(DDP_TP_Test, globals(), only_for="cuda")
 
 
 if __name__ == "__main__":
