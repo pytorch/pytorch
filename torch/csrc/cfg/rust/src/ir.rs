@@ -117,7 +117,9 @@ pub enum Op {
     ListExtend(V, V),
     SetUpdate(V, V),
     DictUpdate(V, V),
-    DictMerge(V, V),
+    /// dict.update(other) for the `**` arguments of a call of the third
+    /// value: a duplicate key or something that is not a mapping is an error.
+    DictMerge(V, V, V),
     ListToTuple(V),
     /// Unpacks an iterable of exactly n items into a tuple.
     Unpack(V, u32),
@@ -318,7 +320,6 @@ impl Op {
             | Op::ListExtend(a, b)
             | Op::SetUpdate(a, b)
             | Op::DictUpdate(a, b)
-            | Op::DictMerge(a, b)
             | Op::ExcMatch(a, b)
             | Op::MatchKeys(a, b)
             | Op::WithExceptStart { exit: a, exc: b }
@@ -335,7 +336,7 @@ impl Op {
                 f(*key);
                 f(*val)
             }
-            Op::MapAdd(a, b, c) => {
+            Op::MapAdd(a, b, c) | Op::DictMerge(a, b, c) => {
                 f(*a);
                 f(*b);
                 f(*c)
@@ -657,7 +658,7 @@ impl Function {
             Op::ListExtend(a, b) => format!("list_extend {} {}", n(a), n(b)),
             Op::SetUpdate(a, b) => format!("set_update {} {}", n(a), n(b)),
             Op::DictUpdate(a, b) => format!("dict_update {} {}", n(a), n(b)),
-            Op::DictMerge(a, b) => format!("dict_merge {} {}", n(a), n(b)),
+            Op::DictMerge(a, b, _) => format!("dict_merge {} {}", n(a), n(b)),
             Op::ListToTuple(a) => format!("list_to_tuple {}", n(a)),
             Op::Unpack(a, k) => format!("unpack {} {}", n(a), k),
             Op::UnpackEx(a, before, after) => format!("unpack_ex {} {} {}", n(a), before, after),

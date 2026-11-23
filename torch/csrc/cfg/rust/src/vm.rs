@@ -634,6 +634,12 @@ unsafe fn set_name_error(exc: Obj, msg: String, name: Obj) {
     }
 }
 
+/// What the interpreter accepts after a `*`: something with `__iter__`, or a
+/// sequence.
+unsafe fn is_iterable(o: Obj) -> bool {
+    (*ffi::Py_TYPE(o)).tp_iter.is_some() || ffi::PySequence_Check(o) != 0
+}
+
 #[inline(always)]
 unsafe fn take(regs: &mut [Obj], v: V) -> Obj {
     std::mem::replace(regs.get_unchecked_mut(v as usize), null_mut())
@@ -1770,8 +1776,16 @@ impl Compiled {
                 status(ffi::PyDict_SetItem(self.obj(regs, *d), self.obj(regs, *k), self.obj(regs, *v)))
             }
             Op::ListExtend(l, it) => {
-                let r = ffi::PySequence_InPlaceConcat(self.obj(regs, *l), self.obj(regs, *it));
+                let it = self.obj(regs, *it);
+                let r = ffi::PySequence_InPlaceConcat(self.obj(regs, *l), it);
                 if r.is_null() {
+                    if ffi::PyErr_ExceptionMatches(ffi::PyExc_TypeError) != 0 && !is_iterable(it) {
+                        ffi::PyErr_Clear();
+                        set_error(
+                            ffi::PyExc_TypeError,
+                            format!("Value after * must be an iterable, not {}", pyffi::type_name(it)),
+                        );
+                    }
                     return Err(());
                 }
                 ffi::Py_DECREF(r);
@@ -1791,31 +1805,60 @@ impl Compiled {
                 ffi::Py_DECREF(r);
                 Ok(null_mut())
             }
-            Op::DictUpdate(d, o) => status(ffi::PyDict_Update(self.obj(regs, *d), self.obj(regs, *o))),
-            Op::DictMerge(d, o) => {
+            Op::DictUpdate(d, o) => {
+                let o = self.obj(regs, *o);
+                if ffi::PyDict_Update(self.obj(regs, *d), o) < 0 {
+                    if ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) != 0 {
+                        ffi::PyErr_Clear();
+                        set_error(
+                            ffi::PyExc_TypeError,
+                            format!("'{}' object is not a mapping", pyffi::type_name(o)),
+                        );
+                    }
+                    return Err(());
+                }
+                Ok(null_mut())
+            }
+            Op::DictMerge(d, o, func) => {
                 let (d, o) = (self.obj(regs, *d), self.obj(regs, *o));
-                if ffi::PyDict_Check(o) != 0 {
-                    let mut pos: ffi::Py_ssize_t = 0;
-                    let mut key: Obj = null_mut();
-                    let mut value: Obj = null_mut();
-                    while ffi::PyDict_Next(o, &mut pos, &mut key, &mut value) != 0 {
-                        let has = ffi::PyDict_Contains(d, key);
-                        if has < 0 {
-                            return Err(());
-                        }
-                        if has > 0 {
+                if pyffi::_PyDict_MergeEx(d, o, 2) < 0 {
+                    // format_kwargs_error of ceval.c.
+                    if ffi::PyErr_ExceptionMatches(ffi::PyExc_AttributeError) != 0 {
+                        ffi::PyErr_Clear();
+                        set_error(
+                            ffi::PyExc_TypeError,
+                            format!(
+                                "{} argument after ** must be a mapping, not {}",
+                                pyffi::function_str(self.obj(regs, *func)),
+                                pyffi::type_name(o)
+                            ),
+                        );
+                    } else if ffi::PyErr_ExceptionMatches(ffi::PyExc_KeyError) != 0 {
+                        let exc = ffi::PyErr_GetRaisedException();
+                        let args = ffi::PyObject_GetAttrString(exc, c"args".as_ptr());
+                        if !args.is_null() && ffi::PyTuple_Check(args) != 0 && ffi::PyTuple_GET_SIZE(args) == 1 {
+                            let key = ffi::PyObject_Str(ffi::PyTuple_GET_ITEM(args, 0));
+                            let key_text = if key.is_null() { "?".to_string() } else { pyffi::str_to_string(key) };
+                            xdecref(key);
+                            ffi::PyErr_Clear();
                             set_error(
                                 ffi::PyExc_TypeError,
                                 format!(
-                                    "got multiple values for keyword argument {}",
-                                    pyffi::repr_string(key)
+                                    "{} got multiple values for keyword argument '{}'",
+                                    pyffi::function_str(self.obj(regs, *func)),
+                                    key_text
                                 ),
                             );
-                            return Err(());
+                            ffi::Py_DECREF(exc);
+                        } else {
+                            ffi::PyErr_Clear();
+                            ffi::PyErr_SetRaisedException(exc);
                         }
+                        xdecref(args);
                     }
+                    return Err(());
                 }
-                status(ffi::PyDict_Update(d, o))
+                Ok(null_mut())
             }
             Op::ListToTuple(l) => checked(ffi::PyList_AsTuple(self.obj(regs, *l))),
             Op::SuperObject { global_super, class, this, explicit } => {
@@ -1985,6 +2028,17 @@ impl Compiled {
                 let tuple = if ffi::PyTuple_CheckExact(args) != 0 {
                     new_ref(args)
                 } else {
+                    if !is_iterable(args) {
+                        set_error(
+                            ffi::PyExc_TypeError,
+                            format!(
+                                "{} argument after * must be an iterable, not {}",
+                                pyffi::function_str(self.obj(regs, *callee)),
+                                pyffi::type_name(args)
+                            ),
+                        );
+                        return Err(());
+                    }
                     let t = ffi::PySequence_Tuple(args);
                     if t.is_null() {
                         return Err(());
