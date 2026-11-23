@@ -9,7 +9,6 @@ from torch.testing._internal.autocast_test_lists import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyMPS,
     skipCPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -289,23 +288,6 @@ class TestAutocastDevice(TestCase):
             loss = res.mean()
             loss.backward()
 
-    @onlyMPS
-    def test_mps_autocast_error_message(self, device):
-        with self.assertWarnsRegex(
-            UserWarning,
-            "MPS Autocast only supports dtypes of torch.bfloat16, torch.float16 currently.",
-        ):
-            with torch.autocast(device_type="mps", dtype=torch.float32):
-                _ = torch.ones(10)
-
-    @onlyMPS
-    def test_mps_autocast_bfloat16_supported(self, device):
-        with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
-            x = torch.randn(2, 3, device=device)
-            y = torch.randn(3, 3, device=device)
-            result = torch.mm(x, y)
-            self.assertEqual(result.dtype, torch.bfloat16)
-
     @skipCPUIf(
         not torch.backends.mkldnn.is_available()
         or not torch.ops.mkldnn._is_mkldnn_bf16_supported(),
@@ -327,6 +309,25 @@ class TestAutocastDevice(TestCase):
         # Should be able to run the below case with autocast
         with torch.amp.autocast(device_type=device):
             m(x, (hx, cx))
+
+
+class TestAutocastMPS(TestCase):
+    hw_classification = HardwareClassification.MPS
+
+    def test_mps_autocast_error_message(self, device):
+        with self.assertWarnsRegex(
+            UserWarning,
+            "MPS Autocast only supports dtypes of torch.bfloat16, torch.float16 currently.",
+        ):
+            with torch.autocast(device_type="mps", dtype=torch.float32):
+                _ = torch.ones(10)
+
+    def test_mps_autocast_bfloat16_supported(self, device):
+        with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
+            x = torch.randn(2, 3, device=device)
+            y = torch.randn(3, 3, device=device)
+            result = torch.mm(x, y)
+            self.assertEqual(result.dtype, torch.bfloat16)
 
 
 class TestTorchAutocast(TestCase):
@@ -478,6 +479,9 @@ class TestTorchAutocastDevice(TestCase):
 
 instantiate_device_type_tests(
     TestAutocastDevice, globals(), allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestAutocastMPS, globals(), only_for="mps", allow_mps=True
 )
 instantiate_device_type_tests(TestTorchAutocastDevice, globals(), allow_xpu=True)
 
