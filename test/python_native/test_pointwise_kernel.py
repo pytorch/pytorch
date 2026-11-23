@@ -860,7 +860,8 @@ class TestPointwiseKernel(TestCase):
             y = y.view(1, -1)
         name = f"bitwise_{direction}_shift"
         with torch.backends.python_native.cutedsl.disabled():
-            expected = getattr(torch, name)(x, y)
+            # CUDA's scalar shift can truncate out-of-range int64 counts.
+            expected = getattr(torch, name)(x.cpu(), y.cpu()).to(device)
         (actual,) = kernel.run(
             ops.get_fn(f"_{name}"),
             ("shift_bounds", dtype, direction, layout),
@@ -873,11 +874,7 @@ class TestPointwiseKernel(TestCase):
             load="direct",
         )
         with torch.backends.python_native.cutedsl.disabled():
-            self.assertEqual(
-                actual,
-                expected,
-                msg=f"actual={actual.tolist()}, expected={expected.tolist()}",
-            )
+            self.assertEqual(actual, expected)
 
     @onlyCUDA
     @skipIfNoCuteDSL
