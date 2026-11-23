@@ -16781,6 +16781,9 @@ class TestFP32PrecisionFlags(TestCase):
         # Code that saves and restores the precision settings must put back
         # what was stored, not the resolved values; writing those back pins
         # settings that were inheriting, which then ignore their parent.
+        # torch.export loads _trace lazily, so import it for a standalone run.
+        from torch.export._trace import _ignore_backend_decomps
+
         def export_linear():
             torch.export.export(nn.Linear(2, 2), (torch.randn(1, 2),))
             return contextlib.nullcontext()
@@ -16794,7 +16797,7 @@ class TestFP32PrecisionFlags(TestCase):
             "tf32_off": tf32_off,
             "tf32_on": lambda: tf32_on(self),
             "tf32_enabled": tf32_enabled,
-            "_ignore_backend_decomps": torch.export._trace._ignore_backend_decomps,
+            "_ignore_backend_decomps": _ignore_backend_decomps,
             "torch.export.export": export_linear,
         }
         for name, make_ctx in restorers.items():

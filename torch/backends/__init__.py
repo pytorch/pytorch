@@ -99,19 +99,21 @@ def flags(fp32_precision="none"):
             set_flags(*orig_flags)
 
 
-_FP32_PRECISION_KEYS = (
-    "generic.all",
-    "cuda.all",
-    "cuda.conv",
-    "cuda.rnn",
-    "cuda.matmul",
-    "mkldnn.all",
-    "mkldnn.conv",
-    "mkldnn.rnn",
-    "mkldnn.matmul",
-    "float32_matmul_precision",
-    "cudnn_allow_tf32",
-)
+# Keys of _get_fp32_precision_state, mapped to the public name of each setting
+# (used in leak reports).
+_FP32_PRECISION_KEYS: dict[str, str] = {
+    "generic.all": "torch.backends.fp32_precision",
+    "cuda.all": "torch.backends.cudnn.fp32_precision",
+    "cuda.conv": "torch.backends.cudnn.conv.fp32_precision",
+    "cuda.rnn": "torch.backends.cudnn.rnn.fp32_precision",
+    "cuda.matmul": "torch.backends.cuda.matmul.fp32_precision",
+    "mkldnn.all": "torch.backends.mkldnn.fp32_precision",
+    "mkldnn.conv": "torch.backends.mkldnn.conv.fp32_precision",
+    "mkldnn.rnn": "torch.backends.mkldnn.rnn.fp32_precision",
+    "mkldnn.matmul": "torch.backends.mkldnn.matmul.fp32_precision",
+    "float32_matmul_precision": "torch.get_float32_matmul_precision()",
+    "cudnn_allow_tf32": "torch.backends.cudnn.allow_tf32",
+}
 # The legacy getters raise when the legacy flags disagree with the per-backend
 # settings; a snapshot of such a state records this, and restoring skips them.
 _FP32_PRECISION_INCONSISTENT = "<inconsistent with fp32_precision>"

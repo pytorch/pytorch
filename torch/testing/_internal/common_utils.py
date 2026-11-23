@@ -4665,8 +4665,9 @@ class TestCase(expecttest.TestCase):
             current = _snapshot_fp32_precision()
             if current != prev:
                 _restore_fp32_precision(prev)
+                labels = torch.backends._FP32_PRECISION_KEYS
                 mismatches = [
-                    f"  {_FP32_PRECISION_STATE_LABELS[key]}: was {prev[key]!r}, became {current[key]!r}"
+                    f"  {labels.get(key, key)}: was {prev[key]!r}, became {current[key]!r}"
                     for key in prev
                     if prev[key] != current[key]
                 ]
@@ -7106,22 +7107,6 @@ def scoped_load_inline(func):
 
         return func(*args, load_inline=load_inline, **kwargs)
     return wrapper
-
-# Public names for the keys of torch.backends._get_fp32_precision_state(), for leak
-# reports.
-_FP32_PRECISION_STATE_LABELS = {
-    "generic.all": "torch.backends.fp32_precision",
-    "cuda.all": "torch.backends.cudnn.fp32_precision",
-    "cuda.conv": "torch.backends.cudnn.conv.fp32_precision",
-    "cuda.rnn": "torch.backends.cudnn.rnn.fp32_precision",
-    "cuda.matmul": "torch.backends.cuda.matmul.fp32_precision",
-    "mkldnn.all": "torch.backends.mkldnn.fp32_precision",
-    "mkldnn.conv": "torch.backends.mkldnn.conv.fp32_precision",
-    "mkldnn.rnn": "torch.backends.mkldnn.rnn.fp32_precision",
-    "mkldnn.matmul": "torch.backends.mkldnn.matmul.fp32_precision",
-    "float32_matmul_precision": "torch.get_float32_matmul_precision()",
-    "cudnn_allow_tf32": "torch.backends.cudnn.allow_tf32",
-}
 
 
 # The snapshot is the stored state, not the values the getters resolve to:
