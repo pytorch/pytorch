@@ -4084,10 +4084,10 @@ def capture(
     on ``triton.cudagraphs`` (such as ``mode="reduce-overhead"``) and serves
     no CUDA graphs whatever ``torch._inductor.config`` says: its module runs
     outside Inductor's CUDA graph wrapper. Either tracer refuses
-    ``triton.autotune_at_compile_time``
-    off and a nonzero ``triton.multi_kernel``, which the paragraph above turns
-    off. A :class:`DynamoTracer` capture refuses ``freezing``
-    and ``force_disable_caches``, whose compiles file no AOTAutograd cache
+    ``triton.autotune_at_compile_time`` off and a nonzero
+    ``triton.multi_kernel``, which the paragraph above turns off. A
+    :class:`DynamoTracer` capture refuses ``freezing`` and
+    ``force_disable_caches``, whose compiles file no AOTAutograd cache
     entry for the artifact to ship, ``fx_wrapper``, whose graphs Inductor does
     not cache, and ``bundled_autotune_remote_cache`` on, which the capture
     turns off (its eager backward lowering fails on a remote autotune cache
@@ -4121,7 +4121,9 @@ def capture(
     out of CUDA graphs, so such a capture's calls are traced under
     ``triton.cudagraphs``: Dynamo then specializes every Python float
     argument, and each distinct value is its own captured variant, as it is
-    whenever that flag is on in ``torch._inductor.config``.
+    whenever that flag is on in ``torch._inductor.config``. To keep such a
+    value one input there, pass it as a tensor on the device or turn
+    ``graph_partition`` on.
 
     As under :func:`torch.compile`, a graph's outputs are overwritten by its
     next replay, so clone what you keep across calls or call

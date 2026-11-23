@@ -41,6 +41,7 @@ from torch._inductor.cudagraph_utils import (
     cudagraph_trees_clone_live_user_visible_outputs,
     CudagraphCachedInfo,
     CudagraphMetadata,
+    cudagraphs_log,
     format_default_skip_message,
     get_input_storage_mutation_info,
     get_input_storage_mutation_reason,
@@ -975,7 +976,10 @@ class CompiledFxGraph(OutputCode):
                 # The graph compiled without CUDA graphs, so it has nothing to be
                 # wrapped with. A bundled AOTAutograd entry gets here when it is
                 # post-compiled under another triton.cudagraphs than it compiled
-                # under (deserialize_bundled_cache_entry reads the ambient flag).
+                # under (deserialize_bundled_cache_entry reads the ambient flag),
+                # and so does its backward when an override_cudagraphs kept only
+                # that out. Not a skip: the graph was never meant to be wrapped.
+                cudagraphs_log.info("not wrapping a graph compiled without cudagraphs")
                 BoxedBool.disable(cudagraphs)
             else:
                 if is_backward:
