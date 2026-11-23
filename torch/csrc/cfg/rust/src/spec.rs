@@ -306,19 +306,30 @@ impl Unit {
     }
 
     /// Makes the version depend on `cond`. A value that exists when the block
-    /// is entered is checked there; otherwise the check goes right before
-    /// position `before`, resuming the generic code at that instruction.
-    /// Returns None if the guard cannot be placed, and otherwise whether the
-    /// unit changed (false: the version already depended on `cond`).
+    /// is entered is checked there, which picks the version; otherwise the
+    /// check goes right before position `before`, resuming the generic code
+    /// at that instruction. A guard on a size that a comparison was folded
+    /// under (`GuardCond::DimRange`) goes right before `before` in either
+    /// case: the comparison is of what a read of the size gave, and between
+    /// the entry of the block and that read a torch function mode can be
+    /// entered, which answers the read (`Compiled::reads_quietly`). Returns
+    /// None if the guard cannot be placed, and otherwise whether the unit
+    /// changed (false: the version already depended on `cond`).
     pub fn add_guard(&mut self, cx: &PassCx, cond: GuardCond, before: usize) -> Option<bool> {
         let v = cond.value();
+        let mut changed = false;
         if self.def_pos(v).is_none() {
             if !cx.cf.analysis.available_at_entry(self.block, v) {
                 return None;
             }
-            return Some(self.add_entry_guard(cond));
-        }
-        if self.def_pos(v).unwrap() >= before {
+            if matches!(cond, GuardCond::TensorRank { .. }) {
+                return Some(self.add_entry_guard(cond));
+            }
+            if !matches!(self.insts.get(before), Some(u) if u.origin != NONE) {
+                return None;
+            }
+            changed = self.add_entry_guard(cond.clone());
+        } else if self.def_pos(v).unwrap() >= before {
             return None;
         }
         let resume = match self.insts.get(before) {
@@ -327,7 +338,7 @@ impl Unit {
         };
         if let Some(Op::Guard(g)) = before.checked_sub(1).map(|p| &self.insts[p].inst.op) {
             if g.cond == cond {
-                return Some(false);
+                return Some(changed);
             }
         }
         let bc = self.insts[before].inst.bc;
@@ -642,13 +653,17 @@ impl CfgPass for TensorAccessors {
                 continue;
             }
             // A guard instruction may have been inserted before `first`.
-            let (first, pos_now) = if matches!(unit.insts[first].inst.op, Op::Guard(_)) {
+            let (first, mut pos_now) = if matches!(unit.insts[first].inst.op, Op::Guard(_)) {
                 (first + 1, pos + 1)
             } else {
                 (first, pos)
             };
+            // The load of the attribute is part of the read: nothing else
+            // takes what it gives (`match_at`), and where the read runs as
+            // it is written, it runs the load (`Compiled::read_again`).
             if load_pos.is_some() {
-                unit.insts[first].removable = true;
+                unit.insts.remove(first);
+                pos_now -= 1;
             }
             unit.insts[pos_now].inst.op = match accessor {
                 Accessor::Size(dim) => Op::TensorSize { t: x, dim },

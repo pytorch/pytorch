@@ -323,7 +323,12 @@ class ResolveDispatch(BuiltinPass):
 @dataclasses.dataclass(frozen=True, repr=False)
 class TensorAccessors(BuiltinPass):
     """``x.shape[i]``, ``x.size(i)``, ``x.dim()`` and ``x.ndim`` on tensors become
-    plain SSA integers."""
+    plain SSA integers, in a block that is specialized for tensors of exactly
+    ``Tensor`` or ``Parameter`` of a rank. Such a read is valid only where the
+    interpreter would run no Python code at it: it asks, at every run, that no
+    ``TorchFunctionMode`` is on and that the tensor classes have their own
+    getters and methods under these names, and otherwise runs the instructions
+    it stands for as they are written."""
 
     engine: ClassVar[str] = "tensor_accessors"
 
@@ -340,7 +345,8 @@ class MethodCalls(BuiltinPass):
 class NarrowDims(BuiltinPass):
     """A comparison of a dimension with a constant is folded to the outcome last
     observed, under a guard that pins the dimension to the range of sizes with
-    that outcome. In front of :class:`Fold`; not a default."""
+    that outcome, asked where the comparison is, with what a read of
+    :class:`TensorAccessors` asks. In front of :class:`Fold`; not a default."""
 
     engine: ClassVar[str] = "narrow_dims"
 
