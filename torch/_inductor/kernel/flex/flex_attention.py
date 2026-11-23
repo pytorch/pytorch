@@ -8,7 +8,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, cast, get_args, TYPE_CHECKING
 
 import sympy
 
@@ -92,6 +92,8 @@ def _sanitize_kernel_options_for_triton(
     """
     sanitized = dict(kernel_options)
     backend = cast(_Backend, sanitized.pop("BACKEND", "AUTO"))
+    # For an out-of-tree backend (_ask_contributors), never a Triton option.
+    sanitized.pop("BACKEND_OPTIONS", None)
     return sanitized, backend
 
 
@@ -216,6 +218,51 @@ def _flex_block_mask(block_mask: tuple[Any, ...]) -> FlexBlockMask:
     )
 
 
+def _ask_contributors(
+    hook: str, call: FlexAttentionCall | FlexAttentionBackwardCall
+) -> Any:
+    """``V.choices.<hook>(call)``: the contributor's outputs, or None to lower
+    the call with Inductor. Under BACKEND="AUTO" a decline is silent; for a
+    contributor-claimed BACKEND it is an error."""
+    direction = "backward" if hook.endswith("backward") else "forward"
+    if call.backend == "AUTO":
+        try:
+            return getattr(V.choices, hook)(call)
+        except FlexAttentionDeclined as e:
+            log.info("flex_attention %s lowered by Inductor: %s", direction, e)
+            return None
+    if call.backend not in V.choices.flex_attention_backends():
+        raise RuntimeError(
+            f"BACKEND='{call.backend}': no InductorChoices contributor claims "
+            "this flex_attention backend"
+        )
+    try:
+        outputs = getattr(V.choices, hook)(call)
+    except FlexAttentionDeclined as e:
+        raise RuntimeError(
+            f"BACKEND='{call.backend}' cannot lower this flex_attention "
+            f"{direction}: {e}"
+        ) from e
+    if outputs is None:
+        raise RuntimeError(
+            f"BACKEND='{call.backend}' did not lower this flex_attention {direction}"
+        )
+    return outputs
+
+
+def _contributor_backend(
+    kernel_options: dict[str, Any],
+) -> tuple[dict[str, Any], str, dict[str, Any]] | None:
+    """(kernel options without BACKEND and BACKEND_OPTIONS, BACKEND,
+    BACKEND_OPTIONS) for a call contributors are asked to lower: BACKEND is
+    "AUTO" or a contributor-claimed name. None for the other built-in
+    backends."""
+    options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    if backend != "AUTO" and backend in get_args(_Backend):
+        return None
+    return options, backend, dict(kernel_options.get("BACKEND_OPTIONS", {}))
+
+
 def _contributor_forward(
     query: Any,
     key: Any,
@@ -229,9 +276,10 @@ def _contributor_forward(
 ) -> tuple[Any, Any, Any] | None:
     """The forward's outputs from the first InductorChoices contributor that
     lowers the call (``lower_flex_attention``), or None when none does."""
-    options, backend = _sanitize_kernel_options_for_triton(kernel_options)
-    if backend != "AUTO":
+    selected = _contributor_backend(kernel_options)
+    if selected is None:
         return None
+    options, backend, backend_options = selected
     call = FlexAttentionCall(
         query=query,
         key=key,
@@ -243,14 +291,11 @@ def _contributor_forward(
         mask_mod_buffers=tuple(mask_mod_other_buffers),
         kernel_options=options,
         backend=backend,
+        backend_options=backend_options,
         output_logsumexp=bool(options.get("OUTPUT_LOGSUMEXP", True)),
         output_max=bool(options.get("OUTPUT_MAX", False)),
     )
-    try:
-        outputs = V.choices.lower_flex_attention(call)
-    except FlexAttentionDeclined as e:
-        log.info("flex_attention forward lowered by Inductor: %s", e)
-        return None
+    outputs = _ask_contributors("lower_flex_attention", call)
     if outputs is None:
         return None
 
@@ -291,9 +336,10 @@ def _contributor_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     ) = args
-    options, backend = _sanitize_kernel_options_for_triton(kernel_options)
-    if backend != "AUTO":
+    selected = _contributor_backend(kernel_options)
+    if selected is None:
         return None
+    options, backend, backend_options = selected
     call = FlexAttentionBackwardCall(
         query=query,
         key=key,
@@ -310,12 +356,9 @@ def _contributor_backward(
         mask_mod_buffers=tuple(mask_mod_other_buffers),
         kernel_options=options,
         backend=backend,
+        backend_options=backend_options,
     )
-    try:
-        outputs = V.choices.lower_flex_attention_backward(call)
-    except FlexAttentionDeclined as e:
-        log.info("flex_attention backward lowered by Inductor: %s", e)
-        return None
+    outputs = _ask_contributors("lower_flex_attention_backward", call)
     if outputs is None:
         return None
     if len(outputs.captured_grads) != len(score_mod_other_buffers):

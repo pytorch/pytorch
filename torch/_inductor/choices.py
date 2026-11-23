@@ -279,6 +279,17 @@ class InductorChoices:
         """
         return choices
 
+    def flex_attention_backends(self) -> tuple[str, ...]:
+        """The flex_attention ``BACKEND`` names this contributor claims.
+
+        A call that names one of them (``kernel_options={"BACKEND": name}``)
+        is offered only to the contributors claiming it, and fails if they
+        decline. Names may not shadow the built-in backends ("AUTO",
+        "TRITON", ...) or a name another contributor claims. With several
+        contributors, the composed handler returns every contributor's names.
+        """
+        return ()
+
     def lower_flex_attention(
         self, call: FlexAttentionCall
     ) -> FlexAttentionOutputs | None:
@@ -930,6 +941,10 @@ InductorChoicesFactoryConfig: typing.TypeAlias = InductorChoicesFactory | None
 
 _registered_inductor_choices: dict[str, InductorChoicesFactory] = {}
 
+# The flex_attention BACKEND names the registered contributors claim
+# (flex_attention_backends()), for the flex_attention frontend to accept.
+_flex_attention_backend_names: tuple[str, ...] = ()
+
 
 def _validate_choice_uuid(
     key: str, choice: InductorChoices
@@ -945,24 +960,29 @@ def _validate_choice_uuid(
 
 # Hooks every overriding contributor is asked in turn, until one accepts (returns
 # something other than None). A contributor that raises FlexAttentionDeclined
-# declines too; when none accepts, the reasons are raised together.
+# declines too; when none accepts, the reasons are raised together. A call that
+# names a contributor-claimed backend is offered only to its claimants.
 _FIRST_ACCEPTING_HOOKS = ("lower_flex_attention", "lower_flex_attention_backward")
 
 
 def _first_accepting(
-    name: str, hooks: list[tuple[str, typing.Callable[..., Any]]]
+    name: str, contributors: list[InductorChoices]
 ) -> typing.Callable[..., Any]:
-    """Call each of ``hooks`` (owner name, bound hook) in turn and return the
-    first result that is not None."""
+    """Offer a flex_attention call to each of ``contributors`` in turn and
+    return the first result that is not None."""
     from .kernel.flex.backend import FlexAttentionDeclined
 
-    def dispatch(*args: Any, **kwargs: Any) -> Any:
+    def dispatch(call: Any) -> Any:
         reasons = []
-        for owner, hook in hooks:
+        for choice in contributors:
+            if call.backend != "AUTO" and (
+                call.backend not in choice.flex_attention_backends()
+            ):
+                continue
             try:
-                result = hook(*args, **kwargs)
+                result = getattr(choice, name)(call)
             except FlexAttentionDeclined as e:
-                reasons.append(f"{owner}: {e}")
+                reasons.append(f"{type(choice).__name__}: {e}")
                 continue
             if result is not None:
                 return result
@@ -1001,7 +1021,8 @@ class _ComposedInductorChoices(InductorChoices):
             return dispatcher
 
         default = inspect.getattr_static(InductorChoices, name, None)
-        if name == "uuid" or not (
+        # The composed handler's own: they combine every contributor's.
+        if name in ("uuid", "flex_attention_backends") or not (
             callable(default) or isinstance(default, (classmethod, staticmethod))
         ):
             dispatchers[name] = None
@@ -1009,12 +1030,12 @@ class _ComposedInductorChoices(InductorChoices):
 
         choices = object.__getattribute__(self, "_choices")
         if name in _FIRST_ACCEPTING_HOOKS:
-            hooks = [
-                (type(choice).__name__, getattr(choice, name))
+            overriding = [
+                choice
                 for choice in choices
                 if inspect.getattr_static(choice, name) is not default
             ]
-            dispatcher = _first_accepting(name, hooks) if hooks else None
+            dispatcher = _first_accepting(name, overriding) if overriding else None
             dispatchers[name] = dispatcher
             if dispatcher is None:
                 return object.__getattribute__(self, name)
@@ -1042,6 +1063,13 @@ class _ComposedInductorChoices(InductorChoices):
         if dispatcher is None:
             return object.__getattribute__(self, name)
         return dispatcher
+
+    def flex_attention_backends(self) -> tuple[str, ...]:
+        return tuple(
+            name
+            for choice in object.__getattribute__(self, "_choices")
+            for name in choice.flex_attention_backends()
+        )
 
     def uuid(self) -> tuple[str, tuple[Any, ...]]:
         return (
@@ -1096,7 +1124,7 @@ def _replace_registrations(
     """Make ``registrations`` the registry. The calling thread's choices
     handler is replaced right away; every other thread whose handler was built
     from the registry rebuilds it on its next use."""
-    global _registered_inductor_choices
+    global _registered_inductor_choices, _flex_attention_backend_names
     from torch._inductor import virtualized
     from torch._inductor.heuristics.template import tlx
 
@@ -1108,11 +1136,31 @@ def _replace_registrations(
     handler = _create_inductor_choices(
         config.inductor_choices_class, tuple(registrations.items())
     )
+    backend_names = _check_flex_attention_backend_names(handler)
     _registered_inductor_choices = registrations
+    _flex_attention_backend_names = backend_names
     virtualized._choices_registry_generation += 1
     virtualized._install_registry_choices(
         handler, virtualized._choices_registry_generation
     )
+
+
+def _check_flex_attention_backend_names(handler: InductorChoices) -> tuple[str, ...]:
+    """The BACKEND names ``handler`` claims, checked to be new and distinct."""
+    from torch.nn.attention.flex_attention import _Backend
+
+    names = tuple(handler.flex_attention_backends())
+    builtin = typing.get_args(_Backend)
+    for index, name in enumerate(names):
+        if not isinstance(name, str):
+            raise TypeError(f"flex_attention backend names are strings, got {name!r}")
+        if name in builtin:
+            raise ValueError(
+                f"flex_attention backend name {name!r} is a built-in BACKEND"
+            )
+        if name in names[:index]:
+            raise ValueError(f"flex_attention backend name {name!r} is claimed twice")
+    return names
 
 
 def register_inductor_choices(key: str, factory: InductorChoicesFactory) -> None:
