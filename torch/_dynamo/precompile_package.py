@@ -1963,8 +1963,8 @@ class PrecompileSession(Generic[_P, _R]):
         # can compile for CUDA graphs and, at load, how it is wrapped, so one value
         # holds for the whole capture and is recorded.
         self._inductor_pins: dict[str, bool] = {}
-        # The CUDA graph settings its Inductor compiles run under: the artifact
-        # records them beside the capture's options, for a serve-time compile.
+        # The capture's CUDA graph settings, resolved here like the pins: the
+        # artifact records them beside its options, for a serve-time compile.
         self._cudagraph_options: dict[str, bool] = {}
         if self._backend_name == "inductor":
             options: Mapping[str, object] = (
