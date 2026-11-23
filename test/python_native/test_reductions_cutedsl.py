@@ -265,10 +265,17 @@ class TestCuTeDSLReductionWiring(TestCase):
         """Return fresh keepdim results, as ATen does, also below autograd (a custom_op
         forward), where reshape returns a view."""
         x = torch.randn(8, 64, device=device)
-        with torch._C._AutoDispatchBelowAutograd():
-            out, fires = self._run(lambda: getattr(torch, op)(x, -1, keepdim=True))
-        self.assertEqual(fires, 1)
-        self.assertIsNone(out._base)
+        fn = getattr(torch, op)
+        calls = [lambda: fn(x, -1, keepdim=True)]
+        if op != "prod":
+            # prod.dim_int takes one dim; amax and amin spell reduce-all as ().
+            all_dims = () if op in ("amax", "amin") else None
+            calls.append(lambda: fn(x, dim=all_dims, keepdim=True))
+        for call in calls:
+            with torch._C._AutoDispatchBelowAutograd():
+                out, fires = self._run(call)
+            self.assertEqual(fires, 1)
+            self.assertIsNone(out._base)
 
     @parametrize("op", ["amax", "amin"])
     def test_nan_propagates(self, device, op):
