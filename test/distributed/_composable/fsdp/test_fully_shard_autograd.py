@@ -4,6 +4,7 @@ import collections
 import copy
 import functools
 import itertools
+import warnings
 from typing import Any
 
 import torch
@@ -268,6 +269,43 @@ class TestFullyShardPostAccGradHookMultiThread(FSDPTestMultiThread):
         self.assertEqual(param_names, set(param_name_to_hook_count.keys()))
         for count in param_name_to_hook_count.values():
             self.assertEqual(count, 1)
+
+
+class TestFullyShardViewOutputWarning(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        # warnings.catch_warnings is not thread-safe.
+        return 1
+
+    def test_view_output_warning(self):
+        class ViewInCustomFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.view_as(x)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad
+
+        class Model(nn.Module):
+            def __init__(self, custom_fn: bool):
+                super().__init__()
+                self.lin = nn.Linear(8, 8, device=device_type)
+                self.custom_fn = custom_fn
+
+            def forward(self, x):
+                y = self.lin(x)
+                return ViewInCustomFunction.apply(y) if self.custom_fn else y.view(-1)
+
+        inp = torch.randn((2, 8), device=device_type)
+        model = fully_shard(Model(custom_fn=False))
+        with self.assertWarnsRegex(UserWarning, "returned a view tensor"):
+            model(inp)
+        # In-place ops on views created in a custom Function already raise.
+        model = fully_shard(Model(custom_fn=True))
+        with warnings.catch_warnings():
+            warnings.filterwarnings("error", message=".*returned a view tensor")
+            model(inp)
 
 
 class TestFullyShardPostAccGradHookMultiProcess(FSDPTest):
