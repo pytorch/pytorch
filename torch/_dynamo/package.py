@@ -682,6 +682,18 @@ class _DynamoCodeCacheEntry:
     skip_recursive: bool = False
     eager_fallback: bool = False
 
+    def without_compiled_code(self) -> "_DynamoCodeCacheEntry":
+        """Return a copy with no guarded codes or backend ids, and with
+        ``function_names``/``import_sources`` detached so the copy can be filled
+        in without touching the original."""
+        return dataclasses.replace(
+            self,
+            guarded_codes=[],
+            backend_ids=[],
+            function_names=list(self.function_names),
+            import_sources=dict(self.import_sources),
+        )
+
 
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
     name = namespace.get("__name__")
@@ -1302,20 +1314,12 @@ class CompilePackage:
             for key, code in self._codes.items():
                 if code.bypassed:
                     # install() skips a bypassed entry entirely, so its guarded
-                    # codes and backend ids are dead; start from a copy without
-                    # them so the fresh compile's record replaces them and the
-                    # next save writes an installable entry. A copy, not a
-                    # clear, with the mutable containers the fresh compile
-                    # writes to (import_sources, function_names) detached too:
-                    # the caller's entry may be a store's own object
-                    # (InMemoryDynamoStore hands out what it holds).
-                    self._codes[key] = dataclasses.replace(
-                        code,
-                        guarded_codes=[],
-                        backend_ids=[],
-                        function_names=list(code.function_names),
-                        import_sources=dict(code.import_sources),
-                    )
+                    # codes and backend ids are dead; the fresh compile's record
+                    # replaces them and the next save writes an installable
+                    # entry. A copy, not a clear: the caller's entry may be a
+                    # store's own object (InMemoryDynamoStore hands out what it
+                    # holds).
+                    self._codes[key] = code.without_compiled_code()
             # The codes come back, so the device they recorded must too, or one
             # recompile after a reload re-saves the entry as what that frame
             # alone named. The collapse is a maximum under one order, so
@@ -1609,6 +1613,33 @@ class CompilePackage:
                 fn = types.FunctionType(code, module.__dict__, function_name)
                 self._install_global(module, function_name, fn)
 
+    def _install_backends(
+        self,
+        module: types.ModuleType,
+        backend_ids: list[_BackendId],
+        backends: dict[_BackendId, Any],
+    ) -> None:
+        import torch._inductor.config as inductor_config
+
+        for backend_id in backend_ids:
+            if backend_id not in backends:
+                raise RuntimeError(
+                    f"Backend {backend_id} is not found in the given backends"
+                )
+            # AutotuneCacheBundler keeps one bundle per compile context, left
+            # open on a remote-cache miss until the first compiled call. A
+            # backend with a backward post-compiles both in one
+            # after_deserialization(), and a frame can have several backends, so
+            # a second bundle would fail to open. With the flag off these
+            # kernels' first-call autotune results are not uploaded as a bundle;
+            # the per-kernel autotune caches still apply.
+            with (
+                dynamo_timed("after_deserialization", phase_name="backend_compile"),
+                inductor_config.patch(bundled_autotune_remote_cache=False),
+            ):
+                backend = backends[backend_id].after_deserialization()
+                self._install_global(module, backend_id, torch._dynamo.disable(backend))
+
     def _bind_unnamed_scopes(
         self,
         module: types.ModuleType,
@@ -1640,6 +1671,37 @@ class CompilePackage:
                     record_only_if_new=True,
                 )
 
+    def _install_guarded_code(
+        self,
+        module: types.ModuleType,
+        python_module: str,
+        target_code: types.CodeType,
+        guarded_code: _GuardedCodeCacheEntry,
+    ) -> None:
+        from torch._C._dynamo.eval_frame import _load_precompile_entry
+
+        with dynamo_timed("precompile_load_guards"):
+            guards_state = load_guards_state(guarded_code.guards_state)
+        runtime_global_scope = sys.modules[python_module].__dict__
+        output_graph = guards_state.output_graph
+        if builtin_dict_name := output_graph.name_of_builtins_dict_key_in_fglobals:
+            _seed_builtins_dict(runtime_global_scope, builtin_dict_name)
+        # After the builtins dict above, which a recorded source can be rooted at.
+        self._bind_unnamed_scopes(
+            module, runtime_global_scope, output_graph.unnamed_scope_sources
+        )
+        if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
+            raise AssertionError(f"Expected GuardsState, got {type(guards_state)}")
+        with dynamo_timed("precompile_build_guards"):
+            guard_manager = load_guard_manager(
+                guards_state, target_code, runtime_global_scope
+            )
+        _load_precompile_entry(
+            target_code,
+            guard_manager,
+            SerializedCode.to_code_object(guarded_code.dynamo_code),
+        )
+
     def uninstall(self) -> None:
         from torch._C._dynamo.eval_frame import _reset_precompile_entries
 
@@ -1663,9 +1725,6 @@ class CompilePackage:
           2. Install the compiled functions to global scopes.
           3. Install the precompiled cache entries to ExtraStates on the code object.
         """
-        import torch._inductor.config as inductor_config
-        from torch._C._dynamo.eval_frame import _load_precompile_entry
-
         from .convert_frame import input_codes
 
         self.uninstall()
@@ -1703,31 +1762,7 @@ class CompilePackage:
                     continue
 
                 input_codes.add(target_code)
-                for backend_id in entry.backend_ids:
-                    if backend_id not in backends:
-                        raise RuntimeError(
-                            f"Backend {backend_id} is not found in the given backends"
-                        )
-                    # AutotuneCacheBundler keeps one bundle per compile
-                    # context, left open on a remote-cache miss until the
-                    # first compiled call. A backend with a backward
-                    # post-compiles both in one after_deserialization(), and a
-                    # frame can have several backends, so a second bundle
-                    # would fail to open. With the flag off these kernels'
-                    # first-call autotune results are not uploaded as a
-                    # bundle; the per-kernel autotune caches still apply.
-                    with (
-                        dynamo_timed(
-                            "after_deserialization", phase_name="backend_compile"
-                        ),
-                        inductor_config.patch(bundled_autotune_remote_cache=False),
-                    ):
-                        backend = backends[backend_id].after_deserialization()
-                        self._install_global(
-                            module,
-                            backend_id,
-                            torch._dynamo.disable(backend),
-                        )
+                self._install_backends(module, entry.backend_ids, backends)
 
                 # Dynamo generates empty graph for trivial functions, should just skip them
                 # in these cases.
@@ -1736,33 +1771,8 @@ class CompilePackage:
                     self._skipped_codes.append((target_code, entry.skip_recursive))
 
                 for guarded_code in entry.guarded_codes:
-                    with dynamo_timed("precompile_load_guards"):
-                        guards_state = load_guards_state(guarded_code.guards_state)
-                    runtime_global_scope = sys.modules[entry.python_module].__dict__
-                    if (
-                        builtin_dict_name
-                        := guards_state.output_graph.name_of_builtins_dict_key_in_fglobals
-                    ):
-                        _seed_builtins_dict(runtime_global_scope, builtin_dict_name)
-                    # After the builtins dict above, which a recorded source
-                    # can be rooted at.
-                    self._bind_unnamed_scopes(
-                        module,
-                        runtime_global_scope,
-                        guards_state.output_graph.unnamed_scope_sources,
-                    )
-                    if not isinstance(guards_state, torch._dynamo.guards.GuardsState):
-                        raise AssertionError(
-                            f"Expected GuardsState, got {type(guards_state)}"
-                        )
-                    with dynamo_timed("precompile_build_guards"):
-                        guard_manager = load_guard_manager(
-                            guards_state, target_code, runtime_global_scope
-                        )
-                    _load_precompile_entry(
-                        target_code,
-                        guard_manager,
-                        SerializedCode.to_code_object(guarded_code.dynamo_code),
+                    self._install_guarded_code(
+                        module, entry.python_module, target_code, guarded_code
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:
@@ -2036,20 +2046,18 @@ class DiskDynamoCache(DiskDynamoStore):
         key = CompilePackage.source_id_from_fn(fn)
         logger.info("Loading CompilePackage for %s", key)
         path = self._entry_dir(key)
-        if os.path.exists(path):
-            try:
-                result = super().load_cache_entry(key)
-                counters["dynamo_cache"]["dynamo_cache_hit"] += 1
-                return result
-            except Exception:
-                counters["dynamo_cache"]["dynamo_cache_error"] += 1
-                logger.warning(
-                    "Failed to load package from path %s", path, exc_info=True
-                )
-                return None
-        logger.info("No package found for %s", key)
-        counters["dynamo_cache"]["dynamo_cache_miss"] += 1
-        return None
+        if not os.path.exists(path):
+            logger.info("No package found for %s", key)
+            counters["dynamo_cache"]["dynamo_cache_miss"] += 1
+            return None
+        try:
+            result = super().load_cache_entry(key)
+        except Exception:
+            counters["dynamo_cache"]["dynamo_cache_error"] += 1
+            logger.warning("Failed to load package from path %s", path, exc_info=True)
+            return None
+        counters["dynamo_cache"]["dynamo_cache_hit"] += 1
+        return result
 
     def load_and_install_package(self, fn: Callable[..., Any]) -> CompilePackage | None:
         """
@@ -2058,10 +2066,9 @@ class DiskDynamoCache(DiskDynamoStore):
         results = self.load(fn)
         if results is None:
             return None
-        else:
-            package = CompilePackage(fn, results.dynamo)
-            package.install(results.backends)
-            return package
+        package = CompilePackage(fn, results.dynamo)
+        package.install(results.backends)
+        return package
 
     def path_prefix(self) -> str:
         return os.path.join(cache_dir(), "dynamo")
