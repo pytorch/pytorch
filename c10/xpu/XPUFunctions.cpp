@@ -1,4 +1,3 @@
-#include <c10/core/impl/GPUTrace.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUFunctions.h>

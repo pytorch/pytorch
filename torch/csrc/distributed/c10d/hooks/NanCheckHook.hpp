@@ -39,7 +39,6 @@ class TORCH_API NanCheckHook
   // Weak: the group owns the hook, so an owning pointer back would keep the
   // group alive forever.
   c10::weak_intrusive_ptr<ProcessGroup> pg_;
-  int rank_;
   int64_t hook_id_;
 };
 

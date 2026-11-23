@@ -101,14 +101,10 @@ class C10_API SymInt {
   }
 
   SymNodeImpl* release() && {
-#ifndef C10_MOBILE
     TORCH_INTERNAL_ASSERT(is_heap_allocated());
     auto* r = toSymNodeImplUnowned();
     data_ = 0; // transfer ownership
     return r;
-#else
-    TORCH_INTERNAL_ASSERT(false);
-#endif
   }
 
   // Only valid if is_heap_allocated()

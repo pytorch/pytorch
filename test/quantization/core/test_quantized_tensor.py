@@ -150,6 +150,17 @@ class TestQuantizedTensor(TestCase):
         y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
         self.assertTrue(torch.equal(x_q, y_q))
 
+    def test_qtensor_equal_sub_byte_dtypes(self):
+        # gh-203767: equal used to over-read quint2x4 storage (caught by ASAN)
+        for dtype in (torch.quint4x2, torch.quint2x4):
+            x = torch.rand(7)  # odd numel exercises the partial trailing byte
+            a = torch.quantize_per_tensor(x, 1.0, 0, dtype)
+            b = torch.quantize_per_tensor(x, 1.0, 0, dtype)
+            self.assertTrue(torch.equal(a, b))
+            storage = b.untyped_storage()
+            storage[storage.nbytes() - 1] ^= 1
+            self.assertFalse(torch.equal(a, b))
+
     def test_per_tensor_qtensor_to_memory_format(self):
         n = np.random.randint(1, 10)
         c = np.random.randint(2, 10)
