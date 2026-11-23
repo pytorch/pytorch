@@ -3302,6 +3302,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             init: VariableTracker,
             xs: VariableTracker,
             additional_inputs: VariableTracker,
+            *,
             reverse: VariableTracker | None = None,
         ) -> tuple[
             VariableTracker,
@@ -3325,7 +3326,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     context=str(reverse_var),
                     explanation="Expected reverse to be a constant bool.",
                     hints=[
-                        *graph_break_hints.DYNAMO_BUG,
+                        *graph_break_hints.USER_ERROR,
                     ],
                 )
             reverse = reverse_var.as_python_constant()
