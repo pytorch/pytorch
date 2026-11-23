@@ -616,7 +616,6 @@
   "test/test_transformers.py",
   "test/test_tsan.py",
   "test/test_type_hints.py",
-  "test/test_type_promotion.py",
   "test/test_typing.py",
   "test/test_utils.py",
   "test/test_utils_config_module.py",
