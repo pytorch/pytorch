@@ -294,7 +294,6 @@ if not torch._dynamo.config.use_cpp_fake_tensor:
         # FakeTensor dispatches prim::device into PlacementTrackingMode, where
         # sharding propagation fails. C++ FakeTensor answers it from the
         # TensorImpl without dispatching.
-        xfail("nn.functional.binary_cross_entropy_with_logits"),
         xfail("nn.functional.logsigmoid"),
         xfail("nn.functional.multilabel_soft_margin_loss"),
     }
@@ -475,23 +474,7 @@ class DTensorOpsMixin:
                 yield from valid_samples()
                 return
 
-            # Threaded ranks share process-global RNG state. Materialize samples
-            # with a fixed RNG state so non-tensor args match across ranks.
-            with sample_lock:
-                python_rng_state = random.getstate()
-                numpy_rng_state = np.random.get_state() if TEST_NUMPY else None
-                try:
-                    with freeze_rng_state():
-                        torch.manual_seed(SEED)
-                        random.seed(SEED)
-                        if TEST_NUMPY:
-                            np.random.seed(SEED)
-                        samples = list(valid_samples())
-                finally:
-                    random.setstate(python_rng_state)
-                    if numpy_rng_state is not None:
-                        np.random.set_state(numpy_rng_state)
-
+            samples = _samples_with_fixed_rng(sample_lock, valid_samples)
             dist.barrier()
             yield from samples
 
@@ -684,6 +667,28 @@ class DTensorOpsMixin:
             _ = torch.ops.aten.embedding.default(weight_dtensor, input_dtensor)
 
 
+def _samples_with_fixed_rng(lock, make_samples):
+    """Materialize samples under ``lock`` with a fixed RNG state.
+
+    Threaded ranks share process-global RNG state, so generating samples
+    concurrently gives each rank different non-tensor args (e.g. a random delta).
+    """
+    with lock:
+        python_rng_state = random.getstate()
+        numpy_rng_state = np.random.get_state() if TEST_NUMPY else None
+        try:
+            with freeze_rng_state():
+                torch.manual_seed(SEED)
+                random.seed(SEED)
+                if TEST_NUMPY:
+                    np.random.seed(SEED)
+                return list(make_samples())
+        finally:
+            random.setstate(python_rng_state)
+            if numpy_rng_state is not None:
+                np.random.set_state(numpy_rng_state)
+
+
 class TestMultiThreadedDTensorOps(DTensorOpTestBase, DTensorOpsMixin):
     _op_db = repurpose_ops(op_db, "TestDTensorOps", "TestMultiThreadedDTensorOps")
     _op_db_sample_lock = threading.Lock()
@@ -834,7 +839,6 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.multilabel_soft_margin_loss"),
     xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.poisson_nll_loss"),
-    xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.triplet_margin_loss"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
     xfail("nn.functional.upsample_nearest"),
@@ -985,6 +989,8 @@ class TestUnbackedDTensorOps(DTensorOpsMixin, TestCase):
 
 
 class TestSingleDimStrategies(DTensorOpTestBase):
+    _sample_lock = threading.Lock()
+
     @property
     def world_size(self) -> int:
         return 2
@@ -1022,7 +1028,10 @@ class TestSingleDimStrategies(DTensorOpTestBase):
         sharding_prop = DTensor._op_dispatcher.sharding_propagator
 
         try:
-            samples = list(op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=False))
+            samples = _samples_with_fixed_rng(
+                self._sample_lock,
+                lambda: op.sample_inputs(DEVICE_TYPE, dtype, requires_grad=False),
+            )
         except Exception:
             self.skipTest(f"Failed to get sample inputs for {op.name}")
         if not samples:

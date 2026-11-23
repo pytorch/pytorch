@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -361,6 +362,155 @@ class DistMathOpsTest(DTensorContinuousTestBase):
             else:
                 self.assertTrue(dist_x.grad.placements[0].is_shard(dim=shard_dim))
             self.assertEqual(dist_x.grad.full_tensor(), x.grad)
+
+    @with_comms
+    @parametrize(
+        "loss_name",
+        [
+            "binary_cross_entropy",
+            "binary_cross_entropy_with_logits",
+            "huber_loss",
+            "mse_loss",
+            "smooth_l1_loss",
+            "soft_margin_loss",
+        ],
+    )
+    def test_pointwise_loss_on_sharded_input(self, loss_name):
+        device_mesh = self.build_device_mesh()
+        loss_fn = getattr(torch.nn.functional, loss_name)
+        for rows in (2 * self.world_size, 3 * self.world_size - 1):
+            x = torch.randn(rows, 3, device=self.device_type, dtype=torch.float64)
+            target = torch.rand(rows, 3, device=self.device_type, dtype=torch.float64)
+            kwargs, dist_kwargs = {}, {}
+            if loss_name == "binary_cross_entropy":
+                x = x.sigmoid()
+            elif loss_name == "soft_margin_loss":
+                target = target.round() * 2 - 1
+            if loss_name.startswith("binary_cross_entropy"):
+                # weight broadcasts against the input, so it stays replicated.
+                weight = torch.rand(3, device=self.device_type, dtype=torch.float64)
+                kwargs = {"weight": weight}
+                dist_kwargs = {
+                    "weight": distribute_tensor(weight, device_mesh, [Replicate()])
+                }
+            for reduction in ("mean", "sum", "none"):
+                ref_x = x.clone().requires_grad_()
+                ref = loss_fn(ref_x, target, reduction=reduction, **kwargs)
+                ref.sum().backward()
+
+                dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+                dist_x.requires_grad_()
+                dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
+                out = loss_fn(dist_x, dist_target, reduction=reduction, **dist_kwargs)
+                loss = out.sum()
+                comm_mode = CommDebugMode()
+                with comm_mode:
+                    loss.backward()
+                msg = f"rows={rows} reduction={reduction}"
+                self.assertEqual(out.full_tensor(), ref, msg=msg)
+                self.assertEqual(dist_x.grad.full_tensor(), ref_x.grad, msg=msg)
+
+                even = rows % self.world_size == 0
+                expected_out = {
+                    "none": Shard(0),
+                    "sum": Partial("sum"),
+                    "mean": Partial("avg") if even else Replicate(),
+                }[reduction]
+                self.assertEqual(out.placements, (expected_out,), msg=msg)
+                # The backward stays sharded, also for "mean", which runs as
+                # "sum" with a scaled grad_output.
+                self.assertEqual(dist_x.grad.placements, (Shard(0),), msg=msg)
+                self.assertEqual(comm_mode.get_total_counts(), 0, msg=msg)
+
+    @with_comms
+    def test_pointwise_loss_uneven_2d_mesh(self):
+        # The Partial("avg") filter must count the shards of all mesh dims.
+        if self.world_size != 4:
+            self.skipTest("needs a 2x2 mesh")
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+        cases = [
+            ((6, 3), [Shard(0), Shard(0)]),
+            ((4, 7), [Shard(0), Shard(1)]),
+        ]
+        for shape, placements in cases:
+            x = torch.randn(shape, device=self.device_type, dtype=torch.float64)
+            target = torch.randn(shape, device=self.device_type, dtype=torch.float64)
+            ref_x = x.clone().requires_grad_()
+            ref = torch.nn.functional.mse_loss(ref_x, target)
+            ref.backward()
+
+            dist_x = distribute_tensor(x, device_mesh, placements).requires_grad_()
+            dist_target = distribute_tensor(target, device_mesh, placements)
+            out = torch.nn.functional.mse_loss(dist_x, dist_target)
+            out.backward()
+            self.assertEqual(out.full_tensor(), ref, msg=str(placements))
+            self.assertEqual(dist_x.grad.full_tensor(), ref_x.grad, msg=str(placements))
+
+    @with_comms
+    def test_pointwise_loss_out_variants(self):
+        device_mesh = self.build_device_mesh()
+        x = torch.randn(2 * self.world_size, 3, device=self.device_type)
+        target = torch.randn(2 * self.world_size, 3, device=self.device_type)
+        dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+        dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
+
+        def dtensor_like(t, placement):
+            if placement.is_partial():
+                return DTensor.from_local(torch.empty_like(t), device_mesh, [placement])
+            return distribute_tensor(torch.empty_like(t), device_mesh, [placement])
+
+        # reduction -> sharded placements of the loss out buffer and of grad_input
+        cases = {
+            0: (Shard(0), Shard(0)),
+            1: (Partial("avg"), Shard(0)),
+            2: (Partial("sum"), Shard(0)),
+        }
+        for reduction, sharded in cases.items():
+            ref = aten.mse_loss(x, target, reduction)
+            grad = torch.ones_like(ref)
+            ref_grad = aten.mse_loss_backward(grad, x, target, reduction)
+            grad_placement = Shard(0) if reduction == 0 else Replicate()
+            dist_grad = distribute_tensor(grad, device_mesh, [grad_placement])
+            # A Replicate out after a sharded one: the out placement is part of
+            # the sharding cache key, so the second call must not reuse the first.
+            for out_placement, grad_input_placement in (sharded, [Replicate()] * 2):
+                msg = f"reduction={reduction} out={out_placement}"
+                out = dtensor_like(ref, out_placement)
+                grad_input = dtensor_like(ref_grad, grad_input_placement)
+                comm_mode = CommDebugMode()
+                with comm_mode:
+                    aten.mse_loss.out(dist_x, dist_target, reduction, out=out)
+                if out_placement != Replicate():
+                    self.assertEqual(comm_mode.get_total_counts(), 0, msg=msg)
+                with comm_mode:
+                    result = aten.mse_loss_backward.grad_input(
+                        dist_grad, dist_x, dist_target, reduction, grad_input=grad_input
+                    )
+                self.assertIs(result, grad_input, msg=msg)
+                if grad_input_placement != Replicate():
+                    self.assertEqual(comm_mode.get_total_counts(), 0, msg=msg)
+                self.assertEqual(out.placements, (out_placement,), msg=msg)
+                self.assertEqual(
+                    grad_input.placements, (grad_input_placement,), msg=msg
+                )
+                self.assertEqual(out.full_tensor(), ref, msg=msg)
+                self.assertEqual(grad_input.full_tensor(), ref_grad, msg=msg)
+
+    @with_comms
+    def test_binary_cross_entropy_domain_check(self):
+        if self.device_type != "cpu":
+            self.skipTest("only the CPU kernel raises a catchable range error")
+        device_mesh = self.build_device_mesh()
+        x = torch.rand(2 * self.world_size, 3, device=self.device_type)
+        target = torch.rand(2 * self.world_size, 3, device=self.device_type)
+        # The kernel checks the range on each rank's own shard, so put an
+        # out-of-range value in every shard: a rank that did not raise would
+        # otherwise block in the next collective.
+        x[:, 0] = 1.5
+        dist_x = distribute_tensor(x, device_mesh, [Shard(0)])
+        dist_target = distribute_tensor(target, device_mesh, [Shard(0)])
+        with self.assertRaisesRegex(RuntimeError, "between 0 and 1"):
+            torch.nn.functional.binary_cross_entropy(dist_x, dist_target)
 
     @with_comms
     @skip_unless_torch_gpu
@@ -2383,6 +2533,46 @@ class DistMathOpsTest(DTensorContinuousTestBase):
                     self.assertEqual(dt_weight_bwd.grad.full_tensor(), ref_weight.grad)
                 if use_bias:
                     self.assertEqual(dt_bias_bwd.grad.full_tensor(), ref_bias.grad)
+
+
+class TestPointwiseLossRegistration(TestCase):
+    def test_overloads_registered(self):
+        # Every overload needs the explicit registration: autogen-derived .out
+        # strategies would drop the uneven-shard filter.
+        from torch.distributed.tensor._ops._math_ops import (
+            _pointwise_loss_backward_handler,
+            _pointwise_loss_full_mesh_strategy_filter,
+        )
+
+        strategies = (
+            DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs
+        )
+        handlers = DTensor._op_dispatcher._custom_op_handlers
+        packets = {
+            aten.binary_cross_entropy: False,
+            aten.binary_cross_entropy_with_logits: False,
+            aten.huber_loss: False,
+            aten.mse_loss: False,
+            aten.smooth_l1_loss: False,
+            aten.soft_margin_loss: False,
+            aten.binary_cross_entropy_backward: True,
+            aten.huber_loss_backward: True,
+            aten.mse_loss_backward: True,
+            aten.smooth_l1_loss_backward: True,
+            aten.soft_margin_loss_backward: True,
+        }
+        for packet, is_backward in packets.items():
+            for op in packet.op_overloads():
+                self.assertIs(
+                    strategies[op].full_mesh_strategy_filter,
+                    _pointwise_loss_full_mesh_strategy_filter,
+                    msg=str(op),
+                )
+                self.assertEqual(
+                    handlers.get(op) is _pointwise_loss_backward_handler,
+                    is_backward,
+                    msg=str(op),
+                )
 
 
 instantiate_parametrized_tests(DistMathOpsTest)

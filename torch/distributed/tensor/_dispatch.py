@@ -532,6 +532,47 @@ class OpDispatcher:
                         )
         return local_results
 
+    def _dispatch_without_custom_op_handler(
+        self,
+        op_call: torch._ops.OpOverload,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+    ) -> object:
+        """Dispatch a functional or out= op, skipping ``_custom_op_handlers``.
+
+        For custom op handlers that only rewrite the op's arguments: this runs the
+        same Python slow path as the C++ entry point (sharding propagation,
+        redistribution, local compute, wrapping).
+        """
+        schema = op_call._schema
+        if schema.name.endswith("_") or schema._is_view_op():
+            raise AssertionError(f"expected a functional or out= op, got {op_call}")
+        op_info = self.unwrap_to_op_info(op_call, args, kwargs)
+        output_sharding = self._propagate_op_sharding_dispatch_slow_path(
+            op_call, args, kwargs, op_info, try_cache=True
+        )
+        if not isinstance(output_sharding, OutputSharding):
+            # Inference-mode CompositeImplicitAutograd ops were decomposed and
+            # already computed, as in the C++ entry point.
+            return output_sharding
+        op_info.output_sharding = output_sharding
+        local_results = self._dispatch_get_local_results_slow_path(
+            op_call, args, op_info
+        )
+        if not any(argument.is_out for argument in schema.arguments):
+            return self.wrap(local_results, output_sharding.output_spec)
+        return self._dispatch_fast_path_python_tail(
+            op_call,
+            args,
+            kwargs,
+            op_info.compute_mesh,
+            output_sharding,
+            local_results,
+            op_info.compute_mesh.get_coordinate() is not None,
+            is_inplace_op=False,
+            is_out_variant_op=True,
+        )
+
     def _dispatch_fast_path_python_tail(
         self,
         op_call: torch._ops.OpOverload,
