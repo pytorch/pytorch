@@ -1228,8 +1228,9 @@ semantics.
 
 For example, a wrapper that stores an inner tensor as ``elem`` and a string
 label as ``label`` could define the following methods. This excerpt assumes its
-constructor accepts ``outer_size`` and ``outer_stride`` and uses them when
-creating the wrapper, and that it already implements ``__torch_dispatch__``:
+constructor accepts ``outer_size`` and ``outer_stride`` and passes them to
+``torch.Tensor._make_wrapper_subclass(cls, outer_size, strides=outer_stride, ...)``,
+and that it already implements ``__torch_dispatch__``:
 
 ```{code-block} python
 :dedent: 4
