@@ -400,7 +400,7 @@ def _multi_tensor_rprop(
         del signs
 
         # update parameters
-        grad_signs = [grad.sign() for grad in grouped_grads]
+        grad_signs = torch._foreach_sign(grouped_grads)
         torch._foreach_addcmul_(
             grouped_params, grad_signs, grouped_step_sizes, value=-1
         )
