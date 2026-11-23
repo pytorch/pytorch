@@ -164,6 +164,16 @@ class TestFlyDSLTopK(TestCase):
         self._assert_topk_matches_aten(x, k)
         self.assertEqual(topk_cache_info(kernel).misses, misses + 1)
 
+    def test_topk_radix_rejects_k_outside_row(self):
+        # The radix walk assumes k <= n. The wrapper refuses other k before
+        # compiling. CPU tensors are enough: the check runs before any device use.
+        from torch._native.ops.topk.flydsl_kernels import topk_radix
+
+        x = torch.randn(4, 100)
+        for k in (0, 101):
+            with self.assertRaisesRegex(ValueError, "1 <= k <= n"):
+                topk_radix(x, k)
+
     def test_register_correctness_with_odd_rows(self):
         # Register kernel packs two rows per CTA; odd M leaves a tail
         # block where in_bounds is false for one row slot (row_safe falls back

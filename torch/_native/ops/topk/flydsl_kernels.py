@@ -9,8 +9,11 @@ bits, sign at bit 31. ``largest=False`` complements the narrow field.
 threads (``sort_len`` = K rounded up to a power of 2; the bin floor lets
 phase 1 zero the histogram one bin per thread).
   1. Radix byte passes (MSB to LSB, one per byte of the ordinal) over an LDS
-     histogram; thread 0 scans descending, narrowing ``s_prefix``/``s_mask``
-     until it holds the K-th ordinal and ``s_rem_k`` the ties to keep.
+     histogram. The first ``_N_SCAN_GROUPS`` threads each sum one group of
+     ``_SCAN_GROUP_BINS`` bins into ``s_groups``; thread 0 scans the group
+     sums, then the bins of one group, descending, narrowing
+     ``s_prefix``/``s_mask`` until it holds the K-th ordinal and ``s_rem_k``
+     the ties to keep.
   2. Gather at-or-above that threshold. Deterministic: prefix-sum slots
      preserve input order, lowest-index ties win. Otherwise LDS atomic
      counters claim slots and ties resolve per run.
@@ -40,7 +43,8 @@ the scan.
 and ``s_keys`` - they alias, each live only within its phase. The phase-2
 barrier before bitonic sort is the hand-off: after it ``s_scan`` is dead and
 ``s_keys`` is live until phase 4. Anything spanning phases needs a struct
-member, not a union member.
+member, not a union member. ``s_groups`` is a struct member as well: it is
+live only in phase 1, but together with ``s_hist``, so the two must not alias.
 """
 
 import math
@@ -68,7 +72,7 @@ from flydsl.runtime.device import is_rdna_arch
 import torch
 from torch._native.flydsl.cache import CachedCompile, CacheInfo
 from torch._native.flydsl.compile_args import make_compile_arg, read_only_tensor
-from torch._native.flydsl.intrinsics import atomic_add, maxsi, minsi
+from torch._native.flydsl.intrinsics import atomic_add, maxsi, minsi, wave_barrier
 from torch._native.flydsl_utils import _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
 
@@ -77,6 +81,12 @@ _RADIX_BITS = 8
 _RADIX_MASK = (1 << _RADIX_BITS) - 1
 _RADIX_SIGN_BIT = 1 << (_RADIX_BITS - 1)
 _N_HIST_BINS = 1 << _RADIX_BITS
+# The threshold scan sums the histogram in groups of _SCAN_GROUP_BINS bins, then
+# walks the group sums and the bins of one group: 2 * 16 steps instead of 256.
+_SCAN_GROUP_BINS = 16
+_N_SCAN_GROUPS = _N_HIST_BINS // _SCAN_GROUP_BINS
+if _N_HIST_BINS % _SCAN_GROUP_BINS != 0:
+    raise AssertionError("_SCAN_GROUP_BINS must divide _N_HIST_BINS")
 _REGISTER_ROWS_PER_CTA = 2
 _ORD_BITS = 32
 
@@ -289,6 +299,35 @@ def _split_key(key):
     return stored, idx
 
 
+def _find_from_top(arr, top, size, k_rem, base):
+    """Find which entry of arr[top], arr[top - 1], ... holds the k_rem-th element.
+
+    Walks the `size` entries from `top` downward with a running count that starts
+    at `base`. Returns ``(idx, above)``: the first index whose inclusive count
+    reaches `k_rem`, and the count strictly above it (`base` included).
+
+    Counts are never negative, so the running count is monotone and the entries
+    still below `k_rem` form a prefix of the walk. ``idx`` steps down once per
+    such entry, and ``above`` keeps the last count that was still below. Both use
+    selects, so the walk has no branches. Unrolled at trace time.
+
+    Precondition: `k_rem` is reachable, i.e. ``base + sum(entries) >= k_rem``.
+    Otherwise every entry is below `k_rem` and ``idx`` ends at ``top - size``,
+    outside the walked range. ``topk_radix_out`` guarantees it for the whole
+    kernel by rejecting ``k > n``.
+    """
+    cum = base
+    above = base
+    idx = fx.Int32(top)
+    for i in range_constexpr(size):
+        cum = cum + arr[top - i]
+        below = cum < k_rem
+        # Keep updating idx and above as long as cum < k_rem.
+        above = below.select(cum, above)
+        idx = below.select(idx - fx.Int32(1), idx)
+    return idx, above
+
+
 def _make_topk_storage(sort_len: int, block_threads: int, spec: TopKSpec):
     @fx.struct
     class CounterStorage:
@@ -308,6 +347,7 @@ def _make_topk_storage(sort_len: int, block_threads: int, spec: TopKSpec):
         s_prefix: Array[Int32, 1, 4]
         s_mask: Array[Int32, 1, 4]
         s_rem_k: Array[Int32, 1, 4]
+        s_groups: Array[Int32, _N_SCAN_GROUPS, 16]
         s_vals: Array[spec.elem_ty, sort_len, 16]
         s_idxs: Array[Int32, sort_len, 16]
 
@@ -337,6 +377,14 @@ def _build_radix_select_topk_module(
                 f"this config can count {max_step_elems} elements per step"
             )
     warp_size = 32 if is_rdna_arch(arch) else 64
+    # The group-sum lanes (tid < _N_SCAN_GROUPS) and thread 0 must share one
+    # wave, since the scan orders them with wave_barrier() instead of a
+    # block barrier.
+    if _N_SCAN_GROUPS > warp_size:
+        raise AssertionError(
+            f"_N_SCAN_GROUPS={_N_SCAN_GROUPS} group-sum lanes must fit in one "
+            f"wave of {warp_size}"
+        )
     num_warps = block_threads // warp_size
     tile = block_threads * spec.vec
 
@@ -370,6 +418,7 @@ def _build_radix_select_topk_module(
         s_prefix = storage.s_prefix.peek().view(fx.make_layout(1, 1))
         s_mask = storage.s_mask.peek().view(fx.make_layout(1, 1))
         s_rem_k = storage.s_rem_k.peek().view(fx.make_layout(1, 1))
+        s_groups = storage.s_groups.peek().view(fx.make_layout(_N_SCAN_GROUPS, 1))
         s_write_ctr = storage.s_phase.s_counters.s_write_ctr.peek().view(
             fx.make_layout(1, 1)
         )
@@ -479,23 +528,37 @@ def _build_radix_select_topk_module(
                     )
             gpu.barrier()
 
-            # Select the radix threshold.
+            # Select the radix threshold. Threads 0.._N_SCAN_GROUPS-1 each sum
+            # one group of bins. They are all in wave 0, and so is thread 0, so
+            # a wave barrier orders their stores before thread 0's reads. Thread
+            # 0 then walks the group sums and the bins of one group.
+            if tid < fx.Int32(_N_SCAN_GROUPS):
+                group_sum = fx.Int32(0)
+                for j in range_constexpr(_SCAN_GROUP_BINS):
+                    group_sum = group_sum + s_hist[tid * _SCAN_GROUP_BINS + j]
+                s_groups[tid] = group_sum
+            wave_barrier()
             if tid == 0:
                 remaining_k = s_rem_k[0]
-                acc = 0
-                found = 0
-                sel_bin = 0
-                elems_above = 0
-
-                for b in range(_N_HIST_BINS):
-                    bin_idx = _N_HIST_BINS - 1 - b
-                    count = s_hist[bin_idx]
-                    if found == 0:
-                        if acc + count >= remaining_k:
-                            sel_bin = fx.Int32(bin_idx)
-                            elems_above = acc
-                            found = 1
-                    acc = acc + count
+                # Find the group, the "meta bucket" that holds the
+                # remaining_k-th element.
+                group, group_above = _find_from_top(
+                    s_groups,
+                    _N_SCAN_GROUPS - 1,
+                    _N_SCAN_GROUPS,
+                    remaining_k,
+                    fx.Int32(0),
+                )
+                # Find the bin inside the group that holds the remaining_k-th
+                # element. This walk starts from the count above the group, so
+                # elems_above is the count above the bin.
+                sel_bin, elems_above = _find_from_top(
+                    s_hist,
+                    group * _SCAN_GROUP_BINS + (_SCAN_GROUP_BINS - 1),
+                    _SCAN_GROUP_BINS,
+                    remaining_k,
+                    group_above,
+                )
 
                 actual_byte = sel_bin ^ fx.Int32(sign_bit_xor_val)
                 s_prefix[0] = prefix | (actual_byte << fx.Int32(shift))
@@ -952,6 +1015,10 @@ def topk_radix_out(
 ) -> None:
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
+    # _find_from_top assumes k is reachable (k <= n), so reject anything else
+    # before the kernel can read outside the walked range.
+    if not 1 <= k <= n:
+        raise ValueError(f"topk_radix needs 1 <= k <= n, got k={k}, n={n}")
     device_index = input_2d.device.index
     arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
     spec = topk_spec(input_2d.dtype, largest)

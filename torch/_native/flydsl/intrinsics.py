@@ -4,7 +4,7 @@ from enum import Enum
 
 import flydsl.expr as fx
 from flydsl._mlir.dialects import llvm
-from flydsl.expr import arith
+from flydsl.expr import arith, gpu
 from flydsl.expr.typing import Float, Integer, Numeric, Pointer
 
 
@@ -21,7 +21,14 @@ class AtomicSyncScope(Enum):
     WORKGROUP = fx.rocdl.SyncScope.Workgroup
 
 
-__all__ = ["AtomicOrdering", "AtomicSyncScope", "atomic_add", "maxsi", "minsi"]
+__all__ = [
+    "AtomicOrdering",
+    "AtomicSyncScope",
+    "atomic_add",
+    "maxsi",
+    "minsi",
+    "wave_barrier",
+]
 
 
 def maxsi(lhs: Integer, rhs: Integer) -> Integer:
@@ -32,6 +39,19 @@ def maxsi(lhs: Integer, rhs: Integer) -> Integer:
 def minsi(lhs: Integer, rhs: Integer) -> Integer:
     """Return the signed minimum of two FlyDSL integers."""
     return lhs.dtype(arith.minsi(arith.unwrap(lhs), arith.unwrap(rhs)))
+
+
+def wave_barrier() -> None:
+    """Order the lanes of one wave, with no memory fence.
+
+    Lowers to ``rocdl.wave.barrier``, which FlyDSL 0.3.1 and later provide. On
+    0.3.0 it falls back to a workgroup barrier: still correct, but slower.
+    Every lane that must be ordered has to be in the same wave.
+    """
+    if hasattr(fx.rocdl, "wave_barrier"):
+        fx.rocdl.wave_barrier()
+    else:
+        gpu.barrier()
 
 
 def atomic_add(
