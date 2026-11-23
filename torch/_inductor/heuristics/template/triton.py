@@ -43,7 +43,6 @@ from ...utils import (
     _rocm_version_tuple,
     _TDM_DIRECT_PATH_RELATIVE_POLICY_BYTES,
     _TDM_MIN_INNERMOST_REQUEST_BYTES,
-    ceildiv,
     clear_on_fresh_cache,
     commit_tdm_operand_layout,
     get_backend_num_stages,
