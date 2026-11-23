@@ -287,7 +287,16 @@ What ends a path:
 - an instruction that raises in the call the path is taken down from (a key
   that a dict does not have, a division by zero): the path ends in front of
   it, or in front of the call it is in where the path had gone into a
-  function, and the raise goes its way;
+  function, and the raise goes its way. Not what the handler of a signal
+  raised there (a timeout, an interrupt): it came between the instructions,
+  nothing is made of that run, and the next call is taken down (eight times
+  per graph at most: a function that is interrupted whenever it is taken
+  down gets the path in front after that);
+- an instruction that gives a warning in the call the path is taken down
+  from, shown or not: a warning is shown by Python code, for the file and
+  the line the function is at, and is counted in the function's globals, so
+  the instruction runs where the function has it, and the paths of that
+  graph end in front of it from then on;
 - the end of the function, a block that this call is the first to run (the
   path is taken down again at the next call, up to three times), and 200,000
   instructions.
@@ -354,31 +363,39 @@ where it would run, at every call:
   and strs; the truth, the length and the unpacking of a list, a tuple, a
   dict, a set or a str; an item of a list, a tuple or a dict under a number,
   a str, None, a slice or a tuple of them, where every key the dict has is
-  such a value; `in` where each item that is compared compares in C; a
-  loop over a list, a tuple, a dict, a range or a str, and over an
-  `enumerate` or a `zip` of them; an f-string of numbers and strs; a dict
-  that is built under such keys; an item of a tensor (of the class
-  `Tensor` or `Parameter`) under such keys or another such tensor, and its
-  truth: kernels. An attribute that is found in the dict of a module, of
-  an object or of a class; one that the class has as a function (it is
-  bound), as a plain value or as a field of the object (`__slots__`); one
-  that a `__getattr__` with a shortcut finds (`nn.Module`); and one that a
-  getter written in C gives, where the class that defines the getter is
-  one whose getters read the object itself: `object` and `type`, the
+  such a value; `in` where each item that is compared compares in C; a loop
+  over a list, a tuple, a dict, a range or a str, and over an `enumerate` or
+  a `zip` of them; an f-string of numbers and strs; a dict that is built
+  under such keys; an item of a tensor (of the class `Tensor` or
+  `Parameter`) under such keys or another such tensor, and its truth:
+  kernels. An attribute that is found in the dict of a module, of an object
+  or of a class; one that the class has as a function (it is bound), as a
+  plain value or as a field of the object (`__slots__`); one that a
+  `__getattr__` with a shortcut finds (`nn.Module`); and one that a getter
+  written in C gives, where the getter is one that reads the object itself:
+  those of `object` and `type` (not the `__annotations__` of a class, nor
+  its `__doc__` where the class has a descriptor under that name), of the
   numbers, `str`, `bytes`, `tuple`, `list`, `dict`, `set`, `frozenset`,
-  `slice`, `range`, a function, a function of C, a bound method, a cell, a
-  module, the exception classes defined in C, the class under every
-  tensor, `dtype`, `device`, `layout`, `memory_format`, `finfo` and
-  `iinfo`, the names and the bytecode of a code object (`co_varnames`),
-  and the `__dict__` of an object of a class written in Python.
-  Anything else binds first: a property, a descriptor or a `__getattr__` in
-  Python, an operator or a comparison that an object of the user's
-  answers (also as an item of a list that is compared), a `__bool__`, a
-  `__len__`, an `__index__`, a `__hash__`, a `__format__`, an iterator or a
-  generator, a `map`, an `import`, a `match`, every store into an object,
-  a dict or a global (what was there ends), and a getter of any other
-  class. The getter of a frame's `f_locals` is the look itself, and a
-  traceback, a generator and a coroutine lead to a frame;
+  `slice`, `range`, of a function, of a function of C (not its
+  `__qualname__`), of a cell, of the exception classes defined in C, of
+  `dtype`, `device`, `layout`, `memory_format`, `finfo` and `iinfo`, the
+  names and the bytecode of a code object (`co_varnames`), and the
+  `__dict__` of an object of a class written in Python. The getters of the
+  class under every tensor (`shape`, `dtype`, `requires_grad`, `grad`) are
+  among them for a tensor of exactly `Tensor` or `Parameter`, and of a class
+  that says it has no `__torch_function__` (one made of `Parameter`), while
+  no `TorchFunctionMode` is on: for any other tensor they call the override,
+  which is Python code. Not `volatile`, not `grad` of a tensor that is no
+  leaf, not `T` of a tensor with other than 0 or 2 dimensions: they warn,
+  and a warning is shown by Python code. Anything else binds first: a
+  property, a descriptor or a `__getattr__` in Python, an operator or a
+  comparison that an object of the user's answers (also as an item of a list
+  that is compared), a `__bool__`, a `__len__`, an `__index__`, a
+  `__hash__`, a `__format__`, an iterator or a generator, a `map`, an
+  `import`, a `match`, every store into an object, a dict or a global (what
+  was there ends), and a getter of any other class. The getter of a frame's
+  `f_locals` is the look itself, and a traceback, a generator and a
+  coroutine lead to a frame;
 - at a branch on a value that is no bool, the same way;
 - where the function lets go of an object (a variable is bound over or
   deleted, the interpreter pops a value off its stack, an iterator comes to
@@ -3598,15 +3615,15 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does, on the code one step before this
-commit, which changes where a value on the interpreter's stack is let go of
-and no graph of these models (their graphs, operations, runs in a call and
-hits are the same on both): one process a row, the median of three turns, on
-16 cores under the lock for timed runs, with the load average between 1.8
-and 7.5 in front of a row (above 4 in front of three of them) and nothing
-else on the GPU. The graphs that run are those counted above (DistillGPT2
-with the operations it has on a GPU; of hf_DistilBert the graph of a layer
-and the one of its feed-forward part run six times each in a call):
+which is what the dashboard's runner does, on the code two steps before this
+commit; neither step changes a graph of these models (their graphs,
+operations, runs in a call and hits are the same on all three): one process
+a row, the median of three turns, on 16 cores under the lock for timed runs,
+with the load average between 1.8 and 7.5 in front of a row (above 4 in
+front of three of them) and nothing else on the GPU. The graphs that run are
+those counted above (DistillGPT2 with the operations it has on a GPU; of
+hf_DistilBert the graph of a layer and the one of its feed-forward part run
+six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
@@ -3627,7 +3644,7 @@ for five of the models (`python benchmarks/dynamo/torchbench.py
 --performance --inference --bfloat16 --only MODEL` with `--vm` and with
 `--backend inductor`, `timm_models.py` and `huggingface.py` for the models
 of those suites; one run each), which report the speed against eager mode,
-next to what the tool had on the runner's code. That is the code six steps
+next to what the tool had on the runner's code. That is the code seven steps
 before this commit (the one that changed which dicts the engine looks a name
 up in): the runner's lines were taken one after the other with the load
 average between 0.8 and 2.6 in front of a line and nothing else on the GPU,
@@ -3668,29 +3685,29 @@ same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the code one
-step before this commit, measured with the rows of the table in the runner's
-mode (the load average 6.0 and 4.2 in front of them). Seven steps before,
-when a graph gave only what the code behind it reads, another job had yolov3
-with gradients recorded at 7.67 ms (1.53 times eager's speed) in the process
-that fills the compiler's cache and at 7.73 ms (1.54) with the cache filled,
-and at 4.34 ms under `torch.no_grad()`; the graph runs in a first process as
-in a later one ("Limits"). Since then a graph gives what the variables of
-the function are bound to where its path lands as well ("Paths"): as the job
-that made the change counts them, the graph of yolov3 gives 77 results where
-it gave 49 (what the layers put into the list that the model keeps until its
-forward returns), the two small graphs of DistillGPT2 6 and 3 where they
-gave 3 and 1, and two graphs of whisper-tiny 7 and 4 where they gave 6 and
-3; the graphs of the other models give what they gave. With gradients
-recorded the graph of yolov3 is cut at 28 more of its results, those that it
-also reads ("Writes"). That costs yolov3 nothing that two takes of the row
-tell apart under `torch.no_grad()` (4.31 ms one step before this commit and
-4.48 three steps before it, on the same graph, for 4.34) and about a third
-with gradients recorded (10.47 ms and 9.98 for 7.67 and 7.73; 9.19 of the
-10.34 ms that the tool takes apart are in what stands for the graph). The
-rows of this section with gradients recorded that have two figures in a
-column are of code from before the change: a model whose forward binds a
-tensor that its graph reads again is cut there since.
+The rows of yolov3 and of DistillGPT2's training step are of the code two
+steps before this commit, measured with the rows of the table in the
+runner's mode (the load average 6.0 and 4.2 in front of them). Eight steps
+before, when a graph gave only what the code behind it reads, another job
+had yolov3 with gradients recorded at 7.67 ms (1.53 times eager's speed) in
+the process that fills the compiler's cache and at 7.73 ms (1.54) with the
+cache filled, and at 4.34 ms under `torch.no_grad()`; the graph runs in a
+first process as in a later one ("Limits"). Since then a graph gives what
+the variables of the function are bound to where its path lands as well
+("Paths"): as the job that made the change counts them, the graph of yolov3
+gives 77 results where it gave 49 (what the layers put into the list that
+the model keeps until its forward returns), the two small graphs of
+DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of whisper-tiny
+7 and 4 where they gave 6 and 3; the graphs of the other models give what
+they gave. With gradients recorded the graph of yolov3 is cut at 28 more of
+its results, those that it also reads ("Writes"). That costs yolov3 nothing
+that two takes of the row tell apart under `torch.no_grad()` (4.31 ms two
+steps before this commit and 4.48 four steps before it, on the same graph,
+for 4.34) and about a third with gradients recorded (10.47 ms and 9.98 for
+7.67 and 7.73; 9.19 of the 10.34 ms that the tool takes apart are in what
+stands for the graph). The rows of this section with gradients recorded that
+have two figures in a column are of code from before the change: a model
+whose forward binds a tensor that its graph reads again is cut there since.
 
 That gradients are recorded is why deit and hf_DistilBert are at eager's
 speed in their rows with gradients. Their attention is
@@ -3831,15 +3848,43 @@ What graphs do not do at this stage:
 - Loading the runtime, which the first `torch.vm(...)` of a process does,
   asks for the module `warnings` twice through `builtins.__import__`: a
   `__import__` that is not the interpreter's own is called for it.
-- Where a pass over graphs or a gradient stands for a path, Python code that
-  runs inside what was made of the graph, or among the reads that the path
-  makes in front of it, finds the frame of the function as it was in front
-  of the graph, without the variables that the graph gives. Two cases (with
-  `Graphs()` alone both find every variable): a warning that a kernel gives,
-  shown by a `warnings.showwarning` written in Python; and the
-  `__torch_function__` of a tensor of a subclass under a read of its
-  `shape`, `requires_grad` or `grad`, which a path takes for a read that
-  runs no code.
+- A warning is seen where a path is taken down by the frame of the function
+  getting its frame object, which whatever gives a warning from C asks for.
+  Where something had looked at the frame earlier in that call (an earlier
+  warning, a traceback of an exception the function caught,
+  `sys._getframe`), and for an operation that first warns at a later call,
+  the operation stays in the path: its warning is then given where what was
+  made of the graph runs, for that file and line (under the filter `error`
+  it is raised from there), and what shows it finds the frame as it was in
+  front of the graph. In the VM's own loop a kernel's warning has the
+  function's file and line, but the frames that show it are not offered to
+  the VM: a variable that waits for its object is still unbound for a
+  `warnings.showwarning` of the user's.
+- What the handler of a signal raises while what was made of a graph runs
+  leaves the function from in front of the graph, where the signal could as
+  well have come. Nothing looks for signals inside what the engine itself
+  makes of a graph, so a handler that waits for the function's frame to be
+  at a place does not find it there. What tells a handler's raise from a
+  raise of the function, of a pass or of what a pass made is the frame of
+  the signal's handler in the traceback. Three kinds of handler are not seen
+  that way: one that is a `functools.partial`, one written in C that raises
+  by itself, and one that is no longer its signal's handler when it raises.
+  An `Exception` from one of these is still swallowed (the call returns as
+  if no signal had come) while a pass over graphs runs, in the first run of
+  what a pass made, in a later run of it where the path stores into an
+  object, and while the first backward of a graph is compared with the
+  autograd engine's.
+- An audit hook (`sys.addaudithook`) is a tool that watches what runs, as a
+  trace function is, and is not asked for. The engine raises no event for
+  the reads it makes itself (the first `torch.vm(...)` of a process reads
+  the source of two methods of `nn.Module`, in Python, which a hook is told
+  of). A read of a function's `__code__`, `__defaults__` or `__kwdefaults__`
+  (the reads that tell the hooks) that is part of a path tells them where
+  the path runs it, in front of what stands for the graph: a hook finds the
+  frame as it was there, and if it raises, the call runs the instructions,
+  which tell it once more. What a pass over graphs does to make something of
+  a graph has events of its own (`compile`, `exec`, reads of `__code__` by
+  `torch.fx`), in the call that takes a path down.
 - `f_lasti` of the function's frame is not the interpreter's (`f_lineno` and
   `tb_lineno` are).
 - A call that starts while a trace function is set (`sys.settrace`) is the
@@ -3865,23 +3910,12 @@ What graphs do not do at this stage:
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from. With `Inductor()`
   every export is a compilation.
-- An `Exception` that the handler of a signal raises (a timeout) while a
-  pass over graphs runs, in the first run of what a pass made, in a later
-  run of it where the path stores into an object, or while the first
-  backward of a graph is compared with the autograd engine's, is swallowed:
-  the call returns as if no signal had come. A `KeyboardInterrupt` gets
-  through.
 - While a `TorchFunctionMode` is on, the default pass that puts an accessor
   in place of a read of `shape` or `ndim` of a tensor, or of a call of its
   `dim()` or `size(0)` (`TensorAccessors`), does not ask the mode from the
   second call on: a mode that returns something else for them changes what
   the function computes. With that pass left out of the list the mode is
   asked for them as in eager mode.
-- While a `TorchFunctionMode` is on and `Graphs()` is in the list, the call
-  a path is taken down from asks the mode for seven reads that the engine
-  makes for itself (`untyped_storage`, `layout`, `is_quantized`,
-  `is_nested`, `is_mkldnn`, `grad`, `_base`) of a tensor that the function
-  read off its argument (`x.T`, `x.data`).
 - What a process puts on `torch.Tensor` or on `torch.nn.Parameter` under
   `shape`, `ndim`, `dim` or `size` (a property, a function), and a
   `__getattribute__` that it puts on `torch.Tensor`, is not called where the

@@ -422,10 +422,9 @@ pub fn lower(
     func: &pyo3::Bound<'_, pyo3::PyAny>,
     options: &Options,
 ) -> pyo3::PyResult<Function> {
-    use pyo3::prelude::*;
     let mut function = frontend::build(py, table, func)?;
     if options.inline {
-        inline::inline_calls(py, table, &mut function, &func.getattr("__code__")?);
+        inline::inline_calls(py, table, &mut function, &frontend::code_of(func)?);
     }
     if options.unroll {
         function.unrolled = unroll::unroll_loops(&mut function, options.max_trip_count);
@@ -1308,6 +1307,9 @@ unsafe fn versions_of(values: &[Obj], api: &TcfgApi) -> Vec<(Obj, u64)> {
 
 /// Why an operation that changed what kind of tensor one from outside the
 /// path is (its sizes, whether it requires a gradient) ends the path.
+/// Why a path ends in front of an instruction that gave a warning when a
+/// path of the graph was taken down.
+const WARNS: &str = "gave a warning when a path was taken down";
 const CHANGES_KIND: &str = "changes the sizes of a tensor from outside, or whether it requires a gradient";
 
 /// The kind, sizes and strides of each tensor among some values, as the
@@ -6290,6 +6292,15 @@ impl Compiled {
             // done yet, and the instructions would raise it too. One that
             // has not is taken back, and the instructions run from then on.
             let proven = exported.proven.load(Ordering::Relaxed);
+            if graph::interrupted() {
+                // What came between the instructions of the callable and
+                // was raised by none of them (an interrupt, what the
+                // handler of a signal raised) says nothing about the
+                // form: it leaves the function from in front of the path,
+                // where the signal could as well have come.
+                leave(own);
+                return Ran::Landed(Landing { block: usize::MAX, code: std::ptr::null(), pc: bc as usize });
+            }
             if path.mutates {
                 // What the callable wrote before it raised cannot be taken
                 // back, and the instructions would write it again: what it
@@ -7263,6 +7274,12 @@ impl Compiled {
         let Some(kind) = kind else {
             return ends();
         };
+        // One that gave a warning when it ran for a path of this graph: a
+        // warning is shown by Python code, for the place the function is
+        // at, so the instruction runs where the function has it.
+        if site.shuns((t.owners[t.owner() as usize], inst.bc)) == Some(WARNS) {
+            return Taken::Ends(WARNS.to_string());
+        }
         // A method that was bound to a tensor earlier is called as the
         // method of that name of the value it was read off; what the code
         // spreads into a call is handed over item by item.
@@ -7586,6 +7603,13 @@ impl Compiled {
         if self.unbound.any.get() && !matches!(inst.op, Op::Dispatch(_)) && self.looks(regs, &inst.op) {
             self.bind();
         }
+        // What gives a warning from C asks for the frame that is running,
+        // which gets its frame object for that if it has none. Python code
+        // that the instruction gets to (a finalizer, a callback) can ask for
+        // it too: the frames it starts are counted, those of a warning that
+        // is shown as the frames of a kernel.
+        let entered = || api.frame_count.map_or(0, |count| count()) - kernel_frames();
+        let unseen = Some((frames.top().ptr, entered())).filter(|_| !frames.top().looked_at());
         let result = match (&inst.op, kind) {
             (Op::Dispatch(d), Kind::Node) => {
                 // A write to what is the path's own is no write to what it
@@ -7648,6 +7672,7 @@ impl Compiled {
             }
             (op, _) => self.exec_op(regs, op).map(|obj| (obj, null_mut())),
         };
+        let warned = result.is_ok() && unseen == Some((frames.top().ptr, entered())) && frames.top().looked_at();
         let result = match result {
             Ok((obj, _)) if inst.op.is_call() && (self.options.hook || !self.unbound.any.get()) && ffi::PyErr_CheckSignals() != 0 => {
                 capi::release(obj);
@@ -7658,6 +7683,16 @@ impl Compiled {
         let Ok((obj, picked)) = result else {
             return Taken::Raised;
         };
+        if warned {
+            // No instruction of a path looks at the frame: a warning was
+            // given. The paths of the graph end in front of it from now
+            // on, and this run is none to make a form of.
+            site.shun((t.owners[t.owner() as usize], inst.bc), WARNS);
+            t.again = true;
+            if !obj.is_null() {
+                return Taken::Cut(obj, WARNS.to_string());
+            }
+        }
         // What it gave is kept for the graph to be described with: a tensor
         // with its Python object.
         let obj = if capi::is_unboxed(obj) {
@@ -10183,8 +10218,16 @@ impl Compiled {
                         // trace has nothing of the instruction: it is as
                         // it was, or is cut back in front of the call or
                         // the inlined call that it is in.
+                        // Not behind what came between the instructions
+                        // (a signal's handler raised, an interrupt): the
+                        // instruction did not raise it, and nothing is
+                        // made of this run, for as many times as a graph
+                        // is taken down again for anything: a function
+                        // that is interrupted in every call it is taken
+                        // down in gets the path in front after that.
                         let clean = had == (t.body.len(), t.stores.len(), t.classes.len()) && !t.absent;
-                        let front = (t.mark.is_some() || (clean && t.outermost())).then_some((code, pc));
+                        let whole = t.mark.is_some() || (clean && t.outermost());
+                        let front = (whole && !(graph::interrupted() && site.retakes())).then_some((code, pc));
                         return Walked::Raised(b, c.insts[pc].bc, front);
                     }
                     Taken::Deopt(at) => return Walked::Deopt(b, at),
@@ -10192,7 +10235,8 @@ impl Compiled {
                         // The call has run: the function has what it gave.
                         let inst = &c.insts[pc];
                         if result.is_null() {
-                            return Walked::Raised(b, inst.bc, t.mark.is_some().then_some((code, pc)));
+                            let front = t.mark.is_some() && !(graph::interrupted() && site.retakes());
+                            return Walked::Raised(b, inst.bc, front.then_some((code, pc)));
                         }
                         if inst.dst == NONE {
                             capi::release(result);
@@ -10429,10 +10473,12 @@ impl Compiled {
         // The block gets a version that enters such a graph, and this
         // path is taken down again at the next call, so that it lands in
         // that version.
+        let next = || (&(*code).origins).get(pc + 1..).and_then(|rest| rest.iter().find(|o| **o != NONE)).copied();
         let behind = match cut {
-            Some((_, false)) if !(afresh || t.provisional || t.again) => {
-                (&(*code).origins).get(pc + 1..).and_then(|rest| rest.iter().find(|o| **o != NONE)).copied()
-            }
+            Some((_, false)) if !(afresh || t.provisional || t.again) => next(),
+            // The same behind an operation of the function itself that no
+            // path goes over because it gave a warning.
+            None if !(left || afresh || t.again) && ends == WARNS => next(),
             _ => None,
         };
         let mut moved = false;
