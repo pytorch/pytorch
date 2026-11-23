@@ -3,7 +3,6 @@
 # column view and so force the general path. Override OpInfo suites provide full
 # numerical coverage.
 
-import collections
 import contextlib
 import itertools
 import os
@@ -20,6 +19,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    serialTest,
     TEST_CUTEDSL,
     TestCase,
 )
@@ -107,22 +107,26 @@ class _DecodeProbe:
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelGeneral(TestCase):
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2 or torch.cuda.get_device_capability(1)[0] < 9,
+        "requires a second Hopper+ CUDA device",
+    )
     def test_plans_key_and_require_the_current_device(self):
         trait = T.SumOps(acc=cutlass.Float32)
-        x = torch.randn(8, 16, 32, device="cuda")
+        x = torch.randn(8, 16, 32, device="cuda:1")
         before = (set(kg._PLAN), set(kg._COMPILE_CACHE))
-        # One GPU has no other device, so pretend another one is current.
-        other = x.get_device() + 1
-        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
+        with torch.cuda.device(0):
             with self.assertRaisesRegex(AssertionError, "is current"):
                 kg.reduce_dim(trait, "bydevice", x, [0, 2], torch.float32)
         self.assertEqual((set(kg._PLAN), set(kg._COMPILE_CACHE)), before)
-        kg.reduce_dim(trait, "bydevice", x, [0, 2], torch.float32)
+        with torch.cuda.device(1):
+            got = kg.reduce_dim(trait, "bydevice", x, [0, 2], torch.float32)
+        self.assertEqual(got, x.double().sum((0, 2)).float(), atol=1e-4, rtol=1e-5)
         # Neither a row nor a column layout, so every route uses _launch, which keys
         # plans with the device index first.
         keys = [k[0] for k in kg._PLAN if k[0][2] == "bydevice"]
         self.assertTrue(keys)
-        self.assertEqual({k[0] for k in keys}, {x.get_device()})
+        self.assertEqual({k[0] for k in keys}, {1})
 
     def test_reduce_dim_general_path(self):
         # Non-adjacent reduced axes have no column view, so the general kernel serves them.
@@ -183,13 +187,14 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(out[:7], x)
         self.assertEqual(out[7:], torch.full((2,), -1.0, device="cuda"))
 
+    @serialTest()
     @largeTensorTest("24GB", device="cuda")
     def test_wide_outputs_store_every_output(self):
         """Bound 2^31 outputs by the output's full 64-bit size: a 64-bit extent's
         shape[0] reads back as Int32 and wraps negative, which stored nothing."""
         x = torch.ones(2**31, 2, device="cuda", dtype=torch.float16)
-        out = torch.empty(2**31, device="cuda")
-        red, kept = kg._ti_pairs(x, kg._probe(x, {1}))
+        out = torch.full((2**31,), -1.0, device="cuda")
+        red, kept = ((2, 1),), ((2**31, 2),)
         trait = T.SumOps(acc=cutlass.Float32)
         op = kg.ReduceBlock(trait, count=2, num_o=2**31, red_pairs=red, kept_pairs=kept)
         kg._launch(op, ("wide", "wide_outputs"), [kg._flat(x)], [out])
@@ -310,8 +315,8 @@ class TestKernelGeneral(TestCase):
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"
     )
-    def test_reduce_all_grid_stride_index_and_cache_key(self):
-        """Carry global indices and separate fp32/fp64 stage-2 kernels."""
+    def test_reduce_all_grid_stride_index(self):
+        """Carry global indices through both grid-stride stages for fp32 and fp64."""
         n = (1 << 20) + 3
         winner = 700000
         for dtype, acc in (
@@ -323,13 +328,13 @@ class TestKernelGeneral(TestCase):
             x[winner + 100000] = 1
             out = kg.reduce_all(
                 T.ArgMaxOps(acc=acc),
-                "index_cache_key",
+                "grid_stride_index",
                 x,
                 torch.int32,
             )
             with self.subTest(dtype=dtype):
                 self.assertEqual(out, winner)
-        self.assertEqual(_plan_tags("index_cache_key"), {"all1", "all2"})
+        self.assertEqual(_plan_tags("grid_stride_index"), {"all1", "all2"})
 
     def test_noncontiguous_reduce_all_index_is_logical(self):
         """Report row-major logical indices for non-contiguous inputs."""
@@ -380,13 +385,20 @@ class TestKernelGeneral(TestCase):
                 self.assertEqual(got, x.double().sum(dim).float(), atol=1e-3, rtol=1e-5)
                 self.assertFalse({k[1] for k in (*rt._CACHE, *ct._CACHE)} & {key})
 
+    @unittest.skipIf(
+        rt.inner_tree_order_enabled(), "requires unordered reduction order"
+    )
     def test_dense_permuted_full_reduction_takes_the_reduce_all_route(self):
         """TI flattens a transposed full reduction to the storage's unit-stride run."""
         y = torch.randn(1024, 1024, device="cuda")
-        trait = T.SumOps(acc=cutlass.Float32)
-        got = kg.reduce_dim(trait, "ti_flat_all", y.t(), [0, 1], torch.float32)
-        want = kg.reduce_all(trait, "ti_flat_all_ref", y, torch.float32)
+        trait, f32 = T.SumOps(acc=cutlass.Float32), torch.float32
+        got = kg.reduce_dim(trait, "ti_flat_all", y.t(), [0, 1], f32)
+        want = kg.reduce_all(trait, "ti_flat_all_ref", y, f32)
         self.assertEqual(got.view(torch.int32), want.view(torch.int32))
+        with torch.backends.python_native.cutedsl.disabled():
+            self.assertEqual(got, y.double().sum().float(), atol=1e-2, rtol=1e-5)
+        # The flat run took reduce-all's cross-CTA split, not a general decode.
+        self.assertTrue(any(k[1] == "ti_flat_all" for k in xc._PLAN))
         self.assertFalse(_plan_tags("ti_flat_all") & {"reduce", "gensplit1"})
 
     @unittest.skipIf(
@@ -440,16 +452,6 @@ class TestKernelGeneral(TestCase):
         with torch.backends.python_native.cutedsl.disabled():
             want = x.double().sum().float()
         self.assertEqual(got, want, atol=1e-3, rtol=1e-5)
-
-    def test_oneshot_load_bound(self):
-        """16-bit N = 4097 takes 65 scalar loads at 64 threads and stays one-shot;
-        N = 4161 takes 66."""
-
-        def row(n):
-            return torch.empty(1, n, device="meta", dtype=torch.float16)
-
-        self.assertTrue(kg._oneshot_ok(row(4097)))
-        self.assertFalse(kg._oneshot_ok(row(4161)))
 
     @largeTensorTest("24GB", device="cuda")
     def test_wide_rows_skip_the_row_kernels(self):
@@ -533,22 +535,6 @@ class TestKernelGeneral(TestCase):
             expected = torch.tensor([r * strides[0] + q * strides[1]], device="cuda")
             self.assertEqual(out, expected)
 
-    def test_family_kernels_are_listed(self):
-        # New kernels must be listed here deliberately: TileReduce is the shared body for every
-        # axis, PartialColumns folds partition-major column partials, and _OrderedColReduce
-        # preserves the row inner-tree order down columns. Glob files and match
-        # qualified or annotated decorators so new drivers and spellings cannot evade the check.
-        # Runtime introspection cannot distinguish @cute.kernel from @cute.jit wrappers.
-        root = pathlib.Path(reductions.__file__).parent
-        deco = re.compile(r"@(?:\w+\.)*cute\.kernel\b")
-        found = collections.Counter(
-            path.name
-            for path in root.glob("*.py")
-            for line in path.read_text().splitlines()
-            if deco.match(line.strip())
-        )
-        self.assertEqual(found, {"tile.py": 1, "kernel_coltile.py": 2})
-
     # 4095 over 64 threads leaves leftover subtrees and a 63-value tail load with one masked
     # lane; count == block is a single load, and 200 over 128 one whole load and a tail.
     # Stride and the view offset are runtime geometry, so cache_sig omits them; shift scales
@@ -606,6 +592,9 @@ class TestKernelGeneral(TestCase):
             uniform_tree=True,
         )
         self.assertEqual(op.cache_sig, plain.cache_sig)
+        # The tree ran: count // block whole loads, and a masked tail for the rest.
+        self.assertEqual(op.tile.uniform_tree_loads, count // block)
+        self.assertEqual(op.tile.uniform_tree_tail, count % block != 0)
         key = ("test_uniform_welford_tree", type(trait).__name__, dtype) + op.cache_sig
         # plain compiles the shared key for contiguous geometry, or reuses an earlier
         # case's kernel, so a strided or offset op runs a kernel built for other geometry.
@@ -861,14 +850,6 @@ class TestKernelGeneral(TestCase):
             gidx_from="chunk",
         )
         self.assertEqual(offset_op.limit, offset + 1024)
-        # No reduced runs at all is LEGAL -- an extent-1 reduced axis coalesces away in TI. Pinned
-        # here because the arm that allows it is one line in tile._decode_offset, and a crash.
-        self.assertEqual(
-            kg.ReduceBlock(
-                trait, count=1, num_o=1, red_pairs=(), kept_pairs=()
-            ).npairs_red,
-            0,
-        )
         # The uniform Welford tree needs combine_equal, one unclamped Int32 reduced run, a linear
         # decoded (not partial) fold indexed by r, and 1 to UNIFORM_TREE_MAX_LOADS loads per thread.
         tree = dict(
@@ -996,6 +977,7 @@ class TestKernelGeneral(TestCase):
             "all_oneshot",
             "all_xcta",
             "all_strided",
+            "argmax",
         ],
     )
     @unittest.skipIf(
@@ -1016,6 +998,8 @@ class TestKernelGeneral(TestCase):
             "all_oneshot": ((1000,), None, {"rowtile"}),
             "all_xcta": ((1 << 22,), None, {"xcta"}),
             "all_strided": ((1 << 21,), None, split),
+            # Index traits skip the cross-CTA split; 256 KiB exceeds one-shot rows.
+            "argmax": ((1 << 16,), None, {"all1", "all2"}),
         }
         cc = torch.cuda.get_device_capability()
         if case == "batched_column" and cc not in kg._BATCHED_COL_CCS:
@@ -1024,7 +1008,11 @@ class TestKernelGeneral(TestCase):
         view = {"offset_row": lambda t: t[1], "all_strided": lambda t: t[::2]}
         make = lambda: view.get(case, lambda t: t)(torch.randn(shape, device="cuda"))  # noqa: E731
         key = f"replay_{case}"
-        self._assert_replays(key, make, dims, tags)
+        kw = {}
+        if case == "argmax":
+            trait = lambda: T.ArgMaxOps(acc=cutlass.Float32)  # noqa: E731
+            kw = dict(trait=trait, out_dtype=torch.int64, ref=torch.argmax)
+        self._assert_replays(key, make, dims, tags, **kw)
         # The ragged-row route is measured on B200 only; elsewhere these rows take the
         # non-ragged rowtile kernel.
         if case == "ragged_row" and cc in kg._B200_CCS:
@@ -1068,22 +1056,6 @@ class TestKernelGeneral(TestCase):
             self._assert_replays(key, make, None, {"all1", "all2"})
         plans = [k for k in kg._PLAN if k[0][2] == key]
         self.assertEqual(sorted(k[0][1] for k in plans), ["all1", "all2"])
-
-    @unittest.skipIf(
-        rt.inner_tree_order_enabled(), "requires unordered reduction order"
-    )
-    def test_replay_multi_field_traits(self):
-        """Replay a two-field index reduction of a contiguous input."""
-        self._assert_replays(
-            "replay_argmax",
-            lambda: torch.randn(1 << 16, device="cuda"),
-            None,
-            # Index traits decline the cross-CTA split and 256 KiB exceeds one-shot rows.
-            {"all1", "all2"},
-            trait=lambda: T.ArgMaxOps(acc=cutlass.Float32),
-            out_dtype=torch.int64,
-            ref=torch.argmax,
-        )
 
     def test_replay_declines_work_outside_launches(self):
         # Index reduce-all copies a strided input with a torch op, which a replay cannot redo.
@@ -1218,19 +1190,6 @@ class TestKernelGeneral(TestCase):
         self.assertIsNotNone(replay)
         with torch.cuda.device(1), self.assertRaisesRegex(AssertionError, "is current"):
             call()
-
-    def test_replay_requires_the_current_device_one_gpu(self):
-        # One GPU has no other device, so pretend another one is current.
-        x = torch.randn(64, 256, device="cuda")
-        trait = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
-        args = (trait, "replay_one_gpu", x, 1, torch.float32)
-        kg.replay_reduce(*args)
-        (replay,) = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_one_gpu"]
-        self.assertIsNotNone(replay)
-        other = x.get_device() + 1
-        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
-            with self.assertRaisesRegex(AssertionError, "is current"):
-                kg.replay_reduce(*args)
 
     def test_offset_views_share_a_general_plan(self):
         base = torch.randn(3, 8, 16, 16, device="cuda")

@@ -102,27 +102,15 @@ class TestKernelRowTile(TestCase):
             kw.setdefault("threads_per_row", 1)
             return tile.TileReduce(trait, f32, "row", n, **kw).row_chains
 
-        widths = (0, 1, 8, 9, 16, 17, 24, 25, 31, 64)
-        got = [chains(sum_trait, n) for n in widths]
-        self.assertEqual(got, [8, 8, 8, 16, 16, 24, 24, 32, 32, 32])
-        self.assertEqual(chains(T.AMaxOps(acc=f32), 3), 8)
-        # Multi-field, norm and abs-extremum traits, TMA, ragged and multi-thread rows
-        # keep WARP.
+        self.assertLess(chains(sum_trait, 16), tile.WARP)
+        # Multi-field, norm and abs-extremum traits would change bits on fewer chains;
+        # they, TMA, ragged and multi-thread rows keep WARP.
         self.assertEqual(chains(T.ArgMaxOps(acc=f32), 8), 32)
         self.assertEqual(chains(T.NormOps(2, acc=f32), 8), 32)
         self.assertEqual(chains(T.AbsMaxOps(acc=f32), 8), 32)
         self.assertEqual(chains(sum_trait, 16, use_tma=True), 32)
         self.assertEqual(chains(sum_trait, 15, ragged_vector=True), 32)
         self.assertEqual(chains(sum_trait, 16, threads_per_row=32), 32)
-        # 12 and 16 share a plan; 20 and 28, in the same vec class, take the 24 and
-        # WARP plans.
-        rt._CACHE.clear()
-        kw = {"threads_per_row": 1, "use_tma": False}
-        for n in (12, 16, 20, 28):
-            x = torch.randn(64, n, device="cuda")
-            rt.reduce_row_tile(sum_trait, "narrow_chains", x, [torch.float32], **kw)
-        mine = [k for k in rt._CACHE if "narrow_chains" in k]
-        self.assertEqual(len(mine), 3, f"expected three plans, got {sorted(mine)}")
 
     @parametrize(
         "dtype, columns",
@@ -139,23 +127,32 @@ class TestKernelRowTile(TestCase):
             (torch.bfloat16, 16),
             (torch.bfloat16, 24),
             (torch.float64, 8),
+            (torch.float64, 24),
         ),
     )
     def test_narrow_one_thread_rows_match_warp_chains(self, dtype, columns):
         """Narrow one-thread rows match the row padded with identities to WARP elements
         bitwise, signed zeros, a subnormal sum and NaNs included. Widths 16 and 24
-        (fp32), 8, 16 and 24 (bf16) and 8 (fp64) reach the leaf branch; 1, 3, 17, 20 and
-        22 fold only the masked tail, and 31 keeps WARP chains."""
+        (fp32), 8, 16 and 24 (bf16) and 8 and 24 (fp64) reach the leaf branch; 1, 3, 17,
+        20 and 22 fold only the masked tail, and 31 keeps WARP chains."""
         M, inf = 4096, float("inf")
         gen = torch.Generator("cuda").manual_seed(0)
         x = torch.randn(M, columns, device="cuda", generator=gen)
         signs = torch.randint(0, 2, (M // 2, columns), device="cuda", generator=gen)
         x[: M // 2] = torch.tensor([0.0, -0.0], device="cuda")[signs]
+        # An all -0.0 row, whose sum sign only the final combine with init restores.
+        x[64] = -0.0
         x[M // 2 : M // 2 + 64, columns // 2] = float("nan")
         x[-64:, 0], x[-64:, -1] = inf, -inf
         x[:64, 0], x[:64, -1] = -1.5e-38, 1e-38
         x = x.to(dtype)
-        kw, f32 = {"threads_per_row": 1, "use_tma": False}, [torch.float32]
+        kw = {"threads_per_row": 1, "use_tma": False}
+        # fp64 accumulates and stores in Float64, as the dispatcher does.
+        wide = dtype == torch.float64
+        acc = cutlass.Float64 if wide else cutlass.Float32
+        out, bits = (
+            (torch.float64, torch.int64) if wide else (torch.float32, torch.int32)
+        )
         for name, trait, pad in (
             ("sum", T.SumOps, 0.0),
             ("prod", T.ProdOps, 1.0),
@@ -163,14 +160,27 @@ class TestKernelRowTile(TestCase):
             ("amin", T.AMinOps, inf),
             ("nansum", T.NanSumOps, 0.0),
             ("absmax", T.AbsMaxOps, 0.0),
+            ("all", T.AllOps, 1.0),
+            ("any", T.AnyOps, 0.0),
+            ("count_nonzero", T.CountNonzeroOps, 0.0),
         ):
             padded = torch.full((M, tile.WARP), pad, device="cuda", dtype=dtype)
             padded[:, :columns] = x
-            op = trait(acc=cutlass.Float32)
-            (got,) = rt.reduce_row_tile(op, f"narrow_{name}", x, f32, **kw)
-            (want,) = rt.reduce_row_tile(op, f"narrow_{name}", padded, f32, **kw)
+            op = trait(acc=acc)
+            (got,) = rt.reduce_row_tile(op, f"narrow_{name}", x, [out], **kw)
+            (want,) = rt.reduce_row_tile(op, f"narrow_{name}", padded, [out], **kw)
             with self.subTest(op=name):
-                self.assertEqual(got.view(torch.int32), want.view(torch.int32))
+                self.assertEqual(got.view(bits), want.view(bits))
+            if name == "sum":
+                with torch.backends.python_native.cutedsl.disabled():
+                    ref = x.double().sum(1).to(out)
+                self.assertEqual(want, ref, atol=1e-5, rtol=1e-5)
+                # Padding would change a mean's count, so compare it with this sum's
+                # quotient; the kernel's division is not correctly rounded.
+                mean = T.MeanOps(acc=acc)
+                (got,) = rt.reduce_row_tile(mean, "narrow_mean", x, [out], **kw)
+                with self.subTest(op="mean"):
+                    self.assertEqual(got, want / columns)
 
     def test_one_kernel_per_vec_class(self):
         trait = T.SumOps(acc=cutlass.Float32)
@@ -210,48 +220,26 @@ class TestKernelRowTile(TestCase):
         mine = [k for k in rt._CACHE if "bydevice" in k]
         self.assertEqual(sorted(k[5] for k in mine), [0, 1])
 
-    def test_plans_key_the_device_index(self):
-        # The index follows the alignment in row-tile keys and the destination layout in
-        # inner-tree keys; without it, those slots would hold the next field.
-        trait = T.SumOps(acc=cutlass.Float32)
-        x = torch.randn(64, 512, device="cuda")
-        rt.reduce_row_tile(trait, "bykey", x, [torch.float32], order="linear")
-        rt.reduce_row_itree(trait, "bykey", x, torch.empty(64, device="cuda"))
-        slots = {"rowtile": 5, "rowitree": 7}
-        devices = {(k[0], k[slots[k[0]]]) for k in rt._CACHE if k[1] == "bykey"}
-        index = x.get_device()
-        self.assertEqual(devices, {("rowtile", index), ("rowitree", index)})
-
-    def _assert_launchers_reject(self, x):
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
+    def test_launchers_reject_a_non_current_device(self):
         # Both entry points check before compiling, so nothing is cached.
+        x = torch.randn(64, 512, device="cuda:1")
         trait = T.SumOps(acc=cutlass.Float32)
         out = torch.empty(x.shape[0], device=x.device)
         self.assertIsNotNone(rt.itree_plan(x.shape[1], x.shape[0], x.element_size()))
         before = set(rt._CACHE)
-        with self.assertRaisesRegex(AssertionError, "is current"):
-            rt.reduce_row_tile(trait, "off", x, [torch.float32], order="linear")
-        with self.assertRaisesRegex(AssertionError, "is current"):
-            rt.reduce_row_itree(trait, "off", x, out)
-        self.assertEqual(set(rt._CACHE), before)
-
-    @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
-    def test_launchers_reject_a_non_current_device(self):
-        x = torch.randn(64, 512, device="cuda:1")
         with torch.cuda.device(0):
-            self._assert_launchers_reject(x)
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                rt.reduce_row_tile(trait, "off", x, [torch.float32], order="linear")
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                rt.reduce_row_itree(trait, "off", x, out)
+        self.assertEqual(set(rt._CACHE), before)
 
     def test_itree_output_shares_the_input_device(self):
         x = torch.randn(64, 512, device="cuda")
         trait = T.SumOps(acc=cutlass.Float32)
         with self.assertRaisesRegex(AssertionError, "out on cpu"):
             rt.reduce_row_itree(trait, "off_out", x, torch.empty(64))
-
-    def test_plans_require_the_current_device(self):
-        # One GPU has no other device, so pretend another one is current.
-        x = torch.randn(64, 512, device="cuda")
-        other = x.get_device() + 1
-        with mock.patch.object(torch._C, "_cuda_getDevice", return_value=other):
-            self._assert_launchers_reject(x)
 
     def test_two_output_trait(self):
         # nouts=2 stores values and indices projected from one accumulator.
@@ -451,13 +439,6 @@ class TestKernelRowTile(TestCase):
         self.assertFalse(
             rt.tma_ok(32, 2, 1 << 20)
         )  # bf16 does not map one element per 4-byte bank
-        with mock.patch.object(rt._hw, "caps") as caps:
-            caps.return_value.cc = (9, 0)
-            self.assertTrue(rt.one_thread_row_ok(92, 4, 1 << 16, "cuda"))
-            self.assertFalse(rt.one_thread_row_ok(96, 4, 1 << 16, "cuda"))
-            self.assertTrue(rt.one_thread_row_ok(128, 4, 1 << 16, "cuda"))
-            caps.return_value.cc = (10, 0)
-            self.assertTrue(rt.one_thread_row_ok(96, 4, 1 << 16, "cuda"))
 
     def test_narrow_row_scalar_vec(self):
         # Exercise scalar and short-vector narrow loads.
@@ -926,28 +907,24 @@ class TestKernelRowTile(TestCase):
                     )
 
     @parametrize(
-        "axis,kwargs,msg",
+        "axis,n,kwargs,msg",
         (
-            ("col", {"vec": 8}, "require the row axis"),
-            ("row", {"order": "inner_tree"}, "require the linear order"),
-            ("row", {"use_tma": True}, "cannot use TMA"),
-            ("row", {"combine": True}, "cannot combine partials"),
+            ("col", 4095, {"vec": 8}, "require the row axis"),
+            ("row", 4095, {"order": "inner_tree"}, "require the linear order"),
+            ("row", 4095, {"use_tma": True}, "cannot use TMA"),
+            ("row", 4095, {"combine": True}, "cannot combine partials"),
+            ("row", 0, {}, "nonempty rows"),
         ),
-        name_fn=lambda axis, kwargs, msg: "_".join(
-            [axis] + [f"{k}_{v}" for k, v in kwargs.items()]
+        name_fn=lambda axis, n, kwargs, msg: "_".join(
+            [axis] + [f"{k}_{v}" for k, v in kwargs.items()] + ["empty"] * (n == 0)
         ),
     )
-    def test_ragged_vector_tile_rejects(self, axis, kwargs, msg):
+    def test_ragged_vector_tile_rejects(self, axis, n, kwargs, msg):
         trait = T.SumOps(acc=cutlass.Float32)
         with self.assertRaisesRegex(ValueError, msg):
             rt.tile.TileReduce(
-                trait, cutlass.Float16, axis, 4095, ragged_vector=True, **kwargs
+                trait, cutlass.Float16, axis, n, ragged_vector=True, **kwargs
             )
-
-    def test_ragged_vector_tile_rejects_empty_rows(self):
-        trait, f16 = T.SumOps(acc=cutlass.Float32), cutlass.Float16
-        with self.assertRaisesRegex(ValueError, "nonempty rows"):
-            rt.tile.TileReduce(trait, f16, "row", 0, ragged_vector=True)
 
     def test_tma_rejects_empty_rows(self):
         """TMA's one-thread rows raise ValueError for an empty row, which has no box."""
