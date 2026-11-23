@@ -55,7 +55,8 @@ TEST(TestMath, TestIsInf) {
   EXPECT_TRUE(_isinf(torch::headeronly::Half(finf)));
   EXPECT_FALSE(_isinf(torch::headeronly::BFloat16(1.0f)));
   EXPECT_TRUE(_isinf(torch::headeronly::BFloat16(finf)));
-  EXPECT_TRUE(_isinf(torch::headeronly::Float8_e5m2(finf)));
+  EXPECT_TRUE(
+      _isinf(std::numeric_limits<torch::headeronly::Float8_e5m2>::infinity()));
 
   // the fn/fnuz formats have no encoding for infinity
   EXPECT_FALSE(_isinf(torch::headeronly::Float8_e4m3fn(1.0f)));

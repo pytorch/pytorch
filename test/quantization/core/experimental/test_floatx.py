@@ -150,9 +150,7 @@ SPECIAL_NUMBERS = {
     ],
 }
 
-FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
-
-FLOAT8_DTYPES_SATURATE_ON_OVERFLOW = [torch.float8_e4m3fn]
+FLOAT8_DTYPES_SATURATE_ON_OVERFLOW = [torch.float8_e4m3fn, torch.float8_e5m2]
 
 
 def _int_bits_to_float(x):
@@ -205,12 +203,10 @@ def simulate_fp8_precision(input, variant):
     # Re-compose mantissa and exponent
     vals = (mantissa_val_rounded * 2.0 ** (-23 + exponent)).to(dtype)
 
-    # Replace overflows: inf for types that have it, saturate to max for types
-    # that use satfinite semantics, NaN otherwise
+    # Replace overflows: saturate to max for types that use satfinite
+    # semantics, NaN otherwise
     overflow = vals > torch.finfo(variant).max
-    if variant in FLOAT8_DTYPES_WITH_INF:
-        vals[overflow] = torch.inf
-    elif variant in FLOAT8_DTYPES_SATURATE_ON_OVERFLOW:
+    if variant in FLOAT8_DTYPES_SATURATE_ON_OVERFLOW:
         vals[overflow] = torch.finfo(variant).max
     else:
         vals[overflow] = torch.nan
