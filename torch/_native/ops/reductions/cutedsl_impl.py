@@ -194,9 +194,13 @@ def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
     out_kd = _out_keepdim_view(self, d, keepdim, out)
     if out_kd is None:
         return False
-    # Probe a fresh tensor of out's geometry: TensorIterator takes its outputs'
-    # mutable data pointers, which would materialize a copy-on-write out.
-    probe = out_kd.new_empty_strided(out_kd.shape, out_kd.stride())
+    # TensorIterator takes its outputs' mutable data pointers, which would materialize
+    # a copy-on-write out, so probe those (and subclasses, where _is_cow_tensor raises)
+    # with a fresh tensor of out's geometry. Others probe as is: a fresh tensor would
+    # allocate out's whole strided span.
+    probe = out_kd
+    if type(out_kd) is not torch.Tensor or torch._C._is_cow_tensor(out_kd):
+        probe = out_kd.new_empty_strided(out_kd.shape, out_kd.stride())
     return _eligibility(self, d, probe) is not None
 
 
