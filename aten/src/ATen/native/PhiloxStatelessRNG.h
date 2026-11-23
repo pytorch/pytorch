@@ -23,8 +23,12 @@ constexpr int elems_per_call = sizeof(scalar_t) == 8 ? 2 : 4;
 // reduction scales as range / 2^32; this bounds it to ~6%.
 constexpr uint64_t kMaxRange32 = uint64_t{1} << 28;
 
-inline void philox_check_bound(
-    const char* op_name, const char* name, const Tensor& bound, const Tensor& self) {
+// Validates a tensor bound and converts it to dtype. The kernels write self
+// while the bound is still read, so a bound sharing self's storage is cloned:
+// assert_no_overlap lets through aliases it can't analyze (e.g. a non-dense
+// view of self).
+inline Tensor philox_prepare_bound(
+    const char* op_name, const char* name, const Tensor& bound, const Tensor& self, ScalarType dtype) {
   TORCH_CHECK(bound.is_floating_point(),
       op_name, ": ", name, " must be a floating point tensor, got ",
       bound.scalar_type());
@@ -32,6 +36,8 @@ inline void philox_check_bound(
       op_name, ": ", name, " shape ", bound.sizes(),
       " is not broadcastable to the output shape ", self.sizes());
   at::assert_no_overlap(self, bound);
+  auto converted = bound.to(dtype);
+  return converted.is_alias_of(self) ? converted.clone() : converted;
 }
 
 // Where a shard (the output) sits within a row-major global tensor that a
@@ -60,6 +66,7 @@ inline PhiloxShardLayout philox_shard_layout(
       self.device(), " and ", key.device());
   TORCH_CHECK(key.dim() == 1 && key.size(0) == 2,
       op_name, ": key must have shape (2,), got shape ", key.sizes());
+  at::assert_no_internal_overlap(self);
   const int64_t ndim = self.dim();
   TORCH_CHECK(
       static_cast<int64_t>(global_shape.size()) == ndim &&

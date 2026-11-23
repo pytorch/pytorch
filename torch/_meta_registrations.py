@@ -659,6 +659,15 @@ _PHILOX_RANDINT_DTYPES = (
 
 
 def _check_philox_gen_args(op_name, self, key):
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    # Matches at::assert_no_internal_overlap in the kernels; 1 == MemOverlap::Yes.
+    if not free_unbacked_symbols(self) and torch._debug_has_internal_overlap(self) == 1:
+        raise RuntimeError(
+            "unsupported operation: more than one element of the written-to tensor "
+            "refers to a single memory location. Please clone() the tensor before "
+            "performing the operation."
+        )
     torch._check(
         key.dtype == torch.uint64,
         lambda: f"{op_name}: key must have dtype uint64, got {key.dtype}",
