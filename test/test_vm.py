@@ -52,6 +52,14 @@ def narrowing():
     return (*DEFAULT[:at], P.NarrowDims(), *DEFAULT[at:])
 
 
+def call_outcome(fn, *args, **kwargs):
+    """What a call returns, or the type and the message of what it raises."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as e:
+        return type(e), str(e)
+
+
 def block_stats(fn, key):
     return [b[key] for b in fn.stats()["blocks"]]
 
@@ -2229,6 +2237,48 @@ class TestVmMoreBytecodes(TestCase):
         self.assertTrue(
             compiled.stats()["compiled_callees"][0].endswith("f.<locals>.Point.scaled")
         )
+
+    def test_del_attribute_global_and_closure_variable(self):
+        def f(box):
+            global bytecode_global
+            box.a = 1
+            del box.a
+            bytecode_global = 5
+            del bytecode_global
+            cell = 3
+
+            def inner():
+                return cell  # noqa: F821
+
+            before = inner()
+            del cell
+            return hasattr(box, "a"), before, call_outcome(inner)
+
+        def missing_attribute(box):
+            del box.missing
+
+        def missing_global():
+            global bytecode_global
+            del bytecode_global
+
+        def missing_closure_variable():
+            cell = 1
+
+            def inner():
+                return cell  # noqa: F821
+
+            for _ in range(2):
+                del cell
+
+        for fn, args in (
+            (f, (BytecodeBase(),)),
+            (missing_attribute, (BytecodeBase(),)),
+            (missing_global, ()),
+            (missing_closure_variable, ()),
+        ):
+            compiled = torch.vm(fn, fallback=False)
+            self.assertEqual(call_outcome(compiled, *args), call_outcome(fn, *args))
+        self.assertNotIn("bytecode_global", globals())
 
     def test_jump_to_an_instruction_with_extended_arg(self):
         # A loop long enough that its header takes an EXTENDED_ARG prefix,
