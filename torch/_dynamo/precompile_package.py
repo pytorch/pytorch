@@ -1958,9 +1958,10 @@ class PrecompileSession(Generic[_P, _R]):
         )
         if not isinstance(backend, str):
             _check_capture_options(backend.config)
-        # cudagraph_trees decides whether a graph can compile for CUDA graphs and,
-        # at load, how it is wrapped, so one value holds for the whole capture:
-        # the options over the ambient config, read here and recorded.
+        # What every captured call holds torch._inductor.config to, read here (the
+        # options over the ambient config). cudagraph_trees decides whether a graph
+        # can compile for CUDA graphs and, at load, how it is wrapped, so one value
+        # holds for the whole capture and is recorded.
         self._inductor_pins: dict[str, bool] = {}
         if self._backend_name == "inductor":
             options: Mapping[str, object] = (
@@ -1968,6 +1969,17 @@ class PrecompileSession(Generic[_P, _R]):
             )
             trees = _inductor_setting(options, "triton.cudagraph_trees")
             self._inductor_pins["triton.cudagraph_trees"] = bool(trees)
+            # Dynamo reads triton.cudagraphs too: under it a Python float argument
+            # is specialized rather than passed as a CPU scalar tensor. A
+            # partitioned graph copies that scalar to the device outside its CUDA
+            # graph, but it keeps an unpartitioned graph out of CUDA graphs, so
+            # only an unpartitioned CUDA graph capture is traced under the flag
+            # (mode and options reach Inductor alone, as under torch.compile),
+            # and stays unpartitioned.
+            cudagraphs = _inductor_setting(options, "triton.cudagraphs")
+            if cudagraphs and not _inductor_setting(options, "graph_partition"):
+                self._inductor_pins["triton.cudagraphs"] = True
+                self._inductor_pins["graph_partition"] = False
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
