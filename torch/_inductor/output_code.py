@@ -979,8 +979,8 @@ class CompiledFxGraph(OutputCode):
                 # or holds a backward that an override_cudagraphs kept out beside
                 # its CUDA graphed forward: the two share its box.
                 reason = (
-                    "the graph having been compiled without them; "
-                    "recompile or recapture it with CUDA graphs on"
+                    "the graph having been compiled without them (triton.cudagraphs "
+                    "was off, or an override_cudagraphs kept it out)"
                 )
                 if any(is_gpu(device) for device in self.device_types):
                     log_cudagraph_skip_and_bump_counter(
