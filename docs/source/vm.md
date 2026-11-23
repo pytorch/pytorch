@@ -152,13 +152,14 @@ item that is read for nothing, a call whose answer is dropped, a division
 stay: they are what shows that the call gets as far as the path does. In a
 call in which one of them raises, the path is not taken: the instructions
 run, and raise where they stand. What changes something the path made
-itself (an append to a list it built, the next item of an iterator it
-made) is left out only together with the thing ("What a function makes"),
-and only where it cannot fail either: an entry that is put into a dict under
-a key that is no constant of the function and a list or a dict that is
-filled from a value from outside (`[*xs]`, `{**d}`) run in every run, used
-or not, so that a call in which the key cannot be hashed or the value cannot
-be gone over runs the instructions, which raise.
+itself (an append to a list it built, a store into an object of a class it
+called, the next item of an iterator it made) is left out only together with
+the thing ("What a function makes"), and only where it cannot fail either:
+an entry that is put into a dict under a key that is no constant of the
+function and a list or a dict that is filled from a value from outside
+(`[*xs]`, `{**d}`) run in every run, used or not, so that a call in which
+the key cannot be hashed or the value cannot be gone over runs the
+instructions, which raise.
 
 ```python
 class Settings:
@@ -480,9 +481,9 @@ A path does not go into every call. It ends in front of a call
   calls itself is gone into that often, and an `nn.Sequential` inside an
   `nn.Sequential` is on a path twice;
 - more than 48 calls deep;
-- of a `functools.partial`, of a class (constructing an object), and of a
-  function that was made on the path (a closure that the function defines
-  and calls);
+- of a `functools.partial`, of a class whose objects a path does not make
+  ("Objects a path makes"), and of a function that was made on the path (a
+  closure that the function defines and calls);
 - whose arguments do not fit the function: the call raises the `TypeError`
   where the function has it;
 - that hands on `**kwargs` from a dict whose keys are no strs;
@@ -565,45 +566,47 @@ same, whole["hits"] - hits  # (True, 3): and without it, it is again
 ### What a function makes
 
 A list, a dict, an iterator, the cell of a variable that an inner function
-shares: what the instructions of a path make between its operations is the
-path's own. One model says what a path does with such a thing.
+shares, an object of a class that the function calls: what the instructions
+of a path make between its operations is the path's own. One model says what
+a path does with such a thing.
 
 **Which values are the thing.** A thing is known by the instruction that
 made it. Other values of the function may be that thing, or hold it: an item
 or an attribute that is taken out of something that holds it, what an
-iterator over such a holder gives, a method that is bound to it, what a call
-that was handed it gives back (`d.get(k, made)`), a tuple, a list or a dict
-that is built of it. Such a value counts as the thing wherever it may be it
-at some call. What the function had before the path, and what it reads of
-objects from outside, is never one: nothing of the path's is stored there
-before the path ends. So what an iterator of the path gives is from outside
-where what it goes over is: `for i, layer in enumerate(self.layers)` gives
-the layers, and a store into one of them (`layer.grid = ...`) is a store
-into an object from outside ("Stores into objects"), whatever the path made
-to go over them: the iterator, the `enumerate`, a list or the `**kwargs` of
-a call built of such objects.
+iterator over such a holder gives, a method that is bound to it, the dict of
+an object, what a call that was handed it gives back (`d.get(k, made)`), a
+tuple, a list or a dict that is built of it. Such a value counts as the
+thing wherever it may be it at some call. What the function had before the
+path, and what it reads of objects from outside, is never one: nothing of
+the path's is stored there before the path ends. So what an iterator of the
+path gives is from outside where what it goes over is: `for i, layer in
+enumerate(self.layers)` gives the layers, and a store into one of them
+(`layer.grid = ...`) is a store into an object from outside ("Stores into
+objects"), whatever the path made to go over them: the iterator, the
+`enumerate`, a list or the `**kwargs` of a call built of such objects.
 
-**What runs.** What changes a thing (an append, `[*a, b]`, an entry of a
-dict it builds, a variable that an inner function shares being bound, the
-next item of an iterator) runs in a run of the path whenever anything that
-runs takes the thing, or what may be it or hold it, in front of the change
-or behind it. It is left out only together with the thing. A list that the
-function stores into an object and appends to afterwards is held there by
-reference, and has the item.
+**What runs.** What changes a thing (an append, `[*a, b]`, a store into an
+object of a class the path called, an entry of a dict it builds, a variable
+that an inner function shares being bound, the next item of an iterator)
+runs in a run of the path whenever anything that runs takes the thing, or
+what may be it or hold it, in front of the change or behind it. It is left
+out only together with the thing. A list that the function stores into an
+object and appends to afterwards is held there by reference, and has the
+item.
 
 **On which side of the graph.** The instructions that take nothing the graph
 gives run in front of what stands for the graph, the others behind it
 ("Paths"). A thing begins in front. It moves behind the graph at the first
 instruction that takes it, or what may be it or hold it, and has to run
-there: a result of the graph is appended to it, or something reads it
-together with a size that the graph computes (`made + [y.shape[0]]`). From
-that instruction on everything that takes the thing runs behind the graph,
-also what takes nothing else of the graph's; everything in front of it ran
-in front. So what reads and what changes one thing runs in the order the
-function has it, on both sides: a list that is counted, sliced or put into a
-tuple before a result is appended to it is counted, sliced and held as it
-was then, and an item that is appended behind a read is not seen by the
-read.
+there: a result of the graph is appended to it or stored into it, or
+something reads it together with a size that the graph computes (`made +
+[y.shape[0]]`). From that instruction on everything that takes the thing
+runs behind the graph, also what takes nothing else of the graph's;
+everything in front of it ran in front. So what reads and what changes one
+thing runs in the order the function has it, on both sides: a list that is
+counted, sliced or put into a tuple before a result is appended to it is
+counted, sliced and held as it was then, and an item that is appended behind
+a read is not seen by the read.
 
 ```python
 def kept(x, n):
@@ -660,15 +663,16 @@ that writes to a tensor from outside or draws random numbers, it ends in
 front of an instruction that takes such a thing and can fail ("Writes").
 
 What the function makes may come to hold itself: a list that is appended to
-itself, two lists that hold each other, or a list in a dict in the list. A
-path makes such things as the function makes them, by the same instructions
-in the same order, so where the path ends they hold each other as they do in
-eager mode, and the graph around them runs. Nothing that looks into what a
-list or a tuple holds goes round one that holds itself, whether the function
-made it or was handed it: such a list is never a value that a form is
-checked against or has as a constant, it is not turned into text on a path,
-and a call that hands it to an operation is no operation of a graph (the
-call runs as it stands, and raises what it raises in eager mode).
+itself, two lists that hold each other, a list in a dict in the list, an
+object with an attribute that is the object. A path makes such things as
+the function makes them, by the same instructions in the same order, so
+where the path ends they hold each other as they do in eager mode, and
+the graph around them runs. Nothing that looks into what a list or a tuple
+holds goes round one that holds itself, whether the function made it or
+was handed it: such a list is never a value that a form is checked
+against or has as a constant, it is not turned into text on a path, and a
+call that hands it to an operation is no operation of a graph (the call
+runs as it stands, and raises what it raises in eager mode).
 
 ```python
 def ring(x, n):
@@ -1823,12 +1827,12 @@ was made of it is not run a second time, what it raises goes out, and the
 stores of that call are not done.
 
 A store keeps a reference to what it is given, and what the function changes
-of a list or a dict it made itself is changed in its place ("What a function
-makes"), in front of the stores: a list that is stored and then appended to
-has the item when it is stored, as it has in the function once both are
-done. `l.extend(xs)` is the one store that reads what it is given. Of a list
-the path made it takes the items the list holds where the instruction
-stands, whatever is appended to that list behind it.
+of a list or an object it made itself is changed in its place ("What a
+function makes"), in front of the stores: a list that is stored and then
+appended to has the item when it is stored, as it has in the function once
+both are done. `l.extend(xs)` is the one store that reads what it is given.
+Of a list the path made it takes the items the list holds where the
+instruction stands, whatever is appended to that list behind it.
 
 What is stored into is an object from outside the path. A list or a dict
 that the function made itself is changed in place, and a value that may be
@@ -1957,6 +1961,72 @@ appended  # [1, 1, 1, 1, 1, 2, 1, 2]: where the two are one object, `a.n` is wha
 (found,) = [found for found in torch.vm.regions(g) if "ops" in found]
 found["ops"], found["exports"], found["hits"]  # (8, 2, 5)
 ```
+
+### Objects a path makes
+
+A class that is defined in Python and called is an instruction of a path
+where calling it is no more than `object.__new__(cls)` and then its
+`__init__`: its own class is `type`, it has no `__new__` of its own, it is
+not abstract, its objects have no `__del__`, and its `__init__` is a Python
+function, or `object`'s where the call hands over nothing. The object is
+the path's own, as a list the path made is: a new one at every call, of the
+class the callee is at that call. The path goes into the `__init__` as into
+any function it calls and checks that it returns None. Where it returns
+something else the call raises eager's `TypeError`, and where the path does
+not go on inside it (it raises, or does what no path does) the call has run
+as the interpreter runs it and the path ends in front of the call. A
+dataclass is such a class, with the `__init__` that was made for it and its
+`__post_init__`.
+
+A store into such an object (`self.hidden = h` in the `__init__`, or
+anywhere behind it) is done where it stands, at every call, where the class
+keeps what is stored as `object` does: no `__setattr__` of its own, nothing
+in the class that takes a store under the name (a property, a slot),
+objects with a dict. The path checks that of the class in front of what
+stands for the graph, so the store cannot fail behind it; any other store
+ends the path in front of itself. A read of an attribute that the path
+stored is the value that was stored, so a tensor that goes through an
+object is still the value of the graph it was, and what the class has for
+its objects (a method, a property) is read of the class. The gradient at a
+tensor that such an object holds is eager's: the object is something that
+holds it ("Gradients").
+
+```python
+class Out:
+    def __init__(self, hidden, scale=2):
+        self.hidden = hidden
+        self.scale = scale
+
+    def scaled(self):
+        return self.hidden * self.scale
+
+
+def makes(x):
+    y = (x.sin() + 1).cos()
+    out = Out(y, scale=3)
+    return (out.scaled() + out.hidden).tanh().exp()
+
+
+def gives(x):
+    y = (x.sin() + 1).cos()
+    return Out((y * 2).tanh(), scale=y.exp())
+
+
+g = torch.vm(makes, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+for _ in range(6):
+    same = torch.equal(g(v), makes(v))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 7, 'the function returns')
+g = torch.vm(gives, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+outs = [g(v) for _ in range(6)]
+type(outs[-1]).__name__, sorted(vars(outs[-1])), len({id(out) for out in outs})  # ('Out', ['hidden', 'scale'], 6)
+torch.equal(outs[-1].scale, gives(v).scale)  # True
+```
+
+A path does not make an object of a class with a `__new__` of its own (a
+named tuple), with a `__setattr__` written in Python, or made of `dict`, nor
+one of a class that is called with `*` or `**`: such a call ends it, as
+`getattr(obj, name)` and `vars(obj)` of an object the path made do.
 
 ### Operations with several results
 
@@ -2940,11 +3010,13 @@ What graphs do not do at this stage:
 - A raise that is caught ends a path: `getattr(obj, name, default)` and
   `hasattr` where a `__getattribute__` written in Python raises
   `AttributeError`, a `try` around a call that raises, `Mapping.get` of a key
-  that is not there. So do constructing an object (a dataclass of outputs,
-  a named tuple, `functools.partial`), making an inner function or a
-  lambda, a `with` block, and library code a path is not known to be able
-  to call (`inspect.signature`). These are what the paths of transformer
-  models end at ("Models").
+  that is not there. So do constructing an object of a class that a path
+  does not make objects of ("Objects a path makes": a named tuple, a class
+  with a `__setattr__` of its own or made of `dict`, as the output objects
+  of the transformer models are), `functools.partial`, making an inner
+  function or a lambda, a `with` block, and library code a path is not
+  known to be able to call (`inspect.signature`). These are what the paths
+  of transformer models end at ("Models").
 - A call with `*` or `**` is an operation only where the operator it runs
   enters no Python code ("Methods read off a tensor, and what a call
   spreads"). The router of an operator whose kernel is chosen in Python and
