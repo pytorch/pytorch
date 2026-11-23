@@ -2012,9 +2012,7 @@ class DiskDynamoStore(DynamoStore):
         path = self._entry_dir(path)
         try:
             with open(os.path.join(path, "entry"), "rb") as f:
-                pickled_content = f.read()
-                entry = pickle.loads(pickled_content)
-                return entry
+                return pickle.loads(f.read())
         except Exception as e:
             raise RuntimeError(f"Failed to load package from path {path}: {e}") from e
 
@@ -2030,8 +2028,8 @@ class DiskDynamoCache(DiskDynamoStore):
         Saves a package to a given path. Grabs backends from PrecompileContext.
         """
         key = package.source_id
-        logger.info("Saving CompilePackage for %s", package.source_id)
-        super().save_package(package, key)
+        logger.info("Saving CompilePackage for %s", key)
+        self.save_package(package, key)
 
     def load(self, fn: Callable[..., Any]) -> PrecompileCacheEntry | None:
         """
@@ -2045,7 +2043,7 @@ class DiskDynamoCache(DiskDynamoStore):
             counters["dynamo_cache"]["dynamo_cache_miss"] += 1
             return None
         try:
-            result = super().load_cache_entry(key)
+            result = self.load_cache_entry(key)
         except Exception:
             counters["dynamo_cache"]["dynamo_cache_error"] += 1
             logger.warning("Failed to load package from path %s", path, exc_info=True)
