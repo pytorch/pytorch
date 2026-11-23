@@ -28,7 +28,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, IO, Never, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Never, NewType, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.exc import PackageError
@@ -711,30 +711,23 @@ def _lookup_code(entry: _DynamoCodeCacheEntry) -> types.CodeType:
             f"Expected exactly one function name, got {len(entry.function_names)}"
         )
     fn: Any = sys.modules[entry.python_module]
-    parts = entry.function_names[0].split(".")
-    for part in parts:
+    for part in entry.function_names[0].split("."):
         fn = getattr(fn, part)
-    if entry.code_source:
-        parts = entry.code_source.split(".")
-        for part in parts:
-            if part.endswith("]"):
-                index_begin = part.rfind("[")
-                if not isinstance(index_begin, int):
-                    raise AssertionError(
-                        f"Expected int for index_begin, got {type(index_begin)}"
-                    )
-                if index_begin < 0:
-                    raise AssertionError(
-                        f"Expected non-negative index_begin, got {index_begin}"
-                    )
-                attr = getattr(fn, part[:index_begin], None)
-                if attr is None:
-                    raise PackageError(f"Cannot find source for code entry {entry}")
-                fn = attr[ast.literal_eval(part[index_begin + 1 : -1])]
-            else:
-                fn = getattr(fn, part)
-    else:
+    if not entry.code_source:
         raise PackageError(f"Cannot find source for code entry {entry}")
+    for part in entry.code_source.split("."):
+        if not part.endswith("]"):
+            fn = getattr(fn, part)
+            continue
+        index_begin = part.rfind("[")
+        if index_begin < 0:
+            raise AssertionError(
+                f"Expected non-negative index_begin, got {index_begin}"
+            )
+        attr = getattr(fn, part[:index_begin], None)
+        if attr is None:
+            raise PackageError(f"Cannot find source for code entry {entry}")
+        fn = attr[ast.literal_eval(part[index_begin + 1 : -1])]
     if not isinstance(fn, types.CodeType):
         raise AssertionError(
             f"Expected CodeType, got {type(fn)} for code entry {entry}"
@@ -1109,7 +1102,7 @@ class PrecompileCacheEntry:
     @staticmethod
     def from_cache_entry(
         cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
-    ) -> Optional["PrecompileCacheEntry"]:
+    ) -> "PrecompileCacheEntry":
         backend_content: dict[_BackendId, Any] = {}
 
         for code in cache_entry.codes:
