@@ -424,9 +424,17 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         with mock.patch.object(rt._hw, "caps", return_value=mock.Mock(cc=(10, 7))):
             profile = rt._full_itree_arch(trait, x, [torch.float32])
         self.assertIsNotNone(profile)
+        # B200's row can equal the profile (it does for sum), so vary two bit-neutral
+        # knobs away from every row: a dropped arch= then changes a plan's sig.
+        profile = profile._replace(split_stage_rows=2, combine_unroll=32)
+        row = rt._itree_arch(x.device)
         # The plans both entry points build under the profile.
         split = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=profile)
         c = rt.itree_combine_plan(split, 4, nrows=1, trait=trait, arch=profile)
+        row_split = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=row)
+        self.assertNotEqual(row_split.sig, split.sig)
+        row_c = rt.itree_combine_plan(split, 4, nrows=1, trait=trait, arch=row)
+        self.assertNotEqual(row_c.sig, c.sig)
         # Welford partials come from uniform 8192-element batches, so they are weighted.
         self.assertEqual(c.uniform_combine, "weights" if welford else "off")
         ordered = torch.empty(1, device=device)
