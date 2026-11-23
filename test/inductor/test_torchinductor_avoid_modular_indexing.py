@@ -28,6 +28,7 @@ AvoidModularIndexingCommonTemplate = make_test_cls_with_patches(
     "AvoidModularIndexing",
     "_avoid_modular_indexing",
     (config, "avoid_modular_indexing", True),
+    (config.triton, "autotune_pointwise", False),  # too slow
 )
 
 
