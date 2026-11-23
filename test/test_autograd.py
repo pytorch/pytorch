@@ -86,7 +86,6 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     skipIfWindows,
-    skipIfXpu,
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
@@ -16372,41 +16371,6 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(err_count[0], 1)
         self.assertEqual(res, "foo")
 
-    @skipIfXpu(msg="torch._C._scatter Not implemented on XPU, issue #143239")
-    def test_dataparallel_saved_tensors_hooks(self):
-        def pack(x):
-            warnings.warn("pack")
-            return x
-
-        _self = self
-        # DataParallel runs forward in one thread per replica, so read the replica
-        # count from the wrapper instead of querying the accelerator.
-        replica_counts = []
-
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                with warnings.catch_warnings(record=True) as w:
-                    y = x * x
-                    if replica_counts[0] >= 2:
-                        # DataParallel is calling the forward in different threads
-                        # without propagating TLS, so hooks should not be called here
-                        _self.assertEqual(len(w), 0)
-                    else:
-                        # DataParallel only uses one thread
-                        # so hooks should be called here
-                        _self.assertGreater(len(w), 0)
-
-        x = torch.ones(5, 5, requires_grad=True)
-        model = torch.nn.DataParallel(Model())
-        replica_counts.append(len(model.device_ids))
-
-        with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
-            model(x)
-            with warnings.catch_warnings(record=True) as w:
-                y = x * x
-                # hooks should be called here
-                _self.assertGreater(len(w), 0)
-
     def test_python_thread_in_middle(self):
         # User might write a network that starts on one CPU thread, then runs its second half
         # concurrently with other threads (either via python threading or fork/join calls),
@@ -16526,6 +16490,35 @@ class TestMultithreadAutograd(TestCase):
 
 class TestMultithreadAutogradDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @skipXPUIf(True, "torch._C._scatter Not implemented on XPU, issue #143239")
+    def test_dataparallel_saved_tensors_hooks(self, device):
+        def pack(x):
+            warnings.warn("pack")
+            return x
+
+        _self = self
+        replica_counts = []
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                with warnings.catch_warnings(record=True) as w:
+                    y = x * x
+                    if replica_counts[0] >= 2:
+                        # DataParallel calls forward in separate threads without propagating TLS.
+                        _self.assertEqual(len(w), 0)
+                    else:
+                        _self.assertGreater(len(w), 0)
+
+        x = torch.ones(5, 5, requires_grad=True, device=device)
+        model = torch.nn.DataParallel(Model().to(device))
+        replica_counts.append(len(model.device_ids))
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
+            model(x)
+            with warnings.catch_warnings(record=True) as w:
+                y = x * x
+                _self.assertGreater(len(w), 0)
 
     def test_custom_function_propagates_errors_from_device_thread(self, device):
         class MyFunc(Function):
@@ -18971,7 +18964,7 @@ class TestInputGradBuffers(TestCase):
 
     @onlyAccelerator
     def test_lookup_does_not_deadlock_with_python_dispatch(self, device):
-        script = """
+        script = f"""
 import sys
 import threading
 
@@ -19005,7 +18998,7 @@ class DispatchTensor(torch.Tensor):
         dispatch_entered.set()
         if not getter_entering_lookup.wait(timeout=5):
             raise RuntimeError("timed out waiting for InputBuffer lookup")
-        kwargs = {} if kwargs is None else kwargs
+        kwargs = {{}} if kwargs is None else kwargs
         unwrap = lambda value: value.elem if isinstance(value, cls) else value
         return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
 
@@ -19037,7 +19030,7 @@ class Fanout(Function):
 
 seed = torch.ones((), requires_grad=True)
 getter_output = Getter.apply(seed)
-source = torch.ones((), device="cuda", requires_grad=True)
+source = torch.ones((), device={device!r}, requires_grad=True)
 duplicated = source.clone()
 Fanout.apply(getter_output, duplicated, duplicated).backward()
 """
@@ -19146,7 +19139,8 @@ class TestAutogradThreadShutdown(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     def test_thread_shutdown(self, device):
-        code = f"""import torch
+        code = f"""import sys
+import torch
 from torch.autograd import Function
 class MyFunction(Function):
     @staticmethod
@@ -19157,16 +19151,15 @@ class MyFunction(Function):
     def backward(ctx, grad):
         return grad
 
-# Run the backward on the device under test to ensure that the worker thread
-# is properly initialized by the time we exit.
 for shape in [(1,), ()]:
     v = torch.ones(shape, requires_grad=True, device={device!r})
     MyFunction.apply(v).backward()
+print("BACKWARD_COMPLETED", file=sys.stderr)
 """
         s = TestCase.runWithPytorchAPIUsageStderr(code)
-        # The autograd engine creates worker threads only when accelerator devices are present.
-        # So make sure that we do shutdown threads when we're testing an accelerator and make
-        # sure that there is no thread to shutdown when we're not using an accelerator.
+        self.assertRegex(s, "BACKWARD_COMPLETED")
+        # Any backward initializes the device-thread pool. The pool starts worker
+        # threads when accelerators are present, regardless of the tensor's device.
         if torch.accelerator.is_available():
             self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
         else:
@@ -19445,7 +19438,9 @@ instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(TestInputGradBuffers, globals())
-instantiate_device_type_tests(TestAutogradThreadShutdown, globals())
+instantiate_device_type_tests(
+    TestAutogradThreadShutdown, globals(), allow_mps=True, allow_xpu=True
+)
 instantiate_device_type_tests(TestDisallowImplicitGradAccumulation, globals())
 
 instantiate_parametrized_tests(TestAutograd)
