@@ -3250,6 +3250,23 @@ class TestVmFrames(TestCase):
         inlined = compiled.stats()["inlined"]
         self.assertEqual("frame_traced_callee" in inlined, inline)
 
+    def test_callee_whose_globals_are_not_a_plain_dict_runs_in_the_interpreter(self):
+        class Defaults(dict):
+            def __missing__(self, key):
+                return 7
+
+        # The interpreter asks the mapping, which makes up what it lacks.
+        adds = eval("lambda: made_up + 1", Defaults())
+
+        def f(g):
+            return g()
+
+        with self.assertRaisesRegex(torch.vm.Unsupported, "not a plain dict"):
+            torch.vm(adds, fallback=False)
+        compiled = torch.vm(f, fallback=False)
+        self.assertEqual(compiled(adds), 8)
+        self.assertEqual(len(compiled.stats()["interpreted_callees"]), 1)
+
     def test_callee_that_reads_its_frame_is_compiled(self):
         def fmt(name, value):
             return eval("'{}={}'.format(name, value)")
