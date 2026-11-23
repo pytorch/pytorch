@@ -1513,6 +1513,41 @@ class TestConvolutionNNDeviceType(NNTestCase):
             check(conv, x, w)
 
     @dtypes(torch.float)
+    def test_conv_backward_size1_input_cl_grad_output(self, device, dtype):
+        # aten.convolution_backward with a channels-last grad_output whose
+        # size-1 batch stride is non-canonical, and an all-size-1 CL-like input.
+        for nd, mf in ((2, torch.channels_last), (3, torch.channels_last_3d)):
+            xb = torch.randn(1, 2, *[1] * nd, dtype=dtype)
+            w = torch.randn(4, 1, *[1] * nd, dtype=dtype)
+            go_shape = (1, 4) + (3,) * nd
+            go_cpu = torch.randn(go_shape, dtype=dtype).to(memory_format=mf)
+            go_strides = (4,) + go_cpu.stride()[1:]
+            args = (
+                [1] * nd,
+                [1] * nd,
+                [1] * nd,
+                False,
+                [0] * nd,
+                1,
+                [True, True, False],
+            )
+            res = []
+            for dev in ("cpu", device):
+                x_in = torch.empty_strided(
+                    (1, 1) + (1,) * nd, (2, 1) + (2,) * nd, device=dev, dtype=dtype
+                )
+                x_in.copy_(xb[:, :1])
+                go = torch.empty_strided(go_shape, go_strides, device=dev, dtype=dtype)
+                go.copy_(go_cpu)
+                res.append(
+                    torch.ops.aten.convolution_backward(
+                        go, x_in, w.to(dev), None, *args
+                    )
+                )
+            self.assertEqual(res[1][0].cpu(), res[0][0])
+            self.assertEqual(res[1][1].cpu(), res[0][1])
+
+    @dtypes(torch.float)
     def test_conv_cow_input(self, device, dtype):
         # 1D
         x1 = torch.randn(2, 4, 16, device=device, dtype=dtype)

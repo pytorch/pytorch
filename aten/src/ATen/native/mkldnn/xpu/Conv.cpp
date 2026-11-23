@@ -345,8 +345,8 @@ Tensor _convolution_out(
   weight = make_contiguous_and_aligned(weight, mfmt);
   auto input_c = with_canonical_strides(input, mfmt);
   auto weight_c = with_canonical_strides(weight, mfmt);
-  // oneDNN wrappers re-derive the layout from the tensors; keep it equal to
-  // mfmt.
+  // Best-effort: oneDNN wrappers re-derive the layout from the tensors; use the
+  // re-strided ones only if that still equals mfmt, else keep the originals.
   if (use_channels_last_for_conv(input_c, weight_c) ==
       is_channels_last_suggested) {
     input = input_c;
@@ -563,11 +563,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   auto grad_output_c = with_canonical_strides(grad_output_, mfmt);
   auto weight_c = with_canonical_strides(weight_, mfmt);
   auto input_c = with_canonical_strides(input_, mfmt);
-  // oneDNN wrappers re-derive the layout from tensor pairs; keep it equal to
-  // mfmt.
-  if (use_channels_last_for_conv(input_c, weight_c) ==
-          is_channels_last_suggested &&
-      use_channels_last_for_conv(input_c, grad_output_c) ==
+  // Best-effort: the wrappers re-derive the layout from the (input,
+  // grad_output) and (grad_output, weight) pairs; use the re-strided tensors
+  // only if both still equal mfmt, else keep the originals.
+  if (use_channels_last_for_conv(input_c, grad_output_c) ==
           is_channels_last_suggested &&
       use_channels_last_for_conv(grad_output_c, weight_c) ==
           is_channels_last_suggested) {
