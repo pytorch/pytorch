@@ -206,7 +206,7 @@ case "$tag" in
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3.11)
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
-    ROCM_VERSION=10.1
+    ROCM_VERSION=10.2
     THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
     TRITON=yes
     KATEX=yes
@@ -226,15 +226,16 @@ case "$tag" in
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=11
-    XPU_VERSION=2026.0
+    XPU_VERSION=2026.1
+    OMIX_VERSION=0.4.1
     XPU_DRIVER_TYPE=LTS
     TRITON=yes
     ;;
   pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-client | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
-    XPU_VERSION=2026.1
-    OMIX_VERSION=0.4.1
+    XPU_VERSION=2026.2
+    OMIX_VERSION=0.5.0
     if [[ $tag =~ "client" ]]; then
       XPU_DRIVER_TYPE=CLIENT
     else

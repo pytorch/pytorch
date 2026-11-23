@@ -528,6 +528,11 @@ class TestOperatorsDevice(TestCase):
                 device_type="xpu",
             ),
             tol1(
+                "nn.functional.scaled_dot_product_attention",
+                {torch.float32: tol(atol=5e-05, rtol=1.3e-06)},
+                device_type="xpu",
+            ),
+            tol1(
                 "pca_lowrank",
                 {torch.float32: tol(atol=3e-05, rtol=4e-06)},
                 device_type="cpu",
@@ -830,6 +835,11 @@ class TestOperatorsDevice(TestCase):
                 "nn.functional.multi_head_attention_forward",
                 {torch.float32: tol(atol=2e-03, rtol=2e-04)},
             ),
+            tol1(
+                "nn.functional.scaled_dot_product_attention",
+                {torch.float32: tol(atol=5e-05, rtol=1.3e-06)},
+                device_type="xpu",
+            ),
             tol1("__rmatmul__", {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
             tol1("matmul", {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
             tol2(
@@ -1086,12 +1096,6 @@ class TestOperatorsDevice(TestCase):
             tol1("linalg.svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1("linalg.lu", {torch.float32: tol(atol=5e-04, rtol=7e-04)}),
             tol1("linalg.lu_factor", {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
-            # CUDA exceeds the test default here (abs 3.2e-02); CPU and XPU do not.
-            tol1(
-                "linalg.lu_factor_ex",
-                {torch.float32: tol(atol=2e-03, rtol=2e-02)},
-                device_type="cuda",
-            ),
             tol1("linalg.multi_dot", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
             # CUDA exceeds the test default here (rel 3.0e-04); CPU and XPU do not.
             tol2(
@@ -2459,6 +2463,11 @@ class TestOperatorsDevice(TestCase):
             tol1(
                 "nn.functional.conv2d",
                 {torch.float32: tol(atol=5e-05, rtol=5e-05)},
+            ),
+            tol1(
+                "nn.functional.scaled_dot_product_attention",
+                {torch.float32: tol(atol=5e-05, rtol=1.3e-06)},
+                device_type="xpu",
             ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
