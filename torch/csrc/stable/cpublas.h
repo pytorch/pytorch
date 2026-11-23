@@ -280,8 +280,7 @@ inline void brgemm_release(bool is_vnni = true) {
 ///
 /// Only DeviceType::CPU has a registered kernel; other device types fail with
 /// a missing-kernel internal assertion. This operator dispatches CPU calls to
-/// an available CPU capability (such as AVX2, AVX512, or SVE), whereas the
-/// native .DEFAULT slot uses the baseline kernel.
+/// an available CPU capability (such as AVX2, AVX512, or SVE).
 ///
 /// Minimum compatible version: PyTorch 2.16.
 /// Build time minimum version: PyTorch 2.16.
@@ -293,10 +292,9 @@ inline constexpr detail::GemmNoDowncastStub gemm_no_downcast_stub{};
 /// Build time minimum version: PyTorch 2.16.
 inline bool could_pack(torch::headeronly::ScalarType dtype) {
   bool ret = false;
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      torch_cpublas_could_pack(
-          torch::stable::detail::to<int32_t>(torch::stable::detail::from(dtype)),
-          &ret));
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_cpublas_could_pack(
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(dtype)),
+      &ret));
   return ret;
 }
 

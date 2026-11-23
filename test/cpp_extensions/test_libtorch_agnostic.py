@@ -1345,6 +1345,20 @@ for warning in w:
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
     @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+    def test_cpublas_brgemm_float_rejects_vnni(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        a = torch.ones(1, 1, dtype=torch.float32, device=device)
+        b = torch.ones(1, 1, dtype=torch.float32, device=device)
+        c = torch.zeros(1, 1, dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "Float Brgemm does not support vnni layout"
+        ):
+            libtorch_agnostic.ops.my_cpublas_brgemm_dispatch(a, b, c, is_vnni=True)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
     @parametrize(
         "case",
         [
@@ -1394,7 +1408,8 @@ for warning in w:
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
     @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
-    def test_cpublas_gemm_no_downcast_stub(self, device):
+    @parametrize("transpose_b", [False, True])
+    def test_cpublas_gemm_no_downcast_stub(self, device, transpose_b):
         import libtorch_agn_2_16 as libtorch_agnostic
 
         a = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.float32)
@@ -1402,10 +1417,12 @@ for warning in w:
             [[7, 8, 9, 10], [11, 12, 13, 14], [15, 16, 17, 18]],
             dtype=torch.float32,
         )
+        if transpose_b:
+            b = b.T.contiguous()
         c = torch.ones(2, 4, dtype=torch.float32)
-        expected = 1.5 * (a @ b) + 2.0 * c
+        expected = 1.5 * (a @ (b.T if transpose_b else b)) + 2.0 * c
         result = libtorch_agnostic.ops.my_cpublas_gemm_no_downcast_stub_cpu(
-            a, b, c, alpha=1.5, beta=2.0
+            a, b, c, alpha=1.5, beta=2.0, transpose_b=transpose_b
         )
         self.assertEqual(result, expected)
         self.assertEqual(c, expected)
@@ -1416,6 +1433,7 @@ for warning in w:
     def test_cpublas_could_pack(self, device):
         import libtorch_agn_2_16 as libtorch_agnostic
 
+        # Float32 cannot be packed; other dtypes depend on oneDNN and the CPU.
         a = torch.empty(1, dtype=torch.float32)
         self.assertFalse(libtorch_agnostic.ops.my_cpublas_could_pack(a))
 
@@ -1424,7 +1442,9 @@ for warning in w:
     def test_cpublas_brgemm_release(self, device):
         import libtorch_agn_2_16 as libtorch_agnostic
 
-        self.assertTrue(libtorch_agnostic.ops.my_cpublas_brgemm_release())
+        # This test creates no BRGEMM context, so it checks only that the stable
+        # release call succeeds and returns None.
+        self.assertIsNone(libtorch_agnostic.ops.my_cpublas_brgemm_release())
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize(

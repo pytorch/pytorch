@@ -225,8 +225,7 @@ struct FromImpl<TransposeType> {
       [[maybe_unused]] bool is_internal) {
     switch (val) {
       case TransposeType::NoTranspose:
-        return torch::stable::detail::from(
-            torch_transpose_type_no_transpose());
+        return torch::stable::detail::from(torch_transpose_type_no_transpose());
       case TransposeType::Transpose:
         return torch::stable::detail::from(torch_transpose_type_transpose());
       case TransposeType::ConjTranspose:

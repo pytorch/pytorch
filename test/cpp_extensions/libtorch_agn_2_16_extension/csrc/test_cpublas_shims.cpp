@@ -100,15 +100,20 @@ Tensor my_cpublas_gemm_no_downcast_stub_cpu(
     const Tensor& b,
     Tensor c,
     double alpha,
-    double beta) {
+    double beta,
+    bool transpose_b) {
   // The native GEMM stub uses column-major storage. Swap A and B to operate
-  // on row-major tensors, as the native brgemm fallback does.
+  // on row-major tensors, so transposing B selects native transa.
+  const auto transa = transpose_b
+      ? torch::headeronly::TransposeType::Transpose
+      : torch::headeronly::TransposeType::NoTranspose;
+  const auto m = transpose_b ? b.size(0) : b.size(1);
   cpublas::gemm_no_downcast_stub(
       torch::headeronly::DeviceType::CPU,
       torch::headeronly::ScalarType::Float,
+      transa,
       torch::headeronly::TransposeType::NoTranspose,
-      torch::headeronly::TransposeType::NoTranspose,
-      b.size(1),
+      m,
       a.size(0),
       a.size(1),
       alpha,
@@ -126,18 +131,17 @@ bool my_cpublas_could_pack(const Tensor& input) {
   return cpublas::could_pack(input.scalar_type());
 }
 
-bool my_cpublas_brgemm_release() {
-  cpublas::brgemm_release(false);
-  return true;
+void my_cpublas_brgemm_release() {
+  cpublas::brgemm_release(true);
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
       "my_cpublas_brgemm_dispatch(Tensor a, Tensor b, Tensor(a!) c, bool add_c, bool is_vnni) -> Tensor(a!)");
   m.def(
-      "my_cpublas_gemm_no_downcast_stub_cpu(Tensor a, Tensor b, Tensor(a!) c, float alpha, float beta) -> Tensor(a!)");
+      "my_cpublas_gemm_no_downcast_stub_cpu(Tensor a, Tensor b, Tensor(a!) c, float alpha, float beta, bool transpose_b) -> Tensor(a!)");
   m.def("my_cpublas_could_pack(Tensor input) -> bool");
-  m.def("my_cpublas_brgemm_release() -> bool");
+  m.def("my_cpublas_brgemm_release() -> ()");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {

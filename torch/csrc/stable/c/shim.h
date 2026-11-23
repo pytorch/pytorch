@@ -404,8 +404,8 @@ AOTI_TORCH_EXPORT int32_t torch_transpose_type_no_transpose();
 AOTI_TORCH_EXPORT int32_t torch_transpose_type_transpose();
 AOTI_TORCH_EXPORT int32_t torch_transpose_type_conj_transpose();
 
-// Calls the matching cpublas::brgemm overload. dtype_a, dtype_b, and dtype_c
-// use the runtime's c10::ScalarType values.
+// Calls the matching at::native::cpublas::brgemm overload. dtype_a, dtype_b,
+// and dtype_c use the runtime's c10::ScalarType values.
 AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
     int64_t M,
     int64_t N,
@@ -422,12 +422,13 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
     void* C,
     bool is_vnni);
 
-// Releases the BRGEMM hardware context when is_vnni is true.
+// Calls at::native::cpublas::brgemm_release, which releases the BRGEMM hardware
+// context when is_vnni is true.
 AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(bool is_vnni);
 
-// Calls the CPU GEMM dispatch stub. device_type, dtype, and transa/transb use
-// the runtime's DeviceType, ScalarType, and TransposeType encodings. Only CPU
-// has a registered kernel.
+// Calls at::native::cpublas::gemm_no_downcast_stub. device_type, dtype, and
+// transa/transb use the runtime's DeviceType, ScalarType, and TransposeType
+// encodings. Only CPU has a registered kernel.
 // alpha and beta are doubles; for Half/BFloat16/Float8 inputs, c points to a
 // float output buffer.
 AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_float64(
@@ -447,8 +448,8 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_float64(
     void* c,
     int64_t ldc);
 
-// Reports whether packing the given ScalarType is supported and enabled on
-// this CPU; writes the result to ret.
+// Calls at::native::cpublas::could_pack to report whether packing the given
+// ScalarType is supported and enabled on this CPU; writes the result to ret.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_cpublas_could_pack(int32_t dtype, bool* ret);
 

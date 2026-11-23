@@ -46,10 +46,12 @@ def my_cpublas_brgemm_dispatch(a, b, c, add_c=False, is_vnni=False) -> torch.Ten
     )
 
 
-def my_cpublas_gemm_no_downcast_stub_cpu(a, b, c, alpha=1.0, beta=0.0) -> torch.Tensor:
+def my_cpublas_gemm_no_downcast_stub_cpu(
+    a, b, c, alpha=1.0, beta=0.0, transpose_b=False
+) -> torch.Tensor:
     """Write float32 CPU GEMM into c through CPU capability dispatch (2.16+)."""
     return torch.ops.libtorch_agn_2_16.my_cpublas_gemm_no_downcast_stub_cpu.default(
-        a, b, c, alpha, beta
+        a, b, c, alpha, beta, transpose_b
     )
 
 
@@ -58,9 +60,9 @@ def my_cpublas_could_pack(tensor) -> bool:
     return torch.ops.libtorch_agn_2_16.my_cpublas_could_pack.default(tensor)
 
 
-def my_cpublas_brgemm_release() -> bool:
+def my_cpublas_brgemm_release() -> None:
     """Release cpublas brgemm resources (2.16+)."""
-    return torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_release.default()
+    torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_release.default()
 
 
 def test_stable_torch_warn_once(value) -> None:
