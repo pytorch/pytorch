@@ -798,18 +798,18 @@ them directly via `torch.ops.symm_mem.<op_name>`.
         multiplication results.
 
 
-.. py:function:: fused_all_gather_scaled_matmul(A_shard: Tensor, Bs: list[Tensor], A_scale: Tensor, recipe_a: int, swizzle_a: int, B_scales: list[Tensor], recipe_b: int, swizzle_b: int, gather_dim: int, group_name: str, biases: list[Tensor | None], out_dtypes: list[dtype | None], use_fast_accum: list[bool]) -> tuple[Tensor, list[Tensor]]
+.. py:function:: fused_all_gather_scaled_matmul(A_shard: Tensor, Bs: list[Tensor], A_scale: Tensor, scaling_type_a: int, swizzle_type_a: int, B_scales: list[Tensor], scaling_type_b: int, swizzle_type_b: int, gather_dim: int, group_name: str, biases: list[Tensor | None], out_dtypes: list[dtype | None], use_fast_accum: list[bool]) -> tuple[Tensor, list[Tensor]]
 
     Scaled-matrix-multiplication variant of
     :func:`fused_all_gather_matmul`. Each entry of ``B_scales``, ``biases``,
     ``out_dtypes``, and ``use_fast_accum`` corresponds to the entry at the
     same position in ``Bs`` and is forwarded to ``aten._scaled_mm_v2``.
 
-    ``recipe_a``/``recipe_b`` are the integer values of
-    ``torch.nn.functional.ScalingType`` members and ``swizzle_a``/``swizzle_b``
+    ``scaling_type_a``/``scaling_type_b`` are the integer values of
+    ``torch.nn.functional.ScalingType`` members and ``swizzle_type_a``/``swizzle_type_b``
     those of ``torch.nn.functional.SwizzleType`` members (e.g.
-    ``ScalingType.RowWise.value``), as in ``aten._scaled_mm_v2``. ``recipe_b``
-    applies to every entry of ``Bs``. The recipes must be both ``TensorWise``,
+    ``ScalingType.RowWise.value``), as in ``aten._scaled_mm_v2``. ``scaling_type_b``
+    applies to every entry of ``Bs``. The scaling types must be both ``TensorWise``,
     both ``RowWise``, or both ``BlockWise1x32`` (MXFP8). With ``RowWise``,
     ``A_scale`` may be sharded like ``A_shard`` or cover the fully gathered
     tensor.
@@ -858,7 +858,7 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     :param str group_name: Name of the process group.
 
 
-.. py:function:: fused_scaled_matmul_reduce_scatter(A: Tensor, B: Tensor, A_scale: Tensor, recipe_a: int, swizzle_a: int, B_scale: Tensor, recipe_b: int, swizzle_b: int, reduce_op: str, orig_scatter_dim: int, scatter_dim_after_maybe_reshape: int, group_name: str, output_shape: list[int], bias: Tensor | None = None, out_dtype: dtype | None = None, use_fast_accum: bool = False) -> Tensor
+.. py:function:: fused_scaled_matmul_reduce_scatter(A: Tensor, B: Tensor, A_scale: Tensor, scaling_type_a: int, swizzle_type_a: int, B_scale: Tensor, scaling_type_b: int, swizzle_type_b: int, reduce_op: str, orig_scatter_dim: int, scatter_dim_after_maybe_reshape: int, group_name: str, output_shape: list[int], bias: Tensor | None = None, out_dtype: dtype | None = None, use_fast_accum: bool = False) -> Tensor
 
     Scaled-matrix-multiplication variant of
     :func:`fused_matmul_reduce_scatter`. The two scatter dimensions and
@@ -867,7 +867,7 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     call without those reshapes, pass the same value for both scatter
     dimensions and pass ``[*A.shape[:-1], B.shape[1]]`` as ``output_shape``.
 
-    The recipe and swizzle arguments are as in
+    The scaling type and swizzle type arguments are as in
     :func:`fused_all_gather_scaled_matmul`. For MXFP8, ``A_scale`` is the
     swizzled scale of the whole ``A.flatten(0, -2)``, which is sliced per rank;
     this requires ``scatter_dim_after_maybe_reshape=0`` and the rows of ``A``

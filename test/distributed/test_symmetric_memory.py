@@ -2103,7 +2103,7 @@ class AsyncTPTest(MultiProcContinuousTest):
             out_dtypes = [torch.bfloat16] * 3
         else:
             raise AssertionError(f"Invalid scale_mode: {scale_mode}")
-        recipe = (
+        scaling_type = (
             ScalingType.TensorWise
             if scale_mode == "tensor-wise"
             else ScalingType.RowWise
@@ -2114,10 +2114,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             A_shard,
             Bs,
             A_scale,
-            recipe,
+            scaling_type,
             no_swizzle,
             B_scales,
-            recipe,
+            scaling_type,
             no_swizzle,
             gather_dim=gather_dim,
             group_name=group.group_name,
@@ -2129,10 +2129,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             A_shard,
             Bs,
             A_scale,
-            recipe,
+            scaling_type,
             no_swizzle,
             B_scales,
-            recipe,
+            scaling_type,
             no_swizzle,
             gather_dim=gather_dim,
             group_name=group.group_name,
@@ -2265,7 +2265,9 @@ class AsyncTPTest(MultiProcContinuousTest):
             B_scale = torch.tensor(0.1, device=device_type)
 
         output_shape = [*A.shape[:-1], B.shape[1]]
-        recipe = (ScalingType.RowWise if rowwise else ScalingType.TensorWise).value
+        scaling_type = (
+            ScalingType.RowWise if rowwise else ScalingType.TensorWise
+        ).value
         no_swizzle = SwizzleType.NO_SWIZZLE.value
 
         outputs = []
@@ -2276,10 +2278,10 @@ class AsyncTPTest(MultiProcContinuousTest):
                         A,
                         B,
                         A_scale,
-                        recipe,
+                        scaling_type,
                         no_swizzle,
                         B_scale,
-                        recipe,
+                        scaling_type,
                         no_swizzle,
                         "avg",
                         scatter_dim,
