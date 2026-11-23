@@ -153,12 +153,59 @@ class Graphs(BuiltinPass):
         max_variants: how many exported forms a graph has, one per kind of
             call; the form that ran last is tried first. The calls of
             further kinds run its operations as they are.
+        backward: the engine derives the backward of a graph whose inputs
+            need a gradient. Such a graph runs on eager's tape for its first
+            calls, and each is taken down: the kernels of the forward, and
+            what eager's own autograd nodes run when they are called behind
+            it. Once two calls came out the same, and what the nodes gave
+            was what the autograd engine gives, the graph runs without a
+            tape and its results go through one node. A graph that cannot be taken
+            down (an operation of its backward looks at what a tensor holds,
+            say) keeps eager's tape.
+            A graph that gives a tensor and also computes something of it
+            (a hidden state and a loss, say) is cut in front of the first
+            operation that reads the tensor, into parts with a node each:
+            the gradient of what is computed of the tensor then comes to it
+            through its own gradient function, as in eager mode, so asking
+            for the gradient at it (``torch.autograd.grad``,
+            ``retain_grad``) and a hook on it see and change what eager's
+            would. This holds for whatever the caller can hold of the graph
+            when the call goes on: what the function returns, in a tuple, a
+            list or a dict or by itself, what it stores into an object and
+            what a variable holds; not for a tensor that is only asked for
+            its sizes or its type.
+            With a pass over graphs behind it a graph is the pass's, as
+            without ``backward``.
+
+            Where it is not eager's: the ``grad_fn`` of what a graph gives
+            is a node of the graph's. A backward that raises (a tensor it
+            needs was written to in place) raises eager's error with
+            eager's text, but before it has added anything to the ``.grad``
+            of an input of the graph, where eager has by then added up the
+            gradients of the leaves whose nodes all ran before the one
+            that raises. With ``create_graph=True`` the gradient is eager's
+            bit for bit; what a second backward computes through it is
+            eager's value, and can differ from it in the last bits (the
+            gradients that meet there are not always added in eager's
+            order), and for a graph that draws random numbers or writes to
+            a tensor from outside, or one an input of which was written to
+            in place since the call, such a backward raises and says so.
+
+            While a graph is taken down, twice per form, cuDNN's benchmark
+            mode is off and its deterministic mode is on for the whole
+            process (other threads' convolutions included), and both are
+            as they were when the call returns. In benchmark mode cuDNN
+            picks the algorithm of a convolution per thread, by what it
+            measured there, and eager's own gradients are not the same bits
+            on two threads: what a graph's gradients are then is what the
+            same kernels give for the same arguments in the same order.
     """
 
     engine: ClassVar[str] = "graphs"
 
     min_ops: int = 4
     max_variants: int = 8
+    backward: bool = False
 
     def __post_init__(self) -> None:
         for name, least in (("min_ops", 1), ("max_variants", 0)):
@@ -187,6 +234,17 @@ class AOTAutograd(BuiltinPass):
     compiles is the last pass over a graph in the list, and there is one at
     most. ``torch._functorch.aot_autograd`` is imported when the pass first
     runs.
+
+    The gradients are what ``torch.compile`` gives, which is not eager's
+    where a graph gives a tensor and also computes something of it (a
+    hidden state and a loss): the one compiled function has the gradient
+    of both, so nothing of the loss arrives at the tensor's own gradient
+    function. ``torch.autograd.grad(loss, [hidden])`` then says the tensor
+    was not used, ``retain_grad`` keeps nothing, and a hook on the tensor
+    is handed None and changes nothing of what reaches the inputs. Without
+    this pass in the list all of that is eager's: on eager's tape, and with
+    the engine's own backward, which cuts such a graph at the tensor
+    (:class:`Graphs`).
     """
 
     engine: ClassVar[str] = "aot_autograd"

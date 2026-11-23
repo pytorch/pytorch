@@ -380,6 +380,12 @@ pub struct Path {
     /// every call a form is for (`Def::fixed`), so a constant of the
     /// graph, which the form checks where it is computed.
     pub constants: Vec<PathValue>,
+    /// Per output: whether something can still hold it when the path has
+    /// landed (a variable or a value of the function, an object it was
+    /// stored into, a list or a tuple that is held). One that is only
+    /// looked at behind the callable, for its sizes or its kind, is gone
+    /// by then.
+    pub held: Vec<bool>,
     pub exported: Shared<Vec<Arc<Exported>>>,
     /// Register files for the calls that run it, kept from one to the next.
     pub registers: Shared<Vec<Vec<Obj>>>,
@@ -3619,6 +3625,8 @@ impl Path {
     ///     container the graph makes; an operand is ("v", value) or ("c",
     ///     object), a constant;
     ///   outputs: the values the callable returns, as a tuple in this order;
+    ///   held: per output, whether something can hold it when the path has
+    ///     landed (`Path::held`);
     ///   exits: integers it returns behind them, ("dim", tensor) or ("size",
     ///     tensor, dim) each.
     /// A run that cannot be exported is described by its checks alone: the
@@ -3712,6 +3720,7 @@ impl Path {
             closed = Some("what an operation with several results gave leaves the graph whole".to_string());
         }
         let outputs = list_of(self.outputs.iter().map(|v| ffi::PyLong_FromLong(*v as _)).collect());
+        let held = list_of(self.held.iter().map(|held| new_ref(if *held { ffi::Py_True() } else { ffi::Py_False() })).collect());
         let exits = list_of(
             self.exits
                 .iter()
@@ -3725,19 +3734,20 @@ impl Path {
         );
         let description = PyObj::from_owned(ffi::PyDict_New());
         let label = text(name);
-        let entries: [(&std::ffi::CStr, Obj); 7] = [
+        let entries: [(&std::ffi::CStr, Obj); 8] = [
             (c"where", label),
             (c"inputs", inputs.as_ptr()),
             (c"input_ids", ids.as_ptr()),
             (c"input_names", names.as_ptr()),
             (c"nodes", nodes.as_ptr()),
             (c"outputs", outputs),
+            (c"held", held),
             (c"exits", exits),
         ];
         for (key, value) in entries {
             ffi::PyDict_SetItemString(description.as_ptr(), key.as_ptr(), value);
         }
-        for made in [label, outputs, exits] {
+        for made in [label, outputs, held, exits] {
             ffi::Py_DECREF(made);
         }
         if !ffi::PyErr_Occurred().is_null() && closed.is_none() {
@@ -4910,6 +4920,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         pins: Vec::new(),
         body,
         feeds,
+        held: vec![true; outputs.len()],
         outputs,
         exits,
         writes: Vec::new(),
@@ -5972,6 +5983,7 @@ impl Path {
             body: Vec::new(),
             feeds: Vec::new(),
             outputs: Vec::new(),
+            held: Vec::new(),
             exits: Vec::new(),
             writes: Vec::new(),
             clears: Vec::new(),
@@ -6012,6 +6024,7 @@ impl Path {
         live: &BitSet,
         ends: String,
         provisional: bool,
+        returns: bool,
     ) -> Path {
         // A value that is late is so from some instruction on: from the
         // first, where nothing says from which.
@@ -6041,7 +6054,25 @@ impl Path {
         for inst in trace.body.iter().filter(|inst| inst.dst != NONE && container(&inst.op)) {
             built[inst.dst as usize] = true;
         }
+        // What can still be reached when the path has landed: what a value
+        // of the function holds then, what a variable of the frame is bound
+        // to last (unless the path lands where the function returns, and
+        // the frame is gone), what an effect stores, and what something
+        // that can be reached may hold of what it was made of.
+        let mut kept = vec![false; nregs];
+        writes.iter().for_each(|(made, _)| kept[*made as usize] = true);
+        for (at, (slot, v)) in trace.bound.iter().enumerate() {
+            if !returns && !trace.bound[at + 1..].iter().any(|(later, _)| later == slot) {
+                kept[*v as usize] = true;
+            }
+        }
         let values = &trace.rec.values;
+        // What gives a number, a text, a size, a dtype or a class holds
+        // nothing of what it was given.
+        let plain = |v: PathValue| {
+            let held = values[v as usize];
+            !held.is_null() && unsafe { checkable(held) || (!capi::is_unboxed(held) && ffi::PyType_Check(held) != 0) }
+        };
         // A method of the interpreter's, bound to what it was read off: a
         // tensor that an operation of the graph gave, or a list, a dict or
         // a set that the path made, of exactly that class. Nothing in such
@@ -6071,8 +6102,8 @@ impl Path {
         // behind the callable, or of a family that runs behind it by then.
         let late = |v: PathValue, at: usize| things.late(v, at);
         // What an instruction changes of what the path made: the list it
-        // appends to or extends, the dict it stores into, the iterator it
-        // takes the next item of.
+        // appends to or extends, the dict it stores into, the cell it puts
+        // into, the iterator it takes the next item of.
         let changes = |inst: &PathInst| {
             let mut target = NONE;
             if inst.kind == Kind::Residual && !matches!(inst.op, Op::Hold(_) | Op::StoreLocal(..) | Op::GetIter(_)) {
@@ -6094,8 +6125,8 @@ impl Path {
         // front of it: they are gone over again with what the last time
         // found, until that finds no more.
         let mut alive = vec![false; nregs];
-        let first_need = need;
-        let mut need = first_need.clone();
+        let (first_need, first_kept) = (need, kept);
+        let (mut need, mut kept) = (first_need.clone(), first_kept.clone());
         // The values that are no tensors and that the graph computes.
         let mut wanted = vec![false; nregs];
         let (mut outputs, mut exits) = (Vec::new(), Vec::new());
@@ -6228,6 +6259,18 @@ impl Path {
                     _ if !idle(&inst.op) && !(def.late && def.fixed) && !bound_method(&inst.op, dst) => uses(&inst.op, &mut need),
                     _ => Stage::Skipped,
                 };
+                // What is put into something the path made is held where that
+                // is, which may be anywhere; a check holds nothing.
+                let holds = match (inst.stage, inst.kind) {
+                    (Stage::Landing, _) => true,
+                    (Stage::Before | Stage::After, Kind::Residual) => true,
+                    (Stage::Before | Stage::After, Kind::Check) => false,
+                    (Stage::Before | Stage::After, _) => dst != NONE && kept[dst as usize] && !plain(dst),
+                    _ => false,
+                };
+                if holds {
+                    inst.op.for_each_use(|v| kept[v as usize] = true);
+                }
             }
             let mut found = alive.clone();
             (0..nregs).filter(|v| need[*v]).for_each(|v| found[thing(v as PathValue) as usize] = true);
@@ -6236,13 +6279,14 @@ impl Path {
                 break;
             }
             alive = found;
-            need = first_need.clone();
+            (need, kept) = (first_need.clone(), first_kept.clone());
             wanted.iter_mut().for_each(|wanted| *wanted = false);
             (outputs.clear(), exits.clear(), constants.borrow_mut().clear());
             (branches, calls) = (0, 0);
         }
         outputs.reverse();
         exits.reverse();
+        let held: Vec<bool> = outputs.iter().map(|v| kept[*v as usize]).collect();
         let effects = trace.body.iter().any(|inst| inst.stage == Stage::Landing);
         let constants = constants.into_inner();
         let mut feeds: Vec<PathValue> = Vec::new();
@@ -6298,6 +6342,7 @@ impl Path {
             mutates: trace.writes,
             pinned: std::mem::take(&mut trace.pinned),
             constants,
+            held,
             exported: Shared::new(Vec::new()),
             registers: Shared::new(Vec::new()),
         }
