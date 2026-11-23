@@ -603,7 +603,6 @@
   "test/test_scatter_gather_ops.py",
   "test/test_serialization.py",
   "test/test_set_default_mobile_cpu_allocator.py",
-  "test/test_sort_and_select.py",
   "test/test_sparse.py",
   "test/test_spectral_ops.py",
   "test/test_stateless_rng.py",
