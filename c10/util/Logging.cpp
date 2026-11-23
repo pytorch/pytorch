@@ -271,7 +271,7 @@ void SetPyTorchDDPUsageLogger(
   *GetDDPUsageLogger() = std::move(logger);
 }
 
-static int64_t GLOBAL_RANK = -1;
+[[maybe_unused]] static int64_t GLOBAL_RANK = -1;
 
 void SetGlobalRank(int64_t rank) {
   GLOBAL_RANK = rank;

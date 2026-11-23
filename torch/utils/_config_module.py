@@ -559,14 +559,16 @@ class ConfigModule(ModuleType):
             if config.alias is not None:
                 self._set_alias_val(config, value)
             else:
+                if name == "_custom_ops_profile":
+                    self._enable_cpp_fake_custom_op_profiles(value)
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-                # Avoid a redundant instance-__dict__ write: hide defaults to False on
-                # the class and is only ever set True by __delattr__ (the mock.patch
-                # workaround), so only clear it when it is actually set.
-                if config.hide:
-                    config.hide = False
+            # Avoid a redundant instance-__dict__ write: hide defaults to False on
+            # the class and is only ever set True by __delattr__ (the mock.patch
+            # workaround), so only clear it when it is actually set.
+            if config.hide:
+                config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -622,6 +624,9 @@ class ConfigModule(ModuleType):
         if alias is None:
             return None
         module_name, constant_name = alias.rsplit(".", 1)
+        # Nested configs of this module, e.g. "<module>.cutlass.foo", are flat keys.
+        if module_name.startswith(f"{self.__name__}."):
+            return self, alias.removeprefix(f"{self.__name__}.")
         try:
             module = importlib.import_module(module_name)
         except ImportError as e:
@@ -748,6 +753,8 @@ class ConfigModule(ModuleType):
                 for module, key, value in targets:
                     if isinstance(module, ConfigModule):
                         entry = module._config[key]
+                        if key == "_custom_ops_profile":
+                            module._enable_cpp_fake_custom_op_profiles(value)
                         entry.user_override.set(value)
                         if entry.hide:
                             entry.hide = False
@@ -778,6 +785,17 @@ class ConfigModule(ModuleType):
         return revert
 
     _GET_DICT_DIRTY_KEYS_CAP = 16
+
+    def _enable_cpp_fake_custom_op_profiles(self, value: Any) -> None:
+        if (
+            value is not None
+            and value is not _UNSET_SENTINEL
+            and self.__name__ == "torch._dynamo.config"
+        ):
+            import torch
+
+            # Notify before publishing. Never reset: another context may use it.
+            torch._C._enable_fake_tensor_custom_op_profiles()
 
     def _mark_get_dict_dirty(self, name: str) -> None:
         dirty = self._get_dict_dirty_keys_var.get()
@@ -962,22 +980,6 @@ class ConfigModule(ModuleType):
         # additional imports required
         imports = set()
 
-        def get_module_name(func: Callable, add_dot: bool) -> str:
-            module_name = func.__module__
-            if module_name == "builtins":
-                module_name = ""
-            if add_dot and module_name != "":
-                module_name += "."
-            return module_name
-
-        def add_import(func: Callable) -> None:
-            module_name = get_module_name(func, False)
-            if module_name:
-                imports.add(module_name)
-
-        def list_of_callables_to_string(v: list | set) -> list[str]:
-            return [f"{get_module_name(item, True)}{item.__name__}" for item in v]
-
         def importable_callable(v: Any) -> bool:
             # functools.partial has no attributes below but is a callable
             return callable(v) and hasattr(v, "__module__") and hasattr(v, "__name__")
@@ -1066,14 +1068,24 @@ class ConfigModule(ModuleType):
             if isinstance(v, functools.partial):
                 return get_partial_line(mod, k, v)
             elif importable_callable(v):
-                add_import(v)
-                return f"{mod}.{k} = {get_module_name(v, True)}{v.__name__}"
+                ref = importable_ref(v)
+                if ref is None:
+                    return f"# WARNING: {mod}.{k} omitted (callable cannot be re-imported), repro may not reproduce"
+                func_ref, import_name = ref
+                if import_name:
+                    imports.add(import_name)
+                return f"{mod}.{k} = {func_ref}"
             elif isinstance(v, (list, set)) and all(
                 importable_callable(item) for item in v
             ):
-                for item in v:
-                    add_import(item)
-                v_list = list_of_callables_to_string(v)
+                refs = [importable_ref(item) for item in v]
+                if any(ref is None for ref in refs):
+                    return f"# WARNING: {mod}.{k} entirely omitted (an element cannot be re-imported), repro may not reproduce"
+                v_list = []
+                for func_ref, import_name in refs:  # type: ignore[misc]
+                    if import_name:
+                        imports.add(import_name)
+                    v_list.append(func_ref)
                 if isinstance(v, list):
                     return f"{mod}.{k} = {v_list}"
                 else:
@@ -1173,6 +1185,21 @@ class ConfigModule(ModuleType):
     def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()
 
+    def _save_user_overrides(self) -> dict[str, Any]:
+        saved = {}
+        for k, e in self._config.items():
+            v = e.user_override.get()
+            if not isinstance(v, _IMMUTABLE_CONFIG_TYPES) and v is not _UNSET_SENTINEL:
+                v = copy.deepcopy(v)
+            saved[k] = v
+        return saved
+
+    def _restore_user_overrides(self, saved: dict[str, Any]) -> None:
+        self._hash_dirty_var.set(True)
+        self._get_dict_dirty_keys_var.set(None)
+        for k, v in saved.items():
+            self._config[k].user_override.set(v)
+
     def get_serializable_config_copy(self) -> dict[str, Any]:
         return self._get_dict(ignored_keys=getattr(self, "_save_config_ignore", []))
 
@@ -1197,6 +1224,10 @@ class ConfigModule(ModuleType):
 
             with config.patch("name", val):
                 ...
+
+        On exit, each key's previous override is restored, so a key that had no
+        override becomes unset again and keeps following its env, JustKnob, or
+        default value.
 
         For implication targets, this changes stored values; active implications
         still take precedence. On exit, stored values are restored before checking
@@ -1247,40 +1278,42 @@ class ConfigModule(ModuleType):
                 )
 
             def __enter__(self) -> None:
-                has_alias = any(
-                    config._config[key].alias
-                    for key in self.changes
-                    if key in config._config
-                )
                 prior: dict[str, Any] = {}
+                # Snapshots taken in key order, for when a later alias reaches an
+                # implication module and the whole patch switches to _set_raw_values.
+                # Resolving that alias can import modules that change earlier values.
                 raw_prior: dict[tuple[ModuleType, str], tuple[Any, bool]] = {}
                 for key, value in self.changes.items():
-                    if has_alias and key in config._config:
-                        module, name = config, key
-                        if config._config[key].alias:
-                            targets, modules = config._resolve_patch_changes(
-                                {key: value}
+                    entry = config._config.get(key)
+                    if entry is None or entry.hide:
+                        raise AttributeError(f"{config.__name__}.{key} does not exist")
+                    # Warn before anything is written, in case warnings are errors.
+                    config._warn_if_deprecated(key, entry)
+                    module, name = config, key
+                    if entry.alias:
+                        targets, mods = config._resolve_patch_changes({key: value})
+                        if any(isinstance(m, _ImplicationConfigModule) for m in mods):
+                            revert = config._set_raw_values(
+                                self.changes, prior=raw_prior
                             )
-                            if any(
-                                isinstance(m, _ImplicationConfigModule) for m in modules
-                            ):
-                                revert = config._set_raw_values(
-                                    self.changes, prior=raw_prior
-                                )
-                                self._prior.set((*self._prior.get(), revert))
-                                return
-                            module, name, _ = targets[0]
-                        if isinstance(module, ConfigModule):
-                            entry = module._config[name]
-                            raw_prior.setdefault(
-                                (module, name), (entry.user_override.get(), entry.hide)
-                            )
-                        else:
+                            self._prior.set((*self._prior.get(), revert))
+                            return
+                        module, name, _ = targets[0]
+                        if not isinstance(module, ConfigModule):
                             prior[key] = config.__getattr__(key)
                             raw_prior.setdefault((module, name), (prior[key], False))
                             continue
-                    # KeyError on invalid entry
-                    prior[key] = config.__getattr__(key)
+                        entry = module._config[name]
+                        # Only the key and the final target are checked for hide,
+                        # not intermediate hops of a multi-hop alias chain.
+                        if entry.hide:
+                            raise AttributeError(
+                                f"{module.__name__}.{name} does not exist"
+                            )
+                    # Save the raw override (of the final alias target) rather than the
+                    # resolved value so that exit leaves an unset key unset.
+                    prior[key] = entry.user_override.get()
+                    raw_prior.setdefault((module, name), (prior[key], False))
                 prior_stack = self._prior.get()
                 self._prior.set((*prior_stack, prior))
                 try:
@@ -1329,6 +1362,8 @@ class ConfigModule(ModuleType):
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override.get() for k in changes}
             for k, v in changes.items():
+                if k == "_custom_ops_profile":
+                    self._enable_cpp_fake_custom_op_profiles(v)
                 config[k].user_override.set(v)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(k)
@@ -1564,12 +1599,21 @@ def get_tristate_env(name: str, default: Any = None) -> bool | None:
     return default
 
 
-def inherit_fields_from(parent_cls):
-    def wrapper(child_cls):
+def deprecated_alias_fields_from(parent_cls: type) -> Callable[[type], type]:
+    """Adds the public fields of a nested config class that the decorated class
+    does not define as deprecated aliases, so reads and writes go to the parent."""
+
+    def wrapper(child_cls: type) -> type:
+        type_hints = inspect.get_annotations(parent_cls)
         for k, v in parent_cls.__dict__.items():
-            # copy fields that are not private and not overridden
             if not k.startswith("_") and k not in child_cls.__dict__:
-                setattr(child_cls, k, v)
+                alias = Config(
+                    alias=f"{parent_cls.__module__}.{parent_cls.__qualname__}.{k}",
+                    value_type=type_hints.get(k, type(v)),
+                    deprecated=True,
+                    deprecation_message=f"use {parent_cls.__qualname__}.{k} instead",
+                )
+                setattr(child_cls, k, alias)
         return child_cls
 
     return wrapper

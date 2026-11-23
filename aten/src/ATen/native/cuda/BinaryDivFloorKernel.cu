@@ -40,7 +40,7 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
         kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
           using accscalar_t = at::acc_type<scalar_t, true>;
           auto b = iter.scalar_value<accscalar_t>(2);
-          if (C10_UNLIKELY(b == 0)) {
+          if (b == 0) [[unlikely]] {
             return div_true_kernel_cuda(iter);
           }
 

@@ -9,6 +9,7 @@ import math
 import operator
 import unittest
 from re import escape
+from unittest import mock
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -53,6 +54,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -379,6 +381,7 @@ def _sequential_split_inline_tests():
 
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestPasses(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1103,6 +1106,45 @@ def forward(self, sin, cos):
             "wrap_with_autocast",
         )
 
+    def test_region_passes_recompile_each_module_a_fixed_number_of_times(self):
+        # Recompiling the whole module after inlining each region made export
+        # time grow with the square of the number of regions.
+        class Regions(torch.nn.Module):
+            def __init__(self, n):
+                super().__init__()
+                self.n = n
+
+            def forward(self, x):
+                for _ in range(self.n):
+                    x = x + 1
+                    with torch.no_grad():
+                        x = x.sin()
+                    with torch.autocast("cpu", enabled=False):
+                        x = x.cos()
+                return x
+
+        recompile = torch.fx.GraphModule.recompile
+        most_recompiles = []
+        for n in (2, 8):
+            counts = {}
+
+            def counting_recompile(gm):
+                counts[gm] = counts.get(gm, 0) + 1
+                return recompile(gm)
+
+            m, x = Regions(n), torch.randn(4)
+            with mock.patch.object(
+                torch.fx.GraphModule, "recompile", counting_recompile
+            ):
+                ep = export(m, (x,))
+            for region in ("wrap_with_set_grad_enabled", "wrap_with_autocast"):
+                target = getattr(torch.ops.higher_order, region)
+                nodes = ep.graph.find_nodes(op="call_function", target=target)
+                self.assertEqual(len(nodes), n)
+            self.assertEqual(ep.module()(x), m(x))
+            most_recompiles.append(max(counts.values()))
+        self.assertEqual(most_recompiles[0], most_recompiles[1])
+
     def test_set_grad_pass_reads_nested_spec(self):
         # A pytree spec that lives on a submodule is read with a dotted
         # get_attr, before, inside and after the region.
@@ -1771,6 +1813,7 @@ class TestMoveToDevicePassCuda(TestCase):
         self.assertEqual(ep.module()(inp).device, torch.device("cuda:0"))
         self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
 
+    @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
     def test_move_to_device_pass_interpreter_only_graph(self):
         init_torchbind_implementations()
         with _scoped_library("test_move_to_device_pass", "DEF") as lib:

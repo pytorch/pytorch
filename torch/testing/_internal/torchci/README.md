@@ -123,10 +123,13 @@ replaced by dots (`distributed.test_c10d_nccl`). A relative `DIR` is relative to
 the cwd.
 
 In pytorch/pytorch's CI (`GITHUB_REPOSITORY`), `run_test.py` defaults to
-`test/torchci-reports`, which is uploaded as described below, in every job except
-on XPU builds, which write none until the XPU CI image has `pyzes`: with it, the
-writer counts XPU devices with Level Zero Sysman instead of the XPU runtime.
+`test/torchci-reports`, which is uploaded as described below, in every job.
 `run_tests` has no default, so a test file run some other way writes no report.
+
+The writer can't poison fork where importing `common_utils` didn't: it imports
+`common_utils` first, whose `TEST_CUDA` and `TEST_XPU` count devices too, and its
+own count, `torch.<backend>.device_count()`, uses the device runtime only when
+NVML, amdsmi or, on XPU, Level Zero Sysman (`pyzes`, in the XPU CI image) can't.
 
 ## Upload
 
@@ -140,7 +143,9 @@ s3://gha-artifacts/torchci-reports/<org>/<repo>/<run id>/<job id>/<file>-<report
 The job id is `job.check_run_id`, which equals the job's id. When S3 is skipped
 (ROCm) or the junit upload fails, the action uploads the GitHub artifact
 `torchci-reports-runattempt<N>-<job id>.zip` instead, and
-`tools/stats/upload_artifacts.py` uploads each report in it to the same key. A row in
+`tools/stats/upload_artifacts.py` uploads each report in it to the same key. XPU
+runners hold only a read-only role, so `_xpu-test.yml` uploads the reports to the
+same key with a write role after the test container stops. A row in
 the tests tables has its report's `github_workflow_job_id` and `report_uuid`: list
 its job's folder and take the name that ends with the uuid.
 
