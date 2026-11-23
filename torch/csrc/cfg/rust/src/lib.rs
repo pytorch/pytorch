@@ -39,6 +39,7 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<pyapi::NativePass>()?;
     m.add_function(wrap_pyfunction!(pyapi::plan_changed, m)?)?;
     m.add_function(wrap_pyfunction!(pyapi::unsettled, m)?)?;
+    m.add_function(wrap_pyfunction!(pyapi::trial_settles, m)?)?;
     m.add_function(wrap_pyfunction!(shapes::tensor_key, m)?)?;
     m.add_class::<pyapi::CfgFunction>()?;
     m.add_class::<pyapi::Region>()?;
