@@ -665,6 +665,10 @@ impl CfgFunction {
                     d.set_item("hits", site.hits.load(Ordering::Relaxed))?;
                     d.set_item("misses", site.misses.load(Ordering::Relaxed))?;
                     d.set_item("exports", site.exports.load(Ordering::Relaxed))?;
+                    if crate::graph::timed() {
+                        let times: Vec<u64> = site.times.iter().map(|t| t.load(Ordering::Relaxed)).collect();
+                        d.set_item("times", times)?;
+                    }
                     d.set_item("version", version.id)?;
                     let listed = PyList::empty(py);
                     for (path, form) in &forms {

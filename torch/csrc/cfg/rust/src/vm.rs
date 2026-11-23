@@ -5111,6 +5111,16 @@ impl Compiled {
             path.registers.borrow_mut().push(own);
         };
         let other = |staged: Staged| if staged == Staged::Unsure { Ran::Miss } else { Ran::Other };
+        // The times of a call are added where it lands: a call that
+        // leaves the path earlier is in none of them.
+        let clock = graph::timed().then(std::time::Instant::now);
+        let spent = [const { std::cell::Cell::new(0u64) }; 3];
+        let lap = |at: usize, since: Option<std::time::Instant>| {
+            if let Some(since) = since {
+                spent[at].set(since.elapsed().as_nanos() as u64);
+            }
+            since.map(|_| std::time::Instant::now())
+        };
         let staged = self.run_stage(site, path, Stage::Before, &mut own, function, api);
         if staged != Staged::Done {
             leave(own);
@@ -5209,7 +5219,9 @@ impl Compiled {
                 leave(own);
                 return Ran::Miss;
             }
+            let clock = lap(0, clock);
             let result = ffi::PyObject_Vectorcall(callable.as_ptr(), args.as_ptr(), args.len(), null_mut());
+            lap(1, clock);
             let fits = result.is_null()
                 || ((ffi::PyTuple_Check(result) != 0 || ffi::PyList_Check(result) != 0)
                     && ffi::PyObject_Size(result) == expected);
@@ -5239,6 +5251,7 @@ impl Compiled {
             return Ran::Miss;
         }
         exported.proven.store(true, Ordering::Relaxed);
+        let clock = graph::timed().then(std::time::Instant::now);
         let item = |i: usize| {
             if ffi::PyTuple_Check(result) != 0 {
                 ffi::PyTuple_GET_ITEM(result, i as isize)
@@ -5289,6 +5302,12 @@ impl Compiled {
             self.store_local(frames.top(), *slot, reg(&own, *made));
         }
         leave(own);
+        if lap(2, clock).is_some() {
+            for (at, took) in spent.iter().enumerate() {
+                site.times[at].fetch_add(took.get(), Ordering::Relaxed);
+            }
+            site.times[3].fetch_add(1, Ordering::Relaxed);
+        }
         let (code, pc) = path.resume.unwrap_or((std::ptr::null(), AFRESH));
         Ran::Landed(Landing { block: path.land.0, code, pc })
     }

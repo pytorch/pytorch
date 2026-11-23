@@ -1083,6 +1083,32 @@ for dtype in (torch.bfloat16, torch.float16, torch.bfloat16):
 kinds  # [(torch.bfloat16, 1), (torch.float16, 2), (torch.bfloat16, 2)]
 ```
 
+With `TORCH_VM_GRAPH_TIMES=1` in the environment, `regions` also has `times`
+for a graph: the nanoseconds that the calls which ran what was made of it
+spent in front of it (the instructions and the checks of the path), in it,
+and behind it, and how many such calls there were. The numbers are those of
+one run:
+
+```console
+$ cat times.py
+import torch
+
+P = torch.vm.passes
+
+
+def f(x, w):
+    return torch.tanh(x @ w).sum() + (x * 2).mean()
+
+
+g = torch.vm(f, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), P.Inductor()))
+x, w = torch.randn(4, 8), torch.randn(8, 8)
+for _ in range(8):
+    out = g(x, w)
+print(torch.vm.regions(g)[0]["times"])
+$ TORCH_VM_GRAPH_TIMES=1 python times.py
+[19891, 1556676, 3290, 6]
+```
+
 ### AOTAutograd and Inductor
 
 Two passes over graphs come with `torch.vm`, and they are the ones that
