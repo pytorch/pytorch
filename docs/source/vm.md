@@ -412,7 +412,10 @@ of a path while the class has kept its answer for the class of the object;
 registering a class makes the kept answers stale, and the calls that find
 that out run the instructions, which ask anew. A method of a dict that was
 bound earlier (`get = table.get`) is the method of the dict when it is
-called.
+called. An attribute of a class (`Color.RED` of an enum class, a constant of
+a class with a metaclass) is read as `type` reads it while the class of the
+class has no `__getattribute__` and no `__getattr__` of its own, and what is
+found is given out by C code; that is asked again at every call.
 
 The instruction that such a function runs for gives what the interpreter
 makes of what the function returned: `for` and `iter` raise `TypeError` for
