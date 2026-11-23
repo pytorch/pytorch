@@ -155,6 +155,10 @@ def run_one(args):
     # As the accuracy runs of benchmarks/dynamo: random operations in compiled
     # code draw from the generator eager uses, so results can be compared.
     torch._inductor.config.fallback_random = True
+    # Dynamo turns the validation of the arguments of a distribution off for
+    # the process when it is first used (torch._dynamo.eval_frame). The
+    # three modes are to run the same program, so it is off in all of them.
+    torch.distributions.Distribution.set_default_validate_args(False)
     name, test, mode = args.one
     out = {"name": name, "test": test, "mode": mode}
 
