@@ -2553,6 +2553,10 @@ that are the same at every call:
   `nonzero`, `item`; the backward of a product, which looks for zeros);
 - a node of the backward is written in Python (a custom
   `autograd.Function`, a backward hook of a module, a checkpoint);
+- a tensor is made of numbers that are not the same at every call
+  (`torch.tensor` of a size that the graph computed; `torch.tensor` of
+  constants, on the device and of the dtype of a tensor of the graph, is
+  one operation of the forward);
 - a tensor is made a leaf inside the graph (`requires_grad_()`), an input
   is written to in place with a gradient through the write, or a result is a
   view that the graph cannot make again behind its node;

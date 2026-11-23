@@ -109,6 +109,14 @@ fn key(obj: &Bound<'_, PyAny>) -> usize {
     obj.as_ptr() as usize
 }
 
+/// Whether a value is a device or a dtype.
+fn kind_of(value: &Bound<'_, PyAny>) -> bool {
+    let Ok(torch) = torch(value.py()) else {
+        return false;
+    };
+    ["device", "dtype"].iter().any(|name| torch.getattr(*name).and_then(|class| value.is_instance(&class)).unwrap_or(false))
+}
+
 /// The tensors in a value: itself, or those of a tuple or list, in order.
 fn tensors_in<'py>(value: &Bound<'py, PyAny>, into: &mut Vec<Bound<'py, PyAny>>) {
     if is_tensor(value) {
@@ -659,14 +667,22 @@ impl Step {
         !matches!(self.kind, Kind::Aten(..) | Kind::Call(..) | Kind::GetItem(..) | Kind::SetItem(..) | Kind::Kernel(..))
     }
 
-    /// Whether the step takes nothing the graph computed or was handed.
-    fn constant(&self) -> bool {
-        self.reads().is_empty()
-    }
-
-    /// The function a call calls, and what it is called with.
+    /// The function a call calls, and what it is called with: for a call
+    /// of the form's graph, and for an operation of a joint graph that is
+    /// a call and no operator.
     #[allow(clippy::type_complexity)]
     fn called<'py>(&self, py: Python<'py>, values: &[Option<Py<PyAny>>]) -> PyResult<Option<(Bound<'py, PyAny>, Bound<'py, PyTuple>, Bound<'py, PyDict>)>> {
+        if let Kind::Kernel(op, args, kwargs, _, _) = &self.kind {
+            if op.bind(py).is_instance_of::<PyCapsule>() {
+                return Ok(None);
+            }
+            let given: Vec<Bound<'py, PyAny>> = args.iter().map(|item| item.get(py, values)).collect::<PyResult<_>>()?;
+            let named = PyDict::new(py);
+            for (name, arg) in kwargs {
+                named.set_item(name, arg.get(py, values)?)?;
+            }
+            return Ok(Some((op.bind(py).clone(), PyTuple::new(py, given)?, named)));
+        }
         let Kind::Call(callee, method, taken, kwnames) = &self.kind else {
             return Ok(None);
         };
@@ -1307,6 +1323,9 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
     let before: Vec<(bool, Option<(usize, u32)>)> =
         feeds.iter().zip(&held).map(|(feed, node)| (requires_grad(feed), node.as_ref().map(|(node, input)| (node.key(), *input)))).collect();
     let mut ran = Vec::new();
+    // The values that are the same at every call of the form: what is made
+    // of constants only, and the device and the dtype of a tensor.
+    let mut fixed: HashSet<u32> = HashSet::new();
     let mut events: Vec<Event<'py>> = Vec::new();
     let mut why: Option<String> = None;
     let none = PyDict::new(py);
@@ -1315,6 +1334,16 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
         step.run(py, &mut values)?;
         let records = tape.end(py)?;
         ran.push(!records.is_empty());
+        if let Some(value) = step.value {
+            let same = match step.kind {
+                Kind::Tuple(..) | Kind::List(..) | Kind::Slice(..) | Kind::Same(..) | Kind::Neg(..) | Kind::Binary(..) => step.reads().iter().all(|read| fixed.contains(read)),
+                Kind::Attr(..) => values[value as usize].as_ref().is_some_and(|held| kind_of(held.bind(py))),
+                _ => false,
+            };
+            if same && records.is_empty() {
+                fixed.insert(value);
+            }
+        }
         if why.is_some() || records.is_empty() {
             continue;
         }
@@ -1323,14 +1352,20 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
             continue;
         }
         let mut given = Vec::new();
-        if let Some(value) = step.value.and_then(|value| values[value as usize].as_ref()) {
-            tensors_in(value.bind(py), &mut given);
+        for value in step.gives() {
+            if let Some(held) = &values[value as usize] {
+                tensors_in(held.bind(py), &mut given);
+            }
         }
         // A tensor that an operation makes of what is no tensor
-        // (torch.tensor of numbers) is filled where no kernel runs: the
-        // operation itself is the one of the forward that gives it.
-        if step.constant() && given.len() == 1 && matches!(step.kind, Kind::Call(..)) {
-            let (function, args, kwargs) = step.called(py, &values)?.expect("a call");
+        // (torch.tensor of numbers, on the device and of the dtype of a
+        // tensor of the graph) is filled where no kernel runs: the
+        // operation itself, with what it was called with, is the one of
+        // the forward that gives it. Two runs must have called it with the
+        // same, and what it takes of the graph is the same at every call
+        // of the form (`fixed`).
+        let called = if step.reads().iter().all(|value| fixed.contains(value)) && given.len() == 1 { step.called(py, &values)? } else { None };
+        if let Some((function, args, kwargs)) = called {
             let name = function.getattr("__name__").and_then(|name| name.extract::<String>()).unwrap_or_else(|_| "made".to_string());
             let random = records.iter().any(|record| record.random);
             if let Err(error) = joint.forward(&function, &format!("python::{name}"), &args, &kwargs, &given[0], Vec::new(), random) {
@@ -1340,7 +1375,17 @@ fn take_down<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>]) -
         }
         for record in records {
             if record.base() == "lift_fresh" {
-                why = Some("an operation makes a tensor of what is no tensor, with tensors of the graph".to_string());
+                let name = match &step.kind {
+                    Kind::Call(..) => step.called(py, &values)?.and_then(|(function, _, _)| function.getattr("__name__").or_else(|_| function.get_type().getattr("__name__")).ok()),
+                    Kind::Aten(target, ..) => target.bind(py).getattr("__name__").ok(),
+                    _ => None,
+                };
+                let name = name.and_then(|name| name.extract::<String>().ok()).unwrap_or_else(|| match step.kind {
+                    Kind::GetItem(..) => "an index".to_string(),
+                    Kind::SetItem(..) => "a store by an index".to_string(),
+                    _ => "an operation".to_string(),
+                });
+                why = Some(format!("{name} makes a tensor of what is no tensor, and takes what is not the same at every call"));
                 break;
             }
             let written: Vec<Bound<'py, PyAny>> = record.written.iter().filter_map(|at| record.args.get_item(*at).ok()).filter(is_tensor).collect();
