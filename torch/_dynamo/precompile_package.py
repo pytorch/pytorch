@@ -1963,6 +1963,9 @@ class PrecompileSession(Generic[_P, _R]):
         # can compile for CUDA graphs and, at load, how it is wrapped, so one value
         # holds for the whole capture and is recorded.
         self._inductor_pins: dict[str, bool] = {}
+        # The capture's CUDA graph settings, resolved here like the pins: the
+        # artifact records them beside its options, for a serve-time compile.
+        self._cudagraph_options: dict[str, bool] = {}
         if self._backend_name == "inductor":
             options: Mapping[str, object] = (
                 {} if isinstance(backend, str) else backend.config
@@ -1980,6 +1983,11 @@ class PrecompileSession(Generic[_P, _R]):
             if cudagraphs and not _inductor_setting(options, "graph_partition"):
                 self._inductor_pins["triton.cudagraphs"] = True
                 self._inductor_pins["graph_partition"] = False
+            # A serve-time compile is lowered as this capture's graphs are.
+            self._cudagraph_options = {
+                "triton.cudagraphs": bool(cudagraphs),
+                "triton.cudagraph_trees": bool(trees),
+            }
         self._recompile_limit = recompile_limit
         self._dynamic = dynamic
         self._custom_guard_filter = guard_filter_fn is not None
@@ -2414,6 +2422,8 @@ class PrecompileSession(Generic[_P, _R]):
             _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
         sections = dict(custom_op_modules=modules, custom_ops=ops, custom_op_keys=keys)
         options = None if isinstance(self._backend, str) else self._backend.config
+        if self._cudagraph_options:
+            options = {**self._cudagraph_options, **(options or {})}
         cudagraph_config: dict[str, bool] = {}
         if self._backend_name == "inductor":
             trees = self._inductor_pins["triton.cudagraph_trees"]

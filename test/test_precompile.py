@@ -5998,7 +5998,8 @@ class TestPrecompileDynamoCapture(TestCase):
             cap(self.model, self.x2)
         with open(self.artifact) as f:
             recorded = _parse_artifact_metadata(f.read())["INDUCTOR_OPTIONS"]
-        self.assertEqual(recorded, expected)
+        # Beside the CUDA graph settings the capture's compiles ran under.
+        self.assertLessEqual(expected.items(), recorded.items())
         script = (
             "import ast, sys, torch\n"
             "from torch._inductor import compile_fx\n"
@@ -6703,7 +6704,8 @@ def cudagraph_config():
 
 torch.cuda.CUDAGraph.capture_begin = counting_capture_begin
 ambient = cudagraph_config()
-f = torch.compiler.precompile.load(artifact, cache)
+allow = saved["serve_time"]
+f = torch.compiler.precompile.load(artifact, cache, allow_serve_time_compiles=allow)
 # load() patches the artifact's config around the post-compile, and sets nothing.
 assert cudagraph_config() == ambient
 training = saved["expected_grad"] is not None
@@ -6783,6 +6785,7 @@ class TestPrecompileCudagraphs(TestCase):
         mark_step=False,
         expected_grad=None,
         calls=None,
+        serve_time=False,
     ):
         # Calls the loaded artifact three times, on the model and self.x (or on
         # each of calls' (args, expected) in turn), in a fresh process whose
@@ -6793,11 +6796,13 @@ class TestPrecompileCudagraphs(TestCase):
         #   trees: whether it made a CUDA graph tree manager
         #   skips: its cudagraph skips
         # With expected_grad, each call also runs the backward.
+        # serve_time loads with allow_serve_time_compiles.
         state = os.path.join(self.dir, "state.pt")
         saved = {
             "calls": calls or [((self.x,), expected)],
             "expected_grad": expected_grad,
             "mark_step": mark_step,
+            "serve_time": serve_time,
         }
         torch.save({"state_dict": self.model.state_dict(), **saved}, state)
         argv = [self.dir, self.module_name, self.artifact, self.cache, state]
@@ -6810,8 +6815,8 @@ class TestPrecompileCudagraphs(TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         served = json.loads(out.stdout.splitlines()[-1])
-        # The artifact served the calls: the loading process compiled nothing.
-        self.assertEqual(served.pop("compiles"), 0)
+        # The loading process compiles only what it may.
+        self.assertEqual(served.pop("compiles") > 0, serve_time)
         return served
 
     @parametrize("serving", ["standalone", "installed"])
@@ -6919,6 +6924,26 @@ class TestPrecompileCudagraphs(TestCase):
         self.assertTrue(meta["CUDAGRAPH_CONFIG"]["triton.cudagraphs"])
         served = self._serve_in_fresh_process(y)
         self.assertEqual((served["captured"], served["skips"]), (0, 1))
+
+    @parametrize("cudagraphs", [False, True])
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_serve_time_compile_takes_the_capture_cudagraph_settings(
+        self, cudagraphs
+    ):
+        fn = self.mod.calls_breaking_helper
+        # The capture takes the flag from the ambient config, not from options.
+        with torch._inductor.config.patch({"triton.cudagraphs": cudagraphs}):
+            _, meta = self._capture_step(fn)
+        self.assertEqual(meta["INDUCTOR_OPTIONS"]["triton.cudagraphs"], cudagraphs)
+        # A shape no captured variant covers, so every graph serving it is
+        # compiled in the loading process, whose own flag says the opposite.
+        miss = torch.randn(6, 8, device="cuda")
+        with torch.no_grad():
+            calls = [((miss,), fn(self.model, miss))]
+        env = {"TORCHINDUCTOR_CUDAGRAPHS": "0" if cudagraphs else "1"}
+        served = self._serve_in_fresh_process(env=env, calls=calls, serve_time=True)
+        self.assertEqual(served["captured"] > 0, cudagraphs)
+        self.assertEqual(served["skips"], 0)
 
 
 def _exception_chain(exc: BaseException | None) -> str:
