@@ -4186,8 +4186,8 @@ class CommonTemplate:
         with torch.no_grad():
             self.assertEqual(cfn(x, i), fn(x, i))
 
-    @skipCPUIf(True, "requires CUDA/Triton")
-    @requires_cuda_and_triton
+    @skipCPUIf(True, "requires GPU/Triton")
+    @requires_gpu_and_triton
     def test_builtins_round_float_ndigits_neg_uses_value_expr(self):
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
@@ -4622,14 +4622,8 @@ for dtype in (torch.int32, torch.int64):
                 b = torch.full((8,), b_val, dtype=dtype, device=self.device)
                 self.common(fn, (a, b))
 
-    @skip_if_device(
-        lambda device: device not in ("cpu", "cuda"), "Only validated on CPU/CUDA"
-    )
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])
     def test_div_floor_float_nonfinite(self, dtype):
-        if self.device not in ("cpu", "cuda"):
-            raise unittest.SkipTest("Only validated on CPU/CUDA")
-
         def fn(a, b):
             return torch.div(a, b, rounding_mode="floor")
 
@@ -8177,12 +8171,9 @@ for dtype in (torch.int32, torch.int64):
             (weight, indices),
         )
 
-    @skip_if_device(lambda device: device != "cuda", "requires cuda")
+    @skip_if_cpu
     @config.patch(implicit_fallbacks=True)
     def test_no_grad_embedding_renorm_negative_indices(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires cuda")
-
         def fn(weight, indices):
             return torch.ops.aten._no_grad_embedding_renorm_(
                 weight, indices, max_norm=1.0, norm_type=1.0
@@ -8377,13 +8368,7 @@ for dtype in (torch.int32, torch.int64):
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    @skip_if_device(
-        lambda device: device not in ("cpu", "cuda"), "Only validated on CPU/CUDA"
-    )
     def test_layer_norm_rejects_complex_inputs(self):
-        if self.device not in ("cpu", "cuda"):
-            raise unittest.SkipTest("Only validated on CPU/CUDA")
-
         m = torch.nn.LayerNorm(10).to(self.device)
         x = torch.randn(1, 1, 10, device=self.device, dtype=torch.complex64)
 
@@ -9032,12 +9017,10 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([16, 16]),),
         )
 
-    @skip_if_device(lambda device: device != "cuda", "requires CUDA")
+    @skip_if_cpu
     def test_infinitely_differentiable_gelu_backward_bfloat16(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
-        if not SM80OrLater:
-            raise unittest.SkipTest("uses bfloat16 which requires SM >= 80")
+        if not self.is_dtype_supported(torch.bfloat16):
+            raise unittest.SkipTest("device does not support bfloat16")
 
         def fn(grad, self):
             return aten.infinitely_differentiable_gelu_backward(grad, self)
@@ -10176,11 +10159,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ):
                 c_fn(x)
 
-    @skip_if_device(lambda device: device != "cuda", "CUDA only")
+    @skip_if_cpu
     def test_convolution_errors_on_input_weight_dtype_mismatch(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("CUDA only")
-
         def fn(x):
             return torch.nn.functional.conv2d(x, weight, bias=None)
 
@@ -14809,16 +14789,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code.count("triton_helpers.randn4x"), 1)
         self.assertEqual(code.count("tl.randn"), 0)
 
-    @skip_if_device(
-        lambda device: device != "cuda" and not is_mps_backend(device),
-        "Only valid for CUDA!",
-    )
+    @skip_if_cpu
     @xfail_if_mps  # Only works for Triton on CUDA
     @config.patch(use_rand4x=True)
     def test_rand4x_falls_back_in_reduction(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("Only valid for CUDA!")
-
         @torch.compile
         def fn(x):
             return (torch.rand_like(x) * x).sum(dim=1)
@@ -14849,16 +14823,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(code.count("triton_helpers.rand_eager_kernel"), 1)
         self.assertEqual(code.count("tl.rand("), 0)
 
-    @skip_if_device(
-        lambda device: device != "cuda" and not is_mps_backend(device),
-        "Only valid for CUDA!",
-    )
+    @skip_if_cpu
     @xfail_if_mps  # Only works for Triton on CUDA
     @config.patch(align_random_eager=True)
     def test_align_random_eager_randn(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("Only valid for CUDA!")
-
         @torch.compile
         def fn():
             return torch.randn([4096], device=self.device)
@@ -15006,8 +14974,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
         # and https://github.com/pytorch/pytorch/issues/184893
         # max/min on boolean tensors returned incorrect indices on Triton and CPU.
-        if self.device != "cuda" and not is_cpp_backend(self.device):
-            raise unittest.SkipTest("only tested on CUDA and the C++ CPU backend")
+        if self.device not in ("cuda", "xpu") and not is_cpp_backend(self.device):
+            raise unittest.SkipTest("requires CUDA, XPU or the C++ CPU backend")
 
         def fn(x):
             return (
@@ -19279,7 +19247,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
 
-    @requires_cuda
+    @requires_gpu()
     def test_conv_transpose_zero_size_output(self):
         # CUDA/HIP support zero-sized spatial outputs for conv_transpose by
         # short-circuiting before backend libraries see empty tensor descriptors.
@@ -19310,7 +19278,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(compiled_out.shape, torch.Size([1, 1, 0, 0]))
         self.assertEqual(eager_out, compiled_out)
 
-    @requires_cuda
+    @requires_gpu()
     def test_lazy_conv_zero_in_channels_backward(self):
         for dim in (1, 2, 3):
             conv_cls = getattr(torch.nn, f"LazyConv{dim}d")
@@ -21203,7 +21171,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         FileCheck().check_regex(r"tl\.store\(.*xmask\)").run(code)
 
     @xfail_if_triton_cpu
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_addcmul_fma_bitwise_equal(self):
         """Test that addcmul with FMA lowering produces bitwise equal results to eager."""
@@ -21237,7 +21205,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager_result2, compiled_result2, atol=atol, rtol=rtol)
 
     @xfail_if_triton_cpu
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_addcmul_fma_uses_fma_instruction(self):
         """Test that addcmul generates code using FMA instruction."""
@@ -21254,7 +21222,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
     @xfail_if_triton_cpu
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_addcdiv_fma_bitwise_equal(self):
         """Compiled addcdiv matches eager bitwise for both value==1 and value!=1 branches."""
         s = torch.randn(64, 64, device=GPU_TYPE)
@@ -21270,7 +21238,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(fn(s, t1, t2), torch.addcdiv(s, t1, t2, value=value))
 
     @xfail_if_triton_cpu
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_addcdiv_fma_uses_fma_and_div_rn(self):
         """Test that addcdiv re-fusion emits tl.fma and triton.language.div_rn."""
         from torch._dynamo.utils import counters
@@ -21298,7 +21266,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertIn("tl.fma", code)
         self.assertIn("triton.language.div_rn", code)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @config.patch({"emulate_precision_casts": True})
     def test_addcmul_type_promotion(self):
         """Test that addcmul correctly promotes types when inputs have different dtypes."""
@@ -21740,15 +21708,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for eg, cg in zip(eager_grads, compiled_grads, strict=True):
             self.assertEqual(eg, cg)
 
-    @skip_if_device(lambda device: device != "cuda", "CUDA OOM regression test")
+    @skip_if_cpu
     def test_efficient_zero_tensor_avoids_oom(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("CUDA OOM regression test")
-
         element_size = torch.empty((), dtype=torch.float32).element_size()
-        numel = (
-            torch.cuda.get_device_properties(self.device).total_memory // element_size
-        )
+        device_module = torch.get_device_module(self.device)
+        numel = device_module.get_device_properties(self.device).total_memory // element_size
         numel += 1024
 
         def fn():
@@ -22242,7 +22206,7 @@ if RUN_GPU or HAS_MPS:
         common = check_model_gpu
         device = GPU_TYPE
 
-        @requires_cuda_and_triton
+        @requires_gpu_and_triton
         def test_noncontiguous_reshape_cat_backward(self):
             # Cross the 1024-element padding threshold with a non-aligned width.
             width = 342
@@ -22280,7 +22244,7 @@ if RUN_GPU or HAS_MPS:
                 rtol=1e-4,
             )
 
-        @requires_cuda_and_triton
+        @requires_gpu_and_triton
         def test_special_bessel_inf_matches_eager(self):
             ops = (
                 ("bessel_j0", torch.special.bessel_j0),
@@ -22309,7 +22273,7 @@ if RUN_GPU or HAS_MPS:
                         self.assertTrue(torch.isnan(eager[:3]).all())
                         self.assertTrue(torch.isnan(compiled[:3]).all())
 
-        @requires_cuda_and_triton
+        @requires_gpu_and_triton
         def test_signbit_negative_zero_cuda(self):
             def fn(x):
                 return torch.signbit(x)
@@ -22322,7 +22286,7 @@ if RUN_GPU or HAS_MPS:
                 )
                 self.common(fn, (x,), check_lowp=False)
 
-        @requires_cuda_and_triton
+        @requires_gpu_and_triton
         def test_modified_bessel_i_inf_matches_eager(self):
             ops = (
                 ("i0", torch.special.i0),
@@ -22348,7 +22312,7 @@ if RUN_GPU or HAS_MPS:
                         torch.testing.assert_close(actual, expected, equal_nan=True)
                         self.assertTrue(torch.isnan(actual[:3]).all())
 
-        @requires_cuda_and_triton
+        @requires_gpu_and_triton
         @functorch_config.patch(view_replay_for_aliased_outputs=True)
         def test_complex_view_as_complex_exact_stride_copy_cuda(self):
             def fn(x):
@@ -22362,7 +22326,7 @@ if RUN_GPU or HAS_MPS:
 
             self.assertEqual(actual, expected, exact_stride=True)
 
-        @requires_cuda_and_triton
+        @requires_gpu_and_triton
         def test_complex_view_as_complex_expanded_exact_stride_copy_cuda(self):
             def fn(x):
                 y = torch.view_as_complex(x)
@@ -22374,7 +22338,7 @@ if RUN_GPU or HAS_MPS:
 
             self.assertEqual(actual, expected, exact_stride=True)
 
-        @requires_cuda_and_triton
+        @requires_gpu_and_triton
         def test_complex_copy_strided_stride_order_copy_cuda(self):
             def fn(x):
                 y = torch.view_as_complex(x)
