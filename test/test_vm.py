@@ -4857,6 +4857,10 @@ def region_chain(x, y):
     return ((x + y).sin() * y).cos().exp().tanh()
 
 
+def region_counter(x, i):
+    return ((x + i).sin() * i).cos().exp().tanh()
+
+
 class RegionRecurrent(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -5018,6 +5022,13 @@ class TestVmRegions(TestCase):
     def compiled_regions(self, fn):
         return [r for r in torch.vm.regions(fn) if r["state"] == "compiled"]
 
+    def left_to_vm(self, fn, where):
+        return [
+            r["reason"]
+            for r in torch.vm.regions(fn)
+            if r["state"] == "vm" and r["where"].startswith(where)
+        ]
+
     def test_frame_readers_amid_tensor_work_find_their_function(self):
         # The instructions of a region run from frames of the region's own
         # until its graph is made: what they call is called by the function.
@@ -5162,6 +5173,25 @@ class TestVmRegions(TestCase):
             self.assertEqual(out, f(x, scale)[0], atol=0, rtol=0)
             self.assertEqual(shared(), scale)
         self.assertEqual(graphs, [5, 5])
+
+    def test_values_that_keep_changing_do_not_multiply_graphs(self):
+        graphs = []
+
+        def backend(graph, inputs):
+            graphs.append(1)
+            return graph
+
+        compiled = torch.vm(region_counter, passes=with_graphs(backend), fallback=False)
+        x = torch.randn(4)
+        for i in range(40):
+            scale = i / 7
+            self.assertEqual(
+                compiled(x, scale), region_counter(x, scale), atol=0, rtol=0
+            )
+        self.assertLessEqual(len(graphs), 3)
+        self.assertEqual(self.compiled_regions(compiled), [])
+        (reason,) = self.left_to_vm(compiled, "region_counter")
+        self.assertIn("ever new values", reason)
 
     def looks(self, compiled, *args):
         """How many tensors three calls each make their key of."""
@@ -5630,6 +5660,10 @@ class GraphBox:
 
 def graph_boxed(x, box):
     return ((x.sin() * box.scale).cos() + box.scale).tanh() * 2
+
+
+def graph_counter(x, i):
+    return ((x + i).sin() * i).cos().exp().tanh()
 
 
 class GraphScaled:
@@ -6316,6 +6350,49 @@ print(json.dumps(found))
         self.assertEqual(graph["reason"], "load_attr could run Python code")
         self.assertEqual(compiled.stats()["graphs"]["given_up"], 1)
 
+    def test_numbers_that_are_new_on_every_call_are_not_exported_for(self):
+        graphs = []
+
+        def keep(gm, input_types):
+            graphs.append(gm)
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_counter, passes=passes, fallback=False)
+        x = torch.randn(4)
+        for i in range(50):
+            scale = i / 7
+            got = compiled(x, scale)
+            self.assertEqual(got, graph_counter(x, scale), atol=0, rtol=0)
+        # Three forms that never ran again, and a fourth number: no more.
+        self.assertEqual(len(graphs), 3)
+        (graph,) = self.graphs(compiled)
+        reason = "its inputs take ever new values"
+        self.assertEqual((graph["state"], graph["reason"]), ("vm", reason))
+        counts = (graph["variants"], graph["exports"], graph["hits"])
+        self.assertEqual(counts, (0, 3, 0))
+        # The calls of this kind are told by their tensor alone.
+        ((checks, _),) = self.forms(compiled, "aten::exp")[1]
+        self.assertEqual(checks, ["%x.1: float32[4]"])
+        # Another kind of call is exported as before.
+        wide = torch.randn(4, dtype=torch.float64)
+        for _ in range(3):
+            got = compiled(wide, 0.5)
+            self.assertEqual(got, graph_counter(wide, 0.5), atol=0, rtol=0)
+        (graph,) = self.graphs(compiled)
+        found = (graph["state"], graph["variants"], graph["hits"])
+        self.assertEqual(found, ("compiled", 1, 2))
+        self.assertEqual(len(graphs), 4)
+        # Three numbers in turn are three forms, which run.
+        graphs.clear()
+        compiled = torch.vm(graph_counter, passes=passes, fallback=False)
+        for i in range(13):
+            scale = (0.5, 0.25, 0.125)[i % 3]
+            got = compiled(x, scale)
+            self.assertEqual(got, graph_counter(x, scale), atol=0, rtol=0)
+        (graph,) = self.graphs(compiled)
+        self.assertEqual((len(graphs), graph["variants"], graph["hits"]), (3, 3, 9))
+
     def test_the_forms_of_a_graph_are_tried_in_the_order_they_last_ran(self):
         graphs = []
 
@@ -6493,6 +6570,32 @@ print(json.dumps(found))
             got = torch.func.grad(compiled, argnums=1)(x, wrt)
             expected = torch.func.grad(graph_mixed, argnums=1)(x, wrt)
             self.assertEqual(got, expected, atol=0, rtol=0)
+
+    def test_a_kind_of_call_is_open_again_once_its_numbers_stay(self):
+        exports = []
+
+        def keep(gm, input_types):
+            exports.append(1)
+            return gm
+
+        # The calls that run the graph are counted: no measurement.
+        passes = (*DEFAULT, P.Graphs(), keep)
+        compiled = torch.vm(graph_rated, passes=passes, fallback=False, demote=False)
+        x = torch.randn(4, 4)
+        # Ten rates, each new: the kind of call is closed, as before.
+        for step in range(10):
+            rate = 1.0 + step / 10
+            self.assertEqual(compiled(x, rate), graph_rated(x, rate), atol=0, rtol=0)
+        (graph,) = self.graphs(compiled)
+        closed = [form["reason"] for form in graph["forms"] if "reason" in form]
+        self.assertEqual(closed, ["its inputs take ever new values"])
+        made, hits = len(exports), graph["hits"]
+        # One rate from then on: it is exported once more, and runs.
+        for _ in range(30):
+            self.assertEqual(compiled(x, 3.0), graph_rated(x, 3.0), atol=0, rtol=0)
+        (graph,) = self.graphs(compiled)
+        self.assertEqual(len(exports), made + 1)
+        self.assertGreaterEqual(graph["hits"], hits + 20)
 
     def test_why_a_graph_is_not_exported_is_said(self):
         def helper(gm):

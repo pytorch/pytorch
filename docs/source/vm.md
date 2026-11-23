@@ -286,6 +286,57 @@ fine, said["state"], raised, where.split(",")[0]
 # (True, 'vm', 'the pass deep raised IndexError: list index out of range', 'helper')
 ```
 
+A number that is another on every call (a learning rate on a schedule, a
+step count) would use up the forms of a graph with kinds of calls that never
+come again. When a graph is about to be exported for a fourth number, with
+everything else as it was and none of the three forms before it ever run
+again, the three are dropped and nothing more is exported for that kind of
+call while the number goes on changing. The calls run the operations, and
+`regions` gives the reason:
+
+```python
+def step(x, rate):
+    return ((x + rate).sin() * rate).cos().exp().tanh()
+
+
+exported = []
+
+
+def count(gm, input_types):
+    exported.append(gm)
+    return gm
+
+
+g = torch.vm(step, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), count))
+x = torch.randn(4)
+same = [torch.equal(g(x, i / 7), step(x, i / 7)) for i in range(50)]
+all(same), len(exported)  # (True, 3)
+(found,) = torch.vm.regions(g)
+found["state"], found["reason"]  # ('vm', 'its inputs take ever new values')
+found["forms"]
+# [{'checks': ['%x.1: float32[4]'], 'hits': 0, 'reason': 'its inputs take ever new values'}]
+```
+
+Two or three numbers that come in turn keep their forms: by the time a
+fourth number comes, one of the forms has run again.
+
+Once such a number has been the same for three calls in a row, the kind of
+call is open again: the next call is exported, and the calls behind it run
+what was made of the graph. (The calls that run the graph are counted here,
+so the function is not measured against the interpreter meanwhile:
+`demote=False`.)
+
+```python
+exported.clear()
+g = torch.vm(step, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), count), demote=False)
+for i in range(20):
+    out = g(x, i / 7)
+same = [torch.equal(g(x, 0.5), step(x, 0.5)) for _ in range(8)]
+all(same), len(exported)  # (True, 4)
+(found,) = torch.vm.regions(g)
+found["state"], found["hits"]  # ('compiled', 3)
+```
+
 What the function does between its operations (it reads a global or an
 attribute, takes an item of a list, adds two numbers) is not in the graph.
 With something made of the graph in place of the operations, those

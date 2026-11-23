@@ -4487,6 +4487,25 @@ impl Compiled {
             }
         }
         let Some(callable) = &exported.callable else {
+            // Closed for numbers that were new at every call: where they
+            // have been the same for a few calls in a row, the kind of call
+            // is open again, and the next one is taken down.
+            if !exported.varying.is_empty() {
+                let now: Vec<Obj> = exported.varying.iter().map(|place| reg(regs, *place)).collect();
+                let same = {
+                    let last = exported.last.borrow();
+                    last.len() == now.len() && last.iter().zip(&now).all(|(was, is)| !is.is_null() && graph::same_value(was.as_ptr(), *is))
+                };
+                if same {
+                    if exported.repeats.fetch_add(1, Ordering::Relaxed) + 1 >= graph::SETTLED {
+                        path.exported.borrow_mut().retain(|other| !Arc::ptr_eq(other, &exported));
+                    }
+                } else {
+                    exported.repeats.store(0, Ordering::Relaxed);
+                    let kept = now.iter().filter(|o| !o.is_null() && !capi::is_unboxed(**o)).map(|o| PyObj::from_borrowed(*o));
+                    *exported.last.borrow_mut() = kept.collect();
+                }
+            }
             self.undo_path(path, regs);
             return Some(PathEnd::Miss);
         };
@@ -4710,13 +4729,31 @@ impl Compiled {
                 capi::release(take(regs, *v));
             }
         }
-        let described = path.describe(&site.name, &self.func, &rec, api);
+        let mut described = path.describe(&site.name, &self.func, &rec, api);
+        let world = (modes, included, excluded, state);
+        let mut changing: Vec<graph::PathValue> = Vec::new();
+        if described.closed.is_none() {
+            // One more form for nothing but another number, with none of
+            // the `EVER_NEW` before it ever run again: the numbers are new
+            // every time, and what is checked for them never comes.
+            if let Some(varying) = site.ever_new(path, world, &described.checks, &described.numbers) {
+                changing = varying.iter().map(|k| described.checks[*k].target).collect();
+                let mut at = 0;
+                described.checks.retain(|_| {
+                    at += 1;
+                    !varying.contains(&(at - 1))
+                });
+                described.closed = Some(graph::EVER_NEW_REASON.to_string());
+            }
+        }
         let graph::Described { description, closed, checks, numbers, args } = described;
         let form = |callable: Option<PyObj>, guards: Vec<(usize, PyObj)>, closed: Option<String>| {
             let proven = std::sync::atomic::AtomicBool::new(false);
             let hits = AtomicU64::new(0);
             let sizes = crate::shapes::ShapeGuard::exact(&numbers);
-            Arc::new(Exported { modes, included, excluded, state, checks, sizes, args, guards, callable, closed, proven, hits })
+            let varying = if closed.as_deref() == Some(graph::EVER_NEW_REASON) { changing.clone() } else { Vec::new() };
+            let (last, repeats) = (crate::pyffi::Shared::new(Vec::new()), std::sync::atomic::AtomicU32::new(0));
+            Arc::new(Exported { modes, included, excluded, state, checks, sizes, args, guards, callable, varying, last, repeats, closed, proven, hits })
         };
         let Some(description) = description.filter(|_| closed.is_none()) else {
             path.exported.borrow_mut().insert(0, form(None, Vec::new(), closed));
