@@ -414,7 +414,11 @@ def vm(
             guarded on that still being the case.
         unboxed: keep the tensors that kernels return without a Python object
             until Python code needs one. A tensor that only flows from one
-            kernel call into others then never gets one.
+            kernel call into others then never gets one. A variable that is
+            bound to such a tensor gets the object in front of everything
+            that can look at the frame of the function: a call, an
+            instruction that can run Python code, an object whose end can,
+            a frame that the interpreter starts, an exception.
         callees: rewrite the Python functions that are called while the
             function runs, the first time each is called, with the same
             options. That is every call of a Python function on the thread,
