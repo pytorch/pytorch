@@ -1351,9 +1351,9 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
 
         if not compare_full_expansion:
             from torch.distributed.tensor._collective_utils import redistribute_cost
-            from torch.distributed.tensor._redistribute import _gen_transform_infos
+            from torch.distributed.tensor._redistribute import clear_transform_infos_cache
 
-            _gen_transform_infos.cache_clear()
+            clear_transform_infos_cache()
             with use_min_cost_redistribution_plan():
                 actual_cost = sum(
                     redistribute_cost(src, dst)
@@ -1807,11 +1807,11 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         greedy would flag the PQ's ordering optimizations as false positives.
         """
         from torch.distributed.tensor._collective_utils import redistribute_cost
-        from torch.distributed.tensor._redistribute import _gen_transform_infos
+        from torch.distributed.tensor._redistribute import clear_transform_infos_cache
 
         # Clear cached transform infos so use_min_cost_redistribution_plan()
         # takes effect (earlier tests may have cached greedy results).
-        _gen_transform_infos.cache_clear()
+        clear_transform_infos_cache()
 
         placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
         mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))
@@ -1872,9 +1872,9 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         a genuinely worse strategy, not just ordering differences.
         """
         from torch.distributed.tensor._collective_utils import redistribute_cost
-        from torch.distributed.tensor._redistribute import _gen_transform_infos
+        from torch.distributed.tensor._redistribute import clear_transform_infos_cache
 
-        _gen_transform_infos.cache_clear()
+        clear_transform_infos_cache()
 
         placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
         mesh = DeviceMesh("cpu", mesh=torch.arange(4).reshape(2, 2))

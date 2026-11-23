@@ -1581,17 +1581,32 @@ def _gen_transform_infos_non_cached(
     return transform_infos
 
 
-@cache
+_transform_infos_cache: dict[tuple[Any, ...], list[_TransformInfo]] = {}
+
+
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
     use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
-    return _gen_transform_infos_non_cached(
-        src_spec,
-        dst_spec,
+    key = (
+        src_spec.mesh._cache_key,
+        src_spec._hash_key_no_mesh,
+        dst_spec._hash_key_no_mesh,
         use_graph_based_transform,
     )
+    infos = _transform_infos_cache.get(key)
+    if infos is None:
+        infos = _gen_transform_infos_non_cached(
+            src_spec, dst_spec, use_graph_based_transform
+        )
+        _transform_infos_cache[key] = infos
+    return infos
+
+
+def clear_transform_infos_cache() -> None:
+    """Clear the cache of generated transform infos."""
+    _transform_infos_cache.clear()
 
 
 def redistribute_local_tensor(
