@@ -173,6 +173,10 @@ class TestDistributedStateDictSaveLoad(TestCase):
 class _CheckpointContinuousTest(MultiProcContinuousTest):
     world_size = 2
 
+    @requires_capabilities(Capability.distributed.backend)
+    def setUp(self) -> None:
+        super().setUp()
+
     @classmethod
     def backend_str(cls) -> str:
         return cls.distributed_backend()
