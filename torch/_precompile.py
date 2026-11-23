@@ -4106,8 +4106,11 @@ def capture(
     runs as one after :func:`load`, and a graph that compiled without them
     does not, whatever the loading process's ``triton.cudagraphs`` says. The
     CUDA graphs themselves do not ship: the loading process records its own
-    on its first calls. :func:`load` lists the CUDA graph settings that stay
-    the loading process's.
+    on its first calls. ``triton.cudagraph_trees`` is read when ``capture()``
+    is called (``mode`` and ``options`` over ``torch._inductor.config``), holds
+    for every captured call and is the one the loaded graphs are wrapped by.
+    :func:`load` lists the CUDA graph settings that stay the loading
+    process's.
 
     As under :func:`torch.compile`, a graph's outputs are overwritten by its
     next replay, so clone what you keep across calls or call
@@ -4279,12 +4282,12 @@ def load(
     up to a graph break whose continuation fell back, still ran compiled.
 
     CUDA graphs: a :class:`DynamoTracer` artifact's graphs are wrapped in CUDA
-    graphs as they compiled (see :func:`capture`): the artifact's
-    ``CUDAGRAPH_CONFIG`` says whether any did, and load applies it whatever
-    the loading process's ``triton.cudagraphs`` says. The settings read while
-    the graphs are wrapped and run (``triton.cudagraph_trees``,
-    ``cudagraph_policy``, which can decline to wrap a graph,
-    ``triton.cudagraph_capture_sizes``, the rerecord limits,
+    graphs as they compiled (see :func:`capture`), under the capture's
+    ``triton.cudagraph_trees``: the artifact's ``CUDAGRAPH_CONFIG`` holds both,
+    and load applies it whatever the loading process's
+    ``torch._inductor.config`` says for those two. The settings read while the
+    graphs are wrapped and run (``cudagraph_policy``, which can decline to wrap
+    a graph, ``triton.cudagraph_capture_sizes``, the rerecord limits,
     ``triton.cudagraph_or_error``, the warmup and sync knobs, ...) are the
     loading process's, as for a :func:`torch.compile` cache hit. So is a
     serve-time compile (``allow_serve_time_compiles``, below), which takes the
