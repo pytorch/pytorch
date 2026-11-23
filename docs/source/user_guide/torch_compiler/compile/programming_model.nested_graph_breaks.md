@@ -1,8 +1,10 @@
 # Nested Graph Breaks
 
 Summary:
-- Graph breaks in nested functions can result in hard-to-understand compiler behavior, which we document below
-- A nested graph break results in {math}`\mathcal O(N)` duplicate graph break behavior
+
+- Nested graph breaks are enabled by default in open-source PyTorch.
+- When possible, Dynamo resumes every inlined frame after a nested graph break instead of moving the break to each caller.
+- Use `torch._dynamo.disable_nested_graph_breaks` to opt out for code that depends on the legacy behavior.
 
 Recall that when `torch.compile` is applied to a function, any nested function calls are also traced.
 A **nested graph break** refers to any graph break that happens in a nested function call.
@@ -20,172 +22,68 @@ def outer(x):
     ...
 ```
 
-The resumption semantics around nested graph breaks can be confusing, so we describe the behavior here.
-
 Recall that in `fullgraph=False`, [graph breaks are handled](programming_model.dynamo_core_concepts.graph_breaks) by compiling the FX graph that has been determined so far,
 running the unsupported code in regular Python, then resuming tracing after the unsupported code with a new FX graph.
-Resuming a function is actually a fairly complicated technical feat, so resuming tracing is only supported on top-level functions.
 
-We can therefore resume tracing after a nested graph break with this restriction in the following way:
+## Default behavior
 
-First, consider the below example where `torch.compile` traces from `f` and traces all the way until the
-graph break in `inner1` is encountered.
+When a graph break occurs in an eligible nested frame, Dynamo creates resume functions for that frame and its eligible callers.
+Consider this example:
 
 ```python
 def inner1(x):
     x = x + 1
-    torch._dynamo.graph_break()  # stop tracing due to graph break
+    torch._dynamo.graph_break()
     return x + 2
 
 def inner2(x):
     x = x + 4
     x = inner1(x)
-    x = x + 8
+    return x + 8
 
 @torch.compile
 def f(x):
-    # start tracing from here
     x = x + 16
     x = inner2(x)
-    x = x + 32
+    return x + 32
 
 f(torch.randn(3))
 ```
 
-Since we can only resume from top-level functions, we graph break on the `inner2` call in `f`.
+Dynamo traces from `f` through `inner2` and into `inner1`.
+It compiles the operations through `x + 1`, executes the graph-break site in Python, and then resumes `inner1` after the break.
+Tracing continues through the return from `inner1`, the remainder of `inner2`, and the remainder of `f`.
+The result is roughly two compiled regions:
+
 ```python
-# The semantics of torch.compile(f)(x) is roughly this:
+def compiled_before_break(x):
+    return x + 16 + 4 + 1
+
+def compiled_after_break(x):
+    return x + 2 + 8 + 32
+
 def compiled_f_semantics(x):
-    y = x + 16
-    z = inner2(y)
-    return torch.compile(resume_f_semantics)(z)
-
-def resume_f_semantics(x):
-    return x + 32
-
-compiled_f_semantics(torch.randn(3))
+    x = compiled_before_break(x)
+    torch._dynamo.graph_break()  # runs between the compiled regions
+    return compiled_after_break(x)
 ```
 
-`inner2` is then automatically compiled as a top-level function.
-We trace all the way until the graph break in `inner1` is encountered again.
+Nested resumption requires every frame in the caller chain to be eligible for partial graph compilation.
+It is unavailable for `fullgraph=True`, generators, and functions that Dynamo explicitly suppresses.
+Depending on why resumption is unavailable, Dynamo propagates the break outward, skips the frame, or reports an error.
+
+## Disabling nested graph breaks
+
+Use `torch._dynamo.disable_nested_graph_breaks` as a decorator or context manager to restore the legacy behavior for a region:
 
 ```python
-def inner1(x):
-    x = x + 1
-    torch._dynamo.graph_break()  # stop tracing due to graph break
-    return x + 2
-
-# this torch.compile is automatically applied
-@torch.compile
+@torch._dynamo.disable_nested_graph_breaks
 def inner2(x):
-    # start tracing from here
-    x = x + 4
-    x = inner1(x)
-    x = x + 8
+    return inner1(x)
 
-def compiled_f_semantics(x):
-    y = x + 16
-    z = inner2(y)
-    return torch.compile(resume_f_semantics)(z)
-
-def resume_f_semantics(x):
-    return x + 32
-
-compiled_f_semantics(torch.randn(3))
+with torch._dynamo.disable_nested_graph_breaks():
+    compiled_fn(x)
 ```
 
-Then we graph break on the `inner1` call in `inner2`.
-```python
-def compiled_inner2_semantics(x):
-    y = x + 4
-    z = inner1(y)
-    return torch.compile(resume_inner2_semantics)(z)
-
-def resume_inner2_semantics(x):
-    return x + 8
-```
-
-`inner1` is then automatically compiled as a top-level function.
-The graph break is from `inner1`, so we handle the graph break normally.
-```python
-# this torch.compile is automatically applied
-@torch.compile
-def inner1(x):
-    # start tracing from here
-    x = x + 1
-    torch._dynamo.graph_break()  # stop tracing due to graph break
-    return x + 2
-
-def compiled_f_semantics(x):
-    y = x + 16
-    z = compiled_inner2_semantics(y)
-    return torch.compile(resume_f_semantics)(z)
-
-def resume_f_semantics(x):
-    return x + 32
-
-def compiled_inner2_semantics(x):
-    y = x + 4
-    z = inner1(y)
-    return torch.compile(resume_inner2_semantics)(z)
-
-def resume_inner2_semantics(x):
-    return x + 8
-
-compiled_f_semantics(torch.randn(3))
-```
-
-`inner1` is handled normally:
-
-```python
-def compiled_inner1_semantics(x):
-    y = x + 1
-    torch._dynamo.graph_break()
-    return torch.compile(resume_inner1_semantics)(y)
-
-def resume_inner1_semantics(x):
-    return x + 2
-```
-
-So the initial code is semantically equivalent to
-```python
-def compiled_f_semantics(x):
-    y = x + 16
-    z = compiled_inner2_semantics(y)
-    return torch.compile(resume_f_semantics)(z)
-
-def resume_f_semantics(x):
-    return x + 32
-
-def compiled_inner2_semantics(x):
-    y = x + 4
-    z = compiled_inner1_semantics(y)
-    return torch.compile(resume_inner2_semantics)(z)
-
-def resume_inner2_semantics(x):
-    return x + 8
-
-def compiled_inner1_semantics(x):
-    y = x + 1
-    torch._dynamo.graph_break()
-    return torch.compile(resume_inner1_semantics)(y)
-
-def resume_inner1_semantics(x):
-    return x + 2
-
-compiled_f_semantics(torch.randn(3))
-```
-
-Note in particular that we traced 3 top-level functions, and that we traced the same graph break 3 times.
-**This explains why you may encounter duplicate graph breaks when using `torch.compile`.**
-
-In summary, nested graph breaks are handled by:
-- Tracing from the top-level function all the way to the nested graph break
-- Graph breaking on the top-level function at the call to the second-level function
-- Compiling the PyTorch ops tracked so far and running the compiled graph
-- Calling the second-level function, which gets automatically compiled as a top-level function
-- Resuming tracing after the second-level function call
-
-Note that the runtime of handling this graph break is {math}`\mathcal O(NK)`, where {math}`N` is the nesting depth,
-and {math}`K` is the number of instructions from the top-level function to the graph break.
-We end up tracing {math}`\mathcal O(N^2)` frames, and we trace the same graph break {math}`\mathcal O(N)` times.
+When nested graph breaks are disabled, Dynamo uses the legacy behavior: a break in an inlined function bubbles to its caller.
+The nested function may then be compiled separately, so the same break can be encountered again at successive nesting levels.
