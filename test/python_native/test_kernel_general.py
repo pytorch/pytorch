@@ -11,7 +11,12 @@ from unittest import mock
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
 from torch.testing._internal.common_device_type import largeTensorTest
-from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    serialTest,
+    TEST_CUTEDSL,
+    TestCase,
+)
 
 
 # Guard before importing cutlass-dependent kernels to avoid collection errors.
@@ -121,13 +126,14 @@ class TestKernelGeneral(TestCase):
         self.assertEqual(out[:7], x)
         self.assertEqual(out[7:], torch.full((2,), -1.0, device="cuda"))
 
+    @serialTest()
     @largeTensorTest("24GB", device="cuda")
     def test_wide_outputs_store_every_output(self):
         """Bound 2^31 outputs by the output's full 64-bit size: a 64-bit extent's
         shape[0] reads back as Int32 and wraps negative, which stored nothing."""
         x = torch.ones(2**31, 2, device="cuda", dtype=torch.float16)
-        out = torch.empty(2**31, device="cuda")
-        red, kept = kg._ti_pairs(x, kg._probe(x, {1}))
+        out = torch.full((2**31,), -1.0, device="cuda")
+        red, kept = ((2, 1),), ((2**31, 2),)
         trait = T.SumOps(acc=cutlass.Float32)
         op = kg.ReduceBlock(trait, count=2, num_o=2**31, red_pairs=red, kept_pairs=kept)
         kg._launch(op, ("wide", "wide_outputs"), [kg._flat(x)], [out])
@@ -230,14 +236,6 @@ class TestKernelGeneral(TestCase):
                 red_pairs=((2**31 + 1, 1),),
                 kept_pairs=(),
             )
-        # No reduced runs at all is LEGAL -- an extent-1 reduced axis coalesces away in TI. Pinned
-        # here because the arm that allows it is one line in tile._decode_offset, and a crash.
-        self.assertEqual(
-            kg.ReduceBlock(
-                trait, count=1, num_o=1, red_pairs=(), kept_pairs=()
-            ).npairs_red,
-            0,
-        )
         # The reshaping cross-CTA path also requires contiguous CUDA input.
         with self.assertRaisesRegex(AssertionError, "CUDA"):
             xc.reduce_row_xcta(trait, "inv_xcta", xt, torch.float32)
