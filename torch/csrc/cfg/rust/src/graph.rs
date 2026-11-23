@@ -1069,7 +1069,7 @@ impl GraphSite {
 
     /// Hands a description to the exporter. It returns the callable and the
     /// guards of the passes, or the reason there is none as a str. An error
-    /// that is no Exception is left set.
+    /// that the exporter did not raise itself (`interrupted`) is left set.
     pub unsafe fn export(&self, description: Obj) -> Result<(PyObj, Vec<(usize, PyObj)>), String> {
         if self.derives {
             // Nothing of Python is asked: the engine runs the graph itself.
@@ -1080,8 +1080,10 @@ impl GraphSite {
         };
         let made = ffi::PyObject_CallOneArg(exporter.as_ptr(), description);
         if made.is_null() {
-            // What is no Exception (an interrupt) stays raised.
-            if ffi::PyErr_ExceptionMatches(ffi::PyExc_Exception) == 0 {
+            // What came between the instructions of the exporter and was
+            // raised by none of them (an interrupt, what the handler of
+            // a signal raised) stays raised.
+            if interrupted() {
                 return Err(String::new());
             }
             return Err(format!("the export failed: {}", raised_text()));
@@ -3946,7 +3948,7 @@ pub unsafe fn quiet_generic(obj: Obj, name: Obj) -> bool {
         return false;
     }
     let descr = pyffi::_PyType_Lookup(ffi::Py_TYPE(obj), name);
-    let python = !descr.is_null() && python_descriptor(descr);
+    let python = !descr.is_null() && python_descriptor(descr, obj);
     let data = !descr.is_null() && (*ffi::Py_TYPE(descr)).tp_descr_set.is_some();
     if data {
         return !python;
@@ -4010,7 +4012,15 @@ unsafe fn quiet_super(bound: Obj, name: Obj) -> bool {
     } else {
         (ffi::PyObject_GetAttrString(bound, c"__thisclass__".as_ptr()), ffi::PyObject_GetAttrString(bound, c"__self_class__".as_ptr()))
     };
+    // What a getter is asked of: the object, or nothing where `super` is
+    // bound to the class itself.
+    let held = if super_fields() {
+        new_ref_or_null((*(bound as *mut pyffi::SuperObject)).obj)
+    } else {
+        ffi::PyObject_GetAttrString(bound, c"__self__".as_ptr())
+    };
     ffi::PyErr_Clear();
+    let of = if held == class { null_mut() } else { held };
     let mut quiet = false;
     if !this.is_null() && !class.is_null() && ffi::PyType_Check(class) != 0 {
         let order = (*(class as *mut ffi::PyTypeObject)).tp_mro;
@@ -4023,7 +4033,7 @@ unsafe fn quiet_super(bound: Obj, name: Obj) -> bool {
                 match found {
                     Ok(found) if found.is_null() => {}
                     Ok(found) => {
-                        quiet = !python_descriptor(found);
+                        quiet = !python_descriptor(found, of);
                         break;
                     }
                     Err(()) => break,
@@ -4032,6 +4042,7 @@ unsafe fn quiet_super(bound: Obj, name: Obj) -> bool {
         }
     }
     ffi::PyErr_Clear();
+    xdecref(held);
     xdecref(this);
     xdecref(class);
     quiet
@@ -4041,15 +4052,16 @@ unsafe fn quiet_super(bound: Obj, name: Obj) -> bool {
 /// shown to read the object itself and nothing else. A property: its
 /// getter is called with the object, and a getter that is a function of C
 /// (`len`, `dir`) asks the object in turn. A descriptor of a class that is
-/// defined in Python. A getter of C (`getset`) of a class that is not
-/// among those whose getters are known (`plain_getters`): that of a
-/// frame's `f_locals` reads the variables of the frame. Any other
-/// descriptor of C that takes stores too, but a member, which is a field
-/// of the object at a fixed place. What is left is given out by C code
-/// that reads the object: no descriptor at all (the value is what the
-/// class holds), a function or a method of C, which is bound to the
-/// object, a member, a getter of a known class.
-unsafe fn python_descriptor(descr: Obj) -> bool {
+/// defined in Python. A getter of C (`getset`) that is not among those
+/// whose doing is known (`plain_getters`): that of a frame's `f_locals`
+/// reads the variables of the frame. Any other descriptor of C that takes
+/// stores too, but a member, which is a field of the object at a fixed
+/// place. What is left is given out by C code that reads the object: no
+/// descriptor at all (the value is what the class holds), a function or a
+/// method of C, which is bound to the object, a member, a known getter.
+/// `of` is the object the descriptor is asked of; null where it is read
+/// off the class that has it, which hands out a getter and runs none.
+unsafe fn python_descriptor(descr: Obj, of: Obj) -> bool {
     let ty = ffi::Py_TYPE(descr);
     if (*ty).tp_descr_get.is_none() {
         return false;
@@ -4059,7 +4071,7 @@ unsafe fn python_descriptor(descr: Obj) -> bool {
     }
     if ty == std::ptr::addr_of_mut!(ffi::PyGetSetDescr_Type) {
         let fields = descr as *mut ffi::PyDescrObject;
-        return !plain_getters((*fields).d_type, (*fields).d_name);
+        return !plain_getters((*fields).d_type, (*fields).d_name, of);
     }
     if is_static(ty) {
         return (*ty).tp_descr_set.is_some() && ty != std::ptr::addr_of_mut!(ffi::PyMemberDescr_Type);
@@ -4068,24 +4080,33 @@ unsafe fn python_descriptor(descr: Obj) -> bool {
     ffi::PyFunction_Check(descr) == 0 && !is_cache_wrapper(descr)
 }
 
-/// The classes whose getters of C read fields of the object they are asked
-/// of, run no code and lead to no frame's variables: `object` and `type`;
-/// the numbers, texts and bytes; tuple, list, dict, set, frozenset, slice
-/// and range; a function, a function of C, a bound method, a cell, a
-/// module; the exception classes that are defined in C (what an exception
-/// carries: its arguments, its traceback, the exceptions it came from); of
-/// torch the class under every tensor, dtype, device, layout and memory
-/// format, and what `finfo` and `iinfo` give (the limits of a dtype, as
-/// numbers). Of a code object the names of its variables and its
-/// bytecode, which are made of its own tables (`co_varnames`,
-/// `co_cellvars`, `co_freevars`, `co_code`; not `co_lnotab`, which warns,
-/// and a warning is shown by Python code). A class that is written in
-/// Python has two getters, which the interpreter gives it: the dict of
-/// its object and the list of weak references to it. No other class: not
-/// a frame (`f_locals` is the variables of a function that is running),
-/// nor a traceback, a generator or a coroutine, each of which leads to a
-/// frame.
-unsafe fn plain_getters(class: *mut ffi::PyTypeObject, name: Obj) -> bool {
+/// The getters of C that read fields of the object they are asked of, run
+/// no code and lead to no frame's variables, by the class that defines
+/// them: `object` and `type` (not the `__annotations__` of a class, which
+/// may be computed, nor its `__doc__` where the class has a descriptor
+/// under that name, which is asked); the numbers, texts and bytes; tuple,
+/// list, dict, set, frozenset, slice and range; a function (from 3.14 on
+/// not its `__annotations__`, which may be computed; the reads of its
+/// `__code__`, `__defaults__` and `__kwdefaults__` tell the audit hooks,
+/// tools that watch what runs, which are not asked for here: whether one
+/// is installed cannot be asked from this side); a function of C
+/// (not its `__qualname__`, which asks a class for an attribute); a
+/// cell; the exception classes that are defined in C (what an exception
+/// carries: its arguments, its traceback, the exceptions it came from);
+/// of torch the class under every tensor, for the tensors `tensor_getter`
+/// says, dtype, device, layout and memory format, and what `finfo` and
+/// `iinfo` give (the limits of a dtype, as numbers). Of a code object the
+/// names of its variables and its bytecode, which are made of its own
+/// tables (`co_varnames`, `co_cellvars`, `co_freevars`, `co_code`; not
+/// `co_lnotab`, which warns, and a warning is shown by Python code). A
+/// class that is written in Python has two getters, which the
+/// interpreter gives it: the dict of its object and the list of weak
+/// references to it. No other class: not a frame (`f_locals` is the
+/// variables of a function that is running), nor a traceback, a
+/// generator or a coroutine, each of which leads to a frame; not a bound
+/// method, whose `__doc__` is an attribute of what it is bound over; not
+/// a module, whose one getter is `__annotations__`.
+unsafe fn plain_getters(class: *mut ffi::PyTypeObject, name: Obj, of: Obj) -> bool {
     if class.is_null() {
         return false;
     }
@@ -4096,9 +4117,23 @@ unsafe fn plain_getters(class: *mut ffi::PyTypeObject, name: Obj) -> bool {
     if class == std::ptr::addr_of_mut!(ffi::PyCode_Type) {
         return named(&[c"co_varnames", c"co_cellvars", c"co_freevars", c"co_code"]);
     }
+    if class == std::ptr::addr_of_mut!(ffi::PyType_Type) {
+        if named(&[c"__doc__"]) && !of.is_null() && ffi::PyType_Check(of) != 0 {
+            let dict = pyffi::PyType_GetDict(of as *mut ffi::PyTypeObject);
+            let held = if dict.is_null() { Ok(null_mut()) } else { entry(dict, name) };
+            xdecref(dict);
+            return held.is_ok_and(|held| held.is_null() || (*ffi::Py_TYPE(held)).tp_descr_get.is_none());
+        }
+        return !named(&[c"__annotations__"]);
+    }
+    if class == std::ptr::addr_of_mut!(ffi::PyFunction_Type) {
+        return !(cfg!(Py_3_14) && named(&[c"__annotations__"]));
+    }
+    if class == std::ptr::addr_of_mut!(ffi::PyCFunction_Type) {
+        return !named(&[c"__qualname__"]);
+    }
     let known = [
         std::ptr::addr_of!(ffi::PyBaseObject_Type),
-        std::ptr::addr_of!(ffi::PyType_Type),
         std::ptr::addr_of!(ffi::PyLong_Type),
         std::ptr::addr_of!(ffi::PyBool_Type),
         std::ptr::addr_of!(ffi::PyFloat_Type),
@@ -4112,11 +4147,7 @@ unsafe fn plain_getters(class: *mut ffi::PyTypeObject, name: Obj) -> bool {
         std::ptr::addr_of!(ffi::PyFrozenSet_Type),
         std::ptr::addr_of!(ffi::PySlice_Type),
         std::ptr::addr_of!(ffi::PyRange_Type),
-        std::ptr::addr_of!(ffi::PyFunction_Type),
-        std::ptr::addr_of!(ffi::PyCFunction_Type),
-        std::ptr::addr_of!(pyffi::PyMethod_Type),
         std::ptr::addr_of!(pyffi::PyCell_Type),
-        std::ptr::addr_of!(ffi::PyModule_Type),
     ];
     if known.contains(&(class as *const ffi::PyTypeObject)) {
         return true;
@@ -4124,7 +4155,114 @@ unsafe fn plain_getters(class: *mut ffi::PyTypeObject, name: Obj) -> bool {
     if ffi::PyType_IsSubtype(class, ffi::PyExc_BaseException as *mut ffi::PyTypeObject) != 0 {
         return true;
     }
-    torch_classes()[2..].contains(&(class as usize))
+    let torch = torch_classes();
+    if class as usize == torch[2] {
+        return of.is_null() || tensor_getter(of, name);
+    }
+    torch[3..].contains(&(class as usize))
+}
+
+/// Whether a getter of the class under every tensor reads the tensor it
+/// is asked of and nothing else. Each of them looks for an override
+/// first (`__torch_function__`), which is Python code. None is looked
+/// for where no torch function mode is on and the tensor has no Python
+/// object or is of exactly `Tensor` or `Parameter`; none is found for a
+/// class that says so (`overrides_nothing`). And a getter that warns is
+/// no such read, since a warning is shown by Python code: `volatile`
+/// always does, `grad` for a tensor that is no leaf, `T` the first time
+/// it is asked of a tensor with other than 0 or 2 dimensions.
+unsafe fn tensor_getter(of: Obj, name: Obj) -> bool {
+    let Some(api) = capi::api() else {
+        return false;
+    };
+    if (api.call_modes)() >> 16 != 0 {
+        return false;
+    }
+    let boxed = !capi::is_unboxed(of);
+    if boxed && !torch_classes()[..2].contains(&(ffi::Py_TYPE(of) as usize)) && !overrides_nothing(of) {
+        return false;
+    }
+    // The name is read once, as bytes.
+    let mut size: ffi::Py_ssize_t = 0;
+    let text = ffi::PyUnicode_AsUTF8AndSize(name, &mut size);
+    if text.is_null() {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    let name = std::slice::from_raw_parts(text as *const u8, size as usize);
+    let mut info = TcfgTensorInfo::empty();
+    match name {
+        b"volatile" => false,
+        // A tensor that requires no gradient is a leaf; one without an
+        // object that requires one was made by an operation.
+        b"grad" | b"_grad" if boxed => is_leaf(of),
+        b"grad" | b"_grad" => (api.tensor_info)(of, &mut info) != 0 && info.requires_grad == 0,
+        b"T" => (api.tensor_info)(of, &mut info) != 0 && (info.ndim == 0 || info.ndim == 2),
+        _ => true,
+    }
+}
+
+/// Whether a tensor of `Tensor` or `Parameter` is a leaf: the getter of
+/// `is_leaf` of the class under every tensor, called as the lookup of
+/// `object` would call it. For those classes it reads a flag. Found once
+/// the class is there.
+unsafe fn is_leaf(of: Obj) -> bool {
+    static GETTER: pyffi::Once<(usize, usize)> = pyffi::Once::new();
+    let found = match GETTER.get() {
+        Some(found) => *found,
+        None => {
+            let base = torch_classes()[2] as *mut ffi::PyTypeObject;
+            let name = ffi::PyUnicode_InternFromString(c"is_leaf".as_ptr());
+            let descr = if base.is_null() || name.is_null() { null_mut() } else { pyffi::_PyType_Lookup(base, name) };
+            ffi::PyErr_Clear();
+            xdecref(name);
+            if descr.is_null() || ffi::Py_TYPE(descr) != std::ptr::addr_of_mut!(ffi::PyGetSetDescr_Type) {
+                return false;
+            }
+            let fields = (*(descr as *mut ffi::PyGetSetDescrObject)).d_getset;
+            let Some(get) = (*fields).get else {
+                return false;
+            };
+            let found = (get as usize, (*fields).closure as usize);
+            GETTER.set(found);
+            found
+        }
+    };
+    let get: ffi::getter = std::mem::transmute(found.0);
+    let said = get(of, found.1 as *mut std::ffi::c_void);
+    ffi::PyErr_Clear();
+    xdecref(said);
+    said == ffi::Py_True()
+}
+
+/// Whether torch finds no `__torch_function__` to call for an object of
+/// a class made of the tensor class: the lookup its getters make
+/// (`getattr(obj, "__torch_function__")`), followed without running it.
+/// The class reads attributes as `object` does and has under the name
+/// the function of `torch._C` that stands for "none"
+/// (`_disabled_torch_function_impl`, as `Parameter` has it), which is no
+/// descriptor, and the object has nothing under the name itself.
+unsafe fn overrides_nothing(of: Obj) -> bool {
+    let ty = ffi::Py_TYPE(of);
+    let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
+    if (*ty).tp_getattro.map(|own| own as usize) != (*object).tp_getattro.map(|own| own as usize) {
+        return false;
+    }
+    let binding = pyffi::module(c"torch._C");
+    let none = pyffi::in_module(binding, c"_disabled_torch_function_impl");
+    if none.is_null() || ffi::PyCFunction_Check(none) == 0 || (*(none as *mut ffi::PyCFunctionObject)).m_self != binding {
+        return false;
+    }
+    let name = ffi::PyUnicode_InternFromString(c"__torch_function__".as_ptr());
+    if name.is_null() {
+        ffi::PyErr_Clear();
+        return false;
+    }
+    let slot = pyffi::_PyObject_GetDictPtr(of);
+    let own = if slot.is_null() || (*slot).is_null() { Ok(null_mut()) } else { entry(*slot, name) };
+    let nothing = pyffi::_PyType_Lookup(ty, name) == none && own.is_ok_and(|held| held.is_null());
+    xdecref(name);
+    nothing
 }
 
 /// The classes of torch that are asked for at an instruction: `Tensor`
@@ -4223,7 +4361,7 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
         // nothing of its own.
         let class = torch_classes()[0] as Obj;
         let descr = if class.is_null() { null_mut() } else { pyffi::_PyType_Lookup(class as *mut ffi::PyTypeObject, name) };
-        return !descr.is_null() && !python_descriptor(descr);
+        return !descr.is_null() && !python_descriptor(descr, obj);
     }
     let ty = ffi::Py_TYPE(obj);
     if ffi::PyModule_CheckExact(obj) != 0 {
@@ -4247,10 +4385,10 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
         }
         let meta = pyffi::_PyType_Lookup(ty, name);
         if !meta.is_null() && (*ffi::Py_TYPE(meta)).tp_descr_set.is_some() {
-            return !python_descriptor(meta);
+            return !python_descriptor(meta, obj);
         }
         let own = pyffi::_PyType_Lookup(obj as *mut ffi::PyTypeObject, name);
-        return if own.is_null() { !meta.is_null() && !python_descriptor(meta) } else { !python_descriptor(own) };
+        return if own.is_null() { !meta.is_null() && !python_descriptor(meta, obj) } else { !python_descriptor(own, null_mut()) };
     }
     // The lookup of `object`, or that and then a `__getattr__` for what it
     // does not find: of the latter, only one that has a shortcut is known.
@@ -4263,7 +4401,7 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
         return false;
     }
     let descr = pyffi::_PyType_Lookup(ty, name);
-    let python = !descr.is_null() && python_descriptor(descr);
+    let python = !descr.is_null() && python_descriptor(descr, obj);
     let data = !descr.is_null() && (*ffi::Py_TYPE(descr)).tp_descr_set.is_some();
     if data {
         return !python;
@@ -4335,6 +4473,80 @@ pub unsafe fn thread_state() -> u64 {
     mix(yes(3) as u64);
     ffi::PyErr_Clear();
     state
+}
+
+/// Whether the exception that is set came between the instructions of a
+/// function and was raised by none of them: one that is no `Exception`
+/// (a `KeyboardInterrupt`, which the interpreter's own handler of an
+/// interrupt raises from C; a `SystemExit`), or one whose traceback goes
+/// through a function that is the handler of a signal now. A handler
+/// runs wherever the interpreter or the VM looks for signals, behind
+/// whichever instruction was running: what it raises says nothing about
+/// that instruction. The exception stays set.
+pub unsafe fn interrupted() -> bool {
+    let raised = ffi::PyErr_GetRaisedException();
+    if raised.is_null() {
+        return false;
+    }
+    let came = came_between(raised);
+    ffi::PyErr_SetRaisedException(raised);
+    came
+}
+
+/// `interrupted`, of an exception that was caught.
+pub unsafe fn came_between(raised: Obj) -> bool {
+    ffi::PyErr_GivenExceptionMatches(raised, ffi::PyExc_Exception) == 0 || through_handler(raised)
+}
+
+/// Whether the traceback of an exception has the frame of a function
+/// that is installed as the handler of a signal: a function, a method of
+/// one, or an object whose class has a function for calls. Asked of
+/// `_signal.getsignal`, the function of C that reads the table.
+unsafe fn through_handler(raised: Obj) -> bool {
+    let module = pyffi::module(c"_signal");
+    let asks = pyffi::in_module(module, c"getsignal");
+    if asks.is_null() || ffi::PyCFunction_Check(asks) == 0 || (*(asks as *mut ffi::PyCFunctionObject)).m_self != module {
+        return false;
+    }
+    let count = pyffi::in_module(module, c"NSIG");
+    let count = if count.is_null() { 65 } else { ffi::PyLong_AsLong(count).clamp(0, 1024) };
+    let mut handlers: Vec<PyObj> = Vec::new();
+    for signal in 1..count {
+        let number = ffi::PyLong_FromLong(signal);
+        let handler = ffi::PyObject_CallOneArg(asks, number);
+        xdecref(number);
+        if !handler.is_null() {
+            handlers.push(PyObj::from_owned(handler));
+        }
+    }
+    ffi::PyErr_Clear();
+    let code_of = |handler: Obj| -> Obj {
+        let method = ffi::Py_TYPE(handler) == std::ptr::addr_of_mut!(pyffi::PyMethod_Type);
+        let function = if method { pyffi::PyMethod_Function(handler) } else { handler };
+        if ffi::PyFunction_Check(function) != 0 {
+            return ffi::PyFunction_GetCode(function);
+        }
+        let name = ffi::PyUnicode_InternFromString(c"__call__".as_ptr());
+        let call = if name.is_null() { null_mut() } else { pyffi::_PyType_Lookup(ffi::Py_TYPE(handler), name) };
+        xdecref(name);
+        if !call.is_null() && ffi::PyFunction_Check(call) != 0 { ffi::PyFunction_GetCode(call) } else { null_mut() }
+    };
+    let codes: Vec<Obj> = handlers.iter().map(|handler| code_of(handler.as_ptr())).filter(|code| !code.is_null()).collect();
+    ffi::PyErr_Clear();
+    let first = ffi::PyException_GetTraceback(raised);
+    let mut at = first as *mut ffi::PyTracebackObject;
+    let mut found = false;
+    while !at.is_null() && !found && !codes.is_empty() {
+        let frame = (*at).tb_frame;
+        if !frame.is_null() {
+            let code = ffi::PyFrame_GetCode(frame) as Obj;
+            found = codes.contains(&code);
+            xdecref(code);
+        }
+        at = (*at).tb_next;
+    }
+    xdecref(first);
+    found
 }
 
 /// What stands between the operations of the thread and their kernels and
