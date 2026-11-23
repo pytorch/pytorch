@@ -13,12 +13,12 @@ from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
-    expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
     onlyCUDA,
     skipXPU,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
@@ -44,6 +44,7 @@ def _torchVersionLessThan(major, minor):
     return (current_major < major) or (current_major == major and current_minor < minor)
 
 
+# XPU USM pointers may be unsigned 64-bit values, while the extension accepts int64.
 def _signed_int64(value):
     return value - (1 << 64) if value >= (1 << 63) else value
 
@@ -235,16 +236,16 @@ class TestLibtorchAgnostic(TestCase):
         res = libtorch_agnostic.ops.my_abs(t)
         self.assertEqual(res, torch.abs(t))
 
-        def _make_cuda_tensors(prior_mem):
-            cuda_t = libtorch_agnostic.ops.my_abs(t)
-            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
-            self.assertEqual(cuda_t, torch.abs(t))
+        def _make_accelerator_tensors(prior_mem):
+            accelerator_t = libtorch_agnostic.ops.my_abs(t)
+            self.assertGreater(torch.accelerator.memory_allocated(device), prior_mem)
+            self.assertEqual(accelerator_t, torch.abs(t))
 
-        if t.is_cuda:
-            init_mem = torch.cuda.memory_allocated(device)
+        if torch.device(device).type != "cpu":
+            init_mem = torch.accelerator.memory_allocated(device)
             for _ in range(3):
-                _make_cuda_tensors(init_mem)
-                curr_mem = torch.cuda.memory_allocated(device)
+                _make_accelerator_tensors(init_mem)
+                curr_mem = torch.accelerator.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
 
     def test_neg_exp(self, device):
@@ -254,16 +255,16 @@ class TestLibtorchAgnostic(TestCase):
         res = libtorch_agnostic.ops.neg_exp(t)
         self.assertEqual(res, torch.neg(torch.exp(t)))
 
-        def _make_cuda_tensors(prior_mem):
-            cuda_res = libtorch_agnostic.ops.neg_exp(t)
-            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
-            self.assertEqual(cuda_res, torch.neg(torch.exp(t)))
+        def _make_accelerator_tensors(prior_mem):
+            accelerator_res = libtorch_agnostic.ops.neg_exp(t)
+            self.assertGreater(torch.accelerator.memory_allocated(device), prior_mem)
+            self.assertEqual(accelerator_res, torch.neg(torch.exp(t)))
 
-        if t.is_cuda:
-            init_mem = torch.cuda.memory_allocated(device)
+        if torch.device(device).type != "cpu":
+            init_mem = torch.accelerator.memory_allocated(device)
             for _ in range(3):
-                _make_cuda_tensors(init_mem)
-                curr_mem = torch.cuda.memory_allocated(device)
+                _make_accelerator_tensors(init_mem)
+                curr_mem = torch.accelerator.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
 
     def test_divide_neg_exp(self, device):
@@ -273,16 +274,16 @@ class TestLibtorchAgnostic(TestCase):
         res = libtorch_agnostic.ops.divide_neg_exp(t)
         self.assertEqual(res, torch.neg(t) / torch.exp(t))
 
-        def _make_cuda_tensors(prior_mem):
-            cuda_res = libtorch_agnostic.ops.divide_neg_exp(t)
-            self.assertGreater(torch.cuda.memory_allocated(device), prior_mem)
-            self.assertEqual(cuda_res, torch.neg(t) / torch.exp(t))
+        def _make_accelerator_tensors(prior_mem):
+            accelerator_res = libtorch_agnostic.ops.divide_neg_exp(t)
+            self.assertGreater(torch.accelerator.memory_allocated(device), prior_mem)
+            self.assertEqual(accelerator_res, torch.neg(t) / torch.exp(t))
 
-        if t.is_cuda:
-            init_mem = torch.cuda.memory_allocated(device)
+        if torch.device(device).type != "cpu":
+            init_mem = torch.accelerator.memory_allocated(device)
             for _ in range(3):
-                _make_cuda_tensors(init_mem)
-                curr_mem = torch.cuda.memory_allocated(device)
+                _make_accelerator_tensors(init_mem)
+                curr_mem = torch.accelerator.memory_allocated(device)
                 self.assertEqual(curr_mem, init_mem)
 
     def test_is_contiguous(self, device):
@@ -496,7 +497,6 @@ class TestLibtorchAgnostic(TestCase):
         self.assertEqual(id(result), id(out))
 
     @onlyAccelerator
-    @expectedFailureMPS
     @skipIfTorchVersionLessThan(2, 10)
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize(
@@ -1175,14 +1175,14 @@ class TestLibtorchAgnostic(TestCase):
         )
 
     @skipIfTorchVersionLessThan(2, 10)
-    @onlyCUDA
+    @onlyAccelerator
     @deviceCountAtLeast(2)
-    def test_tensor_device_multi_gpu(self, device):
+    def test_tensor_device_multi_device(self, devices):
         import libtorch_agn_2_10 as libtorch_agnostic
 
-        t_cuda_1 = torch.randn(2, 3, device="cuda:1")
+        t = torch.randn(2, 3, device=devices[1])
         self.assertEqual(
-            libtorch_agnostic.ops.test_tensor_device(t_cuda_1), t_cuda_1.device
+            libtorch_agnostic.ops.test_tensor_device(t), t.device
         )
 
     @skipIfTorchVersionLessThan(2, 10)
@@ -1593,7 +1593,9 @@ for warning in w:
         expected_both = torch.full([4, 5], 2.5, dtype=torch.float64, device=device)
         self.assertEqual(result_both, expected_both, exact_device=True)
 
-    @skipXPU
+    @skipXPUIf(
+        True, "libtorch_agn_2_9 registers mv_tensor_accessor only for CPU and CUDA"
+    )
     def test_mv_tensor_accessor(self, device):
         import libtorch_agn_2_9 as libtorch_agnostic
 
@@ -2386,9 +2388,9 @@ except RuntimeError as e:
         """Test for from_blob with custom deleter (2.11 feature)."""
         import libtorch_agn_2_11 as libtorch_agnostic
 
-        is_cuda = torch.device(device).type == "cuda"
-        if is_cuda:
-            init_mem = torch.cuda.memory_allocated(device)
+        is_accelerator = torch.device(device).type != "cpu"
+        if is_accelerator:
+            init_mem = torch.accelerator.memory_allocated(device)
 
         def inner():
             libtorch_agnostic.ops.reset_deleter_call_count()
@@ -2416,15 +2418,15 @@ except RuntimeError as e:
             # and can be used.
             self.assertEqual(libtorch_agnostic.ops.get_deleter_call_count(), 1)
             original += 1
-            # original goes out of scope here and its cuda memory should be
+            # original goes out of scope here and its accelerator memory should be
             # freed.
 
         inner()
 
-        if is_cuda:
+        if is_accelerator:
             # original tensor is out of scope, all the memory should be freed
-            torch.cuda.synchronize(device)
-            curr_mem = torch.cuda.memory_allocated(device)
+            torch.accelerator.synchronize(device)
+            curr_mem = torch.accelerator.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
     @skipIfTorchVersionLessThan(2, 11)
@@ -2437,9 +2439,9 @@ except RuntimeError as e:
         get_count = libtorch_agnostic.ops.get_lambda_deleter_call_count
         reset_count = libtorch_agnostic.ops.reset_lambda_deleter_call_count
 
-        is_cuda = torch.device(device).type == "cuda"
-        if is_cuda:
-            init_mem = torch.cuda.memory_allocated(device)
+        is_accelerator = torch.device(device).type != "cpu"
+        if is_accelerator:
+            init_mem = torch.accelerator.memory_allocated(device)
 
         def inner():
             reset_count()
@@ -2467,15 +2469,15 @@ except RuntimeError as e:
             # and can be used.
             self.assertEqual(get_count(), 1)
             original += 1
-            # original goes out of scope here and its cuda memory should be
+            # original goes out of scope here and its accelerator memory should be
             # freed.
 
         inner()
 
-        if is_cuda:
+        if is_accelerator:
             # original tensor is out of scope, all the memory should be freed
-            torch.cuda.synchronize(device)
-            curr_mem = torch.cuda.memory_allocated(device)
+            torch.accelerator.synchronize(device)
+            curr_mem = torch.accelerator.memory_allocated(device)
             self.assertEqual(curr_mem, init_mem)
 
     @onlyCUDA
