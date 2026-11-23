@@ -11,6 +11,7 @@ from typing import Any
 
 import torch
 import torch.fx
+from torch._dynamo.utils import counters
 from torch._inductor.choices import (
     InductorChoices,
     register_inductor_choices,
@@ -170,6 +171,18 @@ class NoneBackend(InductorChoices):
     def lower_flex_attention(self, call: Any) -> None:
         self.calls += 1
         return None
+
+
+class KeyedBackend(NoneBackend):
+    """Lowers nothing; a constant uuid() and a flex_attention_cache_key()
+    the test changes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.key = "v1"
+
+    def flex_attention_cache_key(self) -> str:
+        return self.key
 
 
 class ClaimingBackend(InductorChoices):
@@ -452,6 +465,31 @@ class FlexBackendHooksTest(TestCase):
         with self.assertRaisesRegex(ValueError, r"'SAME' is claimed twice"):
             register_inductor_choices("two", lambda: ClaimingBackend("SAME"))
         self.assertEqual([key for key, _ in registered_inductor_choices()], ["one"])
+
+    def test_flex_cache_key_joins_only_flex_graphs(self) -> None:
+        backend = self.register(KeyedBackend())
+        q, k, v = self.tensors()
+
+        def plain(q):
+            return q.sin() + 1
+
+        def flex(q, k, v):
+            return flex_attention(q, k, v)
+
+        def cache_hits(fn, *args) -> int:
+            torch._dynamo.reset()
+            counters.clear()
+            torch.compile(fn)(*args)
+            return counters["inductor"]["fxgraph_cache_hit"]
+
+        self.assertEqual(cache_hits(plain, q), 0)
+        self.assertEqual(cache_hits(flex, q, k, v), 0)
+        backend.key = "v2"
+        # The plain graph's entry survives the change; the flex graph's
+        # does not, and its new entry is reused.
+        self.assertEqual(cache_hits(plain, q), 1)
+        self.assertEqual(cache_hits(flex, q, k, v), 0)
+        self.assertEqual(cache_hits(flex, q, k, v), 1)
 
 
 if __name__ == "__main__":

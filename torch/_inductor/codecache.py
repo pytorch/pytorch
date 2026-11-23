@@ -1397,6 +1397,21 @@ def _collect_nested_region_inductor_config_patches_for_hash(
     )
 
 
+def _calls_flex_attention(gm: torch.fx.GraphModule) -> bool:
+    """Whether ``gm`` or one of its submodules calls the flex_attention
+    forward or backward HOP."""
+    targets = (
+        torch.ops.higher_order.flex_attention,
+        torch.ops.higher_order.flex_attention_backward,
+    )
+    return any(
+        module.graph.find_nodes(op="call_function", target=target)
+        for module in gm.modules()
+        if isinstance(module, torch.fx.GraphModule)
+        for target in targets
+    )
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -1676,6 +1691,16 @@ class FxGraphHashDetails:
                     self.user_defined_triton_source.append(
                         (kernel_source, constant_args, configs)
                     )
+
+        # InductorChoices contributors' flex_attention lowerings affect only
+        # graphs that call flex_attention, so their key joins only those keys.
+        self.flex_attention_cache_key: Any = None
+        if gm is not None and _calls_flex_attention(gm):
+            from .choices import flex_attention_cache_key
+
+            self.flex_attention_cache_key = flex_attention_cache_key(
+                config.inductor_choices_class
+            )
 
         no_tensor_inputs = not any(isinstance(x, torch.Tensor) for x in example_inputs)
         # This device index is usually already encoded by the device of the inputs

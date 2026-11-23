@@ -290,6 +290,15 @@ class InductorChoices:
         """
         return ()
 
+    def flex_attention_cache_key(self) -> Any:
+        """What this contributor's flex_attention lowering depends on, for the
+        FX graph cache. It joins the key of graphs that call flex_attention
+        only, so a contributor that changes nothing else can return a
+        constant ``uuid()`` and put its version, settings and environment
+        here: other graphs' cache entries stay valid when they change.
+        Must be picklable; default ``None``."""
+        return None
+
     def lower_flex_attention(
         self, call: FlexAttentionCall
     ) -> FlexAttentionOutputs | None:
@@ -1022,7 +1031,11 @@ class _ComposedInductorChoices(InductorChoices):
 
         default = inspect.getattr_static(InductorChoices, name, None)
         # The composed handler's own: they combine every contributor's.
-        if name in ("uuid", "flex_attention_backends") or not (
+        if name in (
+            "uuid",
+            "flex_attention_backends",
+            "flex_attention_cache_key",
+        ) or not (
             callable(default) or isinstance(default, (classmethod, staticmethod))
         ):
             dispatchers[name] = None
@@ -1069,6 +1082,12 @@ class _ComposedInductorChoices(InductorChoices):
             name
             for choice in object.__getattribute__(self, "_choices")
             for name in choice.flex_attention_backends()
+        )
+
+    def flex_attention_cache_key(self) -> tuple[Any, ...]:
+        return tuple(
+            choice.flex_attention_cache_key()
+            for choice in object.__getattribute__(self, "_choices")
         )
 
     def uuid(self) -> tuple[str, tuple[Any, ...]]:
@@ -1173,6 +1192,14 @@ def unregister_inductor_choices(key: str) -> None:
     registrations = dict(_registered_inductor_choices)
     registrations.pop(key, None)
     _replace_registrations(registrations)
+
+
+def flex_attention_cache_key(factory: InductorChoicesFactoryConfig) -> Any:
+    """The choices' flex_attention_cache_key(), for graphs that call
+    flex_attention (FxGraphHashDetails); None without contributors."""
+    if factory is None and not _registered_inductor_choices:
+        return None
+    return create_inductor_choices(factory).flex_attention_cache_key()
 
 
 def inductor_choices_cache_key(factory: InductorChoicesFactoryConfig) -> Any:
