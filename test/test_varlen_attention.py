@@ -3,7 +3,7 @@ import math
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
-from itertools import pairwise
+from itertools import accumulate, pairwise
 from unittest.mock import patch
 
 import torch
@@ -317,6 +317,11 @@ def pack_sequences(seqs, device):
     max_len = seq_lens.max().item()
 
     return x_packed, cu_seq, max_len
+
+
+def make_cu_seq(lengths: list[int], device) -> torch.Tensor:
+    """int32 offsets ``[0, l0, l0 + l1, ...]`` of sequences with the given lengths."""
+    return torch.tensor([0, *accumulate(lengths)], device=device, dtype=torch.int32)
 
 
 def gather_paged_cache(cache: torch.Tensor, block_table: torch.Tensor) -> torch.Tensor:
@@ -1517,31 +1522,26 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @parametrize("paged", [False, True])
     @parametrize("empty_sequence", [False, True])
     @parametrize("num_splits", [1, None])
+    # Paged split-KV on the unpacked path leaves rows unwritten (#194167).
     @decorateIf(
-        unittest.skip("Paged split-KV on the unpacked path is broken (#194167)"),
+        unittest.expectedFailure,
         lambda p: p["paged"] and p["empty_sequence"] and p["num_splits"] is None,
     )
     def test_fa2_gqa_decode_matches_mha(
         self, device, dtype, window_size, paged, empty_sequence, num_splits
     ):
-        """FA2 runs a GQA call with one query token per sequence on its packed path:
-        the query heads of a KV head become one query. varlen_attn_out must fill the
-        caller's ``out`` there, and the output and LSE must match an MHA call over
-        contiguous KV with the KV heads repeated, which FA2 runs unpacked and without
-        split-KV. A sequence with no query token keeps the call off the packed path."""
+        """FA2 packs a GQA call with one query token per sequence: the query heads of
+        a KV head become one query. It packs window (-1, -1), and with paged KV also the
+        causal window (-1, 0); non-paged causal calls and calls with a sequence that has
+        no query token stay unpacked. Either way varlen_attn_out must fill the caller's
+        ``out``, and the output and LSE must match an MHA call over contiguous KV with
+        the KV heads repeated, which FA2 runs unpacked and without split-KV."""
         torch.manual_seed(42)
         num_heads, num_kv_heads, head_dim, page_size = 8, 2, 64, 256
         kv_lens = [300, 1, 520, 256]
         q_lens = [1, 0, 1, 1] if empty_sequence else [1, 1, 1, 1]
         batch_size = len(kv_lens)
         group = num_heads // num_kv_heads
-
-        def offsets(lengths):
-            return torch.tensor(
-                [0, *torch.tensor(lengths).cumsum(0).tolist()],
-                device=device,
-                dtype=torch.int32,
-            )
 
         q = torch.randn(sum(q_lens), num_heads, head_dim, device=device, dtype=dtype)
         if paged:
@@ -1575,8 +1575,10 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             k_contiguous, v_contiguous = (
                 torch.cat(
                     [
-                        cache[pages].flatten(0, 1)[:length]
-                        for pages, length in zip(block_table, kv_lens)
+                        pages[:length]
+                        for pages, length in zip(
+                            gather_paged_cache(cache, block_table), kv_lens
+                        )
                     ]
                 )
                 for cache in (k, v)
@@ -1587,7 +1589,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                 sum(kv_lens), num_kv_heads, head_dim, device=device, dtype=dtype
             )
             v = torch.randn_like(k)
-            cu_seq_k = offsets(kv_lens)
+            cu_seq_k = make_cu_seq(kv_lens, device)
             paged_kwargs = {}
             k_contiguous, v_contiguous = k, v
 
@@ -1599,7 +1601,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                     q,
                     key,
                     value,
-                    offsets(q_lens),
+                    make_cu_seq(q_lens, device),
                     cu_seq_k,
                     1,
                     max_k,
@@ -1621,7 +1623,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         out_mha, lse_mha = run(
             k_contiguous.repeat_interleave(group, dim=1),
             v_contiguous.repeat_interleave(group, dim=1),
-            offsets(kv_lens),
+            make_cu_seq(kv_lens, device),
             max(kv_lens),
         )
         self.assertFalse(out_gqa.isnan().any())
@@ -1653,13 +1655,6 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         kv_lens = [*decode_kv_lens, 200]
         q_lens = [1, 1, 1, 200]
         num_decode = len(decode_kv_lens)
-
-        def offsets(lengths):
-            return torch.tensor(
-                [0, *torch.tensor(lengths).cumsum(0).tolist()],
-                device=device,
-                dtype=torch.int32,
-            )
 
         q = torch.randn(sum(q_lens), num_heads, head_dim, device=device, dtype=dtype)
         if paged:
@@ -1698,9 +1693,9 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                 key, value = k, v
             else:
                 max_k = max(kv_lens[:num_seqs])
-                cu_seq_k = offsets(kv_lens[:num_seqs])
+                cu_seq_k = make_cu_seq(kv_lens[:num_seqs], device)
                 key, value = k[: cu_seq_k[-1]], v[: cu_seq_k[-1]]
-            cu_seq_q = offsets(q_lens[:num_seqs])
+            cu_seq_q = make_cu_seq(q_lens[:num_seqs], device)
             with _use_backend("fa2"), torch.no_grad():
                 return varlen_attn(
                     q[: cu_seq_q[-1]],

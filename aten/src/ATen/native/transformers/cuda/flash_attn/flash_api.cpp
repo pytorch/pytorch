@@ -686,18 +686,20 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
     // H/t Daniel Haziza
     // The packed layout drops cu_seqlens_q, so every sequence needs exactly one query token
-    // (total_q == batch_size); a sequence with none would break the reshape below.
+    // (total_q == batch_size); a sequence with none would break the view below.
     const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && q.size(0) == batch_size && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
     at::Tensor temp_q = q;
     const int ngroups = num_heads / num_heads_k;
     if (seqlenq_ngroups_swapped) {
-        temp_q = q.reshape({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2).reshape({batch_size * ngroups, num_heads_k, head_size_og});
+        // As in mha_fwd, the kernel reads q, and writes out below, through the strided view
+        // (b, ngroups, nheads_kv, d) instead of a copy in the packed layout (b * ngroups, nheads_kv, d).
+        temp_q = q.view({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2);
         max_seqlen_q = ngroups;
         num_heads = num_heads_k;
         cu_seqlens_q_d = nullptr;
     }
 
-    const int total_q = temp_q.sizes()[0];
+    const int total_q = seqlenq_ngroups_swapped ? batch_size * ngroups : temp_q.size(0);
 
     TORCH_CHECK(batch_size > 0, "batch size must be positive");
     TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
@@ -707,7 +709,11 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     if (window_size_left >= max_seqlen_k) { window_size_left = -1; }
     if (window_size_right >= max_seqlen_k) { window_size_right = -1; }
 
-    CHECK_SHAPE(temp_q, total_q, num_heads, head_size_og);
+    if (seqlenq_ngroups_swapped) {
+        CHECK_SHAPE(temp_q, batch_size, ngroups, num_heads, head_size_og);
+    } else {
+        CHECK_SHAPE(temp_q, total_q, num_heads, head_size_og);
+    }
     if (!paged_KV) {
         const int total_k = k.size(0);
         CHECK_SHAPE(k, total_k, num_heads_k, head_size_og);
@@ -742,10 +748,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         CHECK_SHAPE(out, sizes[0], sizes[1], head_size_og);
         if (head_size_og % 8 != 0) { out = at::empty_like(q_padded); }
     } else {
-        out = seqlenq_ngroups_swapped ? at::empty({sizes[0], sizes[1], head_size_og}, q.options()) : at::empty_like(q_padded);
+        out = at::empty_like(q);
     }
-    // The packed layout (b * ngroups, nheads_kv, d) is not a view of out (b, nheads_kv * ngroups, d).
-    // As in mha_fwd, the kernel writes out through the strided view (b, ngroups, nheads_kv, d).
     at::Tensor out_kernel = out;
     if (seqlenq_ngroups_swapped) {
         out_kernel = out.view({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2);
@@ -799,8 +803,11 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                      /*unpadded_lse*/true);
     params.total_q = total_q;
     // set_params_fprop multiplies the batch strides of the 3D packed layout by seqlen_q;
-    // out_kernel is 4D, so its stride(0) is already the batch stride.
-    if (seqlenq_ngroups_swapped) { params.o_batch_stride = out_kernel.stride(0); }
+    // the 4D views' stride(0) already is the batch stride.
+    if (seqlenq_ngroups_swapped) {
+        params.q_batch_stride = q_padded.stride(0);
+        params.o_batch_stride = out_kernel.stride(0);
+    }
     if (paged_KV) {
         params.block_table = block_table.data_ptr<int>();
         params.block_table_batch_stride = block_table.stride(0);
@@ -848,9 +855,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     }
 
     if (seqlenq_ngroups_swapped) {
-        std::array<int64_t, 4> size_before = {batch_size, max_seqlen_q, num_heads_k, head_size_og};
-        std::array<int64_t, 3> size_after = {batch_size, num_heads_k * max_seqlen_q, head_size_og};
-        q_padded = q_padded.reshape(size_before).transpose(1, 2).reshape(size_after);
+        q_padded = q;
         // The other kernels write the packed LSE as (nheads_kv, ngroups, b). Paged KV runs the
         // split-KV kernel; without splits it skips the combine kernel and writes the LSE in
         // packed-token order, (nheads_kv, b, ngroups).
