@@ -556,7 +556,8 @@ def itree_combine_plan(
     `combine_group_bytes` and each staged field's footprint is bounded by it. Uniform
     counts stage one field fewer per row, and their weights add one row shared by the
     block. `trait` supplies the field count and may enable uniform counts. `arch`
-    replaces the device's policy: a workload-specific profile and tests pass one.
+    replaces the device's policy for this stage-2 plan only; tests pass one, and stage 1
+    still plans with the device's.
     """
     nfields = trait.nfields
     arch = _itree_arch(device) if arch is None else arch
