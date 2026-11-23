@@ -980,16 +980,16 @@ class TestKernelRowTile(TestCase):
         sum_trait = T.SumOps(acc=cutlass.Float32)
         (got,) = rt.reduce_row_tile(sum_trait, "tpr1_empty_sum", x, f32, **kw)
         self.assertEqual(got, zeros, atol=0, rtol=0)
-        # A nonzero identity catches a kernel that leaves the empty output unwritten.
+        # Nonzero identities catch a branch that leaves the empty output unwritten.
         prod_trait = T.ProdOps(acc=cutlass.Float32)
         (got,) = rt.reduce_row_tile(prod_trait, "tpr1_empty_prod", x, f32, **kw)
         self.assertEqual(got, torch.ones(4, device="cuda"), atol=0, rtol=0)
-        trait = T.WelfordOps(acc=cutlass.Float32)
-        parts = rt.reduce_row_tile(
-            trait, "tpr1_empty_welford", x, f32 * trait.nfields, final=False, **kw
+        aminmax = T.AMinMaxOps(acc=cutlass.Float32)
+        lo, hi = rt.reduce_row_tile(
+            aminmax, "tpr1_empty_aminmax", x, f32 * 2, nouts=2, **kw
         )
-        for part in parts:
-            self.assertEqual(part, zeros, atol=0, rtol=0)
+        inf = torch.full((4,), float("inf"), device="cuda")
+        self.assertEqual((lo, hi), (inf, -inf), atol=0, rtol=0)
 
     def test_ragged_vector_pitched_rows(self):
         """Take each row's edges from its own start: pitched rows, and whole-vector rows
