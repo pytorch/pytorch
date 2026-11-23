@@ -798,7 +798,7 @@ def max_pool2d_with_indices(
 
     Args:
         input: input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`, minibatch dim optional.
-        kernel_size: size of the pooling region. Can be a single number, a single-element tuple or a
+        kernel_size: size of the pooling region. Can be a single number or a
             tuple `(kH, kW)`
         stride: stride of the pooling operation. Can be a single number or a
             tuple `(sH, sW)`. Default: :attr:`kernel_size`
