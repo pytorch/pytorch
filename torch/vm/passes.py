@@ -159,9 +159,10 @@ class Graphs(BuiltinPass):
             what eager's own autograd nodes run when they are called behind
             it. Once two calls came out the same, and what the nodes gave
             was what the autograd engine gives, the graph runs without a
-            tape and its results go through one node. A graph that cannot be taken
-            down (an operation of its backward looks at what a tensor holds,
-            say) keeps eager's tape.
+            tape and its results go through one node; a pass over graphs then gets
+            a forward graph and a backward graph with nothing left to
+            derive. A graph that cannot be taken down (an operation of its
+            backward looks at what a tensor holds, say) keeps eager's tape.
             A graph that gives a tensor and also computes something of it
             (a hidden state and a loss, say) is cut in front of the first
             operation that reads the tensor, into parts with a node each:
@@ -174,8 +175,6 @@ class Graphs(BuiltinPass):
             list or a dict or by itself, what it stores into an object and
             what a variable holds; not for a tensor that is only asked for
             its sizes or its type.
-            With a pass over graphs behind it a graph is the pass's, as
-            without ``backward``.
 
             Where it is not eager's: the ``grad_fn`` of what a graph gives
             is a node of the graph's. A backward that raises (a tensor it
