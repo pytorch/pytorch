@@ -29,6 +29,15 @@ pub enum ValueObs {
     Tensor { min_rank: u32, dims: Vec<(i64, i64)>, last: Vec<i64> },
     Bool { seen_true: u32, seen_false: u32, last: bool },
     Int { lo: i64, hi: i64 },
+    /// Always an exact float.
+    Float,
+    /// Always None.
+    None,
+    /// Always an exact str; `same` while it was the same text every time.
+    Str { hash: isize, same: bool },
+    /// Always an object of one exact type, given by its address; for a list,
+    /// a tuple or a dict, the lengths that were seen.
+    Object { ty: usize, len: Option<(i64, i64)> },
     Other,
 }
 
@@ -52,6 +61,12 @@ impl ValueObs {
             } else {
                 ValueObs::Int { lo: x, hi: x }
             }
+        } else if python && ffi::PyFloat_CheckExact(obj) != 0 {
+            ValueObs::Float
+        } else if python && obj == ffi::Py_None() {
+            ValueObs::None
+        } else if python && ffi::PyUnicode_CheckExact(obj) != 0 {
+            ValueObs::Str { hash: ffi::PyObject_Hash(obj), same: true }
         } else {
             let mut info = capi::TcfgTensorInfo::empty();
             match capi::api() {
@@ -63,6 +78,13 @@ impl ValueObs {
                         dims: sizes.iter().map(|s| (*s, *s)).collect(),
                         last: sizes,
                     }
+                }
+                _ if python => {
+                    let sized = ffi::PyList_CheckExact(obj) != 0
+                        || ffi::PyTuple_CheckExact(obj) != 0
+                        || ffi::PyDict_CheckExact(obj) != 0;
+                    let len = sized.then(|| ffi::PyObject_Size(obj) as i64);
+                    ValueObs::Object { ty: ffi::Py_TYPE(obj) as usize, len: len.map(|n| (n, n)) }
                 }
                 _ => ValueObs::Other,
             }
@@ -90,6 +112,18 @@ impl ValueObs {
             (ValueObs::Int { lo, hi }, ValueObs::Int { lo: x, .. }) => {
                 ValueObs::Int { lo: (*lo).min(x), hi: (*hi).max(x) }
             }
+            (ValueObs::Float, ValueObs::Float) => ValueObs::Float,
+            (ValueObs::None, ValueObs::None) => ValueObs::None,
+            (ValueObs::Str { hash, same }, ValueObs::Str { hash: h2, .. }) => {
+                ValueObs::Str { hash: h2, same: *same && *hash == h2 }
+            }
+            (ValueObs::Object { ty, len }, ValueObs::Object { ty: t2, len: l2 }) if *ty == t2 => {
+                let len = match (len, l2) {
+                    (Some((lo, hi)), Some((n, _))) => Some(((*lo).min(n), (*hi).max(n))),
+                    _ => None,
+                };
+                ValueObs::Object { ty: t2, len }
+            }
             _ => ValueObs::Other,
         };
         *self = merged;
@@ -100,6 +134,78 @@ impl ValueObs {
             ValueObs::Tensor { min_rank, .. } => Some(*min_rank),
             _ => None,
         }
+    }
+}
+
+/// How many dispatcher calls the profiling tier saw an instruction make.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Kernels {
+    /// Not counted: the instruction did not run in the profiling tier, or it
+    /// is a call of something that is not a C function, which is not put
+    /// under a capture.
+    #[default]
+    Unseen,
+    None,
+    One,
+    /// More than one, or not the same number every time.
+    Many,
+}
+
+/// How a call reached the Python function it entered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CalleeKind {
+    Function,
+    /// Bound to the object it was looked up on.
+    Method,
+    /// An instance whose class has it as its `__call__`, or that a call
+    /// shortcut leads to.
+    Instance,
+}
+
+/// The Python function the profiling tier saw a call enter first.
+#[derive(Clone, Default)]
+pub enum CalleeFact {
+    #[default]
+    Unseen,
+    /// Its code object.
+    One(PyObj, CalleeKind),
+    Many,
+}
+
+/// What the profiling tier saw one instruction of a block do.
+#[derive(Clone, Default)]
+pub struct InstFacts {
+    /// How many times it ran in the profiling tier.
+    pub runs: u32,
+    pub kernels: Kernels,
+    /// A Python frame was entered while it ran: by the VM for a function it
+    /// runs itself, or by the interpreter (a function, a class body, a
+    /// generator that goes on). Also set where the interpreter does not tell
+    /// of its frames, for an instruction that can call something.
+    pub frames: bool,
+    pub raised: bool,
+    pub callee: CalleeFact,
+    /// The version counter of a tensor it was given moved: it wrote to it in
+    /// place.
+    pub wrote: bool,
+}
+
+impl InstFacts {
+    pub fn saw_kernels(&mut self, kernels: Kernels) {
+        self.kernels = match (self.kernels, kernels) {
+            (seen, Kernels::Unseen) => seen,
+            (Kernels::Unseen, new) => new,
+            (seen, new) if seen == new => seen,
+            _ => Kernels::Many,
+        };
+    }
+
+    pub fn saw_callee(&mut self, code: PyObj, kind: CalleeKind) {
+        self.callee = match &self.callee {
+            CalleeFact::Unseen => CalleeFact::One(code, kind),
+            CalleeFact::One(seen, how) if seen.as_ptr() == code.as_ptr() && *how == kind => return,
+            _ => CalleeFact::Many,
+        };
     }
 }
 
@@ -242,6 +348,8 @@ pub struct PassCx<'a> {
     pub slots: &'a [Option<Arc<SiteSlot>>],
     /// Per SSA value of the function.
     pub obs: &'a [ValueObs],
+    /// Per generic instruction of the block.
+    pub facts: &'a [InstFacts],
 }
 
 impl PassCx<'_> {
