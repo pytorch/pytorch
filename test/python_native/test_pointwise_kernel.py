@@ -28,6 +28,18 @@ from torch.testing._internal.common_utils import (
 class TestPointwiseIndexing(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    @parametrize("name,allowed", (("add.Tensor", True), ("rsub.Tensor", False)))
+    def test_output_dtype_policy_without_cuda(self, name: str, allowed: bool) -> None:
+        from torch._native.ops.pointwise import overrides, table
+
+        row = next(row for row in table.POINTWISE_DEF_TABLE if row.aten == name)
+        inputs = [torch.ones(4, device="cpu")] * row.nin
+        result = getattr(torch, name.partition(".")[0])(*inputs)
+        out = torch.empty(result.shape, dtype=torch.float64, device="cpu")
+        self.assertEqual(
+            overrides._make_dtype_cond(row, "out")(inputs, result.dtype, out), allowed
+        )
+
     def test_row_first_grid_limit(self) -> None:
         from torch._native.ops.pointwise.layout import tma_layout
 
@@ -117,10 +129,14 @@ class TestPointwiseKernel(TestCase):
                 allowed = True
             except RuntimeError:
                 allowed = False
-        cond = overrides._make_cond(row, "out")
-        self.assertEqual(cond(*inputs, out=wide), allowed)
+        policy = overrides._make_dtype_cond(row, "out")
+        self.assertEqual(policy(inputs, result.dtype, wide), allowed)
+        self.assertTrue(policy(inputs, result.dtype, torch.empty_like(result)))
+        supported = torch.cuda.get_device_capability(device)[0] in POINTWISE_ARCH_MAJORS
+        self.assertEqual(
+            overrides._make_cond(row, "out")(*inputs, out=wide), allowed and supported
+        )
         self.assertEqual(wide.view(torch.uint8), before.view(torch.uint8))
-        self.assertTrue(cond(*inputs, out=torch.empty_like(result)))
         if allowed:
             actual = overrides._make_impl(row, "out")(*inputs, out=wide)
             self.assertEqual(actual, reference, atol=0, rtol=0)
