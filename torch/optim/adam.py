@@ -936,7 +936,7 @@ def _fused_adam(
             lr = lr_dict[device]
         clip_kwargs = {}
         if grad_clip_coef is not None:
-            if device.type == "cuda" and not decoupled_weight_decay:
+            if device.type == "cuda":
                 clip_kwargs["grad_clip_coef"] = grad_clip_coef.to(
                     device=device, dtype=torch.float64
                 )
@@ -947,7 +947,11 @@ def _fused_adam(
         torch._foreach_add_(device_state_steps, 1)
         func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
         if clip_kwargs:
-            packet = torch.ops.aten._fused_adam_
+            packet = (
+                torch.ops.aten._fused_adamw_
+                if decoupled_weight_decay
+                else torch.ops.aten._fused_adam_
+            )
             func = (
                 packet.grad_clip_tensor_lr
                 if isinstance(lr, Tensor)

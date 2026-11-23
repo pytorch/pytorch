@@ -32,6 +32,7 @@ class AdamW(Adam):
         capturable: bool = False,
         differentiable: bool = False,
         fused: bool | None = None,
+        max_grad_norm: float | None = None,
     ) -> None:
         super().__init__(
             params,
@@ -46,6 +47,7 @@ class AdamW(Adam):
             differentiable=differentiable,
             fused=fused,
             decoupled_weight_decay=True,
+            max_grad_norm=max_grad_norm,
         )
 
     # Preserve decoupled_weight_decay from AdamW for backwards compatibility. The following
@@ -107,6 +109,10 @@ AdamW.__doc__ = (
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay coefficient (default: 1e-2)
+        max_grad_norm (float, optional): maximum global L2 gradient norm
+            (default: ``None``). Uses the same clipping behavior and restrictions
+            as :class:`~torch.optim.Adam`, including unchanged ``.grad`` tensors
+            and explicit AMP unscaling.
         amsgrad (bool, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
             (default: False)
@@ -143,6 +149,7 @@ def adamw(
     grad_scale: Tensor | None = None,
     found_inf: Tensor | None = None,
     has_complex: bool = False,
+    grad_clip_coef: Tensor | None = None,
     *,
     amsgrad: bool,
     beta1: float | Tensor,
@@ -174,6 +181,7 @@ def adamw(
         eps=eps,
         maximize=maximize,
         decoupled_weight_decay=True,
+        grad_clip_coef=grad_clip_coef,
     )
 
 

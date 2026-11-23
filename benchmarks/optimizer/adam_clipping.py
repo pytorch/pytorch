@@ -160,7 +160,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--numel", type=int, nargs="+", default=[2**20, 2**24, 2**28])
     parser.add_argument("--tensor-count", type=int, nargs="+", default=[1, 64])
-    parser.add_argument("--optimizer", nargs="+", choices=["Adam"], default=["Adam"])
+    parser.add_argument(
+        "--optimizer", nargs="+", choices=["Adam", "AdamW"], default=["Adam", "AdamW"]
+    )
     parser.add_argument("--amsgrad", action="store_true")
     parser.add_argument("--max-norm", type=float, default=1.0)
     parser.add_argument("--warmup", type=int, default=10)

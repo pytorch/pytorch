@@ -20,7 +20,7 @@ class TestAdamClipping(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @dtypes(torch.float32, torch.float64, torch.float16, torch.bfloat16)
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @parametrize("amsgrad", [False, True])
     @parametrize("backend", ["single", "foreach", "fused"])
     @parametrize("max_norm", [0.0, 1.0, 1e6])
@@ -70,14 +70,14 @@ class TestAdamClipping(TestCase):
                 self.assertEqual(p.grad, grad, rtol=0, atol=0)
             self.assertIsNone(params[-1].grad)
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @parametrize("max_norm", [-1.0, float("nan"), float("inf")])
     def test_invalid_threshold(self, device, optimizer, max_norm):
         p = torch.nn.Parameter(torch.ones(1, device=device))
         with self.assertRaisesRegex(ValueError, "Invalid max_grad_norm"):
             getattr(torch.optim, optimizer)([p], max_grad_norm=max_norm)
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     def test_closure_and_state_dict(self, device, optimizer):
         p = torch.nn.Parameter(torch.tensor([3.0, 4.0], device=device))
         opt = getattr(torch.optim, optimizer)([p], lr=0.1, max_grad_norm=1.0)
@@ -104,7 +104,7 @@ class TestAdamClipping(TestCase):
         other.load_state_dict(old_state)
         self.assertIsNone(other.param_groups[0]["max_grad_norm"])
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     def test_rejects_inconsistent_groups(self, device, optimizer):
         params = [torch.nn.Parameter(torch.ones(1, device=device)) for _ in range(2)]
         opt = getattr(torch.optim, optimizer)(
@@ -117,7 +117,7 @@ class TestAdamClipping(TestCase):
             opt.step()
         self.assertEqual(params[0], torch.ones_like(params[0]))
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @parametrize("value", [0.0, float("nan"), float("inf")])
     def test_nonfinite_and_zero_gradients(self, device, optimizer, value):
         p = torch.nn.Parameter(torch.ones(5, device=device))
@@ -137,7 +137,7 @@ class TestAdamClipping(TestCase):
         self.assertEqual(p, q)
         self.assertEqual(p.grad, raw_grad)
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     def test_mixed_dtypes(self, device, optimizer):
         params = [
             torch.nn.Parameter(torch.ones(17, device=device, dtype=dtype))
@@ -159,7 +159,7 @@ class TestAdamClipping(TestCase):
             self.assertEqual(p, q, rtol=0, atol=0)
             self.assertEqual(p.grad, grad, rtol=0, atol=0)
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @parametrize("kind", ["sparse", "complex"])
     def test_rejects_unsupported_gradients(self, device, optimizer, kind):
         dtype = torch.complex64 if kind == "complex" else torch.float32
@@ -172,7 +172,7 @@ class TestAdamClipping(TestCase):
             opt.step()
         self.assertEqual(p, torch.ones_like(p))
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     def test_no_gradients(self, device, optimizer):
         p = torch.nn.Parameter(torch.ones(3, device=device))
         opt = getattr(torch.optim, optimizer)([p], fused=True, max_grad_norm=1.0)
@@ -180,13 +180,13 @@ class TestAdamClipping(TestCase):
         self.assertEqual(p, torch.ones_like(p))
         self.assertIsNone(p.grad)
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     def test_rejects_differentiable(self, device, optimizer):
         p = torch.nn.Parameter(torch.ones(3, device=device))
         with self.assertRaisesRegex(ValueError, "does not support differentiable"):
             getattr(torch.optim, optimizer)([p], differentiable=True, max_grad_norm=1.0)
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @onlyCUDA
     @parametrize("tensor_lr", [False, True])
     def test_amp_unscale_and_overflow(self, device, optimizer, tensor_lr):
@@ -216,7 +216,7 @@ class TestAdamClipping(TestCase):
         self.assertEqual(p, before)
         self.assertEqual(opt.state[p], state_before)
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @onlyCUDA
     def test_amp_requires_unscale(self, device, optimizer):
         p = torch.nn.Parameter(torch.ones(3, device=device))
@@ -227,7 +227,7 @@ class TestAdamClipping(TestCase):
             scaler.step(opt)
         self.assertEqual(p, torch.ones_like(p))
 
-    @parametrize("optimizer", ["Adam"])
+    @parametrize("optimizer", ["Adam", "AdamW"])
     @onlyCUDA
     @parametrize("amsgrad", [False, True])
     def test_cuda_graph(self, device, optimizer, amsgrad):
