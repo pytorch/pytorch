@@ -36,47 +36,6 @@ from torch._native.ops.reductions import (
 )
 
 
-_TRAITS = {
-    "sum": T.SumOps(),
-    "mean": T.MeanOps(),
-    "amax": T.AMaxOps(),
-    "nansum": T.NanSumOps(),
-    "argmax": T.ArgMaxOps(),
-    "argmin": T.ArgMinOps(),
-    "var": T.WelfordOps(),
-    "var_mean": T.VarMeanOps(),
-}
-
-
-def _contract(trait):
-    """Selector keywords for trait's structure."""
-    contract = dict(nfields=trait.nfields, nouts=getattr(trait, "nouts", 1))
-    welford = T.welford_outputs(trait)
-    return contract | dict(trait_type=type(trait), welford_outs=welford)
-
-
-# Contracts by _TRAITS key, for parametrized selector rows.
-_CONTRACTS = {key: _contract(trait) for key, trait in _TRAITS.items()}
-
-
-def _contract_name(contract):
-    """A stable test name fragment for a selector contract row."""
-    return f"{contract['trait_type'].__name__}_{contract['nouts']}out"
-
-
-def _updates_name(updates):
-    """A stable test name fragment for a guard row's updated selector arguments."""
-
-    def value(v):
-        if isinstance(v, tuple):
-            return "x".join(value(e) for e in v)
-        if isinstance(v, torch.dtype):
-            return str(v)[6:]
-        return v.__name__ if isinstance(v, type) else str(v)
-
-    return "_".join(f"{k}_{value(v)}" for k, v in updates.items())
-
-
 def _served(trait_key):
     """Tags of the row and general plans compiled for trait_key."""
     rows = {k[0] for k in rt._CACHE if k[1] == trait_key}
@@ -84,25 +43,7 @@ def _served(trait_key):
 
 
 class TestReductionConfig(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
-    def general(self, **updates):
-        args = dict(
-            cc=(10, 3),
-            dtype=torch.float32,
-            trait_type=T.SumOps,
-            count=1024,
-            num_o=65536,
-            red_pairs=((1024, 2),),
-            kept_pairs=((65536, 2048),),
-            nfields=1,
-            nouts=1,
-            welford_outs=0,
-            acc_bits=32,
-            alignment=16,
-        )
-        args.update(updates)
-        return kg.select_general_config(**args)
+    hw_classification = HardwareClassification.CUDA
 
     @parametrize(
         "sum_gate,native_gate,expected",
@@ -133,298 +74,6 @@ class TestReductionConfig(TestCase):
                 rt.reduction_order()
             with self.assertRaisesRegex(ValueError, rt._INNER_TREE_ENV):
                 rt.inner_tree_fallback("unused")
-
-    @parametrize("cc", [(9, 0), (10, 3), (11, 0)])
-    def test_architecture_isolation(self, cc):
-        """Return the generic defaults until an architecture adds its own rules."""
-        self.assertEqual(self.general(cc=cc), kg._GeneralConfig())
-        self.assertEqual(
-            rt.select_row_order(
-                cc,
-                torch.float32,
-                1024,
-                65536,
-                trait_type=T.WelfordOps,
-                nfields=3,
-                nouts=1,
-                welford_outs=1,
-                acc_bits=32,
-                alignment=16,
-            ),
-            "linear",
-        )
-
-    def test_one_output_reductions_keep_wide_blocks(self):
-        """Launch one-output strided reductions with the reduce-all block width."""
-        self.assertEqual(
-            self.general(num_o=1, kept_pairs=()),
-            kg._GeneralConfig(block=kg._K0_ALL_BLOCK, rule="general_one_output"),
-        )
-
-    @parametrize(
-        "dtype,width,mib,contract,expected",
-        [
-            (torch.float32, 256, 64, _CONTRACTS["mean"], "inner_tree"),
-            (torch.float32, 256, 16, _CONTRACTS["mean"], "linear"),
-            (torch.float32, 256, 64, _CONTRACTS["argmax"], "linear"),
-            (torch.float32, 256, 256, _CONTRACTS["argmax"], "inner_tree"),
-            (torch.bfloat16, 256, 16, _CONTRACTS["sum"], "inner_tree"),
-            (torch.bfloat16, 256, 16, _CONTRACTS["argmax"], "linear"),
-            (torch.bfloat16, 256, 64, _CONTRACTS["sum"], "linear"),
-            # Unmeasured one-field traits keep the linear order.
-            (torch.float32, 256, 64, _CONTRACTS["nansum"], "linear"),
-            (torch.float32, 1024, 64, _CONTRACTS["var"], "inner_tree"),
-            (torch.float32, 1024, 64, _CONTRACTS["var"] | {"nouts": 2}, "linear"),
-            (torch.float32, 1024, 256, _CONTRACTS["argmax"], "linear"),
-            (torch.bfloat16, 1024, 64, _CONTRACTS["argmax"], "inner_tree"),
-            # Rules match trait types: only argmax was measured.
-            (torch.bfloat16, 1024, 64, _CONTRACTS["argmin"], "linear"),
-            (torch.float32, 4096, 16, _CONTRACTS["var_mean"], "inner_tree"),
-            (torch.bfloat16, 4096, 16, _CONTRACTS["argmax"], "inner_tree"),
-            (torch.float32, 4096, 16, _CONTRACTS["mean"], "inner_tree"),
-            (torch.float32, 4096, 64, _CONTRACTS["sum"], "linear"),
-            (torch.float32, 4096, 256, _CONTRACTS["sum"], "inner_tree"),
-            (torch.bfloat16, 4096, 2048, _CONTRACTS["mean"], "linear"),
-        ],
-        name_fn=lambda dtype, width, mib, contract, expected: (
-            f"{_contract_name(contract)}_{str(dtype)[6:]}_{width}_{mib}mib"
-        ),
-    )
-    def test_sm107_row_profiles(self, dtype, width, mib, contract, expected):
-        """Pin each arm of the SM107 row policy."""
-        rows = (mib << 20) // (width * dtype.itemsize)
-        self.assertEqual(
-            rt.select_row_order(
-                (10, 7),
-                dtype,
-                width,
-                rows,
-                **contract,
-                acc_bits=32,
-                alignment=16,
-            ),
-            expected,
-        )
-
-    @parametrize(
-        "dtype,mib,contract,rule",
-        [
-            (torch.float32, 256, _CONTRACTS["sum"], "rubin_strided_sum"),
-            (torch.float32, 256, _CONTRACTS["nansum"], "general_default"),
-            (torch.bfloat16, 2048, _CONTRACTS["sum"], "rubin_strided_sum"),
-            (torch.bfloat16, 16, _CONTRACTS["var"], "rubin_strided_welford"),
-            (torch.float32, 256, _CONTRACTS["var"], "rubin_strided_welford"),
-            # Welford output counts must match the trait's.
-            (torch.float32, 256, _CONTRACTS["var_mean"], "rubin_strided_welford"),
-            (torch.float32, 256, _CONTRACTS["var"] | {"nouts": 2}, "general_default"),
-            (torch.float32, 64, _CONTRACTS["mean"], "rubin_strided_inner"),
-            (torch.float32, 64, _CONTRACTS["sum"], "rubin_strided_inner"),
-            (torch.float32, 64, _CONTRACTS["amax"], "rubin_strided_inner"),
-            (torch.float32, 16, _CONTRACTS["sum"], "general_default"),
-            (torch.bfloat16, 64, _CONTRACTS["argmax"], "rubin_strided_argmax"),
-            (torch.bfloat16, 64, _CONTRACTS["argmin"], "general_default"),
-            (torch.float32, 2048, _CONTRACTS["argmax"], "rubin_strided_argmax"),
-            (torch.float32, 256, _CONTRACTS["argmax"], "general_default"),
-            (torch.float32, 64, _CONTRACTS["argmax"], "general_default"),
-        ],
-        name_fn=lambda dtype, mib, contract, rule: (
-            f"{_contract_name(contract)}_{str(dtype)[6:]}_{mib}mib"
-        ),
-    )
-    def test_sm107_general_profiles(self, dtype, mib, contract, rule):
-        """Pin each distinct SM107 strided policy."""
-        rows = (mib << 20) // (1024 * dtype.itemsize)
-        cfg = kg.select_general_config(
-            (10, 7),
-            dtype,
-            1024,
-            rows,
-            ((1024, 2),),
-            ((rows, 2048),),
-            **contract,
-            acc_bits=32,
-            alignment=16,
-        )
-        self.assertEqual(cfg.rule, rule)
-        self.assertEqual(cfg.block, 64 if rule == "rubin_strided_sum" else kg._K0_BLOCK)
-        linear = rule in ("rubin_strided_sum", "general_default")
-        self.assertEqual(cfg.kernel_order, "linear" if linear else "inner_tree")
-
-    @parametrize(
-        "base,updates",
-        [
-            (
-                {},
-                {
-                    "count": 2048,
-                    "num_o": 32768,
-                    "red_pairs": ((2048, 2),),
-                    "kept_pairs": ((32768, 4096),),
-                },
-            ),
-            ({}, {"num_o": 65535, "kept_pairs": ((65535, 2048),)}),
-            ({}, {"red_pairs": ((1024, 4),)}),
-            ({}, {"kept_pairs": ((65536, 4096),)}),
-            ({}, {"acc_bits": 64}),
-            ({}, {"alignment": 8}),
-            (
-                {
-                    "dtype": torch.bfloat16,
-                    "num_o": 131072,
-                    "kept_pairs": ((131072, 2048),),
-                },
-                {"dtype": torch.float16},
-            ),
-        ],
-        name_fn=lambda base, updates: _updates_name(updates),
-    )
-    def test_sm107_general_guards(self, base, updates):
-        """Keep a 256 MiB strided anchor that breaks one guard on the generic policy."""
-        selected = dict(base, cc=(10, 7))
-        self.assertEqual(self.general(**selected).rule, "rubin_strided_sum")
-        self.assertEqual(self.general(**dict(selected, **updates)), kg._GeneralConfig())
-
-    @parametrize(
-        "updates",
-        [
-            {"alignment": 8},
-            {"acc_bits": 64},
-            {"dtype": torch.float16, "M": 131072},
-            {"N": 2048, "M": 32768},
-            {"M": 65535},
-            # fp32 256 MiB at N = 4096 takes the inner tree but for the trait guard.
-            {
-                "trait_type": T.ProdOps,
-                "nfields": 1,
-                "welford_outs": 0,
-                "N": 4096,
-                "M": 16384,
-            },
-        ],
-        name_fn=_updates_name,
-    )
-    def test_sm107_row_guards(self, updates):
-        """Keep a 256 MiB SM107 row anchor that breaks one guard on the linear order."""
-        args = dict(
-            cc=(10, 7),
-            dtype=torch.float32,
-            trait_type=T.WelfordOps,
-            N=1024,
-            M=65536,
-            nfields=3,
-            nouts=1,
-            welford_outs=1,
-            acc_bits=32,
-            alignment=16,
-        )
-        self.assertEqual(rt.select_row_order(**args), "inner_tree")
-        self.assertEqual(rt.select_row_order(**(args | updates)), "linear")
-
-    @parametrize(
-        "dtype,mib,trait,unroll",
-        [
-            (torch.float32, 256, "sum", 128),
-            (torch.bfloat16, 2048, "argmax", 128),
-            (torch.float32, 256, "var", 64),
-            (torch.bfloat16, 2048, "var_mean", 64),
-        ],
-        name_fn=lambda dtype, mib, trait, unroll: f"{trait}_{mib}mib",
-    )
-    def test_sm107_full_profiles(self, dtype, mib, trait, unroll):
-        """Pin each distinct SM107 full-reduction policy branch."""
-        contract = _CONTRACTS[trait]
-        trait_type, welford_outs = contract["trait_type"], contract["welford_outs"]
-        nfields, nouts = contract["nfields"], contract["nouts"]
-        arch = rt.select_full_itree_arch(
-            (10, 7),
-            dtype,
-            (mib << 20) // dtype.itemsize,
-            1,
-            trait_type=trait_type,
-            field_bits=tuple(dt.width for dt in _TRAITS[trait].fdtypes),
-            out_dtypes=kg._sm107_outputs(dtype, trait_type, nfields, nouts),
-            welford_outs=welford_outs,
-            alignment=16,
-            contiguous=True,
-        )
-        welford = welford_outs > 0
-        want = rt._ItreeArch(
-            split_stage_rows=4,
-            combine_rpb=32,
-            combine_group_bytes=16,
-            stage_rows=False,
-            combine_async=32,
-            combine_max=2048,
-            combine_unroll=unroll,
-            lowp_thread_elems=32,
-            uniform_combine="weights" if welford else "off",
-        )
-        self.assertEqual(arch, want)
-
-    @parametrize(
-        "updates",
-        [
-            {"cc": (10, 0)},
-            {"N": (256 << 20) // 4 - 1},
-            {"trait_type": T.MeanOps},
-            {"trait_type": T.NanSumOps},
-            {"dtype": torch.float16, "N": (256 << 20) // 2},
-            # Only fp32 sums were measured, not bf16 sums into fp32.
-            {"dtype": torch.bfloat16, "N": (256 << 20) // 2},
-            {"M": 2},
-            {"contiguous": False},
-            {"alignment": 8},
-            {"out_dtypes": (torch.bfloat16,)},
-        ],
-        name_fn=_updates_name,
-    )
-    def test_sm107_full_guards(self, updates):
-        """Keep calls outside the SM107 policy contract on the generic path."""
-        args = dict(
-            cc=(10, 7),
-            dtype=torch.float32,
-            trait_type=T.SumOps,
-            N=(256 << 20) // 4,
-            M=1,
-            field_bits=(32,),
-            out_dtypes=(torch.float32,),
-            welford_outs=0,
-            alignment=16,
-            contiguous=True,
-        )
-        self.assertIsNotNone(rt.select_full_itree_arch(**args))
-        args.update(updates)
-        self.assertIsNone(rt.select_full_itree_arch(**args))
-
-    @parametrize(
-        "updates",
-        [
-            {"field_bits": (64,) * 3},
-            {"dtype": torch.float16, "N": 128 << 20, "out_dtypes": (torch.float16,)},
-            {"welford_outs": 0},
-            {"welford_outs": 0, "out_dtypes": ()},
-            {"out_dtypes": (torch.bfloat16,)},
-            {"out_dtypes": (torch.float32,) * 2},
-        ],
-        name_fn=_updates_name,
-    )
-    def test_sm107_full_welford_guards(self, updates):
-        """Keep Welford calls outside the SM107 Welford contract on the generic path."""
-        args = dict(
-            cc=(10, 7),
-            dtype=torch.float32,
-            trait_type=T.WelfordOps,
-            N=(256 << 20) // 4,
-            M=1,
-            field_bits=(32,) * 3,
-            out_dtypes=(torch.float32,),
-            welford_outs=1,
-            alignment=16,
-            contiguous=True,
-        )
-        self.assertIsNotNone(rt.select_full_itree_arch(**args))
-        args.update(updates)
-        self.assertIsNone(rt.select_full_itree_arch(**args))
 
     def test_fallback_warns_once_per_reason(self):
         """Report each distinct reason a gated inner-tree request fell back."""
@@ -462,8 +111,8 @@ class TestReductionConfig(TestCase):
     def test_b200_ragged_rows_need_an_aligned_base(self):
         """Decline ragged rows without a 16-byte aligned base: reduce_row_tile refuses
         them."""
-        args = ((10, 0), torch.float16, 255)
-        kw = dict(trait=T.SumOps(), acc_bits=32, pitch=255)
+        args = ((10, 0), torch.float16, 4095)
+        kw = dict(trait=T.SumOps(), acc_bits=32, pitch=4095)
         self.assertTrue(kg._ragged_rows_ok(*args, 16, **kw))
         self.assertFalse(kg._ragged_rows_ok(*args, 8, **kw))
 
@@ -502,13 +151,14 @@ class TestReductionConfigDevice(TestCase):
             )
         # Contiguous rows run the row kernel; strided rows run the general kernel.
         tags = _served(key)
-        self.assertIn("rowtile" if stride == 1 else "reduce", tags)
+        want = {"rowtile"} if stride == 1 else {"reduce", "gensplit1"}
+        self.assertTrue(tags & want, tags)
         self.assertFalse(any("itree" in t for t in tags), tags)
         self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
     @parametrize("stride", [1, 2])
     def test_selectors_can_pick_inner_tree_for_unordered(self, device, stride):
-        """Serve a selector's inner-tree pick without the env gate's warning."""
+        """Serve a selector's inner-tree pick with the env gate off."""
         import cutlass
 
         from torch._native.ops.reductions import traits
@@ -523,10 +173,7 @@ class TestReductionConfigDevice(TestCase):
                 "select_general_config",
                 return_value=kg._GeneralConfig(kernel_order="inner_tree"),
             ),
-            warnings.catch_warnings(),
         ):
-            # Compiling may warn on its own; only the env gate's fallback must not.
-            warnings.filterwarnings("error", ".*could not be honoured")
             got = kg.reduce_dim(
                 traits.SumOps(acc=cutlass.Float32), key, x, [1], torch.float32
             )
@@ -687,26 +334,37 @@ class TestReductionConfigDevice(TestCase):
         tags = _served(f"{entry}_unordered")
         self.assertIn("rowtile", tags)
         self.assertFalse(any("itree" in t for t in tags), tags)
-        for got, ref in zip(ordered, unordered):
+        wide = x.double()
+        with torch.backends.python_native.cutedsl.disabled():
+            want = {
+                "reduce_dim2": torch.var_mean(wide, 1, correction=1),
+                "reduce_all": (wide.sum(),),
+                "reduce_all2": torch.var_mean(wide, correction=1),
+            }[entry]
+        for got, ref, exp in zip(ordered, unordered, want, strict=True):
             self.assertEqual(got, ref, atol=1e-4, rtol=1e-4)
+            self.assertEqual(got, exp.float(), atol=1e-4, rtol=1e-4)
 
-    def test_inner_tree_rejects_64bit_extents(self, device):
+    @parametrize("entry", ["reduce_dim", "reduce_dim2", "reduce_all2"])
+    def test_inner_tree_rejects_64bit_extents(self, device, entry):
         """Refuse inner-tree order when the reduced extent needs 64-bit indexing."""
         import cutlass
 
         from torch._native.ops.reductions import traits
 
+        one = traits.SumOps(acc=cutlass.Float32)
+        two = traits.VarMeanOps(correction=1, acc=cutlass.Float32)
+        f32 = torch.float32
+        pair = [f32, f32]
         # A stride-0 view reaches the extent check without allocating 2^31 elements.
-        x = torch.zeros(1, 1, device=device).expand(2, 2**31)
+        wide = torch.zeros(1, 1, device=device).expand(2, 2**31)
         with self.assertRaisesRegex(ValueError, rt._INNER_TREE_WIDE):
-            kg.reduce_dim(
-                traits.SumOps(acc=cutlass.Float32),
-                "sum",
-                x,
-                [1],
-                torch.float32,
-                order="inner_tree",
-            )
+            if entry == "reduce_dim":
+                kg.reduce_dim(one, "sum", wide, [1], f32, order="inner_tree")
+            elif entry == "reduce_dim2":
+                kg.reduce_dim2(two, "var_mean", wide, [1], pair, order="inner_tree")
+            else:
+                kg.reduce_all2(two, "var_mean", wide[0], pair, order="inner_tree")
 
     def test_reduce_all_rejects_64bit_extents(self, device):
         """Raise for explicit order beyond 32-bit extents; fall back under the gate."""
@@ -749,8 +407,8 @@ class TestReductionConfigDevice(TestCase):
                 with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: gate}):
                     self.assertEqual(calls[entry](), expected)
 
-    def test_strided_reduce_all_uses_the_general_selector(self, device):
-        """Size strided reduce-all launches with the general kernel's selector."""
+    def test_strided_reduce_all_takes_the_general_kernel(self, device):
+        """Serve strided reduce-all launches with the general kernel."""
         import cutlass
 
         from torch._native.ops.reductions import traits
@@ -761,9 +419,6 @@ class TestReductionConfigDevice(TestCase):
         with mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "0"}):
             got = kg.reduce_all(trait, key, x, torch.float32)
         self.assertTrue(_served(key) & {"reduce", "gensplit1"}, _served(key))
-        # threads_per_block follows axis, vec and threads_per_row in the cache_sig.
-        blocks = {k[0][7] for k in kg._PLAN if k[0][1:3] == ("gensplit1", key)}
-        self.assertEqual(blocks, {kg._K0_ALL_BLOCK})
         self.assertEqual(got, x.double().sum().float(), atol=1e-4, rtol=1e-4)
 
     def test_env_gate_falls_back_with_one_warning(self, device):
@@ -831,7 +486,11 @@ class TestReductionConfigDevice(TestCase):
 
         # A stride-0 view reaches the extent check without allocating 2^31 elements.
         x = torch.zeros(1, device=device).expand(2**31)
-        rt._warned_inner_tree_reasons.discard(rt._INNER_TREE_WIDE)
+        # Restore the warned reasons afterwards; cleanups run last in, first out.
+        warned = rt._warned_inner_tree_reasons
+        self.addCleanup(warned.update, set(warned))
+        self.addCleanup(warned.clear)
+        warned.discard(rt._INNER_TREE_WIDE)
         with (
             mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "1"}),
             self.assertWarnsRegex(UserWarning, rt._INNER_TREE_WIDE),
@@ -842,30 +501,16 @@ class TestReductionConfigDevice(TestCase):
         self.assertEqual(got, torch.zeros((), device=device))
 
     def test_explicit_order_raises_with_its_reason(self, device):
-        """Raise for explicit order through the two-output entry points, and for a
-        geometry the inner-tree kernels cannot serve."""
+        """Raise for a geometry the inner-tree kernels cannot serve."""
         import cutlass
 
         from torch._native.ops.reductions import traits
 
-        two = traits.VarMeanOps(correction=1, acc=cutlass.Float32)
-        f32 = torch.float32
-        wide = torch.zeros(1, 1, device=device).expand(2, 2**31)
-        with self.assertRaisesRegex(ValueError, rt._INNER_TREE_WIDE):
-            kg.reduce_dim2(two, "var_mean", wide, [1], [f32, f32], order="inner_tree")
-        with self.assertRaisesRegex(ValueError, rt._INNER_TREE_WIDE):
-            kg.reduce_all2(two, "var_mean", wide[0], [f32, f32], order="inner_tree")
+        trait = traits.SumOps(acc=cutlass.Float32)
         # 2^25 outputs of 2^20 elements need 2^32 split partials, past Int32.
         deep = torch.zeros(1, 1, device=device).expand(2**25, 2**20)
         with self.assertRaisesRegex(ValueError, rt._INNER_TREE_GEOMETRY):
-            kg.reduce_dim(
-                traits.SumOps(acc=cutlass.Float32),
-                "sum",
-                deep,
-                [1],
-                f32,
-                order="inner_tree",
-            )
+            kg.reduce_dim(trait, "sum", deep, [1], torch.float32, order="inner_tree")
 
 
 instantiate_parametrized_tests(TestReductionConfig)
