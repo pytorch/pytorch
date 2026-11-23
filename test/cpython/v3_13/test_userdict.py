@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, slowTest
 
 __TestCase = CPythonTestCase
 
@@ -67,6 +67,10 @@ d5 = {"one": 1, "two": 1}
 
 class UserDictTest(mapping_tests.TestHashMappingProtocol):
     type2test = collections.UserDict
+
+    @slowTest
+    def test_popitem(self):
+        super().test_popitem()
 
     def test_all(self):
         # Test constructors

@@ -114,7 +114,6 @@ jobs:
         id: filter
         uses: ./.github/actions/filter-test-configs
         with:
-          cpp-faketensor: "true"
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
           selected-test-configs: ${{ inputs.selected-test-configs }}

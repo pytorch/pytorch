@@ -2161,6 +2161,13 @@ void run_cudnn_SDP_bprop_nestedtensor(
     dV.zero_();
     return;
   }
+  // cuDNN uses Q's ragged offsets for the packed dQ accumulator.
+  // TODO: Remove this copy when cuDNN uses the accumulator's own offsets.
+  Tensor q_ = q;
+  if (q.strides() != dQ.strides()) {
+    q_ = at::empty_like(dQ);
+    q_.copy_(q);
+  }
   check_cudnn_sdpa_decode(s_q);
   TORCH_CHECK(
       softmaxstats.dim() == 2, "cuDNN SDPA expected a 2D (H, T) softmax_lse");
@@ -2180,7 +2187,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   const bool shared_cum_seqlen = cum_seqlen_q.is_same(cum_seqlen_kv);
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = shared_cum_seqlen ? seqlen_q : at::diff(cum_seqlen_kv, 1, 0);
-  check_ragged_offset_capacity(q, "query");
+  check_ragged_offset_capacity(q_, "query");
   check_ragged_offset_capacity(k, "key");
   check_ragged_offset_capacity(v, "value");
   check_ragged_offset_capacity(o, "out");
@@ -2188,7 +2195,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   check_ragged_offset_capacity(dQ, "grad_query");
   check_ragged_offset_capacity(dK, "grad_key");
   check_ragged_offset_capacity(dV, "grad_value");
-  const int64_t q_token_stride = q.stride(-3);
+  const int64_t q_token_stride = q_.stride(-3);
   const int64_t kv_token_stride = k.stride(-3);
   auto rag_q_off = cum_seqlen_q.mul(q_token_stride);
   auto rag_k_off = shared_cum_seqlen && kv_token_stride == q_token_stride
@@ -2228,7 +2235,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
       s_kv, // max-seqlen-kv
       d_qk,
       d_v,
-      q,
+      q_,
       k,
       v,
       attn_bias,
@@ -2257,7 +2264,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
         dropout_probability,
         cum_seqlen_q,
         cum_seqlen_kv,
-        q,
+        q_,
         k,
         v,
         attn_bias,
@@ -2275,7 +2282,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
   const fe::graph::Graph& mha_graph = *cache_it->second;
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
-      {Q, q.mutable_data_ptr()},
+      {Q, q_.mutable_data_ptr()},
       {K, k.mutable_data_ptr()},
       {V, v.mutable_data_ptr()},
       {O, o.mutable_data_ptr()},

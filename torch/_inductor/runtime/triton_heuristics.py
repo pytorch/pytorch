@@ -573,8 +573,10 @@ def disable_caching_autotuner_plugins() -> Generator[None, None, None]:
 class CachingAutotunerPlugin:
     """Base class for ``CachingAutotuner`` plugins.
 
-    Each hook returns ``DEFER`` to fall through to the next plugin / default
-    behavior, or any other value to short-circuit ``run()`` with that value.
+    Each ``pre_*`` hook returns ``DEFER`` to fall through to the next plugin /
+    default behavior, or any other value to short-circuit ``run()`` with that
+    value. ``holds_candidates`` and ``tunes_prebuilt_launchers`` are questions
+    ``torch.compiler.precompile`` asks every plugin; they return ``bool``.
     """
 
     def pre_compile(self, autotuner: CachingAutotuner) -> object:
@@ -632,6 +634,34 @@ class CachingAutotunerPlugin:
         instead.
         """
         return DEFER
+
+    def holds_candidates(self, autotuner: CachingAutotuner) -> bool:
+        """Whether the plugin emptied ``autotuner.launchers`` and is still choosing
+        among its ``compile_results`` on real launches.
+
+        ``torch.compiler.precompile`` freezes every candidate of such a kernel,
+        which it would otherwise refuse for having no single launcher, with
+        coordinate descent and combo tuning off. It asks only when every compile
+        result is static, with and without the kernel's lock held, so the answer
+        must be cheap and free of side effects. Serving finishes the tuning under
+        a plugin whose ``tunes_prebuilt_launchers`` is True, and keeps the first
+        candidate without one.
+        """
+        return False
+
+    def tunes_prebuilt_launchers(self, autotuner: CachingAutotuner) -> bool:
+        """Whether the plugin chooses among the launchers ``autotuner`` already
+        built, on real launches and without compiling.
+
+        A kernel ``torch.compiler.precompile`` froze with several candidates
+        keeps them all when it loads under such a plugin, and only the first
+        otherwise; ``holds_candidates`` is what made the capture freeze them.
+        A plugin that returns True must then resolve ``autotuner.launchers``
+        itself, in ``pre_dispatch`` or ``pre_autotune``: deferring leaves
+        ``run()`` to ``autotune_to_one_config``, which ``no_compilation()``
+        refuses.
+        """
+        return False
 
 
 def get_caching_autotuner_plugins(

@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf
+    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf, skipIfCppFakeTensor
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -2064,6 +2064,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1,)))
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_mask(self):
         N, L, D = 10, 12, 14
 
@@ -2080,6 +2081,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         self.assertEqual(input, input_convert)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_mask_error(self):
         N, L, D = 10, 12, 14
 
@@ -8570,17 +8572,22 @@ class TestNNDeviceType(NNTestCase):
                     with torch.no_grad():
                         _test_module_empty_input(self, encoder_layer, input, check_size=False, inference=True)
                     if batch_first and not TEST_WITH_CROSSREF:
-                        with torch.no_grad():
-                            # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
-                            # 2, for that matter) so it can't hit the fast path, nor can we give a
-                            # result.
-                            with self.assertRaisesRegex(
-                                    AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
-                                nt = torch.nested.nested_tensor([], device=device)
+                        @skipIfCppFakeTensor("no nested tensor support")
+                        def _test_nested():
+                            with torch.no_grad():
+                                # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
+                                # 2, for that matter) so it can't hit the fast path, nor can we give a
+                                # result.
+                                with self.assertRaisesRegex(
+                                        AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
+                                    nt = torch.nested.nested_tensor([], device=device)
+                                    _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
+
+                                nt = torch.nested.nested_tensor([torch.rand(0, 512, device=device, dtype=torch.double)], device=device)
                                 _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
 
-                            nt = torch.nested.nested_tensor([torch.rand(0, 512, device=device, dtype=torch.double)], device=device)
-                            _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
+                        with self.subTest(nested_tensor=True):
+                            _test_nested()
                 else:
                     _test_module_empty_input(self, encoder_layer, input, check_size=False)
 
@@ -10265,6 +10272,94 @@ class TestNNDeviceType(NNTestCase):
         ], device=device, dtype=t_in.dtype).reshape(1, 3, 2, 2)
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
+
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("num_channels", [1, 3, 5])
+    @dtypes(torch.float32, torch.uint8)
+    @onlyNativeDeviceTypes
+    @decorateIf(
+        unittest.skip('Lanczos mode is only supported on CPU'),
+        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type != 'cpu',
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode requires antialias=True'),
+        lambda p: p['mode'] == 'lanczos' and not p['antialias'],
+    )
+    @decorateIf(
+        unittest.skip('uint8 is only supported on CPU'),
+        lambda p: p['dtype'] == torch.uint8 and torch.device(p['device']).type != 'cpu',
+    )
+    def test_upsamplingBiMode2d_singleton_spatial_dim(
+        self, device, dtype, memory_format, mode, antialias, num_channels
+    ):
+        # Regression test for https://github.com/pytorch/pytorch/issues/200568
+        # When the output width is 1 the CPU separable kernel used the indices
+        # and weights of the first output row for every output row, so all rows
+        # were identical. The same happened in channels_last with
+        # num_channels == 1. The separable kernel is used for antialias=True,
+        # and for uint8 whenever the AVX2/NEON uint8 kernels do not apply
+        # (e.g. num_channels > 4 on AVX2, so num_channels == 5 reaches it on
+        # x86 CI). The other configurations check the non-separable kernels.
+        # The single output pixel cases also cover the AVX2 uint8 kernel, which
+        # mixed up its packed and unpacked layouts when the output spatial dims
+        # are all 1 (contiguous and channels_last are indistinguishable then).
+        kwargs = dict(mode=mode, align_corners=False, antialias=antialias)
+
+        def to_mf(t):
+            return t.contiguous(memory_format=memory_format)
+
+        def reference(x, out_size):
+            # Resize one spatial dim at a time, like the separable CPU kernel does,
+            # but duplicate the singleton spatial dim first so that the
+            # interpolated dim is never the innermost loop of the kernel.
+            ih, iw = x.shape[-2:]
+            oh, ow = out_size
+            if ow != iw:
+                rep_h = 2 if ih == 1 else 1
+                x = F.interpolate(to_mf(x.repeat(1, 1, rep_h, 1)), size=(ih * rep_h, ow), **kwargs)
+                x = x[:, :, :ih, :]
+            if oh != ih:
+                rep_w = 2 if ow == 1 else 1
+                x = F.interpolate(to_mf(x.repeat(1, 1, 1, rep_w)), size=(oh, ow * rep_w), **kwargs)
+                x = x[:, :, :, :ow]
+            return x
+
+        if dtype == torch.uint8:
+            tol = dict(atol=1, rtol=0)
+        else:
+            tol = dict(atol=1e-5, rtol=1e-5)
+
+        torch.manual_seed(0)
+        # (input_h, input_w, output_h, output_w)
+        for in_h, in_w, out_h, out_w in [
+            (2, 1, 4, 1),  # output width 1, upsample height (the reported case)
+            (5, 1, 3, 1),  # output width 1, downsample height
+            (1, 1, 3, 1),  # single input pixel column
+            (3, 1, 1, 1),  # single output pixel, vertical pass only
+            (1, 3, 1, 1),  # single output pixel, horizontal pass only
+            (1, 5, 1, 3),  # output height 1, horizontal pass only
+            (4, 3, 2, 1),  # two passes, width 1 intermediate for the vertical pass
+            (3, 4, 1, 2),  # two passes, output height 1
+        ]:
+            if dtype == torch.uint8:
+                # keep away from 0 and 255 so that bicubic/lanczos overshoot does not clip
+                in_t = torch.randint(30, 220, (2, num_channels, in_h, in_w), dtype=dtype, device=device)
+            else:
+                in_t = torch.rand(2, num_channels, in_h, in_w, dtype=dtype, device=device)
+            in_t = to_mf(in_t)
+
+            out_t = F.interpolate(in_t, size=(out_h, out_w), **kwargs)
+            expected = reference(in_t, (out_h, out_w))
+            self.assertEqual(out_t, expected, **tol, msg=f"size=({in_h}, {in_w}) -> ({out_h}, {out_w})")
+
+        if mode == "bilinear" and dtype == torch.float32:
+            # Explicit values for the reported case
+            in_t = torch.tensor([0., 1.], device=device).reshape(1, 1, 2, 1)
+            out_t = F.interpolate(to_mf(in_t.expand(1, num_channels, 2, 1)), size=(4, 1), **kwargs)
+            expected = torch.tensor([0., 0.25, 0.75, 1.], device=device).reshape(1, 1, 4, 1)
+            self.assertEqual(out_t, expected.expand(1, num_channels, 4, 1))
 
     @onlyAccelerator
     def test_upsamplingBicubic2d_many_channels(self, device):
@@ -13554,49 +13649,54 @@ class TestNNDeviceType(NNTestCase):
             # currently, which won't be used if training.
             if (batch_first and not training and
                     ('cuda' in str(device) or 'cpu' in str(device)) and not TEST_WITH_CROSSREF):
-                encoder_input[0][-1] = torch.zeros_like(encoder_input[0][1])
-                mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
-                mask[0][-1] = True
+                @skipIfCppFakeTensor("no nested tensor support")
+                def _test_nested():
+                    encoder_input[0][-1] = torch.zeros_like(encoder_input[0][1])
+                    mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
+                    mask[0][-1] = True
 
-                nt = torch.nested.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
-                result = model(nt)
-                ref_output = torch.tensor(
-                    [
+                    nt = torch.nested.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
+                    result = model(nt)
+                    ref_output = torch.tensor(
                         [
-                            [2.4268184, 0.02042419, -0.603311, -0.08476824],
-                            [2.423306, 0.01889652, -0.6057701, -0.08519465],
-                            [2.431538, 0.02078694, -0.5999354, -0.08746159],
-                            [2.4348664, 0.02212971, -0.5975677, -0.08733892],
-                            [2.423133, 0.02097577, -0.60594773, -0.08113337],
+                            [
+                                [2.4268184, 0.02042419, -0.603311, -0.08476824],
+                                [2.423306, 0.01889652, -0.6057701, -0.08519465],
+                                [2.431538, 0.02078694, -0.5999354, -0.08746159],
+                                [2.4348664, 0.02212971, -0.5975677, -0.08733892],
+                                [2.423133, 0.02097577, -0.60594773, -0.08113337],
+                            ],
+                            [
+                                [2.4279876, 0.02121329, -0.60249615, -0.08410317],
+                                [2.4138637, 0.02221113, -0.6124869, -0.07249016],
+                                [2.4251041, 0.01974815, -0.6045152, -0.08483928],
+                                [2.4335563, 0.0218913, -0.59850943, -0.08683228],
+                                [2.4229012, 0.02418739, -0.6061784, -0.07492948],
+                            ],
                         ],
-                        [
-                            [2.4279876, 0.02121329, -0.60249615, -0.08410317],
-                            [2.4138637, 0.02221113, -0.6124869, -0.07249016],
-                            [2.4251041, 0.01974815, -0.6045152, -0.08483928],
-                            [2.4335563, 0.0218913, -0.59850943, -0.08683228],
-                            [2.4229012, 0.02418739, -0.6061784, -0.07492948],
-                        ],
-                    ],
-                    device=device, dtype=dtype
-                )
-                result = result.to_padded_tensor(0)
-                ref_output[0][-1] = torch.zeros_like(
-                    ref_output[0][-1], device=device, dtype=dtype
-                )
-                result[0][-1] = torch.zeros_like(
-                    result[0][-1], device=device, dtype=dtype
-                )
-                self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-                if 'cuda' in device:
-                    if dtype == torch.float:
-                        atol = 2e-4
-                        rtol = 4e-3
+                        device=device, dtype=dtype
+                    )
+                    result = result.to_padded_tensor(0)
+                    ref_output[0][-1] = torch.zeros_like(
+                        ref_output[0][-1], device=device, dtype=dtype
+                    )
+                    result[0][-1] = torch.zeros_like(
+                        result[0][-1], device=device, dtype=dtype
+                    )
+                    self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+                    if 'cuda' in device:
+                        if dtype == torch.float:
+                            atol = 2e-4
+                            rtol = 4e-3
+                        else:
+                            atol = 7e-4
+                            rtol = 2e-2
+                        torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
                     else:
-                        atol = 7e-4
-                        rtol = 2e-2
-                    torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
-                else:
-                    torch.testing.assert_close(result, ref_output)
+                        torch.testing.assert_close(result, ref_output)
+
+                with self.subTest(nested_tensor=True):
+                    _test_nested()
 
 
         for batch_first in (True, False):

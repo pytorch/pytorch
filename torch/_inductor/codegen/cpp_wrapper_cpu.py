@@ -31,6 +31,7 @@ from ..utils import (
     _align,
     AotOnlyBuffer,
     DualIndentedBuffer,
+    get_cpp_wrapper_header_device,
     make_codegen_buffer,
     normalize_name,
 )
@@ -612,11 +613,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     @staticmethod
     def get_device_include_path_jit(device: str) -> str:
-        return f"#include <torch/csrc/inductor/cpp_wrapper/{device}.h>"
+        return f"#include <torch/csrc/inductor/cpp_wrapper/{get_cpp_wrapper_header_device(device)}.h>"
 
     @staticmethod
     def get_device_include_path_aot(device: str) -> str:
-        return f"#include <torch/csrc/inductor/aoti_include/{device}.h>"
+        return f"#include <torch/csrc/inductor/aoti_include/{get_cpp_wrapper_header_device(device)}.h>"
 
     def add_device_include(self, device: str) -> None:
         if device in self.included_devices:

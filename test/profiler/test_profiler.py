@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    skipIfCppFakeTensor,
     skipIfRocm,
     skipIfTorchDynamo,
     TemporaryFileName,
@@ -1431,6 +1432,7 @@ torch.ones(10) * 2
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_with_shapes(self):
         a = torch.randn(4, 4)
         b = torch.randn(4, 4)
@@ -1444,6 +1446,17 @@ torch.ones(10) * 2
                 # of mm to addmm or other impl, or changing internal order of args
                 self.assertTrue(len(e.input_shapes) > 0)
                 self.assertTrue(len(e.input_shapes[0]) > 0)
+
+    @skipIfCppFakeTensor("no nested tensor support")
+    def test_flops_nested(self):
+        nested_tensor = torch.nested.nested_tensor(
+            [torch.randn((2, 5)), torch.randn((3, 5))], layout=torch.jagged
+        )
+        with _profile(
+            record_shapes=True, with_flops=True, use_kineto=kineto_available()
+        ) as prof:
+            nested_tensor = nested_tensor + nested_tensor
+        prof.key_averages(group_by_input_shape=True).table()
 
     def test_custom_autograd_function_input_shapes(self):
         class CustomRecordShapes(torch.autograd.Function):
@@ -2875,14 +2888,10 @@ class TestProfilerDevice(TestCase):
             nn.ReLU(),
         )
         inputs = torch.randn(40, 16, 18, 260)
-        nested_tensor = torch.nested.nested_tensor(
-            [torch.randn((2, 5)), torch.randn((3, 5))], layout=torch.jagged
-        )
         with _profile(
             record_shapes=True, with_flops=True, use_kineto=kineto_available()
         ) as prof:
             model(inputs)
-            nested_tensor = nested_tensor + nested_tensor
         profiler_output = prof.key_averages(group_by_input_shape=True).table(
             sort_by="cpu_time_total", row_limit=10
         )

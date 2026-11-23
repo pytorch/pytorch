@@ -84,6 +84,7 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     MI200_ARCH,
     serialTest,
+    skipIfCppFakeTensor,
     skipIfRocm,
     skipIfRocmArch,
     TEST_MULTIACCELERATOR,
@@ -7915,6 +7916,7 @@ class GraphModule(torch.nn.Module):
         ):
             attention(query, key, value, return_lse=True)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @supported_platform
     @skip_on_cpu
     @skip_on_xpu
