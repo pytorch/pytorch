@@ -12009,6 +12009,63 @@ def vm_binds_property(x, holder, n):
     return x
 
 
+REPLACED_NAMES = '''"""What a process put under a name before anything ran compiled, where the
+engine could call it by that name for itself: functions of `__main__` named
+`type`, `iter`, `range` and `reversed`, and a loop while a tensor variable
+waits for its object. One line `done {...}`: the calls, of eight, in which
+the result or the calls of what was put there differ from eager's, and the
+first of them."""
+import builtins
+import json
+import sys
+
+import torch
+import torch.vm
+
+DEVICE = sys.argv[1]
+CALLS = []
+OWN = {name: getattr(builtins, name) for name in dir(builtins)}
+
+
+def counted(name):
+    own = OWN[name]
+
+    def replacement(*args, **kwargs):
+        CALLS.append(name)
+        return own(*args, **kwargs)
+
+    return replacement
+
+
+def loops(x, rows):
+    h = torch.relu(x) + 1
+    total = 0.0
+    for row in rows:
+        total += row
+    for at, row in enumerate(zip(rows, rows)):
+        total += at
+    return (h * total).sin().sum(), total
+
+
+# Names of this module that are the interpreter's in `builtins`; the
+# default passes: the loop runs in the VM.
+type, iter, range, reversed = (counted(name) for name in ("type", "iter", "range", "reversed"))
+compiled = torch.vm(loops)
+ways = {}
+for label, run in (("under", compiled), ("eager", loops)):
+    rows = []
+    for at in OWN["range"](8):
+        x = torch.full((3, 4), 0.25 * (at + 1), device=DEVICE)
+        del CALLS[:]
+        out, said = run(x, [1.0, 2.0])
+        rows.append((out.item().hex(), said, OWN["sorted"](CALLS)))
+    ways[label] = rows
+differ = [at for at in OWN["range"](8) if ways["under"][at] != ways["eager"][at]]
+first = [ways["under"][differ[0]][1:], ways["eager"][differ[0]][1:]] if differ else None
+print("done " + json.dumps({"differ": differ, "first": first}), flush=True)
+'''
+
+
 GRAPH_NAME_LOG = []
 
 
@@ -16902,6 +16959,23 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             later = after["bound_later"] - before["bound_later"]
             self.assertEqual(later, bound, msg=fn.__name__)
         del VM_LOOKS_SEEN[:]
+
+    def test_a_name_the_process_replaced_is_not_called_for_the_engine(self, device):
+        # The classes of the interpreter's iterators, which the VM's loop
+        # asks for while a variable waits for its object, are the
+        # interpreter's by no name that a process can put something else
+        # under: functions of `__main__` named `type`, `iter`, `range` and
+        # `reversed` are not called for the engine. In a process of its
+        # own, in which nothing ran compiled before.
+        import json
+
+        command = [sys.executable, "-c", REPLACED_NAMES, device]
+        limit = GRAPH_CASE_SECONDS
+        pipes = {"capture_output": True, "text": True, "timeout": limit}
+        ran = subprocess.run(command, **pipes)
+        self.assertEqual(ran.returncode, 0, msg=ran.stderr[-600:])
+        said = json.loads(ran.stdout.strip().split("\n")[-1][5:])
+        self.assertEqual(said["differ"], [], msg=str(said))
 
     def test_a_key_that_compares_in_python_is_compared_once_per_lookup(self, device):
         # A dict that the engine looks a name up in (the dict of an object,
