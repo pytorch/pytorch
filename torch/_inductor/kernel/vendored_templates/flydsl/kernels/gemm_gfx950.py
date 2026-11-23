@@ -1662,6 +1662,10 @@ def gemm_hti_gfx950_kernel(
         b0 = load_b_fragment(0, 0, k_tile)
         a0 = load_a_fragment(0, 0, k_tile)
         async_load_a_to_lds(1, k_tile + 1, 1)
+        # The second group runs one barrier behind the first, so this barrier
+        # lets the first group refill B half 0 below. Finish the b0 reads
+        # first; s_barrier does not wait for LDS reads.
+        rocdl.s_waitcnt(lgkmcnt=0)
         rocdl.s_barrier()
         consume(k_tile, c00, a0, b0)
         rocdl.s_barrier()
@@ -1690,7 +1694,12 @@ def gemm_hti_gfx950_kernel(
             async_load_b_to_lds(1, next_k_tile, 0)
             __barrier(2 * half_ldg_b_iters + half_ldg_a_iters)
         consume(k_tile, c11, a1, b1)
-        if const_expr(not prefetch_next):
+        if const_expr(prefetch_next):
+            # Same for stage 1: the second group's barrier after this one lets
+            # the first group refill B half 0 of stage 1 below. Finish the b0
+            # reads here; they have had all of consume() to complete.
+            rocdl.s_waitcnt(lgkmcnt=0)
+        else:
             __waitcnt(0)
         rocdl.s_barrier()
 
