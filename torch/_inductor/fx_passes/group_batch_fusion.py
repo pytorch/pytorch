@@ -54,8 +54,8 @@ MAX_FUSE_SET_SIZE = 300
 MAX_FUSE_SEARCH_DEPTH = 5
 # The maximum tensor size that can go into the fusion group
 MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR = 4096
-# Maximum number of elements in the concatenated weights of batch_linear_lhs.
-MAX_FUSE_TENSOR_SIZE_BATCH_LINEAR_LHS = 1 << 24
+# Maximum number of bytes in the concatenated weights of batch_linear_lhs.
+MAX_FUSE_TENSOR_BYTES_BATCH_LINEAR_LHS = 4 << 20
 # Whether we only fuse nodes with same parent node
 FUSE_NODES_WITH_SAME_PARENT = False
 # Whether we enable the add broadcast in batch linear
@@ -73,7 +73,7 @@ default_graph_search_options = {
     "max_fuse_set_size": MAX_FUSE_SET_SIZE,
     "max_fuse_search_depth": MAX_FUSE_SEARCH_DEPTH,
     "max_fuse_tensor_size_group_linear": MAX_FUSE_TENSOR_SIZE_GROUP_LINEAR,
-    "max_fuse_tensor_size": MAX_FUSE_TENSOR_SIZE_BATCH_LINEAR_LHS,
+    "max_fuse_tensor_bytes": MAX_FUSE_TENSOR_BYTES_BATCH_LINEAR_LHS,
     "fuse_nodes_with_same_parent": FUSE_NODES_WITH_SAME_PARENT,
     "shape_broadcast_batch_linear": SHAPE_BROADCAST_BATCH_LINEAR,
     "fuse_nodes_with_same_users": Fuse_NODES_WITH_SAME_USERS,
@@ -844,13 +844,13 @@ class BatchLinearLHSFusion(BatchFusion):
             batch_biases.append(bias)
             split_sections.append(weight.meta["val"].shape[1])  # type: ignore[union-attr]
 
-        max_size = self.graph_search_options.get("max_fuse_tensor_size")
-        if max_size is not None:
-            total = sum(
-                weight.meta["val"].numel()  # type: ignore[union-attr]
-                for weight in batch_weights
-            )
-            if statically_known_true(total > max_size):
+        max_bytes = self.graph_search_options.get("max_fuse_tensor_bytes")
+        if max_bytes is not None:
+            total_bytes = 0
+            for weight in batch_weights:
+                value = weight.meta["val"]  # type: ignore[union-attr]
+                total_bytes += value.numel() * value.element_size()
+            if statically_known_true(total_bytes > max_bytes):
                 return
 
         custom_context = _common_custom_context(batch_nodes)

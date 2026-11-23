@@ -421,14 +421,14 @@ pre_grad_fusion_options: dict[str, dict[str, Any]] = {}
 # batch_linear_lhs is enabled by default on XPU with static split widths.
 # Assign a merged dict to keep these defaults; assigning a new dict replaces
 # them. Keys: devices (device types or torch.device), min_fuse_set_size,
-# static_widths_only, and max_fuse_tensor_size (max fused weight elements).
+# static_widths_only, and max_fuse_tensor_bytes (max fused weight bytes).
 # Shipped defaults; post_grad_fusion_options below is a mutable copy.
 DEFAULT_POST_GRAD_FUSION_OPTIONS: dict[str, dict[str, Any]] = {
     "batch_linear_lhs": {
         "devices": ("xpu",),
         "min_fuse_set_size": 2,
         "static_widths_only": True,
-        "max_fuse_tensor_size": 1 << 24,
+        "max_fuse_tensor_bytes": 4 << 20,
     },
 }
 

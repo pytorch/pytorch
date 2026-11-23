@@ -635,7 +635,7 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(default["devices"], ("xpu",))
         self.assertEqual(default["min_fuse_set_size"], 2)
         self.assertTrue(default["static_widths_only"])
-        self.assertEqual(default["max_fuse_tensor_size"], 1 << 24)
+        self.assertEqual(default["max_fuse_tensor_bytes"], 4 << 20)
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -757,9 +757,9 @@ class TestGroupBatchFusion(TestCase):
             self.assertEqual(counters["inductor"]["batch_linear_lhs"], expected_count)
         counters.clear()
 
-    @parametrize("max_fuse_tensor_size,expected_count", [(100, 0), (10000, 1)])
-    def test_batch_linear_lhs_respects_max_fuse_tensor_size(
-        self, max_fuse_tensor_size, expected_count
+    @parametrize("max_fuse_tensor_bytes,expected_count", [(1024, 0), (20000, 1)])
+    def test_batch_linear_lhs_respects_max_fuse_tensor_bytes(
+        self, max_fuse_tensor_bytes, expected_count
     ):
         class M(torch.nn.Module):
             def forward(self, x, w1, w2):
@@ -774,7 +774,7 @@ class TestGroupBatchFusion(TestCase):
                 "batch_linear_lhs": {
                     "devices": ("cpu",),
                     "min_fuse_set_size": 2,
-                    "max_fuse_tensor_size": max_fuse_tensor_size,
+                    "max_fuse_tensor_bytes": max_fuse_tensor_bytes,
                 }
             },
         ):
