@@ -1200,6 +1200,54 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
+    @skipPRIVATEUSE1
+    def test_dual_index_dtype_cat(self, device):
+        """test_dual_index_dtype_pointwise for a concat of graph inputs. Up to
+        config.max_pointwise_cat_inputs inputs, the concat is lowered as one pointwise
+        kernel (the copies fused horizontally) instead of a foreach combo kernel, so it
+        gets the int32 and int64 kernels."""
+
+        def fn(a, b, c):
+            return torch.cat([a, b, c])
+
+        def inputs(rows):
+            return [torch.randn(rows, 64, device=device) for _ in range(3)]
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True)
+        with config.patch(dual_index_dtype_kernels=True), _lowered_int32_limit():
+            # rows != 64 on the first call, so duck sizing does not tie rows to columns.
+            args = inputs(100)
+            actual, (code, *_) = run_and_get_code(compiled, *args)
+            self.assertEqual(actual, fn(*args))
+            # The output is the largest buffer: 3 * rows * 64 elements.
+            for rows in [512, 3, 300, 400, 64]:
+                self._assert_dual_launch(compiled, fn, inputs(rows), 3 * rows * 64)
+        self.assertEqual(counter.frame_count, 1)
+        self.assertNotIn("triton_for_fused", code)
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertNotIn("2147483647", str(entry.guard_manager))
+
+    @onlyAccelerator
+    @skipPRIVATEUSE1
+    def test_dual_index_dtype_foreach_cat_keeps_guard(self, device):
+        """A concat of more than config.max_pointwise_cat_inputs graph inputs is a
+        foreach combo kernel, which dual_index_dtype_kernels does not cover: it keeps a
+        single int32 kernel and its size guard. Flip this if combo kernels get covered."""
+
+        def fn(*xs):
+            return torch.cat(xs)
+
+        n = config.max_pointwise_cat_inputs + 1
+        xs = [torch.randn(64, 64, device=device) for _ in range(n)]
+        with config.patch(dual_index_dtype_kernels=True):
+            actual, (code, *_) = run_and_get_code(torch.compile(fn, dynamic=True), *xs)
+        self.assertEqual(actual, fn(*xs))
+        self.assertIn("triton_for_fused", code)
+        (entry,) = _debug_get_cache_entry_list(fn.__code__)
+        self.assertIn("2147483647", str(entry.guard_manager))
+
+    @onlyAccelerator
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
