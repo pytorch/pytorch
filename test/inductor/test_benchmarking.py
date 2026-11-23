@@ -791,6 +791,8 @@ class TestBenchmarker(TestCase):
             ("gfx90a", None, 0),
             ("gfx1100", None, 96),
             ("gfx1201", None, 64),
+            ("gfx1250", 0, 192),
+            ("gfx1250-strict", 0, 192),
             ("gfx9999", None, 0),
         ):
             props = unittest.mock.Mock(gcnArchName=arch)

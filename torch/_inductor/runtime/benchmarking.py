@@ -626,6 +626,7 @@ _ROCM_MALL_SIZE_FALLBACK = {
     "gfx90a": 0,  # MI200
     "gfx942": 256 * 1024 * 1024,  # MI300X
     "gfx950": 256 * 1024 * 1024,  # MI350X
+    "gfx1250": 192 * 1024 * 1024,  # GL2, the MALL equivalent
     "gfx1030": 128 * 1024 * 1024,  # RX 6800/6900
     "gfx1031": 96 * 1024 * 1024,  # RX 6700
     "gfx1032": 32 * 1024 * 1024,  # RX 6600
@@ -713,7 +714,7 @@ def _rocm_mall_size(device: int) -> int:
     if size:
         return size
     arch = get_interface_for_device("cuda").get_compute_capability(device)
-    return _ROCM_MALL_SIZE_FALLBACK.get(arch, 0)
+    return _ROCM_MALL_SIZE_FALLBACK.get(str(arch).removesuffix("-strict"), 0)
 
 
 @functools.cache
