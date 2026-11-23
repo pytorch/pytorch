@@ -12,6 +12,7 @@
 #include <vector>
 
 #if AT_MKLDNN_ENABLED()
+#include <dnnl.hpp>
 #include <ideep/tensor.hpp>
 #endif // AT_MKLDNN_ENABLED()
 
@@ -79,9 +80,9 @@ using AttrFunction = std::function<ideep::attr_t(
 
 const std::unordered_map<std::string_view, AttrFunction>& fusion_unary_attr_map();
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_unary_alg_map();
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_unary_alg_map();
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
 }
@@ -169,3 +170,20 @@ inline void mkldnn_check_low_precision(ScalarType input_t, std::string name) {
 }
 
 }
+
+#if AT_MKLDNN_ENABLED()
+namespace at::native::mkldnn {
+
+template <typename T, typename... Items>
+constexpr bool one_of(T val, Items... items) {
+  return ((val == items) || ...);
+}
+
+inline bool is_avx2_vnni_2() {
+  static const bool result =
+      dnnl::get_effective_cpu_isa() == dnnl::cpu_isa::avx2_vnni_2;
+  return result;
+}
+
+} // namespace at::native::mkldnn
+#endif // AT_MKLDNN_ENABLED()

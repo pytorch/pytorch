@@ -1,3 +1,4 @@
+import ast
 import atexit
 import collections
 import dataclasses
@@ -352,7 +353,7 @@ class CompilerBisector:
         config_data = {}
         for line in lines:
             key, value = line.strip().split("=", 1)
-            config_data[key] = eval(value)
+            config_data[key] = ast.literal_eval(value)
 
         return config_data
 

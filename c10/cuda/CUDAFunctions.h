@@ -86,12 +86,12 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     int64_t nbytes,
     cudaMemcpyKind kind,
     cudaStream_t stream) {
-  if (C10_UNLIKELY(
-          warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
+  if (warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)
+      [[unlikely]] {
     warn_or_error_on_sync();
   }
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
+  if (interp) [[unlikely]] {
     (*interp)->trace_gpu_stream_synchronization(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
@@ -102,7 +102,7 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
   // here explicitly.
   hipStreamCaptureStatus captureStatus;
   C10_CUDA_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
-  if (C10_LIKELY(captureStatus == hipStreamCaptureStatusNone)) {
+  if (captureStatus == hipStreamCaptureStatusNone) [[likely]] {
     C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
   } else {
     C10_CUDA_CHECK(hipErrorStreamCaptureUnsupported);
@@ -119,12 +119,12 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
 }
 
 C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
-  if (C10_UNLIKELY(
-          warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
+  if (warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)
+      [[unlikely]] {
     warn_or_error_on_sync();
   }
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-  if (C10_UNLIKELY(interp)) {
+  if (interp) [[unlikely]] {
     (*interp)->trace_gpu_stream_synchronization(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }

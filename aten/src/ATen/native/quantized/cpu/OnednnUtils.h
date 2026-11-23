@@ -373,11 +373,11 @@ inline ideep::attr_t create_attr_by_post_op(
     }
   } else if (binary_post_op == "add") {
     if (unary_post_op == "none") {
-      return ideep::attr_t::fuse_binary(ideep::algorithm::binary_add, input1_desc);
+      return ideep::attr_t::fuse_binary(dnnl::algorithm::binary_add, input1_desc);
     } else if (unary_post_op == "relu") {
       ideep::post_ops po;
-      po.append_binary(ideep::algorithm::binary_add, input1_desc);
-      po.append_eltwise(ideep::algorithm::eltwise_relu, 0, 0);
+      po.append_binary(dnnl::algorithm::binary_add, input1_desc);
+      po.append_eltwise(dnnl::algorithm::eltwise_relu, 0, 0);
       return ideep::attr_t::attr_post_ops(po);
     } else {
       TORCH_CHECK(
@@ -496,7 +496,7 @@ struct QlinearForwardParams {
   c10::ScalarType out_dtype{c10::ScalarType::Undefined};
   std::vector<int64_t> output_size;
   dnnl::matmul primitive;
-  ideep::exec_args args;
+  std::unordered_map<int, dnnl::memory> args;
   ideep::tensor src;
   ideep::tensor dst;
   std::optional<ideep::tensor> src1;

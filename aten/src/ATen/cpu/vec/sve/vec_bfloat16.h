@@ -23,6 +23,12 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_SVE256) && defined(__ARM_FEATURE_BF16)
 
+// loadu and convert access BFloat16 values as their only member (see loadu).
+static_assert(
+    std::is_standard_layout_v<BFloat16> &&
+    std::is_same_v<decltype(BFloat16::x), uint16_t> &&
+    sizeof(BFloat16) == sizeof(uint16_t));
+
 template <>
 struct is_vec_specialized_for<BFloat16> : std::bool_constant<true> {};
 
@@ -56,8 +62,8 @@ class Vectorized<BFloat16> {
       typename... Args,
       typename = std::enable_if_t<(sizeof...(Args) == size())>>
   Vectorized(Args... vals) {
-    __at_align__ BFloat16 buffer[size()] = {vals...};
-    values = svld1_bf16(ptrue, reinterpret_cast<const bfloat16_t*>(buffer));
+    __at_align__ uint16_t buffer[size()] = {BFloat16(vals).x...};
+    values = loadu(buffer);
   }
 
   operator svbfloat16_t() const {
@@ -81,11 +87,11 @@ class Vectorized<BFloat16> {
   static Vectorized<BFloat16> arange(
       BFloat16 base = 0.f,
       step_t step = static_cast<step_t>(1)) {
-    __at_align__ BFloat16 buffer[size()];
+    __at_align__ uint16_t buffer[size()];
     for (int64_t i = 0; i < size(); i++) {
-      buffer[i] = base + i * step;
+      buffer[i] = BFloat16(base + i * step).x;
     }
-    return svld1_bf16(ptrue, reinterpret_cast<bfloat16_t*>(buffer));
+    return loadu(buffer);
   }
   static Vectorized<BFloat16> set(
       const Vectorized<BFloat16>& a,
@@ -99,10 +105,14 @@ class Vectorized<BFloat16> {
     return b;
   }
   static Vectorized<BFloat16> loadu(const void* ptr, int64_t count = size()) {
+    // A BFloat16 may be read through its member's type, uint16_t, but not
+    // through bfloat16_t: GCC assumes that bfloat16_t loads can't read
+    // BFloat16 objects (strict aliasing) and may drop earlier stores to them.
+    auto p = reinterpret_cast<const uint16_t*>(ptr);
     if (count == size())
-      return svld1_bf16(ptrue, reinterpret_cast<const bfloat16_t*>(ptr));
+      return svreinterpret_bf16_u16(svld1_u16(ptrue, p));
     svbool_t pg = svwhilelt_b16(0ull, count);
-    return svld1_bf16(pg, reinterpret_cast<const bfloat16_t*>(ptr));
+    return svreinterpret_bf16_u16(svld1_u16(pg, p));
   }
   void store(void* ptr, int64_t count = size()) const {
     __at_align__ bfloat16_t tmp[size()];
@@ -577,26 +587,17 @@ Vectorized<BFloat16> inline Vectorized<BFloat16>::le(
 template <>
 inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
   const int64_t fraction = n % Vectorized<BFloat16>::size();
+  // Access the values as their uint16_t member, like loadu.
+  auto src_u16 = reinterpret_cast<const uint16_t*>(src);
+  auto dst_u16 = reinterpret_cast<uint16_t*>(dst);
 #pragma unroll
   for (int64_t i = 0; i < n - fraction; i += Vectorized<BFloat16>::size()) {
-    svst1_bf16(
-        ptrue,
-        const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(dst)) + i,
-        svldnt1_bf16(
-            ptrue,
-            const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(src)) +
-                i));
+    svst1_u16(ptrue, dst_u16 + i, svldnt1_u16(ptrue, src_u16 + i));
   }
 #pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<BFloat16>::size()) {
     svbool_t pg = svwhilelt_b16(i, n);
-    svst1_bf16(
-        pg,
-        const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(dst)) + i,
-        svldnt1_bf16(
-            pg,
-            const_cast<bfloat16_t*>(reinterpret_cast<const bfloat16_t*>(src)) +
-                i));
+    svst1_u16(pg, dst_u16 + i, svldnt1_u16(pg, src_u16 + i));
   }
 }
 
@@ -605,7 +606,14 @@ Vectorized<BFloat16> inline fmadd(
     const Vectorized<BFloat16>& a,
     const Vectorized<BFloat16>& b,
     const Vectorized<BFloat16>& c) {
-  return a * b + c;
+  // Compute in float, where the product is exact (unless it overflows or
+  // underflows): a * b + c would round it to BFloat16 before adding.
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);
+  return convert_float_bfloat16(
+      fmadd(a_float_low, b_float_low, c_float_low),
+      fmadd(a_float_high, b_float_high, c_float_high));
 }
 
 template <>

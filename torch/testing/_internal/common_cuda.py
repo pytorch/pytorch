@@ -212,6 +212,8 @@ _CDNA3_ARCHS = ["gfx942", "gfx950"]
 _CDNA5_ARCHS = ["gfx1250"]
 # GFX11 (RDNA 3 and RDNA 3.5)
 _RDNA3_ARCHS = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1153"]
+# GFX11.7 uses the GFX12-style 128-bit WMMA interface.
+_GFX117X_ARCHS = ["gfx1170", "gfx1171"]
 # GFX12 (RDNA 4)
 _RDNA4_ARCHS = ["gfx1200", "gfx1201"]
 
@@ -225,7 +227,7 @@ def CDNA2OrLater():
     return evaluate_gfx_arch_within(_CDNA2_ARCHS + _CDNA3_ARCHS + _CDNA5_ARCHS)
 
 def RDNA3OrLater():
-    return evaluate_gfx_arch_within(_RDNA3_ARCHS + _RDNA4_ARCHS)
+    return evaluate_gfx_arch_within(_RDNA3_ARCHS + _GFX117X_ARCHS + _RDNA4_ARCHS)
 
 # Archs that take the opportunistic_fastAtomicAdd path (packed 2x16 atomics + DPP
 # lane coalescing) in ScatterGatherKernel.cu. Keep in sync with that kernel's arch
@@ -235,14 +237,11 @@ def gfx_arch_supports_opportunistic_fastatomics():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        # NOTE: gfx1250 is omitted until flash-attention artifacts ship for it.
-        # The AOTriton path needs the gfx1250 GPU image from AOTriton 0.12.1b,
-        # which is wired up by PR #188242 (which also adds gfx1250 to this list);
-        # this gate-only PR leaves it out so the two changes do not conflict
-        # (see cmake/External/aotriton.cmake). The CK FAv3/AITER codegen is
-        # separately not yet wired for gfx1250
+        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image.
+        # "gfx1250" already matches gfx1250-strict by substring; listed for explicitness.
+        # The CK FAv3/AITER codegen is not wired for gfx1250
         # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -274,12 +273,11 @@ def evaluate_platform_sdpa_supports_hdim512():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        # NOTE: gfx1250 is omitted until mem-efficient-attention artifacts ship
-        # for it. The AOTriton gfx1250 image (from AOTriton 0.12.1b) is wired up
-        # by PR #188242, which also adds gfx1250 here; this gate-only PR leaves
-        # it out to avoid conflicting with that change. The CK FAv3/AITER codegen
-        # is separately not yet wired for gfx1250.
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        # gfx1250 and gfx1250-strict use the AOTriton gfx1250 GPU image.
+        # "gfx1250" already matches gfx1250-strict by substring; listed for explicitness.
+        # The CK FAv3/AITER codegen is not wired for gfx1250
+        # (see aten/src/ATen/native/transformers/hip/flash_attn/ck/fav_v3/CMakeLists.txt).
+        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950", "gfx1250", "gfx1250-strict"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
@@ -394,6 +392,8 @@ def evaluate_platform_supports_fp8_grouped_gemm():
                     return True
         else:
             return SM90OrLater and not SM100OrLater
+    if torch.xpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_mx_gemm():
@@ -406,12 +406,32 @@ def evaluate_platform_supports_mx_gemm():
             return SM100OrLater
     if torch.xpu.is_available():
         return True
+    # MXFP8 and NVFP4 on MPS; MXFP4 is not implemented there
+    if torch.backends.mps.is_available():
+        return True
+    return False
+
+def evaluate_platform_supports_mxfp8_cast():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            # TODO(future PR): add ROCm support for hardware natively supporting
+            # mxfp8 gemm. While technically the casts can be added on any
+            # hardware with emulation, we have no plans to do so.
+            return False
+        else:
+            # On NVIDIA, we have implementations for CUDA capability 10.0+
+            return SM100OrLater
+    # TODO(future PR): XPU, only on hardware which natively supports mxfp8
+    # gemm. While technically the casts can be added on any hardware
+    # with emulation, we have no plans to do so.
     return False
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
         built_with_mslk = "USE_MSLK" in torch.__config__.show()
         return built_with_mslk and IS_SM100
+    if torch.xpu.is_available():
+        return True
     return False
 
 def hipsparselt_supported_archs():
@@ -427,6 +447,24 @@ def hipsparselt_supported_archs():
 def evaluate_platform_supports_hipsparselt():
     return bool(torch.version.hip) and evaluate_gfx_arch_within(hipsparselt_supported_archs())
 
+def evaluate_platform_supports_cublaslt_grouped_gemm(min_cuda_version=(13, 3)):
+    return (
+        TEST_CUDA
+        and not TEST_WITH_ROCM
+        and SM90OrLater
+        and not SM120OrLater
+        and _get_torch_cuda_version() >= min_cuda_version
+    )
+
+def evaluate_platform_supports_cublaslt_mnk4():
+    return (
+        TEST_CUDA
+        and not TEST_WITH_ROCM
+        and torch.cuda.get_device_capability()[0] in (10, 11)
+        and _get_torch_cuda_version() >= (13, 4)
+        and int(dict(torch.cuda.tunable.get_validators())["CUBLASLT_VERSION"]) >= 130801
+    )
+
 def evaluate_platform_supports_fp8_sparse():
     if torch.cuda.is_available():
         if torch.version.hip:
@@ -440,10 +478,17 @@ def evaluate_platform_supports_fp8_sparse():
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
+PLATFORM_SUPPORTS_MXFP8_CAST: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_cast())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_SPARSE: bool = LazyVal(lambda: evaluate_platform_supports_fp8_sparse())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
+PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm())
+PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_grouped_gemm((13, 4)))
+PLATFORM_SUPPORTS_CUBLASLT_FP32_BLOCK_GROUPED_GEMM: bool = LazyVal(
+    lambda: bool(PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and IS_SM90)
+)
+PLATFORM_SUPPORTS_CUBLASLT_MNK4: bool = LazyVal(lambda: evaluate_platform_supports_cublaslt_mnk4())
 
 if TEST_NUMBA:
     try:
@@ -626,6 +671,7 @@ def with_tf32_off(f):
         with tf32_off():
             return f(*args, **kwargs)
 
+    wrapped._preserves_device_arguments = wrapped
     return wrapped
 
 def _get_magma_version():
@@ -649,11 +695,39 @@ def _get_torch_rocm_version():
     return tuple(int(x) for x in rocm_version.split("."))
 
 def rocm_mx_swizzle(mat_dtype):
-    """Whether this device takes MX block scales for `mat_dtype` in the swizzled layout."""
-    if not torch.version.hip or not evaluate_gfx_arch_within(["gfx950"]):
+    """Whether this device takes MX block scales for `mat_dtype` pre-swizzled.
+
+    gfx950 requests SWIZZLE_32_8, a 32x8 tile. gfx1250 requests SWIZZLE_128.
+    `mx_scale_swizzle` builds the matching bytes.
+    """
+    if not torch.version.hip:
         return False
-    min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
-    return _get_torch_rocm_version() >= min_version
+    version = _get_torch_rocm_version()
+    if evaluate_gfx_arch_within(["gfx950"]):
+        min_version = (7, 13) if mat_dtype == torch.float4_e2m1fn_x2 else (7, 14)
+        return version >= min_version
+    if evaluate_gfx_arch_within(["gfx1250"]):
+        return version >= (7, 14)
+    return False
+
+
+def mx_scale_swizzle(scale, mat_dtype, block_size=32):
+    """Flatten block scales into the layout this device's scaled_mm expects.
+
+    gfx950 uses a 32x8 tile. gfx1250 uses its own order. block_size is 32 for
+    MX and 16 for NVFP4. Other ROCm archs and XPU are returned unchanged.
+    """
+    from torch.testing._internal.common_quantized import to_blocked, to_mx_swizzled_gfx1250
+
+    if torch.version.hip:
+        if not rocm_mx_swizzle(mat_dtype):
+            return scale
+        if evaluate_gfx_arch_within(["gfx1250"]):
+            return to_mx_swizzled_gfx1250(scale, block_size)
+        return to_blocked(scale, swizzle_32_8=True)
+    if scale.device.type == "xpu":
+        return scale
+    return to_blocked(scale)
 
 def _get_torch_hipblaslt_version():
     if not TEST_WITH_ROCM:

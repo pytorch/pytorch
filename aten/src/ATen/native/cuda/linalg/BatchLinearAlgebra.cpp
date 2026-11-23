@@ -67,6 +67,7 @@ namespace lazy_linalg {
 
 #if AT_MAGMA_ENABLED()
 
+#if defined(USE_ROCM)
 template <class scalar_t>
 void magmaLdlHermitian(
     magma_uplo_t uplo,
@@ -80,6 +81,7 @@ void magmaLdlHermitian(
       "LDL decomposition is not available.",
       "Please rebuild with MAGMA 2.5.4+.");
 }
+#endif
 
 #if defined(USE_ROCM)
 template<class scalar_t>
@@ -101,6 +103,7 @@ void magmaEig(
 
 #if AT_MAGMA_VERSION >= 20504
 
+#if defined(USE_ROCM)
 template <>
 void magmaLdlHermitian<double>(
     magma_uplo_t uplo,
@@ -154,6 +157,7 @@ void magmaLdlHermitian<c10::complex<float>>(
       uplo, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, ipiv, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
+#endif
 
 #endif // AT_MAGMA_VERSION >= 20504
 
@@ -346,6 +350,7 @@ void _warn_once_magma_deprecation(const std::string& op_name, bool force_cusolve
   }
 }
 
+#if defined(USE_ROCM)
 template <typename scalar_t>
 void apply_ldl_factor_magma(
     const Tensor& A,
@@ -410,6 +415,7 @@ void ldl_factor_magma(
         apply_ldl_factor_magma<scalar_t>(LD, pivots, info, upper);
       });
 }
+#endif
 
 void ldl_factor_kernel(
     const Tensor& LD,
@@ -417,50 +423,33 @@ void ldl_factor_kernel(
     const Tensor& info,
     bool upper,
     bool hermitian) {
+#if defined(USE_ROCM)
+  _warn_once_magma_deprecation("linalg.eig", /*force_cusolver=*/false);
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-       {
-#ifndef USE_ROCM
-         if (hermitian && LD.is_complex()) {
-           return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, upper);
-         }
+    case at::LinalgBackend::Cusolver: {
+      return ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
+    }
+    case at::LinalgBackend::Magma: {
+      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
+    }
+    default: {
+      // If cusolver and magma 2.5.4+ are both available and hermitian=true (on ROCm),
+      // call magma for complex inputs
+      #if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
+      if (LD.is_complex() && hermitian) {
+        return ldl_factor_magma(LD, pivots, info, upper, hermitian);
+      }
+      #endif
+      return ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
+    }
+  }
 #endif
-         ldl_factor_cusolver(
-          LD, pivots, info, upper, hermitian);
-        return;
-}
-    case at::LinalgBackend::Magma:
-       { ldl_factor_magma(LD, pivots, info, upper, hermitian);
-        return;
-}
-    default:
-#ifndef USE_ROCM
     // cuSOLVER has no Hermitian LDL for complex inputs, so the custom kernel takes them.
     // For real inputs, where hermitian=true is sytrf too, the custom kernel is faster, yet
     // they are still dispatched to cuSOLVER.
-      if (hermitian && LD.is_complex()) {
-        return ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, upper);
-      }
-#endif
-    // Otherwise use cusolver if available and magma otherwise.
-    // If cusolver and magma 2.5.4+ are both available and hermitian=true (on ROCm),
-    // call magma for complex inputs
-#ifdef USE_LINALG_SOLVER
-#if AT_MAGMA_ENABLED() && (AT_MAGMA_VERSION >= 20504)
-      if (LD.is_complex() && hermitian) {
-        return ldl_factor_magma(
-            LD, pivots, info, upper, hermitian);
-      }
-#endif
-    { ldl_factor_cusolver(
-      LD, pivots, info, upper, hermitian);
-      return;
-    }
-#else
-      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
-#endif
-  }
+    return hermitian && LD.is_complex() ? ::at::native::ldl_factor_blas3_kernel(LD, pivots, info, upper)
+                                          : ldl_factor_cusolver(LD, pivots, info, upper, hermitian);
 }
 
 void ldl_solve_kernel(
@@ -627,10 +616,20 @@ namespace {
   // Unlike pivoted LU, no super-linear (batch^1.5) scaling is needed because
   // cuSOLVER's nopiv algorithm has lower per-matrix overhead, keeping the
   // crossover n^2/batch roughly constant across batch sizes.
-  inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, const ScalarType& dtype, bool compute_pivots = true) {
+  inline SolverBackend get_lu_factor_solver_backend(int64_t batch, int64_t m, int64_t n, int64_t lda, const ScalarType& dtype, bool compute_pivots = true) {
+    // The custom kernel does int arithmetic on offsets and loop bounds, so it requires
+    // (lda >= m, so bounding lda bounds m too):
+    // - batch * lda: per-batch offsets into pivots and the permutation workspace;
+    // - lda * min(n, MAX_RECNB) + 1024: linearized rank-1 update index in the tall panel kernel;
+    // - n + SWP_WIDTH: column tile count of row swaps.
+    constexpr int64_t int_max = std::numeric_limits<int>::max();
+    const bool custom_fits_int = batch * lda <= int_max
+      && lda * std::min<int64_t>(n, 32) <= int_max - 1024
+      && n <= int_max - 4; // SWP_WIDTH
+
     // Select a custom (pivoted) LU factorization kernel over cuSOLVER/cuBLAS.
     // The kernel is benchmarked on/tuned for A100, H100, L40S, GB200.
-    if (m == n && batch <= 65535 && m >= 256
+    if (m == n && batch <= 65535 && m >= 256 && custom_fits_int
       && ((compute_pivots && batch >= 4) || (!compute_pivots && batch >= 16 && m <= 1024))
     ) {
       return SolverBackend::CUSTOM;
@@ -638,6 +637,15 @@ namespace {
 
     // cuBLAS does not support rectangular inputs.
     if (m != n) {
+      // Custom kernel for m <= 1024 and batch >= 4 (pivoted) or batch >= 16 (nopiv).
+      // Based on benchmarks extended from the square case (note, they agree)
+      // TODO: explore m > 1024
+      if ((compute_pivots ? batch >= 4 : batch >= 16) && batch <= 65535
+        && (1 <= m && m <= 1024)
+        && custom_fits_int
+      ) {
+        return SolverBackend::CUSTOM;
+      }
       return SolverBackend::CUSOLVER;
     }
 
@@ -727,7 +735,9 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
     }
 #else
-    const auto solver_backend = get_lu_factor_solver_backend(batch_size, m, n, input.scalar_type(), compute_pivots);
+    // Same lda as in lu_batched_blas3_kernel
+    const auto lda = std::max(input.stride(-1), std::max<int64_t>(1, m));
+    const auto solver_backend = get_lu_factor_solver_backend(batch_size, m, n, lda, input.scalar_type(), compute_pivots);
     switch (solver_backend) {
       case SolverBackend::CUSOLVER:
         lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
