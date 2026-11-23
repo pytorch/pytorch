@@ -5,11 +5,11 @@ Tuning enabled (compile-time autotune):
   concrete miss -> tune, persist concrete, plus a wildcard key if a dim is
   dynamic; concrete hit -> persist the wildcard key if it is still missing.
 
-Tuning disabled (runtime): the AOTI cpp_wrapper emits no
-`TunableDynamicDimsGuard`, so the mask is empty and a concrete miss is
-resolved by `LookupWildcardFallback`'s token scan. With no match,
-`operator()` falls through to `ResultEntry::Default()`, which is the same
-non-tunable aten kernel the caller would have used.
+Tuning disabled (runtime): a concrete miss is resolved by
+`LookupWildcardFallback`'s token scan. This also supports artifacts compiled
+without `TunableDynamicDimsGuard` emission. With no match, `operator()` falls
+through to `ResultEntry::Default()`, which is the same non-tunable aten kernel
+the caller would have used.
 
 Observability caveat, applying to every runtime wildcard test here: nothing
 reports whether a wildcard actually served a dispatch. A wildcard hit and a
@@ -265,6 +265,7 @@ def _untuned_has(lines: list[str], op_substr: str, m: int, n: int, k: int) -> bo
     return False
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "cuda not available")
 class DynamicTunableOpsTest(TestCase):
     """Verification of the full tuning enable/disable x dynamic-dim matrix.
 
@@ -277,8 +278,6 @@ class DynamicTunableOpsTest(TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
         # Redirect TunableOp persistence to a fresh per-process tempfile so
         # this run never appends to (or lazily loads) the shared default
         # "tunableop_results.csv".
@@ -487,7 +486,7 @@ class DynamicTunableOpsTest(TestCase):
     ) -> None:
         """Tuning disabled + concrete miss + wildcard match -> dispatch via
         the wildcard. Phase B deliberately runs without a `dynamic_dims_mask`
-        to mirror the AOTI runtime, which emits no guard."""
+        to verify wildcard fallback independently of AOTI guard emission."""
         m_tuned, n, k = 47, 2053, 1019
         m_test = 53  # different M, same wildcard pattern
         bias_t, mat1_t, mat2_t = _addmm(m_tuned, n, k, seed=6)
@@ -519,10 +518,9 @@ class DynamicTunableOpsTest(TestCase):
         torch.cuda.tunable.tuning_enable(False)
         ref = torch.addmm(bias_x, mat1_x, mat2_x)
 
-        # Phase B (runtime analog): tunable enabled, tuning disabled,
-        # NO `dynamic_dims_mask` context -- the AOTI runtime cannot push
-        # one. Concrete miss for m_test -> LookupWildcardFallback finds
-        # the wildcard seeded in Phase A and dispatches via it.
+        # Phase B (runtime analog): tunable enabled, tuning disabled, and no
+        # dynamic mask. Concrete miss for m_test -> LookupWildcardFallback
+        # finds the wildcard seeded in Phase A and dispatches via it.
         torch.cuda.tunable.enable(True)
         torch.cuda.tunable.tuning_enable(False)
         out = torch.addmm(bias_x, mat1_x, mat2_x)
@@ -863,6 +861,7 @@ class DynamicTunableOpsTest(TestCase):
 # correctly for every layout.
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "cuda not available")
 class LayoutCoverageWildcardTest(TestCase):
     """The dynamic-mask + wildcard-fallback contract across all four
     (transa, transb) layouts, with M/N/K dynamic in turn.
@@ -874,8 +873,6 @@ class LayoutCoverageWildcardTest(TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
         cls._tmpdir = tempfile.mkdtemp(prefix="layout_coverage_test_")
         cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
         torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
@@ -1081,6 +1078,7 @@ class LayoutCoverageWildcardTest(TestCase):
 #     covered by the round-trip tests in DynamicTunableOpsTest).
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "cuda not available")
 class BmmLayoutCoverageWildcardTest(TestCase):
     """Batched analog of LayoutCoverageWildcardTest. bmm derives its
     transpose flags and M<->N remap in baddbmm_out_cuda_impl, a separate path
@@ -1088,8 +1086,6 @@ class BmmLayoutCoverageWildcardTest(TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
         cls._tmpdir = tempfile.mkdtemp(prefix="bmm_layout_coverage_test_")
         cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
         torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
@@ -1288,6 +1284,10 @@ class BmmLayoutCoverageWildcardTest(TestCase):
 #            -> LookupWildcardFallback hits the wildcard.
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "cuda not available")
+@unittest.skipIf(
+    not hasattr(torch, "float8_e4m3fn"), "torch.float8_e4m3fn not available"
+)
 @unittest.skipIf(
     torch.version.hip is None,
     "_scaled_gemm only reaches TunableOp under USE_ROCM; off ROCm "
@@ -1302,12 +1302,8 @@ class ScaledGemmTunableOpFP8Test(TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
         # FP8 e4m3fn requires a recent enough device; skip on older
         # hardware that doesn't expose the dtype.
-        if not hasattr(torch, "float8_e4m3fn"):
-            raise unittest.SkipTest("torch.float8_e4m3fn not available")
         cls._tmpdir = tempfile.mkdtemp(prefix="scaled_gemm_test_")
         cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
         torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
@@ -1495,14 +1491,13 @@ class ScaledGemmTunableOpFP8Test(TestCase):
 # feature).
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "cuda not available")
 class LegacyConcreteOnlyTunableOpsTest(TestCase):
     """Pre-feature behavior: with no `dynamic_dims_mask` pushed, only concrete
     entries persist and a runtime concrete miss falls through safely."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
         cls._tmpdir = tempfile.mkdtemp(prefix="legacy_concrete_only_test_")
         cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
         torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
@@ -1675,6 +1670,7 @@ class LegacyConcreteOnlyTunableOpsTest(TestCase):
 # shapes a wildcard is approximating.
 
 
+@unittest.skipIf(not torch.cuda.is_available(), "cuda not available")
 class RecordUntunedConcreteMissTest(TestCase):
     """PYTORCH_TUNABLEOP_RECORD_UNTUNED collection on a runtime concrete miss,
     for every GEMM category, whether or not a wildcard then serves the call. A
@@ -1689,8 +1685,6 @@ class RecordUntunedConcreteMissTest(TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("cuda not available")
         cls._tmpdir = tempfile.mkdtemp(prefix="record_untuned_test_")
         cls._tmp_results_path = os.path.join(cls._tmpdir, "tunable_results.csv")
         torch.cuda.tunable.set_filename(cls._tmp_results_path, False)
@@ -1787,6 +1781,9 @@ class RecordUntunedConcreteMissTest(TestCase):
             lambda: torch.baddbmm(bias, b1, b2),
         )
 
+    @unittest.skipIf(
+        not hasattr(torch, "float8_e4m3fn"), "torch.float8_e4m3fn not available"
+    )
     @unittest.skipIf(
         torch.version.hip is None,
         "_scaled_gemm only reaches TunableOp under USE_ROCM; off ROCm "

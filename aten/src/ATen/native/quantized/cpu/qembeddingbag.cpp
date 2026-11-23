@@ -191,7 +191,7 @@ at::Tensor& embedding_lookup_fallback_impl(
 }
 
 #ifdef __aarch64__
-static inline void embedding_neon_kernel(
+[[maybe_unused]] static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
@@ -219,7 +219,7 @@ static inline void embedding_neon_kernel(
   output4 = vmlaq_f32(output4, w_4, scale);
 }
 
-static inline void embedding_neon_kernel(
+[[maybe_unused]] static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,
     float32x4_t& output2,
@@ -606,7 +606,7 @@ void fbgemm_spmdm_report_error_(
     const OffsetType* offsets,
     const IndexType* indices) {
   for (const auto m : c10::irange(output_size)) {
-    for (OffsetType i = offsets[m]; i < offsets[m + 1]; ++i) {
+    for (const auto i : c10::irange(offsets[m], offsets[m + 1])) {
       TORCH_CHECK(i < index_size);
       IndexType idx = indices[i];
       TORCH_CHECK(
@@ -710,7 +710,11 @@ at::Tensor& embedding_bag_nbit_impl(
   constexpr int prefetch_distance = 16;
   if (!pruned_weights || fallback_to_no_sparse) {
     // Generate the fbgemm kernel
-    auto kernel = fbgemm::GenerateEmbeddingSpMDMNBit<IndexType, OffsetType>(
+    auto kernel = fbgemm::GenerateEmbeddingSpMDMNBitWithStrides<
+        IndexType,
+        OffsetType,
+        /*OutType=*/float,
+        /*THREAD_LOCAL=*/true>(
         /*bit rate=*/bit_width,
         /*block size=*/block_size,
         /*has weights=*/per_sample_weights_.has_value(),
@@ -737,8 +741,17 @@ at::Tensor& embedding_bag_nbit_impl(
           output_size, index_size, N, offsets_data, indices_data);
     }
   } else {
+    // OSS builds can pin an FBGEMM that predates the THREAD_LOCAL parameter on
+    // this path, in which case the globally cached kernel is used.
+#ifdef FBGEMM_HAS_SPMDM_NBIT_ROWWISE_SPARSE_THREAD_LOCAL
+    auto kernel = fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<
+        IndexType,
+        OffsetType,
+        /*THREAD_LOCAL=*/true>(
+#else
     auto kernel =
         fbgemm::GenerateEmbeddingSpMDMNBitRowWiseSparse<IndexType, OffsetType>(
+#endif
             /*bit rate=*/bit_width,
             /*block_size=*/block_size,
             /*has weights=*/per_sample_weights_.has_value(),

@@ -12,6 +12,7 @@
 #include <vector>
 
 #if AT_MKLDNN_ENABLED()
+#include <dnnl.hpp>
 #include <ideep/tensor.hpp>
 #endif // AT_MKLDNN_ENABLED()
 
@@ -79,20 +80,21 @@ using AttrFunction = std::function<ideep::attr_t(
 
 const std::unordered_map<std::string_view, AttrFunction>& fusion_unary_attr_map();
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_unary_alg_map();
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_unary_alg_map();
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
 }
 
 #if defined(__aarch64__)
+// oneDNN relies on ACL for bf16/fp16 kernels on aarch64
 inline bool mkldnn_bf16_device_check_arm() {
-  return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
+  return AT_MKLDNN_ACL_ENABLED() && cpuinfo_initialize() && cpuinfo_has_arm_bf16();
 }
 
 inline bool mkldnn_fp16_device_check_arm() {
-  return cpuinfo_initialize() && cpuinfo_has_arm_neon_fp16();
+  return AT_MKLDNN_ACL_ENABLED() && cpuinfo_initialize() && cpuinfo_has_arm_neon_fp16();
 }
 
 inline bool is_arm_neoverse() {
@@ -115,6 +117,16 @@ constexpr bool is_arm_neoverse() {
   return false;
 }
 #endif
+
+// Without ACL, oneDNN has no optimized kernels for aarch64 CPUs that lack SVE (e.g. Apple Silicon):
+// convolutions run via gemm and the NEON-only JIT binary kernel fails to build
+constexpr bool mkldnn_lacks_aarch64_kernels() {
+#if defined(__aarch64__) && !AT_MKLDNN_ACL_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
 
 #if AT_MKLDNN_ENABLED()
 inline bool mkldnn_bf16_device_check() {
@@ -158,3 +170,20 @@ inline void mkldnn_check_low_precision(ScalarType input_t, std::string name) {
 }
 
 }
+
+#if AT_MKLDNN_ENABLED()
+namespace at::native::mkldnn {
+
+template <typename T, typename... Items>
+constexpr bool one_of(T val, Items... items) {
+  return ((val == items) || ...);
+}
+
+inline bool is_avx2_vnni_2() {
+  static const bool result =
+      dnnl::get_effective_cpu_isa() == dnnl::cpu_isa::avx2_vnni_2;
+  return result;
+}
+
+} // namespace at::native::mkldnn
+#endif // AT_MKLDNN_ENABLED()

@@ -1,13 +1,17 @@
 # Owner(s): ["oncall: profiler"]
 """Tests for ``NodeTimerObserver`` -- the minimal always-on per-graph-node timing
 consumer of Cuspy. Collection runs through Cuspy, so these need
-CUDA + libcupti >= 13.3 (gated the same way as the rest of the Cuspy suite)."""
+CUDA >= 13.5 + libcupti >= 13.5 (gated the same way as the rest of the Cuspy suite)."""
 
 import unittest
 
 import torch
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUPTI, TEST_CUPTI_V13_3
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUPTI, TEST_CUPTI_V13_5
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def _capture_relu_graph() -> "torch.cuda.CUDAGraph":
@@ -34,7 +38,9 @@ def _capture_relu_graph() -> "torch.cuda.CUDAGraph":
 class TestCuspyNodeTimerCUDA(TestCase):
     """NodeTimerObserver collection through Cuspy (not via profile)."""
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_node_timer_collects_kernel_spans(self):
         # NodeTimerObserver is the minimal timing consumer: it registers just the
         # kernel timing fields (START/END/GRAPH_NODE_ID) and drain() returns flat
@@ -72,7 +78,7 @@ class TestCuspyNodeTimerCUDA(TestCase):
         self.assertEqual(start.dtype, np.dtype("<i8"))
         self.assertEqual(stream.dtype, np.dtype("<u8"))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_node_timer_drain_annotated_eager(self):
         # With eager naming on (default), eager kernels bracketed by annotate(name) resolve
         # to that region via the correlation_id -> external_id -> name join, and
@@ -103,7 +109,7 @@ class TestCuspyNodeTimerCUDA(TestCase):
         for start_ns, end_ns in spans["regionA"]:
             self.assertGreaterEqual(end_ns, start_ns)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_node_timer_nested_resolves_to_enclosing_region(self):
         # A kernel launched under an inner (unnamed) external-correlation push -- as a
         # collective would push, leaf and innermost -- nested inside a named region
@@ -142,7 +148,7 @@ class TestCuspyNodeTimerCUDA(TestCase):
         for start_ns, end_ns in spans["outer"]:
             self.assertGreaterEqual(end_ns, start_ns)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_node_timer_drain_annotated_unnamed_bucket(self):
         # With no annotations configured, drain_annotated() doesn't drop or raise --
         # every span lands in the "" bucket.
@@ -165,7 +171,7 @@ class TestCuspyNodeTimerCUDA(TestCase):
         self.assertEqual(set(spans), {""})
         self.assertGreater(len(spans[""]), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_node_timer_collects_graph_node_spans(self):
         # CUDA-graph-captured kernels carry real (non-zero) graph_node_ids -- unlike
         # eager kernels (node 0) -- and the same node recurs across replays, so
@@ -197,7 +203,7 @@ class TestCuspyNodeTimerCUDA(TestCase):
         _, counts = np.unique(gnode[gnode != 0], return_counts=True)
         self.assertTrue(bool((counts >= 2).any()))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_node_timer_drain_annotated_graph(self):
         # Graph-first naming: a graph_annotation_resolver maps each captured node id to
         # a region name, and drain_annotated() buckets the replayed spans under it --
@@ -234,7 +240,7 @@ class TestCuspyNodeTimerCUDA(TestCase):
         for start_ns, end_ns in spans["graphregion"]:
             self.assertGreaterEqual(end_ns, start_ns)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_node_timer_names_source_keyed_graph(self):
         # A graph captured with annotation_config={"key_by": "source"} keeps its
         # annotations on the capture graph, so the exec node id CUPTI reports for a
@@ -292,7 +298,7 @@ class TestCuspyNodeTimerCUDA(TestCase):
             self.skipTest("driver delivered no graph spans")
         self.assertGreater(len(spans.get("sourceregion", [])), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_source_key_space_names_spans_without_the_exec_field(self):
         # key_space="source" is the caller asserting every graph is source-keyed, so the
         # exec node id is not selected at all -- one field less per record -- and the
@@ -361,7 +367,7 @@ class TestCuspyNodeTimerCUDA(TestCase):
         with self.assertRaisesRegex(ValueError, "key_space='source'"):
             NodeTimerObserver(kinds=(ActivityKind.MEMCPY2,), key_space="source")
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     def test_node_timer_collects_memcpy2_spans(self):
         # Peer-to-peer / cross-device copies surface under MEMCPY2 (not MEMCPY). CUPTI
@@ -394,7 +400,7 @@ class TestCuspyNodeTimerCUDA(TestCase):
         self.assertEqual(len(stream), len(start))
         self.assertTrue(bool((end >= start).all()))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires >= 2 GPUs")
     def test_graphed_p2p_copy_named_through_the_exec_alias(self):
         # The case source keying cannot cover on its own: a graphed peer-to-peer copy is
@@ -482,10 +488,12 @@ class TestCuspyNodeTimerCUDA(TestCase):
 
 
 @unittest.skipIf(not TEST_CUPTI, "requires cupti bindings + generated _cupti_stubs")
-class TestNodeTimerBucketName(TestCase):
+class TestNodeTimerBucketNameCUDA(TestCase):
     """``_bucket_name`` normalizes whatever a graph annotation resolver returns; no CUDA
     or libcupti at runtime, but importing it pulls in ``records`` -> the build-generated
     ``_cupti_stubs``, which is what TEST_CUPTI gates on."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def test_shapes(self):
         from torch.profiler._cuspy.observers.node_timer import _bucket_name

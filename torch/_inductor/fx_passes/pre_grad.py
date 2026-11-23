@@ -386,8 +386,8 @@ def pre_grad_passes(
                 if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
                     continue
                 # skip auto-enabled fusion options that are not registered
-                # as pattern matcher passes (e.g., batch_linear_lhs when
-                # PRE_GRAD_FUSIONS is mocked by tests)
+                # as pattern matcher passes (e.g. an option that is only
+                # registered for the post-grad stage)
                 if pass_name not in PRE_GRAD_PATTERNS:
                     continue
                 pattern_matcher_pass = PRE_GRAD_PATTERNS[pass_name]
@@ -499,7 +499,9 @@ def remove_identity(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     """
     graph = gm.graph
     work_done = False
-    for module_name, module in gm.named_modules():
+    # remove_duplicate=False so every attribute path to a shared Identity
+    # instance is visited, not just the first one.
+    for module_name, module in gm.named_modules(remove_duplicate=False):
         if type(module) is nn.Identity:
             for node in list(graph.find_nodes(op="call_module", target=module_name)):
                 if len(node.args) != 1:

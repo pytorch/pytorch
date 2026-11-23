@@ -35,14 +35,14 @@ class C10_API SizesAndStrides {
   }
 
   ~SizesAndStrides() {
-    if (C10_UNLIKELY(!isInline())) {
+    if (!isInline()) [[unlikely]] {
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       free(outOfLineStorage_);
     }
   }
 
   SizesAndStrides(const SizesAndStrides& rhs) : size_(rhs.size_) {
-    if (C10_LIKELY(rhs.isInline())) {
+    if (rhs.isInline()) [[likely]] {
       copyDataInline(rhs);
     } else {
       allocateOutOfLineStorage(size_);
@@ -72,8 +72,8 @@ class C10_API SizesAndStrides {
     if (this == &rhs) {
       return *this;
     }
-    if (C10_LIKELY(rhs.isInline())) {
-      if (C10_UNLIKELY(!isInline())) {
+    if (rhs.isInline()) [[likely]] {
+      if (!isInline()) [[unlikely]] {
         // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
         free(outOfLineStorage_);
       }
@@ -92,7 +92,7 @@ class C10_API SizesAndStrides {
 
   // Move from rhs. rhs.size() == 0 afterwards.
   SizesAndStrides(SizesAndStrides&& rhs) noexcept : size_(rhs.size_) {
-    if (C10_LIKELY(isInline())) {
+    if (isInline()) [[likely]] {
       memcpy(inlineStorage_, rhs.inlineStorage_, sizeof(inlineStorage_));
     } else {
       outOfLineStorage_ = rhs.outOfLineStorage_;
@@ -107,8 +107,8 @@ class C10_API SizesAndStrides {
     if (this == &rhs) {
       return *this;
     }
-    if (C10_LIKELY(rhs.isInline())) {
-      if (C10_UNLIKELY(!isInline())) {
+    if (rhs.isInline()) [[likely]] {
+      if (!isInline()) [[unlikely]] {
         // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
         free(outOfLineStorage_);
       }
@@ -133,7 +133,7 @@ class C10_API SizesAndStrides {
   }
 
   const int64_t* sizes_data() const noexcept {
-    if (C10_LIKELY(isInline())) {
+    if (isInline()) [[likely]] {
       return &inlineStorage_[0];
     } else {
       return &outOfLineStorage_[0];
@@ -141,7 +141,7 @@ class C10_API SizesAndStrides {
   }
 
   int64_t* sizes_data() noexcept {
-    if (C10_LIKELY(isInline())) {
+    if (isInline()) [[likely]] {
       return &inlineStorage_[0];
     } else {
       return &outOfLineStorage_[0];
@@ -179,7 +179,7 @@ class C10_API SizesAndStrides {
   }
 
   const int64_t* strides_data() const noexcept {
-    if (C10_LIKELY(isInline())) {
+    if (isInline()) [[likely]] {
       return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
       return &outOfLineStorage_[size()];
@@ -187,7 +187,7 @@ class C10_API SizesAndStrides {
   }
 
   int64_t* strides_data() noexcept {
-    if (C10_LIKELY(isInline())) {
+    if (isInline()) [[likely]] {
       return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
       return &outOfLineStorage_[size()];
@@ -195,7 +195,7 @@ class C10_API SizesAndStrides {
   }
 
   strides_const_iterator strides_begin() const noexcept {
-    if (C10_LIKELY(isInline())) {
+    if (isInline()) [[likely]] {
       return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
       return &outOfLineStorage_[size()];
@@ -203,7 +203,7 @@ class C10_API SizesAndStrides {
   }
 
   strides_iterator strides_begin() noexcept {
-    if (C10_LIKELY(isInline())) {
+    if (isInline()) [[likely]] {
       return &inlineStorage_[C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE];
     } else {
       return &outOfLineStorage_[size()];
@@ -265,8 +265,8 @@ class C10_API SizesAndStrides {
     if (newSize == oldSize) {
       return;
     }
-    if (C10_LIKELY(
-            newSize <= C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE && isInline())) {
+    if (newSize <= C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE && isInline())
+        [[likely]] {
       if (oldSize < newSize) {
         const auto bytesToZero =
             (newSize - oldSize) * sizeof(inlineStorage_[0]);

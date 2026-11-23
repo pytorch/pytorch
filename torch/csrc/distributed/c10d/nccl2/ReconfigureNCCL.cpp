@@ -25,7 +25,9 @@
 #include <variant>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/env.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
@@ -143,7 +145,7 @@ ReconfigureQuorum findReconfigureQuorum(
     return {};
   }
   int previousRank = -1;
-  for (int i = 0; i < quorum.size; ++i) {
+  for (const auto i : c10::irange(quorum.size)) {
     auto info = parseNCCLReconfigureHandle(handles[i]);
     if (info.uuid != quorum.uuid || info.rank <= previousRank) {
       return {};
@@ -155,18 +157,6 @@ ReconfigureQuorum findReconfigureQuorum(
   std::ignore = handles;
   return {};
 #endif
-}
-
-void abortCommIgnoringErrors(
-    NcclApi& api,
-    ncclComm_t comm,
-    std::chrono::milliseconds timeout,
-    std::string_view operation) {
-  try {
-    waitForNcclCompletion(api, comm, api.commAbort(comm), timeout, operation);
-  } catch (const std::exception& e) {
-    LOG(ERROR) << e.what();
-  }
 }
 
 std::vector<uint8_t> uniqueIdToBytes(const ncclUniqueId& uniqueId) {
@@ -387,7 +377,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
         reconfigure_uuid_,
         " but it is not initialized");
     std::unordered_set<int> keptRanks;
-    for (int i = 0; i < quorum.size; ++i) {
+    for (const auto i : c10::irange(quorum.size)) {
       keptRanks.insert(parseNCCLReconfigureHandle(handles[i]).rank);
     }
     for (int rank = 0; rank < comm_size_; ++rank) {
@@ -452,23 +442,38 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     }
   }
 
-  ncclConfig_t config = options_c10d_->config;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name_.c_str();
-#endif
+  ncclConfig_t config = commConfig();
   populateNcclConfigFromHints(config, opts.hints, name_);
   // ReconfigureOptions::timeout must bound initialization even when the
   // process-group config normally uses blocking NCCL calls.
   config.blocking = 0;
 
-  // Tear down the previous communicator generation: revoke in-flight work,
-  // stop the watchdog, drain the work queue, and abort the comm unless it is
+  // Tear down the previous communicator generation: stop the watchdog, revoke
+  // in-flight work after cancelling it, and abort the comm unless it is
   // shrunk below. Port of the pre-reconfigure cleanup in torchcomms'
   // TorchCommNCCL::reconfigure.
+  // The watchdog revokes without reconfigure_mutex_, so stop it first to
+  // avoid a concurrent second commRevoke on the same communicator. Done even
+  // if a previous initialization failed after starting the watchdog.
+  stopWatchdog();
+  // If teardown or comm creation throws, still publish the cancelled work's
+  // results. On success the queue is drained below instead.
+  auto finalizeOnError = c10::make_scope_exit([this] {
+    try {
+      workq_.finalize();
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "Failed to drain work after reconfigure failure: "
+                          << e.what();
+    }
+  });
+  std::unique_lock revokeLock(revoke_mutex_);
   ncclComm_t oldComm = nullptr;
   if (init_state_ == InitializationState::INITIALIZED) {
     auto workStatus = workq_.garbageCollect();
-    if (nccl_comm_ &&
+    // Before the revoke: a revoked kernel's end event can otherwise complete
+    // its work successfully.
+    workq_.cancelPending();
+    if (nccl_comm_ && !revoked_.exchange(true) &&
         (workStatus == WorkNCCL::WorkStatus::NOT_STARTED ||
          workStatus == WorkNCCL::WorkStatus::INPROGRESS)) {
       NCCL_CHECK_IGNORE(
@@ -479,17 +484,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
 
     detachMemoryHook();
     retireComm();
-
-    if (timeout_thread_.joinable()) {
-      shutdown_ = true;
-      {
-        std::lock_guard<std::mutex> lock(timeout_mutex_);
-        timeout_cv_.notify_all();
-      }
-      timeout_thread_.join();
-    }
-
-    workq_.finalize();
 
     oldComm = std::exchange(nccl_comm_, nullptr);
     init_state_ = InitializationState::UNINITIALIZED;
@@ -510,6 +504,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   comm_state_ = CommState::NORMAL;
   shutdown_ = false;
   revoked_ = false;
+  revokeLock.unlock();
 
   // Resolve the device on the first reconfigure: prefer the bound device,
   // else the caller's current CUDA device. The bootstrap's rank-based default
@@ -531,9 +526,10 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   c10::cuda::CUDAGuard gpuGuard(device_);
 
   const auto growIdKey = c10::str("grow_unique_id/", handles.front());
+  ncclComm_t newComm = nullptr;
   try {
     if (inQuorum) {
-      nccl_comm_ = shrinkAndGrowComm(
+      newComm = shrinkAndGrowComm(
           *nccl_api_,
           oldComm,
           std::move(excluded),
@@ -547,7 +543,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
       if (shrinkGrow) {
         uniqueId = waitForUniqueId(*prefixedStore, growIdKey, timeout);
       }
-      nccl_comm_ = initComm(
+      newComm = initComm(
           *nccl_api_, shrinkGrow, newSize, newRank, uniqueId, config, timeout);
     }
   } catch (...) {
@@ -556,7 +552,14 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     init_state_ = InitializationState::UNINITIALIZED;
     throw;
   }
+  {
+    std::lock_guard newCommLock(revoke_mutex_);
+    nccl_comm_ = newComm;
+  }
 
+  // The old comm is aborted, so its kernels no longer use the queued inputs.
+  finalizeOnError.release();
+  workq_.finalize();
   initNcclResources();
   init_state_ = InitializationState::INITIALIZED;
   TORCH_CHECK(

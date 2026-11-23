@@ -224,12 +224,6 @@ constexpr int kCountWords = countWords<kMaxFields>();
 constexpr int kEqCap = 2;
 static_assert(kEqCap >= 1, "a single-round slice must never overflow the held equal elements");
 
-// Number of set bits of `ballot` in lanes below the calling lane.
-__device__ __forceinline__ uint32_t laneRank(uint64_t ballot) {
-  uint32_t r = __builtin_amdgcn_mbcnt_lo(static_cast<uint32_t>(ballot), 0u);
-  return __builtin_amdgcn_mbcnt_hi(static_cast<uint32_t>(ballot >> 32), r);
-}
-
 // Inclusive scan of the per-warp counts held by lanes 0..num_warps-1; returns the block total and this warp's
 // exclusive prefix as wave-uniform values. The combine after the barrier is a serial dependency chain, so it
 // is written to minimize dependent cross-lane steps: on GFX9 (wave64, so <= 16 warps per 1024-thread block)
@@ -447,7 +441,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     if constexpr (!kLast) {
       #pragma unroll
       for (int u = 0; u < U; ++u) {
-        v_next[u] = doLdg(&inputSliceStart[min(rowOff + (U + u) * rowStep + tidOff, lastOff)]);
+        v_next[u] = doLdg(&inputSliceStart[::min(rowOff + (U + u) * rowStep + tidOff, lastOff)]);
       }
     }
 
@@ -580,7 +574,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
   if (inputSliceSize <= stride) {
     // Short slice: one round per phase.
-    v[0] = doLdg(&inputSliceStart[min(tidOff, lastOff)]);
+    v[0] = doLdg(&inputSliceStart[::min(tidOff, lastOff)]);
     gatherRound.template operator()<1, false, true>(0, 0);
     // A single round never overflows the held equals (kEqCap >= 1), so this always finishes the output.
     finishWithHeldEquals(/*mayOverflow=*/false);
@@ -595,7 +589,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   auto loadFirstRound = [&]() {
     #pragma unroll
     for (int u = 0; u < kGatherBatch; ++u) {
-      v[u] = doLdg(&inputSliceStart[min(u * rowStep + tidOff, lastOff)]);
+      v[u] = doLdg(&inputSliceStart[::min(u * rowStep + tidOff, lastOff)]);
     }
   };
 

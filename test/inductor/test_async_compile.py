@@ -375,6 +375,33 @@ def test_flydsl_loader_main(value, stream):
 
     @requires_gpu()
     @requires_triton()
+    @parametrize("method", ("subprocess", "fork"))
+    def test_pool_compile_on_one_rank_without_triton_cache_dir(self, method):
+        # compile_on_one_rank kernels carry no device index, and a worker forked after
+        # CUDA initialization cannot look up the current device to pick a cache dir.
+        def fn(x, y):
+            return x + y
+
+        x = torch.rand(10, device=GPU_TYPE)
+        y = torch.rand(10, device=GPU_TYPE)
+
+        with (
+            config.patch(worker_start_method=method, compile_threads=2),
+            torch.compiler.config.patch(compile_on_one_rank=True),
+            patch.dict(os.environ),
+        ):
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            shutdown_compile_workers()
+            try:
+                AsyncCompile.wait_pool_ready()
+                self.assertTrue(AsyncCompile.use_process_pool())
+                self.assertFalse(AsyncCompile.should_use_thread_workers())
+                self.assertEqual(torch.compile(fn)(x, y), fn(x, y))
+            finally:
+                shutdown_compile_workers()
+
+    @requires_gpu()
+    @requires_triton()
     def test_bad_kernel(self):
         shutdown_compile_workers()
 
@@ -613,6 +640,25 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         finally:
             release.set()
             pool.shutdown(wait=True)
+
+    def test_triton_worker_receives_static_launch_config(self):
+        from torch._inductor.async_compile import CompiledTritonKernels
+
+        pool = Mock()
+        source = "# test_triton_worker_receives_static_launch_config\n"
+        with (
+            config.patch(static_launch_user_defined_triton_kernels=True),
+            patch.object(AsyncCompile, "use_process_pool", return_value=True),
+            patch.object(AsyncCompile, "get_worker_pool", return_value=pool),
+            patch.object(AsyncCompile, "should_use_thread_workers", return_value=False),
+            patch("torch._inductor.async_compile._set_triton_libdevice_path"),
+        ):
+            try:
+                AsyncCompile().triton("kernel", source)
+            finally:
+                CompiledTritonKernels.remove_future(source)
+        extra_config = pool.submit.call_args.args[3]
+        self.assertIs(extra_config["static_launch_user_defined_triton_kernels"], True)
 
 
 @skipIfNoCuteDSL

@@ -10,6 +10,7 @@
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/native/ForeachUtils.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/vulkan/Context.h>
@@ -30,7 +31,6 @@
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_foreach_copy_native.h>
-#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/expand_copy.h>
 #endif
@@ -65,18 +65,10 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       self.numel() >= MIN_SZ;
 }
 
-#if !defined(C10_MOBILE)
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
         AT_DISPATCH_V2(                             \
             TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, \
             AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
-#else
-#define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(    \
-            kComplexHalf, kBComplex32, kHalf,      \
-            kBool, kBFloat16, TYPE, NAME,          \
-            __VA_ARGS__)
-#endif
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
@@ -89,7 +81,6 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 60;
   }
-  Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
   // The code below is implemented with the assumption that sizes are equal
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
@@ -97,12 +88,21 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   _AT_DISPATCH_CP_TYPES(self.scalar_type(), "copy_", [&] {
     const scalar_t* sp = src.const_data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
-    scalar_t* bp = buf.data_ptr<scalar_t>();
 
     int64_t NR = src.size(0);
     int64_t NC = src.size(1);
-    for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
-      for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
+    // Blocks write disjoint parts of self, so threads can take ranges of them
+    // (in row-major block order); each range needs its own buffer.
+    int64_t row_blocks = (NR + BLOCK_SZ - 1) / BLOCK_SZ;
+    int64_t col_blocks = (NC + BLOCK_SZ - 1) / BLOCK_SZ;
+    int64_t grain_size =
+        std::max<int64_t>(1, at::internal::GRAIN_SIZE / (BLOCK_SZ * BLOCK_SZ));
+    at::parallel_for(0, row_blocks * col_blocks, grain_size, [&](int64_t first, int64_t last) {
+      auto buf = std::make_unique<scalar_t[]>(BLOCK_SZ * BLOCK_SZ);
+      scalar_t* bp = buf.get();
+      for (const auto b : c10::irange(first, last)) {
+        int64_t R = b / col_blocks * BLOCK_SZ;
+        int64_t C = b % col_blocks * BLOCK_SZ;
         const scalar_t* spo = sp + R + C * NR;
         scalar_t* rpo = rp + C + R * NC;
 
@@ -131,7 +131,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
           memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
         }
       }
-    }
+    });
   });
 }
 
@@ -145,6 +145,32 @@ bool is_supported_device(Device device) {
 } // namespace
 
 namespace at::native {
+
+// Shell dtypes have no defined value conversion. Rejecting casts on the host
+// keeps every backend consistent with tracing; on CUDA they would otherwise
+// device-assert in the dynamic-cast kernel.
+void check_shell_dtype_cast(ScalarType src, ScalarType dst) {
+  if (dst == src || !(isShellType(dst) || isShellType(src))) {
+    return;
+  }
+  if (dst == ScalarType::Float4_e2m1fn_x2 ||
+      src == ScalarType::Float4_e2m1fn_x2) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Casting from ", src, " to ", dst, " is not supported. "
+        "torch.float4_e2m1fn_x2 packs two fp4 values per byte, so there is no "
+        "elementwise conversion. To decode, use .view(torch.uint8) and unpack "
+        "the nibbles (low 4 bits are the first element, high 4 bits the "
+        "second); to encode, pack fp4 codes into torch.uint8 and "
+        ".view(torch.float4_e2m1fn_x2).");
+  }
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "Casting from ", src, " to ", dst, " is not supported: ",
+      isShellType(src) ? src : dst,
+      " is a shell dtype with no defined conversions. Use .view() to "
+      "reinterpret the bytes as a same-size integer dtype instead.");
+}
 
 static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...
@@ -205,6 +231,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   if (self.is_same(src)) {
     return self;
   }
+
+  // Checked for every device, including meta and out-of-tree backends, so
+  // eager and FakeTensor tracing reject the same casts.
+  check_shell_dtype_cast(src.scalar_type(), self.scalar_type());
 
   // Copies into meta self are OK and just ignored (similar to inplace)
   if (self.is_meta()) {
@@ -364,6 +394,7 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
 }
 
 ::std::vector<at::Tensor> _foreach_copy(at::TensorList self, at::TensorList src, bool non_blocking) {
+  check_foreach_api_restrictions(self, src);
   std::vector<at::Tensor> outs;
   outs.reserve(self.size());
   // This is a very slow implementation, but needs to directly call the copy() kernel above to handle

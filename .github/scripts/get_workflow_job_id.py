@@ -188,11 +188,16 @@ def set_output(name: str, val: Any) -> None:
 
 def main() -> None:
     args = parse_args()
+    # job.check_run_id is the job id, so with it only the name needs a request,
+    # and a failed one (e.g. the GITHUB_TOKEN quota shared by every job ran out)
+    # loses just the name.
+    check_run_id = os.environ.get("CHECK_RUN_ID")
+    if check_run_id:
+        set_output("job-id", check_run_id)
     try:
-        # Get both the job ID and job name because we have already spent a request
-        # here to get the job info
         job_id, job_name = find_job_id_name(args)
-        set_output("job-id", job_id)
+        if not check_run_id:
+            set_output("job-id", job_id)
         set_output("job-name", job_name)
     except Exception as e:
         print(repr(e), file=sys.stderr)

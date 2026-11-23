@@ -190,15 +190,11 @@ class _PipelineStageBase(ABC):
         # RemovableHandle weak-references its registry, matching module hooks.
         self._forward_contexts: OrderedDict[int, _ForwardContextFactory] = OrderedDict()
 
-        # Directed physical rank-edge communicators. Auto-enabled when
-        # TorchComms is in use; the config flag
+        # Directed physical rank-edge communicators, enabled by
         # torch.distributed.config.pipeline_per_edge_p2p (env
-        # TORCH_DISTRIBUTED_PIPELINE_PER_EDGE_P2P) force-enables it on other
-        # backends. When disabled every P2P op uses ``self.group``.
-        self.p2p_per_edge = (
-            dist_config.pipeline_per_edge_p2p
-            or dist.distributed_c10d._use_torchcomms_enabled()
-        )
+        # TORCH_DISTRIBUTED_PIPELINE_PER_EDGE_P2P). When disabled every P2P op
+        # uses ``self.group``.
+        self.p2p_per_edge = dist_config.pipeline_per_edge_p2p
         if not self.p2p_per_edge:
             _warn_if_eager_nccl(group)
         # Keys are (source group rank, destination group rank). Opposite
@@ -1871,7 +1867,8 @@ def build_stage(
         group (Optional[dist.ProcessGroup]): the process group to be used by this stage
 
     Returns:
-        _PipelineStage: a pipeline stage that can run with `PipelineSchedules`.
+        A pipeline stage that can run with the pipeline schedules, e.g.
+        :class:`~torch.distributed.pipelining.schedules.ScheduleGPipe`.
     """
     return _PipelineStage(
         stage_module,

@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     is_navi3_arch,
     parametrize,
     patch_test_members,
+    preserves_unittest_skip_marks,
     subtest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
@@ -74,6 +75,7 @@ class _TestDecomposeAddMM(torch.nn.Module):
     }
 )
 @instantiate_parametrized_tests
+@preserves_unittest_skip_marks()
 class TestDecomposeMemMM(TestCase):
     def __init__(self, method_name="runTest", methodName="runTest"):
         super().__init__(method_name, methodName)
@@ -533,7 +535,7 @@ class TestDecomposeBmmCpuDynamicShape(TestCase):
         """
         shape_env = ShapeEnv()
         size = shape_env.create_unbacked_symint()
-        torch._check_is_size(size)
+        torch._check(size >= 0)
         return self._bmm_nodes(size, size, shape_env)
 
     def _decomposes(self, node1, node2, options):
@@ -566,7 +568,7 @@ class TestDecomposeBmmCpuDynamicShape(TestCase):
         # small must keep the extern bmm rather than become a plain reduction.
         shape_env = ShapeEnv()
         size = shape_env.create_unbacked_symint()
-        torch._check_is_size(size)
+        torch._check(size >= 0)
         with FakeTensorMode(shape_env=shape_env):
             mat1 = torch.empty(size, 4096, 65, device="cpu")
             mat2 = torch.empty(size, 65, 5, device="cpu")

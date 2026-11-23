@@ -9,8 +9,9 @@ half, float, double and bfloat16) and complex :class:`Tensor` types (cfloat, cdo
 """
 
 import warnings
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
-from typing import cast, overload
+from typing import Any, cast, overload
 
 import torch
 from torch import _vmap_internals
@@ -258,7 +259,9 @@ def backward(
     retain_graph: bool | None = None,
     create_graph: bool = False,
     grad_variables: _TensorOrOptionalTensors | None = None,
-    inputs: _TensorOrTensorsOrGradEdge | dict[str, torch.Tensor] | None = None,
+    inputs: _TensorOrTensorsOrGradEdge | Mapping[str, torch.Tensor] | None = None,
+    *,
+    disallow_implicit_grad_accumulation: bool = False,
 ) -> None:
     r"""Compute the sum of gradients of given tensors with respect to graph leaves.
 
@@ -311,13 +314,18 @@ def backward(
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``.
-        inputs (Sequence[Tensor] or Tensor or Sequence[GradientEdge] or dict[str, Tensor], optional):
+        inputs (Sequence[Tensor] or Tensor or Sequence[GradientEdge] or Mapping[str, Tensor], optional):
             Inputs w.r.t. which the gradient will be accumulated into ``.grad``.
             All other Tensors will be ignored. If not provided, the gradient is
             accumulated into all the leaf Tensors that were used to compute the
-            :attr:`tensors`. A dict of tensors (e.g.
+            :attr:`tensors`. A mapping of tensors (e.g.
             ``dict(model.named_parameters())``) is also accepted, in which case
             the values are used as the input tensors.
+        disallow_implicit_grad_accumulation (bool, optional): When a tensor is used
+            more than once in forward, backward accumulates the gradient
+            contributions from each use. If ``True``, raise an error instead of
+            performing that accumulation. See
+            :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
     """
     if torch._C._are_functorch_transforms_active():
         raise RuntimeError(
@@ -348,14 +356,9 @@ def backward(
         inputs_tuple = cast(
             tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...], (inputs,)
         )
-    elif type(inputs) is dict:
+    elif isinstance(inputs, Mapping):
         # pyrefly: ignore [bad-argument-type]
         inputs_tuple = tuple(inputs.values())
-    elif isinstance(inputs, Mapping):
-        raise TypeError(
-            f"`inputs` argument to `backward()` must be a dict, not {type(inputs).__name__}. "
-            "Other Mapping types are not supported."
-        )
     else:
         # pyrefly: ignore [bad-argument-type]
         inputs_tuple = tuple(inputs)
@@ -374,6 +377,13 @@ def backward(
     t_inputs = tuple(t for t in inputs_tuple if is_tensor_like(t))
     overridable_args = t_tensors + t_inputs
     if has_torch_function(overridable_args):
+        # Pass the flag only when set, so overrides written against the
+        # signature without it keep working.
+        flag_kwargs: dict[str, Any] = (
+            {"disallow_implicit_grad_accumulation": True}
+            if disallow_implicit_grad_accumulation
+            else {}
+        )
         return handle_torch_function(
             backward,
             overridable_args,
@@ -382,6 +392,7 @@ def backward(
             retain_graph=retain_graph,
             create_graph=create_graph,
             inputs=inputs_tuple if inputs is not None else None,
+            **flag_kwargs,
         )
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
@@ -400,6 +411,7 @@ def backward(
         inputs_tuple,
         allow_unreachable=True,
         accumulate_grad=True,
+        disallow_implicit_grad_accumulation=disallow_implicit_grad_accumulation,
     )
 
 
@@ -414,13 +426,15 @@ def grad(
     allow_unused: bool | None = ...,
     is_grads_batched: bool = ...,
     materialize_grads: bool = ...,
+    *,
+    disallow_implicit_grad_accumulation: bool = ...,
 ) -> tuple[torch.Tensor, ...]: ...
 
 
 @overload
 def grad(
     outputs: _TensorOrTensorsOrGradEdge,
-    inputs: dict[str, torch.Tensor],
+    inputs: OrderedDict[str, torch.Tensor],
     grad_outputs: _TensorOrOptionalTensors | None = ...,
     retain_graph: bool | None = ...,
     create_graph: bool = ...,
@@ -428,12 +442,30 @@ def grad(
     allow_unused: bool | None = ...,
     is_grads_batched: bool = ...,
     materialize_grads: bool = ...,
+    *,
+    disallow_implicit_grad_accumulation: bool = ...,
+) -> OrderedDict[str, torch.Tensor]: ...
+
+
+@overload
+def grad(
+    outputs: _TensorOrTensorsOrGradEdge,
+    inputs: Mapping[str, torch.Tensor],
+    grad_outputs: _TensorOrOptionalTensors | None = ...,
+    retain_graph: bool | None = ...,
+    create_graph: bool = ...,
+    only_inputs: bool = ...,
+    allow_unused: bool | None = ...,
+    is_grads_batched: bool = ...,
+    materialize_grads: bool = ...,
+    *,
+    disallow_implicit_grad_accumulation: bool = ...,
 ) -> dict[str, torch.Tensor]: ...
 
 
 def grad(
     outputs: _TensorOrTensorsOrGradEdge,
-    inputs: _TensorOrTensorsOrGradEdge | dict[str, torch.Tensor],
+    inputs: _TensorOrTensorsOrGradEdge | Mapping[str, torch.Tensor],
     grad_outputs: _TensorOrOptionalTensors | None = None,
     retain_graph: bool | None = None,
     create_graph: bool = False,
@@ -441,6 +473,8 @@ def grad(
     allow_unused: bool | None = None,
     is_grads_batched: bool = False,
     materialize_grads: bool = False,
+    *,
+    disallow_implicit_grad_accumulation: bool = False,
 ) -> tuple[torch.Tensor, ...] | dict[str, torch.Tensor]:
     r"""Compute and return the sum of gradients of outputs with respect to the inputs.
 
@@ -463,10 +497,11 @@ def grad(
 
     Args:
         outputs (sequence of Tensor or GradientEdge): outputs of the differentiated function.
-        inputs (sequence of Tensor or GradientEdge or dict[str, Tensor]): Inputs w.r.t. which
+        inputs (sequence of Tensor or GradientEdge or Mapping[str, Tensor]): Inputs w.r.t. which
             the gradient will be returned (and not accumulated into ``.grad``).
-            When a dict is provided (e.g. ``dict(model.named_parameters())``),
-            the result is returned as a dict with matching keys.
+            When a mapping is provided (e.g. ``dict(model.named_parameters())``),
+            the result is returned as a dict with matching keys, or an OrderedDict
+            if ``inputs`` is an OrderedDict.
         grad_outputs (sequence of [Tensor or None] or Tensor, optional): The "vector" in the
             vector-Jacobian product. Usually gradients w.r.t. each output. None values can be
             specified for scalar Tensors or ones that don't require grad. If a None value would be
@@ -497,6 +532,11 @@ def grad(
             to zero instead of None. This is useful when computing higher-order derivatives.
             If ``materialize_grads`` is ``True`` and ``allow_unused`` is ``False``, an error
             will be raised. Defaults to ``False``.
+        disallow_implicit_grad_accumulation (bool, optional): When a tensor is used
+            more than once in forward, backward accumulates the gradient
+            contributions from each use. If ``True``, raise an error instead of
+            performing that accumulation. See
+            :ref:`disallow-implicit-grad-accumulation`. Defaults to ``False``.
 
     """
     if materialize_grads and allow_unused is False:
@@ -515,18 +555,18 @@ def grad(
         outputs = tuple(outputs)
 
     inputs_tuple: tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...]
+    inputs_mapping_keys: tuple[str, ...] | None = None
     if is_tensor_like(inputs) or isinstance(inputs, graph.GradientEdge):
         inputs_tuple = cast(
             tuple[torch.Tensor, ...] | tuple[graph.GradientEdge, ...], (inputs,)
         )
-    elif type(inputs) is dict:
-        # pyrefly: ignore [bad-argument-type]
-        inputs_tuple = tuple(inputs.values())
     elif isinstance(inputs, Mapping):
-        raise TypeError(
-            f"`inputs` argument to `grad()` must be a dict, not {type(inputs).__name__}. "
-            "Other Mapping types are not supported."
-        )
+        # Iterate `items()` once and unzip into keys/values. Some `Mapping`
+        # subclasses do not guarantee that separate `.keys()` and `.values()`
+        # iterations agree on order, so a single snapshot keeps them aligned.
+        items = list(inputs.items())
+        # pyrefly: ignore [bad-argument-type]
+        inputs_mapping_keys, inputs_tuple = tuple(zip(*items)) if items else ((), ())
     else:
         # pyrefly: ignore [bad-argument-type]
         inputs_tuple = tuple(inputs)
@@ -537,6 +577,13 @@ def grad(
     t_inputs = tuple(i for i in inputs_tuple if is_tensor_like(i))
     overridable_args = t_outputs + t_inputs
     if has_torch_function(overridable_args):
+        # Pass the flag only when set, so overrides written against the
+        # signature without it keep working.
+        flag_kwargs = (
+            {"disallow_implicit_grad_accumulation": True}
+            if disallow_implicit_grad_accumulation
+            else {}
+        )
         result_tuple = handle_torch_function(
             grad,
             overridable_args,
@@ -549,9 +596,12 @@ def grad(
             allow_unused=allow_unused,
             is_grads_batched=is_grads_batched,
             materialize_grads=materialize_grads,
+            **flag_kwargs,
         )
-        if type(inputs) is dict:
-            return dict(zip(inputs.keys(), result_tuple, strict=True))
+        if inputs_mapping_keys is not None:
+            if isinstance(inputs, OrderedDict):
+                return OrderedDict(zip(inputs_mapping_keys, result_tuple, strict=True))
+            return dict(zip(inputs_mapping_keys, result_tuple, strict=True))
         return result_tuple
 
     if not only_inputs:
@@ -585,6 +635,7 @@ def grad(
                 inputs_tuple,
                 allow_unused,
                 accumulate_grad=False,
+                disallow_implicit_grad_accumulation=disallow_implicit_grad_accumulation,
             )
 
         result = _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(
@@ -599,6 +650,7 @@ def grad(
             inputs_tuple,
             allow_unused,
             accumulate_grad=False,
+            disallow_implicit_grad_accumulation=disallow_implicit_grad_accumulation,
         )
     if materialize_grads:
         if any(
@@ -616,8 +668,10 @@ def grad(
                 strict=True,
             )
         )
-    if type(inputs) is dict:
-        return dict(zip(inputs.keys(), result, strict=True))
+    if inputs_mapping_keys is not None:
+        if isinstance(inputs, OrderedDict):
+            return OrderedDict(zip(inputs_mapping_keys, result, strict=True))
+        return dict(zip(inputs_mapping_keys, result, strict=True))
     return result
 
 

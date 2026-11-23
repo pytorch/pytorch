@@ -178,8 +178,8 @@ class _CheckpointContinuousTest(MultiProcContinuousTest):
         super().setUp()
 
     @classmethod
-    def backend_str(cls) -> str:
-        return cls.distributed_backend()
+    def backend_str(cls, device) -> str:
+        return dist.get_default_backend_for_device(device)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):

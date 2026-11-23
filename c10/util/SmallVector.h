@@ -176,7 +176,7 @@ class SmallVectorTemplateCommon
   /// NewSize.
   bool isSafeToReferenceAfterResize(const void* Elt, size_t NewSize) {
     // Past the end.
-    if (C10_LIKELY(!isReferenceToStorage(Elt)))
+    if (!isReferenceToStorage(Elt)) [[likely]]
       return true;
 
     // Return false if Elt will be destroyed by shrinking.
@@ -237,13 +237,13 @@ class SmallVectorTemplateCommon
       const T& Elt,
       size_t N) {
     size_t NewSize = This->size() + N;
-    if (C10_LIKELY(NewSize <= This->capacity()))
+    if (NewSize <= This->capacity()) [[likely]]
       return &Elt;
 
     bool ReferencesStorage = false;
     int64_t Index = -1;
     if constexpr (!U::TakesParamByValue) {
-      if (C10_UNLIKELY(This->isReferenceToStorage(&Elt))) {
+      if (This->isReferenceToStorage(&Elt)) [[unlikely]] {
         ReferencesStorage = true;
         Index = &Elt - This->begin();
       }
@@ -272,30 +272,30 @@ class SmallVectorTemplateCommon
   using Base::size;
 
   // forward iterator creation methods.
-  [[nodiscard]] iterator begin() {
+  [[nodiscard]] iterator begin() C10_LIFETIMEBOUND {
     return (iterator)this->BeginX;
   }
-  [[nodiscard]] const_iterator begin() const {
+  [[nodiscard]] const_iterator begin() const C10_LIFETIMEBOUND {
     return (const_iterator)this->BeginX;
   }
-  [[nodiscard]] iterator end() {
+  [[nodiscard]] iterator end() C10_LIFETIMEBOUND {
     return begin() + size();
   }
-  [[nodiscard]] const_iterator end() const {
+  [[nodiscard]] const_iterator end() const C10_LIFETIMEBOUND {
     return begin() + size();
   }
 
   // reverse iterator creation methods.
-  [[nodiscard]] reverse_iterator rbegin() {
+  [[nodiscard]] reverse_iterator rbegin() C10_LIFETIMEBOUND {
     return reverse_iterator(end());
   }
-  [[nodiscard]] const_reverse_iterator rbegin() const {
+  [[nodiscard]] const_reverse_iterator rbegin() const C10_LIFETIMEBOUND {
     return const_reverse_iterator(end());
   }
-  [[nodiscard]] reverse_iterator rend() {
+  [[nodiscard]] reverse_iterator rend() C10_LIFETIMEBOUND {
     return reverse_iterator(begin());
   }
-  [[nodiscard]] const_reverse_iterator rend() const {
+  [[nodiscard]] const_reverse_iterator rend() const C10_LIFETIMEBOUND {
     return const_reverse_iterator(begin());
   }
 
@@ -311,46 +311,47 @@ class SmallVectorTemplateCommon
   }
 
   /// Return a pointer to the vector's buffer, even if empty().
-  [[nodiscard]] pointer data() {
+  [[nodiscard]] pointer data() C10_LIFETIMEBOUND {
     return pointer(begin());
   }
   /// Return a pointer to the vector's buffer, even if empty().
-  [[nodiscard]] const_pointer data() const {
+  [[nodiscard]] const_pointer data() const C10_LIFETIMEBOUND {
     return const_pointer(begin());
   }
 
   // SmallVector::at is NOT from LLVM.
-  [[nodiscard]] reference at(size_type idx) {
+  [[nodiscard]] reference at(size_type idx) C10_LIFETIMEBOUND {
     assert(idx < size());
     return begin()[idx];
   }
-  [[nodiscard]] const_reference at(size_type idx) const {
+  [[nodiscard]] const_reference at(size_type idx) const C10_LIFETIMEBOUND {
     assert(idx < size());
     return begin()[idx];
   }
-  [[nodiscard]] reference operator[](size_type idx) {
+  [[nodiscard]] reference operator[](size_type idx) C10_LIFETIMEBOUND {
     assert(idx < size());
     return begin()[idx];
   }
-  [[nodiscard]] const_reference operator[](size_type idx) const {
+  [[nodiscard]] const_reference operator[](size_type idx) const
+      C10_LIFETIMEBOUND {
     assert(idx < size());
     return begin()[idx];
   }
 
-  [[nodiscard]] reference front() {
+  [[nodiscard]] reference front() C10_LIFETIMEBOUND {
     assert(!empty());
     return begin()[0];
   }
-  [[nodiscard]] const_reference front() const {
+  [[nodiscard]] const_reference front() const C10_LIFETIMEBOUND {
     assert(!empty());
     return begin()[0];
   }
 
-  [[nodiscard]] reference back() {
+  [[nodiscard]] reference back() C10_LIFETIMEBOUND {
     assert(!empty());
     return end()[-1];
   }
-  [[nodiscard]] const_reference back() const {
+  [[nodiscard]] const_reference back() const C10_LIFETIMEBOUND {
     assert(!empty());
     return end()[-1];
   }
@@ -996,7 +997,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
 
   template <typename... ArgTypes>
   reference emplace_back(ArgTypes&&... Args) {
-    if (C10_UNLIKELY(this->size() >= this->capacity()))
+    if (this->size() >= this->capacity()) [[unlikely]]
       return this->growAndEmplaceBack(std::forward<ArgTypes>(Args)...);
 
     ::new ((void*)this->end()) T(std::forward<ArgTypes>(Args)...);

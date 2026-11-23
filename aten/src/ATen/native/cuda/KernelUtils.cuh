@@ -34,7 +34,7 @@ using torch::headeronly::fastSpecializedAtomicAdd;
 // which is what at::native::storage_size_for computes on the host. The two
 // differ for a strided view, whose gaps are legal pairing partners: inside the
 // region, though belonging to whatever the view was taken from, and only ever
-// receiving a zero.
+// receiving -0.0, which leaves their values unchanged.
 template <
     typename scalar_t,
     size_t N,

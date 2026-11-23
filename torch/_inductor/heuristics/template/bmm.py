@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -105,15 +106,26 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             output_layout=output_layout
         )
         descriptor_options = {
+            "BATCH_SIZE": batch,
+            "LOGICAL_M": m,
+            "LOGICAL_N": n,
+            "DESCRIPTOR_K": k,
+            "A_BATCH_STRIDE": int(mat1.get_stride()[0]),
+            "B_BATCH_STRIDE": int(mat2.get_stride()[0]),
+            "K_BATCH_OFFSET": 0,
+            "A_M_STRIDE": int(mat1.get_stride()[1]),
+            "A_K_STRIDE": int(mat1.get_stride()[2]),
+            "B_K_STRIDE": int(mat2.get_stride()[1]),
+            "B_N_STRIDE": int(mat2.get_stride()[2]),
+            "OUTPUT_BATCH_ROWS": m,
             "NUM_SMS": get_num_sms(),
             "HOST_SIDE_TMA": host_side_tma,
             "A_ROW_MAJOR": a_row_major,
             "B_ROW_MAJOR": b_row_major,
             "A_BROADCAST_BATCH": a_broadcast,
             "B_BROADCAST_BATCH": b_broadcast,
+            "VIRTUAL_BATCH": False,
             "FLATTEN_OUTPUT": flatten_output,
-            # The grid needs the logical problem, not the flattened output size.
-            "call_sizes": (batch, m, n),
         }
         use_meta_ws = meta_ws_enabled()
         for candidate in self.bmm_configs:
@@ -138,6 +150,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "BLOCK_M": candidate.block_m,
                 "BLOCK_N": candidate.block_n,
                 "BLOCK_K": candidate.block_k,
+                "K_TILES": math.ceil(k / candidate.block_k),
                 "GROUP_M": 8,
                 "num_stages": candidate.num_stages,
                 "num_warps": candidate.num_warps,
