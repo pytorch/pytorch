@@ -92,6 +92,23 @@ class TestKernelRowTile(TestCase):
         mine = [k for k in rt._CACHE if "bydevice" in k]
         self.assertEqual(sorted(k[5] for k in mine), [0, 1])
 
+    def test_plans_key_the_device_index(self):
+        # The index follows the alignment in row-tile keys and the destination layout in
+        # inner-tree keys; without it, those slots would hold the next field.
+        trait = T.SumOps(acc=cutlass.Float32)
+        x = torch.randn(64, 512, device="cuda")
+        out = torch.empty(64, device="cuda")
+        (got,) = rt.reduce_row_tile(trait, "bykey", x, [torch.float32], order="linear")
+        self.assertTrue(rt.reduce_row_itree(trait, "bykey", x, out))
+        for result in (got, out):
+            torch.testing.assert_close(
+                result, x.double().sum(1).float(), atol=1e-5, rtol=1e-5
+            )
+        slots = {"rowtile": 5, "rowitree": 7}
+        devices = {(k[0], k[slots[k[0]]]) for k in rt._CACHE if k[1] == "bykey"}
+        index = x.get_device()
+        self.assertEqual(devices, {("rowtile", index), ("rowitree", index)})
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "requires 2 CUDA devices")
     def test_launchers_reject_a_non_current_device(self):
         # Both entry points check before compiling, so nothing is cached.
