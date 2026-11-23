@@ -132,7 +132,7 @@ pub fn clear_shortcuts() {
 }
 
 #[pyfunction]
-#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, max_trip_count=8, callees=true, shortcuts=true, demote=true, workspace=None, hook=true, graphs=None, export=None))]
+#[pyo3(signature = (func, passes, specialize=true, skip_autograd=true, unboxed=true, max_versions=4, max_respecializations=6, inline=true, unroll=true, max_trip_count=8, callees=true, shortcuts=true, demote=true, workspace=None, hook=true, graphs=None, export=None, derives=false))]
 pub fn compile(
     py: Python<'_>,
     func: &Bound<'_, PyAny>,
@@ -152,6 +152,7 @@ pub fn compile(
     hook: bool,
     graphs: Option<(usize, usize)>,
     export: Option<Bound<'_, PyAny>>,
+    derives: bool,
 ) -> PyResult<CfgFunction> {
     // What the pass "graphs" is made with: the least number of operations
     // of a graph and the most exported forms of one; and what makes an
@@ -195,7 +196,7 @@ pub fn compile(
                 let made = Graphs::default();
                 let (min_ops, max_variants) = graphs.unwrap_or((made.min_ops, made.max_variants));
                 let export = export.as_ref().map(|e| unsafe { PyObj::from_borrowed(e.as_ptr()) });
-                pipeline.push(Box::new(Graphs { min_ops, max_variants, export }));
+                pipeline.push(Box::new(Graphs { min_ops, max_variants, export, derives }));
                 continue;
             }
             match spec::builtin_pass(&name) {
@@ -373,7 +374,7 @@ impl CfgFunction {
                 ));
                 // Where graphs are exported, a block is shown as it runs
                 // while they are there: with what enters them.
-                let entered = |site: &Arc<GraphSite>| site.exporter.is_some();
+                let entered = |site: &Arc<GraphSite>| site.exports();
                 let entering = version.entering.as_ref().filter(|copy| copy.graphs.iter().any(entered));
                 let insts = entering.map_or(&version.insts, |copy| &copy.insts);
                 func.dump_code(&mut out, insts, &version.term);

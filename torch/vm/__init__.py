@@ -487,9 +487,8 @@ def vm(
     runtime = _load_runtime()
     export = None
     derives = found is not None and found.backward
-    if over_graph or derives:
-        # Only a pass over graphs has the engine hand a graph to Python, or
-        # the graph pass asked to derive the backward of its graphs.
+    if over_graph:
+        # Only a pass over graphs has the engine hand a graph to Python.
         _export = importlib.import_module("torch.vm._export")
         export = _export.exporter(tuple(over_graph), runtime, derives)
     try:
@@ -511,6 +510,9 @@ def vm(
             hook=os.environ.get("TORCH_VM_EVAL_FRAME", "1") != "0",
             graphs=None if found is None else (found.min_ops, found.max_variants),
             export=export,
+            # With no pass over graphs the engine exports to itself, and
+            # only the graphs whose tensors need a gradient.
+            derives=derives and not over_graph,
         )
     except NotImplementedError as e:
         if not fallback:
@@ -541,10 +543,12 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     times it was handed to the passes over graphs), and ``hits`` and
     ``misses`` (the calls that ran what was made of it, and those that came
     to it and ran its operations). The ``state`` is ``"built"`` for a graph
-    the engine runs itself; with a pass over graphs in the list, ``"waiting"``
-    for one that is exported at its next call and ``"compiled"`` for one that
-    what the passes returned runs in place of (with a ``reason`` if further
-    kinds of calls are not exported); and ``"vm"`` for one that is not
+    the engine runs itself; ``"waiting"`` for one that is exported at its
+    next call and ``"compiled"`` for one that what was made of it runs in
+    place of (with a ``reason`` if further kinds of calls are not exported),
+    which a graph is with a pass over graphs in the list, and from the first
+    call whose tensors need a gradient where the engine derives its backward
+    (``passes.Graphs``); and ``"vm"`` for one that is not
     exported, or not for the calls it has seen, with the ``reason``.
     ``forms`` lists the kinds of calls the graph was recorded for, the one
     that ran last first: per kind its ``checks`` (what a call has to be like

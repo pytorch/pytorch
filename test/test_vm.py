@@ -7528,8 +7528,12 @@ print(json.dumps(found))
             [sys.executable, "-c", script], capture_output=True, text=True, check=True
         )
         found = __import__("json").loads(ran.stdout.strip().split("\n")[-1])
-        self.assertEqual(found["graphs"], ["built"])
-        self.assertEqual(found["engine"], [])
+        # The weight needs a gradient: the engine derives the backward of
+        # the graph, and loads no compiler for that. What it loads is what
+        # it asks of a run before a callable may stand for it (whether the
+        # sizes of what an operation gives follow from its sizes).
+        self.assertEqual(found["graphs"], ["compiled"])
+        self.assertEqual(found["engine"], ["torch.vm._export"])
         # A pass over graphs of one's own brings the export, and nothing
         # else; a pass that compiles brings its compiler when it first runs.
         self.assertEqual(found["exported"], ["compiled"])
@@ -7639,7 +7643,9 @@ print(json.dumps(found))
             graphs.append([(t.dtype, t.requires_grad) for t in input_types])
             return gm
 
-        passes = (*DEFAULT, P.Graphs(max_variants=3), keep)
+        # (With `backward=False`: the pass is handed the graph of a call
+        # whose tensor needs a gradient as that.)
+        passes = (*DEFAULT, P.Graphs(max_variants=3, backward=False), keep)
         compiled = torch.vm(graph_poly, passes=passes, fallback=False)
         f32, f64 = torch.float32, torch.float64
         x, d, g = torch.randn(4), torch.randn(4, dtype=f64), torch.randn(4)
@@ -10497,6 +10503,14 @@ def graph_gives_loudly():
         yield step
 
 
+def graph_draws_behind_a_branch(x):
+    h = torch.tanh(torch.relu(x) + 1) * 2
+    if h.requires_grad:
+        h = h + 1
+    h = torch.nn.functional.dropout(h * 2, 0.5)
+    return torch.tanh(h) + 1
+
+
 def graph_pinned_scaled(h, scale=2.0, shift=1.0):
     return h * scale + shift
 
@@ -11509,18 +11523,26 @@ class TestVmGraphResults(TestCase):
         return out, torch.autograd.grad(out, (x, w))
 
     def test_the_engine_runs_a_graph_with_the_results_of_eager_mode(self, device):
-        compiled = torch.vm(graph_mixed, passes=GRAPHS, fallback=False)
-        for _ in range(5):
-            x = torch.randn(4, 8, device=device, requires_grad=True)
-            w = torch.randn(8, 8, device=device, requires_grad=True)
-            out, grads = self.step(compiled, x, w)
-            expected = self.step(graph_mixed, x, w)
-            self.assertEqual(out, expected[0], atol=0, rtol=0)
-            self.assertEqual(grads, expected[1], atol=0, rtol=0)
-            # On the tape of eager mode: the node of the last operation.
-            self.assertEqual(type(out.grad_fn).__name__, "AddBackward0")
-        (graph,) = torch.vm.regions(compiled)
-        self.assertEqual((graph["state"], graph["ops"]), ("built", 6))
+        # With `backward=False` on the tape of eager mode: the node of the
+        # last operation. Else the engine derives the backward: once the
+        # graph is proven, the node of the graph.
+        tape = (P.Graphs(backward=False), "AddBackward0", "built")
+        cases = (tape, (P.Graphs(), "GraphBackward", "compiled"))
+        for graphs, last, state in cases:
+            compiled = torch.vm(graph_mixed, passes=(*DEFAULT, graphs), fallback=False)
+            nodes = []
+            for _ in range(8):
+                x = torch.randn(4, 8, device=device, requires_grad=True)
+                w = torch.randn(8, 8, device=device, requires_grad=True)
+                out, grads = self.step(compiled, x, w)
+                expected = self.step(graph_mixed, x, w)
+                self.assertEqual(out, expected[0], atol=0, rtol=0)
+                self.assertEqual(grads, expected[1], atol=0, rtol=0)
+                nodes.append(type(out.grad_fn).__name__)
+            self.assertEqual(nodes[0], "AddBackward0")
+            self.assertEqual(nodes[-1], last)
+            (graph,) = torch.vm.regions(compiled)
+            self.assertEqual((graph["state"], graph["ops"]), (state, 6))
 
     def test_an_exported_graph_runs_on_the_kernels_of_eager_mode(self, device):
         graphs = []
@@ -11529,7 +11551,9 @@ class TestVmGraphResults(TestCase):
             graphs.append([(t.dtype, str(t.device)) for t in input_types])
             return gm
 
-        passes = (*DEFAULT, P.Graphs(), keep)
+        # The graph of the function, for a pass that is to see the tensors
+        # that need a gradient: the backward is eager's.
+        passes = (*DEFAULT, P.Graphs(backward=False), keep)
         compiled = torch.vm(graph_mixed, passes=passes, fallback=False)
         x = torch.randn(4, 8, device=device, requires_grad=True)
         w = torch.randn(8, 8, device=device, requires_grad=True)
@@ -11542,6 +11566,25 @@ class TestVmGraphResults(TestCase):
         self.assertEqual((graph["state"], graph["variants"]), ("compiled", 1))
         self.assertGreaterEqual(graph["hits"], 3)
         self.assertEqual(graphs, [[(torch.float32, str(x.device))] * 2])
+        # With the engine's backward a pass is handed two graphs, the
+        # forward and the backward, of tensors that need no gradient.
+        seen = []
+
+        def keeps(gm, input_types):
+            seen.append([t.requires_grad for t in input_types])
+            return gm
+
+        passes = (*DEFAULT, P.Graphs(), keeps)
+        compiled = torch.vm(graph_mixed, passes=passes, fallback=False)
+        for _ in range(8):
+            out, grads = self.step(compiled, x, w)
+            expected = self.step(graph_mixed, x, w)
+            self.assertEqual(out, expected[0], atol=0, rtol=0)
+            self.assertEqual(grads, expected[1], atol=0, rtol=0)
+        self.assertEqual(type(out.grad_fn).__name__, "GraphBackward")
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(seen[0], [False, False])
+        self.assertFalse(any(seen[1]))
 
     @parametrize("compiler", ("AOTAutograd", "Inductor"))
     def test_a_pass_that_compiles_a_graph(self, device, compiler):
@@ -11557,9 +11600,16 @@ class TestVmGraphResults(TestCase):
             self.assertEqual(grads, expected[1], rtol=1e-4, atol=1e-5)
             nodes.append(type(out.grad_fn).__name__)
         # The profiling run and the run that was exported are the block's
-        # own; then the backward is the one that was traced ahead of time.
+        # own. With AOTAutograd in the list the backward is then the one it
+        # traced ahead of time. Without, the engine derives the backward:
+        # two more runs are on the tape, and then Inductor has compiled
+        # the engine's two graphs, which have one node.
         self.assertEqual(nodes[:2], ["AddBackward0"] * 2)
-        self.assertEqual(nodes[2:], ["CompiledFunctionBackward"] * 4)
+        if compiler == "AOTAutograd":
+            self.assertEqual(nodes[2:], ["CompiledFunctionBackward"] * 4)
+        else:
+            derived = ["AddBackward0"] * 2 + ["GraphBackward"] * 2
+            self.assertEqual(nodes[2:], derived)
         (graph,) = torch.vm.regions(compiled)
         self.assertEqual((graph["state"], graph["variants"]), ("compiled", 1))
         self.assertEqual((graph["hits"], graph["misses"]), (4, 1))
@@ -12335,7 +12385,7 @@ class TestVmGraphResults(TestCase):
                     got = calls(compiled, what, graded, boxed)
                     expected = calls(fn, what, graded, boxed)
                     self.assertEqual(got, expected, msg=msg)
-                    if behind:
+                    if behind or graded:
                         # The calls before the change are the path's, and
                         # so are all where nothing changes.
                         ran = graph_runs_to_the_return(compiled)
@@ -12401,7 +12451,7 @@ class TestVmGraphResults(TestCase):
             got = calls(compiled, what, kept, graded, boxed)
             expected = calls(fn, what, kept, graded, boxed)
             self.assertEqual(got, expected, msg=msg)
-            if kept and behind:
+            if kept and (behind or graded):
                 # The caller keeps the tensor: every call is the path's.
                 ran = graph_runs_to_the_return(compiled)
                 self.assertGreaterEqual(ran, 6, msg=msg)
@@ -12619,7 +12669,7 @@ class TestVmGraphResults(TestCase):
             got = calls(compiled, what, kept, graded, boxed)
             expected = calls(fn, what, kept, graded, boxed)
             self.assertEqual(got, expected, msg=msg)
-            if behind:
+            if behind or graded:
                 # A tensor of torch's own memory is let go of by the path
                 # at every other call, and one that the caller keeps at
                 # every call.
@@ -12937,7 +12987,7 @@ class TestVmGraphResults(TestCase):
             got = calls(compiled, lambda: plant(what), graded, boxed)
             expected = calls(fn, lambda: plant(what), graded, boxed)
             self.assertEqual(got, expected, msg=msg)
-            if behind:
+            if behind or graded:
                 listed = torch.vm.regions(compiled)
                 graphs = [g for g in listed if "ops" in g and "within" not in g]
                 self.assertGreaterEqual(sum(g["hits"] for g in graphs), 4, msg=msg)
@@ -13013,7 +13063,7 @@ class TestVmGraphResults(TestCase):
             got = calls(compiled, what, graded, boxed)
             expected = calls(fn, what, graded, boxed)
             self.assertTrue(got == expected, msg=f"{msg}: {got} {expected}")
-            if behind:
+            if behind or graded:
                 listed = torch.vm.regions(compiled)
                 graphs = [g for g in listed if "ops" in g and "within" not in g]
                 # What ends quietly is no reason to turn a path down.
@@ -13077,7 +13127,10 @@ class TestVmGraphResults(TestCase):
             found.append((gave, box, seen, plain(GRAPH_CHANGE_TABLE)))
         return found
 
-    def graph_change_as_eager(self, fns, device, makes=()):
+    def graph_change_as_eager(self, fns, device, held=(), makes=()):
+        # `held`: functions that store a tensor with a gradient function
+        # where the call before stored one, which a path does not let go
+        # of where it lands: with a gradient their graphs need not run.
         def keep(gm, input_types):
             return gm
 
@@ -13092,7 +13145,7 @@ class TestVmGraphResults(TestCase):
                     differ = [(at, a, b) for at, (a, b) in pairs if a != b]
                     msg = f"{fn.__name__}, a pass: {bool(behind)}, a gradient: {graded}"
                     self.assertEqual(differ[:1], [], msg=msg)
-                    if behind:
+                    if behind or (graded and fn not in held):
                         listed = torch.vm.regions(compiled)
                         graphs = [g for g in listed if "ops" in g and "within" not in g]
                         hits = sum(g["hits"] for g in graphs)
@@ -13128,7 +13181,8 @@ class TestVmGraphResults(TestCase):
             graph_change_ends_an_iterator,
             graph_change_goes_over_a_tuple,
         ]
-        self.graph_change_as_eager(fns, device)
+        held = (graph_change_appends_a_result,)
+        self.graph_change_as_eager(fns, device, held=held)
 
     def test_an_extend_that_waits_takes_what_the_list_holds_at_its_place(self, device):
         # A store into an object from outside waits for the path to land;
@@ -13224,6 +13278,32 @@ class TestVmGraphResults(TestCase):
         for other in (three, two, zipped, generated):
             self.graph_change_as_eager(fns, device, makes=(row, other))
 
+    def test_a_draw_that_a_path_does_not_take_says_what_is_in_its_way(self, device):
+        # With a pass over graphs an operation that draws random numbers
+        # is one of the graph, unless the path has taken down something
+        # that can fail behind the graph (here a branch on what a tensor
+        # the graph gives says of itself): a draw cannot be taken back,
+        # so the path ends in front of it. What `regions` gives as the
+        # reason says that, and not what it says of a draw with
+        # `Graphs()` alone.
+        def keep(gm, input_types):
+            return gm
+
+        x = torch.randn(3, 4, device=device)
+        fn = graph_draws_behind_a_branch
+        draws = "in dropout: aten::dropout draws random numbers"
+        for behind, why in (((), draws), ((keep,), draws + " behind what can fail")):
+            passes = (*DEFAULT, P.Graphs(), *behind)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            for _ in range(6):
+                torch.manual_seed(3)
+                expected = fn(x)
+                torch.manual_seed(3)
+                self.assertEqual(compiled(x), expected, atol=0, rtol=0)
+            listed = torch.vm.regions(compiled)
+            graphs = [g for g in listed if "ops" in g and "within" not in g]
+            self.assertEqual([(g["ops"], g["why"]) for g in graphs], [(5, why)])
+
     def graph_thing_cases(self, device, group, debug=False):
         # The cases of a group of `GRAPH_THINGS` in a process of their own:
         # one that does not come back within the time limit, or that ends
@@ -13296,7 +13376,7 @@ class TestVmGraphResults(TestCase):
                         grads.append((out.detach(), leaf.grad))
                     where = f"{msg}, call {at}"
                     self.assertEqual(grads[0], grads[1], atol=0, rtol=0, msg=where)
-                if behind:
+                if behind or graded:
                     found = torch.vm.regions(compiled)
                     graphs = [g for g in found if "ops" in g and "within" not in g]
                     ran = sum(g["hits"] for g in graphs)
@@ -13336,7 +13416,7 @@ class TestVmGraphResults(TestCase):
             "a_cycle_extended_outside",
         )
         for name in runs:
-            for way in ("pass",):
+            for way in ("pass", "gradient"):
                 graphs = found[name][way]["graphs"]
                 ran = sum(hits for _, hits in graphs)
                 self.assertGreaterEqual(ran, 6, msg=f"{name}, {way}: {graphs}")
@@ -13358,7 +13438,7 @@ class TestVmGraphResults(TestCase):
             "outside_stored",
         )
         for name in runs:
-            for way in ("pass",):
+            for way in ("pass", "gradient"):
                 graphs = found[name][way]["graphs"]
                 ran = sum(hits for _, hits in graphs)
                 self.assertGreaterEqual(ran, 6, msg=f"{name}, {way}: {graphs}")
@@ -13379,7 +13459,7 @@ class TestVmGraphResults(TestCase):
         found = self.graph_thing_cases(device, "sides")
         self.assertEqual(len(found), 23)
         for name, ways in found.items():
-            for way in ("pass",):
+            for way in ("pass", "gradient"):
                 graphs = ways[way]["graphs"]
                 ran = sum(hits for _, hits in graphs)
                 self.assertGreaterEqual(ran, 6, msg=f"{name}, {way}: {graphs}")
@@ -13399,7 +13479,7 @@ class TestVmGraphResults(TestCase):
         found = self.graph_thing_cases(device, "own")
         self.assertEqual(len(found), 8)
         for name, ways in found.items():
-            for way in ("pass",):
+            for way in ("pass", "gradient"):
                 graphs = ways[way]["graphs"]
                 whole = sum(hits for ops, hits in graphs if ops >= 7)
                 self.assertGreaterEqual(whole, 6, msg=f"{name}, {way}: {graphs}")
@@ -13506,7 +13586,7 @@ class TestVmGraphResults(TestCase):
             return found
 
         for fn, usual, other in cases:
-            for behind, graded in (((), False), ((keep,), False)):
+            for behind, graded in (((), False), ((keep,), False), ((), True)):
                 passes = (*DEFAULT, P.Graphs(), *behind)
                 compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
                 msg = f"{fn.__name__} with {usual()!r} and {other()!r}"
@@ -13564,7 +13644,7 @@ class TestVmGraphResults(TestCase):
 
         try:
             for fn, usual, other in cases:
-                for behind, graded in (((), False), ((keep,), False)):
+                for behind, graded in (((), False), ((keep,), False), ((), True)):
                     passes = (*DEFAULT, P.Graphs(), *behind)
                     compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
                     msg = f"{fn.__name__} with {usual()!r} and {other()!r}"
@@ -13595,7 +13675,7 @@ class TestVmGraphResults(TestCase):
 
         models = ((GraphWithinModel, False), (GraphWithinModel, True))
         for model_class, loud in models:
-            for graded in (False,):
+            for graded in (False, True):
                 model = model_class(loud).to(device)
                 passes = (*DEFAULT, P.Graphs(), keep)
                 compiled = torch.vm(model, passes=passes, fallback=False, demote=False)
@@ -14019,7 +14099,7 @@ class TestVmGraphBackward(TestCase):
         w = torch.randn(4, 4, device=device, requires_grad=True)
         b = torch.randn(4, device=device, requires_grad=True)
         # A form that is cut is taken down twice, and then each part twice.
-        for _ in range(4 if states is ONE_NODE else 6):
+        for _ in range(6 if states is ONE_NODE else 8):
             compiled(torch.randn(3, 4, device=device), w, b)
         self.assertEqual(self.states(), states)
         # The forms are looked at behind the calls: the function stays.
@@ -14091,6 +14171,42 @@ class TestVmGraphBackward(TestCase):
                 node = node.next_functions[0][0] if node.next_functions else None
             expected = ["NllLossBackward0", "LogSoftmaxBackward0", "GraphBackward"]
             self.assertEqual(names, expected)
+
+    def test_the_backward_is_derived_whatever_the_calls_before_were(self, device):
+        torch.manual_seed(0)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        b = torch.randn(4, device=device, requires_grad=True)
+
+        def call(fn, x, how):
+            if how == "none":
+                with torch.no_grad():
+                    return fn(x, w, b)
+            if how == "plain":
+                return fn(x, w.detach(), b.detach())
+            return fn(x, w, b)
+
+        # Calls without gradients first; gradients on and off by turns; the
+        # other order; and calls with gradients enabled whose tensors need
+        # none, after which the graph is looked at again at the second,
+        # fourth and eighth call with gradients enabled.
+        orders = (
+            ["none"] * 3 + ["graded"] * 10,
+            ["none", "graded"] * 10,
+            ["graded"] * 8 + ["none"] * 3 + ["graded"] * 2,
+            ["plain"] * 5 + ["graded"] * 14,
+        )
+        for order in orders:
+            compiled = self.staged(back_pair)
+            for how in order:
+                x = torch.randn(3, 4, device=device)
+                got, expected = call(compiled, x, how), call(back_pair, x, how)
+                self.alike(got, expected)
+            self.assertEqual(order[-1], "graded")
+            self.assertEqual(self.states(), ["the engine's backward"])
+            self.assertEqual(type(got[0].grad_fn).__name__, "GraphBackward")
+            mine = torch.autograd.grad(got[0] + got[1], (w, b))
+            theirs = torch.autograd.grad(expected[0] + expected[1], (w, b))
+            self.alike(mine, theirs)
 
     def test_results_come_with_a_gradient_in_any_combination(self, device):
         def use(fn, x, w, b):

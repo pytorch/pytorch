@@ -159,7 +159,18 @@ struct SettledBlocks {
     /// whether they took a noticeable part of it (`below`).
     watched: std::cell::Cell<bool>,
     below: std::cell::Cell<bool>,
+    /// For a function with a graph that is exported for nothing but its
+    /// backward and has its path from calls that needed none
+    /// (`GraphSite::dormant`): after how many more calls with gradients
+    /// enabled such graphs are taken down again, and after how many they
+    /// were the last time. (0, _) where there is no such graph.
+    dormant: std::cell::Cell<(u32, u32)>,
 }
+
+/// A graph that waits for a call whose tensors need a gradient is taken
+/// down again by the first call with gradients enabled, and then by every
+/// second, fourth, ... such call, to every one in this many at most.
+const DORMANT_GAP: u32 = 4096;
 
 /// Whether a callee is worth running compiled is measured, not assumed: the
 /// generic tier is slower than the interpreter on plain Python, so a callee
@@ -1970,6 +1981,7 @@ impl Compiled {
                 trial: std::cell::Cell::new(Trial::start(PLAN_EPOCH.load(Ordering::Relaxed))),
                 watched: std::cell::Cell::new(false),
                 below: std::cell::Cell::new(false),
+                dormant: std::cell::Cell::new((0, 1)),
             },
             generic,
             state: Shared::new(state),
@@ -4654,7 +4666,7 @@ impl Compiled {
             unsettled();
             return PathEnd::Miss;
         }
-        if site.exporter.is_none() && site.variants.borrow().is_empty() && self.asks(site, block) {
+        if !site.exports() && site.variants.borrow().is_empty() && self.asks(site, block) {
             // A graph that starts earlier in the function is taken down
             // again: this call goes a way its path does not, and may come
             // through here.
@@ -6414,7 +6426,8 @@ impl Compiled {
         // the graph for as long as nothing that can fail behind the
         // callable has been taken down: it cannot be taken back.
         let outside = std::cell::Cell::new(false);
-        let draws = site.exporter.is_some() && !t.fallible;
+        let draws = site.exports() && !t.fallible;
+        let behind = site.exports() && t.fallible;
         let operators = self.operation(block, origin, inst, regs, api, &|v| owned(t, v), (!t.fallible).then_some(&outside), draws);
         if operators.is_none() {
             if let Some(taken) = self.record_call(t, site, (block, code as *const BlockCode, pc), regs, frames, api) {
@@ -6474,7 +6487,7 @@ impl Compiled {
                 // something of (what that is draws in its place; a pass
                 // that returns the graph draws eager's numbers), and like
                 // a write to a tensor from outside it cannot be taken back.
-                let draws = !(dropout && idle) && site.exporter.is_some() && !t.fallible;
+                let draws = !(dropout && idle) && site.exports() && !t.fallible;
                 outside.set(draws);
                 ((dropout && idle) || draws).then_some(Kind::Node)
             }
@@ -6563,7 +6576,7 @@ impl Compiled {
                 let seen = found.map_or(String::new(), |f| format!("runs {} operators {:?} frames {} wrote {}", f.runs, f.operators, f.frames, f.wrote));
                 eprintln!("torch.vm graph: a path ends in {} in front of {} ({})", self.func.qualname, self.func.op_repr(&inst.op), seen);
             }
-            graph::why_not(&self.func, &inst.op, found, reason)
+            graph::why_not(&self.func, &inst.op, found, reason, behind)
         };
         let ends = || Taken::Ends(why());
         let Some(kind) = kind else {
@@ -6978,7 +6991,7 @@ impl Compiled {
         // Asked only where graphs are exported (a path that is only
         // reported never runs in place of the instructions), and of a run
         // that is described (not under a mode, which would see it asked).
-        let asked = site.exporter.is_some().then_some(t.rec.failed.is_none());
+        let asked = site.exports().then_some(t.rec.failed.is_none());
         let fixed = fixed && (kind != Kind::Node || self.sized(inst, regs, picked, obj, operators.as_deref(), asked, api));
         // What a node gave: a tensor, or nothing that is read (a store, a
         // write whose result is dropped).
@@ -8969,9 +8982,29 @@ impl Compiled {
         if whole.is_some_and(|place| site.shun(place, "what an operation with several results gives is used whole")) || t.again {
             return PathEnd::Landed(landing);
         }
-        let finished = path.provisional || path.operators.len() < site.min_ops || site.exporter.is_none();
+        // Whether a tensor the path takes needs a gradient, with gradients
+        // enabled: the engine derives the backward of such a call.
+        let graded = world.0 & 1 != 0
+            && path.feeds.iter().any(|v| {
+                let held = t.rec.values[*v as usize];
+                let mut info = TcfgTensorInfo::empty();
+                !held.is_null() && (api.tensor_info)(held, &mut info) != 0 && info.requires_grad != 0
+            });
+        if site.derives && !site.exports() && graded {
+            // The first such call to a graph that is exported for nothing
+            // but its backward: its paths are taken down for that from
+            // here on, this one again at the next call (what a callable can
+            // stand for goes further than what is only reported: through
+            // an operation that draws random numbers, say).
+            site.needs_gradients();
+            return PathEnd::Landed(landing);
+        }
+        let finished = path.provisional || path.operators.len() < site.min_ops || !site.exports();
         if finished {
             site.install(path, None);
+            if site.dormant() && self.settled.dormant.get().0 == 0 {
+                self.settled.dormant.set((1, 1));
+            }
             return PathEnd::Landed(landing);
         }
         let mut described = path.describe(&site.name, &t.rec, api);
@@ -8991,6 +9024,10 @@ impl Compiled {
             }
         }
         let graph::Described { description, mut closed, checks, numbers, args, aliases, bumps } = described;
+        if closed.is_none() && site.derives && !graded {
+            // Nothing to derive, and no pass over graphs to hand it to.
+            closed = Some("no tensor of the call needs a gradient: its operations run as they are".to_string());
+        }
         if closed.is_none() && t.inplace {
             // What autograd kept of an operation was written to in place:
             // eager raises when it goes backward, and so must this call.
@@ -9061,6 +9098,37 @@ impl Compiled {
         result
     }
 
+    /// A call comes to a function with a graph that waits for a call whose
+    /// tensors need a gradient (`GraphSite::dormant`). Whether a call is
+    /// one is seen where a path is taken down: with gradients enabled the
+    /// graph is taken down again, by this call or by one of the next (see
+    /// `DORMANT_GAP`). What the graph was taken down by before does not
+    /// matter: calls without gradients are not counted.
+    #[cold]
+    unsafe fn wake(&self) {
+        if capi::backward_api().is_none_or(|api| (api.grad_enabled)() == 0) {
+            return;
+        }
+        let (left, gap) = self.settled.dormant.get();
+        if left > 1 {
+            self.settled.dormant.set((left - 1, gap));
+            return;
+        }
+        let mut found = false;
+        for (b, bs) in self.state.borrow().blocks.iter().enumerate() {
+            for (_, site) in &bs.graphs {
+                if site.wake() {
+                    found = true;
+                    // The code that enters the graph runs again.
+                    let unsettled = Settled { code: std::ptr::null(), ..self.settled.blocks[b].get() };
+                    self.settled.blocks[b].set(unsettled);
+                }
+            }
+        }
+        let gap = (gap * 2).min(DORMANT_GAP);
+        self.settled.dormant.set(if found { (gap, gap) } else { (0, 1) });
+    }
+
     /// Runs the function: from its first block, or from where a path that
     /// was taken down through this call of it left off (`start`).
     unsafe fn exec_blocks(&self, regs: &mut [Obj], frames: &mut Frames, start: Option<PathEnd>) -> Obj {
@@ -9068,6 +9136,9 @@ impl Compiled {
         let func = &self.func;
         if self.options.specialize {
             self.settled.calls.set(self.settled.calls.get() + 1);
+        }
+        if self.settled.dormant.get().0 != 0 && start.is_none() {
+            self.wake();
         }
         let serial = self.settled.calls.get();
         let mut cur: usize = 0;
