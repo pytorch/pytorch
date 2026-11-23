@@ -113,11 +113,12 @@ def one_thread_row_ok(
 
 # --- INNER-TREE ORDER (opt-in) --- Unlike launch-shape orders, this fixes the DAG from N,
 # making it hash-pinnable, and covers every N to prevent silent fallback. It costs
-# 0.92-1.41x the rolled fold and requires per-N compilation. Column layouts take the
-# general axis's decoded-gather tree ahead of coltile: x.sum(0) of fp32 (65536, 256) took
-# 68.4us against 17.2us (B200 CUDA graphs, L2-cold). Its independent env var avoids
-# affecting upstream kernels, which register first. `1` prefers the order and warns once when
-# a call cannot use it; `strict` raises instead, as an explicit order= argument does.
+# 0.92-1.41x the rolled fold and requires per-N compilation. On B200, column layouts try
+# reduce_ordered_col first; otherwise they take the general axis's decoded-gather tree
+# ahead of coltile: x.sum(0) of fp32 (65536, 256) took 68.4us against 17.2us (B200 CUDA
+# graphs, L2-cold). Its independent env var avoids affecting upstream kernels, which
+# register first. `1` prefers the order and warns once when a call cannot use it;
+# `strict` raises instead, as an explicit order= argument does.
 _INNER_TREE_ENV = "PYTORCH_NATIVE_INNER_TREE"
 _INNER_TREE_STRICT = "strict"
 # Reasons a dispatcher cannot serve an inner-tree request.
@@ -331,7 +332,10 @@ def reduction_order(
     if order is None:
         return "inner_tree" if inner_tree_order_enabled() else "unordered"
     if order not in ("unordered", "inner_tree"):
-        raise ValueError(f"unknown reduction order: {order!r}")
+        raise ValueError(
+            f"unknown reduction order {order!r}: expected None, 'unordered' or "
+            "'inner_tree' (the kernel launchers spell unordered 'linear')"
+        )
     return order
 
 
@@ -342,7 +346,7 @@ def inner_tree_fallback(reason: str, *, explicit: bool = False) -> None:
     """Fall back from an unservable inner-tree request: raise for an explicit order= or
     the strict env gate, else warn once per reason."""
     if explicit:
-        raise ValueError(reason)
+        raise ValueError(f"order='inner_tree' cannot be honoured: {reason}")
     if _inner_tree_env() == _INNER_TREE_STRICT:
         raise ValueError(f"{_INNER_TREE_ENV}=strict cannot be honoured: {reason}")
     if reason not in _warned_inner_tree_reasons:
@@ -350,7 +354,8 @@ def inner_tree_fallback(reason: str, *, explicit: bool = False) -> None:
         strict = f"{_INNER_TREE_ENV}={_INNER_TREE_STRICT}"
         warnings.warn(
             f"{_INNER_TREE_ENV} could not be honoured ({reason}); such reductions use "
-            f"unordered kernels. Set {strict} to raise instead."
+            f"unordered kernels. Set {strict} to raise instead.",
+            stacklevel=3,
         )
 
 
@@ -438,6 +443,7 @@ class _ItreePlan(NamedTuple):
     # COMBINE shape only: partials per row per cp.async-staged smem tile. 0 folds straight from
     # global. Also bit-neutral -- staging moves where the operand is read from, not the chain.
     combine_tile: int = 0
+    # Staged fold unroll factor; 0 with a nonzero combine_tile unrolls a whole tile.
     combine_unroll: int = 0
     # Staged COMBINE only: every partial holds split[1] values (tile.uniform_combine_ok). The
     # fold derives counts from it, so the count field is not staged. With "weights", a row
@@ -1106,9 +1112,12 @@ def reduce_row_tile(
             trait, N, M, x.element_size(), device=x.device, arch=arch
         )
     if order == "inner_tree" and itree is None:
+        plan = trait_itree_plan(
+            trait, N, M, x.element_size(), device=x.device, arch=arch
+        )
         raise ValueError(
             f"order='inner_tree' cannot be honoured here: {final=} {threads_per_row=} "
-            f"plan={trait_itree_plan(trait, N, M, x.element_size(), device=x.device) is not None}"
+            f"plan={plan is not None}"
         )
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts, arch=arch)
