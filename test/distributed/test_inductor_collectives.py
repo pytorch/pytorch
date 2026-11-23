@@ -3594,6 +3594,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         from torch._inductor.scheduler import (
             BaseSchedulerNode,
             ExternKernelSchedulerNode,
+            GroupedSchedulerNode,
         )
 
         mock_node_1 = mock.create_autospec(ExternKernelSchedulerNode)
@@ -3602,39 +3603,37 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
 
         mock_node_2 = mock.create_autospec(ExternKernelSchedulerNode)
         mock_node_3 = mock.create_autospec(BaseSchedulerNode)
+        leaves = [mock_node_1, mock_node_2, mock_node_3]
+        estimates = [(0.125, 0.75, 0.5), (0.25, 0.375, 0.875)]
+        for index, leaf in enumerate(leaves):
+            leaf.get_name.return_value = f"op{index}"
+            leaf.override_estimated_runtime = None
+            leaf.get_estimated_runtime.return_value = estimates[self.rank][index]
 
-        if self.rank == 0:
-            mock_node_1.override_estimated_runtime = 0.1
-            mock_node_2.override_estimated_runtime = 0.3
-            mock_node_3.override_estimated_runtime = 0.5
-        else:
-            mock_node_1.override_estimated_runtime = 0.2
-            mock_node_2.override_estimated_runtime = 0.4
-            mock_node_3.override_estimated_runtime = 0.6
-
-        mock_node_1.get_estimated_runtime.side_effect = (
-            lambda: mock_node_1.override_estimated_runtime
-        )
-        mock_node_2.get_estimated_runtime.side_effect = (
-            lambda: mock_node_2.override_estimated_runtime
-        )
-        mock_node_3.get_estimated_runtime.side_effect = (
-            lambda: mock_node_3.override_estimated_runtime
-        )
+        nested_group = object.__new__(GroupedSchedulerNode)
+        nested_group.node = None
+        nested_group.snodes = [mock_node_2]
+        nested_group.temp_grouping = True
+        nested_group.override_estimated_runtime = 99.0
+        group = object.__new__(GroupedSchedulerNode)
+        group.node = None
+        group.snodes = [mock_node_1, nested_group]
+        group.temp_grouping = False
+        group.override_estimated_runtime = 99.0
 
         self._init_process_group()
-        from torch._inductor.comms import (
-            align_runtime_estimations_across_all_distributed_ranks,
-        )
-
-        align_runtime_estimations_across_all_distributed_ranks(
-            [mock_node_1, mock_node_2, mock_node_3]
-        )
-
-        # all nodes should be aligned across ranks (median)
-        self.assertEqual(mock_node_1.override_estimated_runtime, 0.1)
-        self.assertEqual(mock_node_2.override_estimated_runtime, 0.3)
-        self.assertEqual(mock_node_3.override_estimated_runtime, 0.5)
+        with comms.config.patch(estimate_op_runtime="default"):
+            self.assertTrue(
+                comms.align_runtime_estimations_across_all_distributed_ranks(
+                    [group, mock_node_3]
+                )
+            )
+            for leaf, expected in zip(leaves, (0.125, 0.375, 0.5)):
+                self.assertEqual(leaf.override_estimated_runtime, expected)
+                self.assertEqual(comms.estimate_op_runtime(leaf), expected)
+                leaf.get_estimated_runtime.assert_called_once_with()
+            self.assertEqual(comms.estimate_op_runtime(nested_group), 0.375)
+            self.assertEqual(comms.estimate_op_runtime(group), 0.5)
 
     @skip_if_lt_x_gpu(2)
     def test_all_gather_comm_analysis(self):

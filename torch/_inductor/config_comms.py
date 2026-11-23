@@ -9,7 +9,8 @@ runtime_estimations_use_nccl_lib_estimations: bool = False
 
 # Config to enable sync of runtime estimations across distributed ranks,
 # To prevent passes using this runtime estimations to make different
-# decisions on different distributed ranks.
+# decisions on different distributed ranks. If scheduler leaves differ across
+# ranks, communication overlap passes are skipped.
 runtime_estimations_align_across_all_distributed_ranks: bool = False
 
 reorder_iterative_debug_memory_recompute: bool = False
@@ -24,6 +25,8 @@ sink_waits_iterative_debug_limit_to_sink: int | None = (
 )
 
 
+# Runtime-based scheduling includes per-process-group queues and wait stalls.
+# With runtime estimation, reorder preserves same-process-group FIFO order.
 # Should be used with config.runtime_estimations_mms_benchmark = True
 reorder_iterative_use_runtime_estimations: bool = False
 sink_iterative_use_runtime_estimations: bool = False
@@ -57,6 +60,7 @@ reorder_iterative_peak_memory_budget: float = 0.2
 sink_iterative_peak_memory_budget: float = 0.2
 
 # Experimental unsafe configuration that allows changing relative collectives order.
+# Runtime-based reorder still preserves FIFO order within each process group.
 # Must be used with runtime_estimations_align_across_all_distributed_ranks = True
 reorder_iterative_unsafe_collectives_reorder: bool = True
 sink_waits_iterative_unsafe_collectives_reorder: bool = True

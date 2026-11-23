@@ -9,13 +9,14 @@ import logging
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, config_comms, ir
+from .comm_analysis import _get_collective_group_name
 from .dependencies import WeakDep
 
 
@@ -41,38 +42,50 @@ if TYPE_CHECKING:
 
 def align_runtime_estimations_across_all_distributed_ranks(
     snodes: list[BaseSchedulerNode],
-):
-    runtime_estimations = [snode.get_estimated_runtime() for snode in snodes]
+) -> bool:
+    leaves = [leaf for snode in snodes for leaf in _collective_group_leaves(snode)]
+    runtime_estimations = [estimate_op_runtime(leaf) for leaf in leaves]
 
     import torch.distributed as dist
     from torch.distributed.distributed_c10d import _get_default_group
 
+    signature = [
+        (index, leaf.get_name())
+        for index, snode in enumerate(snodes)
+        for leaf in _collective_group_leaves(snode)
+    ]
     world_size = dist.get_world_size()
     pg = _get_default_group()
-    gathered_runtime_estimations: list[list[float]] = [[] for _ in range(world_size)]
-    dist.all_gather_object(
-        gathered_runtime_estimations,
-        runtime_estimations,
-        pg,
-    )
-
-    lengths = OrderedSet([len(e) for e in gathered_runtime_estimations])
-    if len(lengths) != 1:
-        log.warning(
-            "Different ranks have different numbers of scheduler nodes (%s), "
-            "skipping runtime estimation alignment",
-            [len(e) for e in gathered_runtime_estimations],
-        )
-        for idx, snode in enumerate(snodes):
-            snode.override_estimated_runtime = runtime_estimations[idx]
-        return
+    gathered: list[Any] = [None] * world_size
+    dist.all_gather_object(gathered, (signature, runtime_estimations), pg)
+    for rank, (keys, _) in enumerate(gathered):
+        if keys != signature:
+            index = next(
+                (
+                    i
+                    for i, pair in enumerate(zip(signature, keys))
+                    if pair[0] != pair[1]
+                ),
+                min(len(signature), len(keys)),
+            )
+            log.warning(
+                "Scheduler leaf mismatch on rank %s at index %s: %s != %s; "
+                "skipping communication overlap reordering",
+                rank,
+                index,
+                keys[index : index + 1],
+                signature[index : index + 1],
+            )
+            return False
+    gathered_runtime_estimations = [values for _, values in gathered]
 
     median_runtime_estimations = torch.median(
         torch.tensor(gathered_runtime_estimations), dim=0
     ).values.tolist()
 
-    for idx, snode in enumerate(snodes):
+    for idx, snode in enumerate(leaves):
         snode.override_estimated_runtime = median_runtime_estimations[idx]
+    return True
 
 
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
@@ -202,7 +215,7 @@ def _temp_group_visit_leaves(snode: BaseSchedulerNode, fn):
 
     if isinstance(snode, GroupedSchedulerNode) and snode.temp_grouping:
         for _snode in snode.snodes:
-            fn(_snode)
+            _temp_group_visit_leaves(_snode, fn)
     else:
         fn(snode)
 
@@ -388,13 +401,22 @@ def _coll_exposed_communication_time(
     runtimes: dict[BaseSchedulerNode, float],
     node_output_sets: dict[BaseSchedulerNode, frozenset[str]],
     node_dep_sets: dict[BaseSchedulerNode, frozenset[str]],
+    timeline: _CollectiveQueueTimeline | None = None,
 ) -> tuple[float, float, str]:
-    """
-    Calculate exposed communication time by iterating directly over linked list.
-    Avoids O(N) list construction for each call.
+    r"""Return communication and overlap time for ``collective_snode``.
 
-    The collective_snode is the starting point, iteration continues via next_dict.
+    A supplied timeline includes FIFO queue delays and compute-stream stalls.
+    Otherwise, walk ``next_dict`` from the collective to its corresponding wait.
     """
+    if timeline is not None:
+        comm_time, comp_time = timeline.collective_times.get(
+            collective_snode, (0.0, 0.0)
+        )
+        return (
+            comm_time,
+            comp_time,
+            f"queue_delay[{timeline.delays.get(collective_snode, 0.0)}]",
+        )
     comm_time = runtimes[collective_snode]
     comp_time = 0.0
     collective_outs = node_output_sets[collective_snode]
@@ -442,6 +464,192 @@ def _coll_exposed_communication_time(
     return comm_time, comp_time, overlap_info
 
 
+def _collective_process_group_name(snode: BaseSchedulerNode) -> str | None:
+    node = snode.node
+    if not isinstance(node, ir.FallbackKernel):
+        return None
+    try:
+        group_name = _get_collective_group_name(cast(ir._CollectiveKernel, node))
+    except (AttributeError, IndexError, TypeError):
+        return None
+    if not isinstance(group_name, str):
+        group_name = getattr(group_name, "group_name", None)
+    return group_name if isinstance(group_name, str) and group_name else None
+
+
+def _collective_group_leaves(snode: BaseSchedulerNode):
+    from .scheduler import GroupedSchedulerNode
+
+    if isinstance(snode, GroupedSchedulerNode):
+        for child in snode.snodes:
+            yield from _collective_group_leaves(child)
+    else:
+        yield snode
+
+
+def _collective_runtime_estimations(
+    snodes: list[BaseSchedulerNode],
+) -> dict[BaseSchedulerNode, float]:
+    from .scheduler import GroupedSchedulerNode
+
+    runtimes: dict[BaseSchedulerNode, float] = {}
+
+    def estimate(snode: BaseSchedulerNode) -> float:
+        if snode not in runtimes:
+            if isinstance(snode, GroupedSchedulerNode):
+                runtimes[snode] = sum(estimate(child) for child in snode.snodes)
+            else:
+                runtimes[snode] = estimate_op_runtime(
+                    snode
+                ) * _op_runtime_estimate_mult(snode)
+        return runtimes[snode]
+
+    for snode in snodes:
+        estimate(snode)
+    return runtimes
+
+
+def _collective_process_groups(
+    snodes: list[BaseSchedulerNode],
+) -> dict[BaseSchedulerNode, str | None]:
+    return {
+        leaf: _collective_process_group_name(leaf)
+        for snode in snodes
+        for leaf in _collective_group_leaves(snode)
+        if contains_collective(leaf)
+    }
+
+
+@dataclass
+class _CollectiveQueueTimeline:
+    r"""Outer-node timing, selecting the leaf with the greatest exposure.
+
+    ``delays`` and ``wait_delays`` are FIFO queue delays. ``idle`` records
+    removable stream gaps that delay a later outer node's queued collective.
+    ``collective_times`` and ``wait_times`` hold (communication, overlap) pairs;
+    communication includes queue delay and overlap includes earlier wait stalls.
+    """
+
+    delays: dict[BaseSchedulerNode, float]
+    idle: dict[BaseSchedulerNode, float]
+    collective_times: dict[BaseSchedulerNode, tuple[float, float]]
+    wait_times: dict[BaseSchedulerNode, tuple[float, float]]
+    wait_delays: dict[BaseSchedulerNode, float]
+
+
+def _record_exposed_time(times, snode, comm_time, comp_time):
+    previous = times.get(snode)
+    if previous is None or comm_time - comp_time > previous[0] - previous[1]:
+        times[snode] = comm_time, comp_time
+
+
+def _collective_queue_timeline(
+    head: BaseSchedulerNode | None,
+    next_dict: dict[BaseSchedulerNode, BaseSchedulerNode | None],
+    runtimes: dict[BaseSchedulerNode, float],
+    process_groups: dict[BaseSchedulerNode, str | None],
+) -> _CollectiveQueueTimeline:
+    """
+    Estimate FIFO communication per process group and a compute clock stalled by
+    waits and synchronous collectives. Unresolved groups use independent streams;
+    contention across process groups and CPU launch overhead are not modelled.
+
+    Times are keyed by the outer scheduler node, taking its most exposed leaf.
+    Idle only includes gaps whose removal helps the next queued collective.
+    """
+    timeline = _CollectiveQueueTimeline({}, {}, {}, {}, {})
+    pg_free_ts: dict[str | BaseSchedulerNode, float] = {}
+    previous_coll = {}
+    buffer_times = {}
+    launches = {}
+    waited: OrderedSet[BaseSchedulerNode] = OrderedSet()
+    t = 0.0
+    snode = head
+    while snode is not None:
+        for leaf in _collective_group_leaves(snode):
+            if contains_wait(leaf):
+                arrival = t
+                for dep in leaf.unmet_dependencies:
+                    if _is_fake_dep(dep) or dep.name not in buffer_times:
+                        continue
+                    owner, coll, issue, finish = buffer_times[dep.name]
+                    timeline.wait_delays[snode] = max(
+                        timeline.wait_delays.get(snode, 0.0),
+                        finish - issue - runtimes[coll],
+                    )
+                    _record_exposed_time(
+                        timeline.wait_times, snode, finish - issue, arrival - issue
+                    )
+                    if coll not in waited:
+                        _record_exposed_time(
+                            timeline.collective_times,
+                            owner,
+                            finish - issue,
+                            arrival - issue,
+                        )
+                        waited.add(coll)
+                    t = max(t, finish)
+            elif contains_collective(leaf):
+                pg = process_groups[leaf] or leaf
+                free_ts = pg_free_ts.get(pg, 0.0)
+                start = max(t, free_ts)
+                finish = start + runtimes[leaf]
+                if contains_async_collective(leaf):
+                    timeline.delays[snode] = max(
+                        timeline.delays.get(snode, 0.0), start - t
+                    )
+                    timeline.idle.setdefault(snode, 0.0)
+                    if pg in previous_coll and start > t:
+                        owner, gap = previous_coll[pg]
+                        if owner is not snode:
+                            timeline.idle[owner] = max(timeline.idle[owner], gap)
+                    previous_coll[pg] = snode, start - free_ts
+                    launches[leaf] = snode, t, finish
+                    for output in leaf.get_outputs():
+                        buffer_times[output.get_name()] = snode, leaf, t, finish
+                else:
+                    previous_coll.pop(pg, None)
+                    t = finish
+                pg_free_ts[pg] = finish
+            else:
+                if isinstance(leaf.node, ir.MultiOutput):
+                    for dep in leaf.unmet_dependencies:
+                        if _is_fake_dep(dep) or dep.name not in buffer_times:
+                            continue
+                        for output in leaf.get_outputs():
+                            buffer_times[output.get_name()] = buffer_times[dep.name]
+                t += runtimes[leaf]
+        snode = next_dict[snode]
+    for coll, (owner, issue, finish) in launches.items():
+        if coll not in waited:
+            _record_exposed_time(
+                timeline.collective_times, owner, finish - issue, t - issue
+            )
+    return timeline
+
+
+def _collective_queue_after_swap(
+    candidate,
+    group_head,
+    group_tail,
+    head,
+    prev_dict,
+    next_dict,
+    runtimes,
+    process_groups,
+    *,
+    sink=False,
+):
+    trial_prev, trial_next = prev_dict.copy(), next_dict.copy()
+    swap = (
+        _perform_double_linked_list_swap_sink_waits
+        if sink
+        else _perform_double_linked_list_swap
+    )
+    trial_head = swap(candidate, group_head, group_tail, trial_prev, trial_next, head)
+    return _collective_queue_timeline(trial_head, trial_next, runtimes, process_groups)
+
+
 def _wait_exposed_communication_time(
     wait_snode: BaseSchedulerNode,
     head: BaseSchedulerNode,
@@ -449,13 +657,17 @@ def _wait_exposed_communication_time(
     runtimes: dict[BaseSchedulerNode, float],
     node_output_sets: dict[BaseSchedulerNode, frozenset[str]],
     node_dep_sets: dict[BaseSchedulerNode, frozenset[str]],
+    timeline: _CollectiveQueueTimeline | None = None,
 ) -> tuple[float, float, str]:
-    """
-    Calculate exposed communication time for a wait operation by iterating
-    directly over linked list backwards. Avoids O(N) list construction.
+    r"""Return communication and overlap time for ``wait_snode``.
 
-    Iterates from wait_snode backwards using prev_dict to find corresponding collective.
+    A supplied timeline includes FIFO queue delays and earlier wait stalls.
+    Otherwise, walk ``prev_dict`` backwards to the corresponding collective.
     """
+    if timeline is not None:
+        comm_time, comp_time = timeline.wait_times.get(wait_snode, (0.0, 0.0))
+        delay = timeline.wait_delays.get(wait_snode, 0.0)
+        return comm_time, comp_time, f"queue_delay[{delay}] wait_stalls_included"
     comm_time = 0.0
     comp_time = 0.0
     overlap_info = ""
@@ -885,6 +1097,7 @@ def _reorder_communication_preserving_peak_memory_internal(
     if not has_collectives:
         return snodes, {}
 
+    use_runtime_estimations = config_comms.reorder_iterative_use_runtime_estimations
     original_snodes_num = len(snodes)
     # heuristic to avoid degenerating to quadratic time
     graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
@@ -898,10 +1111,14 @@ def _reorder_communication_preserving_peak_memory_internal(
         candidate_buffer_map,
     ) = _initialize_memory_tracking(snodes, graph_inputs, graph_outputs)
 
-    runtimes: dict[BaseSchedulerNode, float] = {
-        snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
-        for snode in snodes
-    }
+    runtimes: dict[BaseSchedulerNode, float] = (
+        _collective_runtime_estimations(snodes)
+        if use_runtime_estimations
+        else {
+            snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
+            for snode in snodes
+        }
+    )
 
     # Pre-compute output and dependency sets for O(1) lookup instead of O(N) creation per iteration
     node_output_sets: dict[BaseSchedulerNode, frozenset[str]] = {
@@ -931,6 +1148,10 @@ def _reorder_communication_preserving_peak_memory_internal(
         config_comms.reorder_iterative_debug_memory_recompute
     )
     iterative_recompute_error = False
+    timeline: _CollectiveQueueTimeline | None = None
+    process_groups = {}
+    if config_comms.reorder_iterative_use_runtime_estimations:
+        process_groups = _collective_process_groups(snodes)
 
     while curr is not None and _next[curr] is not None:
         _next_curr = _next[curr]
@@ -948,19 +1169,25 @@ def _reorder_communication_preserving_peak_memory_internal(
         num_processed_collectives += 1
 
         info = stats[curr] = ReorderInfo()
+        if config_comms.reorder_iterative_use_runtime_estimations and timeline is None:
+            timeline = _collective_queue_timeline(
+                _head, _next, runtimes, process_groups
+            )
         comm_time, comp_time, overlap_info = _coll_exposed_communication_time(
-            curr, _next, runtimes, node_output_sets, node_dep_sets
+            curr, _next, runtimes, node_output_sets, node_dep_sets, timeline
         )
         info.comm_time = comm_time
         info.comp_time = comp_time
         info.initial_exposed = info.final_exposed = comm_time - comp_time
         info.overlap_info = overlap_info
+        stream_idle = timeline.idle.get(curr, 0.0) if timeline is not None else 0.0
+        if timeline is not None:
+            info.overlap_info += f" stream_idle_to_fill[{stream_idle}]"
 
         candidate = _prev[curr]
         group_head = curr
         group_tail = curr
         group_waits = {}
-        group_runtime = 0.0
         group_peak_memory = _curr_memory[curr][0]  # post_alloc memory
 
         # Track group dependencies incrementally - initialize from pre-computed sets
@@ -968,10 +1195,15 @@ def _reorder_communication_preserving_peak_memory_internal(
         group_output_names = OrderedSet(node_output_sets[curr])
 
         while candidate is not None:
-            if config_comms.reorder_iterative_use_runtime_estimations and (
-                info.final_exposed
-                < -config_comms.reorder_iterative_extra_comm_comp_overlap
-                * info.comm_time
+            trial: _CollectiveQueueTimeline | None = None
+            if (
+                config_comms.reorder_iterative_use_runtime_estimations
+                and stream_idle <= 0
+                and (
+                    info.final_exposed
+                    < -config_comms.reorder_iterative_extra_comm_comp_overlap
+                    * info.comm_time
+                )
             ):
                 info.limiting_factor = "unexposed by runtime estimations"
                 break
@@ -1013,10 +1245,9 @@ def _reorder_communication_preserving_peak_memory_internal(
                                 runtimes,
                                 node_output_sets,
                                 node_dep_sets,
+                                timeline,
                             )
                             group_waits[candidate] = comm_time, comp_time
-                        if not contains_async_collective(candidate):
-                            group_runtime += runtimes[candidate]
 
                     group_peak_memory = max(
                         group_peak_memory, _curr_memory[candidate][0]
@@ -1073,27 +1304,46 @@ def _reorder_communication_preserving_peak_memory_internal(
                                     gw_comp_time - c_runtime,
                                 )
                 else:
-                    # Candidate is async_collective
-
-                    # Unsafe collectives reordering
-                    # Cj -> [...group_runtime..., Ci] -> Wj
-                    # Checking that we are not increasing exposed time of Cj
-                    if group_runtime > 0:
-                        comm_time, comp_time, _ = _coll_exposed_communication_time(
-                            candidate, _next, runtimes, node_output_sets, node_dep_sets
+                    current_pgs = OrderedSet(
+                        process_groups[leaf]
+                        for node in _group_nodes_from_linked_list(
+                            group_head, group_tail, _next
                         )
-                        # pyrefly: ignore[no-matching-overload]
-                        exposed_before = max(0, comm_time - comp_time)
-                        # pyrefly: ignore[no-matching-overload]
-                        exposed_after = max(0, comm_time - comp_time + group_runtime)
-                        exposed_delta = exposed_after - exposed_before
-                        if exposed_delta > 0:
-                            info.limiting_factor = (
-                                f"candidate {candidate.get_name()} is collective,"
-                                f" group_runtime:{group_runtime},"
-                                f" exposed_delta:{exposed_delta} c_comm_time:{comm_time} c_comp_time:{comp_time}"
-                            )
-                            break
+                        for leaf in _collective_group_leaves(node)
+                        if leaf in process_groups and process_groups[leaf] is not None
+                    )
+                    candidate_pgs = OrderedSet(
+                        process_groups[leaf]
+                        for leaf in _collective_group_leaves(candidate)
+                        if leaf in process_groups and process_groups[leaf] is not None
+                    )
+                    if current_pgs & candidate_pgs:
+                        info.limiting_factor = f"same process-group FIFO ordering with {candidate.get_name()}"
+                        break
+                    trial = _collective_queue_after_swap(
+                        candidate,
+                        group_head,
+                        group_tail,
+                        _head,
+                        _prev,
+                        _next,
+                        runtimes,
+                        process_groups,
+                    )
+                    comm_time, comp_time = (
+                        timeline.collective_times.get(candidate, (0.0, 0.0))
+                        if timeline is not None
+                        else (0.0, 0.0)
+                    )
+                    new_comm, new_comp = trial.collective_times.get(
+                        candidate, (0.0, 0.0)
+                    )
+                    if max(0.0, new_comm - new_comp) > max(0.0, comm_time - comp_time):
+                        info.limiting_factor = (
+                            f"candidate collective exposure increases with {candidate.get_name()}:"
+                            f" {max(0.0, comm_time - comp_time)} -> {max(0.0, new_comm - new_comp)}"
+                        )
+                        break
 
             # Create group nodes list once for swap operations
             gns: list[BaseSchedulerNode] = _group_nodes_from_linked_list(
@@ -1143,19 +1393,57 @@ def _reorder_communication_preserving_peak_memory_internal(
                     f"peak memory new:{potential_peak} vs base:{peak_memory}"
                 )
                 break
+            if timeline is not None:
+                if trial is None:
+                    trial = _collective_queue_after_swap(
+                        candidate,
+                        group_head,
+                        group_tail,
+                        _head,
+                        _prev,
+                        _next,
+                        runtimes,
+                        process_groups,
+                    )
+                new_comm, new_comp = trial.collective_times.get(curr, (0.0, 0.0))
+                candidate_compute = any(
+                    runtimes[leaf] > 0
+                    and not contains_wait(leaf)
+                    and not contains_async_collective(leaf)
+                    for leaf in _collective_group_leaves(candidate)
+                )
+                wait_comm, wait_comp = timeline.wait_times.get(candidate, (0.0, 0.0))
+                if (
+                    (candidate_compute or wait_comm > wait_comp)
+                    and new_comm - new_comp >= info.final_exposed
+                    and trial.idle.get(curr, 0.0) >= stream_idle
+                ):
+                    info.limiting_factor = (
+                        f"no queue-aware overlap improvement with {candidate.get_name()}:"
+                        f" exposed {info.final_exposed} -> {new_comm - new_comp},"
+                        f" idle {stream_idle} -> {trial.idle.get(curr, 0.0)}"
+                    )
+                    break
             info.moves += 1
             total_moves += 1
 
             _head = _perform_double_linked_list_swap(
                 candidate, group_head, group_tail, _prev, _next, _head
             )
+            if timeline is not None:
+                timeline = trial
+                stream_idle = (
+                    timeline.idle.get(curr, 0.0) if timeline is not None else 0.0
+                )
 
             comm_time, comp_time, overlap_info = _coll_exposed_communication_time(
-                curr, _next, runtimes, node_output_sets, node_dep_sets
+                curr, _next, runtimes, node_output_sets, node_dep_sets, timeline
             )
             info.comm_time = comm_time
             info.comp_time = comp_time
             info.overlap_info = overlap_info
+            if timeline is not None:
+                info.overlap_info += f" stream_idle_to_fill[{stream_idle}]"
             info.final_exposed = comm_time - comp_time
 
             _update_memory_tracking_after_swap_reorder(
@@ -1778,6 +2066,7 @@ def _find_buffers_with_changed_last_use_sink_waits(
 def _sink_waits_iterative_internal(
     snodes: list[BaseSchedulerNode],
 ) -> tuple[list[BaseSchedulerNode], dict[BaseSchedulerNode, SinkWaitInfo]]:
+    use_runtime_estimations = config_comms.sink_iterative_use_runtime_estimations
     original_snodes_num = len(snodes)
     if original_snodes_num == 0:
         return snodes, {}
@@ -1796,10 +2085,14 @@ def _sink_waits_iterative_internal(
 
     stats: dict[BaseSchedulerNode, SinkWaitInfo] = {}
 
-    runtimes: dict[BaseSchedulerNode, float] = {
-        snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
-        for snode in snodes
-    }
+    runtimes: dict[BaseSchedulerNode, float] = (
+        _collective_runtime_estimations(snodes)
+        if use_runtime_estimations
+        else {
+            snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
+            for snode in snodes
+        }
+    )
 
     # Pre-compute output and dependency sets for O(1) lookup instead of O(N) creation per iteration
     node_output_sets: dict[BaseSchedulerNode, frozenset[str]] = {
@@ -1823,6 +2116,10 @@ def _sink_waits_iterative_internal(
     )
 
     iterative_recompute_error = False
+    timeline: _CollectiveQueueTimeline | None = None
+    process_groups = {}
+    if config_comms.sink_iterative_use_runtime_estimations:
+        process_groups = _collective_process_groups(snodes)
     while curr is not None and _prev[curr] is not None:
         _prev_curr = _prev[curr]
         if iterative_recompute_error:
@@ -1839,8 +2136,12 @@ def _sink_waits_iterative_internal(
 
         processed_waits.add(curr)
         info = stats[curr] = SinkWaitInfo()
+        if config_comms.sink_iterative_use_runtime_estimations and timeline is None:
+            timeline = _collective_queue_timeline(
+                _head, _next, runtimes, process_groups
+            )
         comm_time, comp_time, overlap_info = _wait_exposed_communication_time(
-            curr, _head, _prev, runtimes, node_output_sets, node_dep_sets
+            curr, _head, _prev, runtimes, node_output_sets, node_dep_sets, timeline
         )
         info.initial_exposed = info.final_exposed = comm_time - comp_time
         info.comm_time = comm_time
@@ -1851,7 +2152,6 @@ def _sink_waits_iterative_internal(
         group_head = curr
         group_tail = curr
         group_colls = {}
-        group_runtime = 0.0
         group_peak_memory = _curr_memory[curr][0]
 
         # Track group outputs and check collective status incrementally - initialize from pre-computed set
@@ -1908,11 +2208,14 @@ def _sink_waits_iterative_internal(
                         and contains_collective(candidate)
                     ):
                         comm_time, comp_time, _ = _coll_exposed_communication_time(
-                            candidate, _next, runtimes, node_output_sets, node_dep_sets
+                            candidate,
+                            _next,
+                            runtimes,
+                            node_output_sets,
+                            node_dep_sets,
+                            timeline,
                         )
                         group_colls[candidate] = (comm_time, comp_time)
-                        if not contains_async_collective(candidate):
-                            group_runtime += runtimes[candidate]
 
                     group_peak_memory = max(
                         group_peak_memory, _curr_memory[candidate][0]
@@ -1939,7 +2242,7 @@ def _sink_waits_iterative_internal(
                     break
 
             if config_comms.sink_iterative_use_runtime_estimations:
-                if is_wait(candidate.node):
+                if contains_wait(candidate):
                     # Corresponding collective is before the group,
                     # Swap can increase exposed time of corresponding collective
                     comm_time, comp_time, _ = _wait_exposed_communication_time(
@@ -1949,11 +2252,23 @@ def _sink_waits_iterative_internal(
                         runtimes,
                         node_output_sets,
                         node_dep_sets,
+                        timeline,
                     )
                     # pyrefly: ignore[no-matching-overload]
                     exposed_before = max(0, comm_time - comp_time)
-                    # pyrefly: ignore[no-matching-overload]
-                    exposed_after = max(0, comm_time - comp_time + group_runtime)
+                    trial = _collective_queue_after_swap(
+                        candidate,
+                        group_head,
+                        group_tail,
+                        _head,
+                        _prev,
+                        _next,
+                        runtimes,
+                        process_groups,
+                        sink=True,
+                    )
+                    new_comm, new_comp = trial.wait_times.get(candidate, (0.0, 0.0))
+                    exposed_after = max(0.0, new_comm - new_comp)
                     # We do not know how much we can sink more after this swap,
                     # Just comparing advantage at the moment for now.
                     if exposed_after > exposed_before:
@@ -2052,9 +2367,13 @@ def _sink_waits_iterative_internal(
             _head = _perform_double_linked_list_swap_sink_waits(
                 candidate, group_head, group_tail, _prev, _next, _head
             )
+            if timeline is not None:
+                timeline = _collective_queue_timeline(
+                    _head, _next, runtimes, process_groups
+                )
 
             comm_time, comp_time, overlap_info = _wait_exposed_communication_time(
-                curr, _head, _prev, runtimes, node_output_sets, node_dep_sets
+                curr, _head, _prev, runtimes, node_output_sets, node_dep_sets, timeline
             )
             info.comm_time = comm_time
             info.comp_time = comp_time
@@ -2139,9 +2458,16 @@ def sink_waits_iterative(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerN
 
 
 def estimate_op_runtime(snode: BaseSchedulerNode) -> float:
+    r"""Estimate runtime in milliseconds, honoring aligned leaf overrides.
+
+    Grouped nodes sum their children instead of invoking a group estimator.
     """
-    Returns estimated op runtime in milliseconds (ms)
-    """
+    from .scheduler import GroupedSchedulerNode
+
+    if isinstance(snode, GroupedSchedulerNode):
+        return sum(estimate_op_runtime(child) for child in snode.snodes)
+    if snode.override_estimated_runtime is not None:
+        return snode.override_estimated_runtime
     if config.estimate_op_runtime == "default":
         runtime = snode.get_estimated_runtime()
     else:

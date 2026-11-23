@@ -6428,18 +6428,17 @@ class Scheduler:
                     self.nodes, self.name_to_buf
                 )
 
+            runtime_estimations_aligned = True
             if config_comms.runtime_estimations_align_across_all_distributed_ranks:
-                has_collectives = False
-                for node in self.nodes:
-                    if is_collective(node.node):
-                        has_collectives = True
-                        break
+                has_collectives = any(
+                    comms.contains_collective(node) for node in self.nodes
+                )
                 if has_collectives:
-                    from .comms import (
-                        align_runtime_estimations_across_all_distributed_ranks,
+                    runtime_estimations_aligned = (
+                        comms.align_runtime_estimations_across_all_distributed_ranks(
+                            self.nodes
+                        )
                     )
-
-                    align_runtime_estimations_across_all_distributed_ranks(self.nodes)
 
             # pyrefly: ignore [unbound-name]
             if config_comms.reorder_sink_verbose_logging:
@@ -6460,7 +6459,8 @@ class Scheduler:
                         ]
                     ),
                 )
-            self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+            if runtime_estimations_aligned:
+                self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
 
         if config.aten_distributed_optimizations.enable_simple_overlap:
             if (
