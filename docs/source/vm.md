@@ -454,6 +454,14 @@ The limits of this stage:
   the frame of the function there: `locals()`, a callee that reads its
   caller's frame (`sys._getframe(1).f_locals`) and the frame of a traceback
   do not have it.
+- A `for` that is left by `break`, `return` or an exception has its
+  generator closed in front of the loop's body, not where the loop is left;
+  so ends any other iterator, and a list that only its iterator holds. A
+  function whose body, or a `finally` on its way out, reads what that end
+  changes computes other values than in eager mode, with the default passes
+  as well. The value of a `return` whose `finally` returns or breaks ends in
+  front of the `finally` in the same way: what the interpreter keeps on its
+  stack is let go of behind its last use, not where the interpreter pops it.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
