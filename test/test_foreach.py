@@ -18,11 +18,9 @@ from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
     dtypesIfCPU,
-    dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     OpDTypes,
     ops,
     skipXPU,
@@ -1825,7 +1823,6 @@ class TestForeachDevice(TestCase):
         self.assertEqual(self_tensor, ref_out)
 
     @onlyAccelerator
-    @dtypesIfXPU(torch.uint16, torch.uint32, torch.uint64)
     @dtypes(torch.uint16, torch.uint32, torch.uint64, torch.float8_e8m0fnu)
     def test_foreach_copy_unfused_dtypes(self, device, dtype):
         # The fused kernel doesn't instantiate these, so they take the slow path.
@@ -1881,26 +1878,6 @@ class TestForeachDevice(TestCase):
                 self.assertEqual(dsts, ref_inputs, atol=0, rtol=0)
             with self.assertRaisesRegex(RuntimeError, "Boolean alpha"):
                 foreach_op(dsts, others, alpha=True)
-
-    @onlyCUDA
-    @dtypes(torch.float16, torch.bfloat16, torch.float8_e5m2)
-    def test_foreach_copy_preserves_nan_bits(self, device, dtype):
-        # Same-dtype lists, which the fused kernel copies, keep NaN signs and payloads.
-        nans = {
-            torch.float16: [-1, 0x7C01, 0x7D00],
-            torch.bfloat16: [-1, 0x7F81, 0x7FC1],
-            torch.float8_e5m2: [-3, 0x7D, 0x7E],
-        }
-        int_dtype = torch.int8 if dtype.itemsize == 1 else torch.int16
-        bits = torch.tensor(nans[dtype] + [1], dtype=int_dtype, device=device)
-        src = [bits.view(dtype), bits.flip(0).view(dtype)]
-        dst = [torch.empty_like(s) for s in src]
-        ForeachFuncWrapper(torch.foreach.copy_)(
-            (dst, src), device=device, expect_fastpath=True
-        )
-        self.assertEqual(
-            [d.view(int_dtype) for d in dst], [s.view(int_dtype) for s in src]
-        )
 
     @requires_gpu_and_triton
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
@@ -2219,6 +2196,33 @@ class TestForeachMixedDtypeCUDA(TestCase):
 
 
 instantiate_device_type_tests(TestForeachMixedDtypeCUDA, globals(), only_for="cuda")
+
+
+@unittest.mock.patch.dict(os.environ, {"KINETO_LOG_LEVEL": "5"})
+class TestForeachCopyCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float8_e5m2)
+    def test_foreach_copy_preserves_nan_bits(self, device, dtype):
+        # Same-dtype lists, which the fused kernel copies, keep NaN signs and payloads.
+        nans = {
+            torch.float16: [-1, 0x7C01, 0x7D00],
+            torch.bfloat16: [-1, 0x7F81, 0x7FC1],
+            torch.float8_e5m2: [-3, 0x7D, 0x7E],
+        }
+        int_dtype = torch.int8 if dtype.itemsize == 1 else torch.int16
+        bits = torch.tensor(nans[dtype] + [1], dtype=int_dtype, device=device)
+        src = [bits.view(dtype), bits.flip(0).view(dtype)]
+        dst = [torch.empty_like(s) for s in src]
+        ForeachFuncWrapper(torch.foreach.copy_)(
+            (dst, src), device=device, expect_fastpath=True
+        )
+        self.assertEqual(
+            [d.view(int_dtype) for d in dst], [s.view(int_dtype) for s in src]
+        )
+
+
+instantiate_device_type_tests(TestForeachCopyCUDA, globals(), only_for="cuda")
 
 
 class TestForeachPublicAPI(TestCase):
