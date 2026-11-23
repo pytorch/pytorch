@@ -1582,6 +1582,20 @@ class CompilePackage:
         if record:
             self._installed_globals.setdefault(module, []).append(name)
 
+    def _install_import_sources(
+        self, module: types.ModuleType, import_sources: dict[str, str]
+    ) -> None:
+        # An __import_* alias someone else bound first may be held BY REFERENCE
+        # by a loaded artifact's guards -- AOTCompiledFunction._seed_guard_scope
+        # seeds those aliases into a live module scope and nothing re-seeds them
+        # -- so uninstall() must leave a binding this package did not create
+        # alone. The aliases and the ___unnamed_scope keys _bind_unnamed_scopes
+        # binds are the only names install() records that are ever seeded that
+        # way.
+        for alias, module_name in import_sources.items():
+            module_obj = importlib.import_module(module_name)
+            self._install_global(module, alias, module_obj, record_only_if_new=True)
+
     def _install_resume_functions(
         self,
         module: types.ModuleType,
@@ -1729,20 +1743,7 @@ class CompilePackage:
             )
             with context:
                 module = sys.modules[entry.python_module]
-                # An __import_* alias someone else bound first may be held BY
-                # REFERENCE by a loaded artifact's guards --
-                # AOTCompiledFunction._seed_guard_scope seeds those aliases into
-                # a live module scope and nothing re-seeds them -- so uninstall()
-                # must leave a binding this package did not create alone. The
-                # aliases and the ___unnamed_scope keys below are the only names
-                # install() records that are ever seeded that way.
-                for alias, module_name in entry.import_sources.items():
-                    self._install_global(
-                        module,
-                        alias,
-                        importlib.import_module(module_name),
-                        record_only_if_new=True,
-                    )
+                self._install_import_sources(module, entry.import_sources)
                 target_code = code
                 if entry.install_to_global:
                     self._install_resume_functions(module, code, entry.function_names)
