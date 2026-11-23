@@ -424,6 +424,8 @@ impl CfgFunction {
         out.set_item("unboxed_results", cf.unboxed_results.load(Ordering::Relaxed))?;
         out.set_item("boxed_later", cf.boxed_later.load(Ordering::Relaxed))?;
         out.set_item("bound_later", cf.bound_later.load(Ordering::Relaxed))?;
+        let below: u64 = cf.callees.compiled().iter().map(|callee| callee.calls_under_modes()).sum();
+        out.set_item("under_modes", cf.calls_under_modes() + below)?;
         out.set_item("unlowered", &unlowered)?;
         let inlined: Vec<String> = cf.func.origins[1..].iter().map(|o| o.name.clone()).collect();
         out.set_item("inlined", inlined)?;

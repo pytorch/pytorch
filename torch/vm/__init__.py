@@ -458,7 +458,12 @@ def vm(
             is drawn to run rewritten or in the interpreter, with all it
             calls, so until the list is empty a count of what ran in a call
             (the hits of a graph, say) is of calls some of which the
-            interpreter ran. On by default; the environment variable
+            interpreter ran. A function of which a kernel has met a
+            ``TorchFunctionMode`` (one is on under
+            ``torch.set_default_device``) is left to the interpreter for the
+            calls that start under a mode, and for those only:
+            ``stats()["under_modes"]`` counts them. On by default; the
+            environment variable
             ``TORCH_VM_DEMOTE=0`` turns the default off, for looking at the VM
             itself.
         max_versions: how many specialized versions a block can have at once.

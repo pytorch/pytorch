@@ -4713,8 +4713,9 @@ unsafe fn called_as_handler(frame: *mut ffi::PyFrameObject, code: Obj, above: *m
 /// What stands between the operations of the thread and their kernels and
 /// has to see each one as the function wrote it, if anything does: a
 /// dispatch mode, or a transform of functorch (a torch function mode shows
-/// in `call_modes`). A run under one is never exported: what was made of a
-/// graph would hide its operations, or show others.
+/// in `call_modes`, and no graph is entered under one). A run under one is
+/// never exported: what was made of a graph would hide its operations, or
+/// show others.
 pub unsafe fn interposed() -> Option<&'static str> {
     static ASKED: pyffi::Once<[Option<PyObj>; 2]> = pyffi::Once::new();
     let asked = ASKED.get_or_init(|| {

@@ -1551,12 +1551,15 @@ found["state"], found["reason"]
 
 Some kinds of calls are not exported: one whose operations write to what
 they are given, one with a tensor that carries a forward-mode gradient or is
-of a subclass of `torch.Tensor`, and one under a `TorchDispatchMode`, a
-`TorchFunctionMode` or a transform of `torch.func`, where the operations
-have to run as the function wrote them for the mode or the transform to see
-them. Such a kind of call is remembered like any other. The calls of the
-kind run the operations and are not looked at again, and the other kinds of
-calls go on being exported.
+of a subclass of `torch.Tensor`, and one under a `TorchDispatchMode` or a
+transform of `torch.func`, where the operations have to run as the function
+wrote them for the mode or the transform to see them. Such a kind of call is
+remembered like any other. The calls of the kind run the operations and are
+not looked at again, and the other kinds of calls go on being exported.
+Under a `TorchFunctionMode` a graph is not looked at at all: torch asks such
+a mode at every operation and at every read of a tensor, so nothing is taken
+down, checked, kept or run for a call under one, and the mode is asked for
+nothing that the function did not ask for.
 
 ```python
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -3632,16 +3635,16 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does, on the code four steps before
-this commit; none of the four changes a graph of these models (their graphs,
-operations, runs in a call and hits are the same on all five): one process a
+which is what the dashboard's runner does, on the code five steps before
+this commit; none of the five changes a graph of these models (their graphs,
+operations, runs in a call and hits are the same on all six): one process a
 row, the median of three turns, on 16 cores under the lock for timed runs,
 with the load average between 1.8 and 7.5 in front of a row (above 4 in
 front of three of them) and nothing else on the GPU. Taken again on this
 commit's code and on the code one step before it, model by model in one
 window, the 13 rows differ by no more than eager mode and `torch.compile`
-differ between the same two processes (`torch.vm` between 0.94 and 1.07 of
-the row of the step before, and between 0.98 and 1.00 of it against those
+differ between the same two processes (`torch.vm` between 0.93 and 1.03 of
+the row of the step before, and between 0.98 and 1.01 of it against those
 two). The graphs that run are those counted above (DistillGPT2 with the
 operations it has on a GPU; of hf_DistilBert the graph of a layer and the
 one of its feed-forward part run six times each in a call):
@@ -3665,7 +3668,7 @@ for five of the models (`python benchmarks/dynamo/torchbench.py
 --performance --inference --bfloat16 --only MODEL` with `--vm` and with
 `--backend inductor`, `timm_models.py` and `huggingface.py` for the models
 of those suites; one run each), which report the speed against eager mode,
-next to what the tool had on the runner's code. That is the code nine steps
+next to what the tool had on the runner's code. That is the code ten steps
 before this commit (the one that changed which dicts the engine looks a name
 up in): the runner's lines were taken one after the other with the load
 average between 0.8 and 2.6 in front of a line and nothing else on the GPU,
@@ -3706,9 +3709,9 @@ same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the code four
+The rows of yolov3 and of DistillGPT2's training step are of the code five
 steps before this commit, measured with the rows of the table in the
-runner's mode (the load average 6.0 and 4.2 in front of them). Ten steps
+runner's mode (the load average 6.0 and 4.2 in front of them). Eleven steps
 before, when a graph gave only what the code behind it reads, another job
 had yolov3 with gradients recorded at 7.67 ms (1.53 times eager's speed) in
 the process that fills the compiler's cache and at 7.73 ms (1.54) with the
@@ -3722,8 +3725,8 @@ DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of whisper-tiny
 7 and 4 where they gave 6 and 3; the graphs of the other models give what
 they gave. With gradients recorded the graph of yolov3 is cut at 28 more of
 its results, those that it also reads ("Writes"). That costs yolov3 nothing
-that two takes of the row tell apart under `torch.no_grad()` (4.31 ms four
-steps before this commit and 4.48 six steps before it, on the same graph,
+that two takes of the row tell apart under `torch.no_grad()` (4.31 ms five
+steps before this commit and 4.48 seven steps before it, on the same graph,
 for 4.34) and about a third with gradients recorded (10.47 ms and 9.98 for
 7.67 and 7.73; 9.19 of the 10.34 ms that the tool takes apart are in what
 stands for the graph). The rows of this section with gradients recorded that
@@ -3923,6 +3926,16 @@ What graphs do not do at this stage:
   that is set when the call starts (`sys.setprofile`, which `cProfile` uses)
   gets no event of the function's frame: neither its call and its return nor
   the calls of its operations.
+- A tool that starts a thread around a call and reads `f_locals` of the
+  running frame from it (a sampling profiler that is switched on for one
+  call) can end the process, in eager mode too, and with a stock PyTorch:
+  that is the interpreter's own. It takes a thread that is started around
+  the call and that reads `f_locals`: one thread for the whole process, and
+  a thread that only walks the frames, never did it. Under load, of the
+  processes that do it for 144 calls, eager mode on this build ends 0 to 4
+  percent, a function with `Graphs()` that calls into Python between its
+  operations 15 to 20 percent, and eager mode on a stock build about 20
+  percent.
 - A path lets go of an object from outside it only where the end of the
   object cannot run Python code, or the object stays alive. Whether it
   stays alive is looked at in front of what stands for the graph: for a
@@ -3947,27 +3960,38 @@ What graphs do not do at this stage:
   "tensor_dim"), where eager mode reads through the new class. For a tensor
   that an operation of the function made, and where a branch lies between
   the two, the read is eager's.
-- A function whose first call runs under a `TorchFunctionMode` takes, in
-  every later call without a mode, 1.4 to 1.5 times what it takes in a
-  function that never ran under one (measured on a function of six
-  operations, where that is more than eager mode takes), and gets no graph
-  with `Graphs()`; a mode that is entered after the first calls costs
-  nothing in the calls behind it. `torch.set_default_device` installs such a
-  mode for the whole process, and `with torch.device(...)` for its block: a
-  function that is first called with a default device set is specialized in
-  almost none of its runs, gets no graph, and takes what eager mode takes;
-  set after the first calls, the function keeps its blocks and takes about
-  15 percent more than eager mode while the device is set. Under
+- `torch.set_default_device(...)` and `with torch.device(...):` put a
+  `TorchFunctionMode` on, for the whole process or for the block: a
+  function that runs under a default device runs as eager mode runs it, no
+  faster, and no graph is made or run for it. A function of which a kernel
+  has met a `TorchFunctionMode` is run by the interpreter, with all it
+  calls, in the calls that start under one: every kernel goes through the
+  handler of the mode there, and the instructions around it are no faster
+  compiled. `stats()["under_modes"]` counts those calls. Nothing of that
+  stays when the mode is off: the first call without a mode is compiled
+  again; a block whose profile was taken under a mode is profiled once
+  more, from nothing, at its first run without one; a call site that was
+  not used under a mode has missed nothing; and a call that is handed over
+  is no sample of the measurement against the interpreter (`demote`). With
+  `demote=False` the function stays compiled under a mode, and its
+  operations go through the mode one by one. Under
   `torch.set_default_device("cuda")` no model of the table in "Models" gets
-  a graph, and each runs at 0.95 to 1.00 of eager's speed, where
-  `torch.compile` keeps its time (measured on the code one step before this
-  commit, which changes nothing of it).
-- While a `TorchFunctionMode` is on and `Graphs()` alone is in the list, the
-  first call under a mode that is entered after a graph was built asks the
-  mode for seven reads that the engine makes for itself (`untyped_storage`,
-  `layout`, `is_quantized`, `is_nested`, `is_mkldnn`, `grad`, `_base`) of a
-  view that a function of `torch.nn.functional` such as `F.dropout2d` is
-  given.
+  a graph, and each runs at 0.98 to 1.01 of eager's speed, where
+  `torch.compile` keeps its time.
+- A function that enters a `TorchFunctionMode` itself in every call, around
+  its operations or around a call, is measured against the interpreter with
+  the mode on, and where it is left to the interpreter it stays there for
+  the calls that do not enter the mode: of 12 such functions all 12 were,
+  after 520 calls, where the callee is inlined, and none to 6 of 12 where
+  it is not.
+- The call under a mode that follows a call without one is still a call of
+  the measurement, and where the interpreter is drawn for it its time is
+  the interpreter's. With a mode whose handler is slow, of 30 functions
+  that the interpreter runs faster 2 or 3 stayed compiled where the first
+  call and every second one behind it, or three calls of four, ran under
+  the mode (all 30 are left to the interpreter without one), and of 30 that
+  run faster compiled one was left to the interpreter where three calls of
+  four did.
 - Where a raise leaves a function that was inlined into its caller, what was
   on that function's stack ends when its frame is gone already: code that
   runs at such an end (the `finally` of a generator, a `__del__`) and looks
@@ -3988,9 +4012,10 @@ What graphs do not do at this stage:
   value.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
-  and the calls under one are not exported. A `TorchFunctionMode` is asked
-  at every read of a tensor's sizes as well, and may answer with something
-  else. What a default pass puts in the place of a read or a call (a read of
+  and the calls under one are not exported; under a `TorchFunctionMode` no
+  graph is looked at at all. A `TorchFunctionMode` is asked at every read
+  of a tensor's sizes as well, and may answer with something else. What a
+  default pass puts in the place of a read or a call (a read of
   a size or of the number of dimensions for `x.shape[i]`, `x.size(i)`,
   `x.dim()` and `x.ndim`; a kernel that is called directly) is therefore
   valid only while the interpreter would run no Python code there, which is

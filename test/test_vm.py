@@ -13172,6 +13172,127 @@ class VmAsksAnswers(TorchFunctionMode):
 VM_ASKS_MODE = VmAsksChanges()
 
 
+VM_UNDER_MODE = VmAsksLogs()
+
+
+def vm_under_case_kernels(x):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    return (t + h).tanh().sum()
+
+
+def vm_under_case_read(x):
+    h = (x * 2).sin() + 1
+    t = h.cos() * h.shape[0]
+    return (t + h).tanh().sum()
+
+
+def vm_under_callee(h):
+    return (h.cos() * 3 + h).tanh()
+
+
+def vm_under_case_callee(x):
+    h = (x * 2).sin() + 1
+    return vm_under_callee(h).sum()
+
+
+def vm_under_case_functional(x):
+    h = torch.nn.functional.relu(x * 2 - 1) + 1
+    return (torch.nn.functional.softmax(h, dim=-1) * h).cos().sum()
+
+
+def vm_under_case_loop(x):
+    total = x * 0
+    for step in range(3):
+        total = total + (x * step).sin()
+    return total.tanh().sum()
+
+
+def vm_under_case_inside(x):
+    h = (x * 2).sin() + 1
+    VM_UNDER_MODE.__enter__()
+    t = h.cos() * 3
+    VM_UNDER_MODE.__exit__(None, None, None)
+    return (t + h).tanh().sum()
+
+
+def vm_under_case_around_a_callee(x):
+    h = (x * 2).sin() + 1
+    with VM_UNDER_MODE:
+        t = vm_under_callee(h)
+    return (t + h).sum()
+
+
+def vm_under_case_dropout_of_a_view(x):
+    h = (x * 2).sin() + 1
+    return torch.nn.functional.dropout2d(h.reshape(1, 1, 2, 3), 0.0).sum() + h.sum()
+
+
+def vm_under_graphs(compiled, counted=True):
+    """What the graphs of a compiled function are: where each is, its path, why it ends, how often it was exported;
+    and, with `counted`, how often it was missed and taken down, which no call under a mode moves."""
+    kept = (
+        "where",
+        "state",
+        "ops",
+        "operators",
+        "paths",
+        "ends",
+        "why",
+        "variants",
+        "version",
+        "exports",
+    ) + (("misses", "taken") if counted else ())
+    return [
+        tuple(found.get(key) for key in kept)
+        for found in torch.vm.regions(compiled)
+        if "ops" in found
+    ]
+
+
+def vm_under_calls(fn, device, calls, under, graded):
+    """One row per call: the value, the gradient, and what a mode that logs was asked for (it is on around the
+    calls for which `under` says so)."""
+    rows = []
+    for at in calls:
+        x = (torch.arange(6.0, device=device).reshape(2, 3) + at % 5) / 7
+        if graded:
+            x.requires_grad_(True)
+        del VM_ASKS_LOG[:]
+        if under(at):
+            with VmAsksLogs():
+                out = fn(x)
+        else:
+            out = fn(x)
+        log = list(VM_ASKS_LOG)
+        grad = torch.autograd.grad(out, x)[0].tolist() if graded else None
+        rows.append((out.detach().tolist(), grad, log))
+    return rows
+
+
+def vm_under_said(compiled):
+    """What a compiled function has become: its call sites, the versions of its blocks and how often each block
+    was profiled, the graphs that are made, and the counters that a call under a mode must not move."""
+    stats = compiled.stats()
+    made = [
+        found
+        for found in torch.vm.regions(compiled)
+        if found.get("state") in ("built", "compiled")
+    ]
+    return {
+        "sites": stats["sites"],
+        # Kernels that a call site ran, and runs of what was made of a graph.
+        "hits": stats["site_hits"] + sum(found["hits"] for found in made),
+        "misses": stats["site_misses"],
+        "versions": [block["versions"] for block in stats["blocks"]],
+        "profiled": [block["profile_runs"] for block in stats["blocks"]],
+        "built": sorted(found["ops"] for found in made),
+        "demoted": stats["demoted"],
+        "measuring": stats["measuring"],
+        "under": stats.get("under_modes", 0),
+    }
+
+
 def vm_asks_case_shape_item(x):
     h = (x * 2).sin() + 1
     return (h * h.shape[0] + h.shape[-1]).sum()
@@ -19731,6 +19852,348 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             behind = blocks(compiled)
             self.assertEqual((behind[0], behind[2]), (versions, under[2]), msg=msg)
             self.assertGreaterEqual(behind[1], under[1] + 5, msg=msg)
+
+    def test_what_a_function_ran_as_under_a_torch_function_mode_does_not_stay(
+        self, device
+    ):
+        # Under a torch function mode every kernel goes through the handler
+        # of the mode: no call site stands for it, none can be made, and
+        # what a profiling run sees an instruction do is what the handler
+        # did. All of that holds for the calls under a mode and for no
+        # other. A function whose first calls ran under a mode is, once the
+        # mode is off, what a function is that never ran under one: its
+        # blocks are profiled again from nothing at their first run without
+        # a mode, so they have their call sites and their graphs, and the
+        # measurement against the interpreter has taken no sample under the
+        # mode, so the function was not left to the interpreter for it.
+        # While a mode is on, a function of which a kernel has met one is
+        # run by the interpreter, with all it calls: the mode is asked for
+        # exactly what it is asked for in eager mode.
+        # (The first block of such a function kept the version without call
+        # sites for good, and the measurement, taken under the mode, left
+        # the function to the interpreter for good: it ran at the speed of
+        # eager mode, or slower, for the rest of the process.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES, False),
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        cases = (
+            vm_under_case_kernels,
+            vm_under_case_read,
+            vm_under_case_callee,
+            vm_under_case_functional,
+            vm_under_case_loop,
+        )
+        for fn in cases:
+            for way, passes, graded in ways:
+                for demote in (True, False):
+                    # A function that never ran under a mode, after as many calls.
+                    twin = torch.vm(fn, passes=passes, fallback=False, demote=demote)
+                    vm_under_calls(twin, device, range(40), lambda at: False, graded)
+                    never = vm_under_said(twin)
+                    self.assertGreater(never["sites"], 0, msg=f"{fn.__name__}, {way}")
+                    for first in (1, 2, 12, 40):
+                        msg = f"{fn.__name__}, {way}, measured against the interpreter {demote}, the first {first} calls under a mode"
+                        compiled = torch.vm(
+                            fn, passes=passes, fallback=False, demote=demote
+                        )
+                        expected = vm_under_calls(
+                            fn, device, range(first), lambda at: True, graded
+                        )
+                        self.assertEqual(
+                            vm_under_calls(
+                                compiled, device, range(first), lambda at: True, graded
+                            ),
+                            expected,
+                            msg=msg,
+                        )
+                        self.assertTrue(all(log for _, _, log in expected), msg=msg)
+                        under = vm_under_said(compiled)
+                        # No sample was taken under the mode, nothing was
+                        # exported, no call site was made or missed. With
+                        # the measurement on, every call but the first was
+                        # the interpreter's.
+                        self.assertFalse(under["demoted"], msg=msg)
+                        self.assertEqual(
+                            (under["sites"], under["misses"], under["built"]),
+                            (0, 0, []),
+                            msg=msg,
+                        )
+                        self.assertEqual(
+                            under["under"], first - 1 if demote else 0, msg=msg
+                        )
+                        expected = vm_under_calls(
+                            fn,
+                            device,
+                            range(first, first + 40),
+                            lambda at: False,
+                            graded,
+                        )
+                        self.assertEqual(
+                            vm_under_calls(
+                                compiled,
+                                device,
+                                range(first, first + 40),
+                                lambda at: False,
+                                graded,
+                            ),
+                            expected,
+                            msg=msg,
+                        )
+                        after = vm_under_said(compiled)
+                        for what in ("sites", "versions", "built"):
+                            self.assertEqual(
+                                after[what], never[what], msg=f"{msg}: {what}"
+                            )
+                        self.assertGreater(after["hits"], 0, msg=msg)
+                        self.assertEqual(after["under"], under["under"], msg=msg)
+                        # Each block that ran under the mode was profiled once more.
+                        self.assertTrue(
+                            all(
+                                0 <= again - once <= 1
+                                for again, once in zip(
+                                    after["profiled"], never["profiled"]
+                                )
+                            ),
+                            msg=msg,
+                        )
+                        self.assertGreater(
+                            sum(after["profiled"]), sum(never["profiled"]), msg=msg
+                        )
+
+    def test_a_torch_function_mode_on_a_warm_function_leaves_its_call_sites_as_they_are(
+        self, device
+    ):
+        # A mode that comes on when a function is warm says nothing about
+        # its call sites: a site that is not used because every kernel goes
+        # through the mode is no miss, and nothing is learned of the call
+        # (a miss has the instruction captured anew, which under a mode
+        # gives nothing, and a site that missed often learns no more). The
+        # blocks keep their versions and are not profiled again, the calls
+        # behind the mode use the same sites, and with the measurement
+        # against the interpreter on, the calls under the mode but the first
+        # are the interpreter's.
+        # (Every kernel of every call under the mode was a miss and, for
+        # its first 32 misses, a capture.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES, False),
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        cases = (
+            vm_under_case_kernels,
+            vm_under_case_read,
+            vm_under_case_callee,
+            vm_under_case_functional,
+            vm_under_case_loop,
+        )
+        for fn in cases:
+            for way, passes, graded in ways:
+                for demote in (True, False):
+                    msg = f"{fn.__name__}, {way}, measured against the interpreter {demote}"
+                    compiled = torch.vm(
+                        fn, passes=passes, fallback=False, demote=demote
+                    )
+                    self.assertEqual(
+                        vm_under_calls(
+                            compiled, device, range(30), lambda at: False, graded
+                        ),
+                        vm_under_calls(fn, device, range(30), lambda at: False, graded),
+                        msg=msg,
+                    )
+                    warm = vm_under_said(compiled)
+                    expected = vm_under_calls(
+                        fn, device, range(30, 40), lambda at: True, graded
+                    )
+                    self.assertEqual(
+                        vm_under_calls(
+                            compiled, device, range(30, 40), lambda at: True, graded
+                        ),
+                        expected,
+                        msg=msg,
+                    )
+                    self.assertTrue(all(log for _, _, log in expected), msg=msg)
+                    under = vm_under_said(compiled)
+                    for what in ("sites", "misses"):
+                        self.assertEqual(under[what], warm[what], msg=f"{msg}: {what}")
+                    # A function that the measurement had decided to run
+                    # compiled ran the first call under the mode compiled
+                    # and the other nine in the interpreter; one that it
+                    # left to the interpreter earlier, or was still
+                    # measuring, ran some of the ten there anyway.
+                    if not demote:
+                        self.assertEqual(under["under"], 0, msg=msg)
+                    elif not (warm["demoted"] or warm["measuring"]):
+                        self.assertEqual(under["under"], 9, msg=msg)
+                    else:
+                        self.assertLessEqual(under["under"], 9, msg=msg)
+                    self.assertEqual(
+                        vm_under_calls(
+                            compiled, device, range(40, 60), lambda at: False, graded
+                        ),
+                        vm_under_calls(
+                            fn, device, range(40, 60), lambda at: False, graded
+                        ),
+                        msg=msg,
+                    )
+                    after = vm_under_said(compiled)
+                    for what in ("sites", "misses", "under"):
+                        self.assertEqual(after[what], under[what], msg=f"{msg}: {what}")
+                    # The blocks have the versions they had, and were not
+                    # profiled or specialized again for the mode.
+                    for what in ("versions", "profiled"):
+                        self.assertEqual(after[what], warm[what], msg=f"{msg}: {what}")
+                    if not (after["demoted"] or after["measuring"]):
+                        self.assertGreater(after["hits"], under["hits"], msg=msg)
+        # A mode that is entered inside the function is on at the same
+        # instructions in every call: a block is profiled again for it once
+        # and no more, and the kernels outside the mode keep their sites.
+        for fn in (vm_under_case_inside, vm_under_case_around_a_callee):
+            for way, passes, graded in ways:
+                for demote in (True, False):
+                    msg = f"{fn.__name__}, {way}, measured against the interpreter {demote}"
+                    compiled = torch.vm(
+                        fn, passes=passes, fallback=False, demote=demote
+                    )
+                    expected = vm_under_calls(
+                        fn, device, range(30), lambda at: False, graded
+                    )
+                    self.assertEqual(
+                        vm_under_calls(
+                            compiled, device, range(30), lambda at: False, graded
+                        ),
+                        expected,
+                        msg=msg,
+                    )
+                    self.assertTrue(all(log for _, _, log in expected), msg=msg)
+                    warm = vm_under_said(compiled)
+                    if passes is torch.vm.DEFAULT_PASSES:
+                        self.assertTrue(
+                            all(runs <= 2 for runs in warm["profiled"]), msg=msg
+                        )
+                    self.assertEqual(warm["misses"], 0, msg=msg)
+                    self.assertEqual(
+                        vm_under_calls(
+                            compiled, device, range(30, 60), lambda at: False, graded
+                        ),
+                        vm_under_calls(
+                            fn, device, range(30, 60), lambda at: False, graded
+                        ),
+                        msg=msg,
+                    )
+                    after = vm_under_said(compiled)
+                    for what in ("sites", "misses", "versions", "profiled"):
+                        self.assertEqual(after[what], warm[what], msg=f"{msg}: {what}")
+
+    def test_a_graph_is_not_looked_at_under_a_torch_function_mode(self, device):
+        # torch asks a torch function mode at every operation and at every
+        # read of a tensor. So what a path would be under one is no path of
+        # the calls without one (it ends in front of every read of a size),
+        # and what the engine reads of a tensor for itself where it takes a
+        # path down or lets go of a value (its storage, its layout, its
+        # gradient, what it is a view of) would be asked of the mode, which
+        # eager mode asks for none of it. Under a mode nothing of a graph
+        # is looked at: no path is tried, taken down or kept, the mode's
+        # log is what it is in eager mode, and behind the mode the graph is
+        # what it was, with the path it had.
+        # (A call under a mode was taken down like any other: the mode was
+        # asked for seven reads of the engine's, and the path that was cut
+        # short under the mode stayed the graph's.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        cases = (
+            vm_under_case_kernels,
+            vm_under_case_read,
+            vm_under_case_callee,
+            vm_under_case_functional,
+            vm_under_case_loop,
+            vm_under_case_dropout_of_a_view,
+        )
+        for fn in cases:
+            for way, passes, graded in ways:
+                for demote in (True, False):
+                    msg = f"{fn.__name__}, {way}, measured against the interpreter {demote}"
+                    compiled = torch.vm(
+                        fn, passes=passes, fallback=False, demote=demote
+                    )
+                    self.assertEqual(
+                        vm_under_calls(
+                            compiled, device, range(30), lambda at: False, graded
+                        ),
+                        vm_under_calls(fn, device, range(30), lambda at: False, graded),
+                        msg=msg,
+                    )
+                    warm = vm_under_graphs(compiled)
+                    self.assertTrue(
+                        warm
+                        and all(found[1] in ("built", "compiled") for found in warm),
+                        msg=msg,
+                    )
+                    expected = vm_under_calls(
+                        fn, device, range(30, 40), lambda at: True, graded
+                    )
+                    self.assertEqual(
+                        vm_under_calls(
+                            compiled, device, range(30, 40), lambda at: True, graded
+                        ),
+                        expected,
+                        msg=msg,
+                    )
+                    self.assertTrue(all(log for _, _, log in expected), msg=msg)
+                    self.assertEqual(
+                        vm_under_graphs(compiled), warm, msg=f"{msg}: under the mode"
+                    )
+                    self.assertEqual(
+                        vm_under_calls(
+                            compiled, device, range(40, 60), lambda at: False, graded
+                        ),
+                        vm_under_calls(
+                            fn, device, range(40, 60), lambda at: False, graded
+                        ),
+                        msg=msg,
+                    )
+                    self.assertEqual(
+                        vm_under_graphs(compiled, False),
+                        [found[:-2] for found in warm],
+                        msg=f"{msg}: behind the mode",
+                    )
+                    # A mode in every other call, from the first call on.
+                    compiled = torch.vm(
+                        fn, passes=passes, fallback=False, demote=demote
+                    )
+                    expected = vm_under_calls(
+                        fn, device, range(40), lambda at: at % 2 == 0, graded
+                    )
+                    self.assertEqual(
+                        vm_under_calls(
+                            compiled, device, range(40), lambda at: at % 2 == 0, graded
+                        ),
+                        expected,
+                        msg=f"{msg}: every other call",
+                    )
+                    self.assertEqual(
+                        [found[2] for found in vm_under_graphs(compiled)],
+                        [found[2] for found in warm],
+                        msg=f"{msg}: every other call",
+                    )
 
     def test_what_is_put_on_the_tensor_class_is_called_wherever_a_pass_stands_for_a_read(
         self, device

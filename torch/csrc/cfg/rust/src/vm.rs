@@ -96,6 +96,13 @@ pub struct BlockState {
     pub facts: Vec<InstFacts>,
     pub respec_left: u32,
     pub profile_runs: u32,
+    /// A profiling run of the block was under a torch function mode, which
+    /// every kernel goes through: no call site was made of it, and what
+    /// was seen is what the mode's handler did. The block is profiled
+    /// again, from nothing, at its first run without a mode
+    /// (`select_slow`), once: a mode that is entered inside the block is
+    /// there in every run of it. `MODE_NEVER`, `MODE_WAITS`, `MODE_AGAIN`.
+    pub under_mode: u8,
     /// How many profiling runs in a row ended in a raise.
     pub raised: u32,
     pub next_version_id: u32,
@@ -160,6 +167,14 @@ struct SettledBlocks {
     /// the profiling tier.
     warming: std::cell::Cell<u32>,
     trial: std::cell::Cell<Trial>,
+    /// A kernel of the function met a torch function mode: a call site
+    /// that could not be used or made for it (`Compiled::met_mode`), or
+    /// one did somewhere below the function that was handed to torch.vm.
+    /// While a mode is on, the calls of the function are the
+    /// interpreter's (`Compiled::left_to_mode`).
+    met_mode: std::cell::Cell<bool>,
+    /// How many calls that was.
+    under_modes: std::cell::Cell<u64>,
     /// For the function that was handed to torch.vm: whether calls
     /// below its last call were part of a measurement (`watched`), and
     /// whether they took a noticeable part of it (`below`).
@@ -321,6 +336,18 @@ static ENTRY_CALLS: AtomicU64 = AtomicU64::new(0);
 const TRIAL_YOUNG_ENTRIES: u32 = 16;
 /// How much faster the interpreter has to be: 1/32, about 3%.
 const TRIAL_MARGIN_SHIFT: u32 = 5;
+
+/// `BlockState::under_mode`.
+const MODE_NEVER: u8 = 0;
+const MODE_WAITS: u8 = 1;
+const MODE_AGAIN: u8 = 2;
+thread_local! {
+    /// Counts the kernels that met a torch function mode in compiled code
+    /// on this thread, and the calls that were left to the interpreter for
+    /// one: a function that this happened below was not as fast as it is
+    /// without a mode. Per thread, as the modes are.
+    static MODES_MET: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 
 /// Bumped when what compiled code does changes for a reason the VM does not
 /// see, such as a pass replacing part of a block by a compiled graph. A
@@ -2158,6 +2185,7 @@ impl Compiled {
                 facts: vec![InstFacts::default(); block.insts.len()],
                 respec_left: options.max_respecializations,
                 profile_runs: 0,
+                under_mode: MODE_NEVER,
                 raised: 0,
                 next_version_id: 1,
                 execs: 0,
@@ -2221,6 +2249,8 @@ impl Compiled {
                 calls: std::cell::Cell::new(0),
                 raised: std::cell::Cell::new(u64::MAX),
                 trial: std::cell::Cell::new(Trial::start(PLAN_EPOCH.load(Ordering::Relaxed))),
+                met_mode: std::cell::Cell::new(false),
+                under_modes: std::cell::Cell::new(0),
                 watched: std::cell::Cell::new(false),
                 below: std::cell::Cell::new(false),
                 dormant: std::cell::Cell::new((0, 1)),
@@ -3041,6 +3071,21 @@ impl Compiled {
             return call();
         }
         ENTRY_CALLS.fetch_add(1, Ordering::Relaxed);
+        if self.settled.met_mode.get() && self.left_to_mode() {
+            self.settled.below.set(false);
+            let _nobody = Hooked::nobody();
+            return ffi::PyObject_Call(function, args, kwargs);
+        }
+        // A kernel that meets a mode anywhere below makes the next call
+        // under a mode the interpreter's from here down.
+        let met = MODES_MET.with(|met| met.get());
+        let call = || {
+            let result = call();
+            if MODES_MET.with(|met| met.get()) != met {
+                self.settled.met_mode.set(true);
+            }
+            result
+        };
         let phase = self.settled.trial.get().phase;
         if phase == TRIAL_COMPILED {
             // The clock is read for a call only if something below the one
@@ -3118,11 +3163,54 @@ impl Compiled {
         run_compiled: impl FnOnce() -> Obj,
         run_interpreted: impl FnOnce() -> Obj,
     ) -> Obj {
-        let slot = &(*compiled).settled.trial;
-        if slot.get().phase == TRIAL_COMPILED || !self.options.demote {
+        if !self.options.demote {
+            return run_compiled();
+        }
+        if (*compiled).settled.met_mode.get() && (*compiled).left_to_mode() {
+            // What calls it is not as fast as it is without a mode.
+            unsettled();
+            let _nobody = Hooked::nobody();
+            return run_interpreted();
+        }
+        if (*compiled).settled.trial.get().phase == TRIAL_COMPILED {
             return run_compiled();
         }
         self.trial_call(compiled, func, run_compiled, run_interpreted)
+    }
+
+    /// Called where a kernel of the function meets a torch function mode:
+    /// its call site cannot be used, or cannot be made, while every kernel
+    /// goes through the mode's handler.
+    #[cold]
+    fn met_mode(&self) {
+        self.settled.met_mode.set(true);
+        MODES_MET.with(|met| met.set(met.get() + 1));
+        // The call is not as fast as the function is without a mode.
+        unsettled();
+    }
+
+    /// For a function that met a torch function mode (`met_mode`): whether
+    /// this call of it is the interpreter's, because a mode is on. Under a
+    /// mode the kernels run as the interpreter runs them, through the
+    /// handler, and the instructions around them are no faster compiled:
+    /// the function runs as it does without torch.vm, with all it calls.
+    /// The first call without a mode is compiled again, and the question
+    /// is not asked any more until a kernel next meets a mode.
+    #[cold]
+    unsafe fn left_to_mode(&self) -> bool {
+        if capi::api().is_some_and(|api| modes_on(api)) {
+            self.settled.under_modes.set(self.settled.under_modes.get() + 1);
+            MODES_MET.with(|met| met.set(met.get() + 1));
+            return true;
+        }
+        self.settled.met_mode.set(false);
+        false
+    }
+
+    /// How many calls of the function the interpreter ran because a torch
+    /// function mode was on (`left_to_mode`).
+    pub fn calls_under_modes(&self) -> u64 {
+        self.settled.under_modes.get()
     }
 
     #[inline(never)]
@@ -4711,11 +4799,18 @@ impl Compiled {
                 return Err(());
             }
         }
-        let misses = slot.misses.fetch_add(1, Ordering::Relaxed);
         // The generic operation can be a call of anything.
         if self.unbound.any.get() {
             self.bind();
         }
+        // No site stands for the call while a torch function mode is on,
+        // which every kernel goes through: that says nothing about the
+        // operands. It is no miss, and no new case to learn.
+        if modes_on(api) {
+            self.met_mode();
+            return self.exec_op(regs, fallback);
+        }
+        let misses = slot.misses.fetch_add(1, Ordering::Relaxed);
         if n < self.options.max_site_variants && misses < MAX_CAPTURE_ATTEMPTS as u64 * 4 {
             let (result, site, _, _, _) = self.capture_exec(regs, fallback, slot.kind, api);
             if !site.is_null() {
@@ -4744,6 +4839,9 @@ impl Compiled {
             (bs.slots[index].clone(), bs.capture_attempts[index], bs.facts[index].runs)
         };
         let outward = inst.op.calls_out();
+        // Whether what the instruction is seen to do is what it does
+        // through the handler of a torch function mode.
+        let under_mode = outward && modes_on(api);
         let probe = if outward { Some(Probe::start(&self.callees, regs, &inst.op, api)) } else { None };
         // A call of anything but a C function is not put under a capture:
         // what it runs has no end that is known here.
@@ -4760,6 +4858,10 @@ impl Compiled {
         let count = outward && (!call || spread) && runs < MAX_COUNTED_RUNS;
         let mut kernels = if outward { Kernels::Unseen } else { Kernels::None };
         let mut operators = Vec::new();
+        // Whether the instruction is one that a call site is made of, or
+        // an operation, a read or a method of a tensor: torch asks a mode
+        // at each. (A call of any function of C is looked at for a site.)
+        let mut sited = slot.is_some();
         let result = if let Some(slot) = slot {
             let ptrs = self
                 .site_operands(slot.kind, &inst.op)
@@ -4771,6 +4873,7 @@ impl Compiled {
             }
         } else {
             let kind = if attempts >= MAX_CAPTURE_ATTEMPTS { None } else { self.site_kind(regs, &inst.op, api) };
+            sited = kind.is_some_and(|kind| kind != capi::TCFG_CALL);
             match kind {
                 None if count => {
                     (api.capture_begin)();
@@ -4788,12 +4891,18 @@ impl Compiled {
                     let (result, site, reason, calls, names) = self.capture_exec(regs, &inst.op, kind, api);
                     kernels = calls;
                     operators = names;
+                    // Under a torch function mode no capture gives a
+                    // site, whatever the instruction is: no attempt at one.
+                    let moded = site.is_null() && under_mode;
+                    if moded && matches!(kernels, Kernels::One | Kernels::Many) {
+                        self.met_mode();
+                    }
                     // A slot that the instruction's own run put there
                     // ends with nothing borrowed: a site holds an object.
                     let before = {
                         let mut st = self.state.borrow_mut();
                         let bs = &mut st.blocks[b];
-                        bs.capture_attempts[index] += 1;
+                        bs.capture_attempts[index] += !moded as u32;
                         if !site.is_null() {
                             let slot = SiteSlot::new(kind);
                             slot.push(site);
@@ -4813,6 +4922,13 @@ impl Compiled {
         };
         let gone = {
             let mut st = self.state.borrow_mut();
+            // What was seen of a kernel under a mode is what the handler
+            // of the mode did: the profile is the block's for the runs
+            // under a mode only (`BlockState::under_mode`).
+            let kernel = sited || matches!(kernels, Kernels::One | Kernels::Many);
+            if under_mode && kernel && st.blocks[b].under_mode == MODE_NEVER {
+                st.blocks[b].under_mode = MODE_WAITS;
+            }
             let facts = &mut st.blocks[b].facts[index];
             facts.runs += 1;
             facts.saw_kernels(kernels);
@@ -4934,9 +5050,33 @@ impl Compiled {
             settle(generic, false);
             return (generic, Mode::Generic);
         }
+        // A profile that was taken under a torch function mode is the
+        // block's while a mode is on. At the first run without one the
+        // block starts over: what was seen and made of it is put aside,
+        // and it is profiled as if for the first time.
+        let seen = {
+            let mut st = self.state.borrow_mut();
+            let bs = &mut st.blocks[b];
+            if bs.under_mode == MODE_WAITS && !api.is_some_and(|api| modes_on(api)) {
+                bs.under_mode = MODE_AGAIN;
+                let n = bs.facts.len();
+                let made = std::mem::take(&mut bs.versions);
+                bs.retired.extend(made);
+                bs.capture_attempts = vec![0; n];
+                bs.raised = 0;
+                // The profile under the mode was none of the block's own.
+                bs.respec_left = (bs.respec_left + 1).min(self.options.max_respecializations);
+                Some((std::mem::replace(&mut bs.facts, vec![InstFacts::default(); n]), std::mem::replace(&mut bs.reasons, vec![None; n])))
+            } else {
+                None
+            }
+        };
+        // What the facts held ends with nothing borrowed.
+        drop(seen);
         let mut st = self.state.borrow_mut();
         let bs = &mut st.blocks[b];
         bs.execs += 1;
+        let waits = bs.under_mode == MODE_WAITS;
         // The copy of a version that enters its graphs runs in its place
         // while one of them has something to do. `enter_graph` has the
         // block looked at again when one has not.
@@ -4945,10 +5085,11 @@ impl Compiled {
             copy.map_or(Arc::as_ptr(version), Arc::as_ptr)
         };
         // One version that is entered unconditionally, or none and no more
-        // attempts at one: from now on there is nothing to decide.
-        if bs.versions.len() == 1 && bs.versions[0].entry_guards.is_empty() {
+        // attempts at one: from now on there is nothing to decide. Not
+        // while the block waits for a run without a mode.
+        if !waits && bs.versions.len() == 1 && bs.versions[0].entry_guards.is_empty() {
             settle(entered(&bs.versions[0]), true);
-        } else if bs.versions.is_empty() && bs.respec_left == 0 {
+        } else if !waits && bs.versions.is_empty() && bs.respec_left == 0 {
             settle(generic, false);
         }
         for version in &bs.versions {
@@ -5106,6 +5247,15 @@ impl Compiled {
             return PathEnd::Miss;
         }
         let modes = (api.call_modes)();
+        // Nor while a torch function mode is on: torch asks it at every
+        // operation and at every read of a tensor, so what a path would be
+        // under one is no path of the calls without one, and what the
+        // engine reads of a tensor for itself would be asked of the mode.
+        // Nothing of the graph is looked at, taken down or kept for such
+        // a call: the instructions run.
+        if modes >> 16 != 0 {
+            return PathEnd::Miss;
+        }
         let (mut included, mut excluded) = (0u64, 0u64);
         (api.dispatch_keys)(&mut included, &mut excluded);
         let world = (modes, included, excluded);
@@ -10516,10 +10666,10 @@ impl Compiled {
         // Neither does a call in which a path is taken down.
         unsettled();
         let mut t = Trace::new(self as *const Compiled, func.nvalues as usize);
-        // Under a mode, or a transform, the operations run as they are: the
-        // run is only looked at for what kind of call it is.
-        let mode = (world.0 >> 16 != 0).then_some("a torch function mode is on");
-        t.rec.failed = mode.or_else(|| graph::interposed()).map(|why| why.to_string());
+        // Under a dispatch mode, or a transform, the operations run as
+        // they are: the run is only looked at for what kind of call it is.
+        // (Under a torch function mode no graph is entered.)
+        t.rec.failed = graph::interposed().map(|why| why.to_string());
         let root = (block, (&(*code).origins)[pc..].iter().find(|o| **o != NONE).map_or(0, |o| *o as usize));
         // Where this run of the function has got to.
         let mut left = false;
