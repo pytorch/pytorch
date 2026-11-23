@@ -739,6 +739,8 @@ test_python_smoke_b200() {
   # calibrated tolerances. It runs in every CUDA job, but only here is the DSL
   # installed, so only here does it measure the override rather than eager.
   time python test/run_test.py --include test_nn -k linear_cross_entropy $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # Unregistered overrides would make the two steps below compare ATen with itself.
+  (cd test && python -c "import torch; assert 'sum.dim_IntList' in torch.backends.python_native.get_dsl_operations('cutedsl'), 'CuTeDSL reduction overrides are not registered'")
   # The CuTeDSL runtime is installed here, so the selected test_reductions checks run
   # with the sum, mean, amax, amin and prod overrides active where their conditions
   # accept a call; declined calls stay on ATen.

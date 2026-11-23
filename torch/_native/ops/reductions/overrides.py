@@ -19,7 +19,7 @@ disable_operations("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin"
 need the full overload: disable_operations("sum") matches nothing. Disabling
 sum.dim_IntList or prod.dim_int also drops PYTORCH_SUM_INNER_TREE's registration of that
 symbol. cutedsl.disabled() does the same as enabled = False while its block runs
-(process-wide), along with native AOT for every DSL except UNCONDITIONAL declarations.
+(process-wide), along with native AOT for every DSL except unconditional kernels.
 
 Builds with the native-AOT reduction kernels (aot.py) also serve covered calls from them,
 including out= calls of the overloads above (mean.dtype_out as a full reduction), except
