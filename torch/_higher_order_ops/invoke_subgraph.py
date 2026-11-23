@@ -80,6 +80,9 @@ _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
         # them. False cannot turn off tuning that max_autotune enables, or
         # pointwise multi-config tuning that triton.autotune_pointwise enables.
         "max_autotune_pointwise",
+        # Same, for the reduction families only; None follows
+        # max_autotune_pointwise.
+        "max_autotune_reduction",
     }
 )
 
