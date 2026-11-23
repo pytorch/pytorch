@@ -636,8 +636,8 @@ def meta_philox_key_fold_in_tensor(key, data):
         lambda: f"_philox_key_fold_in: key must have dtype uint64, got {key.dtype}",
     )
     torch._check(
-        data.dtype == torch.uint64,
-        lambda: f"_philox_key_fold_in: data must have dtype uint64, got {data.dtype}",
+        data.dtype in (torch.uint64, torch.int64),
+        lambda: f"_philox_key_fold_in: data must have dtype uint64 or int64, got {data.dtype}",
     )
     torch._check(
         data.numel() == 1,
