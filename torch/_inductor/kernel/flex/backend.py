@@ -13,6 +13,14 @@ raises :class:`FlexAttentionDeclined` with a reason, and Inductor lowers the
 call itself. Contributors are asked in registration order; the first one that
 returns outputs lowers the call.
 
+A backend may also claim ``BACKEND`` names
+(:meth:`~torch._inductor.choices.InductorChoices.flex_attention_backends`). A
+call made with ``kernel_options={"BACKEND": name}`` is offered only to the
+contributors claiming ``name``, carries ``kernel_options["BACKEND_OPTIONS"]``
+as ``backend_options``, and fails with the backends' reasons if they decline.
+Under ``BACKEND="AUTO"`` every contributor is asked and a decline is silent;
+the other built-in names skip contributors.
+
 The contract every backend follows:
 
 - ``logsumexp`` (and ``max_scores``) are float32 ``[B, Hq, M]`` in base 2:
@@ -112,9 +120,11 @@ class FlexAttentionCall:
 
     ``score_mod`` takes ``(score, b, h, m, n, *score_mod_buffers)`` and
     ``block_mask.mask_mod`` takes ``(b, h, m, n, *mask_mod_buffers)``.
-    ``kernel_options`` are the call's kernel options without ``BACKEND``;
-    ``output_logsumexp`` and ``output_max`` say which statistics the caller
-    reads (outputs it does not read may be returned as ``None``)."""
+    ``kernel_options`` are the call's kernel options without ``BACKEND`` and
+    ``BACKEND_OPTIONS``; ``backend`` is the ``BACKEND`` ("AUTO" or a claimed
+    name) and ``backend_options`` its ``BACKEND_OPTIONS`` (empty when not
+    given). ``output_logsumexp`` and ``output_max`` say which statistics the
+    caller reads (outputs it does not read may be returned as ``None``)."""
 
     query: TensorBox
     key: TensorBox
@@ -126,6 +136,7 @@ class FlexAttentionCall:
     mask_mod_buffers: tuple[Any, ...]
     kernel_options: Mapping[str, Any]
     backend: str
+    backend_options: Mapping[str, Any]
     output_logsumexp: bool
     output_max: bool
 
@@ -146,7 +157,8 @@ class FlexAttentionBackwardCall:
     """A flex_attention backward, as its lowering receives it. ``fw_graph``
     is the forward's score_mod and ``joint_graph`` its joint graph:
     ``(score, b, h, m, n, grad_score, *score_mod_buffers)`` to the gradient
-    of the score and of each captured buffer."""
+    of the score and of each captured buffer. ``kernel_options``,
+    ``backend`` and ``backend_options`` are as in :class:`FlexAttentionCall`."""
 
     query: TensorBox
     key: TensorBox
@@ -163,6 +175,7 @@ class FlexAttentionBackwardCall:
     mask_mod_buffers: tuple[Any, ...]
     kernel_options: Mapping[str, Any]
     backend: str
+    backend_options: Mapping[str, Any]
 
 
 @dataclasses.dataclass(frozen=True)
