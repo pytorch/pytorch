@@ -30,6 +30,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     decorateIf,
+    DeterministicGuard,
     HardwareClassification,
     parametrize,
     run_tests,
@@ -976,6 +977,45 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         self.assertTrue(out.requires_grad)
         self.assertFalse(lse.requires_grad)
         torch.autograd.grad(out.sum(), (q, k, v))
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("backend", [SDPBackend.FLASH_ATTENTION, SDPBackend.CUDNN_ATTENTION])
+    @decorateIf(
+        unittest.skip("cuDNN varlen attention is not supported on this device"),
+        lambda p: p["backend"] == SDPBackend.CUDNN_ATTENTION
+        and (
+            not PLATFORM_SUPPORTS_CUDNN_ATTENTION
+            or not varlen_attention._should_use_cudnn(torch.device(p["device"]).index)
+        ),
+    )
+    def test_backward_is_deterministic(self, device, backend):
+        if backend == SDPBackend.CUDNN_ATTENTION:
+            _check_cudnn_varlen_supported(device)
+        seq_lens = [1024, 3072, 2048, 2048]
+        total, max_len = sum(seq_lens), max(seq_lens)
+        cu_seq = torch.tensor([0] + seq_lens, device=device).cumsum(0).to(torch.int32)
+        q, k, v = (
+            torch.randn(total, 16, 128, device=device, dtype=torch.bfloat16)
+            for _ in range(3)
+        )
+        grad_out = torch.randn_like(q)
+
+        def grads():
+            q_, k_, v_ = (t.detach().requires_grad_() for t in (q, k, v))
+            with sdpa_kernel(backend):
+                out = varlen_attn(q_, k_, v_, cu_seq, cu_seq, max_len, max_len)
+            return torch.autograd.grad(out, (q_, k_, v_), grad_out)
+
+        # Build the backward graph in non-deterministic mode first so that the
+        # deterministic runs below also check that the graph cache key tells
+        # the two modes apart.
+        grads()
+        with DeterministicGuard(True):
+            expected = grads()
+            for _ in range(10):
+                self.assertEqual(grads(), expected, atol=0, rtol=0)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
