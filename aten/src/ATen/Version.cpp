@@ -38,8 +38,6 @@ std::string get_mkldnn_version() {
   #if AT_MKLDNN_ENABLED()
     // Cribbed from mkl-dnn/src/common/verbose.cpp
     // Too bad: can't get ISA info conveniently :(
-    // Apparently no way to get ideep version?
-    // https://github.com/intel/ideep/issues/29
     {
       const dnnl_version_t* ver = dnnl_version();
       ss << "Intel(R) MKL-DNN v" << ver->major << '.' << ver->minor << '.' << ver->patch
