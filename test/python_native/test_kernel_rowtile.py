@@ -103,7 +103,7 @@ class TestKernelRowTile(TestCase):
         op = ops[name](acc=cutlass.Float32)
         x = -torch.zeros(65536, 128, device="cuda")
         kw = {"threads_per_row": 1, "use_tma": True}
-        (got,) = rt.reduce_row_tile(op, "tma_nz", x, [x.dtype], **kw)
+        (got,) = rt.reduce_row_tile(op, f"tma_nz_{name}", x, [x.dtype], **kw)
         self.assertEqual(got.view(torch.int32), torch.zeros(65536, dtype=torch.int32))
 
     def test_narrow_one_thread_row_chains(self):
@@ -894,7 +894,7 @@ class TestKernelRowTile(TestCase):
             (got,) = rt.reduce_row_tile(
                 trait, "ragged_width", x, [torch.float32], ragged_vector=True
             )
-            self.assertEqual(got, x.sum(dim=1), atol=0, rtol=0)
+            self.assertEqual(got, x.double().sum(dim=1).float(), atol=0, rtol=0)
         mine = [k for k in rt._CACHE if "ragged_width" in k]
         # b itself is whole vectors at a whole pitch: the rolled path's plan.
         self.assertEqual(
@@ -907,7 +907,7 @@ class TestKernelRowTile(TestCase):
             (got,) = rt.reduce_row_tile(
                 trait, "ragged_whole", x, [torch.float32], ragged_vector=True
             )
-            self.assertEqual(got, x.sum(dim=1), atol=0, rtol=0)
+            self.assertEqual(got, x.double().sum(dim=1).float(), atol=0, rtol=0)
         mine = [k for k in rt._CACHE if "ragged_whole" in k]
         self.assertEqual(len(mine), 1, f"expected one plan per vec class, got {mine}")
         self._assert_ragged_plan("ragged_whole", False)
