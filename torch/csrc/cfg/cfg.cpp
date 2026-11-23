@@ -1714,11 +1714,28 @@ void THP_PyThreadState_PopFrame(
 
 void* framePush(PyObject* func, uint16_t*** instr, uint16_t** code_start) {
   PyThreadState* tstate = PyThreadState_Get();
+  // A compiled function is a Python call: it counts against the recursion
+  // limit in the interpreter's own counter, as _Py_EnterRecursivePy does, so
+  // that the limit means the same depth whoever runs the functions.
+  if (tstate->py_recursion_remaining-- <= 0) {
+    int depth = tstate->py_recursion_limit - tstate->py_recursion_remaining;
+    int limit = Py_GetRecursionLimit();
+    if (depth < limit) {
+      // The limit was raised since the counter was set up.
+      tstate->py_recursion_limit = limit;
+      tstate->py_recursion_remaining = limit - depth;
+    } else {
+      ++tstate->py_recursion_remaining;
+      PyErr_SetString(PyExc_RecursionError, "maximum recursion depth exceeded");
+      return nullptr;
+    }
+  }
   auto* function = reinterpret_cast<PyFunctionObject*>(func);
   auto* code = reinterpret_cast<PyCodeObject*>(function->func_code);
   _PyInterpreterFrame* frame =
       THP_PyThreadState_BumpFramePointerSlow(tstate, code->co_framesize);
   if (frame == nullptr) {
+    ++tstate->py_recursion_remaining;
     return nullptr;
   }
   Py_INCREF(func);
@@ -1750,6 +1767,7 @@ void framePop(void* popped) {
   tstate->cframe->current_frame = frame->previous;
   THP_PyFrame_Clear(frame);
   THP_PyThreadState_PopFrame(tstate, frame);
+  ++tstate->py_recursion_remaining;
 }
 #endif
 
