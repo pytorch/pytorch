@@ -2332,6 +2332,9 @@ class PrecompileSession(Generic[_P, _R]):
         }
         for n, t in package.graph_break_op_devices:
             op_devices.setdefault(n, set()).add(t)
+        # Whether any graph compiled for CUDA graphs. Load post-compiles with them
+        # on then, and each graph runs as one only if it compiled for them.
+        cudagraphs = False
         for backend_id, artifact in backends.items():
             # Unlike a make_fx capture, the graph's ops stay even if Inductor
             # decomposed them, since the frame's guards can name them.
@@ -2343,6 +2346,7 @@ class PrecompileSession(Generic[_P, _R]):
                 for result in (c.result for c in compiled if c is not None):
                     if isinstance(result, CompiledFxGraph):
                         names |= _called_op_names(result.source_code)
+                        cudagraphs |= result.cudagraph_info is not None
             for n in names:
                 op_devices.setdefault(n, set()).update(
                     package.device_types.get(backend_id, ())
@@ -2372,12 +2376,16 @@ class PrecompileSession(Generic[_P, _R]):
             _warn_unregistered_ops(found, tuple(sorted(served - set(found.modules))))
         sections = dict(custom_op_modules=modules, custom_ops=ops, custom_op_keys=keys)
         options = None if isinstance(self._backend, str) else self._backend.config
+        cudagraph_config: dict[str, bool] = {}
+        if self._backend_name == "inductor":
+            cudagraph_config = {"triton.cudagraphs": cudagraphs}
         return _build_multigraph_artifact(
             entry,
             backends,
             summary,
             self._backend_name,
             self._fn,
+            cudagraph_config=cudagraph_config,
             inductor_options=options,
             **sections,
         )
