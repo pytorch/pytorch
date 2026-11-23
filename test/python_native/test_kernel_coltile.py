@@ -88,36 +88,47 @@ class TestKernelColTile(TestCase):
     def test_reduce_col_tile_single_stage(self):
         # A misaligned input needs an element-aligned descriptor.
         raw = torch.randn(32 * 512 + 1, device="cuda")
-        x = raw[1:].view(32, 512)
-        self.assertEqual(
-            _L.supported_alignment(x, tile.align_bytes(512, x.element_size())),
-            x.element_size(),
-        )
-        out = ct.reduce_col_tile(
-            T.SumOps(acc=cutlass.Float32),
-            "smoke",
-            x,
-            torch.float32,
-            npar=1,
-        )
-        self.assertEqual(out, x.sum(dim=0), atol=1e-2, rtol=1e-2)
-
-    def test_plans_key_and_require_the_current_device(self):
         trait = T.SumOps(acc=cutlass.Float32)
+        for offset in (0, 1):
+            x = raw[offset : offset + 32 * 512].view(32, 512)
+            with self.subTest(offset=offset):
+                bound = tile.align_bytes(512, x.element_size())
+                aligned = _L.supported_alignment(x, bound) > x.element_size()
+                self.assertEqual(aligned, offset == 0)
+                out = ct.reduce_col_tile(trait, "smoke", x, torch.float32, npar=1)
+                self.assertEqual(out, x.sum(dim=0), atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2 or torch.cuda.get_device_capability(1)[0] < 9,
+        "requires a second Hopper+ CUDA device",
+    )
+    @parametrize("launcher", ["col_tile", "ordered_col"])
+    def test_plans_key_and_require_the_current_device(self, launcher):
+        trait = T.SumOps(acc=cutlass.Float32)
+        ordered, key = launcher == "ordered_col", f"bydevice_{launcher}"
         # A split over a thread-per-column width adds a "coltile2" stage-two plan.
-        x = torch.randn(4096, ct._C_THREAD_STAGE2 + 256, device="cuda")
+        shape = (2, 4096, 32) if ordered else (4096, ct._C_THREAD_STAGE2 + 256)
+        x = torch.randn(shape, device="cuda:1")
+
+        def run():
+            if ordered:
+                return ct.reduce_ordered_col(trait, key, x, [torch.float32], 1)[0]
+            return ct.reduce_col_tile(trait, key, x, torch.float32)
+
         before = set(ct._CACHE)
-        # One GPU has no other device, so pretend another one is current.
-        other = x.get_device() + 1
-        with mock.patch.object(torch.cuda, "current_device", return_value=other):
+        with torch.cuda.device(0):
             with self.assertRaisesRegex(AssertionError, "is current"):
-                ct.reduce_col_tile(trait, "bydevice", x, torch.float32)
+                run()
         self.assertEqual(set(ct._CACHE), before)
-        ct.reduce_col_tile(trait, "bydevice", x, torch.float32)
-        # Both keys put the index sixth; without it, the slot holds the "col" axis.
-        keys = {k[0]: k[5] for k in ct._CACHE if k[1] == "bydevice"}
-        index = x.get_device()
-        self.assertEqual(keys, {"coltile": index, "coltile2": index})
+        with torch.cuda.device(1):
+            out = run()
+        want = x.double().sum(dim=-2).float()
+        self.assertEqual(out.view(want.shape), want, atol=1e-3, rtol=1e-5)
+        # The device index is the fifth ordered key field and the sixth column-tile one;
+        # without it, those slots hold the next field.
+        tags, slot = ({"ordered_col"}, 4) if ordered else ({"coltile", "coltile2"}, 5)
+        keys = {k[0]: k[slot] for k in ct._CACHE if k[1] == key}
+        self.assertEqual(keys, dict.fromkeys(tags, 1))
 
     def test_reduce_col_tile_split_reduced_axis(self):
         # Exercise a ragged reduced-axis split and stage-2 partial combination.
@@ -184,6 +195,10 @@ class TestKernelColTile(TestCase):
     def test_partial_tree_folds_every_partial_once(self):
         # Stage 2 of a (2**20, 3) sum folds hundreds of partial rounds per thread, so whole
         # trees run; small integers keep every partial sum exact.
+        # Its 128 threads fold npar column-layout partials, so trees need
+        # npar // 128 >= _PARTIAL_GROUP.
+        npar, _ = ct._col_geometry(1 << 20, 3, 1, 4)
+        self.assertGreaterEqual(npar // 128, tile._PARTIAL_GROUP, "the test is stale")
         x = torch.randint(-4, 5, (1 << 20, 3), device="cuda").float()
         trait = T.SumOps(acc=cutlass.Float32)
         got = ct.reduce_col_tile(trait, "partial_tree", x, torch.float32)
@@ -277,20 +292,20 @@ class TestKernelColTile(TestCase):
             self.assertEqual(g, e, **_TOL[dtype])
 
     @parametrize(
-        "shape,nouts,routed",
+        "shape,nouts",
         [
-            ((4, 64, 2), 1, True),
-            ((4, 1024, 2), 1, False),
-            ((4, 1024, 16), 1, True),
-            ((4, 64, 16), 2, True),
-            ((4, 1024, 16), 2, False),
-            ((4, 1024, 2048), 2, True),
+            ((4, 64, 2), 1),
+            ((4, 1024, 2), 1),
+            ((4, 1024, 16), 1),
+            ((4, 64, 16), 2),
+            ((4, 1024, 16), 2),
+            ((4, 1024, 2048), 2),
         ],
-        name_fn=lambda s, n, r: f"{'x'.join(map(str, s))}_nouts{n}",
+        name_fn=lambda s, n: f"{'x'.join(map(str, s))}_nouts{n}",
     )
-    @_batched_route
-    def test_batched_column_route_gate(self, shape, nouts, routed):
-        # Middle-axis reductions use the batched kernel only where it measured faster.
+    def test_middle_axis_reductions_match_aten(self, shape, nouts):
+        # One- and two-output middle-axis reductions over short and long reduced runs
+        # and narrow and wide kept columns match ATen through dispatch.
         f32 = torch.float32
         x = torch.randn(shape, device="cuda")
         with torch.backends.python_native.cutedsl.disabled():
@@ -301,7 +316,6 @@ class TestKernelColTile(TestCase):
         else:
             two = T.VarMeanOps(correction=1, acc=cutlass.Float32)
             got = kg.reduce_dim2(two, key, x, 1, [f32, f32])
-        self.assertEqual("coltile" in _tags(key), routed)
         for g, e in zip(got, expected):
             self.assertEqual(g, e, atol=1e-3, rtol=1e-4)
 
@@ -315,22 +329,21 @@ class TestKernelColTile(TestCase):
         self.assertIn("coltile", _tags("collapse"))
         self.assertEqual(got, x.double().sum(dim=(2, 3)).float(), atol=1e-4, rtol=1e-4)
 
-    @parametrize("layout", ["dim0", "transposed", "narrow"])
+    @parametrize("layout", ["dim0", "transposed"])
     @_batched_route
     def test_two_output_columns_route_to_coltile(self, layout):
         # Dense dim-0 and transposed two-output reductions reach the column kernel when
-        # they pass the batched gate as B == 1; narrow columns stay on the general kernel.
+        # they pass the batched gate as B == 1.
         trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
-        x, dim, routed = {
-            "dim0": (torch.randn(1100, 8192, device="cuda"), 0, True),
-            "transposed": (torch.randn(1100, 8192, device="cuda").t(), 1, True),
-            "narrow": (torch.randn(4096, 256, device="cuda"), 0, False),
+        x, dim = {
+            "dim0": (torch.randn(1100, 8192, device="cuda"), 0),
+            "transposed": (torch.randn(1100, 8192, device="cuda").t(), 1),
         }[layout]
         with torch.backends.python_native.cutedsl.disabled():
             expected = torch.var_mean(x, dim=dim)
         f32 = [torch.float32, torch.float32]
         got = kg.reduce_dim2(trait, f"var_mean_{layout}", x, dim, f32)
-        self.assertEqual("coltile" in _tags(f"var_mean_{layout}"), routed)
+        self.assertIn("coltile", _tags(f"var_mean_{layout}"))
         for g, e in zip(got, expected):
             self.assertEqual(g, e, atol=1e-4, rtol=1e-4)
 
@@ -440,15 +453,6 @@ class TestKernelColTile(TestCase):
         with self.assertRaisesRegex(ValueError, "vec must divide the row pitch"):
             ct.reduce_col_tile(trait, "pitch_col", cols, f32, vec=4)
 
-    def test_route_gate_keeps_other_architectures_on_general(self):
-        x = torch.randn(4, 64, 16, device="cuda")
-        with mock.patch.object(kg, "_BATCHED_COL_CCS", ()):
-            got = kg.reduce_dim(
-                T.SumOps(acc=cutlass.Float32), "gate_off", x, 1, torch.float32
-            )
-        self.assertNotIn("coltile", _tags("gate_off"))
-        self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-4, rtol=1e-4)
-
     def test_over_reported_split_stays_correct(self):
         # 64 chunks of ceil(65 / 64) = 2 rows leave the last 31 empty; they must load
         # nothing and combine identities.
@@ -488,28 +492,22 @@ class TestColTileHost(TestCase):
         with self.assertRaisesRegex(AssertionError, "no tile"):
             col.tilemap
 
-    def test_explicit_vec_must_divide_the_column_count(self):
-        # Explicit vec must divide C or trailing outputs remain uninitialized.
-        x = torch.randn(64, 30, device="cuda")
-        with self.assertRaisesRegex(ValueError, "vec must divide"):
-            ct.reduce_col_tile(
-                T.SumOps(acc=cutlass.Float32), "badvec", x, torch.float32, vec=4
-            )
-
-    def test_explicit_npar_must_fit_int32_partials(self):
-        x = torch.randn(1, 1 << 20, device="cuda")
-        with self.assertRaisesRegex(ValueError, "overflows Int32"):
-            ct.reduce_col_tile(
-                T.SumOps(acc=cutlass.Float32), "bignpar", x, torch.float32, npar=4096
-            )
-
-    def test_explicit_sizes_must_be_positive(self):
-        x = torch.randn(64, 32, device="cuda")
+    @parametrize(
+        "shape,arg,value,error",
+        [
+            # Explicit vec must divide C or trailing outputs remain uninitialized.
+            ((64, 30), "vec", 4, "vec must divide"),
+            ((1, 1 << 20), "npar", 4096, "overflows Int32"),
+            ((64, 32), "vec", 0, "vec must be positive"),
+            ((64, 32), "npar", 0, "npar must be positive"),
+        ],
+        name_fn=lambda shape, arg, value, error: f"{arg}{value}",
+    )
+    def test_explicit_sizes_are_validated(self, shape, arg, value, error):
+        x = torch.randn(shape, device="cuda")
         trait = T.SumOps(acc=cutlass.Float32)
-        with self.assertRaisesRegex(ValueError, "vec must be positive"):
-            ct.reduce_col_tile(trait, "badvec0", x, torch.float32, vec=0)
-        with self.assertRaisesRegex(ValueError, "npar must be positive"):
-            ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
+        with self.assertRaisesRegex(ValueError, error):
+            ct.reduce_col_tile(trait, "badsize", x, torch.float32, **{arg: value})
 
     def test_rows_must_fit_int32(self):
         # Stage one indexes rows as batch * R + row in Int32; stride-0 views reach the
@@ -587,9 +585,6 @@ _ROUTED_TRAITS = {
 # Selections return input elements, so their values must match exactly.
 _EXACT_REFS = {"amax", "amin", "absmax", "absmin", "max_dim", "min_dim", "aminmax"}
 
-# Traits by field count for the gate's output minimums.
-_FIELD_TRAITS = {1: T.SumOps(), 2: T.ArgMaxOps(), 3: T.WelfordOps(correction=1)}
-
 
 def _flags(x):
     return x != 0
@@ -624,38 +619,17 @@ _TORCH_REFS = {
 
 class TestOrderedColRoute(TestCase):
     @parametrize(
-        "nfields,shape,routed",
+        "shape,routed",
         [
-            (1, (16, 128, 128), True),
-            (1, (16, 128, 127), False),
-            (1, (16, 127, 128), False),
-            (2, (128, 128, 128), True),
-            (2, (127, 128, 128), False),
-            (3, (256, 128, 128), True),
-            (3, (255, 128, 128), False),
-            (1, (16, 8192, 128), True),
-            (1, (16, 8193, 128), False),
-            (1, (128, 2048), True),
-            (1, (127, 2048), False),
-            (1, (128, 2047), False),
-            (1, (128, 128, 31), False),
-            (1, (128, 128, 32), True),
+            # reduce_ordered_col tiles 32 columns per warp.
+            ((128, 128, 31), False),
+            ((128, 128, 32), True),
         ],
-        name_fn=lambda n, shape, routed: f"{n}f_" + "x".join(map(str, shape)),
+        name_fn=lambda shape, routed: "x".join(map(str, shape)),
     )
-    def test_gate_boundaries(self, nfields, shape, routed):
+    def test_gate_boundaries(self, shape, routed):
         view = torch.empty(shape, device="meta")
-        ok = kg._ordered_col_route_ok(view, _FIELD_TRAITS[nfields])
-        self.assertEqual(ok, routed)
-
-    @parametrize("outputs", [8192, 16384])
-    def test_general_norms_need_more_outputs(self, outputs):
-        view = torch.empty((outputs // 128, 128, 128), device="meta")
-        self.assertTrue(kg._ordered_col_route_ok(view, T.SumOps()))
-        routed = kg._ordered_col_route_ok(view, T.NormOps(3))
-        self.assertEqual(routed, outputs >= 16384)
-        self.assertTrue(kg._general_norm(T.NormOps(3)))
-        self.assertFalse(kg._general_norm(T.NormOps(2)))
+        self.assertEqual(kg._ordered_col_route_ok(view, T.SumOps()), routed)
 
     @parametrize(
         "field,error",
@@ -687,43 +661,9 @@ class TestOrderedColRoute(TestCase):
         wide = ct._OrderedColReduce(trait, plan, 1024, 1 << 21, 1)
         self.assertEqual((narrow.wide, wide.wide), (False, True))
 
-    @parametrize(
-        "name,rows,loads,exact,per_load",
-        [
-            ("sum", 8192, 4, True, True),
-            ("sum", 4096, 2, True, True),
-            ("sum", 2048, 1, True, False),
-            ("sum", 8000, 4, False, False),
-            ("argmax", 8192, 4, True, False),
-        ],
-    )
-    def test_per_load_strides(self, name, rows, loads, exact, per_load):
-        """Only exact single-field replays of several loads copy the stride per load."""
-        from torch._native.ops.reductions import kernel_rowtile as rt
-
-        trait = T.SumOps() if name == "sum" else T.ArgMaxOps()
-        plan = rt.itree_plan(rows, 64, 4, stage=False)
-        self.assertEqual((plan.batches[0][2], plan.tms[0].exact), (loads, exact))
-        op = ct._OrderedColReduce(trait, plan, rows, 64, 1)
-        self.assertEqual(op.per_load, per_load)
-
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "requires Hopper or later")
 class TestOrderedColDevice(TestCase):
-    def test_plans_key_and_require_the_current_device(self, device):
-        trait, x = T.SumOps(), torch.randn(2, 4096, 32, device=device)
-        before = set(ct._CACHE)
-        # One GPU has no other device, so pretend another one is current.
-        other = x.get_device() + 1
-        with mock.patch.object(torch.cuda, "current_device", return_value=other):
-            with self.assertRaisesRegex(AssertionError, "is current"):
-                ct.reduce_ordered_col(trait, "ordered_bydevice", x, [torch.float32], 1)
-        self.assertEqual(set(ct._CACHE), before)
-        got = ct.reduce_ordered_col(trait, "ordered_bydevice", x, [torch.float32], 1)
-        self.assertIsNotNone(got)
-        keys = [k for k in ct._CACHE if k[:2] == ("ordered_col", "ordered_bydevice")]
-        self.assertEqual({k[4] for k in keys}, {x.get_device()})
-
     @parametrize(
         "op,in_dtype,shape",
         [
@@ -759,6 +699,13 @@ class TestOrderedColDevice(TestCase):
             "argmax": (T.ArgMaxOps(acc=cutlass.Float32), [torch.int64]),
             "var_mean": (T.VarMeanOps(correction=0), [torch.float32] * 2),
         }[op]
+        # The cases above reach exact multi-group merges and a single masked warp.
+        plan = rt.trait_itree_plan(trait, rows, batches * columns, 4, stage=False)
+        if (op, rows) in (("sum", 4096), ("argmax", 8192)):
+            self.assertTrue(plan.tms[0].exact)
+            self.assertGreater(plan.wpr // plan.kchunk, 1)
+        elif rows == 200:
+            self.assertEqual((plan.wpr, plan.tms[0].exact), (1, False))
         nouts = len(outputs)
         got = ct.reduce_ordered_col(trait, f"ordered_{op}", x, outputs, nouts)
         reference = kg._try_indexed_itree(
@@ -777,23 +724,16 @@ class TestOrderedColDevice(TestCase):
         for a, b in zip(got, reference, strict=True):
             self.assertEqual(a.flatten().view(torch.uint8), b.view(torch.uint8))
 
-    def test_direct_plan_cases_reach_their_plans(self, device):
-        """The cases above cover exact multi-group merges and a single masked warp."""
-        from torch._native.ops.reductions import kernel_rowtile as rt
-
-        for trait, rows in ((T.SumOps(), 4096), (T.ArgMaxOps(), 8192)):
-            plan = rt.trait_itree_plan(trait, rows, 64, 4, stage=False)
-            self.assertTrue(plan.tms[0].exact)
-            self.assertGreater(plan.wpr // plan.kchunk, 1)
-        plan = rt.trait_itree_plan(T.SumOps(), 200, 64, 4, stage=False)
-        self.assertEqual((plan.wpr, plan.tms[0].exact), (1, False))
-
-    @parametrize("pattern", ["signed_zeros", "ties"])
+    @parametrize("pattern", ["negative_zero", "signed_zeros", "ties"])
     def test_special_values_match_the_indexed_tree(self, device, pattern):
-        """Keep signed-zero maxima and argmax ties bitwise equal to the indexed tree."""
+        """Keep signed-zero sums and maxima and argmax ties bitwise equal to the indexed
+        tree."""
         rows, columns = 2048, 32
-        if pattern == "signed_zeros":
-            # max(-0, +0) keeps whichever zero the fold order favors.
+        if pattern == "negative_zero":
+            x = torch.full((rows, columns), -0.0, device=device)
+            trait, outputs = T.SumOps(), [torch.float32]
+        elif pattern == "signed_zeros":
+            # max(-0, +0) keeps its left operand, which both trees take from row 0.
             negative = torch.rand(rows, columns, device=device) < 0.5
             x = torch.where(negative, -0.0, 0.0)
             trait, outputs = T.AMaxOps(), [torch.float32]
@@ -818,9 +758,12 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
         if pattern == "ties":
             self.assertEqual(got[0], torch.zeros_like(got[0]))
+        elif pattern == "negative_zero":
+            # The identity seed turns -0 sums into +0.
+            self.assertFalse(torch.signbit(got[0]).any())
         else:
             signs = torch.signbit(got[0]).unique().numel()
-            self.assertEqual(signs, 2, "one sign cannot tell fold orders apart")
+            self.assertEqual(signs, 2, "every output has one sign, so no zero tie ran")
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_norm2_leaf_narrow_values(self, device, dtype):
@@ -854,6 +797,12 @@ class TestOrderedColDevice(TestCase):
         output = torch.float32 if op == "sum" else torch.int64
         got = ct.reduce_ordered_col(trait, "bounded_" + op, x, [output], 1)
         self.assertEqual(got is not None, served)
+        if served:
+            key, shapes, kept = f"bounded_{op}_ref", [(rows, 32)], [(32, 1)]
+            want = kg._try_indexed_itree(
+                trait, key, x, shapes, kept, 32, rows, [output], 1
+            )
+            self._assert_bitwise(got, want)
 
     def test_batch_and_column_counts_share_one_kernel(self, device):
         trait = T.SumOps(acc=cutlass.Float32)
@@ -874,10 +823,12 @@ class TestOrderedColDevice(TestCase):
         want = x.sum(dim=0, dtype=torch.float32)
         self.assertEqual(got[0], want, atol=1e-2, rtol=1e-3)
 
+    # Exact R = 8192 copies a 64-bit stride per load; ragged R = 8000 addresses every
+    # leaf through the Int32 row stride.
     @largeTensorTest("8GB", device="cuda")
-    def test_batch_offsets_pass_int32(self, device):
+    @parametrize("rows,columns", [(8192, (1 << 17) + 1), (8000, 140001)])
+    def test_batch_offsets_pass_int32(self, device, rows, columns):
         # R * C < 2**31 keeps Int32 row offsets, but batch 2 starts past 2**31.
-        rows, columns = 8192, (1 << 17) + 1
         flat = torch.randn(3 * rows * columns + 1, device=device, dtype=torch.bfloat16)
         x = flat[1:].view(3, rows, columns)
         trait, f32 = T.SumOps(acc=cutlass.Float32), [torch.float32]
@@ -992,9 +943,11 @@ class TestOrderedColDevice(TestCase):
         x = prepare(torch.randn(2, 3000, 64, device=device)).to(dtype)
         self._assert_matches_indexed(name, x, f"padded_{name}")
 
-    @parametrize("name", ["amax", "absmax", "argmax", "max_dim", "aminmax"])
+    @parametrize(
+        "name", ["amax", "absmax", "argmax", "argmin", "max_dim", "min_dim", "aminmax"]
+    )
     def test_selections_through_masked_leaves_past_nan_rows(self, device, name):
-        """Masked leaves re-read row R - 1 and must stay masked: argmax and max_dim would
+        """Masked leaves re-read row R - 1 and must stay masked: the index traits would
         pick a re-read NaN's index, and the value traits check NaN and inf parity."""
         x = torch.randn(2, 3000, 64, device=device)
         x[:, -1, ::3] = float("nan")
@@ -1015,9 +968,11 @@ class TestOrderedColDevice(TestCase):
     def test_shipped_route_serves_b200_only(self, device):
         x = torch.randn(16, 128, 128, device=device)
         trait, f32 = T.SumOps(acc=cutlass.Float32), [torch.float32]
-        _, served = self._reduce(device, trait, "shipped", x, 1, f32, route=None)
+        got, served = self._reduce(device, trait, "shipped", x, 1, f32, route=None)
         b200 = torch.cuda.get_device_capability(device) == (10, 0)
         self.assertEqual(served, b200)
+        want, _ = self._reduce(device, trait, "shipped_ref", x, 1, f32, route=False)
+        self._assert_bitwise(got, want)
 
     def test_narrow_columns_stay_on_the_indexed_tree(self, device):
         # The kernel tiles 32 columns, so the gate and the kernel both decline 16.

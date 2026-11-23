@@ -32,7 +32,9 @@ def align_bytes(N: int, itemsize: int) -> int:
 def _decode_offset(
     linear, divs, strides, npairs, native_div: cutlass.Constexpr = False
 ):
-    # Mixed-radix flat offset with only pair count compiled.
+    # Mixed-radix flat offset with only pair count compiled. Callers pass FastDivmod
+    # divisors (native_div=False) only for linear below 2^31; wider linear values need
+    # native_div=True.
     rem = linear
     if npairs == 0:
         return cutlass.Int64(0)
@@ -225,7 +227,10 @@ def fold_decoded(
     return reduce_fn(acc, val, _rotate(base_r, shift, rb), valid)
 
 
-# Rounds per partial-fold tree and the accumulators its roots rotate over.
+# Rounds per partial-fold tree and the accumulators its roots rotate over. Unlike
+# fold_cols_rolled's stage-one trees, whose group shrinks with vec to fit 32 registers
+# and whose leftover rows fold first, stage two reads one partial per load and folds
+# leftovers last, so the two schemes are tuned separately.
 _PARTIAL_GROUP = 16
 _PARTIAL_ACCS = 4
 
@@ -1735,7 +1740,8 @@ class TileReduce:
         # Compute output indices after folding to reduce live registers.
         out_base = unit * const_expr(self.nslots)
         if const_expr(self.axis in ("row", "general")):
-            # Split inner-tree writes by block; other row/general paths write by unit.
+            # Split inner-tree plans write one partial per (block, row-in-block) slot;
+            # other row/general paths write by unit.
             part_base = (
                 Int32(bx) * const_expr(self.itree.rows_per_block) + row_in_block
                 if const_expr(
