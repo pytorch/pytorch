@@ -101,6 +101,25 @@ variable `TORCHELASTIC_TIMER_FILE`, and this environment variable will
 be propagated to the worker processes to allow them to connect to the same
 named pipe that `LocalElasticAgent` uses.
 
+## Graceful Shutdown Timeout
+
+When a worker process does not exit after being sent a termination signal
+(e.g. `SIGTERM`, sent when the agent itself receives a signal or when another
+worker fails), the agent waits a configurable amount of time before
+forcefully killing the worker (e.g. via `SIGKILL`). This timeout defaults to
+30 seconds and can be configured, in decreasing order of precedence, by:
+
+1. passing `shutdown_timeout` to `LocalElasticAgent` (or `--shutdown-timeout`
+   to `torchrun`),
+2. setting the `TORCH_ELASTIC_SHUTDOWN_TIMEOUT` environment variable
+   (a non-negative number of seconds, fractions allowed),
+3. the default of 30 seconds (`DEFAULT_SHUTDOWN_TIMEOUT`).
+
+The same value is also used by
+`torch.distributed.elastic.multiprocessing.start_processes` when worker
+processes are terminated internally (e.g. when another worker fails), unless
+overridden via its `shutdown_timeout` argument or the environment variable.
+
 ## Health Check Server
 
 A health check monitoring server can be enabled in `LocalElasticAgent`

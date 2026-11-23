@@ -25,7 +25,12 @@ import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
-from torch.distributed.elastic.multiprocessing import ProcessFailure, SignalException
+from torch.distributed.elastic.multiprocessing import (
+    DEFAULT_SHUTDOWN_TIMEOUT,
+    ProcessFailure,
+    resolve_shutdown_timeout,
+    SignalException,
+)
 from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.numa.binding import NumaOptions
@@ -461,7 +466,7 @@ class SimpleElasticAgent(ElasticAgent):
         self,
         spec: WorkerSpec,
         exit_barrier_timeout: float | None = None,
-        shutdown_timeout: int = 30,
+        shutdown_timeout: float | None = None,
     ):
         self._worker_group = WorkerGroup(spec)
         self._remaining_restarts = self._worker_group.spec.max_restarts
@@ -474,7 +479,10 @@ class SimpleElasticAgent(ElasticAgent):
             )
         else:
             self._exit_barrier_timeout = exit_barrier_timeout
-        self._shutdown_timeout = shutdown_timeout
+        # Resolve shutdown_timeout: explicit arg wins, then the
+        # TORCH_ELASTIC_SHUTDOWN_TIMEOUT env var, then the historical default
+        # of 30 s (see resolve_shutdown_timeout).
+        self._shutdown_timeout = resolve_shutdown_timeout(shutdown_timeout)
         self._total_execution_time = 0
         self._in_exit_barrier: bool = False
 
@@ -510,7 +518,9 @@ class SimpleElasticAgent(ElasticAgent):
 
     @abc.abstractmethod
     def _shutdown(
-        self, death_sig: signal.Signals = signal.SIGTERM, timeout: int = 30
+        self,
+        death_sig: signal.Signals = signal.SIGTERM,
+        timeout: float = DEFAULT_SHUTDOWN_TIMEOUT,
     ) -> None:
         """Clean up any resources that were allocated during the agent's work.
 
