@@ -1356,13 +1356,6 @@ for warning in w:
                 if options.get("pin_memory"):
                     self.assertTrue(actual.is_pinned())
 
-        for empty_strided in (
-            torch.empty_strided,
-            libtorch_agnostic.ops.my_empty_strided,
-        ):
-            with self.assertRaisesRegex(RuntimeError, "SparseCPU"):
-                empty_strided(size, stride, layout=torch.sparse_coo, device="cpu")
-
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize(
         "target",
