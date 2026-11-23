@@ -149,6 +149,21 @@ impl Inliner<'_, '_> {
 
     /// Replaces the call at instruction `i` of block `b` by `callee`.
     fn splice(&mut self, func: &mut Function, b: usize, i: usize, callee: Function, target: PyObj, code: PyObj) {
+        // A value lives as long as the interpreter keeps it, and while a
+        // function it called runs the interpreter keeps what the caller
+        // goes on with behind the call. Where the callee raises there is
+        // no "behind the call" in the inlined body, so each way out of it
+        // by a raise holds those values until there, the latest made (the
+        // topmost of the interpreter's stack) first.
+        let raises = callee.blocks.iter().any(|block| matches!(block.term, Term::Raise { .. } | Term::Reraise(..)));
+        let mut kept: Vec<V> = Vec::new();
+        if raises {
+            let consts: HashSet<V> =
+                func.blocks.iter().flat_map(|block| &block.insts).filter(|inst| matches!(inst.op, Op::Const(_))).map(|inst| inst.dst).collect();
+            let live = crate::analysis::analyze(func).live_before(func, b, i + 1);
+            kept = live.iter().filter(|v| *v != func.blocks[b].insts[i].dst && !consts.contains(v)).collect();
+            kept.sort_unstable_by(|one, other| other.cmp(one));
+        }
         let tail = func.blocks[b].insts.split_off(i + 1);
         let call = func.blocks[b].insts.pop().unwrap();
         let Op::Call { callee: callee_value, args, .. } = &call.op else {
@@ -232,6 +247,11 @@ impl Inliner<'_, '_> {
             if matches!(block.term, Term::Return(_)) {
                 let bc = insts.last().map_or(tag(block.bc_start), |inst| inst.bc);
                 insts.push(Inst { dst: NONE, op: Op::FrameLeave, bc, kills: Vec::new() });
+            }
+            if matches!(block.term, Term::Raise { .. } | Term::Reraise(..)) {
+                for v in &kept {
+                    insts.push(Inst { dst: NONE, op: Op::Hold(vec![*v]), bc: tag(block.term_bc), kills: Vec::new() });
+                }
             }
             let mut term = block.term;
             let _ = rewrite_term_uses(&mut term, &mut |v| Ok(map(v)));
