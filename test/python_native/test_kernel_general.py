@@ -174,7 +174,9 @@ class TestKernelGeneral(TestCase):
             limit=4096,
         )
         kg._launch(wide_count, ("wide", "wide_count"), [x], [out])
-        self.assertEqual(out, x[:4096].sum().reshape(1), atol=0, rtol=0)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x[:4096].sum().reshape(1)
+        self.assertEqual(out, want, atol=0, rtol=0)
 
         # Lower only the selection and grid limits to run the real wide-output split.
         # 7 outputs on a 3-wide grid leave two dead slots, which must not store.
@@ -598,7 +600,8 @@ class TestKernelGeneral(TestCase):
             uniform_tree=True,
         )
         self.assertEqual(op.cache_sig, plain.cache_sig)
-        # The tree ran: count // block whole loads, and a masked tail for the rest.
+        # The plan compiles the tree: count // block whole loads, plus a masked tail
+        # load when count % block != 0.
         self.assertEqual(op.tile.uniform_tree_loads, count // block)
         self.assertEqual(op.tile.uniform_tree_tail, count % block != 0)
         key = ("test_uniform_welford_tree", type(trait).__name__, dtype) + op.cache_sig
@@ -1026,8 +1029,10 @@ class TestKernelGeneral(TestCase):
             plans = lambda: {k for k in rt._CACHE if k[:2] == ("rowtile", key)}  # noqa: E731
             routed = plans()
             trait, kw = T.SumOps(acc=cutlass.Float32), {"ragged_vector": True}
-            rt.reduce_row_tile(trait, key, make(), [torch.float32], **kw)
+            x = make()
+            (got,) = rt.reduce_row_tile(trait, key, x, [torch.float32], **kw)
             self.assertEqual(plans(), routed)
+            self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
 
     @parametrize("case", ["row", "column", "ordered_column", "general", "all"])
     def test_replay_matches_a_fresh_inner_tree_call(self, case):
