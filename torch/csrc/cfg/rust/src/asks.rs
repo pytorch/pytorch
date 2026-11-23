@@ -108,13 +108,13 @@ const HISTORY: usize = 4096;
 
 /// The names under which a node of autograd holds what it saved, in the
 /// order of the names.
-pub(crate) fn saved_names(py: Python<'_>, node: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+pub(crate) fn saved_names(node: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     let kind = node.get_type();
     let known = SAVED.lock().unwrap().get_or_insert_with(HashMap::new).get(&(kind.as_ptr() as usize)).cloned();
     if let Some(names) = known {
         return Ok(names);
     }
-    let listed: Vec<String> = py.import("builtins")?.getattr("dir")?.call1((&kind,))?.extract()?;
+    let listed: Vec<String> = kind.dir()?.extract()?;
     let names: Vec<String> = listed.into_iter().filter(|name| name.starts_with("_saved_")).collect();
     SAVED.lock().unwrap().get_or_insert_with(HashMap::new).insert(kind.as_ptr() as usize, names.clone());
     Ok(names)
@@ -140,7 +140,7 @@ fn changed(py: Python<'_>, results: &Bound<'_, PyAny>) -> PyResult<String> {
         if seen.len() > HISTORY {
             return Ok(format!("what autograd saved is not looked at behind {HISTORY} functions"));
         }
-        for name in &saved_names(py, &node)? {
+        for name in &saved_names(&node)? {
             if let Err(error) = node.getattr(name.as_str()) {
                 if !error.is_instance_of::<PyRuntimeError>(py) {
                     return Err(error);
