@@ -31,6 +31,7 @@ from ..runtime.hints import (
     TRITON_DEFAULT_RSPLIT_SIZE,
     TritonMeta,
 )
+from ..runtime.tiling import get_z_blocks
 from ..stream_utils import (
     AOTI_SUPPORTED_STREAM_OP_NAMES,
     AOTI_UNSUPPORTED_STREAM_OP_REASONS,
@@ -196,7 +197,9 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
                 cast("InductorMeta", inductor_meta), config_dict
             )
 
-        # Per-subkernel block sizes for combo kernels, or single-element lists.
+        # Combo kernels store one block size per subkernel.
+        # Single kernels store one X/Y/R0 block, but Z blocks are per-axis,
+        # ordered from Z0 (innermost) outward.
         num_kernels = combo_grid_meta.get("num_kernels", 1) if combo_grid_meta else 1
         if num_kernels > 1 and "XBLOCK_0" in config_dict:
             xblocks = [
@@ -208,7 +211,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
                 for i in range(num_kernels)
             ]
             zblocks = [
-                config_dict.get(f"ZBLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])
+                config_dict.get(f"Z0_BLOCK_{i}", TRITON_DEFAULT_BLOCK_SIZES["Z0_BLOCK"])
                 for i in range(num_kernels)
             ]
             r0blocks = [
@@ -218,7 +221,7 @@ def generate_aoti_kernel_config_header(kernel_names: list[str]) -> str:
         else:
             xblocks = [config_dict.get("XBLOCK", TRITON_DEFAULT_BLOCK_SIZES["XBLOCK"])]
             yblocks = [config_dict.get("YBLOCK", TRITON_DEFAULT_BLOCK_SIZES["YBLOCK"])]
-            zblocks = [config_dict.get("ZBLOCK", TRITON_DEFAULT_BLOCK_SIZES["ZBLOCK"])]
+            zblocks = get_z_blocks(config_dict)
             r0blocks = [
                 config_dict.get("R0_BLOCK", TRITON_DEFAULT_BLOCK_SIZES["R0_BLOCK"])
             ]
@@ -723,7 +726,7 @@ class DeferredTritonCallWrapper:
         """Generate scratch space allocations with runtime-known sizes."""
         kernel_name = self.kernel_name
         dtype_str = wrapper.codegen_dtype(torch.uint8)
-        device_type, _ = wrapper.codegen_device(torch.device(get_gpu_type())).split(
+        device_type, _ = wrapper.codegen_device(torch.device(wrapper.device)).split(
             ", "
         )
         device_ptr_type = wrapper.device_codegen.cpp_device_ptr()
@@ -1286,10 +1289,18 @@ class DeferredTritonCallWrapper:
 class CppWrapperGpu(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
+
+    A subclass that declares its own ``device`` (class attribute, or set before
+    ``__init__`` runs) keeps it -- the CppWrapperCpu hasattr pattern -- and the
+    value must name a device with registered op overrides, or
+    ``get_device_op_overrides`` below raises KeyError. ``create()`` returns
+    ``cls()``, so a subclass that inherits it must have an argument-free
+    ``__init__``.
     """
 
     def __init__(self) -> None:
-        self.device = get_gpu_type()
+        if not hasattr(self, "device"):
+            self.device = get_gpu_type()
         self.device_codegen = get_device_op_overrides(self.device)
         super().__init__()
         self.grid_id = count()
@@ -1328,16 +1339,17 @@ class CppWrapperGpu(CppWrapperCpu):
         self.used_cached_devices.add(device_str)
         return f"cached_torch_device_type_{device_str}"
 
-    @staticmethod
+    @classmethod
     def create(
+        cls,
         is_subgraph: bool,
         subgraph_name: str | None,
         parent_wrapper: PythonWrapperCodegen | None,
         partition_signatures: GraphPartitionSignature | None = None,
-    ):
+    ) -> Self:
         # TODO - support subgraph codegen by lifting functions. Check the
         # comment at CppWrapperCpu `codegen_subgraph` function.
-        return CppWrapperGpu()
+        return cls()
 
     def write_header(self):
         if V.graph.is_const_graph and not V.graph.is_dual_wrapper_mode:

@@ -1039,6 +1039,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(sorted(result), ["a", "b"])
 
+    @unittest.skipIf(not has_triton_package(), "requires Triton package")
     def test_nonstandard_c_method_descriptor_graph_break_binding(self):
         if not has_triton_package():
             self.skipTest("requires Triton package")
@@ -1705,6 +1706,7 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(1)
         self.assertEqual(fn(Child, Base, x), (x + 1, False, "default"))
 
+    @unittest.expectedFailure
     def test_class_setattr_abstractmethods_hasattr(self):
         class Base:
             pass

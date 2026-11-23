@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/mobile/profiler_edge.h>
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -122,12 +123,17 @@ KinetoEdgeCPUProfiler::getProfilerResult() {
 }
 
 KinetoEdgeCPUProfiler::~KinetoEdgeCPUProfiler() {
-  if (!trace_file_name_.empty()) {
-    if (profiler_result_) {
-      profiler_result_->save(trace_file_name_);
-    } else {
-      torch::autograd::profiler::disableProfiler()->save(trace_file_name_);
+  // A destructor must not throw, so a failed save only warns.
+  try {
+    if (!trace_file_name_.empty()) {
+      if (profiler_result_) {
+        profiler_result_->save(trace_file_name_);
+      } else {
+        torch::autograd::profiler::disableProfiler()->save(trace_file_name_);
+      }
     }
+  } catch (const std::exception& e) {
+    TORCH_WARN("Failed to save the edge profiler trace: ", e.what());
   }
   tls_edge_profiler = nullptr;
 }

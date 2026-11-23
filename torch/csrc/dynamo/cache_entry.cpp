@@ -1,3 +1,4 @@
+#include <atomic>
 #include <string>
 #include <utility>
 
@@ -7,15 +8,21 @@
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 
+namespace {
+std::atomic<uint64_t> next_serial{0};
+} // namespace
+
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
     : guard_manager{guarded_code.attr("guard_manager")},
       code{guarded_code.attr("code")},
       compile_id{guarded_code.attr("compile_id")},
       root_mgr{torch::dynamo::convert_to_root_guard_manager(
           guard_manager.attr("root"))},
-      diff_guard_root_mgr{torch::dynamo::convert_to_root_guard_manager(
-          guard_manager.attr("diff_guard_root"))},
-      backend{py::cast<py::object>(get_backend(backend))} {
+      diff_guard_root{guard_manager.attr("diff_guard_root")},
+      diff_guard_root_mgr{
+          torch::dynamo::convert_to_root_guard_manager(diff_guard_root)},
+      backend{py::cast<py::object>(get_backend(backend))},
+      serial{next_serial.fetch_add(1, std::memory_order_relaxed)} {
   if (py::object trace_annotation_obj{guarded_code.attr("trace_annotation")}) {
     trace_annotation = std::move(trace_annotation_obj).cast<std::string>();
   } else {
@@ -23,40 +30,18 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   }
 }
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
-    "-Wdeprecated-copy-with-user-provided-dtor")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
-// NOLINTNEXTLINE(bugprone-exception-escape)
-CacheEntry::~CacheEntry() {
-  // Only an entry linked into an ExtraState set the back-references.
-  if (this->_owner == nullptr) {
-    return;
-  }
-  // prevent guard_manager from use-after-free when invalidating
-  this->guard_manager.attr("cache_entry") = py::none();
-  this->guard_manager.attr("extra_state") = py::none();
-}
-C10_DIAGNOSTIC_POP()
-C10_DIAGNOSTIC_POP()
-
-void CacheEntry::invalidate(py::object deleted_guard_manager) {
-  // Keep the current pointer alive but make the fields as if no-op
-  this->guard_manager.attr("cache_entry") = py::none();
-  this->guard_manager.attr("extra_state") = py::none();
-  this->code = py::none();
-  this->guard_manager = std::move(deleted_guard_manager);
+void CacheEntry::invalidate(
+    py::object deleted_guard_manager,
+    std::vector<py::object>& released) {
+  // Keep the current pointer alive but make the fields as if no-op.
+  released.push_back(
+      std::exchange(this->guard_manager, std::move(deleted_guard_manager)));
+  released.push_back(std::exchange(this->code, py::none()));
+  released.push_back(std::exchange(this->diff_guard_root, py::none()));
+  released.push_back(std::exchange(this->backend, py::none()));
   this->root_mgr = nullptr;
   this->diff_guard_root_mgr = nullptr;
   this->trace_annotation = "Invalidated";
-  this->backend = py::none();
-}
-
-void CacheEntry::update_diff_guard_root_manager() {
-  TORCH_CHECK(
-      this->_owner != nullptr,
-      "cannot update the diff guard root of a copied cache entry");
-  this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
-      this->guard_manager.attr("diff_guard_root"));
 }
 
 CacheEntry CacheEntry::copy_for_python() const {
@@ -64,28 +49,16 @@ CacheEntry CacheEntry::copy_for_python() const {
   copy.root_mgr = nullptr;
   copy.diff_guard_root_mgr = nullptr;
   copy._owner = nullptr;
-  copy._source = identity();
   copy._owner_loc = {};
   return copy;
 }
 
-const CacheEntry* CacheEntry::identity() const {
-  return _source != nullptr ? _source : this;
-}
-
 bool CacheEntry::py_equal(const CacheEntry& other) const {
-  return identity() == other.identity() && compile_id.is(other.compile_id);
+  return serial == other.serial;
 }
 
 std::size_t CacheEntry::py_hash() const {
-  return std::hash<const void*>{}(identity());
-}
-
-PyObject* CacheEntry_to_obj(CacheEntry* e) {
-  if (!e) {
-    return py::none().release().ptr();
-  }
-  return py::cast(e, py::return_value_policy::reference).release().ptr();
+  return std::hash<uint64_t>{}(serial);
 }
 
 static PyObject* get_orig_backend_str() {
