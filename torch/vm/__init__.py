@@ -41,7 +41,13 @@ under a guard on the function; any other Python function, method or
 ``try``/``except``/``finally``, ``with``, imports and class statements are
 handled. A rewritten function runs under a frame of the interpreter that has
 its variables, so what looks for them there finds them: ``locals()``, ``eval``,
-``exec``, ``super()`` without arguments, a traceback, a debugger. Generators
+``exec``, ``super()`` without arguments, a traceback, a debugger. A value
+lives as long as the interpreter keeps it: in a variable until that is bound
+again or the frame ends, on the interpreter's stack until the instruction that
+pops it. So an object whose end runs code ends where it ends in the
+interpreter: a generator that a ``for`` breaks out of is closed behind the
+body of the loop, where the ``break`` stands, not behind the draw that read it
+last. Generators
 and coroutines run in the interpreter, and so does what they call; so does what
 is called while a trace function (``sys.settrace``) is set. A Python side
 effect does not split the function: it is one more instruction of the graph,
