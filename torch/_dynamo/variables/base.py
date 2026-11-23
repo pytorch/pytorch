@@ -41,7 +41,7 @@ from ..current_scope_id import current_scope_id
 from ..exc import raise_attribute_error, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import format_source_range, istype
+from ..utils import check_num_args, check_positional, format_source_range, istype
 
 
 # Stands in for the %p address object_repr/slot_tp_repr print: the real address
@@ -332,7 +332,7 @@ class NO_SUCH_SUBOBJ:
 class MethodFlags(IntFlag):
     """Calling convention for a `Method` handler, mirroring CPython's
     PyMethodDef ml_flags. `call_method` enforces arity from these before
-    invoking the handler, centralizing the raise_args_mismatch boilerplate."""
+    invoking the handler, centralizing the arity-check boilerplate."""
 
     VARARGS = 1  # any positional args; kwargs rejected unless KEYWORDS is set
     KEYWORDS = 2  # kwargs allowed (combine with VARARGS)
@@ -457,6 +457,13 @@ class Member:
     setter: Setter
 
 
+def unmodeled_get(self: Any, tx: InstructionTranslatorBase) -> None:
+    """Getter for a tp_getset/tp_members entry whose read half is not modeled
+    here: returning None declines, so the read falls through to the VT's
+    tp_getattro_impl. Used by entries that exist only to model the setter."""
+    return None
+
+
 def readonly_setter(
     self: Any, tx: InstructionTranslatorBase, value: VariableTracker | None
 ) -> NoReturn:
@@ -514,6 +521,18 @@ def getset_build(
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
+def graph_break_on_untracked_vt(
+    obj: VariableTracker, name: str, value: VariableTracker | None
+) -> None:
+    unimplemented(
+        gb_type="Attribute mutation on a sourced but untracked user-defined object",
+        context=f"object={obj}, name={name}, value={value}",
+        explanation="Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+        hints=[*graph_break_hints.DYNAMO_BUG],
+        log_warning=True,
+    )
+
+
 def store_attr_mutation(
     tx: InstructionTranslatorBase,
     item: VariableTracker,
@@ -528,13 +547,8 @@ def store_attr_mutation(
         # Their sourced owners must already be tracked; unlike generic Python
         # setattr, this closed path has no valid sourced-untracked fallback.
         if item.source is not None:
-            raise AssertionError(
-                f"{item} has a source but was never registered via "
-                "track_object_existing (usually missing at its VariableBuilder "
-                "construction site) -- writes to its writable Member/GetSet "
-                "entries would otherwise be silently dropped instead of "
-                "raising here."
-            )
+            # ref: https://github.com/pytorch/pytorch/pull/196865/
+            graph_break_on_untracked_vt(item, name, value)
         se.track_attribute_mutation_new(item)
     value_to_store = variables.DeletedVariable() if value is None else value
     se.store_attr(item, name, value_to_store)
@@ -634,8 +648,7 @@ def _wrap_unaryfunc(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 0:
-        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
+    check_num_args(tx, args, 0)
     return func(self, tx)
 
 
@@ -648,12 +661,22 @@ def _wrap_hashfunc(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 0:
-        raise_type_error(tx, f"expected 0 arguments, got {len(args)}")
+    check_num_args(tx, args, 0)
     from .builder import SourcelessBuilder
     from .constant import ConstantVariable, FakeValueKind
 
     h, is_fake = func(self, tx)
+    if is_fake and self.source is not None:
+        # A folded identity hash has no guard, so comparing it could go stale.
+        unimplemented(
+            gb_type="Identity-based __hash__ escapes to user code",
+            context=f"{self}.__hash__()",
+            explanation="Dynamo cannot guard an identity-based hash, so its value could go stale.",
+            hints=[
+                "Use hash(x) if calling x's own hash implementation is intended.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
     if is_fake:
         return SourcelessBuilder.create_internal_fake_id(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
@@ -668,8 +691,7 @@ def _wrap_binaryfunc(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     other = args[0]
     return func(self, tx, other)
 
@@ -684,8 +706,7 @@ def _wrap_binaryfunc_r(
     # Reflected binary op (``__radd__``): same impl, operands from the right.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     other = args[0]
     return func(self, tx, other, reverse=True)
 
@@ -700,8 +721,7 @@ def _wrap_ternaryfunc(
     # __pow__ is binary or ternary: ``x.__pow__(y)`` or ``x.__pow__(y, z)`` (mod).
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) not in (1, 2):
-        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 1, 2)
     z = args[1] if len(args) == 2 else None
     return func(self, tx, args[0], z)
 
@@ -716,8 +736,7 @@ def _wrap_ternaryfunc_r(
     # Reflected __rpow__: operands from the right.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) not in (1, 2):
-        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 1, 2)
     z = args[1] if len(args) == 2 else None
     return func(self, tx, args[0], z, reverse=True)
 
@@ -733,8 +752,7 @@ def _wrap_sq_setitem(
         raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
-    if len(args) != 2:
-        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 2, 2)
     [arg, value] = args
     i = getindex(tx, self, arg)
     return func(self, tx, i, value)
@@ -751,8 +769,7 @@ def _wrap_sq_item(
         raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
 
     [arg] = args
     i = getindex(tx, self, arg)
@@ -770,8 +787,7 @@ def _wrap_indexargfunc(
         raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import pynumber_as_ssize_t
 
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_positional(tx, "", len(args), 1, 1)
 
     [o] = args
     i = pynumber_as_ssize_t(tx, o, err=OverflowError)
@@ -787,8 +803,7 @@ def _wrap_objobjargproc(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 2:
-        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 2, 2)
     [key, value] = args
     return func(self, tx, key, value)
 
@@ -802,8 +817,7 @@ def _wrap_delitem(
 ) -> VariableTracker:
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     [key] = args
     return func(self, tx, key, None)
 
@@ -819,8 +833,7 @@ def _wrap_sq_delitem(
         raise_type_error(tx, "this method takes no keyword arguments")
     from .object_protocol import getindex
 
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     [arg] = args
     i = getindex(tx, self, arg)
     return func(self, tx, i, None)
@@ -836,8 +849,7 @@ def _wrap_objobjproc(
     # sq_contains via __contains__: one arg, impl returns a bool.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     [other] = args
     return func(self, tx, other)
 
@@ -864,8 +876,7 @@ def _make_richcmp(
     ) -> VariableTracker:
         if kwargs:
             raise_type_error(tx, "this method takes no keyword arguments")
-        if len(args) != 1:
-            raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+        check_num_args(tx, args, 1)
         return func(self, tx, args[0], op)
 
     return wrapper
@@ -927,8 +938,11 @@ def _wrap_setattr(
     # tp_setattro via __setattr__: (name, value).
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 2:
-        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 2, 2)
+    if not issubclass(args[0].python_type(), str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{args[0].python_type_name()}'"
+        )
     return func(self, tx, args[0], args[1])
 
 
@@ -942,9 +956,12 @@ def _wrap_delattr(
     # tp_setattro via __delattr__: (name,).
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
-    return func(self, tx, args[0])
+    check_num_args(tx, args, 1)
+    if not issubclass(args[0].python_type(), str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{args[0].python_type_name()}'"
+        )
+    return func(self, tx, args[0], None)
 
 
 def _wrap_getattro(
@@ -957,8 +974,7 @@ def _wrap_getattro(
     # tp_getattro via __getattribute__: impl takes the attribute name as a str.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     name = args[0].as_python_constant()
     if not isinstance(name, str):
         raise_type_error(
@@ -975,20 +991,17 @@ def _wrap_descr_get(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_descr_get via __get__(obj, owner=None): owner defaults to type(obj).
+    from .constant import ConstantVariable
+
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) not in (1, 2):
-        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 1, 2)
+    obj = args[0]
+    owner = args[1] if len(args) > 1 else ConstantVariable.create(None)
     # wrap_descr_get treats None as absent for both arguments and rejects the
     # call when both are absent.
-    if all(a.is_constant_none() for a in args):
+    if obj.is_constant_none() and owner.is_constant_none():
         raise_type_error(tx, "__get__(None, None) is invalid")
-    obj = args[0]
-    owner = (
-        args[1]
-        if len(args) > 1 and not args[1].is_constant_none()
-        else obj.tp_getattro_impl(tx, "__class__")
-    )
     return func(self, tx, obj, owner)
 
 
@@ -1002,8 +1015,7 @@ def _wrap_descr_set(
     # tp_descr_set via __set__(obj, value): 2 args.
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 2:
-        raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    check_positional(tx, "", len(args), 2, 2)
     return func(self, tx, args[0], args[1])
 
 
@@ -1018,8 +1030,7 @@ def _wrap_descr_delete(
     # passes value==NULL to the shared tp_descr_set slot).
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) != 1:
-        raise_type_error(tx, f"expected 1 argument, got {len(args)}")
+    check_num_args(tx, args, 1)
     return func(self, tx, args[0], None)
 
 
@@ -1276,19 +1287,18 @@ _SLOTDEFS: list[SlotDef] = [
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
-    # This needs one to model tp_setattro first + PyObject_GenericSetAttr / PyObject_GenericDelAttr
-    # TPSLOT(
-    #     "__setattr__",
-    #     "setattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_setattr,
-    # ),
-    # TPSLOT(
-    #     "__delattr__",
-    #     "delattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_delattr,
-    # ),
+    TPSLOT(
+        "__setattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_setattr,
+    ),
+    TPSLOT(
+        "__delattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_delattr,
+    ),
     TPSLOT(
         "__lt__",
         "tp_richcompare_impl",
@@ -1832,31 +1842,29 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     }
     tp_members: dict[str, Member] = {}
 
-    def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
+    @classmethod
+    def _lookup_tp_table(cls, name: str, *table_attrs: str) -> Any:
         """Resolve *name* in the given declarative tables across the class MRO.
 
         Mirrors CPython method/getset/member inheritance: each class contributes
         its own table entries into its own tp_dict, and lookup walks the MRO with
         the most-derived class winning. A subclass table therefore *adds* to
         (rather than replaces) the entries it inherits. Within a class the tables
-        are consulted in the order given. A table may be a property of the
-        instance, for a VT that wraps several Python types.
+        are consulted in the order given.
         """
-        for klass in type(self).__mro__:
+        for klass in cls.__mro__:
             d = klass.__dict__
             for attr in table_attrs:
                 table = d.get(attr)
-                if isinstance(table, property):
-                    table = table.__get__(self)
                 if table is not None and name in table:
                     return table[name]
         return None
 
     def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
-        return self._lookup_tp_table(name, "tp_getset", "tp_members")
+        return type(self)._lookup_tp_table(name, "tp_getset", "tp_members")
 
     def lookup_tp_method(self, name: str) -> Method | None:
-        return self._lookup_tp_table(name, "tp_methods")
+        return type(self)._lookup_tp_table(name, "tp_methods")
 
     def lookup_slotdefs(self, name: str) -> SlotDef | None:
         return self._slotdefs.get(name)
@@ -2215,12 +2223,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
-    def get_value_for_setattr(self) -> object | None:
-        """Return the wrapped Python object for generic STORE_ATTR mutation,
-        or None to decline.  Only override for VTs with __dict__ and
-        standard __setattr__."""
-        return None
-
     def lookup_instance_dict(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:
@@ -2282,6 +2284,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         __getattr__).  UDOV overrides to walk the MRO for __getattr__.
         """
         return None
+
+    def tp_setattro_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        from .object_protocol import object_generic_setattr
+
+        return object_generic_setattr(tx, self, name, value)
 
     def tp_getattro_impl(
         self, tx: InstructionTranslatorBase, name: str

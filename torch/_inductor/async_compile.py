@@ -58,6 +58,7 @@ from torch._inductor.runtime.compile_tasks import (
     _worker_compile_triton,
     _worker_compile_triton_thread,
 )
+from torch._inductor.runtime.runtime_utils import triton_cache_dir
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
 from torch._utils_internal import log_triton_builds
@@ -85,6 +86,9 @@ _triton_kernel_metrics: dict[str, dict[str, Any]] | None = None
 size_hints_regex = re.compile(
     r"size_hints=(\{.*?\})",
 )
+
+# The device type of a kernel whose triton_meta device has no index.
+indexless_device_regex = re.compile(r"DeviceProperties\(type='(\w+)', index=None")
 
 
 def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
@@ -597,6 +601,19 @@ class AsyncCompile:
         if is_parallel:
             # Ensure libdevice path is set in os.environ before passing to workers
             _set_triton_libdevice_path()
+            # A GPU kernel without a device index (compile_on_one_rank) defaults
+            # TRITON_CACHE_DIR from the current device, which a compile worker forked
+            # after CUDA initialization can't query. Set it in this process, not only
+            # for the workers, so that lookups here (e.g. TritonBundler.put) resolve
+            # the directory the workers wrote to.
+            m = indexless_device_regex.search(source_code)
+            if m and os.environ.get("TRITON_CACHE_DIR") is None:
+                from torch._inductor.runtime.triton_heuristics import (
+                    _resolve_load_device,
+                )
+
+                if (device := _resolve_load_device(None, m.group(1))) is not None:
+                    os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(device)
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = [
