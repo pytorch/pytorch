@@ -351,7 +351,7 @@ def uniform(
     return uniform_(key, result, low=low, high=high)
 
 
-def sharded_normal_(
+def shard_normal_(
     key: torch.Tensor,
     result: torch.Tensor,
     global_shape: Sequence[int | torch.SymInt],
@@ -364,8 +364,13 @@ def sharded_normal_(
 
     ``result`` is treated as the region at ``global_offset`` of a tensor of
     shape ``global_shape`` (e.g. a shard of a parameter), and is filled with
-    exactly the values that ``normal(key, global_shape, mean=mean, std=std)``
+    exactly the values that
+    ``normal(key, global_shape, mean=mean, std=std, dtype=result.dtype)``
     would produce there, without generating the rest of the global tensor.
+
+    ``result`` must be a single rectangular region of the global tensor. For a
+    placement that gives a rank several separate chunks (e.g. a strided shard),
+    call this once per chunk.
 
     Args:
         key (Tensor): An unbatched PRNG key returned by :func:`key`,
@@ -386,7 +391,7 @@ def sharded_normal_(
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
         >>> # Rows 512:1024 of a (1024, 4096) parameter.
         >>> shard = torch.empty(512, 4096, device="cuda")  # doctest: +SKIP
-        >>> torch.func._random.sharded_normal_(  # doctest: +SKIP
+        >>> torch.func._random.shard_normal_(  # doctest: +SKIP
         ...     key, shard, (1024, 4096), (512, 0)
         ... )
     """
@@ -395,7 +400,7 @@ def sharded_normal_(
     )
 
 
-def sharded_uniform_(
+def shard_uniform_(
     key: torch.Tensor,
     result: torch.Tensor,
     global_shape: Sequence[int | torch.SymInt],
@@ -408,8 +413,13 @@ def sharded_uniform_(
 
     ``result`` is treated as the region at ``global_offset`` of a tensor of
     shape ``global_shape`` (e.g. a shard of a parameter), and is filled with
-    exactly the values that ``uniform(key, global_shape, low=low, high=high)``
+    exactly the values that
+    ``uniform(key, global_shape, low=low, high=high, dtype=result.dtype)``
     would produce there, without generating the rest of the global tensor.
+
+    ``result`` must be a single rectangular region of the global tensor. For a
+    placement that gives a rank several separate chunks (e.g. a strided shard),
+    call this once per chunk.
 
     Args:
         key (Tensor): An unbatched PRNG key returned by :func:`key`,
@@ -431,7 +441,7 @@ def sharded_uniform_(
         >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
         >>> # Columns 2048:4096 of a (1024, 4096) parameter.
         >>> shard = torch.empty(1024, 2048, device="cuda")  # doctest: +SKIP
-        >>> torch.func._random.sharded_uniform_(  # doctest: +SKIP
+        >>> torch.func._random.shard_uniform_(  # doctest: +SKIP
         ...     key, shard, (1024, 4096), (0, 2048)
         ... )
     """
