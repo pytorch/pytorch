@@ -325,45 +325,52 @@ class MeshTopoInfo:
     """
     Mesh information for collective cost estimation
     """
-
-    mesh: DeviceMesh
+    
     mesh_dim_devices: list[int]
     mesh_dim_bandwidth: list[float]
     mesh_dim_latency: list[float]
 
     @staticmethod
-    @lru_cache(None)
     def build_from_mesh(mesh: DeviceMesh) -> "MeshTopoInfo":
-        # Generate mesh topology info for intra-host/inter-host communication pattern
-        # Note that we made bunch of assumptions for simplicity:
-        # 1. we assume the mesh is homogeneous, and it's gpu/nccl model
-        # 2. we assume gpu arch is Ampere or Hopper
-        # 3. we assume collectives are all ring base algo for now
-        num_devices_per_host = _mesh_resources.num_devices_per_host(mesh.device_type)
-        # the base bw number (intra-node), GB/s
-        base_bw = 87.7
-        mesh_dim_bandwidth = [base_bw] * mesh.ndim
-        # the latency in terms of us (intra-node, nv-link)
-        mesh_dim_latency = [0.6] * mesh.ndim
-        mesh_dim_devices = [1] * mesh.ndim
+        return _build_mesh_topo_info(mesh.device_type, mesh.shape)
 
-        total_num_devices = 1
-        for mesh_dim in reversed(range(mesh.ndim)):
-            num_devices = mesh.size(mesh_dim)
-            mesh_dim_devices[mesh_dim] = num_devices
-            total_num_devices *= num_devices
-            if total_num_devices > num_devices_per_host:
-                # magic number for inter-host communication bandwidth/latency factor
-                # This number assumes latest GPU arch, i.e. Ampere or Hopper
-                # TODO: see if we need to tweak this or offer a way for user
-                # to specify the bandwidths/latency
-                mesh_dim_bandwidth[mesh_dim] *= 0.22
-                # set to ethernet latency for inter-host
-                mesh_dim_latency[mesh_dim] = 2.7
 
-        return MeshTopoInfo(
-            mesh, mesh_dim_devices, mesh_dim_bandwidth, mesh_dim_latency
-        )
+@lru_cache(None)
+def _build_mesh_topo_info(
+    device_type: str,
+    mesh_dim_sizes: tuple[int, ...],
+) -> MeshTopoInfo:
+    # Generate mesh topology info for intra-host/inter-host communication pattern
+    # Note that we made bunch of assumptions for simplicity:
+    # 1. we assume the mesh is homogeneous, and it's gpu/nccl model
+    # 2. we assume gpu arch is Ampere or Hopper
+    # 3. we assume collectives are all ring base algo for now
+    num_devices_per_host = _mesh_resources.num_devices_per_host(device_type)
+    mesh_ndim = len(mesh_dim_sizes)
+    # the base bw number (intra-node), GB/s
+    base_bw = 87.7
+    mesh_dim_bandwidth = [base_bw] * mesh_ndim
+    # the latency in terms of us (intra-node, nv-link)
+    mesh_dim_latency = [0.6] * mesh_ndim
+    mesh_dim_devices = [1] * mesh_ndim
+
+    total_num_devices = 1
+    for mesh_dim in reversed(range(mesh_ndim)):
+        num_devices = mesh_dim_sizes[mesh_dim]
+        mesh_dim_devices[mesh_dim] = num_devices
+        total_num_devices *= num_devices
+        if total_num_devices > num_devices_per_host:
+            # magic number for inter-host communication bandwidth/latency factor
+            # This number assumes latest GPU arch, i.e. Ampere or Hopper
+            # TODO: see if we need to tweak this or offer a way for user
+            # to specify the bandwidths/latency
+            mesh_dim_bandwidth[mesh_dim] *= 0.22
+            # set to ethernet latency for inter-host
+            mesh_dim_latency[mesh_dim] = 2.7
+
+    return MeshTopoInfo(
+        mesh_dim_devices, mesh_dim_bandwidth, mesh_dim_latency
+    )
 
 
 def allgather_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
