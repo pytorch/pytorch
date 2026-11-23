@@ -492,7 +492,7 @@ def binary_folding_init():
                 computation_node = binary_node.args[1].args[0]
                 reshape_node = binary_node.args[1]
             graph = match.graph
-            with graph.inserting_before(reshape_node if reshape_node else binary_node):
+            with graph.inserting_before(binary_node):
                 if computation_node.target not in _computation_ops:
                     raise AssertionError(
                         f"expected a computation op, got {computation_node.target}"
@@ -512,6 +512,7 @@ def binary_folding_init():
                         raise AssertionError(
                             f"expected aten.reshape.default, got {reshape_node.target}"
                         )
+                    binary_node.prepend(reshape_node)
                     computation_node.replace_all_uses_with(new_computation_node)
                     binary_node.replace_all_uses_with(reshape_node)
                 else:

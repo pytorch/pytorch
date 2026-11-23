@@ -335,6 +335,29 @@ class BinaryFoldingTemplate(TestCase):
                 expect_success=False,
             )
 
+    @inductor_config.patch({"freezing": True, "enable_linear_binary_folding": True})
+    def test_linear_binary_folding_use_before_definition(self):
+        class Model(nn.Module):
+            def __init__(self, dtype):
+                super().__init__()
+                self.weight = nn.Parameter(torch.ones(2, 2, dtype=dtype))
+                self.scale = nn.Parameter(torch.full((2,), 3.0, dtype=dtype))
+
+            def forward(self, x):
+                y = torch.nn.functional.linear(x, self.weight)
+                return y * self.scale.reciprocal()
+
+        for dtype in (torch.bfloat16, torch.float32):
+            torch._dynamo.reset()
+            counters.clear()
+            model = Model(dtype).to(self.device).eval()
+            x = torch.ones(2, 2, 2, dtype=dtype, device=self.device)
+            with torch.no_grad():
+                expected = model(x)
+                actual = torch.compile(model, fullgraph=True)(x)
+                self.assertEqual(actual, expected)
+                self.assertEqual(counters["inductor"]["binary_folding"], 1)
+
 
 if HAS_CPU and not torch.backends.mps.is_available():
 
