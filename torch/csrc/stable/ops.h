@@ -1718,6 +1718,17 @@ inline torch::stable::Tensor roll(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef shifts,
     torch::headeronly::IntHeaderOnlyArrayRef dims = {}) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_roll(
+      self.get(),
+      shifts.data(),
+      static_cast<int64_t>(shifts.size()),
+      dims.data(),
+      static_cast<int64_t>(dims.size()),
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 3> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(shifts),
@@ -1725,6 +1736,7 @@ inline torch::stable::Tensor roll(
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch_call_dispatcher("aten::roll", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the repeat_interleave.Tensor op.
@@ -1741,12 +1753,19 @@ inline torch::stable::Tensor roll(
 inline torch::stable::Tensor repeat_interleave(
     const torch::stable::Tensor& repeats,
     std::optional<int64_t> output_size = std::nullopt) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_repeat_interleave_Tensor(
+      repeats.get(), output_size ? &*output_size : nullptr, &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 2> stack{
       torch::stable::detail::from(repeats),
       torch::stable::detail::from(output_size)};
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::repeat_interleave", "Tensor", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the repeat_interleave.self_Tensor op.
@@ -1767,6 +1786,16 @@ inline torch::stable::Tensor repeat_interleave(
     const torch::stable::Tensor& repeats,
     std::optional<int64_t> dim = std::nullopt,
     std::optional<int64_t> output_size = std::nullopt) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_repeat_interleave_self_Tensor(
+      self.get(),
+      repeats.get(),
+      dim ? &*dim : nullptr,
+      output_size ? &*output_size : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 4> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(repeats),
@@ -1778,6 +1807,7 @@ inline torch::stable::Tensor repeat_interleave(
       stack.data(),
       TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the repeat_interleave.self_int op.
@@ -1797,6 +1827,16 @@ inline torch::stable::Tensor repeat_interleave(
     int64_t repeats,
     std::optional<int64_t> dim = std::nullopt,
     std::optional<int64_t> output_size = std::nullopt) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_repeat_interleave_self_int(
+      self.get(),
+      repeats,
+      dim ? &*dim : nullptr,
+      output_size ? &*output_size : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 4> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(repeats),
@@ -1805,6 +1845,7 @@ inline torch::stable::Tensor repeat_interleave(
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::repeat_interleave", "self_int", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the equal op.
@@ -1820,11 +1861,18 @@ inline torch::stable::Tensor repeat_interleave(
 inline bool equal(
     const torch::stable::Tensor& self,
     const torch::stable::Tensor& other) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  int32_t ret0 = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_equal(self.get(), other.get(), &ret0));
+  return ret0 != 0;
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 2> stack{
       torch::stable::detail::from(self), torch::stable::detail::from(other)};
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::equal", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<bool>(stack[0]);
+#endif
 }
 
 /// Stable version of the nonzero op.
@@ -1837,10 +1885,16 @@ inline bool equal(
 /// @param self The input tensor.
 /// @return A tensor of nonzero indices.
 inline torch::stable::Tensor nonzero(const torch::stable::Tensor& self) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_nonzero(self.get(), &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 1> stack{torch::stable::detail::from(self)};
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::nonzero", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the expand op.
@@ -1859,6 +1913,16 @@ inline torch::stable::Tensor expand(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size,
     bool implicit = false) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_expand(
+      self.get(),
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      implicit,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 3> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(size),
@@ -1866,6 +1930,7 @@ inline torch::stable::Tensor expand(
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::expand", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the all.dim op.
@@ -1884,6 +1949,12 @@ inline torch::stable::Tensor all(
     const torch::stable::Tensor& self,
     int64_t dim,
     bool keepdim = false) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_all_dim(self.get(), dim, keepdim, &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 3> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim),
@@ -1891,6 +1962,7 @@ inline torch::stable::Tensor all(
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::all", "dim", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the all.dims op.
@@ -1909,6 +1981,17 @@ inline torch::stable::Tensor all(
     const torch::stable::Tensor& self,
     std::optional<torch::headeronly::IntHeaderOnlyArrayRef> dim,
     bool keepdim = false) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  const int64_t* dim_data = dim ? dim->data() : nullptr;
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_all_dims(
+      self.get(),
+      dim ? &dim_data : nullptr,
+      dim ? static_cast<int64_t>(dim->size()) : 0,
+      keepdim,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 3> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim),
@@ -1916,6 +1999,7 @@ inline torch::stable::Tensor all(
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::all", "dims", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the all op.
@@ -1928,10 +2012,16 @@ inline torch::stable::Tensor all(
 /// @param self The input tensor.
 /// @return The scalar result tensor.
 inline torch::stable::Tensor all(const torch::stable::Tensor& self) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_all(self.get(), &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 1> stack{torch::stable::detail::from(self)};
   STABLE_TORCH_ERROR_CODE_CHECK(
       torch_call_dispatcher("aten::all", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the median op.
@@ -1945,10 +2035,16 @@ inline torch::stable::Tensor all(const torch::stable::Tensor& self) {
 /// @param self The input tensor.
 /// @return The result tensor.
 inline torch::stable::Tensor median(const torch::stable::Tensor& self) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_median(self.get(), &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 1> stack{torch::stable::detail::from(self)};
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::median", "", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the median.dim op.
@@ -1966,6 +2062,14 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> median(
     const torch::stable::Tensor& self,
     int64_t dim,
     bool keepdim = false) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  AtenTensorHandle ret1 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_median_dim(self.get(), dim, keepdim, &ret0, &ret1));
+  return std::make_tuple(
+      torch::stable::Tensor(ret0), torch::stable::Tensor(ret1));
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 3> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim),
@@ -1975,14 +2079,13 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> median(
   return std::make_tuple(
       torch::stable::detail::to<torch::stable::Tensor>(stack[0]),
       torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
+#endif
 }
 
 /// Stable version of the index_fill_.int_Tensor op.
 ///
 /// Fills indexed positions along a dimension in place. The stable API
 /// takes a mutable tensor reference, as with other stable in-place ops.
-/// The Scalar overload requires a stable representation of ATen Scalar;
-/// this overload accepts a zero-dimensional tensor.
 ///
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
@@ -1997,6 +2100,11 @@ inline torch::stable::Tensor& index_fill_(
     int64_t dim,
     const torch::stable::Tensor& index,
     const torch::stable::Tensor& value) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_index_fill__int_Tensor(
+      self.get(), dim, index.get(), value.get()));
+  return self;
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   std::array<StableIValue, 4> stack{
       torch::stable::detail::from(self),
       torch::stable::detail::from(dim),
@@ -2006,11 +2114,36 @@ inline torch::stable::Tensor& index_fill_(
       "aten::index_fill_", "int_Tensor", stack.data(), TORCH_ABI_VERSION));
   (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
   return self;
+#endif
 }
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+/// Stable version of the index_fill_.int_Scalar op.
+///
+/// Fills indexed positions along a dimension in place. The fill value is
+/// passed as a double. Use the tensor overload for complex values or
+/// integers that cannot be represented exactly as double.
+///
+/// Minimum compatible version: PyTorch 2.16.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @param self The tensor to modify.
+/// @param dim The dimension to index.
+/// @param index The indices to fill.
+/// @param value The real fill value.
+/// @return The modified input tensor.
+inline torch::stable::Tensor& index_fill_(
+    torch::stable::Tensor& self,
+    int64_t dim,
+    const torch::stable::Tensor& index,
+    double value) {
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_index_fill__int_Scalar(
+      self.get(), dim, index.get(), value));
+  return self;
+}
 
 /// Stable version of the add.Tensor op.
 ///

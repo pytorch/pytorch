@@ -489,6 +489,9 @@ def gen_static_dispatch_backend_call(
                 base_name = base_name.removesuffix("_symint")  # Remove "_symint" suffix
                 return f"at::symint::{base_name}<c10::SymInt>"
 
+        if Variant.function not in f.variants:
+            return f"at::_ops::{f.func.name.unambiguous_name()}::call"
+
         return f"at::{cpp_sig.name()}"
     else:
         return f"at::{backend_index.dispatch_key.lower()}::{cpp_sig.name()}"

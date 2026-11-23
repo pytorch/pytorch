@@ -167,7 +167,10 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::copy_
 ```
 
-```{doxygenfunction} torch::stable::index_fill_
+```{doxygenfunction} torch::stable::index_fill_(torch::stable::Tensor &self, int64_t dim, const torch::stable::Tensor &index, const torch::stable::Tensor &value)
+```
+
+```{doxygenfunction} torch::stable::index_fill_(torch::stable::Tensor &self, int64_t dim, const torch::stable::Tensor &index, double value)
 ```
 
 ## Mathematical Operations
