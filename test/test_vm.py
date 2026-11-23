@@ -6,6 +6,7 @@ import collections
 import collections.abc
 import contextvars
 import copy
+import ctypes
 import dataclasses
 import dis
 import enum
@@ -12815,6 +12816,308 @@ VM_HELD_SHAPES = (
 )
 
 
+VM_SEES_LOG = []
+
+
+def vm_sees_look(what):
+    # What Python code that an instruction of a function under test gets to
+    # finds in that function's frame: the names that are bound, and the line.
+    frame = sys._getframe(1)
+    while frame is not None and not frame.f_code.co_name.startswith("vm_sees_case_"):
+        frame = frame.f_back
+    if frame is None:
+        VM_SEES_LOG.append((what, None, None))
+    else:
+        names = tuple(sorted(name for name in frame.f_locals if name != "given"))
+        VM_SEES_LOG.append((what, names, frame.f_lineno - frame.f_code.co_firstlineno))
+    del frame
+
+
+class VmSeesSub(torch.Tensor):
+    # A tensor class with an override: the getters of the class under every
+    # tensor call it, so a read of `shape` is Python code.
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        vm_sees_look("an override")
+        return super().__torch_function__(func, types, args, kwargs or {})
+
+
+class VmSeesParameter(torch.nn.Parameter):
+    # A class made of `Parameter`, which says that it has no override.
+    pass
+
+
+class VmSeesDescriptor:
+    def __get__(self, obj, owner):
+        vm_sees_look("a descriptor")
+        return "text"
+
+
+class VmSeesDocumented:
+    __doc__ = VmSeesDescriptor()
+
+
+class VmSeesMeta(type):
+    def __getattribute__(cls, name):
+        if name == "__qualname__":
+            vm_sees_look("the class of a class")
+        return super().__getattribute__(name)
+
+
+class VmSeesList(list, metaclass=VmSeesMeta):
+    pass
+
+
+def vm_sees_shown(message, category, filename, lineno, file=None, line=None):
+    # A `warnings.showwarning` in Python: what the warning says and where
+    # it says it was given, and what the frame of the function has then.
+    vm_sees_look(
+        f"{category.__name__}: {str(message)[:24]} in {os.path.basename(filename)}"
+    )
+
+
+def vm_sees_case_shape(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    size = given.shape
+    u = (t + len(size)).tanh() + h
+    return (u * 2).cos().sum()
+
+
+def vm_sees_case_requires_grad(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    flag = given.requires_grad
+    u = (t + flag).tanh() + h
+    return (u * 2).cos().sum()
+
+
+def vm_sees_case_grad(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    none = given.grad is None
+    u = (t + none).tanh() + h
+    return (u * 2).cos().sum()
+
+
+def vm_sees_case_volatile(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    flag = given.volatile
+    u = (t + flag).tanh() + h
+    return (u * 2).cos().sum()
+
+
+def vm_sees_case_grad_of_what_it_made(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    none = h.grad is None
+    u = (t + none).tanh() + h
+    return (u * 2).cos().sum()
+
+
+def vm_sees_case_doc(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    text = given.__doc__
+    u = (t + len(text)).tanh() + h
+    return (u * 2).cos().sum()
+
+
+def vm_sees_case_qualname(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    text = given.append.__qualname__
+    u = (t + len(text)).tanh() + h
+    return (u * 2).cos().sum()
+
+
+def vm_sees_case_binding_warns(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    r = torch.range(0, 2, device=x.device)
+    u = (t + r).tanh() + h
+    return (u * 2).cos().sum()
+
+
+def vm_sees_case_kernel_warns(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    r = t[:1].std().nan_to_num(0.0)
+    u = (t + r).tanh() + h
+    return (u * 2).cos().sum()
+
+
+def vm_sees_case_index_warns(x, given):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    r = t[given].sum()
+    u = (t + r).tanh() + h
+    return (u * 2).cos().sum()
+
+
+class VmSeesTimeout(Exception):
+    pass
+
+
+class VmSeesTrips(int):
+    # The number of a signal whose attribute `again` marks the signal as
+    # arrived and does not look for signals: `signal.raise_signal` and
+    # `os.kill` run the handler before they return, a property over a
+    # function of C is read by an instruction that looks for none.
+    again = (
+        property(ctypes.pythonapi.PyErr_SetInterruptEx)
+        if hasattr(ctypes.pythonapi, "PyErr_SetInterruptEx")
+        else None
+    )
+
+
+VM_SEES_SIGNAL = {
+    "armed": False,
+    "raises": None,
+    "where": None,
+    "seen": None,
+    "number": None,
+}
+
+
+def vm_sees_handler(signum, frame):
+    # Raises where the function under test has got to a line: until then
+    # the signal is marked as arrived again, so that whatever looks for
+    # signals next comes here again.
+    state = VM_SEES_SIGNAL
+    if not state["armed"]:
+        return
+    code, line = state["where"]
+    if code is not None and not (
+        frame is not None
+        and frame.f_code is code
+        and frame.f_lineno - code.co_firstlineno >= line
+    ):
+        return state["number"].again
+    state["armed"] = False
+    state["seen"] = (frame.f_code.co_name, tuple(sorted(frame.f_locals)))
+    raise state["raises"]("a signal")
+
+
+def vm_sees_case_interrupted(x):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    u = (t + 1).tanh() + h
+    r = (u * 2).cos().sum()
+    return r + 1
+
+
+def vm_sees_helper(u):
+    w = u * 2
+    return w.cos().sum()
+
+
+def vm_sees_case_interrupted_in_a_call(x):
+    h = (x * 2).sin() + 1
+    t = h.cos() * 3
+    u = (t + 1).tanh() + h
+    r = vm_sees_helper(u)
+    return r + 1
+
+
+class VmSeesHolder:
+    pass
+
+
+def vm_sees_case_stores(x, holder):
+    h = (x * 2).sin() + 1
+    holder.kept = 3.0
+    t = h.cos() * holder.kept
+    return (t + 1).tanh().sum()
+
+
+def vm_sees_pass_that_waits(gm, input_types):
+    # A pass over graphs in which a signal comes: marked as arrived, and
+    # found by the interpreter behind the next call.
+    if VM_SEES_SIGNAL["armed"]:
+        VM_SEES_SIGNAL["number"].again
+        len(())
+    return gm
+
+
+class VmSeesMode(TorchDispatchMode):
+    # Under a dispatch mode every kernel runs Python code, also those of a
+    # backward: somewhere for the interpreter to look for signals.
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        return func(*args, **(kwargs or {}))
+
+
+class VmSeesEngine:
+    # The autograd engine with Python code in front of it: where the
+    # engine compares the first backward of a form with autograd, a signal
+    # comes, and the interpreter finds it behind the next call.
+    def __init__(self, real):
+        self.real = real
+
+    def run_backward(self, *args, **kwargs):
+        if VM_SEES_SIGNAL["armed"]:
+            VM_SEES_SIGNAL["number"].again
+            len(())
+        return self.real.run_backward(*args, **kwargs)
+
+
+VM_SEES_AUDIT = r"""
+import json, sys, torch
+SEEN = []
+ARMED = [False]
+
+def audit(event, args):
+    # The events that the reads of a function's code raise: the engine reads
+    # the code of every function it compiles, and raises none.
+    if ARMED[0] and event == "object.__getattr__":
+        SEEN.append(args[1])
+
+sys.addaudithook(audit)
+
+class Scales:
+    def scaled(self, t):
+        return t.cos() * 3
+
+def other(t):
+    return t + 1
+
+SCALES = Scales()
+
+def fn(x):
+    h = (x * 2).sin() + 1
+    t = other(SCALES.scaled(h))
+    u = t.tanh() + h
+    return (u * 2).cos().sum()
+
+device, out = sys.argv[1], {}
+graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+# The first torch.vm(...) of a process reads the source of two methods of
+# nn.Module (inspect.getsource), in Python: that is not what is counted.
+torch.vm(other)
+for way, passes, graded in (("the default passes", None, False), ("graphs", graphs, False), ("a gradient", graphs, True)):
+    rows = []
+    for compiled in (True, False):
+        # From where the function is handed to torch.vm on.
+        del SEEN[:]
+        ARMED[0] = True
+        run = fn if not compiled else torch.vm(fn) if passes is None else torch.vm(fn, passes=passes, fallback=False, demote=False)
+        row = [(0.0, list(SEEN))]
+        for at in range(8):
+            x = torch.arange(3.0, device=device) + at
+            if graded:
+                x.requires_grad_(True)
+            del SEEN[:]
+            ARMED[0] = True
+            value = run(x)
+            ARMED[0] = False
+            row.append((round(float(value.detach()), 5), list(SEEN)))
+        rows.append(row)
+    out[way] = rows
+print(json.dumps(out))
+"""
+
+
 GRAPH_NAME_LOG = []
 
 
@@ -13044,6 +13347,15 @@ def graph_spread_twice(x, given):
 # How long one case of `GRAPH_THINGS` may take before it counts as one that
 # does not come back.
 GRAPH_CASE_SECONDS = 300
+
+
+def vm_case_script(script):
+    # Under load the teardown of a PyTorch process that ran autograd on CUDA can end in
+    # "terminate called without an active exception" (stock builds too): not asserted.
+    ends = "import os, sys\nsys.stdout.flush()\nsys.stderr.flush()\nos._exit(0)\n"
+    return script.rstrip("\n") + "\n" + ends
+
+
 GRAPH_THINGS = '''"""The things a function makes between its operations (a list, a dict,
 an object, a cell, an iterator), on a path: the cases of a group, each with
 `Graphs()` alone, with a pass that returns the graph and with an input that
@@ -16198,7 +16510,7 @@ listed = [g for g in torch.vm.regions(compiled) if "ops" in g and "within" not i
 graphs = [(g["ops"], g["state"], g["hits"] >= 30) for g in listed]
 print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
 """
-        command = [sys.executable, "-c", script]
+        command = [sys.executable, "-c", vm_case_script(script)]
         ran = subprocess.run(command, capture_output=True, text=True, check=True)
         found = __import__("json").loads(ran.stdout.strip().split("\n")[-1])
         self.assertEqual(found["noted"], ["function"])
@@ -17128,7 +17440,7 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         import queue
 
         env = dict(os.environ, TORCH_VM_GRAPH_DEBUG="2") if debug else None
-        command = [sys.executable, "-c", GRAPH_THINGS, device, group]
+        command = [sys.executable, "-c", vm_case_script(GRAPH_THINGS), device, group]
         pipes = {"stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL, "text": True}
         ran = subprocess.Popen(command, env=env, **pipes)
         lines = queue.Queue()
@@ -17715,7 +18027,8 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         import json
         import queue
 
-        command = [sys.executable, "-c", IMPORT_FORMS, device, when, way, *forms]
+        script = vm_case_script(IMPORT_FORMS)
+        command = [sys.executable, "-c", script, device, when, way, *forms]
         pipes = {"stdout": subprocess.PIPE, "stderr": subprocess.DEVNULL, "text": True}
         ran = subprocess.Popen(command, **pipes)
         lines = queue.Queue()
@@ -17792,7 +18105,8 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
 
         cases = {"main": [], "dir": [10], "slice": [10], "locals": [], "named": []}
         for case, graphs in cases.items():
-            command = [sys.executable, "-c", REPLACED_NAMES, device, case]
+            script = vm_case_script(REPLACED_NAMES)
+            command = [sys.executable, "-c", script, device, case]
             limit = GRAPH_CASE_SECONDS
             pipes = {"capture_output": True, "text": True, "timeout": limit}
             ran = subprocess.run(command, **pipes)
@@ -17857,6 +18171,567 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
         compiled(torch.ones(3, device=device))
         self.assertEqual(VM_HELD_LOG, ["open it", "body", "closed it", "behind"])
         del VM_HELD_LOG[:]
+
+    def vm_sees_calls(self, fn, given, device, graded):
+        rows = []
+        for at in range(8):
+            x = torch.arange(3.0, device=device) + at
+            if graded:
+                x.requires_grad_(True)
+            del VM_SEES_LOG[:]
+            out = fn(x, given)
+            grad = (
+                torch.autograd.grad(out, x)[0].nan_to_num(7.0).tolist()
+                if graded
+                else None
+            )
+            rows.append((out.detach().tolist(), grad, list(VM_SEES_LOG)))
+        return rows
+
+    def test_what_a_getter_gets_to_finds_the_frame_as_the_instructions_left_it(
+        self, device
+    ):
+        # A read through a getter of C is a quiet read, one that a path
+        # takes along and runs in front of what stands for its graph, only
+        # where the getter is shown to run no code for the value at hand.
+        # The getters of the class under every tensor look for an override
+        # first: for a tensor of a class with a `__torch_function__` the
+        # read of `shape`, `requires_grad` or `grad` is Python code, which
+        # finds the variables of the function as the instructions left them
+        # (with a pass and with a gradient it found them as they were in
+        # front of the graph). So is the `__doc__` of a class that has a
+        # descriptor under the name, and the `__qualname__` of a function of
+        # C, which asks the class of what the function is bound to. Of a
+        # tensor of exactly `Tensor` or `Parameter`, and of a class made
+        # of `Parameter`, which says that it has no override, the read is
+        # as quiet as it was: the graph goes over it.
+        def keep(gm, input_types):
+            return gm
+
+        sub = torch.ones(2, 2, device=device).as_subclass(VmSeesSub)
+        plain = torch.ones(2, 2, device=device)
+        loud = (
+            (vm_sees_case_shape, sub),
+            (vm_sees_case_requires_grad, sub),
+            (vm_sees_case_grad, sub),
+            (vm_sees_case_doc, VmSeesDocumented),
+            (vm_sees_case_qualname, VmSeesList()),
+        )
+        quiet = (
+            (vm_sees_case_shape, plain),
+            (vm_sees_case_shape, torch.nn.Parameter(plain)),
+            (vm_sees_case_shape, VmSeesParameter(plain)),
+            (vm_sees_case_requires_grad, VmSeesParameter(plain)),
+            (vm_sees_case_grad, plain),
+        )
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        for looks, cases in ((True, loud), (False, quiet)):
+            for fn, given in cases:
+                for way, passes, graded in ways:
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__} of a {type(given).__name__}, {way}"
+                    got, expected = (
+                        self.vm_sees_calls(compiled, given, device, graded),
+                        self.vm_sees_calls(fn, given, device, graded),
+                    )
+                    self.assertEqual(got, expected, msg=msg)
+                    self.assertEqual(any(log for _, _, log in expected), looks, msg=msg)
+                    found = [
+                        (region["ops"], region["hits"] > 0)
+                        for region in torch.vm.regions(compiled)
+                        if "ops" in region
+                    ]
+                    if way != "graphs":
+                        # Over a quiet read one graph with every operation;
+                        # a read that is none has a graph on each side.
+                        self.assertEqual(
+                            found,
+                            [(5, True), (6, True)] if looks else [(11, True)],
+                            msg=msg,
+                        )
+        del VM_SEES_LOG[:]
+
+    def test_a_warning_is_given_where_the_function_gives_it(self, device):
+        # A warning is shown by Python code (`warnings.showwarning`, the
+        # filters), for the file and the line of the frame that is running,
+        # and is counted in that frame's globals. So an instruction that
+        # gives one is no part of a path: it runs where the function has
+        # it. A getter that warns is no quiet read (`volatile`; `grad` of a
+        # tensor that is no leaf), and an operation during which a warning
+        # was given while a path was taken down ends the paths of that
+        # graph in front of it from then on, whether the warning was shown
+        # or not: with a pass the warning came from the code of what the
+        # pass made, with a gradient from the line the graph starts at,
+        # and with the usual filters it was shown a second time from
+        # there. What the function of the user's that shows the warning
+        # finds in the frame is compared too, but for a kernel's warning
+        # with `Graphs()` alone, where the frames that show it are not
+        # offered to the engine and a variable may still wait for its
+        # object.
+        def keep(gm, input_types):
+            return gm
+
+        mask = torch.tensor([1, 0, 1], dtype=torch.uint8, device=device)
+        plain = torch.ones(2, 2, device=device)
+        cases = (
+            (vm_sees_case_volatile, plain, False, True),
+            (vm_sees_case_grad_of_what_it_made, None, True, True),
+            (vm_sees_case_binding_warns, None, False, True),
+            (vm_sees_case_kernel_warns, None, False, False),
+            (vm_sees_case_index_warns, mask, False, False),
+        )
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        for fn, given, needs_gradient, binds in cases:
+            for way, passes, graded in ways:
+                for action in ("always", "default"):
+                    msg = f"{fn.__name__}, {way}, {action}"
+                    fn.__globals__.pop("__warningregistry__", None)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter(action)
+                        warnings.showwarning = vm_sees_shown
+                        expected = self.vm_sees_calls(fn, given, device, graded)
+                    fn.__globals__.pop("__warningregistry__", None)
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter(action)
+                        warnings.showwarning = vm_sees_shown
+                        got = self.vm_sees_calls(compiled, given, device, graded)
+                    if not binds and way == "graphs":
+                        got, expected = (
+                            [
+                                (out, grad, [(what, line) for what, _, line in log])
+                                for out, grad, log in rows
+                            ]
+                            for rows in (got, expected)
+                        )
+                    self.assertEqual(got, expected, msg=msg)
+                    # Shown at every call, or once per place with the usual
+                    # filters (going backward, the index warns once more).
+                    shown = sum(len(log) for _, _, log in expected)
+                    self.assertEqual(shown > 0, graded or not needs_gradient, msg=msg)
+                    self.assertTrue(
+                        shown == 0
+                        or (shown >= 8 if action == "always" else shown <= 2),
+                        msg=msg,
+                    )
+        del VM_SEES_LOG[:]
+
+    @unittest.skipUnless(
+        VmSeesTrips.again is not None and hasattr(signal, "SIGUSR1"),
+        "needs a signal that can be marked as arrived",
+    )
+    def test_what_the_handler_of_a_signal_raises_is_no_raise_of_the_function(
+        self, device
+    ):
+        # A signal's handler runs wherever something looks for signals,
+        # behind whichever instruction was running, and what it raises says
+        # nothing about that instruction, the pass or the graph that it
+        # came under. While a path is taken down nothing is made of the run
+        # (the raise was taken for the instruction's: a path that ends in
+        # front of it stayed, with a graph behind it); while a pass over
+        # graphs runs, in the first run of what a pass made and in a run of
+        # a form whose path stores into an object, the exception leaves the
+        # call (an `Exception`, a timeout say, was taken for a failure of
+        # the pass or of what it made: the call returned as if no signal
+        # had come, and the first two gave the graph up for good). The
+        # signal is marked as arrived in front of the call; its handler
+        # marks it again until the function is at a line, so it raises at
+        # a place of the function whatever the timing.
+        if threading.current_thread() is not threading.main_thread():
+            self.skipTest("signals are handled in the main thread")
+
+        def keep(gm, input_types):
+            return gm
+
+        state = VM_SEES_SIGNAL
+        state["number"] = VmSeesTrips(signal.SIGUSR1)
+
+        def one(fn, args, armed, mark=True):
+            state["armed"], state["seen"] = armed, None
+            if armed and mark:
+                state["number"].again
+            try:
+                said = fn(*args).detach().tolist()
+            except BaseException as error:
+                frames = traceback.extract_tb(error.__traceback__)[1:]
+                said = (
+                    type(error).__name__,
+                    [
+                        (entry.name, entry.lineno)
+                        for entry in frames
+                        if entry.name.startswith("vm_sees_")
+                    ],
+                )
+            finally:
+                state["armed"] = False
+            return said, state["seen"]
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        previous = signal.signal(signal.SIGUSR1, vm_sees_handler)
+        try:
+            for kind in (VmSeesTimeout, KeyboardInterrupt):
+                state["raises"] = kind
+                # Where a path is taken down: at calls 1 and 2 of a function
+                # whose first call was watched.
+                places = (
+                    (vm_sees_case_interrupted, (vm_sees_case_interrupted.__code__, 4)),
+                    (vm_sees_case_interrupted_in_a_call, (vm_sees_helper.__code__, 2)),
+                )
+                for fn, where in places:
+                    for way, passes, graded in ways:
+                        state["where"] = where
+                        compiled = torch.vm(
+                            fn, passes=passes, fallback=False, demote=False
+                        )
+                        msg = f"{fn.__name__}, {kind.__name__}, {way}"
+                        for at in range(10):
+                            x = (torch.arange(6.0, device=device) + at).requires_grad_(
+                                graded
+                            )
+                            got, expected = (
+                                one(compiled, (x,), at in (1, 2)),
+                                one(fn, (x,), at in (1, 2)),
+                            )
+                            self.assertEqual(got, expected, msg=f"{msg}, call {at}")
+                            raised = (
+                                isinstance(got[0], tuple) and got[0][0] == kind.__name__
+                            )
+                            self.assertEqual(
+                                raised, at in (1, 2), msg=f"{msg}, call {at}"
+                            )
+                        if way != "graphs":
+                            (found,) = [
+                                region
+                                for region in torch.vm.regions(compiled)
+                                if "ops" in region
+                            ]
+                            self.assertEqual(
+                                (found["ops"], found["paths"], found["why"]),
+                                (12, 1, "the function returns"),
+                                msg=msg,
+                            )
+                            self.assertGreaterEqual(found["hits"], 4, msg=msg)
+                # A function that is interrupted in every call that takes it
+                # down is not taken down for ever: after as many times as a
+                # graph is taken down again for anything (eight), what
+                # stands in front is a path, as in front of any raise.
+                state["where"] = (vm_sees_case_interrupted.__code__, 4)
+                compiled = torch.vm(
+                    vm_sees_case_interrupted,
+                    passes=(*graphs, keep),
+                    fallback=False,
+                    demote=False,
+                )
+                for at in range(20):
+                    x = torch.arange(6.0, device=device) + at
+                    got, expected = (
+                        one(compiled, (x,), at > 0),
+                        one(vm_sees_case_interrupted, (x,), at > 0),
+                    )
+                    self.assertEqual(
+                        got,
+                        expected,
+                        msg=f"interrupted every time, {kind.__name__}, call {at}",
+                    )
+                (found,) = [
+                    region for region in torch.vm.regions(compiled) if "ops" in region
+                ]
+                reached = (found["ops"], found["taken"], found["why"])
+                self.assertEqual(
+                    reached,
+                    (8, 9, "what raised when the path was taken down"),
+                    msg=f"interrupted every time, {kind.__name__}",
+                )
+                # Where the engine runs a pass, and where what the pass made
+                # runs: the handler raises as soon as it runs.
+                state["where"] = (None, 0)
+                holder = VmSeesHolder()
+                inside = (
+                    (
+                        "a pass",
+                        vm_sees_case_interrupted,
+                        (*graphs, vm_sees_pass_that_waits),
+                        (),
+                        1,
+                        False,
+                    ),
+                    (
+                        "the first run of what a pass made",
+                        vm_sees_case_stores,
+                        (*graphs, keep),
+                        (holder,),
+                        2,
+                        True,
+                    ),
+                    (
+                        "a later run, of a path that stores",
+                        vm_sees_case_stores,
+                        (*graphs, keep),
+                        (holder,),
+                        5,
+                        True,
+                    ),
+                )
+                for what, fn, passes, more, armed, mark in inside:
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{what}, {kind.__name__}"
+                    for at in range(10):
+                        args = (torch.arange(6.0, device=device) + at, *more)
+                        (said, _), expected = (
+                            one(compiled, args, at == armed, mark),
+                            fn(*args).tolist(),
+                        )
+                        said = said[0] if isinstance(said, tuple) else said
+                        self.assertEqual(
+                            said,
+                            kind.__name__ if at == armed else expected,
+                            msg=f"{msg}, call {at}",
+                        )
+                    (found,) = [
+                        region
+                        for region in torch.vm.regions(compiled)
+                        if "ops" in region
+                    ]
+                    self.assertEqual(
+                        (found["state"], found["hits"] >= 4),
+                        ("compiled", True),
+                        msg=msg,
+                    )
+        finally:
+            signal.signal(signal.SIGUSR1, previous)
+            state["armed"], state["number"] = False, None
+
+    @unittest.skipUnless(
+        VmSeesTrips.again is not None and hasattr(signal, "SIGUSR1"),
+        "needs a signal that can be marked as arrived",
+    )
+    def test_a_signal_leaves_the_call_from_under_the_engines_own_work(self, device):
+        # More of the places where what a signal brings comes under work
+        # the engine does itself. The interpreter's own handler of SIGINT,
+        # a function of C that raises `KeyboardInterrupt` with no frame of a
+        # handler: where a path is taken down, while a pass runs, in the
+        # first run of what a pass made and in a run of a path that stores
+        # (it got through at all four before; it stays so). A handler that
+        # raises while the backward of a graph runs, under a dispatch mode,
+        # whose Python code is where the interpreter looks for signals: as
+        # in eager mode (on a device whose backward runs on autograd's own
+        # thread no handler runs there, in either). And a handler that
+        # raises while the first backward of a form is compared with the
+        # autograd engine: the exception leaves the call and the form goes
+        # on learning (an `Exception` was taken for a failure of the
+        # comparison: the call returned, and the form kept eager's tape for
+        # good).
+        if threading.current_thread() is not threading.main_thread():
+            self.skipTest("signals are handled in the main thread")
+
+        def keep(gm, input_types):
+            return gm
+
+        state = VM_SEES_SIGNAL
+
+        def one(fn, args, armed, mark=True):
+            state["armed"], state["seen"] = armed, None
+            if armed and mark:
+                state["number"].again
+            try:
+                said = fn(*args).detach().tolist()
+            except BaseException as error:
+                said = type(error).__name__
+            finally:
+                state["armed"] = False
+            return said
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        fn = vm_sees_case_interrupted
+        before = signal.signal(signal.SIGINT, signal.default_int_handler)
+        state["number"] = VmSeesTrips(signal.SIGINT)
+        try:
+            for way, passes, graded in ways:
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                for at in range(10):
+                    x = (torch.arange(6.0, device=device) + at).requires_grad_(graded)
+                    got, expected = (
+                        one(compiled, (x,), at in (1, 2)),
+                        one(fn, (x,), at in (1, 2)),
+                    )
+                    self.assertEqual(
+                        got,
+                        expected,
+                        msg=f"the interpreter's handler, {way}, call {at}",
+                    )
+                    self.assertEqual(
+                        got == "KeyboardInterrupt",
+                        at in (1, 2),
+                        msg=f"the interpreter's handler, {way}, call {at}",
+                    )
+            holder = VmSeesHolder()
+            inside = (
+                ("a pass", fn, (*graphs, vm_sees_pass_that_waits), (), 1, False),
+                (
+                    "the first run of what a pass made",
+                    vm_sees_case_stores,
+                    (*graphs, keep),
+                    (holder,),
+                    2,
+                    True,
+                ),
+                (
+                    "a later run, of a path that stores",
+                    vm_sees_case_stores,
+                    (*graphs, keep),
+                    (holder,),
+                    5,
+                    True,
+                ),
+            )
+            for what, case, passes, more, armed, mark in inside:
+                compiled = torch.vm(case, passes=passes, fallback=False, demote=False)
+                for at in range(10):
+                    args = (torch.arange(6.0, device=device) + at, *more)
+                    said, expected = (
+                        one(compiled, args, at == armed, mark),
+                        case(*args).tolist(),
+                    )
+                    self.assertEqual(
+                        said,
+                        "KeyboardInterrupt" if at == armed else expected,
+                        msg=f"the interpreter's handler, {what}, call {at}",
+                    )
+                (found,) = [
+                    region for region in torch.vm.regions(compiled) if "ops" in region
+                ]
+                self.assertEqual(
+                    (found["state"], found["hits"] >= 4), ("compiled", True), msg=what
+                )
+        finally:
+            signal.signal(signal.SIGINT, before)
+        previous = signal.signal(signal.SIGUSR1, vm_sees_handler)
+        state["number"] = VmSeesTrips(signal.SIGUSR1)
+        variable = torch.autograd.variable.Variable
+        try:
+            for kind in (VmSeesTimeout, KeyboardInterrupt):
+                # Under the backward of a graph, at calls 7 and 8.
+                state["raises"], state["where"] = (
+                    kind,
+                    (VmSeesMode.__torch_dispatch__.__code__, 0),
+                )
+                rows = []
+                for run in (
+                    torch.vm(fn, passes=graphs, fallback=False, demote=False),
+                    fn,
+                ):
+                    row = []
+                    for at in range(10):
+                        x = (torch.arange(6.0, device=device) + at).requires_grad_(True)
+                        out = run(x)
+                        state["armed"], state["seen"] = at in (7, 8), None
+                        try:
+                            with VmSeesMode():
+                                if state["armed"]:
+                                    state["number"].again
+                                out.backward()
+                            row.append(x.grad.tolist())
+                        except BaseException as error:
+                            row.append(
+                                (
+                                    type(error).__name__,
+                                    state["seen"] and state["seen"][0],
+                                )
+                            )
+                        finally:
+                            state["armed"] = False
+                    rows.append(row)
+                self.assertEqual(
+                    rows[0], rows[1], msg=f"the backward of a graph, {kind.__name__}"
+                )
+                if torch.device(device).type == "cpu":
+                    self.assertEqual(
+                        [row[0] for row in rows[1][7:9]],
+                        [kind.__name__] * 2,
+                        msg=kind.__name__,
+                    )
+                # Under the comparison with the autograd engine, which the
+                # engine makes once it has run a form twice: calls 3 to 5.
+                state["where"] = (None, 0)
+                compiled = torch.vm(fn, passes=graphs, fallback=False, demote=False)
+                row = []
+                for at in range(12):
+                    x = (torch.arange(6.0, device=device) + at).requires_grad_(True)
+                    state["armed"], state["seen"] = at < 6, None
+                    try:
+                        with unittest.mock.patch.object(
+                            variable,
+                            "_execution_engine",
+                            VmSeesEngine(variable._execution_engine),
+                        ):
+                            row.append(type(compiled(x).grad_fn).__name__)
+                    except BaseException as error:
+                        row.append(type(error).__name__)
+                    finally:
+                        state["armed"] = False
+                self.assertEqual(
+                    row[3:6],
+                    [kind.__name__] * 3,
+                    msg=f"the comparison, {kind.__name__}: {row}",
+                )
+                self.assertNotIn(
+                    kind.__name__,
+                    row[:3] + row[6:],
+                    msg=f"the comparison, {kind.__name__}: {row}",
+                )
+                self.assertEqual(
+                    row[-1],
+                    "GraphBackward",
+                    msg=f"the comparison, {kind.__name__}: {row}",
+                )
+        finally:
+            signal.signal(signal.SIGUSR1, previous)
+            state["armed"], state["number"] = False, None
+
+    def test_the_engine_tells_the_audit_hooks_of_nothing_it_reads_itself(self, device):
+        # The getter of a function's `__code__` tells the audit hooks of
+        # the read. The engine reads the code of every function it compiles
+        # as the interpreter reads it to call the function, which tells
+        # nobody: a hook is the user's code, and is run for nothing the
+        # engine does for itself (it was told of two reads per function in
+        # the call that first ran it compiled). From where the function is
+        # handed to `torch.vm` through eight calls, with a function that is
+        # inlined and a method that is compiled when it is first called. In
+        # a process of its own: an audit hook stays for good.
+        import json
+
+        ran = subprocess.run(
+            [sys.executable, "-c", vm_case_script(VM_SEES_AUDIT), device],
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        self.assertEqual(ran.returncode, 0, msg=ran.stderr[-2000:])
+        for way, (got, expected) in json.loads(
+            ran.stdout.strip().splitlines()[-1]
+        ).items():
+            self.assertEqual(got, expected, msg=way)
+            self.assertEqual([seen for _, seen in expected], [[]] * 9, msg=way)
 
     def test_a_key_that_compares_in_python_is_compared_once_per_lookup(self, device):
         # A dict that the engine looks a name up in (the dict of an object,

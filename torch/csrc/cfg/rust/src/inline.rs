@@ -106,7 +106,7 @@ impl Inliner<'_, '_> {
             }
             Bound::from_borrowed_ptr(self.py, found)
         };
-        let code = target.getattr("__code__").ok()?;
+        let code = frontend::code_of(&target).ok()?;
         let mut origin = origin_of(inst.bc);
         let mut depth = 1;
         loop {
