@@ -6258,6 +6258,13 @@ def graph_counted(x, n):
     return ((x.sin() * graph_counts(n, GRAPH_TOOLS)).cos() + 1).tanh().exp()
 
 
+def graph_timed(x):
+    # Its compiled form sleeps: slower than the interpreter by far.
+    if cfg_rs.frames_offered():
+        time.sleep(0.002)
+    return ((x.sin() + 1).cos() * 2).tanh().exp()
+
+
 class GraphLogs(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -8179,6 +8186,39 @@ print(json.dumps(found))
             self.assertEqual(compiled(x, 30), graph_counted(x, 30), atol=0, rtol=0)
         self.assertGreaterEqual(graph_of(compiled)["hits"], hits + 20 + 3)
         self.assertEqual(compiled.stats()["demoted_callees"], ["graph_counts"])
+
+    def test_a_call_in_which_a_path_is_taken_down_is_no_sample_of_the_measurement(self):
+        def keep(gm, input_types):
+            return gm
+
+        # The compiled form of the function sleeps, so every call that
+        # counts finds it slower than the interpreter. A call with a
+        # tensor of a class that was never seen is taken down (the form
+        # for that kind of call is closed) and does not count.
+        passes = (*DEFAULT, P.Graphs(max_variants=64), keep)
+        compiled = torch.vm(graph_timed, passes=passes, fallback=False, demote=True)
+        plain = torch.randn(4, 3)
+        for _ in range(3):
+            self.assertEqual(compiled(plain), graph_timed(plain), atol=0, rtol=0)
+        for n in range(40):
+            x = plain.as_subclass(type(f"GraphKind{n}", (torch.Tensor,), {}))
+            self.assertEqual(compiled(x), graph_timed(x), atol=0, rtol=0)
+        stats = compiled.stats()
+        self.assertEqual((stats["demoted"], stats["measuring"]), (False, True))
+        # The report names the classes, which are gone but for the forms.
+        (graph,) = self.graphs(compiled)
+        closed = [form["checks"] for form in graph["forms"] if "reason" in form]
+        self.assertGreater(len(closed), 10)
+        types = [check for checks in closed for check in checks]
+        named = {check.split(" is ")[1] for check in types if check.startswith("type(")}
+        kinds = [name for name in named if name.startswith("GraphKind")]
+        self.assertTrue(named and len(kinds) == len(named), named)
+        self.assertEqual(len(named), len(closed))
+        # Calls of a kind it has a form for count: it is left to the
+        # interpreter, as the measurement would have had it all along.
+        for _ in range(80):
+            self.assertEqual(compiled(plain), graph_timed(plain), atol=0, rtol=0)
+        self.assertTrue(compiled.stats()["demoted"])
 
     def test_the_graphs_of_what_is_called_wait_for_the_graph_of_the_caller(self):
         exported = []
