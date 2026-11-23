@@ -649,6 +649,26 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertIn("e_deprecated_alias", str(w[0].message))
             self.assertIn("use something else instead", str(w[0].message))
 
+    def test_deprecated_alias_fields_from(self):
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            self.assertTrue(config.nested_alias.e_bool)
+            self.assertEqual(len(w), 1)
+            self.assertIn("use nested.e_bool instead", str(w[0].message))
+
+            config.nested_alias.e_bool = False
+            self.assertFalse(config.nested.e_bool)
+            config.nested.e_bool = True
+            self.assertTrue(config.nested_alias.e_bool)
+            with config.patch({"nested_alias.e_bool": False}):
+                self.assertFalse(config.nested.e_bool)
+            self.assertTrue(config.nested.e_bool)
+            with patch.object(config.nested_alias, "e_bool", False):
+                self.assertFalse(config.nested.e_bool)
+            self.assertTrue(config.nested_alias.e_bool)
+            self.assertEqual(len(w), 1)
+        self.assertNotIn("nested_alias.e_bool", config.get_config_copy())
+
     def test_no_warnings_for_normal_user_code(self):
         """Test that normal user operations don't produce deprecation warnings."""
         import torch
@@ -689,6 +709,17 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         self.assertTrue(config.e_bool)
         with config.patch(e_bool=False):
             self.assertFalse(config._is_default("e_bool"))
+
+    def test_save_restore_user_overrides(self):
+        config.e_list = [1, 2]
+        saved = config._save_user_overrides()
+        config.e_bool = False
+        config.e_list.append(3)
+        config._restore_user_overrides(saved)
+        self.assertTrue(config.e_bool)
+        self.assertEqual(config.e_list, [1, 2])
+        override = config._config["e_env_default"].user_override
+        self.assertIs(override.get(), _UNSET_SENTINEL)
 
     def test_dict_patch(self):
         self.assertTrue(config.e_bool)
