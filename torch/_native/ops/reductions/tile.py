@@ -32,7 +32,9 @@ def align_bytes(N: int, itemsize: int) -> int:
 def _decode_offset(
     linear, divs, strides, npairs, native_div: cutlass.Constexpr = False
 ):
-    # Mixed-radix flat offset with only pair count compiled.
+    # Mixed-radix flat offset with only pair count compiled. Callers pass FastDivmod
+    # divisors (native_div=False) only for linear below 2^31; wider linear values need
+    # native_div=True.
     rem = linear
     if npairs == 0:
         return cutlass.Int64(0)
