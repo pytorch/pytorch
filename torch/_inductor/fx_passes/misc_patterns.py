@@ -128,7 +128,8 @@ def _misc_patterns_init(device: str):
     )
 
     # Pattern: e8m0 extraction with ceiling rounding (for MX format scaling)
-    if device.startswith("cuda"):
+    device_type = torch.device(device).type
+    if device_type in ("cuda", "xpu"):
 
         def e8m0_extra_check(match):
             inp = match.kwargs.get("inp")
@@ -137,7 +138,7 @@ def _misc_patterns_init(device: str):
             inp_val = inp.meta.get("val")
             return (
                 inp_val is not None
-                and inp_val.device.type == "cuda"
+                and inp_val.device.type == device_type
                 and inp_val.dtype == torch.float32
             )
 
@@ -176,7 +177,7 @@ def _misc_patterns_init(device: str):
         # Pattern 2: log2 + ceil approach (used by torchao MX formats)
         # Matches: (clamp(ceil(log2(x)), -127, 127) + 127).to(uint8)
         #
-        # Registered on ALL CUDA hardware. On NVIDIA SM100+ uses the PTX instruction;
+        # Registered on all CUDA and XPU hardware. On NVIDIA SM100+ uses the PTX instruction;
         # on earlier hardware uses exact IEEE 754 bit-manipulation.
         #
         # The bit-manipulation replacement is preferred over the software
@@ -223,7 +224,7 @@ def _misc_patterns_init(device: str):
             e8m0_rceil_log2_pattern,
             # pyrefly: ignore [bad-argument-type]
             e8m0_rceil_log2_replacement,
-            [torch.randn(32, device="cuda", dtype=torch.float32).abs() + 1e-10],
+            [torch.randn(32, device=device, dtype=torch.float32).abs() + 1e-10],
             # pyrefly: ignore [bad-argument-type]
             fwd_only,
             # pyrefly: ignore [bad-argument-type]

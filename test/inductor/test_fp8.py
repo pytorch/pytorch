@@ -56,6 +56,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
+    HAS_TRITON,
     is_big_gpu,
 )
 from torch.utils._sympy.symbol import SymT
@@ -2862,7 +2863,7 @@ class TestCvtE8M0Rceil(TestCase):
         self.assertEqual(compiled_result, expected)
 
 
-@unittest.skipIf(not HAS_CUDA_AND_TRITON, "Requires CUDA + Triton")
+@unittest.skipIf(not HAS_TRITON, "Requires Triton")
 @unittest.skipIf(
     utils.is_nvidia_sm100_or_later(),
     "Pre-NVIDIA-SM100 path: uses bit-manipulation fallback",
@@ -2876,9 +2877,9 @@ class TestE8M0Log2PatternBitManip(TestCase):
     software log2 near exact powers of 2 (gh-178045).
     """
 
-    def test_pattern_fires_and_is_correct(self):
+    def test_pattern_fires_and_is_correct(self, device):
         """The log2+ceil pattern should be matched and produce correct uint8."""
-        _misc_patterns_init("cuda")
+        _misc_patterns_init(device)
         E8M0_BIAS = 127
 
         def fn(inp):
@@ -2889,13 +2890,13 @@ class TestE8M0Log2PatternBitManip(TestCase):
             return biased.to(torch.uint8)
 
         inp = torch.tensor(
-            [1.0, 2.0, 4.0, 3.0, 1.5, 0.5, 0.25], device="cuda", dtype=torch.float32
+            [1.0, 2.0, 4.0, 3.0, 1.5, 0.5, 0.25], device=device, dtype=torch.float32
         )
         eager_result = fn(inp)
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, eager_result)
 
-    def test_correct_for_values_one_ulp_above_power_of_two(self):
+    def test_correct_for_values_one_ulp_above_power_of_two(self, device):
         """Values 1 ULP above a power of 2 must produce the correct (higher) exponent.
 
         Software log2 for x = 2^e + 1 ULP may round to exactly e when e is
@@ -2917,15 +2918,15 @@ class TestE8M0Log2PatternBitManip(TestCase):
             torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
             for p in powers
         ]
-        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+        inp = torch.tensor(one_ulp_above, device=device, dtype=torch.float32)
 
         expected = torch.tensor(
-            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device="cuda"
+            [E8M0_BIAS + e + 1 for e in range(8)], dtype=torch.uint8, device=device
         )
         compiled_result = torch.compile(fn)(inp)
         self.assertEqual(compiled_result, expected)
 
-    def test_regression_gh178045_encoding_correctness(self):
+    def test_regression_gh178045_encoding_correctness(self, device):
         """Regression for gh-178045: encoding must be correct for inputs near power-of-2.
 
         When a compiled kernel (e.g. fused GELU) produces a float value that is
@@ -2959,11 +2960,11 @@ class TestE8M0Log2PatternBitManip(TestCase):
             torch.nextafter(torch.tensor(p), torch.tensor(float("inf"))).item()
             for p in powers
         ]
-        inp = torch.tensor(one_ulp_above, device="cuda", dtype=torch.float32)
+        inp = torch.tensor(one_ulp_above, device=device, dtype=torch.float32)
 
         # The correct e8m0 encoding for "1 ULP above 2^e" is E8M0_BIAS + (e+1)
         expected = torch.tensor(
-            [E8M0_BIAS + e + 1 for e in range(7)], dtype=torch.uint8, device="cuda"
+            [E8M0_BIAS + e + 1 for e in range(7)], dtype=torch.uint8, device=device
         )
 
         torch._dynamo.reset()
@@ -2979,6 +2980,9 @@ class TestE8M0Log2PatternBitManip(TestCase):
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestFP8Lowering, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestE8M0ToFloat, globals(), only_for=("cpu", "cuda"))
+instantiate_device_type_tests(
+    TestE8M0Log2PatternBitManip, globals(), only_for=("xpu", "cuda"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
