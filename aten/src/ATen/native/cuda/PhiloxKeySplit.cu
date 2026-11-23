@@ -162,8 +162,8 @@ Tensor _philox_key_fold_in_tensor_cuda(const Tensor& key, const Tensor& data) {
   TORCH_CHECK(key.scalar_type() == kUInt64,
       "_philox_key_fold_in: key must have dtype uint64, got ",
       key.scalar_type());
-  TORCH_CHECK(data.scalar_type() == kUInt64,
-      "_philox_key_fold_in: data must have dtype uint64, got ",
+  TORCH_CHECK(data.scalar_type() == kUInt64 || data.scalar_type() == kLong,
+      "_philox_key_fold_in: data must have dtype uint64 or int64, got ",
       data.scalar_type());
   // TODO: Relax this and allow for arbitrary data shape that broadcasts with
   // batched keys?
@@ -187,7 +187,8 @@ Tensor _philox_key_fold_in_tensor_cuda(const Tensor& key, const Tensor& data) {
       key_contig.data_ptr<uint64_t>(),
       output.data_ptr<uint64_t>(),
       num_keys,
-      data.const_data_ptr<uint64_t>());
+      // Read int64 as uint64, matching the int overload's remap of negative values.
+      static_cast<const uint64_t*>(data.const_data_ptr()));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;
