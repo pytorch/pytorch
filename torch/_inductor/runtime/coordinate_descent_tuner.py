@@ -277,7 +277,10 @@ class CoordescTuner:
     @staticmethod
     def has_improvement(baseline, test):
         threshold = 0.001  # 0.1%
-        return test is not None and test < baseline * (1 - threshold)
+        # With a negative (bogus) timing, an equal timing must not count as an
+        # improvement, or autotune() cycles between cached configs forever.
+        factor = (1 - threshold) if baseline >= 0 else (1 + threshold)
+        return test is not None and test < baseline * factor
 
     def is_valid_config(self, config) -> bool:
         # Rounded size hints can overestimate launchable legacy 3D grids.

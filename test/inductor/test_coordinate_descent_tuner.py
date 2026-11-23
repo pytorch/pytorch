@@ -15,7 +15,6 @@ from torch._inductor.runtime.hints import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_LINUX,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -196,6 +195,31 @@ class TestCoordinateDescentTuner(TestCase):
 
         best_config = tuner.autotune(func, baseline_config)
         self.assertTrue(best_config.kwargs.get("XBLOCK") == 1, str(best_config))
+
+    def test_negative_timings_terminate(self):
+        # On Windows ROCm the GPU timer can report a negative time. Every config
+        # here "takes" the same -0.01 ms. With a negative baseline, `test < baseline *
+        # (1 - threshold)` used to accept an equal timing as an improvement, so the
+        # tuner kept moving between neighbour configs and never stopped. The search
+        # must terminate and keep the baseline, since no config is actually faster.
+        tuner = CoordescTuner(size_hints={"x": 2**20})
+        baseline_config = triton.Config({"XBLOCK": 16}, num_warps=4, num_stages=1)
+        # Bound the comparisons so that a cycling search fails instead of hanging.
+        has_improvement = CoordescTuner.has_improvement
+        calls = 0
+
+        def bounded_has_improvement(baseline, test):
+            nonlocal calls
+            calls += 1
+            if calls > 1000:
+                raise AssertionError("coordinate descent did not terminate")
+            return has_improvement(baseline, test)
+
+        with mock.patch.object(
+            CoordescTuner, "has_improvement", staticmethod(bounded_has_improvement)
+        ):
+            best_config = tuner.autotune(lambda config: -0.01, baseline_config)
+        self.assertEqual(best_config.kwargs["XBLOCK"], 16)
 
     def test_get_neighbour_values(self):
         tuner = CoordescTuner()
@@ -683,5 +707,5 @@ class TestCoordinateDescentTuner(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_GPU:
+    if HAS_GPU:
         run_tests()
