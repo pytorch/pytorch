@@ -1908,6 +1908,24 @@ if(USE_ROCM)
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
+# Test executables cannot preload the SDK HIP runtime, and the DLL search order
+# finds the display driver's older amdhip64 in System32 before PATH; copy the
+# SDK runtime next to the binaries in build/bin.
+if(WIN32 AND USE_ROCM AND BUILD_TEST)
+  file(GLOB _hip_runtime_dlls
+    "${ROCM_PATH}/bin/amdhip64_*.dll"
+    "${ROCM_PATH}/bin/amd_comgr*.dll"
+    "${ROCM_PATH}/bin/hiprtc*.dll"
+    "${ROCM_PATH}/bin/rocm_kpack.dll")
+  if(_hip_runtime_dlls)
+    add_custom_target(copy_hip_runtime_for_tests ALL
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/bin"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${_hip_runtime_dlls}
+              "${PROJECT_BINARY_DIR}/bin"
+      VERBATIM)
+  endif()
+endif()
+
 if(BUILD_STATIC_RUNTIME_BENCHMARK)
   add_subdirectory(${TORCH_ROOT}/benchmarks/static_runtime ${PROJECT_BINARY_DIR}/bin)
   add_executable(static_runtime_bench "${STATIC_RUNTIME_BENCHMARK_SRCS}")

@@ -1,5 +1,5 @@
-# Skip on windows
-if(WIN32)
+# Skip on windows, except ROCm builds
+if(WIN32 AND NOT USE_ROCM)
   return()
 endif()
 
