@@ -14016,12 +14016,7 @@ class TestNondeterministic(TestCaseMPS):
         input = torch.randn(1, 2, 6, 6, device=device, requires_grad=True)
         res = module(input)
         grad = torch.ones_like(res)
-
-        def f():
-            res.backward(grad, retain_graph=True)
-            return input.grad
-
-        return f
+        return lambda: torch.autograd.grad(res, input, grad, retain_graph=True)
 
     def _case_upsample_bilinear2d_aa_backward(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
