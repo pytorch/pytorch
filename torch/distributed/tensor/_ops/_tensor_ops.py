@@ -255,15 +255,17 @@ def bucketize_single_dim_strategy(
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """Bucketize returns indices into a sorted boundary tensor.
 
-    Three families of strategies:
+    Two families of strategies:
     1. Shard the input (and output) on any dim, keep boundaries replicated.
     2. Shard boundaries on dim 0, replicate input, output is Partial("sum").
        Each rank counts how many of its local boundary values each input
        element exceeds; summing across ranks gives the correct global index.
-    3. Partial("max") or Partial("min") input with replicated boundaries.
-       Bucketize is monotonically non-decreasing in its input, so reducing
-       local bucket indices with max (or min) across ranks gives the same
-       result as bucketizing the reduced input values.
+
+    Partial("max")/Partial("min") inputs are not passed through even though
+    bucketize is non-decreasing: it maps NaN to the last bucket, and whether
+    that bucket wins the reduction depends on the backend (NCCL's all_reduce
+    MAX/MIN ignores NaN), so P(min) breaks under NaN propagation and P(max)
+    breaks on NCCL.
     """
     input_meta, _boundaries_meta = args_schema
     if not isinstance(input_meta, TensorMeta):
@@ -274,8 +276,6 @@ def bucketize_single_dim_strategy(
             [_ShardingPlaceholder(dim), _ShardingPlaceholder(dim), Replicate()]
         )
     strategies.append([Partial("sum"), Replicate(), _ShardingPlaceholder(0)])
-    for reduce_op in ("max", "min"):
-        strategies.append([Partial(reduce_op), Partial(reduce_op), Replicate()])
     return strategies
 
 
@@ -534,14 +534,6 @@ def local_scalar_dense_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """Only allow replication on the input; the output is a local scalar."""
-    return []
-
-
-@register_single_dim_strategy(aten._assert_async.msg)
-def assert_async_single_dim_strategy(
-    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    r"""Only allow replicated predicates; assertions have no tensor output."""
     return []
 
 

@@ -32,6 +32,7 @@ from torch.utils._triton import (
     has_triton,
     has_triton_block_ptr,
     has_triton_cpu_backend,
+    has_triton_stable_tma_api,
 )
 from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
@@ -89,6 +90,16 @@ HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON or HAS_MTIA_AND_TRITON
 HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
+
+
+def platform_supports_tensor_descriptor() -> bool:
+    """Return whether CUDA TMA descriptors are supported on this platform."""
+    return (
+        HAS_CUDA_AND_TRITON
+        and not torch.version.hip
+        and torch.cuda.get_device_capability()[0] >= 9
+        and has_triton_stable_tma_api()
+    )
 
 
 def running_on_tdm_device() -> bool:

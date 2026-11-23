@@ -1096,8 +1096,8 @@ class MetaConverter(Generic[_TensorT]):
         source: Source | None,
         symbolic_context: SymbolicContext | None,
     ) -> _TensorT:
-        from torch._guards import require_python_fake_mode
         from torch._subclasses.fake_tensor import (
+            FakeTensor,
             is_fake_tensor,
             maybe_get_fake_mode,
             maybe_get_real_tensor,
@@ -1605,7 +1605,6 @@ class MetaConverter(Generic[_TensorT]):
                             is_coalesced=t.is_coalesced,
                         )
                     )
-                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray that sparse clone doesn't lose information
                         if t.data is None:
@@ -1681,7 +1680,6 @@ class MetaConverter(Generic[_TensorT]):
                             device="meta",
                         )
                     )
-                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         # Pray sparse clone doesn't lose information
                         if t.data is None:
@@ -1727,7 +1725,6 @@ class MetaConverter(Generic[_TensorT]):
                             sizes, strides, dtype=t.dtype, device="meta"
                         )
                     )
-                    require_python_fake_mode(maybe_get_fake_mode(r))
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
                             if t.size is None:
@@ -1947,7 +1944,6 @@ class MetaConverter(Generic[_TensorT]):
                             torch._dynamo.source.AttrSource(source, "_base"),
                             base_symbolic_context,
                         )
-                    require_python_fake_mode(maybe_get_fake_mode(base))
 
                     def is_c_of_r(
                         complex_dtype: torch.dtype, real_dtype: torch.dtype
@@ -1970,19 +1966,30 @@ class MetaConverter(Generic[_TensorT]):
                         torch._C.DispatchKey.ADInplaceOrView, False
                     )
                     try:
-                        if base.dtype == t.dtype:
-                            pass
-                        elif is_c_of_r(base.dtype, t.dtype):
-                            base = self._checked_cast_tensor_t(torch.view_as_real(base))
-                        elif is_c_of_r(t.dtype, base.dtype):
-                            base = self._checked_cast_tensor_t(
-                                torch.view_as_complex(base)
+                        # Native fallback conversion excludes Fake, but dtype
+                        # replay needs fake dispatch to wrap its Meta output.
+                        with (
+                            torch._C._SetExcludeDispatchKeyGuard(
+                                torch._C.DispatchKey.Fake, False
                             )
-                        else:
-                            # This is not guaranteed to succeed.  If it fails, it
-                            # means there is another dtype-converting view function
-                            # that hasn't been handled here
-                            base = self._checked_cast_tensor_t(base.view(t.dtype))
+                            if self.cpp_fakes
+                            else contextlib.nullcontext()
+                        ):
+                            if base.dtype == t.dtype:
+                                pass
+                            elif is_c_of_r(base.dtype, t.dtype):
+                                base = self._checked_cast_tensor_t(
+                                    torch.view_as_real(base)
+                                )
+                            elif is_c_of_r(t.dtype, base.dtype):
+                                base = self._checked_cast_tensor_t(
+                                    torch.view_as_complex(base)
+                                )
+                            else:
+                                # This is not guaranteed to succeed.  If it fails, it
+                                # means there is another dtype-converting view function
+                                # that hasn't been handled here
+                                base = self._checked_cast_tensor_t(base.view(t.dtype))
 
                         # This is very tricky.  Naively, you might expect this
                         # to hold:
@@ -2327,12 +2334,12 @@ class MetaConverter(Generic[_TensorT]):
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
                 # pyrefly: ignore [unbound-name]
-                if not is_fake_tensor(r):
-                    raise AssertionError("Expected r to be a FakeTensor for nested int")
+                if not isinstance(r, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
+                    raise RuntimeError(
+                        "Symbolic nested ints require a Python FakeTensor"
+                    )
                 # pyrefly: ignore [unbound-name]
-                r_mode = require_python_fake_mode(maybe_get_fake_mode(r))
-                # pyrefly: ignore [unbound-name, missing-attribute]
-                r.nested_int_memo = r_mode.create_symbolic_nested_int(
+                r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
                 )
 

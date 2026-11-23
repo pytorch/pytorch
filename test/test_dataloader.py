@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     parametrize,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfNoDill,
     skipIfRocm,
     skipIfXpu,
@@ -152,9 +153,12 @@ if "forkserver" in torch.multiprocessing.get_all_start_methods():
 JOIN_TIMEOUT = 60.0  # seconds
 
 
-supported_multiprocessing_contexts = [None] + list(
-    torch.multiprocessing.get_all_start_methods()
-)
+# fork is unsafe on macOS: the objc runtime aborts forked children of multithreaded parents
+supported_multiprocessing_contexts = [None] + [
+    method
+    for method in torch.multiprocessing.get_all_start_methods()
+    if not (IS_MACOS and method in ("fork", "forkserver"))
+]
 
 
 # The following collate functions are defined globally here for pickle purposes.
@@ -2982,6 +2986,7 @@ except RuntimeError as e:
 class TestDataLoaderDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipIfCppFakeTensor("no nested tensor support")
     @parametrize(
         "context",
         [ctx for ctx in supported_multiprocessing_contexts if ctx is not None],
