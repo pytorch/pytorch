@@ -573,6 +573,9 @@ class TestInnerTreeOrder(TestCase):
             with _order_on():
                 got = kg.reduce_dim(T.SumOps(acc=acc), key, x, [1], dtype)
             self.assertEqual(got, x.sum(dim=1, dtype=dtype))
+        # Both ran the indexed split path, each with its own stage-one kernel.
+        stage1 = [k for k in kg._COMPILE_CACHE if k[1:3] == ("genitree1", key)]
+        self.assertEqual(len(stage1), 2)
 
     def test_strided_rows_use_the_trait_plan(self):
         """Serve strided ragged rows with the same trait-tuned DAG as contiguous rows."""
