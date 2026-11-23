@@ -1990,6 +1990,67 @@ for _ in range(6):
 same, found["ops"], found["why"]  # (True, 8, 'the function returns')
 ```
 
+### Sizes on a path
+
+The sizes of a tensor are a tuple of numbers, and a path goes through what
+a function does with them as it goes through numbers: `y.shape[0] > 2`,
+`n, c = y.shape`, and a comparison of the sizes of one tensor with those of
+another or with a tuple (`a.shape != b.shape`, `y.shape == (2, 3)`). Such a
+comparison is a branch of the path; where the sizes are those of a tensor
+the graph computes, they follow from the sizes of what the graph is given,
+which a form checks, so other sizes are another form:
+
+```python
+def sized(x, y):
+    a = (x.sin() + 1).cos()
+    if a.shape != y.shape:
+        raise ValueError("sizes")
+    b = (a * y).tanh()
+    if b.shape == (2, 3):
+        b = b + 1
+    return b.exp()
+
+
+g = torch.vm(sized, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+x, y = torch.randn(2, 3), torch.randn(2, 3)
+for _ in range(6):
+    same = torch.equal(g(x, y), sized(x, y))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 7, 'the function returns')
+try:
+    g(x, torch.randn(2, 1))
+except ValueError as error:
+    said = str(error)
+said  # 'sizes'
+```
+
+Going over the sizes is part of a path as well, which is what
+`nn.AdaptiveAvgPool2d((1, 1))` does to work out its output size: the pool,
+and whatever stands behind it, is in the graph of the model.
+
+```python
+class Pooled(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, 3, padding=1)
+        self.pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = torch.nn.Linear(8, 4)
+
+    def forward(self, x):
+        y = torch.relu(self.conv(x)).sin().cos()
+        return self.fc(torch.flatten(self.pool(y), 1)).tanh()
+
+
+model = Pooled().eval()
+g = torch.vm(model, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), keep))
+images = torch.randn(2, 3, 8, 8)
+with torch.no_grad():
+    for _ in range(6):
+        same = torch.equal(g(images), model(images))
+(found,) = [found for found in torch.vm.regions(g) if "ops" in found]
+same, found["ops"], found["why"]  # (True, 8, 'the function returns')
+```
+
 ### The order of the list
 
 - `Graphs()` can stand anywhere among the passes over a block. It looks at a
@@ -2017,6 +2078,89 @@ torch.vm(f, passes=(*default, P.Graphs(), P.Inductor(), keep))
 torch.vm(f, passes=(*default, keep, P.Inductor())).passes
 # ['resolve_dispatch', 'tensor_accessors', 'method_calls', 'fold', 'dce', 'graphs']
 ```
+
+### Models
+
+The times of this section were measured on the tree of commit `90f834123d55`
+of this series, which is above this one and has what the commits between add
+(the graphs the tables name are that tree's), on one H100 and eight cores,
+one process at a time under the lock that every job on the machine takes for
+a timed run. In front of every row the load average of the last minute was
+under 10 (between 1.2 and 9.8) and no process was on the GPU. Every row was
+measured twice, and every row whose eager figure was more than 3 percent
+apart between the two processes a third time (eager's own figure moves by up
+to 11 percent from one process to the next); all the figures are given, and
+the rows whose eager figure moved are listed with the figures of each
+process behind the tables. Eager mode and what is compared with it take
+turns in one process, so that both have the same machine: a ratio is of the
+turns inside one process, never of figures from two. The row of yolov3 is of
+the tree of commit `5c0ad0cf96d7`, on which its forward is one graph: on the
+other tree a store that a detection layer makes into itself ended the path,
+and the model was two graphs.
+
+With the default settings and `Graphs()` and `Inductor()` in the list, the
+forward of a resnet is one graph, and so is that of yolov3. In images per
+second against eager mode (the model in eval mode under `torch.no_grad()`,
+the best of three rounds of 60 batches for each side):
+
+| model | the graphs that run | `Graphs()` | `Graphs(), Inductor()` |
+|---|---|---|---|
+| yolov3 (TorchBench), bfloat16, batch 8 of 3x384x512 | 328 operations | 1.05x, 0.97x, 1.02x | 2.38x, 2.24x, 2.19x |
+| resnet18 (torchvision), float32, batch 16 of 3x224x224 | 69 operations | 1.01x, 0.97x | 1.89x, 1.93x |
+| resnet18, bfloat16 | 69 operations | 1.03x, 1.00x | 2.17x, 2.26x |
+| resnet50, float32 | 175 operations | 1.00x, 1.04x, 1.03x | 1.70x, 1.72x |
+| resnet50, bfloat16 | 175 operations | 1.00x, 1.01x, 1.01x | 2.23x, 2.16x |
+
+With `Graphs()` alone the outputs are those of eager mode bit for bit, the
+operations in place included. With `Inductor()` they differ by its
+arithmetic: by 2.4e-4 of the largest value in float32, and by up to 1.4e-2
+in bfloat16. With `Inductor()` a few small functions on the way were left to
+the interpreter by measurement (`ContextProp.__get__`, `Module.__setattr__`,
+`_BufferMeta.__instancecheck__`, `_ParameterMeta.__instancecheck__`), and
+the graphs go through them. The graph of a resnet is its whole forward, the
+pool, the flatten and the linear layer at the end included. The graph of
+yolov3 is the model with its three detection layers and the stores they make
+into themselves, 328 operations: what an iterator over the model's layers
+gives is a layer, an object from outside, and a store into it is an effect
+of the path ("Stores into objects", "What a function makes"). It ends at a
+call that runs no kernel, and the one operation behind that runs by itself.
+
+The forward of a training step is one graph as well: 89 operations for
+resnet18 and 228 for resnet50, the batch norms writing their statistics and
+counting their batches in it. In steps per second against eager mode (batch
+16 of 3x224x224, 100 classes, cross entropy and SGD with momentum; a step is
+forward, loss, backward and update; eager's steps and the other side's take
+turns of two seconds until each side has run twelve), with `Graphs()` alone,
+on eager's tape, and with `Inductor()` behind it, for which AOTAutograd
+derives the backward:
+
+| model | `Graphs()` | `Graphs(), Inductor()` |
+|---|---|---|
+| resnet18 (eager 131 to 142 steps a second) | 1.04x, 1.01x, 1.01x | 1.50x, 1.42x |
+| resnet50 (eager 57 to 58 steps a second) | 1.03x, 1.03x | 1.37x, 1.38x |
+
+On the tree these were measured on the two lists are written
+`Graphs(backward=False)` and `Graphs(), AOTAutograd(), Inductor()`. With
+`Graphs()` alone the losses and the gradients of 30 steps in lockstep with
+eager mode are eager's bit for bit. With `Inductor()` they are not: the
+gradients of a step from the same state are within 5.2e-1 of the largest of
+eager's. On the CPU the gradient of every parameter of a small model is
+within 1e-4 of eager's at each of 30 steps with `AOTAutograd()` and with
+`Inductor()`, which is what the tests hold.
+
+
+Eager's own figure was more than 3 percent apart between the processes of 5
+rows of the two tables above. For these, every figure of every process, in
+the order the processes ran: eager's, the other side's, and the ratio, which
+is of the turns inside that one process.
+
+| row | eager | the other side | ratio |
+|---|---|---|---|
+| yolov3, `Graphs()`, images a second | 786, 833, 816 | 825, 809, 835 | 1.05x, 0.97x, 1.02x |
+| yolov3, `Graphs(), Inductor()`, images a second | 807, 835, 830 | 1922, 1869, 1820 | 2.38x, 2.24x, 2.19x |
+| resnet50, float32, `Graphs()`, images a second | 3152, 2999, 3034 | 3157, 3121, 3131 | 1.00x, 1.04x, 1.03x |
+| resnet50, bfloat16, `Graphs()`, images a second | 2874, 2754, 2799 | 2887, 2779, 2819 | 1.00x, 1.01x, 1.01x |
+| resnet18, `Graphs()`, steps a second | 136.2, 142.1, 142.3 | 141.1, 143.0, 143.0 | 1.04x, 1.01x, 1.01x |
 
 ### Limits
 

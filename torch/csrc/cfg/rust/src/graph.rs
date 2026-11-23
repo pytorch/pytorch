@@ -2322,12 +2322,24 @@ pub unsafe fn move_version(tensor: Obj, count: u64) {
     ffi::PyErr_Clear();
 }
 
-/// Whether two values compare in C code: numbers, texts, or dtypes and
-/// devices.
+/// Whether two values compare in C code: numbers, texts, dtypes and
+/// devices, or tuples of numbers, texts and None (the sizes of a tensor
+/// with those of another, or with a tuple).
 pub unsafe fn quiet_compare(a: Obj, b: Obj) -> bool {
     let text = |o: Obj| !capi::is_unboxed(o) && ffi::PyUnicode_CheckExact(o) != 0;
     let token = |o: Obj| !capi::is_unboxed(o) && is_token(o);
-    (is_number(a) && is_number(b)) || (text(a) && text(b)) || (token(a) && token(b))
+    // A tuple, or one of a class that is defined in C and compares as a
+    // tuple does (a `torch.Size`).
+    let row = |o: Obj| {
+        if capi::is_unboxed(o) || ffi::PyTuple_Check(o) == 0 {
+            return false;
+        }
+        let (ty, tuple) = (ffi::Py_TYPE(o), std::ptr::addr_of!(ffi::PyTuple_Type));
+        let compares = (*ty).tp_richcompare.map(|f| f as usize) == (*tuple).tp_richcompare.map(|f| f as usize);
+        (ffi::PyTuple_CheckExact(o) != 0 || (is_static(ty) && compares))
+            && (0..ffi::PyTuple_GET_SIZE(o)).all(|i| is_plain(ffi::PyTuple_GET_ITEM(o, i)))
+    };
+    (is_number(a) && is_number(b)) || (text(a) && text(b)) || (token(a) && token(b)) || (row(a) && row(b))
 }
 
 /// An iterator over, or a view of, a list, a tuple, a dict or a range: what
@@ -2378,6 +2390,12 @@ pub unsafe fn quiet_iter(o: Obj) -> Option<bool> {
     }
     if !is_static(ty) {
         return None;
+    }
+    // A tuple of a class that is defined in C and goes over itself as a
+    // tuple does (a `torch.Size`).
+    let tuple = std::ptr::addr_of!(ffi::PyTuple_Type);
+    if ffi::PyTuple_Check(o) != 0 && (*ty).tp_iter.map(|f| f as usize) == (*tuple).tp_iter.map(|f| f as usize) {
+        return Some(false);
     }
     let name = std::ffi::CStr::from_ptr((*ty).tp_name).to_bytes();
     if VIEWS.contains(&name) {
