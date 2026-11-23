@@ -7,7 +7,8 @@
 # Other names mirror SharedReduceOps.h. Accumulator dtypes provide their identities.
 # Scalar conditionals lower only inside cute.jit methods; cute.arch.fmax suppresses
 # NaNs, so traits handle them.
-# leaf_is_reduce_init: leaf(x) is reduce(init, x) up to a sum's -0.0 and NaN payloads.
+# leaf_is_reduce_init: leaf(x) is reduce(init, x) up to a sum's -0.0 and NaN payloads
+# that the trait's combine canonicalizes (add or mul).
 
 import cutlass
 import cutlass.cute as cute
@@ -454,8 +455,10 @@ class NanSumOps:
 
 
 class AllOps:
-    # acc is the min of 0/1 truth flags; NaN is truthy, matching torch.all. Ordered
-    # columns ran a product fold at 0.22-0.59x of the indexed tree on B200.
+    # acc is the min of 0/1 truth flags; NaN is truthy, matching torch.all. On B200,
+    # ordered columns ran a product fold at 0.10-0.98x of this min fold, while
+    # unordered contiguous rows at (64, 131072) and (1024, 4096) run min at 0.77x of
+    # the product.
     nfields = 1
     leaf_is_reduce_init = True
 
