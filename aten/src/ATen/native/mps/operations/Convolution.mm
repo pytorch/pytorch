@@ -821,11 +821,13 @@ static bool mpsgraph_depthwise_overflows(const Tensor& weight,
   if (!is_depthwise || is_dilated || has_large_stride || has_many_taps || kernel_height == 1) {
     return false;
   }
+  static const bool full_tile_overflows = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
   const int64_t tile_element_size = weight.scalar_type() == kHalf ? sizeof(c10::Half) : sizeof(float);
   return std::ranges::any_of(kMPSGraphDepthwiseTileOutputs, [&](const auto& outputs) {
     const auto tile_width = outputs[0] * stride[1] + kernel_width - 1;
     const auto tile_height = outputs[1] * stride[0] + kernel_height - 1;
-    return tile_width * tile_height * outputs[2] * tile_element_size > kMPSGraphDepthwiseTileBytes;
+    const auto tile_bytes = tile_width * tile_height * outputs[2] * tile_element_size;
+    return full_tile_overflows ? tile_bytes >= kMPSGraphDepthwiseTileBytes : tile_bytes > kMPSGraphDepthwiseTileBytes;
   });
 }
 

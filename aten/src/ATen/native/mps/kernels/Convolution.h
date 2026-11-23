@@ -8,9 +8,11 @@ C10_METAL_CONSTEXPR int32_t kConv1dDepthwiseOutputsPerThread = 8;
 // MPS Graph runs undilated depthwise convolutions with strides of up to
 // kMPSGraphDepthwiseMaxStride, and a product of filter taps and strides of up
 // to kMPSGraphDepthwiseMaxTaps, with a kernel that keeps a threadgroup's input
-// tile in kMPSGraphDepthwiseTileBytes of threadgroup memory and does not check
-// that the tile fits. kMPSGraphDepthwiseTileOutputs bounds the output columns,
-// output rows and images it gives one threadgroup.
+// tile in threadgroup memory and does not check its size. The output is wrong
+// once a tile exceeds kMPSGraphDepthwiseTileBytes, and on GPUs older than the
+// Apple9 family (M1, M2) also when it takes exactly that many bytes.
+// kMPSGraphDepthwiseTileOutputs bounds the output columns, output rows and
+// images it gives one threadgroup.
 C10_METAL_CONSTEXPR int32_t kMPSGraphDepthwiseMaxStride = 2;
 C10_METAL_CONSTEXPR int32_t kMPSGraphDepthwiseMaxTaps = 1024;
 C10_METAL_CONSTEXPR int32_t kMPSGraphDepthwiseTileBytes = 65536;
