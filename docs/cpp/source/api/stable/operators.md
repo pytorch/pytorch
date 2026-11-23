@@ -44,9 +44,6 @@ torch::stable::Device cuda_device(torch::headeronly::DeviceType::CUDA, 0);
 ```{doxygenfunction} torch::stable::empty
 ```
 
-```{doxygenfunction} torch::stable::empty_strided
-```
-
 ```{doxygenfunction} torch::stable::empty_like
 ```
 
@@ -119,9 +116,6 @@ auto tensor = torch::stable::empty(
 ```
 
 ```{doxygenfunction} torch::stable::narrow
-```
-
-```{doxygenfunction} torch::stable::slice
 ```
 
 ```{doxygenfunction} torch::stable::pad

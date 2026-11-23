@@ -105,6 +105,8 @@ class MetricsContext:
                 )
             except Exception:
                 log.exception("Unexpected exception logging compilation metrics")
+            finally:
+                self._edits.clear()
 
     def in_progress(self) -> bool:
         """
