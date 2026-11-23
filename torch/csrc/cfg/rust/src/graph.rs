@@ -382,6 +382,12 @@ pub struct Path {
     /// It ended at a block that had not been profiled yet: the next run
     /// gets further.
     pub provisional: bool,
+    /// It leaves a variable of the frame unbound that the instructions
+    /// bind: one that is bound to what the graph computes and does not
+    /// give back, where the path lands at the return of the function and
+    /// the frame is gone. Not run for a call whose frame has a frame
+    /// object, which may outlive the call (`Compiled::run_path`).
+    pub unbinds: bool,
     /// It has stores into objects from outside (`Kind::Effect`), which are
     /// done when it lands.
     pub effects: bool,
@@ -5830,6 +5836,7 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         calls: 0,
         first: None,
         provisional: false,
+        unbinds: false,
         effects: false,
         mutates: false,
         pinned: Vec::new(),
@@ -6971,6 +6978,7 @@ impl Path {
             calls: 0,
             first: None,
             provisional: false,
+            unbinds: false,
             effects: false,
             mutates: false,
             pinned: Vec::new(),
@@ -7035,9 +7043,15 @@ impl Path {
         // that can be reached may hold of what it was made of.
         let mut kept = vec![false; nregs];
         writes.iter().for_each(|(made, _)| kept[*made as usize] = true);
+        // The frame has every variable the instructions bound, wherever
+        // something can look at it: what a variable is bound to last is
+        // there when the path lands, read behind it or not. Where the path
+        // lands at the return of the function the frame is gone, unless it
+        // has a frame object by then (`Path::unbinds`).
         for (at, (slot, v)) in trace.bound.iter().enumerate() {
             if !returns && !trace.bound[at + 1..].iter().any(|(later, _)| later == slot) {
                 kept[*v as usize] = true;
+                need[*v as usize] |= *v != UNDEF;
             }
         }
         let values = &trace.rec.values;
@@ -7311,15 +7325,24 @@ impl Path {
             }
         }
         let mut bound: Vec<(u32, PathValue)> = Vec::new();
+        // The variables that are left unbound though the instructions
+        // bind them.
+        let mut left: Vec<u32> = Vec::new();
         for (slot, v) in &trace.bound {
             bound.retain(|(other, _)| other != slot);
+            left.retain(|other| other != slot);
             bound.push((*slot, if there[*v as usize] { *v } else { UNDEF }));
+            if *v != UNDEF && !there[*v as usize] {
+                left.push(*slot);
+            }
         }
+        let unbinds = !left.is_empty();
         Path {
             root,
             land,
             resume,
             nregs,
+            unbinds,
             stages: stages_of(&trace.body),
             handed: handed_of(&trace.inputs, &trace.body, &writes, &bound),
             made: trace.defs.iter().map(|def| def.made).collect(),
