@@ -1185,9 +1185,22 @@ pub fn build_generator(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyA
     build_as(py, table, func, true)
 }
 
+/// The code of a function, read as the interpreter reads it to call the
+/// function. Not `function.__code__`: the getter tells the audit hooks of
+/// the read, and a hook is the user's code, which the engine runs for
+/// nothing it does itself.
+pub fn code_of<'py>(func: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    unsafe {
+        if ffi::PyFunction_Check(func.as_ptr()) != 0 {
+            return Ok(Bound::from_borrowed_ptr(func.py(), ffi::PyFunction_GetCode(func.as_ptr())));
+        }
+    }
+    func.getattr("__code__")
+}
+
 fn build_as(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>, generator: bool) -> PyResult<Function> {
     const CO_GENERATOR: u32 = 0x20;
-    let code = func.getattr("__code__")?;
+    let code = code_of(func)?;
     let flags: u32 = code.getattr("co_flags")?.extract()?;
     if flags & CO_GENERATOR_LIKE != if generator { CO_GENERATOR } else { 0 } {
         return unsupported("generators and coroutines are not supported");
