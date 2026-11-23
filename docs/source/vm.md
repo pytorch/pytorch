@@ -156,10 +156,10 @@ itself (an append to a list it built, a store into an object of a class it
 called, the next item of an iterator it made) is left out only together with
 the thing ("What a function makes"), and only where it cannot fail either:
 an entry that is put into a dict under a key that is no constant of the
-function and a list or a dict that is filled from a value from outside
-(`[*xs]`, `{**d}`) run in every run, used or not, so that a call in which
-the key cannot be hashed or the value cannot be gone over runs the
-instructions, which raise.
+function, a `pop`, and a list or a dict that is filled from a value from
+outside (`[*xs]`, `{**d}`) run in every run, used or not, so that a call in
+which the key cannot be hashed, the name is not there or the value cannot be
+gone over runs the instructions, which raise.
 
 ```python
 class Settings:
@@ -608,13 +608,55 @@ objects"), whatever the path made to go over them: the iterator, the
 `enumerate`, a list or the `**kwargs` of a call built of such objects.
 
 **What runs.** What changes a thing (an append, `[*a, b]`, a store into an
-object of a class the path called, an entry of a dict it builds, a variable
-that an inner function shares being bound, the next item of an iterator)
-runs in a run of the path whenever anything that runs takes the thing, or
-what may be it or hold it, in front of the change or behind it. It is left
+object of a class the path called, an entry of a dict it builds, an item
+that is stored into a dict it made or popped out of it, a variable that an
+inner function shares being bound, the next item of an iterator) runs in
+a run of the path whenever anything that runs takes the thing, or what may
+be it or hold it, in front of the change or behind it. It is left
 out only together with the thing. A list that the function stores into an
 object and appends to afterwards is held there by reference, and has the
 item.
+
+A dict that the function made, and the `**kwargs` of a function that the
+path went into, is such a thing: `kwargs[name] = value` and
+`kwargs.pop(name, default)` are done in their place, a read under a name
+gives what was stored under it, and what the dict is spread into afterwards
+(`inner(**kwargs)`) is handed what it holds then. The names under which a
+path stores and pops are among its checks: a call that comes with another
+name runs the instructions. A key is hashed and compared by the instruction
+that stores, reads or pops under it, as often as without the engine: the
+engine itself looks under a key only where the key is of one of the
+interpreter's own exact classes (a number, a text, `None`, a tuple of such)
+and every key of the dict is, which it asks at every call, at the
+instruction; a key of any other class (a subclass of `str` with a `__hash__`
+of its own) is left to the instructions. A method that is read off the thing
+first and called later (`take = kwargs.pop`, or `kwargs.pop(name,
+default_of(config))`, where the default is computed between the two) is the
+same change; a method of another list or dict that an object of the function
+merely holds (`holder.append = outside.append`) is a change of that other
+one.
+
+```python
+def scaled_by(y, scale=1.0, shift=0.0):
+    return y * scale + shift
+
+
+def wrapped(y, **kwargs):
+    kwargs["shift"] = kwargs.pop("offset", 0.0)
+    kwargs["scale"] = 2.0
+    return scaled_by(y, **kwargs)
+
+
+def named(x, offset):
+    return wrapped(x.sin() * 2, offset=offset).cos().sum()
+
+
+g = torch.vm(named, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), as_it_is))
+for _ in range(4):
+    same = torch.equal(g(x, 0.5), named(x, 0.5))
+(found,) = [found for found in torch.vm.regions(g) if found["where"].startswith("named")]
+same, found["ops"], found["hits"]  # (True, 6, 2)
+```
 
 **On which side of the graph.** The instructions that take nothing the graph
 gives run in front of what stands for the graph, the others behind it
