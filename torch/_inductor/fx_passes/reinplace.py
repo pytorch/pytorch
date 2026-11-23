@@ -34,10 +34,12 @@ from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
 from torch._inductor.virtualized import V
+from torch._prims_common import is_contiguous_or_false
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     GuardOnDataDependentSymNode,
+    statically_known_true,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.reinplace import _is_view_op
@@ -618,9 +620,12 @@ def reinplace_inplaceable_ops_core(
     side effects of the current node. If the current node is not used later as
     well as no view of this node is used later in the graph, then it is safe to
     inplace as there would be no way to observe the side effects.
-    This condition is slightly different for graph inputs where they can only
-    be inplaced if the above condition is true and there's a copy_ in the
-    epilogue that signals that the caller wants to observe the mutation.
+    Graph inputs are also observable by the caller, so they require a later
+    copy_ into the input. A candidate-specific copyback preserves the requested
+    mutation. For input views, a full-storage overwrite can instead hide the
+    earlier mutation, provided the input is not read before the overwrite and
+    no result made to alias it remains live across the overwrite. Permission
+    to reuse input storage does not by itself permit removing that copy_.
 
     Unlike JIT Inductor, AOTInductor currently unlifts weights and buffers from
     input args, so instead of checking mutation on placeholder, AOTInductor
@@ -807,7 +812,9 @@ def reinplace_inplaceable_ops_core(
             for written in get_mutated_input_nodes(node)
         )
 
-    def can_inplace(node, mutated_arg):
+    def can_inplace(node, mutated_arg, *, result_nodes=None):
+        # For the expanded input-view permission, None infers tensor results;
+        # [] disables that permission when structured results are not tracked.
         # ls should be a list of tensors that all shares the same storage.
         def _overlap(ls) -> bool:
             try:
@@ -824,7 +831,7 @@ def reinplace_inplaceable_ops_core(
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
                 return False
-            return all(can_inplace(node, arg) for arg in mutated_arg)
+            return all(can_inplace(node, arg, result_nodes=[]) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:
             return False
@@ -841,14 +848,93 @@ def reinplace_inplaceable_ops_core(
             if _overlap([mutated_arg.meta["val"], v.meta["val"]])
         ]
 
-        # Canonical references can make previously rejected consumers eligible.
         mutated_storage = get_node_storage(mutated_arg)
+        removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
+        result_views = OrderedSet()
         if mutated_storage in canonicalized_storages:
-            result_views = OrderedSet([node])
+            # Canonical references can make previously rejected consumers eligible.
+            result_views.add(node)
             for result in pytree.tree_leaves(node.meta.get("val")):
                 if isinstance(result, torch.Tensor) and torch._C._has_storage(result):
                     result_views.update(storage_to_nodes[get_storage(result)])
-            removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
+        elif (result_storage := get_node_storage(node)) is not None:
+            result_views.update(storage_to_nodes[result_storage])
+
+        preserved_copyback_views = OrderedSet()
+        copy_node = None
+        mutated_arg_base = mutated_arg
+        if any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
+            # Without a later copy into the input, the caller could observe an
+            # extra mutation even if the graph has no remaining reads of it.
+            mutated_arg_base = _get_view_base(mutated_arg)
+            # Use the next input overwrite for permission and liveness checks.
+            copy_node = min(
+                get_input_copybacks_after_candidate(node, mutated_arg_base),
+                key=node_order.__getitem__,
+                default=None,
+            )
+            if copy_node is None or node_order[copy_node] <= node_order[node]:
+                return False
+        # Direct input mutations and recognized copybacks keep their permission.
+        if (
+            copy_node is not None
+            and mutated_arg.op not in ("placeholder", "get_attr")
+            and copy_node is not removable_copyback
+        ):
+            # An unrelated copy can hide the view mutation only if it overwrites
+            # all input storage, including any bytes outside the input's shape.
+            base_val = mutated_arg_base.meta["val"]
+            if not (
+                is_contiguous_or_false(base_val)
+                and statically_known_true(base_val.storage_offset() == 0)
+                and statically_known_true(
+                    base_val.numel() * base_val.element_size()
+                    == base_val.untyped_storage().nbytes()
+                )
+            ):
+                return False
+
+            if result_nodes is None:
+                if not isinstance(node.meta.get("val"), torch.Tensor) and any(
+                    user.target is not operator.getitem for user in node.users
+                ):
+                    return False
+                result_nodes = (
+                    [node]
+                    if isinstance(node.meta.get("val"), torch.Tensor)
+                    else [
+                        user
+                        for user in node.users
+                        if isinstance(user.meta.get("val"), torch.Tensor)
+                    ]
+                )
+            source_storage = get_node_storage(copy_node.args[1])
+            # A self-copy or aliased source would preserve the early mutation
+            # instead of restoring the input's required final values.
+            if source_storage is None or source_storage == mutated_storage:
+                return False
+            # Untracked outputs could remain live after the overwrite and would
+            # observe different values once reinplacement aliases them to the input.
+            output_storages = FakeTensorUpdater._storage_ids(node.meta["val"])
+            tracked_storages = OrderedSet(
+                get_node_storage(result) for result in result_nodes
+            )
+            if output_storages is None or any(
+                storage not in tracked_storages for storage in output_storages
+            ):
+                return False
+            for result in result_nodes:
+                views = storage_to_nodes[get_node_storage(result)]
+                result_views.update(views)
+                if source_storage == get_node_storage(result):
+                    # A copy of the result must preserve its view/copy semantics.
+                    if not _is_layout_preserving_view_copy_back(
+                        mutated_arg_base, copy_node.args[1], mutated_arg, result
+                    ):
+                        return False
+                    preserved_copyback_views.update(views)
+
+        if result_views:
             mutations = OrderedSet(
                 user
                 for alias in storage_to_nodes[mutated_storage]
@@ -857,92 +943,28 @@ def reinplace_inplaceable_ops_core(
                 and user is not removable_copyback
             )
             for mutation in mutations:
+                views = (
+                    result_views - preserved_copyback_views
+                    if mutation is copy_node
+                    else result_views
+                )
                 if writes_storage(
                     mutation, mutated_storage
                 ) and any_use_of_views_after_node(
                     mutation,
-                    result_views,
+                    views,
                     copy_node=None,
                     mutated_arg=node,
                     include_current=True,
                 ):
                     return False
 
-        result_storage = get_node_storage(node)
-        if result_storage is not None:
-            removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
-            mutated_storage = get_node_storage(mutated_arg)
-            possible_mutations = OrderedSet(
-                user
-                for alias in storage_to_nodes[mutated_storage]
-                for user in alias.users
-            )
-            for mutation in possible_mutations:
-                if not writes_storage(mutation, mutated_storage):
-                    continue
-                if node_order[mutation] <= node_order[node]:
-                    continue
-                # Successful reinplacement removes this copyback, so it cannot
-                # overwrite a live functional result. Other later writes still matter.
-                if mutation is removable_copyback:
-                    continue
-                if any_use_of_views_after_node(
-                    mutation,
-                    storage_to_nodes[result_storage],
-                    copy_node=None,
-                    mutated_arg=node,
-                    include_current=True,
-                ):
-                    return False
-
-        if mutated_arg.op in ("placeholder", "get_attr"):
-            # Use the next input overwrite for permission and liveness checks.
-            copy_node = min(
-                get_input_copybacks_after_candidate(node, mutated_arg),
-                key=node_order.__getitem__,
-                default=None,
-            )
-            if copy_node is None:
-                # There is no copy_ back to the candidate mutated_arg (which is a graph input).
-                # Therefore the semantics of the program are that it does not mutate
-                # mutated_arg, so we cannot re-inplace it.
-                return False
-            if any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=copy_node, mutated_arg=mutated_arg
-            ):
-                return False
-
-            return True
-        elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
-            # If mutated_arg is a view of a graph input, we can only reinplace
-            # when a later copy_ writes this op's result back to that input.
-            copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
-            if copy_node is None:
-                return False
-
-            mutated_arg_base = copy_node.args[0]
-            copy_src = copy_node.args[1]
-            if not (
-                isinstance(mutated_arg_base, torch.fx.Node)
-                and isinstance(copy_src, torch.fx.Node)
-                and _is_layout_preserving_view_copy_back(
-                    mutated_arg_base, copy_src, mutated_arg, node
-                )
-            ):
-                return False
-
-            if any_use_of_views_after_node(
-                node,
-                shared_view_nodes,
-                copy_node=copy_node,
-                mutated_arg=mutated_arg_base,
-            ):
-                return False
-            return True
-        else:
-            return not any_use_of_views_after_node(
-                node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
-            )
+        return not any_use_of_views_after_node(
+            node,
+            shared_view_nodes,
+            copy_node=copy_node,
+            mutated_arg=mutated_arg_base,
+        )
 
     def copy_node_for_reinplaced_arg(node, mutated_arg):
         copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
