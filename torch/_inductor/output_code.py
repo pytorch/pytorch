@@ -977,9 +977,11 @@ class CompiledFxGraph(OutputCode):
                 # post-compiled under another triton.cudagraphs than it compiled
                 # under (deserialize_bundled_cache_entry reads the ambient flag).
                 # So does a backward that an override_cudagraphs kept out beside
-                # its CUDA graphed forward, on a cache hit: create_fx_config
-                # hands both the same box. That one is not reported again here,
-                # create_compiler_config_extra having reported the override.
+                # its CUDA graphed forward, in a bundled entry and on a cache hit
+                # (create_fx_config hands both the same box). That one is not
+                # reported here: the override was reported when the backward
+                # compiled, and create_compiler_config_extra reports it again on
+                # a cache hit, though not when a bundled entry loads.
                 if not is_backward and any(is_gpu(d) for d in self.device_types):
                     log_cudagraph_skip_and_bump_counter(
                         "skipping cudagraphs: the graph compiled without them"
