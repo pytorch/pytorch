@@ -31,9 +31,7 @@ void ensureDeviceGuardSet(DeviceType type) {
   if (!p || p->deviceCount() != 0) {
     return;
   }
-  // Function-local static: lazily constructed with program lifetime. The
-  // registry is global and must never point at thread-local storage
-  // (see EnsureCUDADeviceGuard.NoUseAfterFreeWhenThreadsExit).
+
   switch (type) {
 #define CASE(D, _)                                  \
   case DeviceType::D: {                             \
