@@ -319,7 +319,7 @@ inline bool _naot_reduction_env_enabled(const char* name) {
       if (!({out_dtype_accept})) return false;
       {dtype_arg}
       if (!out.is_contiguous()) return false;
-      if (reinterpret_cast<uintptr_t>(out.mutable_data_ptr()) % 16 != 0) return false;
+      if (reinterpret_cast<uintptr_t>(out.const_data_ptr()) % 16 != 0) return false;
     """
         else:
             # Without dtype=, an out= sets the result dtype, as in the dispatch prelude.

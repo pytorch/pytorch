@@ -194,7 +194,10 @@ def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
     out_kd = _out_keepdim_view(self, d, keepdim, out)
     if out_kd is None:
         return False
-    return _eligibility(self, d, out_kd) is not None
+    # Probe a fresh tensor of out's geometry: TensorIterator takes its outputs'
+    # mutable data pointers, which would materialize a copy-on-write out.
+    probe = out_kd.new_empty_strided(out_kd.shape, out_kd.stride())
+    return _eligibility(self, d, probe) is not None
 
 
 def _sum_into():
