@@ -1141,6 +1141,41 @@ $ TORCH_VM_GRAPH_TIMES=1 python times.py
 [19891, 1556676, 3290, 6]
 ```
 
+With `TORCH_VM_GRAPH_DEBUG=1` in the environment the engine says on stderr
+what it does with graphs: a line per path it takes down (how long it is, how
+many of its instructions run in front of what stands for its operations and
+behind it, how many registers it has and how many results the graph gives,
+where it ends and why), per call that is not gone into, and per call that
+did not run what was made of a graph, with the check that did not hold (with
+`TORCH_VM_GRAPH_DEBUG=2`, also the instructions that run in front of what
+stands for a path and behind it):
+
+```console
+$ cat debug.py
+import torch
+
+P = torch.vm.passes
+
+
+def branchy(x, flag):
+    y = x.sin() * 2
+    if flag:
+        y = y.cos() + 1
+    else:
+        y = y.tanh() - 1
+    return (y * y).exp().sum()
+
+
+g = torch.vm(branchy, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(), lambda gm, input_types: gm))
+x = torch.randn(4)
+for flag in (True, True, True, False):
+    out = g(x, flag)
+$ TORCH_VM_GRAPH_DEBUG=1 python debug.py
+torch.vm graph branchy (block 0)[0]: a path of 11 instructions, 7 operations (4 in front of what stands for them, 0 behind; 13 registers, 1 results), ends at (3, 6): the function returns
+torch.vm graph branchy (block 0)[0]: a check of the path does not hold: the way of a branch (instruction 4 of 11, in branchy; of: to_bool %5)
+torch.vm graph branchy (block 0)[0]: a path of 5 instructions, 2 operations (3 in front of what stands for them, 0 behind; 7 registers, 1 results), ends at (2, 0): a block that was not profiled yet
+```
+
 ### AOTAutograd and Inductor
 
 Two passes over graphs come with `torch.vm`, and they are the ones that

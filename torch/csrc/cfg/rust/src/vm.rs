@@ -4657,6 +4657,9 @@ impl Compiled {
             }
         }
         if !exported.sizes.holds_numbers(&numbers) {
+            if graph::debug() {
+                eprintln!("torch.vm graph: the sizes of a form do not hold");
+            }
             return false;
         }
         // With their Python objects: the class of each tensor, and which of
@@ -4674,6 +4677,10 @@ impl Compiled {
             let ty = ffi::Py_TYPE(o);
             let same = seen.iter().position(|other| *other == o).unwrap_or(seen.len());
             if ty as usize != row.ty || (*ty).tp_version_tag != row.type_version || same != row.same {
+                if graph::debug() {
+                    let (class, version) = (ty as usize != row.ty, (*ty).tp_version_tag != row.type_version);
+                    eprintln!("torch.vm graph: a tensor of a form is of another class ({}), version of its class ({}), or the same as another ({} for {})", class, version, same, row.same);
+                }
                 return false;
             }
             seen.push(o);
@@ -4843,6 +4850,26 @@ impl Compiled {
                     }
                 };
                 if !holds {
+                    if graph::debug() {
+                        let at = path.body.iter().position(|other| std::ptr::eq(other, inst)).unwrap_or(0);
+                        let what = match assert {
+                            Assert::Truth(..) => "the way of a branch",
+                            Assert::Null(..) => "the end of a loop",
+                            Assert::Guard(_) => "a guard of the code",
+                            Assert::Enters(..) => "the function a call enters",
+                            Assert::Iterator(_) | Assert::Count(_) => "what a function of a class returned",
+                            Assert::Absent(..) => "an attribute left to __getattr__",
+                            Assert::Lacks(..) => "a class without a __len__",
+                            Assert::Sequence(..) | Assert::Keys(..) => "what a call spreads",
+                            Assert::Equals(..) => "the place of an item",
+                        };
+                        let made = path.body.iter().find(|other| other.dst == assert.value() && other.dst != NONE);
+                        let from = made.map_or(String::new(), |made| (&*path.owners[made.owner as usize]).func.op_repr(&made.op));
+                        eprintln!(
+                            "torch.vm graph {}: a check of the path does not hold: {} (instruction {} of {}, in {}; of: {})",
+                            site.name, what, at, path.body.len(), owner.func.qualname, from
+                        );
+                    }
                     return Staged::Failed;
                 }
                 continue;
@@ -4873,6 +4900,9 @@ impl Compiled {
                 Ok(obj) => capi::release(obj),
                 // The instructions raise it where they get to it.
                 Err(()) => {
+                    if graph::debug() {
+                        eprintln!("torch.vm graph {}: {} of the path raises: {}", site.name, owner.func.op_repr(&inst.op), graph::raised_text());
+                    }
                     ffi::PyErr_Clear();
                     return Staged::Failed;
                 }
