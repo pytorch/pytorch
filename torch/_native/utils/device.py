@@ -1,7 +1,8 @@
 # CUDA device guards for Python-native overrides. Python-native dispatch installs no device
 # guard before an override runs, unlike the generated C++ ATen path, so a kernel would
 # otherwise launch on the current device's stream (#187983 fixed the same bug for bmm).
-# TODO: topk/cutedsl_impl.py and topk/flydsl_impl.py still inline their own copies.
+# TODO: topk/cutedsl_impl.py, topk/flydsl_impl.py and
+# quantize_tensor/blockscaled_tma/blockscaled_tma_impl.py still inline their own copies.
 
 from __future__ import annotations
 
