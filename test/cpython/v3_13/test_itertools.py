@@ -1476,8 +1476,8 @@ class TestBasicOps(__TestCase):
         self.assertEqual(list(starmap(operator.pow, [])), [])
         self.assertEqual(list(starmap(operator.pow, [iter([4,5])])), [4**5])
         # self.assertRaises(TypeError, list, starmap(operator.pow, [None]))
-        # self.assertRaises(TypeError, starmap)
-        # self.assertRaises(TypeError, starmap, operator.pow, [(4,5)], 'extra')
+        self.assertRaises(TypeError, starmap)
+        self.assertRaises(TypeError, starmap, operator.pow, [(4,5)], 'extra')
         self.assertRaises(TypeError, next, starmap(10, [(4,5)]))
         self.assertRaises(ValueError, next, starmap(errfunc, [(4,5)]))
         # self.assertRaises(TypeError, next, starmap(onearg, [(4,5)]))
@@ -2609,8 +2609,8 @@ class TestVariousIteratorArgs(__TestCase):
         for s in ("12345", "", range(1000), ('do', 1.2), range(2000,2200,5)):
             for g in (G, I, Ig, S, L, R):
                 self.assertEqual(list(islice(g(s),1,None,2)), list(g(s))[1::2])
-            # self.assertRaises(TypeError, islice, X(s), 10)
-            # self.assertRaises(TypeError, islice, N(s), 10)
+            self.assertRaises(TypeError, islice, X(s), 10)
+            self.assertRaises(TypeError, islice, N(s), 10)
             self.assertRaises(ZeroDivisionError, list, islice(E(s), 10))
 
     def test_pairwise(self):
@@ -2630,8 +2630,8 @@ class TestVariousIteratorArgs(__TestCase):
                 ss = lzip(s, s)
                 self.assertEqual(list(starmap(operator.pow, g(ss))),
                                  [x**x for x in g(s)])
-            # self.assertRaises(TypeError, starmap, operator.pow, X(ss))
-            # self.assertRaises(TypeError, starmap, operator.pow, N(ss))
+            self.assertRaises(TypeError, starmap, operator.pow, X(ss))
+            self.assertRaises(TypeError, starmap, operator.pow, N(ss))
             self.assertRaises(ZeroDivisionError, list, starmap(operator.pow, E(ss)))
 
     def test_takewhile(self):
@@ -2642,8 +2642,8 @@ class TestVariousIteratorArgs(__TestCase):
                     if not isEven(elem): break
                     tgt.append(elem)
                 self.assertEqual(list(takewhile(isEven, g(s))), tgt)
-            # self.assertRaises(TypeError, takewhile, isEven, X(s))
-            # self.assertRaises(TypeError, takewhile, isEven, N(s))
+            self.assertRaises(TypeError, takewhile, isEven, X(s))
+            self.assertRaises(TypeError, takewhile, isEven, N(s))
             self.assertRaises(ZeroDivisionError, list, takewhile(isEven, E(s)))
 
     def test_dropwhile(self):
@@ -2654,8 +2654,8 @@ class TestVariousIteratorArgs(__TestCase):
                     if not tgt and isOdd(elem): continue
                     tgt.append(elem)
                 self.assertEqual(list(dropwhile(isOdd, g(s))), tgt)
-            # self.assertRaises(TypeError, dropwhile, isOdd, X(s))
-            # self.assertRaises(TypeError, dropwhile, isOdd, N(s))
+            self.assertRaises(TypeError, dropwhile, isOdd, X(s))
+            self.assertRaises(TypeError, dropwhile, isOdd, N(s))
             self.assertRaises(ZeroDivisionError, list, dropwhile(isOdd, E(s)))
 
     def test_tee(self):

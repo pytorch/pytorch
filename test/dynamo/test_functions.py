@@ -654,7 +654,6 @@ partial_fn = functools.partial(fn, scale=2)
         for actual, expected in opt_fn():
             self.assertEqual(actual, expected)
 
-    @unittest.expectedFailure
     def test_itertools_islice_intlike(self):
         # CPython issue #30537: islice can accept integer-like objects as arguments.
         class IntLike:
@@ -681,6 +680,40 @@ partial_fn = functools.partial(fn, scale=2)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn()
+
+    @parametrize(
+        "name, args",
+        (
+            ("islice", (1, 2)),
+            ("islice", ([1], -1)),
+            ("islice", ([1], 1.5)),
+            ("islice", ([1], -1, 2)),
+            ("islice", ([1], 0, 2, 0)),
+            ("dropwhile", (bool, 1)),
+            ("takewhile", (bool, 1)),
+            ("starmap", (bool, 1)),
+            ("permutations", ([1, 2], 1.5)),
+            ("combinations", ([1, 2], 1.5)),
+            ("combinations_with_replacement", ([1, 2], 1.5)),
+            ("combinations_with_replacement", (1, -1)),
+            ("tee", ([1], -1)),
+            ("tee", (1, -1)),
+        ),
+    )
+    def test_itertools_invalid_args_raise_at_call(self, name, args):
+        itertools_fn = getattr(itertools, name)
+
+        def fn(x):
+            try:
+                itertools_fn(*args)
+            except (TypeError, ValueError) as exc:
+                return x + 1, type(exc), str(exc)
+            return x, None, None
+
+        expected = fn(torch.zeros(1))
+        self.assertIsNotNone(expected[1])
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(torch.zeros(1))
+        self.assertEqual(actual, expected)
 
     def test_bin_oct_hex_index(self):
         # bin/oct/hex dispatch through __index__ (CPython PyNumber_ToBase).
