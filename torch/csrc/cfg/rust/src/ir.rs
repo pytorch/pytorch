@@ -200,9 +200,10 @@ pub enum Op {
     TensorSize { t: V, dim: i64 },
     TensorDim(V),
     Guard(Box<GuardOp>),
-    /// In front of the instructions of a graph that is exported: runs what
-    /// was made of the graph in place of them when it holds for the values
-    /// of the call, and otherwise does nothing (see `Compiled::enter_graph`).
+    /// In front of the first operation of a graph: runs what was made of
+    /// the graph in place of its instructions when it holds for the values
+    /// of the call, or has the instructions that follow recorded as a path,
+    /// and otherwise does nothing (see `Compiled::enter_graph`).
     Graph(Arc<GraphSite>),
 }
 
@@ -606,10 +607,16 @@ pub struct BlockCode {
     pub entry_guards: Vec<GuardCond>,
     /// Version number, for specialized code; 0 for generic code.
     pub id: u32,
-    /// The graphs the graph pass made of a specialized version, and what it
-    /// left out of them.
+    /// Per instruction: the generic instruction it stands for, or NONE.
+    pub origins: Vec<u32>,
+    /// The graphs that start in a specialized version, and what the graph
+    /// pass left out of them.
     pub graphs: Vec<Arc<GraphSite>>,
     pub left: Vec<Left>,
+    /// This code with `Op::Graph` in front of each of its graphs: it runs
+    /// in its place while one of them has something to do (a path to take
+    /// down, an exported form to run).
+    pub entering: Option<Arc<BlockCode>>,
 }
 
 #[derive(Clone)]

@@ -1,29 +1,37 @@
-//! Graphs: the tensor work of a specialized block as a unit of its own.
+//! Graphs: the tensor work of a function along a path through its blocks,
+//! as a unit of its own.
 //!
-//! A graph is a run of the instructions of one specialized block: kernel
-//! call sites, its nodes, with what sits between them (reads of globals and
-//! attributes, constants, arithmetic on sizes). The graph pass finds the runs
-//! of a block once the other passes are done with it and describes each as a
-//! `Path`. The VM runs a graph as it runs the block, instruction by
-//! instruction and each node through its site, on eager's autograd tape; the
-//! path is what `torch.vm.regions` reports.
+//! A graph starts at an operation of a specialized block: a kernel call
+//! site, or a call that runs kernels and is none. The graph pass finds the
+//! runs of operations of a block once the other passes are done with it,
+//! with what sits between them (reads of globals and attributes, constants,
+//! arithmetic on sizes), and makes a `GraphSite` for the first operation of
+//! each. From there a `Path` is taken down while the function runs
+//! (`Compiled::record`): the instructions as they came, through the
+//! branches as they went and the loops as often as they went round, up to
+//! the first instruction that can be no part of one. Each way a branch went
+//! is a check of the path (`Assert`). The VM runs a graph as it runs the
+//! blocks, instruction by instruction and each node through its site, on
+//! eager's autograd tape; the path is what `torch.vm.regions` reports.
 //!
 //! When the list of passes has a pass over graphs, a path is also what such
-//! a pass is given, as a `torch.fx.GraphModule`. The instruction `Op::Graph`
-//! then stands in front of the run. A call that finds no exported form for
-//! its values runs the instructions and takes down what they did (the site
-//! each node hit, the values the nodes took from outside the graph): from
-//! that one run the graph is built in Python, the passes are applied, and
+//! a pass is given, as a `torch.fx.GraphModule`: from the run that was
+//! taken down the graph is built in Python, the passes are applied, and
 //! what they return is kept with the conditions it was made under
-//! (`Exported`). A later call that meets them runs the callable in place of
-//! the nodes.
+//! (`Exported`). A later call that comes to the first operation runs the
+//! instructions of the path that depend on no node, with their checks, on
+//! registers of the path's own; if they hold and the values are those of an
+//! exported form, the callable runs in place of the nodes, the rest of the
+//! instructions run on what it returned, and the function goes on where
+//! the path ended. A call that fails a check has changed nothing: the
+//! function goes on at the first operation.
 
 use crate::analysis::BitSet;
 use crate::capi::{self, TcfgApi, TcfgSite, TcfgTensorInfo, SITE_RANDOM, SITE_SCALAR, SITE_WRITES};
 use crate::ir::*;
 use crate::pyffi::{self, new_ref, xdecref, Obj, PyObj, Shared};
 use crate::shapes::{key_of, ShapeGuard, KIND_BYTES};
-use crate::spec::{CalleeFact, CfgPass, InstFacts, Kernels, PassCx, UInst, Unit, ValueObs};
+use crate::spec::{CalleeFact, CfgPass, InstFacts, Kernels, PassCx, Unit, ValueObs};
 use pyo3::ffi;
 use pyo3::prelude::*;
 use std::collections::HashMap;
@@ -50,6 +58,28 @@ pub enum Kind {
     Read,
     /// Keeps values alive, or binds a variable of the frame.
     Residual,
+    /// What the path took for granted where it went on (`Assert`).
+    Check,
+}
+
+/// What a path takes for granted of a value where it goes on.
+#[derive(Clone)]
+pub enum Assert {
+    /// A branch went this way: its condition is this bool.
+    Truth(PathValue, bool),
+    /// An iterator was exhausted (true), or gave an item.
+    Null(PathValue, bool),
+    /// A guard of the code the path was taken down from.
+    Guard(GuardCond),
+}
+
+impl Assert {
+    pub fn value(&self) -> PathValue {
+        match self {
+            Assert::Truth(v, _) | Assert::Null(v, _) => *v,
+            Assert::Guard(cond) => cond.value(),
+        }
+    }
 }
 
 /// When an instruction of a path runs once a callable stands for its nodes.
@@ -68,13 +98,14 @@ pub enum Stage {
 pub struct PathInst {
     pub op: Op,
     pub dst: PathValue,
-    pub kills: Vec<PathValue>,
     pub kind: Kind,
     pub bc: u32,
     pub stage: Stage,
-    /// An integer the exported graph computes itself: a size of one of its
-    /// tensors, or arithmetic on such sizes.
+    /// A value the exported graph computes itself that is no tensor: a size
+    /// of one of its tensors, arithmetic on such sizes, a list of them.
     pub in_graph: bool,
+    /// For `Kind::Check`.
+    pub assert: Option<Assert>,
 }
 
 /// What a check looks at and a callable is handed: a value, or one of the
@@ -104,10 +135,12 @@ impl Place {
         if sequence { sequence_item(held, self.item as isize) } else { null_mut() }
     }
 
-    pub fn text(&self, func: &Function) -> String {
+    /// A name for it: that of the value of the function it stands for.
+    pub fn text(&self, func: &Function, path: &Path) -> String {
+        let value = func.value_name(path.source.get(self.value as usize).copied().unwrap_or(self.value));
         match self.item {
-            NONE => func.value_name(self.value),
-            item => format!("{}[{}]", func.value_name(self.value), item),
+            NONE => value,
+            item => format!("{}[{}]", value, item),
         }
     }
 }
@@ -196,10 +229,21 @@ pub struct Path {
     /// Where it is entered: the block, and the generic instruction its first
     /// node stands for.
     pub root: (usize, usize),
-    /// Where the generic code goes on behind it.
+    /// Where the function goes on behind it: the block and the generic
+    /// instruction, and the code and the instruction of it to go on with.
+    /// Without the latter, the block is entered as from a block before it.
+    /// The code is a version of a block of the function the path is of, or
+    /// its generic code: the function keeps both for as long as it lives.
     pub land: (usize, usize),
-    /// The values it takes from before it, in the order it first reads them.
-    pub inputs: Vec<V>,
+    pub resume: Option<(*const BlockCode, usize)>,
+    /// How many registers it runs on. A path that was taken down numbers
+    /// its values itself, from 1; the one the graph pass makes of a run of
+    /// a block (`GraphSite::seed`), which is only reported, as the function
+    /// does.
+    pub nregs: usize,
+    /// The values of the function it takes from before it, in the order it
+    /// first reads them, each with the value of its own that it is.
+    pub inputs: Vec<(V, PathValue)>,
     pub body: Vec<PathInst>,
     /// The values its nodes take that the graph does not compute: inputs,
     /// and what the instructions in front of the callable read. In the order
@@ -209,10 +253,15 @@ pub struct Path {
     /// is computed: results of nodes, and integers. A callable returns
     /// these, and then one integer per entry of `exits`.
     pub outputs: Vec<PathValue>,
-    /// The guards of the block on results of nodes that a callable does not
+    /// The guards of the code on results of nodes that a callable does not
     /// return: it returns what each looks at instead, the rank of the tensor
     /// or the size of the dimension.
     pub exits: Vec<GuardCond>,
+    /// Where it ends: the values of the function that hold one of its
+    /// values then and are read from there on, and those that hold nothing
+    /// anymore.
+    pub writes: Vec<(PathValue, V)>,
+    pub clears: Vec<V>,
     /// The variables of the frame its instructions bind, each with the value
     /// it holds at the end, or UNDEF where a callable does not give it.
     pub bound: Vec<(u32, PathValue)>,
@@ -221,16 +270,71 @@ pub struct Path {
     /// Why it ends where it does: what the instruction behind it is, or how
     /// the block ends.
     pub ends: String,
+    /// Which instructions it is, of which code: two runs with the same
+    /// numbers are the same path.
+    pub shape: Vec<u32>,
+    /// Per value: the value of the function it stood for when it was made.
+    pub source: Vec<V>,
+    /// How many branches and loop tests it goes through.
+    pub branches: usize,
+    /// The block and the instruction of its first operation, where that
+    /// is one of the function it starts in: what the graph is named by.
+    pub first: Option<(usize, u32)>,
+    /// It ended at a block that had not been profiled yet: the next run
+    /// gets further.
+    pub provisional: bool,
     pub exported: Shared<Vec<Arc<Exported>>>,
-    pub hits: AtomicU64,
-    pub misses: AtomicU64,
+    /// Register files for the calls that run it, kept from one to the next.
+    pub registers: Shared<Vec<Vec<Obj>>>,
+    /// Which instructions of `body` run in front of the callable and
+    /// behind it, in order (`Path::staged`).
+    pub stages: [Vec<u32>; 2],
+    /// The values of the function that the path takes and hands on: it
+    /// writes them to a value of the function or binds a variable to
+    /// them, as they are or as an item of a tuple it builds. What such a
+    /// value holds is held by the function when the path has landed.
+    pub handed: Vec<V>,
+}
+
+// The registers are empty between calls, and only touched with the GIL held.
+unsafe impl Send for Path {}
+unsafe impl Sync for Path {}
+
+/// The instructions of a path by the stage they run in (`Path::stages`).
+pub fn stages_of(body: &[PathInst]) -> [Vec<u32>; 2] {
+    let mut stages = [Vec::new(), Vec::new()];
+    for (at, inst) in body.iter().enumerate() {
+        match inst.stage {
+            Stage::Before => stages[0].push(at as u32),
+            Stage::After => stages[1].push(at as u32),
+            Stage::Inside | Stage::Skipped => {}
+        }
+    }
+    stages
+}
+
+/// The values of the function that a path hands on (`Path::handed`).
+fn handed_of(inputs: &[(V, PathValue)], body: &[PathInst], writes: &[(PathValue, V)], bound: &[(u32, PathValue)]) -> Vec<V> {
+    let mut handed: std::collections::HashSet<PathValue> = writes.iter().map(|(made, _)| *made).collect();
+    handed.extend(bound.iter().map(|(_, made)| *made));
+    for inst in body.iter().rev() {
+        if let (Op::BuildTuple(items), true) = (&inst.op, handed.contains(&inst.dst)) {
+            handed.extend(items.iter().copied());
+        }
+    }
+    inputs.iter().filter(|(_, made)| handed.contains(made)).map(|(v, _)| *v).collect()
 }
 
 impl Path {
-    /// The values that die in the path: released when a callable has run in
-    /// place of its instructions.
-    pub fn dying(&self) -> impl Iterator<Item = PathValue> + '_ {
-        self.body.iter().flat_map(|inst| inst.kills.iter().copied())
+    /// The instructions that run in one stage: in front of the callable or
+    /// behind it.
+    pub fn staged(&self, stage: Stage) -> impl Iterator<Item = &PathInst> + '_ {
+        let at = match stage {
+            Stage::Before => 0,
+            Stage::After => 1,
+            Stage::Inside | Stage::Skipped => unreachable!("no instruction runs in this stage"),
+        };
+        self.stages[at].iter().map(|k| &self.body[*k as usize])
     }
 
     /// How many kinds of calls have something that runs in place of the
@@ -252,6 +356,9 @@ pub enum GraphState {
     Waiting,
     /// As `Built`: exporting it failed, for this reason.
     GivenUp(String),
+    /// The path from its first operation has this many operations, fewer
+    /// than a graph has.
+    Small(usize),
 }
 
 /// Instructions of a block that are in no graph: the generic instructions
@@ -267,6 +374,12 @@ pub struct Left {
 /// callable or behind it could run Python code before the graph is left to
 /// the VM.
 const MAX_UNSURE: u32 = 3;
+/// How many calls in a row may find that a graph cannot take them for
+/// what its path lets go of (a path that is turned down where it would
+/// land, a path that is not taken down to its end) before the graph
+/// gives way to the graphs inside it. A call that runs a path of the
+/// graph starts the count anew; one that takes a path down does not.
+const MAX_TURNED: u32 = 3;
 
 /// How many exported forms that differ in nothing but numbers, and of
 /// which none ever ran again, say that the numbers are new on every call.
@@ -276,79 +389,246 @@ const EVER_NEW: usize = 3;
 
 pub const EVER_NEW_REASON: &str = "its inputs take ever new values";
 
+/// What is said of a graph that gave way (`GraphSite::gave_way`).
+pub const GAVE_WAY_REASON: &str = "where its path lands it would let go of an object whose end may run Python code";
+
 /// How many calls in a row with the same numbers reopen a kind of call that
 /// was closed for numbers that are new every time.
 pub const SETTLED: u32 = 3;
 
-/// A graph of one version of a block.
+/// Whether `TORCH_VM_GRAPH_DEBUG` asks for a line on stderr per path that
+/// is taken down: how long it is, where it ends and why, and why a run was
+/// not exported.
+pub fn debug() -> bool {
+    static ASKED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ASKED.get_or_init(|| std::env::var_os("TORCH_VM_GRAPH_DEBUG").is_some_and(|v| v != "0"))
+}
+
+/// How many times a graph is taken down again because its path ended at a
+/// block that had not been profiled.
+const MAX_PROVISIONAL: u32 = 3;
+
+/// A graph: the paths from one operation of a block on.
 pub struct GraphSite {
-    /// The function, the block, and the generic instructions from the first
-    /// node to the last.
+    /// The function, the block, and the generic instructions of the block
+    /// from the first operation to the last of its run there.
     pub name: String,
-    /// One path: that of the version it was built from.
+    /// The block, and the generic instruction of it, that it starts at:
+    /// the first operation of a run, or (`entry`) the first instruction of
+    /// the function, from where a path has the lists the function makes
+    /// before its first operation.
+    pub root: (usize, usize),
+    pub entry: bool,
+    /// What the graph pass made of the run of the block the graph starts
+    /// with: reported until a path was taken down.
+    pub seed: Shared<Arc<Path>>,
+    /// The paths that were taken down, the one that ran last first.
     pub variants: Shared<Vec<Arc<Path>>>,
     pub state: Shared<GraphState>,
-    /// The version of the block.
-    pub version: AtomicU32,
     /// What makes an exported form of a description (`torch.vm._export`),
-    /// if the list of passes has a pass over graphs, and how many forms a
-    /// path may have.
+    /// if the list of passes has a pass over graphs; the fewest operations
+    /// a graph has; and how many forms one may have.
     pub exporter: Option<PyObj>,
+    pub min_ops: usize,
     pub max_variants: usize,
     unsure: AtomicU32,
+    /// How many calls in a row a path of the graph was turned down for
+    /// what it would let go of where it lands; from `MAX_TURNED` on the
+    /// graph has given way (`gave_way`).
+    turned: AtomicU32,
+    provisional: AtomicU32,
     /// How many times it was handed to the exporter, and how many calls
-    /// came to it and ran its instructions.
+    /// ran what was made of it and how many ran its instructions.
     pub exports: AtomicU64,
+    pub hits: AtomicU64,
     pub misses: AtomicU64,
+    /// The graph whose path went through the first operation of this one:
+    /// while that one is there, this one is part of it.
+    pub within: Shared<std::sync::Weak<GraphSite>>,
+    /// The call of the function that last came here and ran the
+    /// instructions: it does not try again.
+    pub missed: AtomicU64,
+    /// Where graphs are not exported: a graph that starts further on has
+    /// asked for another path of this one (`asked`), and how many times.
+    again: AtomicBool,
+    asks: AtomicU32,
 }
 
 impl GraphSite {
-    pub fn install(&self, path: Path, version: u32) {
-        self.variants.borrow_mut().push(Arc::new(path));
-        self.version.store(version, Ordering::Relaxed);
-    }
-
-    pub fn path(&self) -> Option<Arc<Path>> {
-        self.variants.borrow().first().cloned()
-    }
-
-    pub fn describe(&self) -> String {
-        match self.path() {
-            Some(path) => format!("{}: {} operations", self.name, path.operators.len()),
-            None => self.name.clone(),
+    pub fn new(name: String, seed: Path, entry: bool, graphs: &Graphs) -> GraphSite {
+        let exported = graphs.export.is_some();
+        GraphSite {
+            name,
+            root: seed.root,
+            entry,
+            again: AtomicBool::new(false),
+            asks: AtomicU32::new(0),
+            seed: Shared::new(Arc::new(seed)),
+            variants: Shared::new(Vec::new()),
+            state: Shared::new(if exported { GraphState::Waiting } else { GraphState::Built }),
+            exporter: graphs.export.clone(),
+            min_ops: graphs.min_ops,
+            max_variants: graphs.max_variants,
+            unsure: AtomicU32::new(0),
+            turned: AtomicU32::new(0),
+            provisional: AtomicU32::new(0),
+            exports: AtomicU64::new(0),
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+            within: Shared::new(std::sync::Weak::new()),
+            missed: AtomicU64::new(u64::MAX),
         }
     }
 
-    /// Whether a call that no exported form is for may be recorded for one:
-    /// while there are fewer than `max_variants` forms with a callable, and
-    /// no more than that without one.
-    pub fn records(&self, path: &Path) -> bool {
-        matches!(*self.state.borrow(), GraphState::Waiting)
-            && path.compiled() < self.max_variants
-            && path.closed() <= self.max_variants
+    /// The path that is reported: the one that ran last, or the run of the
+    /// block before any was taken down.
+    pub fn path(&self) -> Arc<Path> {
+        self.variants.borrow().first().cloned().unwrap_or_else(|| self.seed.borrow().clone())
+    }
+
+    pub fn paths(&self) -> Vec<Arc<Path>> {
+        self.variants.borrow().clone()
+    }
+
+    pub fn describe(&self) -> String {
+        format!("{}: {} operations", self.name, self.path().operators.len())
+    }
+
+    /// How many forms with a callable, and how many without, its paths have.
+    pub fn forms(&self) -> (usize, usize) {
+        let paths = self.variants.borrow();
+        (paths.iter().map(|path| path.compiled()).sum(), paths.iter().map(|path| path.closed()).sum())
+    }
+
+    /// Whether a call that no path or no exported form is for may be taken
+    /// down: for a graph that is exported, while there are fewer than
+    /// `max_variants` forms with a callable and no more than that without
+    /// one; for one that is not, until it has its path.
+    pub fn records(&self) -> bool {
+        match &*self.state.borrow() {
+            GraphState::Waiting => {
+                let (compiled, closed) = self.forms();
+                compiled < self.max_variants && closed <= self.max_variants
+            }
+            GraphState::Built => {
+                self.again.load(Ordering::Relaxed)
+                    || self.variants.borrow().first().is_none_or(|path| path.provisional)
+            }
+            _ => false,
+        }
+    }
+
+    /// For a graph that is not exported and has its path: has it take
+    /// another one down the next time the function comes to it, if it has
+    /// not been asked twice already. A graph that starts further on asks,
+    /// when a call comes to it on a way that the path of this one does not
+    /// go: the two would otherwise both have the operations behind it.
+    pub fn asked(&self) -> bool {
+        let has = matches!(*self.state.borrow(), GraphState::Built)
+            && self.variants.borrow().first().is_some_and(|path| !path.provisional);
+        if !has || self.asks.load(Ordering::Relaxed) >= 2 {
+            return false;
+        }
+        self.asks.fetch_add(1, Ordering::Relaxed);
+        self.again.store(true, Ordering::Relaxed);
+        true
+    }
+
+    /// For what is no graph because it has too few operations: how many.
+    /// The path that was taken down from here, or, before one was, the
+    /// run of the block.
+    pub fn short(&self) -> Option<usize> {
+        match &*self.state.borrow() {
+            GraphState::Small(count) => Some(*count),
+            GraphState::Built | GraphState::Waiting if self.variants.borrow().is_empty() => {
+                let count = self.seed.borrow().operators.len();
+                (count < self.min_ops).then_some(count)
+            }
+            _ => None,
+        }
+    }
+
+    /// The graph, if there is one, that this one is part of. It stays part
+    /// of one that was given up: what was made of the larger graph failed,
+    /// and is not tried again on a part of it.
+    pub fn outer(&self) -> Option<Arc<GraphSite>> {
+        let outer = self.within.borrow().upgrade()?;
+        let there = !matches!(*outer.state.borrow(), GraphState::Small(_)) && !outer.gave_way();
+        there.then_some(outer)
     }
 
     /// Whether `Op::Graph` has anything to do for it.
-    pub fn runs(&self, path: &Path) -> bool {
-        matches!(*self.state.borrow(), GraphState::Waiting) || !path.exported.borrow().is_empty()
+    pub fn runs(&self) -> bool {
+        self.outer().is_none() && !self.gave_way() && (self.records() || self.forms() != (0, 0))
+    }
+
+    /// A path of the graph was turned down for what it would let go of
+    /// where it lands (an object whose end may run Python code), or was
+    /// not taken down to its end for such an object. Where that happens
+    /// `MAX_TURNED` calls in a row, the graph gives way: it is not
+    /// entered again, and the graphs that start further on, which were
+    /// part of it, are their own again.
+    pub fn turned_down(&self) {
+        self.turned.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Whether the graph has given way (`turned_down`).
+    pub fn gave_way(&self) -> bool {
+        self.turned.load(Ordering::Relaxed) >= MAX_TURNED
     }
 
     pub fn give_up(&self, reason: String) {
         *self.state.borrow_mut() = GraphState::GivenUp(reason);
     }
 
+    /// Takes a path that was taken down, with the form that was made of the
+    /// run if one was: a path it has already gets the form. A path that is
+    /// not final (see `Path::provisional`) is taken a few times at most.
+    pub fn install(&self, path: Path, form: Option<Arc<Exported>>) {
+        self.again.store(false, Ordering::Relaxed);
+        if path.provisional && self.provisional.fetch_add(1, Ordering::Relaxed) + 1 < MAX_PROVISIONAL {
+            return;
+        }
+        if path.operators.len() < self.min_ops {
+            let small = matches!(*self.state.borrow(), GraphState::Built | GraphState::Waiting)
+                && self.variants.borrow().is_empty();
+            if small {
+                *self.state.borrow_mut() = GraphState::Small(path.operators.len());
+            }
+            return;
+        }
+        let mut paths = self.variants.borrow_mut();
+        let known = paths.iter().position(|other| other.shape == path.shape && other.provisional == path.provisional);
+        let at = known.unwrap_or_else(|| {
+            // A path that was not final makes way for the ones that are.
+            paths.retain(|other| !other.provisional);
+            paths.insert(0, Arc::new(path));
+            0
+        });
+        if let Some(form) = form {
+            paths[at].exported.borrow_mut().insert(0, form);
+        }
+        let path = paths.remove(at);
+        paths.insert(0, path);
+    }
+
     /// An instruction that would run out of its place for an exported form
     /// could not be shown to run no Python code. Where that goes on, the
     /// forms are dropped and the graph is left to the VM.
-    pub fn unsure(&self, path: &Path, what: &str) {
+    pub fn unsure(&self, what: &str) {
         if self.unsure.fetch_add(1, Ordering::Relaxed) + 1 >= MAX_UNSURE {
-            path.exported.borrow_mut().clear();
+            for path in self.variants.borrow().iter() {
+                path.exported.borrow_mut().clear();
+            }
             self.give_up(format!("{} could run Python code", what));
         }
     }
 
     pub fn sure(&self) {
         self.unsure.store(0, Ordering::Relaxed);
+        if !self.gave_way() {
+            self.turned.store(0, Ordering::Relaxed);
+        }
     }
 
     /// Whether a run that is about to be exported is one more of a kind of
@@ -359,11 +639,13 @@ impl GraphSite {
     /// run the instructions.
     pub unsafe fn ever_new(
         &self,
-        path: &Path,
+        shape: &[u32],
         world: (u64, u64, u64, u64),
         checks: &[Check],
         sizes: &[i64],
     ) -> Option<Vec<usize>> {
+        let paths = self.variants.borrow();
+        let path = paths.iter().find(|path| path.shape == shape)?;
         let mut forms = path.exported.borrow_mut();
         let alike: Vec<(usize, Vec<usize>)> = forms
             .iter()
@@ -721,7 +1003,7 @@ unsafe fn is_plain(o: Obj) -> bool {
 
 /// What indexes a list, a tuple or a dict in C code: a plain value, a slice
 /// of plain values, or a tuple of them.
-unsafe fn is_plain_key(o: Obj) -> bool {
+pub unsafe fn is_plain_key(o: Obj) -> bool {
     if capi::is_unboxed(o) {
         return false;
     }
@@ -1361,17 +1643,198 @@ unsafe fn is_tensor(o: Obj) -> bool {
     capi::api().is_some_and(|api| (api.tensor_info)(o, &mut info) != 0)
 }
 
-/// Whether the objects that a path lets go of where a callable has run in
-/// its place (`gone`, each as often as the path lets go of a reference to
-/// it; put in order here) end without Python code running, as far as they
-/// end at all. Asked before the path has taken anything of the call, so
-/// that every reference is somebody else's or one that is let go of.
-/// Looked at as the garbage collector looks at a set of objects: an
-/// object ends if its count of references is no larger than the
-/// references to it that the path lets go of and those from objects that
-/// end; else one of its references is somebody else's and it stays, with
-/// everything it refers to, and is not looked into. `stay` are objects
-/// that are known to stay. What ends must be of a class without a
+/// Whether letting go of a reference to an object runs no Python code even
+/// if it is the last one, as far as that can be shown by looking: neither
+/// the object nor anything it refers to, and so may take with it, is of a
+/// class with a finalizer (`__del__`, a generator's, a file's), is a
+/// tensor that requires a gradient (`holds_unseen`), or has a
+/// weak reference with a callback, other than the one by which a weak
+/// dictionary or a weak set takes its entry out (what goes with that
+/// entry is looked at like what the object refers to). At most 64 objects
+/// are looked at; with more, the answer is no. A class is not looked into: it does not die
+/// where a reference to it is let go of (its own order of classes refers to
+/// it). What an object holds outside of what it shows the garbage
+/// collector (the history of a tensor in C++) is not seen.
+pub unsafe fn dies_quietly(o: Obj) -> bool {
+    const LOOKED_AT: usize = 64;
+    if o.is_null() || capi::is_unboxed(o) {
+        return true;
+    }
+    let mut seen: Vec<Obj> = vec![o];
+    let mut found: Vec<Obj> = Vec::new();
+    // What a weak container lets go of with its entry: kept while looked at.
+    let mut more: Vec<PyObj> = Vec::new();
+    let mut at = 0;
+    while at < seen.len() {
+        let held = seen[at];
+        at += 1;
+        if ffi::PyType_Check(held) != 0 || is_plain(held) || ffi::PyBytes_CheckExact(held) != 0 {
+            continue;
+        }
+        let ty = ffi::Py_TYPE(held);
+        found.clear();
+        let before = more.len();
+        if finalized(held) || weakly_watched(held, &mut more) {
+            return false;
+        }
+        if is_tensor(held) {
+            match unseen(held) {
+                Ok(gradient) => more.extend(gradient),
+                Err(()) => return false,
+            }
+        }
+        found.extend(more[before..].iter().map(|other| other.as_ptr()));
+        match (*ty).tp_traverse {
+            Some(traverse) => {
+                traverse(held, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
+            }
+            None if !holds_nothing(held) => return false,
+            None => {}
+        }
+        for other in &found {
+            if !seen.contains(other) {
+                if seen.len() >= LOOKED_AT {
+                    return false;
+                }
+                seen.push(*other);
+            }
+        }
+    }
+    true
+}
+
+/// Whether an object is of a class of the interpreter itself that holds
+/// references to what it is made of or goes over: a tuple, a list, a dict,
+/// a set, a slice, a cell, a bound method, an iterator, a view. Not a
+/// function (it holds the globals of its module), a class or a module.
+unsafe fn holds_others(o: Obj) -> bool {
+    let ty = ffi::Py_TYPE(o);
+    (*ty).tp_traverse.is_some()
+        && is_static(ty)
+        && ffi::PyType_Check(o) == 0
+        && ffi::PyModule_Check(o) == 0
+        && ffi::PyFunction_Check(o) == 0
+        && ffi::PyCode_Check(o) == 0
+}
+
+/// Who holds references that are not the function's while a path is run
+/// or taken down, and so go when that is over: for each of `asked`, no
+/// fewer than those references (None where that cannot be told); and
+/// whether an object is a tensor that an operation of the path made.
+pub trait Holds {
+    unsafe fn held(&mut self, asked: &[Obj]) -> Option<Vec<isize>>;
+    unsafe fn made(&mut self, o: Obj) -> bool;
+}
+
+impl Holds for Scan<'_> {
+    unsafe fn held(&mut self, asked: &[Obj]) -> Option<Vec<isize>> {
+        Scan::held(self, asked)
+    }
+
+    unsafe fn made(&mut self, _o: Obj) -> bool {
+        false
+    }
+}
+
+/// What a trace keeps of a run (`Recording::kept`), with the values of
+/// the path that an operation gave.
+pub struct Kept<'a> {
+    pub kept: &'a HashMap<usize, (isize, PathValue)>,
+    pub defs: &'a [Def],
+}
+
+impl Holds for Kept<'_> {
+    unsafe fn held(&mut self, asked: &[Obj]) -> Option<Vec<isize>> {
+        Some(asked.iter().map(|o| self.kept.get(&(*o as usize)).map_or(0, |(count, _)| *count)).collect())
+    }
+
+    unsafe fn made(&mut self, o: Obj) -> bool {
+        self.kept.get(&(o as usize)).is_some_and(|(_, first)| self.defs.get(*first as usize).is_some_and(|def| def.node))
+    }
+}
+
+/// The values of a path, for counting the references the path itself may
+/// hold to an object: the registers of the path (`own`), and what the
+/// function had before the path (`given`: such a value is not the path's).
+pub struct Scan<'a> {
+    own: &'a [Obj],
+    given: &'a [Obj],
+    /// What the registers hold, in order of where it is, once looked at.
+    slots: Option<Vec<Obj>>,
+    /// The values that may be something the path made and that hold
+    /// references: containers, iterators and bound methods of the
+    /// interpreter's own classes.
+    temps: Vec<Obj>,
+}
+
+impl<'a> Scan<'a> {
+    pub fn new(own: &'a [Obj], given: &'a [Obj]) -> Scan<'a> {
+        Scan { own, given, slots: None, temps: Vec::new() }
+    }
+
+    /// For each of `asked`, no fewer than the references the path itself
+    /// holds to it: the registers that hold it, and every reference to it
+    /// from a value that may be something the path made, or from what
+    /// such a value holds inside. None where there is too much to look at
+    /// (4096 objects, or containers more than four deep inside one
+    /// another).
+    pub unsafe fn held(&mut self, asked: &[Obj]) -> Option<Vec<isize>> {
+        const LOOKED_AT: usize = 4096;
+        if self.slots.is_none() {
+            let mut slots: Vec<Obj> = self.own.iter().copied().filter(|held| !held.is_null() && !capi::is_unboxed(*held)).collect();
+            slots.sort_unstable();
+            let mut temps = slots.clone();
+            temps.dedup();
+            temps.retain(|other| !self.given.contains(other) && holds_others(*other));
+            self.temps = temps;
+            self.slots = Some(slots);
+        }
+        let slots = self.slots.as_ref().expect("just made");
+        let mut counts: Vec<isize> = asked
+            .iter()
+            .map(|o| (slots.partition_point(|other| *other <= *o) - slots.partition_point(|other| *other < *o)) as isize)
+            .collect();
+        let index: HashMap<usize, usize> = asked.iter().enumerate().map(|(i, o)| (*o as usize, i)).collect();
+        let mut seen: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut work: Vec<(Obj, u32)> = self.temps.iter().map(|other| (*other, 0)).collect();
+        let mut found: Vec<Obj> = Vec::new();
+        while let Some((at, depth)) = work.pop() {
+            if seen.len() >= LOOKED_AT {
+                return None;
+            }
+            seen.insert(at as usize);
+            let Some(traverse) = (*ffi::Py_TYPE(at)).tp_traverse else {
+                continue;
+            };
+            found.clear();
+            traverse(at, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
+            for other in &found {
+                if let Some(i) = index.get(&(*other as usize)) {
+                    counts[*i] += 1;
+                } else if slots.binary_search(other).is_err() && holds_others(*other) && !seen.contains(&(*other as usize)) {
+                    if depth >= 4 {
+                        return None;
+                    }
+                    work.push((*other, depth + 1));
+                }
+            }
+        }
+        Some(counts)
+    }
+}
+
+/// Whether the objects that a path lets go of where it lands (`gone`, each
+/// as often as the path lets go of a reference to it; put in order here)
+/// end without Python code running, as far as they end at all. Looked at
+/// as the garbage collector looks at a set of objects: an object ends if
+/// its count of references is no larger than the references to it that
+/// the path lets go of, those from objects that end, and those the path
+/// itself holds (`scan`; none where the path has taken nothing of the
+/// call yet: every reference is then somebody else's or one that is let
+/// go of); else one of its references is somebody else's and it stays,
+/// with everything it refers to, and is not looked into. `stay` are
+/// objects that are known to stay, `more` further objects to look at, of
+/// which no reference is let go of. What ends must be of a class without a
 /// finalizer and have no weak reference with a callback other than a weak
 /// container's own (`weakly_watched`); what it refers to, and what a weak
 /// container lets go of with its entry, is looked at in the same way.
@@ -1380,8 +1843,9 @@ unsafe fn is_tensor(o: Obj) -> bool {
 /// of and what that class does at the end of an object, the weak
 /// references to it and what it refers to are all read at the call. Err
 /// with the object whose end may run Python code, or with null where
-/// there is too much to look at (4096 objects that end).
-pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj]) -> Result<(), Obj> {
+/// there is too much to look at (4096 objects that end, or `Scan::held`
+/// says so).
+pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj], more: &[Obj], mut scan: Option<&mut dyn Holds>) -> Result<(), Obj> {
     const ENDING: usize = 4096;
     gone.sort_unstable();
     // The distinct objects, each with how often it is let go of.
@@ -1397,20 +1861,22 @@ pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj]) -> Result<(), Obj> {
     };
     // A number, a text or None refers to nothing and ends quietly.
     let ends_alone = |o: Obj| is_plain(o) || ffi::PyBytes_CheckExact(o) != 0;
-    // The common case, without keeping anything: every object has a
-    // reference besides those that are let go of, so nothing ends.
-    let (mut at, mut all) = (0, true);
-    while at < gone.len() && all {
-        let o = gone[at];
-        let count = gone[at..].iter().take_while(|other| **other == o).count();
-        all = ffi::Py_REFCNT(o) > count as isize || ends_alone(o) || stay.contains(&o);
-        at += count;
+    if scan.is_none() {
+        // The common case, without keeping anything: every object has a
+        // reference besides those that are let go of, so nothing ends.
+        let (mut at, mut all) = (0, true);
+        while at < gone.len() && all {
+            let o = gone[at];
+            let count = gone[at..].iter().take_while(|other| **other == o).count();
+            all = ffi::Py_REFCNT(o) > count as isize || ends_alone(o) || stay.contains(&o);
+            at += count;
+        }
+        if all {
+            return Ok(());
+        }
     }
-    if all {
-        return Ok(());
-    }
-    // Per object that was reached: the references to it that are not let
-    // go of by the path (counted once, when it is reached),
+    // Per object that was reached: the references to it that are neither
+    // the path's nor let go of by it (counted once, when it is reached),
     // how many of those are from objects that end, and whether it ends.
     struct Reached {
         others: isize,
@@ -1424,7 +1890,8 @@ pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj]) -> Result<(), Obj> {
     // is to be compared again.
     let mut fresh: Vec<(Obj, isize)> = Vec::new();
     let mut touched: Vec<Obj> = Vec::new();
-    for (o, count) in runs(gone) {
+    let nothing = more.iter().filter(|o| gone.binary_search(o).is_err()).map(|o| (*o, 0));
+    for (o, count) in runs(gone).into_iter().chain(nothing) {
         if !ends_alone(o) && !stay.contains(&o) && !reached.contains_key(&(o as usize)) {
             reached.insert(o as usize, Reached { others: 0, inside: 0, ends: false, with: false });
             fresh.push((o, count));
@@ -1437,10 +1904,17 @@ pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj]) -> Result<(), Obj> {
     let mut found: Vec<Obj> = Vec::new();
     let mut ended = 0;
     loop {
-        for (o, dropped) in fresh.drain(..) {
-            let kept_here = more.iter().filter(|other| other.as_ptr() == o).count() as isize;
-            let entry = reached.get_mut(&(o as usize)).expect("it was reached");
-            entry.others = ffi::Py_REFCNT(o) - kept_here - dropped;
+        if !fresh.is_empty() {
+            let asked: Vec<Obj> = fresh.iter().map(|(o, _)| *o).collect();
+            let held = match scan.as_deref_mut() {
+                Some(scan) => scan.held(&asked).ok_or(null_mut::<ffi::PyObject>())?,
+                None => vec![0; asked.len()],
+            };
+            for ((o, dropped), held) in fresh.drain(..).zip(held) {
+                let kept_here = more.iter().filter(|other| other.as_ptr() == o).count() as isize;
+                let entry = reached.get_mut(&(o as usize)).expect("it was reached");
+                entry.others = ffi::Py_REFCNT(o) - kept_here - held - dropped;
+            }
         }
         let mut ending: Vec<Obj> = Vec::new();
         for o in touched.drain(..) {
@@ -1467,9 +1941,11 @@ pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj]) -> Result<(), Obj> {
             // A tensor ends with what C++ holds for it: its history
             // and the hooks on it, what owns its memory, its `.grad`.
             // Where that cannot be looked at, its end is taken to run
-            // Python code.
+            // Python code: unless the operations of the path made it,
+            // whose history and memory are theirs.
             let tensor = is_tensor(o);
-            if tensor {
+            let made = scan.as_deref_mut().is_some_and(|scan| scan.made(o));
+            if tensor && !made {
                 match unseen(o) {
                     Ok(gradient) => more.extend(gradient),
                     Err(()) => return Err(o),
@@ -1480,8 +1956,10 @@ pub unsafe fn end_quietly(gone: &mut [Obj], stay: &[Obj]) -> Result<(), Obj> {
                 Some(traverse) => {
                     traverse(o, every_referent, &mut found as *mut Vec<Obj> as *mut std::ffi::c_void);
                 }
-                // What shows nothing may hold what cannot be seen.
-                None if !holds_nothing(o) => return Err(o),
+                // What shows nothing may hold what cannot be seen: unless
+                // the path made it, of what its instructions are known
+                // to go over.
+                None if !made && !holds_nothing(o) => return Err(o),
                 None => {}
             }
             for other in &found {
@@ -1560,6 +2038,19 @@ pub unsafe fn quiet_contains(item: Obj, container: Obj) -> bool {
     sequence && (0..ffi::PyObject_Size(container)).all(|i| is_plain(sequence_item(container, i)))
 }
 
+/// Whether `bool(o)` runs no Python code.
+pub unsafe fn quiet_truth(o: Obj) -> bool {
+    !capi::is_unboxed(o) && (is_plain(o) || quiet_sized(o))
+}
+
+/// Whether two values compare in C code: numbers, texts, or dtypes and
+/// devices.
+pub unsafe fn quiet_compare(a: Obj, b: Obj) -> bool {
+    let text = |o: Obj| !capi::is_unboxed(o) && ffi::PyUnicode_CheckExact(o) != 0;
+    let token = |o: Obj| !capi::is_unboxed(o) && is_token(o);
+    (is_number(a) && is_number(b)) || (text(a) && text(b)) || (token(a) && token(b))
+}
+
 /// Whether what a type has under a name is given out by Python code: a
 /// property whose getter is a Python function, or a descriptor of a class
 /// that is defined in Python.
@@ -1576,6 +2067,34 @@ unsafe fn python_descriptor(descr: Obj) -> bool {
         return python;
     }
     !is_static(ty) && ffi::PyFunction_Check(descr) == 0
+}
+
+/// Whether the lookup of `object` finds nothing under a name of an object,
+/// and finds that out without running Python code: the class has nothing
+/// under the name, and the object keeps what it has under texts. What
+/// `object.__getattribute__(obj, name)` then does is raise AttributeError.
+pub unsafe fn generic_absent(obj: Obj, name: Obj) -> bool {
+    let plain = |o: Obj| !o.is_null() && !capi::is_unboxed(o);
+    if !plain(obj) || ffi::PyType_Check(obj) != 0 || !plain(name) || ffi::PyUnicode_CheckExact(name) == 0 {
+        return false;
+    }
+    if !pyffi::_PyType_Lookup(ffi::Py_TYPE(obj), name).is_null() {
+        return false;
+    }
+    let slot = pyffi::_PyObject_GetDictPtr(obj);
+    slot.is_null() || (*slot).is_null() || (pyffi::text_keys(*slot) && ffi::PyDict_GetItemWithError(*slot, name).is_null())
+}
+
+/// Whether an object whose attributes are read as `object` reads them,
+/// with no function of its class asked behind that, has nothing under a
+/// name: reading it raises AttributeError and does nothing else.
+pub unsafe fn plainly_absent(obj: Obj, name: Obj) -> bool {
+    if obj.is_null() || capi::is_unboxed(obj) || ffi::PyModule_Check(obj) != 0 {
+        return false;
+    }
+    let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
+    let generic = (*ffi::Py_TYPE(obj)).tp_getattro.map(|own| own as usize) == (*object).tp_getattro.map(|own| own as usize);
+    generic && generic_absent(obj, name)
 }
 
 /// Whether `getattr(obj, name)` runs no Python code, as far as that can be
@@ -1758,11 +2277,15 @@ pub fn pure_operator(name: &str) -> bool {
 }
 
 /// What a run of a path on the values of a call found, for an exported form
-/// to be made from: the values its nodes took from outside the graph (owned,
-/// null until one is taken), and per node the site that ran and what it
-/// returned (dtype, device, requires_grad, sizes: an owned tuple).
+/// to be made from: the values of the path as they were (owned; null where
+/// one was not kept), and per node the site that ran and what it returned
+/// (dtype, device, requires_grad, sizes: an owned tuple).
 pub struct Recording {
-    pub feeds: Vec<Obj>,
+    pub values: Vec<Obj>,
+    /// Per object among `values`: how many of them it is (each is a
+    /// reference the trace holds beyond those of the function), and the
+    /// first value it is.
+    pub kept: HashMap<usize, (isize, PathValue)>,
     /// The site is null for an operation that is no call site.
     pub nodes: Vec<(*mut TcfgSite, Obj)>,
     /// Why the run cannot be described, once something says so.
@@ -1772,28 +2295,16 @@ pub struct Recording {
 }
 
 impl Recording {
-    pub fn new(path: &Path) -> Recording {
-        let feeds = vec![null_mut(); path.feeds.len()];
-        Recording { feeds, nodes: Vec::new(), failed: None, wrote: false }
-    }
-
-    /// The values the nodes took, where registers would have them: for
-    /// `Place::at`.
-    fn feeds_by_value(&self, path: &Path) -> Vec<Obj> {
-        let most = path.feeds.iter().copied().max().map_or(0, |v| v as usize + 1);
-        let mut values = vec![null_mut(); most];
-        for (k, v) in path.feeds.iter().enumerate() {
-            values[*v as usize] = self.feeds[k];
-        }
-        values
+    fn value(&self, v: PathValue) -> Obj {
+        self.values.get(v as usize).copied().unwrap_or(null_mut())
     }
 }
 
 impl Drop for Recording {
     fn drop(&mut self) {
         unsafe {
-            for feed in &self.feeds {
-                xdecref(*feed);
+            for value in &self.values {
+                xdecref(*value);
             }
             for (_, meta) in &self.nodes {
                 xdecref(*meta);
@@ -1920,8 +2431,8 @@ impl Path {
         let mut numbers: Vec<i64> = Vec::new();
         // The tensors among the values the nodes take, and then those the
         // graph takes out of lists and tuples.
-        let feeds = self.feeds.iter().enumerate().map(|(k, v)| (Place::of(*v), rec.feeds[k], tensors[k]));
-        let held = items.iter().map(|place| (*place, place.at(&rec.feeds_by_value(self)), true));
+        let feeds = self.feeds.iter().enumerate().map(|(k, v)| (Place::of(*v), rec.value(*v), tensors[k]));
+        let held = items.iter().map(|place| (*place, place.at(&rec.values), true));
         let places: Vec<(Place, Obj, bool)> = feeds.chain(held).collect();
         // A run whose operations could not be followed says nothing of the
         // values they took: the form is then for calls that have a value of
@@ -1958,7 +2469,8 @@ impl Path {
             };
             ffi::PyList_Append(ids.as_ptr(), id);
             ffi::Py_DECREF(id);
-            let label = match func.value_names.get(place.value as usize).and_then(|n| n.as_ref()) {
+            let source = self.source.get(place.value as usize).copied().unwrap_or(place.value);
+            let label = match func.value_names.get(source as usize).and_then(|n| n.as_ref()) {
                 Some(label) => label.clone(),
                 None => format!("v{}", place.value),
             };
@@ -2021,8 +2533,8 @@ impl Path {
         api: &TcfgApi,
         checks: &mut Vec<Check>,
     ) -> Option<Result<Obj, String>> {
-        let feed = self.feeds.iter().position(|f| *f == recv)?;
-        let value = rec.feeds[feed];
+        self.feeds.iter().position(|f| *f == recv)?;
+        let value = rec.value(recv);
         let mut info = TcfgTensorInfo::empty();
         if value.is_null() || (api.tensor_info)(value, &mut info) != 0 {
             return None;
@@ -2078,7 +2590,7 @@ impl Path {
                 return Ok(value_ref(v));
             }
             let feed = self.feeds.iter().position(|f| *f == v);
-            let value = feed.map_or(null_mut(), |k| rec.feeds[k]);
+            let value = feed.map_or(null_mut(), |_| rec.value(v));
             if value.is_null() {
                 return Err("an operand of the graph has no value".to_string());
             }
@@ -2201,7 +2713,7 @@ impl Path {
                     let given: Vec<Obj> = d
                         .operands
                         .iter()
-                        .map(|v| self.feeds.iter().position(|f| f == v).map_or(null_mut(), |k| rec.feeds[k]))
+                        .map(|v| self.feeds.iter().position(|f| f == v).map_or(null_mut(), |_| rec.value(*v)))
                         .collect();
                     *wrote |= updates_statistics(exported.as_ptr(), &given);
                     let guards = ffi::PyDict_GetItemString(exported.as_ptr(), c"guards".as_ptr());
@@ -2343,7 +2855,7 @@ impl Exported {
     }
 
     /// What its checks ask of a call, as text.
-    pub unsafe fn conditions(&self, func: &Function) -> Vec<String> {
+    pub unsafe fn conditions(&self, func: &Function, path: &Path) -> Vec<String> {
         const DTYPES: [&str; 12] = [
             "uint8", "int8", "int16", "int32", "int64", "float16", "float32", "float64", "complex32",
             "complex64", "complex128", "bool",
@@ -2354,7 +2866,7 @@ impl Exported {
         self.checks
             .iter()
             .map(|check| {
-                let value = check.target.text(func);
+                let value = check.target.text(func, path);
                 match &check.cond {
                     Cond::Is(expected) => format!("{} is {}", value, short(expected)),
                     Cond::ValueEq(expected) => format!("{} == {}", value, short(expected)),
@@ -2465,8 +2977,12 @@ impl Row {
 // The pass
 // ----------------------------------------------------------------------
 
-/// The graph pass: finds the graphs of a block, once the other passes are
-/// done with it. With `export`, it puts `Op::Graph` in front of each.
+/// The graph pass: finds where the graphs of a block start, once the other
+/// passes are done with it: at the first operation of every run of
+/// operations, and at the first instruction of the function. `finalize`
+/// puts `Op::Graph` there in a copy of the code, which runs while one of
+/// the graphs has something to do; with `export`, what the paths from
+/// there are made of is handed to the passes over graphs.
 pub struct Graphs {
     /// A run with fewer nodes than this is no graph.
     pub min_ops: usize,
@@ -2501,14 +3017,16 @@ enum Role {
     Break(String),
 }
 
-/// What the run so far knows of a value one of its instructions defines.
-#[derive(Clone, Copy)]
-struct Def {
-    node: bool,
+/// What is known of a value that an instruction of a run or a path
+/// defines.
+#[derive(Clone, Copy, Default)]
+pub struct Def {
+    pub node: bool,
     /// It depends on the result of a node.
-    late: bool,
-    /// An integer the graph can compute itself.
-    graph: bool,
+    pub late: bool,
+    /// An integer, or a list, tuple or slice, that the graph can compute
+    /// itself.
+    pub graph: bool,
 }
 
 /// The binary operators a graph computes on integers: + - * // %.
@@ -2545,8 +3063,7 @@ impl Graphs {
         }
         let origins: Vec<u32> = unit.insts.iter().map(|u| u.origin).collect();
         // What is reported as left out: the instructions that end a run
-        // where the block has tensor work on both sides, and the runs that
-        // are too short to be graphs.
+        // where the block has tensor work on both sides.
         let works = |i: &usize| {
             let facts = cx.facts.get(origins[*i] as usize);
             matches!(unit.insts[*i].inst.op, Op::Dispatch(_))
@@ -2560,48 +3077,39 @@ impl Graphs {
                 }
             }
         }
-        let mut found: Vec<(usize, Path)> = Vec::new();
-        for (first, end, ends) in runs {
-            let nodes = (first..end).filter(|i| matches!(roles[*i], Role::Part(Kind::Node))).count();
-            if nodes < self.min_ops {
-                let reason = format!("{} operations, fewer than min_ops ({})", nodes, self.min_ops);
-                left.push(Left { lo: origins[first], hi: origins[end - 1] + 1, reason });
-                continue;
-            }
-            found.push((first, path(unit, cx, &roles, first, end, ends)));
-        }
         unit.left = left;
-        let export = self.export.is_some() && !found.is_empty();
-        let firsts: Vec<usize> = found.iter().map(|(first, _)| *first).collect();
-        for (k, (first, path)) in found.into_iter().enumerate() {
-            let name = format!("{} (block {})[{}]", cx.func().qualname, unit.block, path.root.1);
-            let site = Arc::new(GraphSite {
-                name,
-                variants: Shared::new(Vec::new()),
-                state: Shared::new(if export { GraphState::Waiting } else { GraphState::Built }),
-                version: AtomicU32::new(0),
-                exporter: self.export.clone(),
-                max_variants: self.max_variants,
-                unsure: AtomicU32::new(0),
-                exports: AtomicU64::new(0),
-                misses: AtomicU64::new(0),
-            });
-            // With `Graph` in front of this run and of each one before it,
-            // the first instruction of the path moves down by as many.
-            unit.graphs.push((site, path, if export { first + k + 1 } else { first }));
+        // A graph starts at the first operation of each run, and one at the
+        // first instruction of the function. The versions of a block share
+        // the graphs that start at the same instruction.
+        let mut seeds: Vec<(usize, Path, bool)> = Vec::new();
+        for (first, end, ends) in runs {
+            seeds.push((first, path(unit, cx, &roles, first, end, ends), false));
         }
-        if export {
-            for (k, first) in firsts.iter().enumerate().rev() {
-                let inst = Inst {
-                    dst: NONE,
-                    op: Op::Graph(unit.graphs[k].0.clone()),
-                    bc: unit.insts[*first].inst.bc,
-                    kills: Vec::new(),
-                };
-                unit.insts.insert(*first, UInst { inst, origin: NONE, removable: false });
-            }
+        let starts = seeds.first().is_some_and(|(_, seed, _)| seed.root.1 == 0);
+        if unit.block == 0 && n > 0 && !starts {
+            let run = seeds.first().map_or(0, |(_, seed, _)| seed.land.1);
+            seeds.insert(0, (0, Path::empty((0, 0), (0, run)), true));
         }
-        export
+        for (first, seed, entry) in seeds {
+            let root = seed.root.1 as u32;
+            let mut state = cx.cf.state.borrow_mut();
+            let known = &mut state.blocks[unit.block].graphs;
+            let site = match known.iter().find(|(at, _)| *at == root) {
+                Some((_, site)) => {
+                    *site.seed.borrow_mut() = Arc::new(seed);
+                    site.clone()
+                }
+                None => {
+                    let name =
+                        format!("{} (block {})[{}]", cx.func().qualname, unit.block, seed.root.1);
+                    let site = Arc::new(GraphSite::new(name, seed, entry, self));
+                    known.push((root, site.clone()));
+                    site
+                }
+            };
+            unit.graphs.push((site, first));
+        }
+        !unit.graphs.is_empty()
     }
 }
 
@@ -2693,6 +3201,26 @@ fn generic(unit: &Unit, cx: &PassCx, i: usize) -> bool {
         && found.operators.iter().all(|name| pure_operator(name))
 }
 
+/// What cannot fail and runs no Python code whatever it is given.
+pub fn infallible(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Const(_)
+            | Op::Hold(_)
+            | Op::BuildTuple(_)
+            | Op::BuildList(_)
+            | Op::BuildSlice(..)
+            | Op::ListAppend(..)
+            | Op::MakeCell(_)
+            | Op::CellSet(..)
+            | Op::TupleGet(..)
+            | Op::IsNone(..)
+            | Op::Is(..)
+            | Op::TensorSize { .. }
+            | Op::TensorDim(_)
+    )
+}
+
 /// A list, a tuple or a slice that the instructions make.
 fn container(op: &Op) -> bool {
     matches!(op, Op::BuildTuple(_) | Op::BuildList(_) | Op::BuildSlice(..))
@@ -2701,13 +3229,19 @@ fn container(op: &Op) -> bool {
 /// Why an instruction is in no graph.
 fn why(unit: &Unit, cx: &PassCx, i: usize) -> String {
     let u = &unit.insts[i];
-    let found = facts(cx, unit, i);
-    let no_site = || match cx.reasons.get(u.origin as usize).and_then(|r| r.as_ref()) {
+    let reason = cx.reasons.get(u.origin as usize).and_then(|r| r.as_ref());
+    why_not(cx.func(), &u.inst.op, facts(cx, unit, i), reason)
+}
+
+/// Why an instruction is no part of a graph, from what the profiling tier
+/// saw it do (`found`) and why it is no call site (`reason`).
+pub fn why_not(func: &Function, op: &Op, found: Option<&InstFacts>, reason: Option<&String>) -> String {
+    let no_site = || match reason {
         Some(reason) => format!("runs kernels and is no call site: {}", reason),
         None => "runs kernels and is no call site".to_string(),
     };
     let kernels = found.is_some_and(|f| matches!(f.kernels, Kernels::One | Kernels::Many));
-    match &u.inst.op {
+    match op {
         Op::Dispatch(d) => {
             let operator = unsafe { d.slot.operator() }.unwrap_or_else(|| "the kernel".to_string());
             let traits = d.slot.traits();
@@ -2757,7 +3291,7 @@ fn why(unit: &Unit, cx: &PassCx, i: usize) -> String {
             }
         }
         op => {
-            let text = cx.func().op_repr(op);
+            let text = func.op_repr(op);
             let name = text.split_whitespace().next().unwrap_or("it");
             if kernels {
                 no_site()
@@ -2878,11 +3412,11 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         body.push(PathInst {
             op: inst.op.clone(),
             dst: inst.dst,
-            kills: Vec::new(),
             kind: *kind,
             bc: inst.bc,
             stage: Stage::Before,
             in_graph: false,
+            assert: None,
         });
     }
     let late = |inst: &PathInst| {
@@ -2973,12 +3507,12 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
         }
     }
     let made: Vec<V> = body.iter().filter(|inst| inst.dst != NONE).map(|inst| inst.dst).collect();
-    let mut inputs: Vec<V> = Vec::new();
+    let mut inputs: Vec<(V, PathValue)> = Vec::new();
     let mut feeds: Vec<V> = Vec::new();
     for inst in &body {
         inst.op.for_each_use(|v| {
-            if v != UNDEF && !made.contains(&v) && !inputs.contains(&v) && inst.kind != Kind::Residual {
-                inputs.push(v);
+            if v != UNDEF && !made.contains(&v) && !inputs.contains(&(v, v)) && inst.kind != Kind::Residual {
+                inputs.push((v, v));
             }
         });
         if inst.kind == Kind::Node || inst.in_graph {
@@ -3007,16 +3541,463 @@ fn path(unit: &Unit, cx: &PassCx, roles: &[Role], first: usize, end: usize, ends
     Path {
         root: (block, unit.insts[first].origin as usize),
         land: (block, unit.insts[end - 1].origin as usize + 1),
+        resume: None,
+        nregs: 0,
         inputs,
+        stages: stages_of(&body),
+        handed: Vec::new(),
         body,
         feeds,
         outputs,
         exits,
+        writes: Vec::new(),
+        clears: Vec::new(),
         bound,
         operators,
         ends,
+        shape: Vec::new(),
+        source: Vec::new(),
+        branches: 0,
+        first: None,
+        provisional: false,
         exported: Shared::new(Vec::new()),
-        hits: AtomicU64::new(0),
-        misses: AtomicU64::new(0),
+        registers: Shared::new(Vec::new()),
+    }
+}
+
+// ----------------------------------------------------------------------
+// Paths that are taken down
+// ----------------------------------------------------------------------
+
+/// What became of a value of the function along a path.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Held {
+    /// The path neither made it nor let go of it.
+    Untouched,
+    /// It holds this value of the path.
+    Value(PathValue),
+    /// It holds nothing anymore.
+    Empty,
+}
+
+/// The instructions of a function from the first operation of a graph on,
+/// as they are taken down while they run (`Compiled::record`): renamed to
+/// the values of the path, which are numbered from 1 in the order they are
+/// made or first read (0 is the undefined value).
+pub struct Trace {
+    pub body: Vec<PathInst>,
+    /// Per value of the path.
+    pub defs: Vec<Def>,
+    pub source: Vec<V>,
+    pub inputs: Vec<(V, PathValue)>,
+    /// Per value of the function: the value of the path it is, or NONE; and
+    /// what it holds where the trace has got to.
+    pub map: Vec<PathValue>,
+    pub held: Vec<Held>,
+    /// The variables that were bound, in order.
+    pub bound: Vec<(u32, PathValue)>,
+    pub operators: Vec<String>,
+    pub shape: Vec<u32>,
+    pub rec: Recording,
+    /// The trace was let go of (`abandon`), and why.
+    pub abandoned: Option<String>,
+    /// See `Path::first`.
+    pub first: Option<(usize, u32)>,
+    /// From which instruction of the path each of its values is late (see
+    /// `Family`).
+    pub things: Family,
+}
+
+/// Per value of a path, from where it is late: computed behind the
+/// callable.
+#[derive(Default)]
+pub struct Family {
+    /// Per value of the path: the instruction of the path from which it is
+    /// late (computed behind the callable); u32::MAX for one that is not.
+    since: Vec<u32>,
+}
+
+impl Family {
+    /// Whether a value is late for the instruction `at` of the path.
+    pub fn late(&self, v: PathValue, at: usize) -> bool {
+        self.since.get(v as usize).is_some_and(|since| (*since as usize) <= at)
+    }
+}
+
+impl Trace {
+    pub fn new(nvalues: usize) -> Trace {
+        Trace {
+            body: Vec::new(),
+            defs: vec![Def::default()],
+            source: vec![UNDEF],
+            inputs: Vec::new(),
+            map: vec![NONE; nvalues],
+            held: vec![Held::Untouched; nvalues],
+            bound: Vec::new(),
+            operators: Vec::new(),
+            shape: Vec::new(),
+            rec: Recording { values: vec![null_mut()], kept: HashMap::new(), nodes: Vec::new(), failed: None, wrote: false },
+            abandoned: None,
+            first: None,
+            things: Family { since: vec![u32::MAX] },
+        }
+    }
+
+    /// A new value of the path, which a value of the function is from here
+    /// on; `kept` is what it is in this run (a reference of its own, or
+    /// null).
+    pub fn define(&mut self, v: V, def: Def, kept: Obj) -> PathValue {
+        let made = self.defs.len() as PathValue;
+        self.defs.push(def);
+        self.things.since.resize(self.defs.len(), u32::MAX);
+        self.source.push(v);
+        self.rec.values.push(kept);
+        if !kept.is_null() && !capi::is_unboxed(kept) {
+            self.rec.kept.entry(kept as usize).or_insert((0, made)).0 += 1;
+        }
+        self.map[v as usize] = made;
+        self.held[v as usize] = Held::Value(made);
+        made
+    }
+
+    /// Lets go of every reference the trace holds to the values of the
+    /// run. A trace keeps what its instructions gave and took, so that
+    /// the run can be described when it has ended; an object that the
+    /// function has let go of is alive by that alone. Where the end of
+    /// such an object may run Python code, it has to end where the
+    /// function let go of it: the trace gives up what it holds, there,
+    /// and nothing is made of this run.
+    pub unsafe fn abandon(&mut self, why: String) {
+        // What the trace reads of its values from here on finds None.
+        for kept in self.rec.values.iter_mut().filter(|kept| !kept.is_null()) {
+            let held = std::mem::replace(kept, new_ref(ffi::Py_None()));
+            if capi::is_unboxed(held) { capi::release(held) } else { xdecref(held) }
+        }
+        self.rec.kept.clear();
+        self.abandoned = Some(why);
+    }
+
+    /// A value of the function becomes the one another is: a variable of an
+    /// edge.
+    pub fn rename(&mut self, v: V, to: PathValue) {
+        self.map[v as usize] = to;
+        self.held[v as usize] = if to == UNDEF { Held::Empty } else { Held::Value(to) };
+    }
+
+    pub fn check(&mut self, assert: Assert, bc: u32) {
+        let inst = PathInst {
+            op: Op::Hold(Vec::new()),
+            dst: NONE,
+            kind: Kind::Check,
+            bc,
+            stage: Stage::Before,
+            in_graph: false,
+            assert: Some(assert),
+        };
+        self.body.push(inst);
+    }
+}
+
+/// A copy of an instruction with its operands renamed, for the instructions
+/// a path can hold; None for any other. A call site is renamed without its
+/// fallback, which no path runs.
+pub fn renamed(op: &Op, f: &mut impl FnMut(V) -> V) -> Option<Op> {
+    let mut all = |vs: &[V]| vs.iter().map(|v| f(*v)).collect::<Vec<V>>();
+    Some(match op {
+        Op::Const(_) | Op::LoadGlobal(_) | Op::LoadDeref(_) => op.clone(),
+        Op::Hold(_) => Op::Hold(Vec::new()),
+        Op::BuildTuple(vs) => Op::BuildTuple(all(vs)),
+        Op::BuildList(vs) => Op::BuildList(all(vs)),
+        Op::Dispatch(d) => {
+            let operands = all(&d.operands);
+            Op::Dispatch(Box::new(DispatchOp { slot: d.slot.clone(), operands, fallback: Op::Hold(Vec::new()) }))
+        }
+        Op::Call { callee, args, kwnames } => {
+            let callee = all(&[*callee])[0];
+            Op::Call { callee, args: all(args), kwnames: *kwnames }
+        }
+        Op::CallMethod { recv, name, args, kwnames } => {
+            let recv = all(&[*recv])[0];
+            Op::CallMethod { recv, name: *name, args: all(args), kwnames: *kwnames }
+        }
+        Op::BuildSlice(a, b, c) => {
+            let parts = all(&[*a, *b]);
+            Op::BuildSlice(parts[0], parts[1], if *c == NONE { NONE } else { all(&[*c])[0] })
+        }
+        Op::CellGet(a, n) => Op::CellGet(f(*a), *n),
+        Op::LoadAttr(a, n) => Op::LoadAttr(f(*a), *n),
+        Op::Binary(k, a, b) => Op::Binary(*k, f(*a), f(*b)),
+        Op::Unary(k, a) => Op::Unary(*k, f(*a)),
+        Op::Compare(k, a, b) => Op::Compare(*k, f(*a), f(*b)),
+        Op::Is(a, b, invert) => Op::Is(f(*a), f(*b), *invert),
+        Op::Contains(a, b, invert) => Op::Contains(f(*a), f(*b), *invert),
+        Op::ToBool(a) => Op::ToBool(f(*a)),
+        Op::IsNone(a, invert) => Op::IsNone(f(*a), *invert),
+        Op::GetItem(a, b) => Op::GetItem(f(*a), f(*b)),
+        Op::Unpack(a, n) => Op::Unpack(f(*a), *n),
+        Op::TupleGet(a, i) => Op::TupleGet(f(*a), *i),
+        Op::GetLen(a) => Op::GetLen(f(*a)),
+        Op::CheckBound(a, n) => Op::CheckBound(f(*a), *n),
+        Op::IsFunction { v, func, code } => Op::IsFunction { v: f(*v), func: *func, code: *code },
+        Op::TensorSize { t, dim } => Op::TensorSize { t: f(*t), dim: *dim },
+        Op::TensorDim(t) => Op::TensorDim(f(*t)),
+        _ => return None,
+    })
+}
+
+pub fn renamed_guard(cond: &GuardCond, f: &mut impl FnMut(V) -> V) -> GuardCond {
+    match cond {
+        GuardCond::TensorRank { v, min_rank } => GuardCond::TensorRank { v: f(*v), min_rank: *min_rank },
+        GuardCond::DimRange { v, dim, lo, hi } => GuardCond::DimRange { v: f(*v), dim: *dim, lo: *lo, hi: *hi },
+    }
+}
+
+/// Whether the graph computes what an instruction of a path gives from
+/// values that depend on its nodes: a size of a tensor of its own,
+/// arithmetic on such sizes and other integers (`int` says of a value from
+/// in front of the nodes whether it is one), a list, tuple or slice of what
+/// it has.
+pub fn computed(op: &Op, defs: &[Def], int: impl Fn(PathValue) -> bool) -> bool {
+    let fits = |v: &PathValue| match defs[*v as usize] {
+        def if def.late => def.graph,
+        _ => int(*v),
+    };
+    let held = |v: &PathValue| {
+        let def = defs[*v as usize];
+        !def.late || def.node || def.graph
+    };
+    match op {
+        Op::TensorSize { t, .. } | Op::TensorDim(t) => defs[*t as usize].node,
+        Op::Binary(k, a, b) => INT_BINARY.contains(k) && fits(a) && fits(b),
+        Op::Unary(UnaryKind::Neg, a) => fits(a),
+        Op::BuildTuple(vs) | Op::BuildList(vs) => vs.iter().all(held),
+        Op::BuildSlice(a, b, c) => [a, b, c].into_iter().all(|v| *v == NONE || held(v)),
+        _ => false,
+    }
+}
+
+impl Path {
+    /// A path without instructions: what a graph that starts with the
+    /// function is before a path was taken down.
+    pub fn empty(root: (usize, usize), land: (usize, usize)) -> Path {
+        Path {
+            root,
+            land,
+            resume: None,
+            nregs: 0,
+            inputs: Vec::new(),
+            body: Vec::new(),
+            feeds: Vec::new(),
+            outputs: Vec::new(),
+            exits: Vec::new(),
+            writes: Vec::new(),
+            clears: Vec::new(),
+            bound: Vec::new(),
+            operators: Vec::new(),
+            ends: String::new(),
+            shape: Vec::new(),
+            source: Vec::new(),
+            branches: 0,
+            first: None,
+            provisional: false,
+            exported: Shared::new(Vec::new()),
+            registers: Shared::new(Vec::new()),
+            stages: Default::default(),
+            handed: Vec::new(),
+        }
+    }
+
+    /// The path of a trace that ended in front of an instruction of a block
+    /// (or of a block as a whole): `live` are the values of the function
+    /// that are read from there on. Decides when each instruction runs once
+    /// a callable stands for the nodes (`Stage`), and with that what the
+    /// callable is handed and what it gives.
+    #[allow(clippy::too_many_arguments)]
+    pub fn of(
+        trace: &mut Trace,
+        root: (usize, usize),
+        land: (usize, usize),
+        resume: Option<(*const BlockCode, usize)>,
+        live: &BitSet,
+        ends: String,
+        provisional: bool,
+    ) -> Path {
+        // A value that is late is so from some instruction on: from the
+        // first, where nothing says from which.
+        trace.things.since.resize(trace.defs.len(), u32::MAX);
+        for v in 0..trace.defs.len() {
+            if trace.defs[v].late && trace.things.since[v] == u32::MAX {
+                trace.things.since[v] = 0;
+            }
+        }
+        let defs = &trace.defs;
+        let nregs = defs.len();
+        let things = &trace.things;
+        // Whether a value is late for the instruction `at`: computed
+        // behind the callable, or of a family that runs behind it by then.
+        let late = |v: PathValue, at: usize| things.late(v, at);
+        // What is read behind the path of what it made, and so has to be
+        // there when it ends.
+        let mut need = vec![false; nregs];
+        let (mut writes, mut clears) = (Vec::new(), Vec::new());
+        for (v, held) in trace.held.iter().enumerate() {
+            match held {
+                Held::Untouched => {}
+                Held::Value(made) if live.contains(v as V) => {
+                    need[*made as usize] = true;
+                    writes.push((*made, v as V));
+                }
+                _ => clears.push(v as V),
+            }
+        }
+        // The lists, tuples and slices that the path builds.
+        let mut built = vec![false; nregs];
+        for inst in trace.body.iter().filter(|inst| inst.dst != NONE && container(&inst.op)) {
+            built[inst.dst as usize] = true;
+        }
+        let values = &trace.rec.values;
+        // A method of the interpreter's, read off a tensor that an
+        // operation of the graph gave and bound to it.
+        let bound_method = |op: &Op, dst: PathValue| match op {
+            Op::LoadAttr(of, _) if dst != NONE && defs[*of as usize].node => {
+                let (held, tensor) = (values[dst as usize], values[*of as usize]);
+                !held.is_null() && unsafe { ffi::PyCFunction_Check(held) != 0 && (*(held as *mut ffi::PyCFunctionObject)).m_self == tensor }
+            }
+            _ => false,
+        };
+        // The values that are no tensors and that the graph computes.
+        let mut wanted = vec![false; nregs];
+        let (mut outputs, mut exits) = (Vec::new(), Vec::new());
+        let mut branches = 0;
+        for (at, inst) in trace.body.iter_mut().enumerate().rev() {
+            let dst = inst.dst;
+            let needed = dst != NONE && need[dst as usize];
+            let def = if dst == NONE { Def::default() } else { Def { late: late(dst, at), ..defs[dst as usize] } };
+            // What an operation of the graph, or a value the graph computes,
+            // takes: of what depends on a node, the graph computes it too,
+            // and it has the lists the path builds as what they hold; the
+            // rest is there in front of the callable.
+            let takes = |op: &Op, wanted: &mut [bool], need: &mut [bool]| {
+                reads(op, |v| match (Def { late: late(v, at), ..defs[v as usize] }) {
+                    taken if (taken.late && !taken.node) || built[v as usize] => wanted[v as usize] = true,
+                    taken if !taken.late => need[v as usize] = true,
+                    _ => {}
+                })
+            };
+            let uses = |op: &Op, need: &mut [bool]| {
+                let mut behind = false;
+                op.for_each_use(|v| {
+                    need[v as usize] = true;
+                    behind |= late(v, at);
+                });
+                if behind { Stage::After } else { Stage::Before }
+            };
+            inst.stage = match inst.kind {
+                Kind::Node => {
+                    if needed {
+                        outputs.push(dst);
+                    }
+                    takes(&inst.op, &mut wanted, &mut need);
+                    Stage::Inside
+                }
+                Kind::Check => {
+                    let assert = inst.assert.as_ref().expect("a check has what it checks");
+                    let v = assert.value() as usize;
+                    match assert {
+                        // A guard on what a node returns looks at what the
+                        // graph says of it.
+                        Assert::Guard(cond) if defs[v].node => {
+                            exits.push(cond.clone());
+                            Stage::Inside
+                        }
+                        _ => {
+                            branches += matches!(assert, Assert::Truth(..) | Assert::Null(..)) as usize;
+                            need[v] = true;
+                            if late(v as PathValue, at) { Stage::After } else { Stage::Before }
+                        }
+                    }
+                }
+                _ if dst != NONE && wanted[dst as usize] => {
+                    inst.in_graph = true;
+                    takes(&inst.op, &mut wanted, &mut need);
+                    if needed && container(&inst.op) {
+                        // What is read behind the path is made there.
+                        uses(&inst.op, &mut need)
+                    } else {
+                        if needed {
+                            outputs.push(dst);
+                        }
+                        Stage::Inside
+                    }
+                }
+                // An integer the graph computes is one it can give.
+                _ if needed && def.late && def.graph && !container(&inst.op) => {
+                    inst.in_graph = true;
+                    outputs.push(dst);
+                    takes(&inst.op, &mut wanted, &mut need);
+                    Stage::Inside
+                }
+                _ if needed => uses(&inst.op, &mut need),
+                // What nothing uses is left out of a run only where it
+                // cannot fail: anything else is what shows that the call
+                // gets this far (an attribute that is read for nothing
+                // and may be gone, a call whose answer is dropped), and
+                // a call in which it raises is not the path's.
+                // Nor is a method that was read off a tensor the graph
+                // gives, which the operation that calls it stands for.
+                _ if !infallible(&inst.op) && !bound_method(&inst.op, dst) => uses(&inst.op, &mut need),
+                _ => Stage::Skipped,
+            };
+        }
+        outputs.reverse();
+        exits.reverse();
+        let mut feeds: Vec<PathValue> = Vec::new();
+        for (at, inst) in trace.body.iter().enumerate().filter(|(_, inst)| inst.kind == Kind::Node || inst.in_graph) {
+            reads(&inst.op, |v| {
+                if !late(v, at) && !wanted[v as usize] && !feeds.contains(&v) {
+                    feeds.push(v);
+                }
+            });
+        }
+        // The variables the instructions bind are bound at the end: each to
+        // what it was bound to last, if that is there then.
+        let mut there = vec![false; nregs];
+        trace.inputs.iter().for_each(|(_, v)| there[*v as usize] = true);
+        outputs.iter().for_each(|v| there[*v as usize] = true);
+        for inst in trace.body.iter().filter(|inst| matches!(inst.stage, Stage::Before | Stage::After)) {
+            if inst.dst != NONE {
+                there[inst.dst as usize] = true;
+            }
+        }
+        let mut bound: Vec<(u32, PathValue)> = Vec::new();
+        for (slot, v) in &trace.bound {
+            bound.retain(|(other, _)| other != slot);
+            bound.push((*slot, if there[*v as usize] { *v } else { UNDEF }));
+        }
+        Path {
+            root,
+            land,
+            resume,
+            nregs,
+            stages: stages_of(&trace.body),
+            handed: handed_of(&trace.inputs, &trace.body, &writes, &bound),
+            inputs: trace.inputs.clone(),
+            body: std::mem::take(&mut trace.body),
+            feeds,
+            outputs,
+            exits,
+            writes,
+            clears,
+            bound,
+            operators: std::mem::take(&mut trace.operators),
+            ends,
+            shape: std::mem::take(&mut trace.shape),
+            source: trace.source.clone(),
+            branches,
+            first: trace.first,
+            provisional,
+            exported: Shared::new(Vec::new()),
+            registers: Shared::new(Vec::new()),
+        }
     }
 }

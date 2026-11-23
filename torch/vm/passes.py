@@ -98,15 +98,20 @@ class ModuleShortcuts(BuiltinPass):
 
 @dataclasses.dataclass(frozen=True, repr=False)
 class Graphs(BuiltinPass):
-    """Makes graphs of the tensor work of each basic block.
+    """Makes graphs of the tensor work of a function.
 
-    A graph is a run of the operations of a block that the engine calls
-    directly (:class:`ResolveDispatch`), with what sits between them: reads of
-    globals and attributes, constants, arithmetic on sizes. It ends in front
-    of everything else: a call of a Python function, an operation that writes
-    to one of its arguments or draws random numbers, a number read from a
-    tensor. ``torch.vm.regions(fn)`` reports the graphs, and what was left out
-    of them with the reason.
+    A graph starts at an operation that the engine calls directly
+    (:class:`ResolveDispatch`), or with the function, and goes on along the
+    way a call takes through the function: through the branches as they go,
+    with what sits between the
+    operations (reads of globals and attributes, constants, arithmetic on
+    sizes). Each way a branch went is checked
+    on later calls; a call that goes another way gets a path of its own. A
+    graph ends in front of everything else: a call of a Python function, an
+    operation that writes to one of its arguments or draws random numbers, a
+    number read from a tensor and the branch on it, a store into an object.
+    ``torch.vm.regions(fn)`` reports the graphs, and what was left out of
+    them with the reason.
 
     The engine runs a graph itself: the same kernels, on the same values, in
     the same order, on the autograd tape of eager mode. With this pass alone a
@@ -140,8 +145,8 @@ class Graphs(BuiltinPass):
     a property or a ``__getattr__`` leaves the graph to the engine.
 
     Args:
-        min_ops: a run with fewer operations than this is no graph: it is not
-            reported as one, and not exported.
+        min_ops: a path with fewer operations than this is no graph: it is
+            not reported as one, and not exported.
         max_variants: how many exported forms a graph has, one per kind of
             call; the form that ran last is tried first. The calls of
             further kinds run its operations as they are.

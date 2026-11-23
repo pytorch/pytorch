@@ -13,7 +13,7 @@
 
 use crate::analysis::BitSet;
 use crate::capi::{self, SiteSlot, TCFG_METHOD};
-use crate::graph::{GraphSite, Graphs, Left, Path};
+use crate::graph::{GraphSite, Graphs, Left};
 use crate::ir::*;
 use crate::pyffi::{self, PyObj};
 use crate::vm::Compiled;
@@ -263,10 +263,10 @@ pub struct Unit {
     /// for a block that keeps failing its guards, so that it settles on code
     /// that holds for every input.
     pub speculate: bool,
-    /// The graphs the graph pass made of the unit, each with its path and
-    /// the position of the path's first instruction in `insts`, and what it
-    /// left out of them.
-    pub graphs: Vec<(Arc<GraphSite>, Path, usize)>,
+    /// The graphs that start in the unit, each with the position of its
+    /// first instruction in `insts`, and what the graph pass left out of
+    /// them.
+    pub graphs: Vec<(Arc<GraphSite>, usize)>,
     pub left: Vec<Left>,
 }
 
@@ -911,6 +911,7 @@ pub fn finalize(unit: Unit, cf: &Compiled, id: u32) -> Result<BlockCode, String>
         }
     }
     let mut insts: Vec<Inst> = Vec::with_capacity(unit.insts.len());
+    let mut origins: Vec<u32> = Vec::with_capacity(unit.insts.len());
     // Specialized code must run the generic instructions it keeps in their
     // original order, and a guard must resume exactly at the first generic
     // instruction that has not run yet.
@@ -951,6 +952,7 @@ pub fn finalize(unit: Unit, cf: &Compiled, id: u32) -> Result<BlockCode, String>
             available.insert(inst.dst);
         }
         insts.push(inst);
+        origins.push(u.origin);
     }
     let mut missing = None;
     unit.term.for_each_use(|v| {
@@ -967,14 +969,28 @@ pub fn finalize(unit: Unit, cf: &Compiled, id: u32) -> Result<BlockCode, String>
         return Err(format!("{} is needed after the block but not defined", func.value_name(v)));
     }
     let term_kills = crate::analysis::compute_kills(&mut insts, &unit.term, &analysis.live_out[b]);
-    // A path releases what its instructions release.
-    let mut graphs = Vec::with_capacity(unit.graphs.len());
-    for (site, mut path, first) in unit.graphs {
-        for (step, inst) in path.body.iter_mut().zip(&insts[first..]) {
-            step.kills = inst.kills.clone();
+    let graphs: Vec<Arc<GraphSite>> = unit.graphs.iter().map(|(site, _)| site.clone()).collect();
+    // The graphs are entered from a copy of the code, which runs in its
+    // place while one of them has something to do.
+    let mut entering = None;
+    if !unit.graphs.is_empty() {
+        let (mut with, mut at) = (insts.clone(), origins.clone());
+        for (site, first) in unit.graphs.iter().rev() {
+            let bc = with.get(*first).map_or(func.blocks[b].term_bc, |inst| inst.bc);
+            with.insert(*first, Inst { dst: NONE, op: Op::Graph(site.clone()), bc, kills: Vec::new() });
+            at.insert(*first, NONE);
         }
-        site.install(path, id);
-        graphs.push(site);
+        entering = Some(Arc::new(BlockCode {
+            insts: with,
+            term: unit.term.clone(),
+            term_kills: term_kills.clone(),
+            entry_guards: unit.entry_guards.clone(),
+            id,
+            origins: at,
+            graphs: graphs.clone(),
+            left: Vec::new(),
+            entering: None,
+        }));
     }
     Ok(BlockCode {
         insts,
@@ -982,7 +998,9 @@ pub fn finalize(unit: Unit, cf: &Compiled, id: u32) -> Result<BlockCode, String>
         term_kills,
         entry_guards: unit.entry_guards,
         id,
+        origins,
         graphs,
         left: unit.left,
+        entering,
     })
 }

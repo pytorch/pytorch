@@ -71,8 +71,9 @@ default list::
     def forward(model, x): ...
 
 A list of one's own is the default one with more passes. The engine makes
-graphs of the tensor work of each block when it is asked to, and runs them
-itself, with the results of eager mode; the pass that hands such a graph to
+graphs of the tensor work of a function when it is asked to, along the ways
+its calls take through it, and runs them itself, with the results of eager
+mode; the pass that hands such a graph to
 Inductor is the one to ask for when the last bits of a result may differ::
 
     P = torch.vm.passes
@@ -520,11 +521,15 @@ def regions(fn: Any) -> list[dict[str, Any]]:
     """What :class:`passes.Graphs` made of a rewritten function and of what it calls.
 
     One dict per graph, with ``where`` (function, block and instruction of its
-    first operation), ``state``, ``ops`` (how many
-    operations it has) and ``operators`` (which, as the dispatcher names
+    first operation, which is its name whether its path starts there or
+    with the function), ``state``, ``ops`` (how many operations the path
+    that ran last has) and ``operators`` (which, as the dispatcher names
     them), ``inputs`` and ``outputs`` (how many values it takes and gives),
-    ``ends`` (the block and the instruction the function goes on at behind
-    it) and ``why`` (it ends there: what the instruction behind it is),
+    ``branches`` (how many branches and loop tests it goes through),
+    ``paths`` (how many ways
+    through the function were taken down), ``ends`` (per path, the block and
+    the instruction the function goes on at behind it) and ``why`` (it ends
+    there: what the instruction behind it is),
     ``variants`` (how many exported forms it has), ``exports`` (how many
     times it was handed to the passes over graphs), and ``hits`` and
     ``misses`` (the calls that ran what was made of it, and those that came
