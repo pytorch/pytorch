@@ -2398,16 +2398,49 @@ unsafe fn draws_in_c(o: Obj, depth: usize) -> bool {
         return false;
     }
     let own = OWN.get_or_init(|| {
-        const MADE: &std::ffi::CStr = c"[enumerate, zip] + [type(iter(over)) for over in ([], (), range(1), range(1 << 80), {}, {}.keys(), {}.values(), {}.items(), '', '\\u20ac')] + [type(reversed([]))]";
-        let py = pyo3::Python::assume_attached();
-        let classes = py.eval(MADE, None, None).map_or(null_mut(), |made| made.into_ptr());
-        let mut own = Vec::new();
-        if !classes.is_null() && ffi::PyList_Check(classes) != 0 {
-            own.extend((0..ffi::PyList_GET_SIZE(classes)).map(|i| ffi::PyList_GET_ITEM(classes, i) as usize));
-        }
+        // Made of the interpreter's own containers, by its functions of C:
+        // no name is looked up where the user could have put another.
+        let class_of = |made: Obj| {
+            let class = if made.is_null() { 0 } else { ffi::Py_TYPE(made) as usize };
+            xdecref(made);
+            class
+        };
+        let over = |held: Obj| {
+            let class = if held.is_null() { 0 } else { class_of(ffi::PyObject_GetIter(held)) };
+            xdecref(held);
+            class
+        };
+        let called = |class: *mut ffi::PyTypeObject, with: Obj| {
+            let made = if with.is_null() { null_mut() } else { ffi::PyObject_CallOneArg(class as Obj, with) };
+            xdecref(with);
+            made
+        };
+        let view = |name: &std::ffi::CStr| {
+            let (dict, name) = (ffi::PyDict_New(), ffi::PyUnicode_FromString(name.as_ptr()));
+            let made = if dict.is_null() || name.is_null() { null_mut() } else { ffi::PyObject_CallMethodNoArgs(dict, name) };
+            xdecref(dict);
+            xdecref(name);
+            made
+        };
+        let range = std::ptr::addr_of_mut!(ffi::PyRange_Type);
+        let own = vec![
+            std::ptr::addr_of_mut!(ffi::PyEnum_Type) as usize,
+            std::ptr::addr_of_mut!(ffi::PyZip_Type) as usize,
+            over(ffi::PyList_New(0)),
+            over(ffi::PyTuple_New(0)),
+            over(called(range, ffi::PyLong_FromLong(1))),
+            over(called(range, ffi::PyLong_FromDouble(1e30))),
+            over(ffi::PyDict_New()),
+            over(view(c"keys")),
+            over(view(c"values")),
+            over(view(c"items")),
+            over(ffi::PyUnicode_FromString(c"".as_ptr())),
+            over(ffi::PyUnicode_FromString(c"\u{20ac}".as_ptr())),
+            class_of(called(std::ptr::addr_of_mut!(ffi::PyReversed_Type), ffi::PyList_New(0))),
+        ];
         // The classes are the interpreter's, and stay.
         ffi::PyErr_Clear();
-        own
+        own.into_iter().filter(|class| *class != 0).collect()
     });
     let class = ffi::Py_TYPE(o);
     let Some(which) = own.iter().position(|other| *other == class as usize) else {

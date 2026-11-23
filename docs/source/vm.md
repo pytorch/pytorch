@@ -3778,9 +3778,7 @@ What graphs do not do at this stage:
   `shape`, `requires_grad` or `grad`, which a path takes for a read that
   runs no code.
 - `f_lasti` of the function's frame is not the interpreter's (`f_lineno` and
-  `tb_lineno` are). A generator's `finally` that looks at its caller's frame
-  when a `for` that breaks closes the generator finds the number variables
-  of the loop stale or unbound.
+  `tb_lineno` are).
 - A call that starts while a trace function is set (`sys.settrace`) is the
   interpreter's, and the trace function gets every line as in eager mode.
   One that is set during a call that the engine is running (by a callee,
@@ -3808,6 +3806,14 @@ What graphs do not do at this stage:
   shim, a test harness that patches it), a function with `Graphs()` in the
   list does not come back from the call that takes its path down: the
   engine imports through it there, and waits for itself.
+- A `for` that is left by `break`, `return` or an exception has its
+  generator closed in front of the loop's body, not where the loop is left;
+  so ends any other iterator, and a list that only its iterator holds. A
+  function whose body, or a `finally` on its way out, reads what that end
+  changes computes other values than in eager mode, with the default passes
+  as well. The value of a `return` whose `finally` returns or breaks ends in
+  front of the `finally` in the same way: what the interpreter keeps on its
+  stack is let go of behind its last use, not where the interpreter pops it.
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported.
