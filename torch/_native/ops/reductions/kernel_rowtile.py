@@ -224,7 +224,10 @@ def reduction_order(
     if order is None:
         return "inner_tree" if inner_tree_order_enabled() else "unordered"
     if order not in ("unordered", "inner_tree"):
-        raise ValueError(f"unknown reduction order: {order!r}")
+        raise ValueError(
+            f"unknown reduction order {order!r}: expected None, 'unordered' or "
+            "'inner_tree' (the kernel launchers spell unordered 'linear')"
+        )
     return order
 
 
@@ -235,7 +238,7 @@ def inner_tree_fallback(reason: str, *, explicit: bool = False) -> None:
     """Fall back from an unservable inner-tree request: raise for an explicit order= or
     the strict env gate, else warn once per reason."""
     if explicit:
-        raise ValueError(reason)
+        raise ValueError(f"order='inner_tree' cannot be honoured: {reason}")
     if _inner_tree_env() == _INNER_TREE_STRICT:
         raise ValueError(f"{_INNER_TREE_ENV}=strict cannot be honoured: {reason}")
     if reason not in _warned_inner_tree_reasons:
@@ -243,7 +246,8 @@ def inner_tree_fallback(reason: str, *, explicit: bool = False) -> None:
         strict = f"{_INNER_TREE_ENV}={_INNER_TREE_STRICT}"
         warnings.warn(
             f"{_INNER_TREE_ENV} could not be honoured ({reason}); such reductions use "
-            f"unordered kernels. Set {strict} to raise instead."
+            f"unordered kernels. Set {strict} to raise instead.",
+            stacklevel=3,
         )
 
 
@@ -293,6 +297,7 @@ class _ItreePlan(NamedTuple):
     # COMBINE shape only: partials per row per cp.async-staged smem tile. 0 folds straight from
     # global. Also bit-neutral -- staging moves where the operand is read from, not the chain.
     combine_tile: int = 0
+    # Staged fold unroll factor; 0 with a nonzero combine_tile unrolls a whole tile.
     combine_unroll: int = 0
 
     @property

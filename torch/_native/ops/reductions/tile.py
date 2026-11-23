@@ -32,7 +32,9 @@ def align_bytes(N: int, itemsize: int) -> int:
 def _decode_offset(
     linear, divs, strides, npairs, native_div: cutlass.Constexpr = False
 ):
-    # Mixed-radix flat offset with only pair count compiled.
+    # Mixed-radix flat offset with only pair count compiled. Callers pass FastDivmod
+    # divisors (native_div=False) only for linear below 2^31; wider linear values need
+    # native_div=True.
     rem = linear
     if npairs == 0:
         return cutlass.Int64(0)
@@ -1663,7 +1665,8 @@ class TileReduce:
         # Compute output indices after folding to reduce live registers.
         out_base = unit * const_expr(self.nslots)
         if const_expr(self.axis in ("row", "general")):
-            # Split inner-tree writes by block; other row/general paths write by unit.
+            # Split inner-tree plans write one partial per (block, row-in-block) slot;
+            # other row/general paths write by unit.
             part_base = (
                 Int32(bx) * const_expr(self.itree.rows_per_block) + row_in_block
                 if const_expr(
