@@ -75,7 +75,10 @@ from ..runtime.tiling import (
     block_to_prefix,
     get_axis_prefix,
     get_max_block,
+    get_pointwise_prefixes,
+    get_z_prefixes,
     is_reduction_prefix,
+    is_z_prefix,
 )
 from ..scheduler import (
     BaseSchedulerNode,
@@ -144,7 +147,6 @@ from .simd import (
     PartialAccumulate,
     SIMDKernel,
     SIMDScheduling,
-    TRITON_MAX_TENSOR_DIMS,
 )
 from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
@@ -178,6 +180,8 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
+
+TRITON_MAX_TENSOR_DESCRIPTOR_DIMS = 5
 
 
 def get_triton_reduction_function(reduction_type):
@@ -4548,7 +4552,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     stride_sorter_cls=stride_sorter_cls,
                 )
                 if isinstance(options, TensorDescriptorOptions):
-                    if len(options.params.block_shape) > TRITON_MAX_TENSOR_DIMS:
+                    if (
+                        len(options.params.block_shape)
+                        > TRITON_MAX_TENSOR_DESCRIPTOR_DIMS
+                    ):
                         return None
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
@@ -8400,6 +8407,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         inductor_meta = {
             "grid_type": self._get_grid_type().__name__,
+            "rank": len(get_pointwise_prefixes(self.numels)),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
@@ -8647,6 +8655,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if self.is_native_matmul:
                 return triton_heuristics.BatchMatmulGrid3D
             return triton_heuristics.Grid3D
+        elif n > 3:
+            return triton_heuristics.GridND
         raise ValueError(f"Unsupported number of dimensions: {n}")
 
     def add_numel_to_call_args(self, name, call_args, arg_types):
@@ -8737,11 +8747,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return f"tl.full({size}, {value}, {index_dtype})"
 
     def iteration_ranges_get_pid(self, entry: IterationRangesRoot) -> str:
+        z_prefixes = get_z_prefixes(self.numels)
+        if len(z_prefixes) > 1 and is_z_prefix(entry.prefix):
+            pid = "tl.program_id(2)"
+            for prefix in z_prefixes[:-1]:
+                blocks = f"tl.cdiv({prefix}numel, {prefix.upper()}BLOCK)"
+                if prefix == entry.prefix:
+                    return f"({pid} % {blocks}).to({self.index_dtype})"
+                pid = f"({pid} // {blocks})"
+            return f"{pid}.to({self.index_dtype})"
         if entry.grid_dim is None:
             raise AssertionError("entry.grid_dim must not be None")
         key = f"tl.program_id({entry.grid_dim})"
         # y_grid has a limit, so express it in terms of y and z in case of overflow.
-        # z grid is only exercised when max_tiles == 3 (off by default).
+        # Overflow can use the Z launch axis only when no logical Z tile uses it.
         if self.needs_yz_grid_overflow(entry):
             # For ynumel larger than max_ygrid, we need to use zdim.
             # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
