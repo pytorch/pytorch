@@ -1913,6 +1913,11 @@ def _sink_waits_iterative_internal(
                         group_colls[candidate] = (comm_time, comp_time)
                         if not contains_async_collective(candidate):
                             group_runtime += runtimes[candidate]
+                    elif (
+                        config_comms.sink_iterative_use_runtime_estimations
+                        and config_comms.sink_waits_iterative_count_group_compute
+                    ):
+                        group_runtime += runtimes[candidate]
 
                     group_peak_memory = max(
                         group_peak_memory, _curr_memory[candidate][0]

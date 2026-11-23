@@ -27,6 +27,11 @@ sink_waits_iterative_debug_limit_to_sink: int | None = (
 # Should be used with config.runtime_estimations_mms_benchmark = True
 reorder_iterative_use_runtime_estimations: bool = False
 sink_iterative_use_runtime_estimations: bool = False
+# With sink_iterative_use_runtime_estimations, also count the runtime of non-collective
+# nodes that move together with a sinking wait.
+sink_waits_iterative_count_group_compute: bool = (
+    os.getenv("TORCHINDUCTOR_SINK_WAITS_ITERATIVE_COUNT_GROUP_COMPUTE", "0") == "1"
+)
 
 # Broadcast runtime estimations doing real Collective operation between all ranks.
 # If non-deterministic runtime estimations are used this must be used to make
