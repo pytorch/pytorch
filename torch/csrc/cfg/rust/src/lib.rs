@@ -15,6 +15,7 @@ mod ir;
 mod pyapi;
 mod pyffi;
 mod spec;
+mod unroll;
 mod vm;
 
 use pyo3::prelude::*;

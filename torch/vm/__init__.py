@@ -29,9 +29,10 @@ such a guard fails, only the basic block that carries it is rewritten again.
 
 What is done to a function is one ordered list of passes, ``passes=``, and a
 pass says what it is over. One over the control-flow graph rewrites the
-function once, before it runs: calls are inlined. One over a basic block
-rewrites a block after its first runs were watched: tensor operations become
-direct calls of their kernels. The bare decorator is the default list::
+function once, before it runs: calls are inlined, loops unrolled. One over a
+basic block rewrites a block after its first runs were watched: tensor
+operations become direct calls of their kernels. The bare decorator is the
+default list::
 
     @torch.vm(passes=torch.vm.DEFAULT_PASSES)
     def forward(model, x): ...
@@ -51,7 +52,7 @@ from typing import Any
 import torch
 
 from . import passes
-from .passes import BuiltinPass
+from .passes import BuiltinPass, Inline, Unroll
 
 
 __all__ = ["DEFAULT_PASSES", "Unsupported", "is_available", "passes", "vm"]
@@ -63,6 +64,7 @@ class Unsupported(RuntimeError):
 
 DEFAULT_PASSES: tuple[BuiltinPass, ...] = (
     passes.Inline(),
+    passes.Unroll(),
     passes.ResolveDispatch(),
     passes.TensorAccessors(),
     passes.MethodCalls(),
@@ -122,7 +124,12 @@ def _plan(given: Iterable[Any]) -> tuple[list[Any], dict[str, bool]]:
     twice = sorted({kind.__name__ for kind in own if own.count(kind) > 1})
     if twice:
         raise ValueError(f"torch.vm.passes.{twice[0]} is given more than once")
-    whole = dict.fromkeys(("inline",), False)
+    if Inline in own and Unroll in own and own.index(Unroll) < own.index(Inline):
+        raise ValueError(
+            "passes has Unroll in front of Inline: the engine inlines first, so "
+            "that the loops of an inlined function are unrolled too"
+        )
+    whole = dict.fromkeys(("inline", "unroll"), False)
     for one in listed:
         if isinstance(one, BuiltinPass) and one.kind == "cfg":
             whole[one.engine] = True
@@ -209,6 +216,7 @@ def vm(
             skip_autograd=skip_autograd,
             unboxed=unboxed,
             inline=whole["inline"],
+            unroll=whole["unroll"],
             max_versions=max_versions,
             max_respecializations=max_respecializations,
         )

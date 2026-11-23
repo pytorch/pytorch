@@ -1023,6 +1023,7 @@ pub fn build(py: Python<'_>, table: &OpcodeTable, func: &Bound<'_, PyAny>) -> Py
     let filename: String = code.getattr("co_filename")?.extract()?;
     Ok(Function {
         origins: vec![Origin { name: name.clone(), filename: filename.clone(), call_bc: 0 }],
+        unrolled: 0,
         name,
         qualname: code.getattr("co_qualname")?.extract()?,
         filename,
