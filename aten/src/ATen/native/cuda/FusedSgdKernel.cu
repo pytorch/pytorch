@@ -10,6 +10,19 @@ namespace at::native {
 
 namespace {
 
+const double* get_grad_clip_coef_ptr(
+    const std::optional<at::Tensor>& coef,
+    const at::Tensor& param) {
+  if (!coef.has_value()) {
+    return nullptr;
+  }
+  TORCH_CHECK(
+      coef->device() == param.device() && coef->scalar_type() == kDouble &&
+          coef->numel() == 1,
+      "grad_clip_coef must be a one-element float64 tensor on the params device");
+  return coef->data_ptr<double>();
+}
+
 constexpr uint8_t kParamIdx = 0;
 constexpr uint8_t kGradIdx = 1;
 constexpr uint8_t kMomentumBufferIdx = 2;
@@ -24,7 +37,8 @@ C10_DEVICE __forceinline__ void sgd_math(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const float* grad_scale_ptr) {
+    const float* grad_scale_ptr,
+    const double* grad_clip_coef_ptr) {
 #pragma unroll
   for (int ii = 0; ii < kILP; ii++) {
     auto p = static_cast<opmath_t>(r_args[kParamIdx][ii]);
@@ -33,6 +47,10 @@ C10_DEVICE __forceinline__ void sgd_math(
     if (grad_scale_ptr) {
       g /= static_cast<opmath_t>(*grad_scale_ptr);
       r_args[kGradIdx][ii] = g;
+    }
+    if (grad_clip_coef_ptr) {
+      g = static_cast<opmath_t>(static_cast<scalar_t>(
+          g * static_cast<opmath_t>(*grad_clip_coef_ptr)));
     }
     if (maximize) {
       g *= -1.0;
@@ -77,7 +95,8 @@ struct FusedSgdMathFunctor {
       const bool maximize,
       const bool is_first_step,
       const float* grad_scale_ptr,
-      const float* found_inf_ptr) {
+      const float* found_inf_ptr,
+      const double* grad_clip_coef_ptr) {
     if (found_inf_ptr && *found_inf_ptr == 1) {
       return;
     }
@@ -115,7 +134,8 @@ struct FusedSgdMathFunctor {
             nesterov,
             maximize,
             is_first_step,
-            grad_scale_ptr);
+            grad_scale_ptr,
+            grad_clip_coef_ptr);
         load_store(args[0], r_args[0], i_start, 0);
         if (grad_scale_ptr) {
           load_store(args[1], r_args[1], i_start, 0);
@@ -137,7 +157,8 @@ struct FusedSgdMathFunctor {
             nesterov,
             maximize,
             is_first_step,
-            grad_scale_ptr);
+            grad_scale_ptr,
+            grad_clip_coef_ptr);
         store_args(args[0], r_args[0], i_start, chunk_size, n);
         if (grad_scale_ptr) {
           store_args(args[1], r_args[1], i_start, chunk_size, n);
@@ -162,7 +183,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const bool maximize,
     const bool is_first_step,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef) {
   TORCH_CHECK_GT(momentum, 0);
   TORCH_CHECK(at::native::check_fast_path_restrictions(
       {params, grads, momentum_buffer_list}));
@@ -170,6 +192,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
+  const double* grad_clip_coef_ptr =
+      get_grad_clip_coef_ptr(grad_clip_coef, params[0]);
   float* lr_ptr = nullptr;
 
   auto tensor_lists = c10::make_nested<Tensor>(
@@ -192,7 +216,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
             maximize,
             is_first_step,
             grad_scale_ptr,
-            found_inf_ptr);
+            found_inf_ptr,
+            grad_clip_coef_ptr);
       });
 }
 
@@ -208,7 +233,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
     const bool maximize,
     const bool is_first_step,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef) {
   if (lr.is_cpu()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -222,7 +248,8 @@ void _fused_sgd_with_momentum_kernel_cuda_(
         maximize,
         is_first_step,
         grad_scale,
-        found_inf);
+        found_inf,
+        grad_clip_coef);
     return;
   }
   TORCH_CHECK_GT(momentum, 0);
@@ -246,6 +273,9 @@ void _fused_sgd_with_momentum_kernel_cuda_(
   float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
 
+  const double* grad_clip_coef_ptr =
+      get_grad_clip_coef_ptr(grad_clip_coef, params[0]);
+
   auto tensor_lists = c10::make_nested<Tensor>(
       params.vec(), grads.vec(), momentum_buffer_list.vec());
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -266,13 +296,14 @@ void _fused_sgd_with_momentum_kernel_cuda_(
             maximize,
             is_first_step,
             grad_scale_ptr,
-            found_inf_ptr);
+            found_inf_ptr,
+            grad_clip_coef_ptr);
       });
 }
 
 } // namespace
 
-void _fused_sgd_kernel_cuda_(
+void _fused_sgd_kernel_cuda_impl_(
     at::TensorList params,
     at::TensorList grads,
     at::TensorList momentum_buffer_list,
@@ -284,7 +315,8 @@ void _fused_sgd_kernel_cuda_(
     const bool maximize,
     const bool is_first_step,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef) {
   if (!momentum_buffer_list.empty()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -298,7 +330,8 @@ void _fused_sgd_kernel_cuda_(
         maximize,
         is_first_step,
         grad_scale,
-        found_inf);
+        found_inf,
+        grad_clip_coef);
     return;
   }
   TORCH_CHECK_EQ(momentum, 0);
@@ -311,6 +344,8 @@ void _fused_sgd_kernel_cuda_(
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
+  const double* grad_clip_coef_ptr =
+      get_grad_clip_coef_ptr(grad_clip_coef, params[0]);
   float* lr_ptr = nullptr;
 
   auto tensor_lists = c10::make_nested<Tensor>(params.vec(), grads.vec());
@@ -332,11 +367,12 @@ void _fused_sgd_kernel_cuda_(
             maximize,
             /* is_first_step */ false,
             grad_scale_ptr,
-            found_inf_ptr);
+            found_inf_ptr,
+            grad_clip_coef_ptr);
       });
 }
 
-void _fused_sgd_kernel_cuda_(
+void _fused_sgd_kernel_cuda_impl_(
     at::TensorList params,
     at::TensorList grads,
     at::TensorList momentum_buffer_list,
@@ -348,7 +384,8 @@ void _fused_sgd_kernel_cuda_(
     const bool maximize,
     const bool is_first_step,
     const std::optional<at::Tensor>& grad_scale,
-    const std::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& found_inf,
+    const std::optional<at::Tensor>& grad_clip_coef) {
   if (!momentum_buffer_list.empty()) {
     _fused_sgd_with_momentum_kernel_cuda_(
         params,
@@ -362,11 +399,12 @@ void _fused_sgd_kernel_cuda_(
         maximize,
         is_first_step,
         grad_scale,
-        found_inf);
+        found_inf,
+        grad_clip_coef);
     return;
   }
   if (lr.is_cpu()) {
-    _fused_sgd_kernel_cuda_(
+    _fused_sgd_kernel_cuda_impl_(
         params,
         grads,
         momentum_buffer_list,
@@ -378,7 +416,8 @@ void _fused_sgd_kernel_cuda_(
         maximize,
         is_first_step,
         grad_scale,
-        found_inf);
+        found_inf,
+        grad_clip_coef);
     return;
   }
   TORCH_CHECK_EQ(momentum, 0);
@@ -405,6 +444,9 @@ void _fused_sgd_kernel_cuda_(
   float* found_inf_ptr =
       found_inf.has_value() ? found_inf->data_ptr<float>() : nullptr;
 
+  const double* grad_clip_coef_ptr =
+      get_grad_clip_coef_ptr(grad_clip_coef, params[0]);
+
   auto tensor_lists = c10::make_nested<Tensor>(params.vec(), grads.vec());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf,
@@ -424,8 +466,131 @@ void _fused_sgd_kernel_cuda_(
             maximize,
             /* is_first_step */ false,
             grad_scale_ptr,
-            found_inf_ptr);
+            found_inf_ptr,
+            grad_clip_coef_ptr);
       });
+}
+
+void _fused_sgd_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList momentum_buffer_list,
+    const double weight_decay,
+    const double momentum,
+    const double lr,
+    const double dampening,
+    const bool nesterov,
+    const bool maximize,
+    const bool is_first_step,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  _fused_sgd_kernel_cuda_impl_(
+      params,
+      grads,
+      momentum_buffer_list,
+      weight_decay,
+      momentum,
+      lr,
+      dampening,
+      nesterov,
+      maximize,
+      is_first_step,
+      grad_scale,
+      found_inf,
+      std::nullopt);
+}
+
+void _fused_sgd_grad_clip_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList momentum_buffer_list,
+    const double weight_decay,
+    const double momentum,
+    const double lr,
+    const double dampening,
+    const bool nesterov,
+    const bool maximize,
+    const bool is_first_step,
+    const at::Tensor& grad_clip_coef,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  TORCH_CHECK(
+      !grad_scale.has_value(), "Unscale gradients before fused SGD clipping");
+  _fused_sgd_kernel_cuda_impl_(
+      params,
+      grads,
+      momentum_buffer_list,
+      weight_decay,
+      momentum,
+      lr,
+      dampening,
+      nesterov,
+      maximize,
+      is_first_step,
+      grad_scale,
+      found_inf,
+      grad_clip_coef);
+}
+
+void _fused_sgd_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList momentum_buffer_list,
+    const double weight_decay,
+    const double momentum,
+    const at::Tensor& lr,
+    const double dampening,
+    const bool nesterov,
+    const bool maximize,
+    const bool is_first_step,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  _fused_sgd_kernel_cuda_impl_(
+      params,
+      grads,
+      momentum_buffer_list,
+      weight_decay,
+      momentum,
+      lr,
+      dampening,
+      nesterov,
+      maximize,
+      is_first_step,
+      grad_scale,
+      found_inf,
+      std::nullopt);
+}
+
+void _fused_sgd_grad_clip_kernel_cuda_(
+    at::TensorList params,
+    at::TensorList grads,
+    at::TensorList momentum_buffer_list,
+    const double weight_decay,
+    const double momentum,
+    const at::Tensor& lr,
+    const double dampening,
+    const bool nesterov,
+    const bool maximize,
+    const bool is_first_step,
+    const at::Tensor& grad_clip_coef,
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
+  TORCH_CHECK(
+      !grad_scale.has_value(), "Unscale gradients before fused SGD clipping");
+  _fused_sgd_kernel_cuda_impl_(
+      params,
+      grads,
+      momentum_buffer_list,
+      weight_decay,
+      momentum,
+      lr,
+      dampening,
+      nesterov,
+      maximize,
+      is_first_step,
+      grad_scale,
+      found_inf,
+      grad_clip_coef);
 }
 
 } // namespace at::native
