@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
-    onlyCUDA,
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
@@ -506,18 +505,6 @@ class TestScatterGatherDevice(TestCase):
         self.assertIs(result, out)
         self.assertEqual(result.cpu(), expected, atol=0, rtol=0)
 
-    @onlyCUDA
-    @serialTest()
-    @largeTensorTest("5GB")
-    def test_scatter_copy_large_slice(self, device):
-        # The last valid vector fits int32, but the final loop increment does not.
-        width = 2**29
-        src = torch.ones((1, width), device=device).expand(2, width)
-        dst = torch.zeros((1, width), device=device)
-        index = torch.zeros((2, 1), device=device, dtype=torch.int64).expand_as(src)
-        dst.scatter_(0, index, src)
-        self.assertEqual(dst[0, [0, width // 2, width - 1]], torch.ones(3, device=device))
-
     @dtypes(torch.float16, torch.float32, torch.complex64)
     def test_scatter__scalar(self, device, dtype):
         self._test_scatter_base(torch.Tensor.scatter_, device=device, dtype=dtype,
@@ -677,7 +664,56 @@ class TestScatterGatherDevice(TestCase):
                     expected_result[1] = 0
                 self.assertEqual(input, expected_result)
 
-    @onlyCUDA
+    @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
+    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
+    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
+    def test_scatter_reduce_amin(self, device, dtype):
+        for include_self in (True, False):
+            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
+                                    is_scalar=False, reduction='amin', unique_indices=False,
+                                    include_self=include_self)
+            # simple test for nan/inf propagation
+            if (dtype.is_floating_point):
+                input = torch.zeros(3, device=device, dtype=dtype)
+                src = torch.tensor([1, float('nan'), -2, -float('inf'), float('inf'), float('inf')], device=device, dtype=dtype)
+                idx = torch.tensor([0, 0, 1, 1, 2, 2], device=device)
+                input.scatter_reduce_(0, idx, src, 'amin', include_self=include_self)
+                expected_result = torch.tensor([float('nan'), -float('inf'), float('inf')], device=device, dtype=dtype)
+                if (include_self):
+                    expected_result[2] = 0
+                self.assertEqual(input, expected_result)
+
+    @dtypes(torch.float32)
+    def test_scatter_add_broadcasted_index_deterministic(self, device, dtype):
+        for d in (0, 1):
+            inp = torch.randn(3, 4, 5, device=device, dtype=dtype)
+            idx_1d = torch.randint(3, (10,), device=device)
+            src_shape = list(inp.shape)
+            src_shape[d] = 10
+            src = torch.randn(src_shape, device=device, dtype=dtype)
+            idx_view_shape = [1] * inp.ndim
+            idx_view_shape[d] = 10
+            idx = idx_1d.view(idx_view_shape).expand(src_shape)
+            ref = inp.clone().scatter_add_(d, idx, src)
+            with DeterministicGuard(True):
+                res = inp.clone().scatter_add_(d, idx, src)
+            self.assertEqual(res, ref)
+
+
+class TestScatterGatherCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @serialTest()
+    @largeTensorTest("5GB")
+    def test_scatter_copy_large_slice(self, device):
+        # The last valid vector fits int32, but the final loop increment does not.
+        width = 2**29
+        src = torch.ones((1, width), device=device).expand(2, width)
+        dst = torch.zeros((1, width), device=device)
+        index = torch.zeros((2, 1), device=device, dtype=torch.int64).expand_as(src)
+        dst.scatter_(0, index, src)
+        self.assertEqual(dst[0, [0, width // 2, width - 1]], torch.ones(3, device=device))
+
     @unittest.skipUnless(
         TEST_CUDA and (torch.version.hip is not None or SM80OrLater),
         "requires CUDA sm80+; ROCm runs the generic kernel",
@@ -791,27 +827,6 @@ class TestScatterGatherDevice(TestCase):
                     self.assertEqual(actual[0, 3], 0)
                     self.assertEqual(actual[0, 4], 0)
 
-
-    @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
-    @dtypesIfCUDA(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
-    @dtypesIfXPU(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False, include_bool=False))
-    def test_scatter_reduce_amin(self, device, dtype):
-        for include_self in (True, False):
-            self._test_scatter_base(torch.Tensor.scatter_reduce_, device=device, dtype=dtype,
-                                    is_scalar=False, reduction='amin', unique_indices=False,
-                                    include_self=include_self)
-            # simple test for nan/inf propagation
-            if (dtype.is_floating_point):
-                input = torch.zeros(3, device=device, dtype=dtype)
-                src = torch.tensor([1, float('nan'), -2, -float('inf'), float('inf'), float('inf')], device=device, dtype=dtype)
-                idx = torch.tensor([0, 0, 1, 1, 2, 2], device=device)
-                input.scatter_reduce_(0, idx, src, 'amin', include_self=include_self)
-                expected_result = torch.tensor([float('nan'), -float('inf'), float('inf')], device=device, dtype=dtype)
-                if (include_self):
-                    expected_result[2] = 0
-                self.assertEqual(input, expected_result)
-
-    @onlyCUDA
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize(
         "op",
@@ -888,22 +903,6 @@ class TestScatterGatherDevice(TestCase):
                 expected.view(torch.int16),
                 msg=f"dim={dim}, index={i}, self strides {x.stride()}, offset {x.storage_offset()}",
             )
-
-    @dtypes(torch.float32)
-    def test_scatter_add_broadcasted_index_deterministic(self, device, dtype):
-        for d in (0, 1):
-            inp = torch.randn(3, 4, 5, device=device, dtype=dtype)
-            idx_1d = torch.randint(3, (10,), device=device)
-            src_shape = list(inp.shape)
-            src_shape[d] = 10
-            src = torch.randn(src_shape, device=device, dtype=dtype)
-            idx_view_shape = [1] * inp.ndim
-            idx_view_shape[d] = 10
-            idx = idx_1d.view(idx_view_shape).expand(src_shape)
-            ref = inp.clone().scatter_add_(d, idx, src)
-            with DeterministicGuard(True):
-                res = inp.clone().scatter_add_(d, idx, src)
-            self.assertEqual(res, ref)
 
 
 
@@ -1590,6 +1589,7 @@ instantiate_parametrized_tests(TestScatterAddOverrideCorrectness)
 
 instantiate_parametrized_tests(TestScatterGather)
 instantiate_device_type_tests(TestScatterGatherDevice, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestScatterGatherCUDA, globals(), only_for="cuda")
 
 if __name__ == '__main__':
     run_tests()
