@@ -88,6 +88,7 @@ pub enum Bc {
     WithExceptStart,
     BeforeWith,
     LoadAssertionError,
+    LoadBuildClass,
     FormatValue,
     Other,
 }
@@ -173,6 +174,7 @@ fn bc_from_name(name: &str) -> Bc {
         "WITH_EXCEPT_START" => Bc::WithExceptStart,
         "BEFORE_WITH" => Bc::BeforeWith,
         "LOAD_ASSERTION_ERROR" => Bc::LoadAssertionError,
+        "LOAD_BUILD_CLASS" => Bc::LoadBuildClass,
         "FORMAT_VALUE" => Bc::FormatValue,
         _ => Bc::Other,
     }

@@ -774,6 +774,13 @@ impl<'a> Builder<'a> {
                     stack.push(exit);
                     stack.push(entered);
                 }
+                Bc::LoadBuildClass => {
+                    // A class statement calls builtins.__build_class__ on the
+                    // function that holds its body.
+                    let name = self.name_const("__build_class__");
+                    let v = emit!(off, Op::LoadGlobal(name));
+                    stack.push(v);
+                }
                 Bc::LoadAssertionError => {
                     let obj = unsafe { PyObj::from_borrowed(ffi::PyExc_AssertionError) };
                     let c = self.extra_const(obj);
