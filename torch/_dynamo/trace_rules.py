@@ -3610,8 +3610,10 @@ NGB_SUPPRESS_MODULES: set[str] = set()
 # NGB-only module/qualname matching avoids importing test-only modules.
 NGB_SUPPRESS_FUNCTION_NAMES: dict[str, set[str]] = {
     "torch._prims_common.wrappers": {"_maybe_resize_out"},
+    "torch.testing._comparison": {"assert_close"},
     "torch.testing._creation": {"make_tensor"},
-    "torch.testing._internal.common_utils": {"TestCase.assertEqual"},
+    "torch.testing._internal.common_nn": {"get_new_module_tests"},
+    "torch.testing._internal.common_utils": {"TestCase.assertEqual", "TestCase.setUp"},
 }
 
 if torch.distributed.is_available():
