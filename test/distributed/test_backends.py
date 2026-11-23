@@ -4,7 +4,11 @@ import os
 
 import torch.distributed as dist
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 """
@@ -13,6 +17,16 @@ common backend API tests
 
 
 class TestMiscCollectiveUtils(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    _SUPPORTED_DEVICE_TYPES = ("cpu", "cuda", "mps", "xpu")
+
+    def setUp(self):
+        if self.device_type not in self._SUPPORTED_DEVICE_TYPES:
+            self.skipTest(
+                f"test_backends only covers in-tree devices, got {self.device_type}"
+            )
+        super().setUp()
+
     def test_device_to_backend_mapping(self, device) -> None:
         """
         Test device to backend mapping
@@ -59,9 +73,8 @@ class TestMiscCollectiveUtils(TestCase):
         dist.destroy_process_group()
 
 
-devices = ["cpu", "cuda", "mps", "xpu"]
 instantiate_device_type_tests(
-    TestMiscCollectiveUtils, globals(), only_for=devices, allow_mps=True, allow_xpu=True
+    TestMiscCollectiveUtils, globals(), allow_mps=True, allow_xpu=True
 )
 
 if __name__ == "__main__":
