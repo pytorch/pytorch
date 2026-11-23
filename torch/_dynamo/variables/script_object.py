@@ -463,6 +463,24 @@ class CustomClassObjectVariable(UserDefinedObjectVariable):
         # mp_subscript_impl loop in VariableTracker.call_method.
         return CustomClassObjectVariable.call_method(self, tx, "__getitem__", [key], {})
 
+    def tp_setattro_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        # A TorchScript object's attribute writes are not modeled; call_method
+        # rejects them with its usual graph break. Opaque objects keep the
+        # generic protocol, which checks their registered members.
+        obj = self.value
+        if isinstance(obj, FakeScriptObject):
+            obj = obj.real_obj
+        if not isinstance(obj, torch.ScriptObject):
+            return super().tp_setattro_impl(tx, name, value)
+        dunder = "__delattr__" if value is None else "__setattr__"
+        args = [name] if value is None else [name, value]
+        return self.call_method(tx, dunder, args, {})
+
     # We only support method calls on script objects. Interpreting the bytecodes
     # should go through tp_getattro_impl then call_function instead of call_method.
 
