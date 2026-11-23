@@ -447,7 +447,7 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             self.assertTrue(rt.reduce_row_itree(trait, key + "_ordered", x, ordered))
         self.assertEqual(ordered.view(torch.int32), got.view(torch.int32))
         # A pitch past N underaligns the staged plan, so _run_itree re-plans it
-        # unstaged, still under the profile.
+        # unstaged. Unstaged split plans read no profile knob; the bits stay the same.
         self.assertTrue(split.stage_e or split.stage_rows)
         n = x.shape[1]
         pitched = torch.empty(2, n + 1, device=device)[:1, :n]
