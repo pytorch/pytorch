@@ -4384,7 +4384,10 @@ class CPUReproTests(TestCase):
                 (a, b),
                 reference_in_float=False,
                 check_gradient=True,
-                atol=1e-1, rtol=1e-3, grad_atol=1e-1, grad_rtol=1e-2,
+                atol=1e-1,
+                rtol=1e-3,
+                grad_atol=1e-1,
+                grad_rtol=1e-2,
             )
 
     @requires_vectorization
