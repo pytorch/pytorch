@@ -14,7 +14,10 @@ step in train mode. The same function is given to both compilers. Each
 - what the calls up to the steady state cost over the steady state itself,
   which is compile time plus, for torch.vm, the calls it spends measuring
   compiled code against the interpreter; and the compile time alone;
-- the median time of a call in the steady state.
+- the median time of a call in the steady state;
+- for torch.vm, the same with torch.compile in the same process, the calls
+  of the two taking turns (``paired``): on a machine that is not idle, two
+  processes one after the other can differ by more than the compilers do.
 
     python benchmarks/vm/torchbench.py --torchbench ~/benchmark resnet18 hf_Bert
     python benchmarks/vm/torchbench.py --torchbench ~/benchmark \\
@@ -24,7 +27,10 @@ Without model names, all models are tried; the ones that do not load in the
 environment (missing data, missing packages) are listed and left out.
 ``--cpus`` gives one group of cores per worker; the three compilers of a model
 run one after the other on the same group. ``--results`` appends each result
-as a line of JSON and skips what the file already has.
+as a line of JSON and skips what the file already has. Every process gets an
+empty directory for Inductor's caches: with a shared one, the compiler that
+runs second finds the kernels the first one built, and both find those of
+earlier runs.
 """
 
 import argparse
@@ -37,6 +43,7 @@ import os
 import queue
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import warnings
@@ -208,8 +215,19 @@ def run_one(args):
             passes = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs(), Inductor())
             compiled = torch.vm(fn, passes=passes, fallback=False)
 
+        def compiled_so_far():
+            # Changes whenever the compiler compiled something.
+            if mode == "compile":
+                from torch._dynamo.utils import counters
+
+                return sum(counters["frames"].values())
+            if mode == "cfg":
+                graphs = compiled.stats()["graphs"]
+                return graphs["built"], graphs["exported"], graphs["given_up"]
+            return None
+
         opt = optimizer(model) if training else None
-        warm, worst, quiet = [], 0.0, 0.0
+        warm, worst, quiet, calm, before = [], 0.0, 0.0, 0, None
         for i in range(args.max_warmup):
             sync()
             start = time.perf_counter()
@@ -223,14 +241,19 @@ def run_one(args):
             if reference and (i < len(reference) if training else True):
                 d = difference(r, reference[i] if training else reference[0])
                 worst = float("inf") if d is None else max(worst, d)
-            # A JIT is warm when it has stopped changing its mind: torch.vm
-            # goes on measuring compiled code against the interpreter for a
-            # while after it has compiled.
+            # A JIT is warm when it has stopped compiling and changing its
+            # mind: a graph of torch.vm is exported again for a kind of call
+            # it has not seen, torch.compile recompiles, and torch.vm goes
+            # on measuring compiled code against the interpreter for a while
+            # after it has compiled, the function and what it calls.
             measuring = mode == "cfg" and compiled.stats()["measuring"]
+            now = compiled_so_far()
+            calm = 0 if measuring or now != before else calm + 1
+            before = now
             enough = i + 1 >= args.warmup or (
                 i + 1 >= 6 and sum(warm) > args.warmup_seconds
             )
-            if enough and not (measuring and quiet < args.settle):
+            if enough and (calm >= 3 or quiet >= args.settle):
                 break
         del r
         if reference:
@@ -292,6 +315,42 @@ def run_one(args):
             ]
             out["why"] = [text[:160] for text in why[:6]]
             out["demoted"] = bool(compiled.stats()["demoted"])
+            if args.paired and out["call_s"] <= args.paired_limit:
+                try:
+                    other_model = copy.deepcopy(model) if training else model
+                    other_opt = optimizer(other_model) if training else None
+                    other = torch.compile(fn)
+                    settle = []
+                    while len(settle) < 12 and (
+                        len(settle) < 3 or max(settle[-2:]) > 1.5 * min(settle)
+                    ):
+                        t = time.perf_counter()
+                        call(other, other_model, other_opt)
+                        settle.append(time.perf_counter() - t)
+                    turns = {"compile": [], "cfg": []}
+                    sides = {
+                        "compile": (other, other_model, other_opt),
+                        "cfg": (compiled, model, opt),
+                    }
+                    start = time.perf_counter()
+                    while len(turns["cfg"]) < args.paired and (
+                        len(turns["cfg"]) < 3
+                        or time.perf_counter() - start < 2 * args.seconds
+                    ):
+                        order = ("compile", "cfg", "compile")
+                        for side in order[len(turns["cfg"]) % 2 :][:2]:
+                            sync()
+                            t = time.perf_counter()
+                            call(*sides[side])
+                            sync()
+                            turns[side].append(time.perf_counter() - t)
+                    for side, times in turns.items():
+                        times.sort()
+                        out[f"paired_{side}_s"] = times[len(times) // 2]
+                        out[f"paired_{side}_best_s"] = times[0]
+                    out["paired_turns"] = len(turns["cfg"])
+                except Exception as e:
+                    out["paired_error"] = f"{type(e).__name__}: {e}"[:200]
         out["ok"] = True
     except BaseException as e:
         text = str(e).strip().splitlines()
@@ -327,6 +386,8 @@ def run_config(args, name, test, mode, cpus):
         "calls",
         "seconds",
         "compared",
+        "paired",
+        "paired_limit",
     ):
         cmd += ["--" + option.replace("_", "-"), str(getattr(args, option))]
     if cpus:
@@ -335,9 +396,11 @@ def run_config(args, name, test, mode, cpus):
         os.environ, TOKENIZERS_PARALLELISM="false", OMP_NUM_THREADS=str(args.threads)
     )
     try:
-        r = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=args.timeout, env=env
-        )
+        with tempfile.TemporaryDirectory(prefix="cfg_torchbench_") as caches:
+            env["TORCHINDUCTOR_CACHE_DIR"] = caches
+            r = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=args.timeout, env=env
+            )
     except subprocess.TimeoutExpired:
         return {
             "name": name,
@@ -421,11 +484,15 @@ def report(args, results):
         print(f"\n### {test}: {len(ran)} models\n")
         print(
             "| model | eager ms | torch.compile ms | torch.vm ms | speedup: torch.compile | torch.vm "
+            "| torch.vm over torch.compile, taking turns "
             "| compile s: torch.compile | torch.vm | to steady state s: torch.compile | torch.vm "
             "| graphs: torch.compile | torch.vm | difference: torch.compile | torch.vm |"
         )
-        print("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        print(
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+        )
         speed = {"compile": [], "cfg": []}
+        paired = []
         compile_s = {"compile": [], "cfg": []}
         warmup_s = {"compile": [], "cfg": []}
         passed = {"compile": 0, "cfg": 0}
@@ -459,6 +526,11 @@ def report(args, results):
                     for m in ("compile", "cfg")
                 ]
 
+            turns = "-"
+            if cells["cfg"] and "paired_cfg_s" in cells["cfg"]:
+                ratio = cells["cfg"]["paired_cfg_s"] / cells["cfg"]["paired_compile_s"]
+                paired.append(ratio)
+                turns = f"{ratio:.2f}"
             line = [
                 name,
                 f"{eager * 1e3:.1f}",
@@ -467,6 +539,7 @@ def report(args, results):
                     lambda r: f"{eager / r['call_s']:.2f}x"
                     + (" (demoted)" if r.get("demoted") else "")
                 ),
+                turns,
                 *column(lambda r: f"{r.get('compile_s', 0.0):.1f}"),
                 *column(lambda r: f"{r['warmup_s']:.1f}"),
                 *column(lambda r: str(r.get("graphs", "-"))),
@@ -481,7 +554,10 @@ def report(args, results):
             f"and {geomean(speed['cfg']):.2f}x; compile time {geomean(compile_s['compile']):.1f} s and "
             f"{geomean(compile_s['cfg']):.1f} s (sum {sum(compile_s['compile']):.0f} s and {sum(compile_s['cfg']):.0f} s); "
             f"time to the steady state over the steady state itself {geomean(warmup_s['compile']):.1f} s and "
-            f"{geomean(warmup_s['cfg']):.1f} s."
+            f"{geomean(warmup_s['cfg']):.1f} s. With the calls of the two taking turns in one process, "
+            f"on {len(paired)} models: the time of torch.vm over that of torch.compile is {geomean(paired):.3f} "
+            f"(geometric mean), above 1.03 on {sum(r > 1.03 for r in paired)} and below 0.97 on "
+            f"{sum(r < 0.97 for r in paired)}."
         )
         failed = [(n, d["eager"]["error"]) for n, d in rows if not d["eager"]["ok"]]
         if failed:
@@ -516,11 +592,11 @@ def main():
         default=120.0,
         help="or this long, and six calls",
     )
-    parser.add_argument("--max-warmup", type=int, default=80)
+    parser.add_argument("--max-warmup", type=int, default=400)
     parser.add_argument(
         "--settle",
         type=float,
-        default=300.0,
+        default=1500.0,
         help="seconds to wait for torch.vm to stop measuring",
     )
     parser.add_argument("--calls", type=int, default=20, help="timed calls, at most")
@@ -529,6 +605,18 @@ def main():
     )
     parser.add_argument(
         "--compared", type=int, default=8, help="training steps compared with eager"
+    )
+    parser.add_argument(
+        "--paired",
+        type=int,
+        default=10,
+        help="calls of each compiler when the two take turns in one process; 0 for none",
+    )
+    parser.add_argument(
+        "--paired-limit",
+        type=float,
+        default=40.0,
+        help="seconds a call may take for the two to take turns",
     )
     parser.add_argument(
         "--tolerance",
