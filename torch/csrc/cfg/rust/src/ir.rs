@@ -146,6 +146,9 @@ pub enum Op {
     /// arguments if they were written out and with none if not, as
     /// LOAD_SUPER_ATTR does.
     SuperObject { global_super: V, class: V, this: V, explicit: bool },
+    /// Calls a fixed Python object with these values. A pass puts it where
+    /// it found something that does the work of a run of instructions.
+    CallObject(PyObj, Vec<V>),
     /// len(v) as an int: what a sequence pattern of `match` compares.
     GetLen(V),
     /// Whether the type of v is a sequence (false) or a mapping (true) for
@@ -355,6 +358,7 @@ impl Op {
                 f(*class);
                 f(*names)
             }
+            Op::CallObject(_, args) => args.iter().for_each(|v| f(*v)),
             Op::SuperObject { global_super, class, this, .. } => {
                 f(*global_super);
                 f(*class);
@@ -395,7 +399,54 @@ impl Op {
     pub fn is_call(&self) -> bool {
         matches!(
             self,
-            Op::Call { .. } | Op::CallMethod { .. } | Op::CallEx { .. } | Op::Dispatch(_)
+            Op::Call { .. }
+                | Op::CallMethod { .. }
+                | Op::CallEx { .. }
+                | Op::CallObject(..)
+                | Op::Dispatch(_)
+        )
+    }
+
+    /// Whether the instruction can be run again on other values without
+    /// anything but its operands and the objects they lead to mattering: no
+    /// frame, no cells, no stores into variables, no iteration state.
+    pub fn is_replayable(&self) -> bool {
+        matches!(
+            self,
+            Op::Const(_)
+                | Op::LoadGlobal(_)
+                | Op::LoadAttr(..)
+                | Op::Binary(..)
+                | Op::Unary(..)
+                | Op::Compare(..)
+                | Op::Call { .. }
+                | Op::CallMethod { .. }
+                | Op::CallEx { .. }
+                | Op::GetItem(..)
+                | Op::BuildTuple(_)
+                | Op::BuildList(_)
+                | Op::BuildMap(_)
+                | Op::BuildSet(_)
+                | Op::BuildSlice(..)
+                | Op::BuildString(_)
+                | Op::TupleGet(..)
+                | Op::Unpack(..)
+                | Op::UnpackEx(..)
+                | Op::Is(..)
+                | Op::IsNone(..)
+                | Op::Contains(..)
+                | Op::ToBool(_)
+                | Op::Format { .. }
+                | Op::Hold(_)
+                | Op::ListToTuple(_)
+                | Op::ListExtend(..)
+                | Op::ListAppend(..)
+                | Op::DictUpdate(..)
+                | Op::DictMerge(..)
+                | Op::MapAdd(..)
+                | Op::IsFunction { .. }
+                | Op::FrameEnter(_)
+                | Op::FrameLeave
         )
     }
 
@@ -669,6 +720,10 @@ impl Function {
                 n(this),
                 if *explicit { "" } else { "    ; arguments implied" }
             ),
+            Op::CallObject(callee, args) => {
+                let repr = unsafe { crate::pyffi::repr(callee.as_ptr()) };
+                format!("call_object {}({})", repr.chars().take(60).collect::<String>(), self.values(args))
+            }
             Op::GetLen(a) => format!("get_len {}", n(a)),
             Op::MatchKind(a, mapping) => {
                 format!("match_{} {}", if *mapping { "mapping" } else { "sequence" }, n(a))
