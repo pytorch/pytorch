@@ -18,7 +18,7 @@ disable_operations("sum.dim_IntList", "mean.dim", "prod.dim_int", "amax", "amin"
 need the full overload: disable_operations("sum") matches nothing. Disabling
 sum.dim_IntList or prod.dim_int also drops PYTORCH_SUM_INNER_TREE's registration of that
 symbol. cutedsl.disabled() does the same as enabled = False while its block runs
-(process-wide), along with native AOT for every DSL except UNCONDITIONAL declarations.
+(process-wide), along with native AOT for every DSL except unconditional kernels.
 
 PYTORCH_NATIVE_INNER_TREE also orders served calls: a user who asks for the inner-tree
 order gets it, and serving an unordered request in that order is fine. The condition

@@ -503,7 +503,7 @@ To keep ATen, pass the overload names `sum.dim_IntList`, `mean.dim`,
 conditional CuTeDSL override, not only these reductions (unconditional ones, such as
 `quantize_tensor`'s, stay). The `cutedsl.disabled()` context manager does the
 same while its block runs (process-wide), along with native AOT for every DSL except
-UNCONDITIONAL declarations. Setting `TORCH_DISABLE_NATIVE_JIT=1` before `import torch`
+unconditional kernels. Setting `TORCH_DISABLE_NATIVE_JIT=1` before `import torch`
 registers no CuTeDSL, Triton, Helion or FlyDSL overrides.
 
 ### Module-level Functions
@@ -579,7 +579,7 @@ Each DSL controller provides the following methods:
 
 **disabled()**
     Context manager that temporarily disables the conditional operations from this DSL,
-    along with native AOT kernels for every DSL (except UNCONDITIONAL declarations).
+    along with native AOT kernels for every DSL (except unconditional ones).
     Both are process-wide while the block runs, and are automatically restored when
     exiting the context.
 
@@ -603,9 +603,9 @@ Each DSL controller provides the following methods:
     # Disable Triton's conditional operations
     pn.triton.enabled = False
 
-    # Temporarily disable CuteDSL operations
+    # Temporarily disable CuteDSL's conditional operations and every DSL's native AOT
     with pn.cutedsl.disabled():
-        result = model(input)  # CuteDSL ops disabled
+        result = model(input)  # both disabled here
 
     # Disable specific operations across all DSLs
     pn.disable_operations('sum.dim_IntList', 'amax')
