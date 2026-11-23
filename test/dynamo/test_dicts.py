@@ -2,6 +2,7 @@
 
 
 import enum
+import inspect
 import itertools
 import operator
 import sys
@@ -2496,6 +2497,40 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(d.keys(), mp.keys())
+
+    def test_mapping_proxy_existing_unrelated_mutation(self):
+        d = {"a": 2, "b": 3, "c": 5}
+        mp = types.MappingProxyType(d)
+        other = {}
+
+        def fn(x):
+            # Mutating a different pre-existing dict must not affect reads of mp
+            other["d"] = 4
+            return torch.sin(x * mp["c"]) + len(mp)
+
+        x = torch.randn(4)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, torch.sin(x * 5) + 3)
+        self.assertEqual(other, {"d": 4})
+
+    def test_signature_bind_after_unrelated_dict_mutation(self):
+        # Signature.parameters is a pre-existing mappingproxy
+        def inner(x, flag=None):
+            return x + 1
+
+        sig = inspect.signature(inner)
+        registry = {}
+
+        def fn(x):
+            registry["k"] = 1
+            bound = sig.bind(x, flag=None)
+            bound.apply_defaults()
+            return inner(*bound.args, **bound.kwargs)
+
+        x = torch.randn(4)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, x + 1)
+        self.assertEqual(registry, {"k": 1})
 
     @parametrize(
         "mapping_type",
