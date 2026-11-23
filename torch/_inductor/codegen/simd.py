@@ -4706,12 +4706,12 @@ class SIMDScheduling(BaseScheduling):
     def _should_build_int32_and_int64(
         self, kernel_features: SIMDKernelFeatures
     ) -> bool:
-        """Whether config.dual_index_dtype applies to this kernel: build an int32 and
-        an int64 variant and launch the int32 one only when the sizes fit, instead of
-        a single kernel with a size guard."""
+        """Whether config.dual_index_dtype_kernels applies to this kernel: build an
+        int32 and an int64 variant and launch the int32 one only when the sizes fit,
+        instead of a single kernel with a size guard."""
         from .triton import TritonScheduling
 
-        if not config.dual_index_dtype:
+        if not config.dual_index_dtype_kernels:
             return False
         skipped_for = (
             # ConditionalMultiKernel emits Triton launches.
@@ -4737,7 +4737,7 @@ class SIMDScheduling(BaseScheduling):
             else None
         )
         if skipped_for is not None:
-            log.debug("dual_index_dtype: single kernel for %s", skipped_for)
+            log.debug("dual_index_dtype_kernels: single kernel for %s", skipped_for)
         return skipped_for is None
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
