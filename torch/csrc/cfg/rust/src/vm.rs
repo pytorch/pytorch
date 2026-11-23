@@ -2103,6 +2103,16 @@ impl Compiled {
             let mut pos: ffi::Py_ssize_t = 0;
             let mut key: Obj = null_mut();
             let mut value: Obj = null_mut();
+            // A name that is no text is refused before any name is
+            // compared with a parameter, as the interpreter refuses it:
+            // a key of another class may compare in Python.
+            while ffi::PyDict_Next(kwargs, &mut pos, &mut key, &mut value) != 0 {
+                if ffi::PyUnicode_Check(key) == 0 {
+                    set_error(ffi::PyExc_TypeError, "keywords must be strings".to_string());
+                    return Err(());
+                }
+            }
+            pos = 0;
             while ffi::PyDict_Next(kwargs, &mut pos, &mut key, &mut value) != 0 {
                 let mut found = None;
                 for j in f.posonlyargcount..argcount + f.kwonlyargcount {
