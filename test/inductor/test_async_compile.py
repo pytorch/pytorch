@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import pickle
 import queue
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -32,7 +33,6 @@ from torch._inductor.utils import (
     is_big_gpu,
 )
 from torch.testing._internal.common_utils import (
-    EXPANDABLE_SEGMENTS,
     instantiate_parametrized_tests,
     parametrize,
     skipIfNoCuteDSL,
@@ -2399,58 +2399,119 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
 
         torch.testing.assert_close(c_eager, c_compiled)
 
-    def test_grouped_gemm_descriptor_seed_at_allocation_end(self):
-        device = "cuda"
-        dtype = torch.bfloat16
-        group_sizes = (1279, 1)
-        K, N = 4096, 1024
-        total_rows = sum(group_sizes)
-        offsets = torch.tensor(
-            [*torch.tensor(group_sizes).cumsum(0).tolist()],
-            device=device,
-            dtype=torch.int32,
+    def test_grouped_gemm_descriptor_seed_guard_page(self):
+        # Isolate illegal accesses because CUDA errors remain sticky per process.
+        script = textwrap.dedent(
+            r"""
+            import torch
+            from torch.cuda._utils import (
+                _check_cuda_bindings,
+                _cuda_bindings_driver as cu,
+            )
+            from torch._inductor import config
+
+            _check_cuda_bindings(cu.cuInit(0))
+            rows, K, N = 1280, 4096, 1024
+            # This is a 10 MiB A allocation, with one granule left unmapped.
+            nbytes = rows * K * torch.empty((), dtype=torch.bfloat16).element_size()
+            prop = cu.CUmemAllocationProp()
+            prop.type = cu.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+            prop.location.type = cu.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+            prop.location.id = torch.cuda.current_device()
+            granularity = _check_cuda_bindings(
+                cu.cuMemGetAllocationGranularity(
+                    prop,
+                    cu.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_MINIMUM,
+                )
+            )
+            va = None
+            handle = None
+            mapped = False
+            A = None
+            try:
+                va = _check_cuda_bindings(
+                    cu.cuMemAddressReserve(nbytes + granularity, 0, 0, 0)
+                )
+                handle = _check_cuda_bindings(cu.cuMemCreate(nbytes, prop, 0))
+                _check_cuda_bindings(cu.cuMemMap(va, nbytes, 0, handle, 0))
+                mapped = True
+                access = cu.CUmemAccessDesc()
+                access.location = prop.location
+                access.flags = cu.CUmemAccess_flags.CU_MEM_ACCESS_FLAGS_PROT_READWRITE
+                _check_cuda_bindings(cu.cuMemSetAccess(va, nbytes, [access], 1))
+
+                class MappedTensor:
+                    __cuda_array_interface__ = {
+                        "shape": (rows, K),
+                        "typestr": "<i2",
+                        "data": (int(va), False),
+                        "version": 3,
+                    }
+
+                A = torch.as_tensor(MappedTensor(), device="cuda").view(
+                    torch.bfloat16
+                )
+                A.copy_(
+                    torch.randn(rows, K, dtype=torch.bfloat16, device="cuda") * 0.1
+                )
+                B = torch.randn(2, K, N, dtype=torch.bfloat16, device="cuda") * 0.01
+                offsets = torch.tensor([1279, 1280], dtype=torch.int32, device="cuda")
+
+                def grouped_mm(a, b, offs):
+                    return torch.nn.functional.grouped_mm(a, b, offs=offs)
+
+                with config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": "CUTEDSL",
+                        "test_configs.autotune_choice_name_regex": "cutedsl",
+                        "autotune_fallback_to_aten": False,
+                    }
+                ):
+                    actual = torch.compile(grouped_mm, dynamic=False)(A, B, offsets)
+
+                expected = torch.cat(
+                    [
+                        A[:1279].float() @ B[0].float(),
+                        A[1279:].float() @ B[1].float(),
+                    ]
+                )
+                torch.testing.assert_close(
+                    actual.float(), expected, atol=1e-2, rtol=1e-2
+                )
+                torch.cuda.synchronize()
+            finally:
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+                if A is not None:
+                    del A
+                if mapped:
+                    _check_cuda_bindings(cu.cuMemUnmap(va, nbytes))
+                if handle is not None:
+                    _check_cuda_bindings(cu.cuMemRelease(handle))
+                if va is not None:
+                    _check_cuda_bindings(
+                        cu.cuMemAddressFree(va, nbytes + granularity)
+                    )
+            """
         )
-
-        a_numel = total_rows * K
-        # 1280 * 4096 * 2 bytes is exactly one 10 MiB, 2 MiB-aligned allocation.
-        allocation_bytes = a_numel * dtype.itemsize
-        self.assertEqual(allocation_bytes, 10 * 2**20)
-
-        if EXPANDABLE_SEGMENTS:
-            self.skipTest("allocation-end regression requires non-expandable segments")
-
-        def grouped_gemm_fn(A, B, offs):
-            return torch.nn.functional.grouped_mm(A, B, offs=offs)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTEDSL",
-                "test_configs.autotune_choice_name_regex": "cutedsl",
-                "autotune_fallback_to_aten": False,
-            }
-        ), fresh_cache():
-            torch.cuda.empty_cache()
-            A = torch.randn(total_rows, K, device=device, dtype=dtype)
-            storage_ptr = A.untyped_storage().data_ptr()
-            storage_nbytes = A.untyped_storage().nbytes()
-            terminal_segments = [
-                segment
-                for segment in torch.cuda.memory_snapshot(include_traces=False)
-                if segment["address"]
-                <= storage_ptr
-                < segment["address"] + segment["total_size"]
-                and storage_ptr + storage_nbytes
-                == segment["address"] + segment["total_size"]
-            ]
-            if not terminal_segments:
-                self.skipTest("storage was not allocated at a CUDA segment boundary")
-            B = torch.randn(2, K, N, device=device, dtype=dtype)
-            expected = grouped_gemm_fn(A, B, offsets)
-            compiled = torch.compile(grouped_gemm_fn, backend="inductor", dynamic=False)
-            actual = compiled(A, B, offsets)
-
-        torch.testing.assert_close(actual, expected)
+        with tempfile.TemporaryDirectory() as cache_dir:
+            env = {**os.environ, "TORCHINDUCTOR_CACHE_DIR": cache_dir}
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Guard-page grouped GEMM subprocess failed.\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
 
 
 if __name__ == "__main__":

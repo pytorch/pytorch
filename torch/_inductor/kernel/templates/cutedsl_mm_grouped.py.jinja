@@ -67,12 +67,7 @@ def _to_fake_cute_tensor(t, assumed_align=16):
     )
 
 
-def _to_fake_gemm_tensor(t, assumed_align=16):
-    """Build a symbolic layout for a descriptor-seed GEMM operand."""
-    shape = tuple(
-        1 if dim == t.ndim - 1 else cute.sym_int64()
-        for dim in range(t.ndim)
-    )
+def _get_gemm_leading_dim(t):
     leading_dim = next(
         (
             dim
@@ -81,35 +76,34 @@ def _to_fake_gemm_tensor(t, assumed_align=16):
         ),
         None,
     )
-    stride_divisibility = max(assumed_align // int(t.element_size()), 1)
-    stride = tuple(
-        1
-        if dim == leading_dim
-        else cute.sym_int64(
-            divisibility=(
-                stride_divisibility if dim != t.ndim - 1 else 1
-            )
-        )
-        for dim in range(t.ndim)
+    if leading_dim is None:
+        raise AssertionError("Grouped GEMM operands must have a unit-stride dimension")
+    return leading_dim
+
+
+def _to_fake_gemm_tensor(dtype, leading_dim, assumed_align=16):
+    """Build a symbolic layout independent of runtime tensor extents."""
+    shape = (cute.sym_int64(), cute.sym_int64(), 1)
+    stride_divisibility = max(
+        assumed_align // torch.empty((), dtype=dtype).element_size(), 1
     )
+    stride = [
+        cute.sym_int64(divisibility=stride_divisibility),
+        cute.sym_int64(divisibility=stride_divisibility),
+        cute.sym_int64(),
+    ]
+    stride[leading_dim] = 1
     return cute.runtime.make_fake_tensor(
-        _TORCH_TO_CUTLASS_DTYPE[t.dtype],
+        _TORCH_TO_CUTLASS_DTYPE[dtype],
         shape,
-        stride=stride,
+        stride=tuple(stride),
         assumed_align=assumed_align,
     )
 
 
 def _get_gemm_seed_tensor(t, assumed_align=16):
     """Keep a small layout-matched seed alive for runtime CuTe compilation."""
-    leading_dim = next(
-        (
-            dim
-            for dim, (size, stride) in enumerate(zip(t.shape, t.stride()))
-            if int(size) != 1 and int(stride) == 1
-        ),
-        0,
-    )
+    leading_dim = _get_gemm_leading_dim(t)
     itemsize = int(t.element_size())
     seed_dim = max(assumed_align // itemsize, 1)
     key = (t.device, t.dtype, t.ndim, leading_dim, seed_dim)
@@ -359,7 +353,8 @@ def launch_build_group_ptrs_from_bases(
     a_unsq = input_a.unsqueeze(-1)
     b_unsq = input_b[0].unsqueeze(-1)
     c_unsq = {{get_output()}}.unsqueeze(-1)
-    # Keep alignment-sized descriptor seeds alive outside CUDA graph capture.
+    # These initial tensors seed TMA descriptors; the kernel updates their
+    # address, shape, and stride from runtime metadata before the first TMA load.
     seed_a = _get_gemm_seed_tensor(a_unsq)
     seed_b = _get_gemm_seed_tensor(b_unsq)
     seed_c = _get_gemm_seed_tensor(c_unsq)
@@ -375,9 +370,9 @@ def launch_build_group_ptrs_from_bases(
 
         gemm_executor = cute.compile(
             grouped_gemm,
-            _to_fake_gemm_tensor(seed_a),
-            _to_fake_gemm_tensor(seed_b),
-            _to_fake_gemm_tensor(seed_c),
+            _to_fake_gemm_tensor(seed_a.dtype, _get_gemm_leading_dim(seed_a)),
+            _to_fake_gemm_tensor(seed_b.dtype, _get_gemm_leading_dim(seed_b)),
+            _to_fake_gemm_tensor(seed_c.dtype, _get_gemm_leading_dim(seed_c)),
             G,
             _to_fake_cute_tensor(probs_t, assumed_align=4),
             _to_fake_cute_tensor(strides_t, assumed_align=4),
@@ -549,9 +544,11 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
 
     gemm_executor = cute.compile(
         grouped_gemm,
-        _to_fake_gemm_tensor(proxy_a),
-        _to_fake_gemm_tensor(proxy_b_unsq),
-        _to_fake_gemm_tensor(proxy_out),
+        _to_fake_gemm_tensor(proxy_a.dtype, _get_gemm_leading_dim(proxy_a)),
+        _to_fake_gemm_tensor(
+            proxy_b_unsq.dtype, _get_gemm_leading_dim(proxy_b_unsq)
+        ),
+        _to_fake_gemm_tensor(proxy_out.dtype, _get_gemm_leading_dim(proxy_out)),
         G,
         _to_fake_cute_tensor(proxy_probs, assumed_align=4),
         _to_fake_cute_tensor(proxy_strides, assumed_align=4),
