@@ -6203,13 +6203,14 @@ class TestPrecompileDynamoCapture(TestCase):
         from torch._dynamo.utils import counters
 
         single = self.mod.single
-        with self._capture(single) as cap:
-            y = cap(self.model, self.x2)
+        with torch._inductor.config.patch({"triton.cudagraphs": False}):
+            with self._capture(single) as cap:
+                y = cap(self.model, self.x2)
         counters.clear()
         with torch._inductor.config.patch({"triton.cudagraphs": True}):
             f = load(self.artifact, self.cache)
             self.assertEqual(f(self.model, self.x2), y)
-        # Not a skip: the graph was never meant to run as a CUDA graph.
+        # A CPU graph: no CUDA graph was skipped.
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
     @parametrize("backend", ["inductor", "eager"])
@@ -6699,6 +6700,14 @@ class TestPrecompileCudagraphs(TestCase):
         env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
         served = self._serve_in_fresh_process(y, env, mark_step)
         self.assertGreater(served["recorded"], 0)
+
+    def test_an_artifact_captured_without_cudagraphs_serves_none(self):
+        with torch._inductor.config.patch({"triton.cudagraphs": False}):
+            y, _ = self._capture_step(self.mod.step)
+        # Its graph compiled without CUDA graphs, so the loading process's flag
+        # finds nothing to wrap it with.
+        env = {"TORCHINDUCTOR_CUDAGRAPHS": "1"}
+        self.assertEqual(self._serve_in_fresh_process(y, env)["recorded"], 0)
 
 
 def _exception_chain(exc: BaseException | None) -> str:
