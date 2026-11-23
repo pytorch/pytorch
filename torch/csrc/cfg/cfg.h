@@ -184,7 +184,9 @@ struct TcfgApi {
   // frames were pushed since.
   void* (*frame_swap)(void* frame);
   // Whether the thread has a trace function (sys.settrace): the interpreter
-  // calls it for the frames it enters and the lines it runs in them.
+  // calls it for the frames it enters and the lines it runs in them. In 3.14
+  // the same goes for a debugger or a coverage tool that asked sys.monitoring
+  // for the functions that start, which is how pdb listens there.
   int32_t (*frame_traced)();
 
   // The frames the interpreter makes itself: for the calls that C code makes
@@ -211,7 +213,9 @@ struct TcfgApi {
   // For a frame that is about to return result and has a frame object: if
   // a debugger put its trace function on the frame (it does so for every
   // frame of the stack it is entered under), tells it of the return, as the
-  // interpreter does. Returns -1 with a Python error set if it raised.
+  // interpreter does: through the thread's trace function, or in 3.14
+  // through what the debugger registered with sys.monitoring for the returns
+  // of the frame's code. Returns -1 with a Python error set if it raised.
   int32_t (*frame_returns)(void* frame, PyObject* result);
 
   // Whether torch.jit.trace is recording on this thread: one of the things
