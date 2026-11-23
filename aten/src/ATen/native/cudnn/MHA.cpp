@@ -1621,7 +1621,10 @@ void run_cudnn_SDP_fprop(
   }
   bool use_ragged = use_ragged_in_dense(q, k, v, o, attn_bias.has_value());
   if (return_softmaxstats && !softmaxstats.defined()) {
-    // TODO(eqy): investigate why cuDNN doesn't like BSH layout softmaxstats
+    // Dense softmaxstats stay BHSD: before cuDNN 9.26, the backward pass read
+    // non-BHSD dense stats incorrectly, and BHSD also matches the (B, H, S)
+    // logsumexp that callers get back. The ragged path uses BSH because its
+    // ragged offsets advance per token.
     if (!use_ragged) {
       softmaxstats = at::empty({b, h, s_q, 1}, q.options().dtype(kFloat));
     } else {
