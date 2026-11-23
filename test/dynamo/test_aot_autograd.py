@@ -1711,6 +1711,32 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             {0, 1, 2, 3},
         )
 
+    @unittest.skipIf(
+        not torch._inductor.config.is_fbcode(), "requires the fbcode aliasing killswitch"
+    )
+    def test_large_dynamic_aliases_fall_back_before_partition_scan(self):
+        def f(inputs):
+            torch._foreach_add_(inputs, 1)
+            return inputs[0]
+
+        base = torch.zeros(401, 4)
+        inputs = list(base.unbind())
+        counter = CompileCounterWithBackend("aot_eager")
+        compiled = torch.compile(f, backend=counter, dynamic=True)
+        with (
+            patch("torch._utils_internal.justknobs_check", return_value=True),
+            patch(
+                "torch._functorch._aot_autograd.input_output_analysis._storage_overlap_partition",
+                side_effect=AssertionError("partition scan ran before alias fallback"),
+            ) as partition_scan,
+        ):
+            result = compiled(inputs)
+
+        partition_scan.assert_not_called()
+        self.assertEqual(result, torch.ones(4))
+        self.assertEqual(base, torch.ones_like(base))
+        self.assertGreater(counter.frame_count, 0)
+
     def test_input_mutation_storage_overlap_recompiles(self):
         def f(x, y):
             x.mul_(2)

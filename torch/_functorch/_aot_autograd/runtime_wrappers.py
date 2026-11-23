@@ -2259,10 +2259,6 @@ def merge_view_inputs(
         # Return early when there are no mutations.
         return fwd_inputs, fwd_inputs_descs, None
 
-    add_input_mutation_storage_overlap_partition_guard(
-        aot_config, fwd_inputs, mutated_input_info
-    )
-
     storage_ref_to_idx: dict[StorageWeakRef, list[int]] = collections.defaultdict(list)
     # pyrefly: ignore [implicit-any]
     base_args = []
@@ -2423,6 +2419,9 @@ def merge_view_inputs(
             # We store just enough info here so that we can regenerate the view later.
             # Regeneration: curr_view._view_func(args[base_idx])
             inner_calling_convention_meta[curr_view_idx] = (base_idx, curr_view)
+    add_input_mutation_storage_overlap_partition_guard(
+        aot_config, fwd_inputs, mutated_input_info
+    )
     if len(base_args) == 0:
         if len(other_args) != len(fwd_inputs):
             raise AssertionError(
