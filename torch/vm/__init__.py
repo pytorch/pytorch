@@ -23,6 +23,13 @@ post-dispatch kernel directly, guarded on the dispatch keys of their operands::
     f(torch.ones(3), torch.ones(3))
     print(f.dump())  # the SSA graph and its specialized blocks
 
+**The default never changes a result.** What ``@torch.vm`` returns computes
+what the function computes, bit for bit: the same kernels, on the same values,
+in the same order. A configuration that is faster and may differ from eager in
+the last bits (a graph compiler fuses and reorders arithmetic) is never the
+default: it is asked for, by naming its passes. :func:`is_exact` tells which of
+the two a configuration is.
+
 Nothing is specialized on shapes unless a pass asks for it: every dimension is
 dynamic. A pass can narrow a dimension to a range by attaching a guard; when
 such a guard fails, only the basic block that carries it is rewritten again.
@@ -97,6 +104,7 @@ __all__ = [
     "Unsupported",
     "fuse_checked",
     "is_available",
+    "is_exact",
     "load_passes",
     "memory",
     "passes",
@@ -387,6 +395,18 @@ def memory(fn: Any) -> dict[str, int] | None:
     fn = getattr(fn, "__func__", fn)
     workspace = getattr(fn, "workspace", None)
     return None if workspace is None else torch._C._cfg_workspace_stats(workspace)
+
+
+def is_exact(passes: Iterable[Any] | None = None) -> bool:
+    """Whether a list of passes computes what the interpreter computes, bit for
+    bit: ``torch.vm.is_exact()`` is true.
+
+    True when every pass is one of the engine's own that leaves every result
+    what it was: they change how the same kernels are reached, not which ones
+    run or in what order. A pass of one's own is not taken to be one.
+    """
+    listed = DEFAULT_PASSES if passes is None else tuple(passes)
+    return all(getattr(one, "exact", False) is True for one in listed)
 
 
 class _CallableModule(types.ModuleType):
