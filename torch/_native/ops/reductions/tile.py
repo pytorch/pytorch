@@ -1269,8 +1269,9 @@ class TileReduce:
         # single-field trait returns bitwise (a sum leaf 0.0 + y is never -0.0), so
         # fewer keep the bits. Narrow rows then fold leaves, not reduce(init, x), so
         # only traits that promise leaf_is_reduce_init opt in. NormOps(2) cannot, as its
-        # leaf rounds the square on its own; other p do not opt in either. An
-        # abs-extremum leaf can carry another NaN payload than max(0.0, |x|).
+        # leaf rounds the square on its own; other p, even p = 1 whose |x| leaf would
+        # qualify, are unmeasured and do not opt in. An abs-extremum leaf can carry
+        # another NaN payload than max(0.0, |x|).
         narrow = (
             axis == "row"
             and order == "linear"
