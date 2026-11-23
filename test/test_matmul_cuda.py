@@ -1019,14 +1019,240 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    def test_hipblaslt_heuristic_repeat_matches(self, device):
-        # The first call queries hipBLASLt. The second call of the same
-        # configuration must return the same tensor.
-        a = torch.randn(128, 128, device=device, dtype=torch.bfloat16)
-        b = torch.randn(128, 128, device=device, dtype=torch.bfloat16)
-        first = torch.mm(a, b)
-        second = torch.mm(a, b)
+    def test_hipblaslt_heuristic_cache_keys(self, device):
+        # These configurations share M, N, and K but must not share a cached
+        # heuristic result. hipblasLtMatmul() does not reject an algorithm that
+        # does not fit the problem, so a key collision shows up as a wrong
+        # result. Each runs twice so the second call reuses the cached entry.
+        self._skip_unless_hipblaslt()
+        m, n, k, batch = 64, 96, 128, 3
+
+        def make(*shape, dtype=torch.bfloat16):
+            return torch.randn(*shape, device=device, dtype=dtype)
+
+        def check(fn, *args):
+            with blas_library_context("cublas"):
+                expected = fn(*(t.float() for t in args))
+            with blas_library_context("cublaslt"):
+                for _ in range(2):
+                    self.assertEqual(fn(*args).float(), expected, atol=0.1, rtol=0.02)
+
+        a, b, bias, w = make(m, k), make(k, n), make(n), make(n, k)
+        a_col, b_col = a.t().contiguous().t(), b.t().contiguous().t()
+
+        for x, y in [(a, b), (a_col, b), (a, b_col), (a_col, b_col),
+                     (make(m, k + 32)[:, :k], b), (a, make(k, n + 32)[:, :n])]:
+            check(torch.mm, x, y)
+
+        check(lambda x, y, z: torch.addmm(z, x, y), a, b, bias)
+        check(lambda x, y, z: torch._addmm_activation(z, x, y), a, b, bias)
+        check(lambda x, y, z: torch._addmm_activation(z, x, y, use_gelu=True), a, b, bias)
+        check(F.linear, a, w, bias)
+
+        check(torch.bmm, make(batch, m, k), make(batch, k, n))
+        check(torch.bmm, make(batch, m, k + 32)[:, :, :k], make(batch, k, n))
+        check(torch.bmm, make(batch, k, m).transpose(1, 2), make(batch, k, n))
+
+        af, bf = make(m, k, dtype=torch.float32), make(k, n, dtype=torch.float32)
+        check(torch.mm, af, bf)
+        torch.backends.cuda.matmul.allow_tf32 = True
+        check(torch.mm, af, bf)
+        torch.backends.cuda.matmul.allow_tf32 = False
+
+        # A repeated call with the same inputs must return the same bits.
+        with blas_library_context("cublaslt"):
+            first = torch.mm(a, b)
+            second = torch.mm(a, b)
         self.assertEqual(second, first, atol=0, rtol=0)
+
+    def _skip_unless_hipblaslt(self):
+        # If hipBLASLt is not supported on this device, PyTorch falls back to
+        # rocBLAS and these tests would not exercise the cache.
+        with blas_library_context("cublaslt"):
+            backend = torch._C._get_blas_preferred_backend()
+        if backend != torch._C._BlasBackend.Cublaslt:
+            self.skipTest("hipBLASLt is not the effective BLAS backend on this device")
+
+    def _count_hipblaslt_heuristic_calls(self, script, device, extra_env=None):
+        # Runs script in a fresh process with the hipBLASLt log enabled. Returns
+        # (label, heuristic_calls) for each "STEP <label>" marker, in order.
+        # The count is taken from the log lines of hipblasLtMatmulAlgoGetHeuristic.
+        env = dict(os.environ, HIPBLASLT_LOG_MASK="16")
+        for var in ("TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT", "DISABLE_ADDMM_CUDA_LT",
+                    "PYTORCH_TUNABLEOP_ENABLED", "HIPBLASLT_LOG_FILE"):
+            env.pop(var, None)
+        env.update(extra_env or {})
+        proc = subprocess.run(
+            [sys.executable, "-c", script.replace("__DEVICE__", repr(device))],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=300,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout[-4000:])
+        self.assertIn("DONE", proc.stdout)
+        steps = []
+        for line in proc.stdout.splitlines():
+            if line.startswith("STEP "):
+                steps.append([line[len("STEP "):], 0])
+            elif steps and "][rocblaslt_matmul_algo_get_heuristic]" in line:
+                steps[-1][1] += 1
+        return [(label, n) for label, n in steps]
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_hipblaslt_heuristic_cache_limit(self, device):
+        # With TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT=2, the cache keeps two
+        # entries per thread and evicts the least recently used one. Hits do not
+        # call the heuristic. Sequence A, B, A, C, A, B:
+        #   A miss; B miss; A hit (order is now A, B); C miss, evicts B;
+        #   A hit; B miss, evicts C.
+        self._skip_unless_hipblaslt()
+        script = r"""
+import torch
+
+torch.cuda.set_device(__DEVICE__)
+torch.backends.cuda.preferred_blas_library("cublaslt")
+
+def r(*shape):
+    return torch.randn(*shape, device=__DEVICE__, dtype=torch.bfloat16)
+
+a, b = r(128, 128), r(128, 128)
+fa = lambda: torch.mm(a, b)
+fb = lambda: torch.mm(a[:64], b)
+fc = lambda: torch.mm(a[:, :64], b[:64])
+seq = [("A", fa), ("B", fb), ("A", fa), ("C", fc), ("A", fa), ("B", fb)]
+for i, (name, fn) in enumerate(seq):
+    print(f"STEP {i} {name}", flush=True)
+    fn()
+    torch.cuda.synchronize()
+print("DONE", flush=True)
+"""
+        steps = self._count_hipblaslt_heuristic_calls(
+            script, device, extra_env={"TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT": "2"})
+        self.assertEqual(
+            steps,
+            [("0 A", 1), ("1 B", 1), ("2 A", 0), ("3 C", 1), ("4 A", 0), ("5 B", 1)],
+        )
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_hipblaslt_heuristic_cache_key_fields(self, device):
+        # hipblasLtMatmul() does not reject an algo that does not fit the
+        # problem, so a key that misses a field silently reuses the wrong
+        # heuristic result. Each case warms one configuration, checks that a
+        # repeat hits the cache, then changes exactly one key field and expects
+        # one new heuristic call. Calls are counted from HIPBLASLT_LOG_MASK in
+        # a subprocess, because the log is written by the hipBLASLt library.
+        # Labels name the torch-level change, not a single key field: an operand
+        # change can move more than one field, because mm swaps its operands.
+        self._skip_unless_hipblaslt()
+        script = r"""
+import torch
+
+torch.cuda.set_device(__DEVICE__)
+torch.backends.cuda.preferred_blas_library("cublaslt")
+
+def r(*shape, dtype=torch.bfloat16):
+    return torch.randn(*shape, device=__DEVICE__, dtype=dtype)
+
+def noop():
+    pass
+
+def set_tf32(on):
+    torch.backends.cuda.matmul.allow_tf32 = on
+
+def set_deterministic(on):
+    torch.use_deterministic_algorithms(on)
+
+def set_carveout(on):
+    torch._C._set_sm_carveout_experimental(2 if on else None)
+
+def run(fn):
+    fn()
+    torch.cuda.synchronize()
+
+a, b, bias = r(128, 128), r(128, 128), r(128)
+a3, b3 = r(2, 128, 128), r(2, 128, 128)
+af, bf = r(128, 128, dtype=torch.float32), r(128, 128, dtype=torch.float32)
+a_pad, b_pad = r(128, 160)[:, :128], r(128, 160)[:, :128]
+c_pad = torch.empty(128, 160, device="cuda", dtype=torch.bfloat16)[:, :128]
+c_m_pad = torch.empty(128, 128, device="cuda", dtype=torch.bfloat16)[:, :64]
+a3_big = r(2, 256, 128)
+b3_big = r(2, 256, 128)
+c3_pad = torch.empty(2, 256, 128, device="cuda", dtype=torch.bfloat16)[:, :128]
+a3_3, b3_3 = r(3, 128, 128), r(3, 128, 128)
+a16, b16 = a.half(), b.half()
+
+# name: (base, variant, setup for variant, teardown for variant)
+cases = {
+    "a_transposed": (lambda: torch.mm(a, b), lambda: torch.mm(a.t(), b), noop, noop),
+    "b_transposed": (lambda: torch.mm(a, b), lambda: torch.mm(a, b.t()), noop, noop),
+    "a_padded_ld": (lambda: torch.mm(a, b), lambda: torch.mm(a_pad, b), noop, noop),
+    "b_padded_ld": (lambda: torch.mm(a, b), lambda: torch.mm(a, b_pad), noop, noop),
+    "out_padded_ld": (lambda: torch.mm(a, b), lambda: torch.mm(a, b, out=c_pad), noop, noop),
+    "n": (lambda: torch.mm(a, b), lambda: torch.mm(a[:64], b), noop, noop),
+    "m": (lambda: torch.mm(a, b), lambda: torch.mm(a, b[:, :64], out=c_m_pad), noop, noop),
+    "k": (lambda: torch.mm(a, b), lambda: torch.mm(a[:, :64], b[:64]), noop, noop),
+    "dtype_fp16": (lambda: torch.mm(a, b), lambda: torch.mm(a16, b16), noop, noop),
+    "epilogue_bias_relu": (
+        lambda: torch.addmm(bias, a, b),
+        lambda: torch._addmm_activation(bias, a, b, use_gelu=False),
+        noop, noop),
+    "epilogue_bias_gelu": (
+        lambda: torch.addmm(bias, a, b),
+        lambda: torch._addmm_activation(bias, a, b, use_gelu=True),
+        noop, noop),
+    "batch_count": (lambda: torch.bmm(a3, b3), lambda: torch.bmm(a3_3, b3_3), noop, noop),
+    "stride_a": (lambda: torch.bmm(a3, b3), lambda: torch.bmm(a3_big[:, :128], b3), noop, noop),
+    "stride_b": (lambda: torch.bmm(a3, b3), lambda: torch.bmm(a3, b3_big[:, :128]), noop, noop),
+    "stride_c": (lambda: torch.bmm(a3, b3), lambda: torch.bmm(a3, b3, out=c3_pad), noop, noop),
+    "deterministic": (
+        lambda: torch.mm(a, b), lambda: torch.mm(a, b),
+        lambda: set_deterministic(True), lambda: set_deterministic(False)),
+    "compute_type": (
+        lambda: torch.mm(af, bf), lambda: torch.mm(af, bf),
+        lambda: set_tf32(True), lambda: set_tf32(False)),
+    "sm_carveout": (
+        lambda: torch.mm(a, b), lambda: torch.mm(a, b),
+        lambda: set_carveout(True), lambda: set_carveout(False)),
+}
+
+# The first call in a fresh process always misses, so this checks the log format.
+print("STEP probe warm", flush=True)
+run(lambda: torch.mm(a, b))
+
+for name, (base, variant, setup, teardown) in cases.items():
+    print(f"STEP {name} warm", flush=True)
+    run(base)
+    print(f"STEP {name} hit", flush=True)
+    run(base)
+    setup()
+    print(f"STEP {name} variant", flush=True)
+    run(variant)
+    teardown()
+print("DONE", flush=True)
+"""
+        steps = self._count_hipblaslt_heuristic_calls(script, device)
+        self.assertEqual(steps[0][0], "probe warm")
+        self.assertGreaterEqual(
+            steps[0][1], 1, "no heuristic log lines found; the log format may have changed")
+
+        failures = []
+        for label, n in steps[1:]:
+            name, phase = label.rsplit(" ", 1)
+            if phase == "hit" and n != 0:
+                failures.append(f"{name}: repeated base config missed the cache ({n} heuristic calls)")
+            if phase == "variant" and n != 1:
+                failures.append(
+                    f"{name}: changed key field did not miss the cache "
+                    f"({n} heuristic calls, expected 1)"
+                )
+        variants = [label for label, _ in steps if label.endswith(" variant")]
+        self.assertEqual(len(variants), 18, f"cases ran: {variants}")
+        if failures:
+            self.fail("\n".join(failures))
 
     @onlyCUDA
     @parametrize("shape", [2**i for i in range(5, 14)])
