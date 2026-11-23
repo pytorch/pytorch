@@ -21,10 +21,11 @@ Invariants:
   it as outdated. Minimizing alone leaves the inline comments listed on the
   Files tab and in GitHub Mobile, hence the deleting. A change request is
   hidden only once it no longer stands.
-- A blocking finding next to an earlier inline comment someone replied to
-  goes in the body with a link to that thread, not on the line again. The
-  match is by position only, so the link says where, not that it is the same
-  finding.
+- Every finding goes on its line: a blocking one expanded, a non-blocking one
+  collapsed under its first sentence, so each can be replied to and reacted
+  to. A finding next to an earlier inline comment someone replied to goes in
+  the body with a link to that thread, not on the line again. The match is by
+  position only, so the link says where, not that it is the same finding.
 - A newer REQUEST_CHANGES replaces an older one in the review decision. A
   COMMENT does not, so after a clean verdict earlier requests are dismissed.
   The only other dismissals are a run retracting its own review because the
@@ -58,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import http.client
 import json
 import os
@@ -314,10 +316,44 @@ def report_url(
     return f"{REPORT_ISSUE_URL}?{urllib.parse.urlencode(params)}"
 
 
-def comment_body(finding: dict, report: str = "") -> str:
-    # Not contained like the body: that would break every closed code block to
-    # save the link from a rare unclosed one, where it just shows as text.
-    lines = marked(BLOCKING_MARK, finding["message"].split("\n"))
+NON_BLOCKING = "Non-blocking"
+MAX_HEADLINE = 150
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+
+
+def headline(message: str) -> tuple[str, str]:
+    """`message` split into its first sentence and the rest. A first line with
+    no sentence end is the headline; one over MAX_HEADLINE is cut, and the rest
+    is then the whole message, so nothing is shown only cut."""
+    first, _, after = message.strip().partition("\n")
+    end = _SENTENCE_END.search(first)
+    head, rest = (first[: end.end()], first[end.end() :]) if end else (first, "")
+    rest = "\n".join(part for part in (rest.strip(), after.strip()) if part)
+    if len(head) > MAX_HEADLINE:
+        return head[: MAX_HEADLINE - 1].rstrip() + "…", message.strip()
+    return head, rest
+
+
+def comment_body(finding: dict, report: str = "", blocking: bool = True) -> str:
+    """A blocking finding in full; a non-blocking one collapsed under its first
+    sentence, which is all a reader sees until they open it."""
+    if blocking:
+        # Not contained like the body: that would break every closed code block
+        # to save the link from a rare unclosed one, where it just shows as text.
+        lines = marked(BLOCKING_MARK, finding["message"].split("\n"))
+    else:
+        head, rest = headline(finding["message"])
+        if not head.lower().startswith(NON_BLOCKING.lower()):
+            head = f"{NON_BLOCKING}: {head}"
+        # Contained: an unclosed fence would swallow the closing tag.
+        lines = [
+            "<details>",
+            f"<summary>{FOLDED_MARK} {html.escape(head, quote=False)}</summary>",
+            "",
+            *(contained(rest) if rest else []),
+            "",
+            "</details>",
+        ]
     if report:
         lines += ["", f"<sub>[Report this finding]({report})</sub>"]
     return defuse_bot_commands("\n".join(lines))
@@ -397,8 +433,12 @@ def review_body(
     """Verdict, summary, and the findings not posted inline (non-blocking ones
     folded). Over MAX_BODY, findings are dropped from the end and counted."""
     blocking = blocking_findings(verdict, findings)
-    in_body = [f for f in blocking if f.get("discussion")] if inline else blocking
-    folded = [f for f in findings if f not in blocking]
+    non_blocking = [f for f in findings if f not in blocking]
+    if inline:
+        in_body = [f for f in blocking if f.get("discussion")]
+        folded = [f for f in non_blocking if f.get("discussion")]
+    else:
+        in_body, folded = blocking, non_blocking
     keep_body, keep_folded = len(in_body), len(folded)
     while True:
         body = _compose(
@@ -411,6 +451,7 @@ def review_body(
             folded[:keep_folded],
             len(in_body) - keep_body + len(folded) - keep_folded,
             report,
+            len(non_blocking) - len(folded) if inline else 0,
         )
         if len(body) <= MAX_BODY or keep_body + keep_folded == 0:
             return body
@@ -421,7 +462,16 @@ def review_body(
 
 
 def _compose(
-    verdict, summary, sha, repo, n_inline, in_body, folded, omitted, report=""
+    verdict,
+    summary,
+    sha,
+    repo,
+    n_inline,
+    in_body,
+    folded,
+    omitted,
+    report="",
+    n_inline_folded=0,
 ) -> str:
     lines = [
         MARKER,
@@ -434,6 +484,13 @@ def _compose(
         lines += [
             f"{BLOCKING_MARK} {count(n_inline, 'blocking finding')} "
             f"{'is' if n_inline == 1 else 'are'} attached to the code below.",
+            "",
+        ]
+    if n_inline_folded:
+        lines += [
+            f"{FOLDED_MARK} {count(n_inline_folded, 'non-blocking finding')} "
+            f"{'is' if n_inline_folded == 1 else 'are'} attached to the code "
+            "below, collapsed.",
             "",
         ]
     lines += finding_blocks(repo, sha, in_body, BLOCKING_MARK)
@@ -478,14 +535,17 @@ def post(
     report = report_url(gh.repo, pr, sha, run_link)
     event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
     base = {"commit_id": sha, "event": event}
+    blocking = blocking_findings(verdict, findings)
     comments = [
         {
             "path": unescape_path(f["path"]),
             "line": f["line"],
             "side": "LEFT" if f.get("removed") else "RIGHT",
-            "body": comment_body(f, report_url(gh.repo, pr, sha, run_link, f)),
+            "body": comment_body(
+                f, report_url(gh.repo, pr, sha, run_link, f), f in blocking
+            ),
         }
-        for f in blocking_findings(verdict, findings)
+        for f in findings
         if not f.get("discussion")
     ]
     if comments:
