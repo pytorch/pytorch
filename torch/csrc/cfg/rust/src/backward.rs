@@ -21,10 +21,9 @@
 
 use crate::capi::{self, TcfgBackwardApi, TcfgNodeInfo, TcfgTensorInfo, TCFG_NODE_LEAF, TCFG_NODE_PYTHON, TCFG_RUN_BELOW_AUTOGRAD, TCFG_RUN_ON_TAPE};
 use crate::joint::{Joint, Value};
-use crate::pyffi::Obj;
+use crate::pyffi::{self, Obj, Once};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple, PyWeakrefMethods, PyWeakrefReference};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{c_void, CStr};
@@ -67,19 +66,32 @@ fn refused<T>(why: impl Into<String>) -> Result<T, Stop> {
 // ---------------------------------------------------------------------------
 // torch, as far as the engine asks it something.
 
-static TORCH: PyOnceLock<Py<PyModule>> = PyOnceLock::new();
-static TENSOR: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
+static TORCH: Once<Py<PyModule>> = Once::new();
+static TENSOR: Once<Py<PyAny>> = Once::new();
 
+/// The module as the interpreter keeps it (`pyffi::module`): it is not
+/// imported here.
 pub(crate) fn torch(py: Python<'_>) -> PyResult<&Bound<'_, PyModule>> {
-    Ok(TORCH.get_or_try_init(py, || PyModule::import(py, "torch").map(Bound::unbind))?.bind(py))
+    if let Some(found) = TORCH.get() {
+        return Ok(found.bind(py));
+    }
+    let found = unsafe { pyffi::module(c"torch") };
+    if found.is_null() {
+        return Err(PyRuntimeError::new_err("torch.vm: the module torch is not there"));
+    }
+    TORCH.set(unsafe { Bound::from_borrowed_ptr(py, found).cast_into_unchecked::<PyModule>().unbind() });
+    Ok(TORCH.get().expect("kept").bind(py))
 }
 
 pub(crate) fn is_tensor(obj: &Bound<'_, PyAny>) -> bool {
     let py = obj.py();
-    let Ok(class) = TENSOR.get_or_try_init(py, || torch(py)?.getattr("Tensor").map(Bound::unbind)) else {
-        return false;
-    };
-    obj.is_instance(class.bind(py)).unwrap_or(false)
+    if TENSOR.get().is_none() {
+        let Ok(class) = pyffi::of_module(py, c"torch", c"Tensor") else {
+            return false;
+        };
+        TENSOR.set(class.unbind());
+    }
+    obj.is_instance(TENSOR.get().expect("kept").bind(py)).unwrap_or(false)
 }
 
 fn info(obj: &Bound<'_, PyAny>) -> Option<TcfgTensorInfo> {
@@ -286,6 +298,24 @@ fn needs_tape(py: Python<'_>) -> PyResult<Option<&'static str>> {
         return Ok(Some("saved-tensor hooks"));
     }
     Ok(None)
+}
+
+/// What the autograd engine gives for `inputs` when `seeds` come in at
+/// `roots`, the graph kept and inputs that are not reached given as None:
+/// `torch.autograd.grad(roots, inputs, seeds, retain_graph=True,
+/// allow_unused=True)` without the Python code around the engine, which
+/// imports at every call (two statements per root) and so calls
+/// `builtins.__import__` where eager calls nothing. The context is stashed
+/// for the engine's device threads as that code stashes it.
+fn engine_grad<'py>(py: Python<'py>, roots: Bound<'py, PyTuple>, inputs: Bound<'py, PyTuple>, seeds: Bound<'py, PyTuple>) -> PyResult<Bound<'py, PyAny>> {
+    let engine = pyffi::of_module(py, c"torch.autograd.variable", c"Variable")?.getattr("_execution_engine")?;
+    let c = pyffi::of_module(py, c"torch", c"_C")?;
+    c.call_method1("_stash_obj_in_tls", ("context", pyffi::of_module(py, c"contextvars", c"copy_context")?.call0()?))?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("accumulate_grad", false)?;
+    let given = engine.call_method("run_backward", (roots, seeds, true, false, inputs, true), Some(&kwargs));
+    c.call_method1("_remove_obj_from_tls", ("context",))?;
+    given
 }
 
 // ---------------------------------------------------------------------------
@@ -738,7 +768,10 @@ impl Step {
             Kind::Neg(a) => get(a)?.call_method0("__neg__")?,
             Kind::Tuple(items) => PyTuple::new(py, items.iter().map(get).collect::<PyResult<Vec<_>>>()?)?.into_any(),
             Kind::List(items) => PyList::new(py, items.iter().map(get).collect::<PyResult<Vec<_>>>()?)?.into_any(),
-            Kind::Slice(a, b, c) => py.import("builtins")?.getattr("slice")?.call1((get(a)?, get(b)?, get(c)?))?,
+            Kind::Slice(a, b, c) => {
+                let (a, b, c) = (get(a)?, get(b)?, get(c)?);
+                unsafe { Bound::from_owned_ptr_or_err(py, pyo3::ffi::PySlice_New(a.as_ptr(), b.as_ptr(), c.as_ptr()))? }
+            }
             Kind::Kernel(op, args, kwargs, places, single) => {
                 let args = PyTuple::new(py, args.iter().map(get).collect::<PyResult<Vec<_>>>()?)?;
                 let given = if op.bind(py).is_instance_of::<PyCapsule>() {
@@ -1190,11 +1223,8 @@ impl<'py> Nodes<'py> {
         if wanted.is_empty() {
             return Ok(());
         }
-        let kwargs = PyDict::new(py);
-        kwargs.set_item("retain_graph", true)?;
-        kwargs.set_item("allow_unused", true)?;
-        let inputs = PyList::new(py, wanted.iter().map(|feed| &feeds[*feed as usize]))?;
-        let engine = torch(py)?.getattr("autograd")?.call_method("grad", (PyList::new(py, roots)?, inputs, PyList::new(py, seeds)?), Some(&kwargs))?;
+        let inputs = PyTuple::new(py, wanted.iter().map(|feed| &feeds[*feed as usize]))?;
+        let engine = engine_grad(py, PyTuple::new(py, roots)?, inputs, PyTuple::new(py, seeds)?)?;
         for (feed, grad) in wanted.iter().zip(engine.try_iter()?) {
             let grad = grad?;
             let same = match given.get(feed) {
@@ -1569,7 +1599,7 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
     // it runs: by the names it keeps it under.
     for (number, node) in nodes.order.iter().enumerate() {
         let mut kept: Vec<Value> = Vec::new();
-        for name in crate::asks::saved_names(py, &node.obj)? {
+        for name in crate::asks::saved_names(&node.obj)? {
             let Ok(held) = node.obj.getattr(name.as_str()) else {
                 continue;
             };
@@ -1950,7 +1980,9 @@ impl Plan {
             Err(Stop::Refused(why)) => Err(why.clone()),
             Err(_) => return made,
         };
-        self.backs.lock().unwrap().insert(key, kept);
+        // What was there ends behind the lock.
+        let before = self.backs.lock().unwrap().insert(key, kept);
+        drop(before);
         made
     }
 
@@ -2160,7 +2192,8 @@ impl Kept {
             Err(error) => {
                 crate::vm::unsettled();
                 let why = format!("its kernels do not fit: {}", error.value(py).to_string().lines().next().unwrap_or(""));
-                self.plan.backs.lock().unwrap().insert((way, pattern.clone(), needed.to_vec()), Err(why.clone()));
+                let before = self.plan.backs.lock().unwrap().insert((way, pattern.clone(), needed.to_vec()), Err(why.clone()));
+                drop(before);
                 return self.again(py, grads, out, false, &why);
             }
         };
@@ -2266,7 +2299,9 @@ unsafe extern "C" fn node_release(state: *mut c_void, dropped: i32) {
         if dropped != 0 {
             drop(Box::from_raw(state as *mut Kept));
         } else {
-            (*(state as *const Kept)).saved.lock().unwrap().clear();
+            // Let go of behind the lock: the end of a tensor can run code.
+            let saved = std::mem::take(&mut *(*(state as *const Kept)).saved.lock().unwrap());
+            drop(saved);
         }
     });
 }
@@ -2480,11 +2515,12 @@ impl Form {
         }
         let does = match &*self.state.lock().unwrap() {
             State::Refused(_) => Does::Tape,
-            _ if needs_tape(py)?.is_some() => Does::Tape,
             State::Proven(plan) => Does::Plan(plan.clone()),
             State::Cut(parts) => Does::Parts(parts.clone()),
             State::Learning(_) => Does::Learn,
         };
+        // Asked with the state let go of.
+        let does = if matches!(does, Does::Tape) || needs_tape(py)?.is_some() { Does::Tape } else { does };
         match does {
             Does::Tape => self.graph.given(py, &self.graph.run(py, feeds)?),
             Does::Plan(plan) => plan.call(py, feeds),
@@ -2508,7 +2544,10 @@ impl Form {
             };
             match taken {
                 Err(why) => {
-                    *state = State::Refused(why);
+                    // What was taken down before ends behind the lock.
+                    let learned = std::mem::replace(&mut *state, State::Refused(why));
+                    drop(state);
+                    drop(learned);
                     return Ok(given);
                 }
                 Ok(taken) => runs.push(taken),
@@ -2536,7 +2575,8 @@ impl Form {
                 }
             }
         };
-        *self.state.lock().unwrap() = next;
+        let learned = std::mem::replace(&mut *self.state.lock().unwrap(), next);
+        drop(learned);
         Ok(given)
     }
 }
