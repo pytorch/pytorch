@@ -1212,6 +1212,17 @@ class TestVmPasses(TestCase):
         ):
             compiled.nothing
 
+    def test_ndim(self):
+        # Nothing is loaded between x and its ndim, unlike for x.dim(): the
+        # pass that turns both into the rank must not look for what is.
+        def rank(x):
+            return x.ndim + 1
+
+        compiled = torch.vm(rank, fallback=False)
+        for shape in ((2, 3), (2, 3), (4,), (2, 3, 4)):
+            self.assertEqual(compiled(torch.ones(shape)), len(shape) + 1)
+        self.assertIn("tensor_dim", compiled.dump())
+
     def test_what_passes_takes(self):
         self.assertNotIn(P.NarrowDims(), DEFAULT)
         with self.assertRaisesRegex(TypeError, "passes has a str"):
