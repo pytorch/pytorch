@@ -3144,6 +3144,9 @@ const INT_BINARY: [u8; 5] = [0, 10, 5, 2, 6];
 
 impl Graphs {
     fn build(&self, unit: &mut Unit, cx: &PassCx) -> bool {
+        if !starts_graphs(&cx.func().filename) {
+            return false;
+        }
         let n = unit.insts.len();
         let roles: Vec<Role> = (0..n).map(|i| role(unit, cx, i)).collect();
         // The runs, each from its first node to its last.
@@ -3220,6 +3223,26 @@ impl Graphs {
             unit.graphs.push((site, first));
         }
         !unit.graphs.is_empty()
+    }
+}
+
+/// The parts of torch whose functions graphs start in: the code of models.
+/// Its other functions are library code around tensors: a graph gets into
+/// them only along a path from outside.
+const MODEL_CODE: [&str; 7] = ["nn/", "functional.py", "_tensor.py", "distributions/", "_functorch/", "func/", "optim/"];
+
+/// Whether graphs start in the functions of a file.
+fn starts_graphs(filename: &str) -> bool {
+    static TORCH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    let torch = TORCH.get_or_init(|| {
+        let asked = |py: Python<'_>| -> PyResult<String> { py.import("torch")?.getattr("__file__")?.extract() };
+        let file = unsafe { asked(Python::assume_attached()) }.unwrap_or_default();
+        unsafe { ffi::PyErr_Clear() };
+        file.rsplit_once('/').map_or(String::new(), |(dir, _)| format!("{}/", dir))
+    });
+    match filename.strip_prefix(torch.as_str()) {
+        Some(rest) if !torch.is_empty() => MODEL_CODE.iter().any(|place| rest.starts_with(place)),
+        _ => true,
     }
 }
 

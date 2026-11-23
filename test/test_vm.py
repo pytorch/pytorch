@@ -5834,6 +5834,10 @@ def graph_looks_up(x, table, key):
     return y.cos().tanh().sum()
 
 
+def graph_printed(x):
+    return str(x.sin() * 2)
+
+
 def graph_unpacks(x, pair):
     y = x.sin() * 2
     a, b = pair
@@ -6974,6 +6978,21 @@ print(json.dumps(found))
         got = compiled(x, table, "a")
         self.assertEqual(got, graph_looks_up(x, table, "a"), atol=0, rtol=0)
         self.assertEqual(self.graphs(compiled)[0]["hits"], 3)
+
+    def test_graphs_start_in_code_of_models_and_not_in_the_rest_of_torch(self):
+        passes = (*DEFAULT, P.Graphs(min_ops=1))
+        compiled = torch.vm(graph_printed, passes=passes, fallback=False)
+        x = torch.randn(3)
+        for _ in range(3):
+            self.assertEqual(compiled(x), graph_printed(x))
+        # What prints a tensor is tensor work in Python, in a file of torch
+        # that is no code of a model: it runs, and has no graphs.
+        called = compiled.stats()["compiled_callees"]
+        self.assertIn("_Formatter.__init__", called)
+        files = {r["where"].split(" (")[0] for r in torch.vm.regions(compiled)}
+        self.assertIn("graph_printed", files)
+        printing = ("_Formatter", "_tensor_str", "_str")
+        self.assertEqual({f for f in files if f.startswith(printing)}, set())
 
     # --- what a graph leaves as the function has it
 

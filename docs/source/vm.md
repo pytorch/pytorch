@@ -298,6 +298,25 @@ sorted((found["where"], found["operators"]) for found in torch.vm.regions(g))
 # [('Linear.forward (block 0)[4]', ['aten::linear']), ('relu (block 4)[2]', ['aten::relu'])]
 ```
 
+Graphs start in one's own code and in the code of models that torch has
+(`torch.nn`, `torch.optim`, `torch.distributions`, `torch.func`,
+`torch.functional`, the methods of `torch.Tensor`). The rest of the library is
+code around tensors, and a function of it that is called runs as it is,
+without graphs of its own. What prints a tensor is such code:
+
+```python
+def printed(x):
+    return str(x.sin() * 2)
+
+
+g = torch.vm(printed, passes=(*torch.vm.DEFAULT_PASSES, P.Graphs(min_ops=1)))
+for _ in range(3):
+    text = g(x)
+"_Formatter.__init__" in g.stats()["compiled_callees"]  # True: the engine runs it
+sorted({found["where"].split(" (")[0] for found in torch.vm.regions(g)})
+# ['Tensor.__format__', 'Tensor.__iter__', 'printed']
+```
+
 ### What a function makes
 
 A list, a dict, an iterator: what the instructions of a path make between
