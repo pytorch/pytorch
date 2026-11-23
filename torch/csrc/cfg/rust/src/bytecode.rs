@@ -23,6 +23,9 @@ pub enum Bc {
     PopTop,
     PushNull,
     EndFor,
+    /// END_FOR of 3.14, which pops one value; the POP_ITER behind it pops
+    /// the iterator that the draw in front found exhausted.
+    EndForOne,
     Copy,
     Swap,
     LoadConst,
@@ -133,7 +136,7 @@ fn bc_from_name(name: &str, v314: bool) -> Bc {
         match name {
             // Pops what FOR_ITER pushed for an exhausted iterator, and
             // POP_ITER then pops the iterator; in 3.12 END_FOR pops both.
-            "END_FOR" => return Bc::PopTop,
+            "END_FOR" => return Bc::EndForOne,
             "CALL_FUNCTION_EX" => return Bc::CallFunctionExKwargs,
             "WITH_EXCEPT_START" => return Bc::WithExceptStartCall,
             _ => {}

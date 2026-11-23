@@ -4334,6 +4334,21 @@ class TestVmLifetimes(TestCase):
         self.assertEqual(run(compiled), expected)
         self.assertEqual(run(compiled), expected)
 
+    def test_a_loop_that_runs_to_its_end_holds_nothing_more(self):
+        # The other side of "a value ends where the interpreter pops it":
+        # the iterator of a `for` is held (`hold`) where a `break` pops it,
+        # once per way out. A loop that only runs out has no instruction for
+        # it: the draw that finds the iterator exhausted is the last to read
+        # it, and the edge that leaves the loop is where it is let go of.
+        loops = {vm_held_runs_out: 0, vm_held_goes_over: 0, vm_held_leaves_early: 1}
+        for fn, held in loops.items():
+            dump = torch.vm(fn, passes=(), fallback=False).dump(versions=False)
+            lines = [line.strip() for line in dump.splitlines()]
+            (made,) = [line.split(" = ")[0] for line in lines if " = get_iter " in line]
+            said = [line[5:].split(", ") for line in lines if line.startswith("hold ")]
+            holds = [values for values in said if made in values]
+            self.assertEqual(len(holds), held, msg=fn.__name__)
+
     def test_hold_in_the_graph(self):
         compiled = torch.vm(lifetime_rebound, fallback=False)
         dump = compiled.dump(versions=False)
@@ -12278,6 +12293,528 @@ print("done " + json.dumps({"differ": differ, "first": first, "graphs": graphs})
 '''
 
 
+VM_HELD_LOG = []
+
+
+def vm_held_gen(name, values=(2.0, 3.0)):
+    # A generator that says when it is closed: by its `finally`, which runs
+    # where the last reference to the generator goes.
+    VM_HELD_LOG.append(f"open {name}")
+    try:
+        yield from values
+    finally:
+        VM_HELD_LOG.append(f"closed {name}")
+
+
+class VmHeldLoud:
+    # An object that says when it ends, and what is done with it meanwhile.
+    def __init__(self, name):
+        self.name = name
+
+    def __del__(self):
+        VM_HELD_LOG.append(f"end of {self.name}")
+
+    def __enter__(self):
+        VM_HELD_LOG.append(f"enter {self.name}")
+        return 2.0
+
+    def __exit__(self, *exc):
+        VM_HELD_LOG.append(f"exit {self.name}")
+        return False
+
+    def __lt__(self, other):
+        VM_HELD_LOG.append(f"{self.name} < {getattr(other, 'name', other)}")
+        return VmHeldTruth(False)
+
+    def __gt__(self, other):
+        VM_HELD_LOG.append(f"{self.name} > {getattr(other, 'name', other)}")
+        return VmHeldTruth(False)
+
+    def scaled(self, by):
+        VM_HELD_LOG.append(f"method of {self.name}")
+        return by
+
+
+class VmHeldTruth:
+    def __init__(self, truth):
+        self.truth = truth
+
+    def __bool__(self):
+        VM_HELD_LOG.append("truth")
+        return self.truth
+
+
+class VmHeldWatched:
+    # An iterator whose end a weak reference is told of.
+    def __init__(self, name):
+        def told(gone):
+            VM_HELD_LOG.append(f"told of {name}")
+
+        self.left = 2
+        self.told = weakref.ref(self, told)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self.left:
+            raise StopIteration
+        self.left -= 1
+        return 2.0
+
+
+def vm_held_says(what, value=2.0):
+    VM_HELD_LOG.append(what)
+    return value
+
+
+def vm_held_raises(what):
+    VM_HELD_LOG.append(what)
+    raise KeyError(what)
+
+
+def vm_held_break(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("it"):
+        VM_HELD_LOG.append("body")
+        x = x * value
+        break
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_return(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("it"):
+        VM_HELD_LOG.append("body")
+        return ((x * value + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_continue(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("it"):
+        if value < 2.5:
+            continue
+        VM_HELD_LOG.append("body")
+        x = x * value
+        break
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_outer_continue(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for scale in (2.0, 3.0):
+        for value in vm_held_gen("inner"):
+            VM_HELD_LOG.append("body")
+            x = x * value
+            break
+        else:
+            continue
+        VM_HELD_LOG.append("between")
+        x = x + scale
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_caught_around(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    try:
+        for value in vm_held_gen("it"):
+            VM_HELD_LOG.append("body")
+            x = x * value
+            vm_held_raises("raise")
+    except KeyError:
+        VM_HELD_LOG.append("handler")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_caught_inside(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("it"):
+        try:
+            VM_HELD_LOG.append("body")
+            x = x * value
+            vm_held_raises("raise")
+        except KeyError:
+            VM_HELD_LOG.append("handler")
+            break
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_raise_statement(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("it"):
+        VM_HELD_LOG.append("body")
+        x = x * value
+        raise KeyError("out")
+
+
+def vm_held_leaves(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    try:
+        return vm_held_raise_statement(x)
+    except KeyError:
+        VM_HELD_LOG.append("the caller's handler")
+        return x
+
+
+def vm_held_raise_in_call(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("it"):
+        VM_HELD_LOG.append("body")
+        x = x * value
+        vm_held_raises("raise")
+    return x
+
+
+def vm_held_leaves_from_call(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    try:
+        return vm_held_raise_in_call(x)
+    except KeyError:
+        VM_HELD_LOG.append("the caller's handler")
+        return x
+
+
+def vm_held_nested_return(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("outer"):
+        for other in vm_held_gen("inner"):
+            VM_HELD_LOG.append("body")
+            return ((x * value * other + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_nested_break(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("outer"):
+        for other in vm_held_gen("inner"):
+            VM_HELD_LOG.append("body")
+            x = x * value * other
+            break
+        VM_HELD_LOG.append("between")
+        break
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_nested_raise(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("outer"):
+        for other in vm_held_gen("inner"):
+            VM_HELD_LOG.append("body")
+            x = x * value * other
+            raise KeyError("out")
+
+
+def vm_held_nested_leaves(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    try:
+        return vm_held_nested_raise(x)
+    except KeyError:
+        VM_HELD_LOG.append("the caller's handler")
+        return x
+
+
+def vm_held_zip(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value, other in zip(vm_held_gen("left"), vm_held_gen("right")):
+        VM_HELD_LOG.append("body")
+        x = x * value * other
+        break
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_enumerate(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for at, value in enumerate(vm_held_gen("it")):
+        VM_HELD_LOG.append("body")
+        x = x * value + at
+        break
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_map(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in map(float, vm_held_gen("it")):
+        VM_HELD_LOG.append("body")
+        x = x * value
+        break
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_finally(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("it"):
+        try:
+            VM_HELD_LOG.append("body")
+            return ((x * value + 1).tanh() * 2).cos() + 1
+        finally:
+            VM_HELD_LOG.append("finally")
+
+
+def vm_held_with_break(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in vm_held_gen("it"):
+        with VmHeldLoud("manager"):
+            VM_HELD_LOG.append("body")
+            x = x * value
+            break
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_with(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    with VmHeldLoud("manager") as value:
+        VM_HELD_LOG.append("body")
+        x = x * value
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_match(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    match VmHeldLoud("subject"):
+        case VmHeldLoud(name="other"):
+            x = x * 5
+        case VmHeldLoud() if vm_held_says("guard"):
+            VM_HELD_LOG.append("body")
+            x = x * 2
+        case _:
+            x = x * 7
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_chained(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    if VmHeldLoud("left") < VmHeldLoud("middle") < VmHeldLoud("right"):
+        x = x * 5
+    VM_HELD_LOG.append("behind")
+    return ((x * 2 + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_receiver(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    x = x * VmHeldLoud("receiver").scaled(vm_held_says("argument"))
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_argument(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    x = x * vm_held_says(VmHeldLoud("first").name, vm_held_says("second"))
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_handled(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    try:
+        vm_held_with_local(x)
+    except KeyError:
+        VM_HELD_LOG.append("handler")
+        x = x * 2
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_with_local(x):
+    kept = VmHeldLoud("a variable of the frame in the traceback")
+    raise KeyError(kept.name)
+
+
+def vm_held_handled_named(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    try:
+        vm_held_with_local(x)
+    except KeyError as error:
+        VM_HELD_LOG.append("handler")
+        x = x * len(error.args)
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_comprehension(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    scales = [vm_held_says("item", value) for value in vm_held_gen("it")]
+    VM_HELD_LOG.append("behind")
+    return ((x * scales[0] + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_comprehension_raises(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    try:
+        scales = [vm_held_raises("item") for value in vm_held_gen("it")]
+    except KeyError:
+        VM_HELD_LOG.append("handler")
+        scales = [2.0]
+    return ((x * scales[0] + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_generator_expression(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    scale = next(vm_held_says("item", value) for value in vm_held_gen("it"))
+    VM_HELD_LOG.append("behind")
+    return ((x * scale + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_tuple_of_generator(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    scales = tuple(vm_held_says("item", value) for value in vm_held_gen("it"))
+    VM_HELD_LOG.append("behind")
+    return ((x * scales[0] + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_del_object(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in VmHeldIterable("what is gone over"):
+        VM_HELD_LOG.append("body")
+        x = x * value
+        break
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+class VmHeldIterable(VmHeldLoud):
+    # Something to go over whose iterator is the only thing that holds it.
+    def __iter__(self):
+        return VmHeldIterator(self)
+
+
+class VmHeldIterator:
+    def __init__(self, over):
+        self.over, self.left = over, 2
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if not self.left:
+            raise StopIteration
+        self.left -= 1
+        return 2.0
+
+
+def vm_held_watched(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for value in VmHeldWatched("what is gone over"):
+        VM_HELD_LOG.append("body")
+        x = x * value
+        break
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_runs_out(total, count):
+    for at in range(count):
+        total = total + at
+    return total
+
+
+def vm_held_goes_over(total, values):
+    for value in values:
+        total = total + value
+    return total
+
+
+def vm_held_leaves_early(total, values):
+    for value in values:
+        total = total + value
+        if total > 2:
+            break
+    return total
+
+
+def vm_held_inlined(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    x = vm_held_break(x)
+    VM_HELD_LOG.append("behind the call")
+    return vm_held_finally(x)
+
+
+def vm_held_unrolled(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for at in range(2):
+        for value in vm_held_gen(f"it {at}"):
+            VM_HELD_LOG.append("body")
+            x = x * value + at
+            break
+        VM_HELD_LOG.append("between")
+        if VmHeldLoud("left") < VmHeldLoud("middle") < VmHeldLoud("right"):
+            x = x * 5
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_overridden(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    try:
+        return VmHeldLoud("the first value")
+    finally:
+        VM_HELD_LOG.append("finally")
+        return ((x + 1).tanh() * 2).cos() + 1  # noqa: B012, SIM107
+
+
+def vm_held_overridden_by_break(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for scale in (2.0, 3.0):
+        try:
+            return VmHeldLoud("the first value")
+        finally:
+            VM_HELD_LOG.append("finally")
+            break  # noqa: B012
+    VM_HELD_LOG.append("behind")
+    return ((x * scale + 1).tanh() * 2).cos() + 1
+
+
+def vm_held_list(x):
+    x = ((x * 2).sin() + 1).cos() * 3
+    for item in [VmHeldLoud("first item"), VmHeldLoud("second item")]:
+        VM_HELD_LOG.append("body")
+        x = x * len(item.name)
+        break
+    VM_HELD_LOG.append("behind")
+    return ((x + 1).tanh() * 2).cos() + 1
+
+
+VM_HELD_SHAPES = (
+    vm_held_break,
+    vm_held_return,
+    vm_held_continue,
+    vm_held_outer_continue,
+    vm_held_caught_around,
+    vm_held_caught_inside,
+    vm_held_leaves,
+    vm_held_leaves_from_call,
+    vm_held_nested_return,
+    vm_held_nested_break,
+    vm_held_nested_leaves,
+    vm_held_zip,
+    vm_held_enumerate,
+    vm_held_map,
+    vm_held_finally,
+    vm_held_with_break,
+    vm_held_with,
+    vm_held_match,
+    vm_held_chained,
+    vm_held_receiver,
+    vm_held_argument,
+    vm_held_handled,
+    vm_held_handled_named,
+    vm_held_comprehension,
+    vm_held_comprehension_raises,
+    vm_held_generator_expression,
+    vm_held_tuple_of_generator,
+    vm_held_del_object,
+    vm_held_watched,
+    vm_held_inlined,
+    vm_held_unrolled,
+    vm_held_overridden,
+    vm_held_overridden_by_break,
+    vm_held_list,
+)
+
+
 GRAPH_NAME_LOG = []
 
 
@@ -17263,6 +17800,63 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
             said = json.loads(ran.stdout.strip().split("\n")[-1][5:])
             self.assertEqual(said["differ"], [], msg=f"{case}: {said}")
             self.assertEqual(said["graphs"], graphs, msg=f"{case}: {said}")
+
+    def test_a_value_ends_where_the_interpreter_lets_go_of_it(self, device):
+        # A value lives as long as the interpreter keeps it: on its stack
+        # until the instruction that pops it, in a variable until that is
+        # bound again or the frame ends. So an object whose end runs code
+        # (a generator's `finally`, a `__del__`, the callback of a weak
+        # reference) ends where it ends in eager mode, not behind the last
+        # instruction that reads it: the iterator of a `for` that the
+        # function leaves by `break`, `return` or a raise is read last by
+        # the draw in front of the loop's body, and the interpreter pops it
+        # behind the body. Each shape logs what its body does and what
+        # ends, in order; eight calls against eight in eager mode, with the
+        # default passes, with `Graphs()` alone, with a pass over graphs and
+        # with a gradient: the log, the result and the gradient of every
+        # call, the first one and those in which a path is taken down and
+        # runs. Ten of the shapes are right without the rule and say
+        # where it has nothing to do: the last instruction that reads the
+        # value is the one that pops it (an unnamed `with` manager, which
+        # the `__exit__` on the stack is bound to; a receiver and an
+        # argument that wait for a call; the generator expression that
+        # `next` is handed), another way out of the same branch reads it
+        # (the subject of a `match`, the middle of `a < b < c`), the thread
+        # keeps it (the exception being handled, and the frame in its
+        # traceback), or it ends by itself (a generator that is drawn to its
+        # end).
+        def keep(gm, input_types):
+            return gm
+
+        def calls(fn, graded):
+            rows = []
+            for at in range(8):
+                x = torch.arange(3.0, device=device) + at
+                if graded:
+                    x.requires_grad_(True)
+                del VM_HELD_LOG[:]
+                out = fn(x)
+                grad = torch.autograd.grad(out.sum(), x)[0].tolist() if graded else None
+                rows.append((out.detach().tolist(), grad, list(VM_HELD_LOG)))
+                del out
+            return rows
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = {"the default passes": (None, False), "graphs": (graphs, False)}
+        ways.update({"a pass": ((*graphs, keep), False), "a gradient": (graphs, True)})
+        kept = {"fallback": False, "demote": False}
+        for fn in VM_HELD_SHAPES:
+            for way, (passes, graded) in ways.items():
+                options = {} if passes is None else {"passes": passes, **kept}
+                compiled, msg = torch.vm(fn, **options), f"{fn.__name__}, {way}"
+                self.assertEqual(calls(compiled, graded), calls(fn, graded), msg=msg)
+        # What the rule gives, said once in words: the body runs with the
+        # generator open, and the generator is closed where the loop is left.
+        compiled = torch.vm(vm_held_break)
+        del VM_HELD_LOG[:]
+        compiled(torch.ones(3, device=device))
+        self.assertEqual(VM_HELD_LOG, ["open it", "body", "closed it", "behind"])
+        del VM_HELD_LOG[:]
 
     def test_a_key_that_compares_in_python_is_compared_once_per_lookup(self, device):
         # A dict that the engine looks a name up in (the dict of an object,
