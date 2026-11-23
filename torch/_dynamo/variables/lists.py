@@ -25,7 +25,7 @@ import torch.fx
 from torch._subclasses.fake_tensor import maybe_get_fake_constant
 from torch.utils._pytree import SequenceKey
 
-from .. import graph_break_hints, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
     create_build_tuple,
     create_call_function,
@@ -561,8 +561,10 @@ class BaseListVariable(VariableTracker):
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
-        if istype(args[0], (ListVariable, TupleVariable)):
-            self.items.extend(args[0].items)
+        iterable = args[0].realize()
+        # CPython extends from a snapshot when the list extends itself.
+        if istype(iterable, (ListVariable, TupleVariable)) or iterable is self:
+            self.items.extend(iterable.items)
         elif not isinstance(args[0], UserDefinedObjectVariable) and isinstance(
             args[0],
             (
@@ -580,7 +582,7 @@ class BaseListVariable(VariableTracker):
         elif isinstance(args[0], ConstantVariable):
             items = unpack_iterable(tx, args[0])
             self.items.extend(items)
-        elif istype(iterable := args[0].realize(), _unpack_fast_types()):
+        elif istype(iterable, _unpack_fast_types()):
             # Builtin iterables that Dynamo unpacks directly, without the
             # iterator and the length hint, as lazily_unpack does.
             self.items.extend(iterable.unpack_var_sequence(tx))
@@ -588,15 +590,17 @@ class BaseListVariable(VariableTracker):
             # list_extend_iter_lock_held: get the iterator, ask the iterable for
             # a length hint, then run the iterator using the native append,
             # which bypasses a subclass's overridden append (e.g. immutable_list).
-            iterator = generic_getiter(tx, iterable)
-            pyobject_length_hint(tx, iterable, 8)
-            while True:
-                try:
-                    item = pyiter_next(tx, iterator)
-                except ObservedUserStopIteration:
-                    handle_observed_exception(tx)
-                    break
-                self.list_append(tx, [item], {})
+            # This host-side iteration has no resumable frame.
+            with config.patch(nested_graph_breaks=False):
+                iterator = generic_getiter(tx, iterable)
+                pyobject_length_hint(tx, iterable, 8)
+                while True:
+                    try:
+                        item = pyiter_next(tx, iterator)
+                    except ObservedUserStopIteration:
+                        handle_observed_exception(tx)
+                        break
+                    self.list_append(tx, [item], {})
 
         if len(self.items) > sz:
             tx.output.side_effects.mutation(self)
