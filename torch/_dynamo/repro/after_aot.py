@@ -66,11 +66,11 @@ import torch
 import torch.fx as fx
 import torch.nn as nn
 from torch._dynamo.debug_utils import (
-    _cuda_system_info_comment,
     AccuracyError,
     backend_accuracy_fails,
     BuckTargetWriter,
     cast_to_fp64,
+    device_system_info_comment,
     extra_deps,
     extra_imports,
     generate_config_string,
@@ -220,7 +220,7 @@ def setup_fake_process_groups(
         group_info: dict mapping group_name -> {'size': group_size, 'rank': rank}
     """
     import torch.distributed as dist
-    from torch.testing._internal.distributed.fake_pg import FakeStore
+    from torch.distributed._backends.fake import FakeStore
 
     if not group_info:
         return
@@ -303,7 +303,7 @@ def wrap_compiler_debug(
         compile_region_name: str | None = None,
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> OutputCode:
-        from torch._subclasses import FakeTensorMode
+        from torch._subclasses.fake_tensor import FakeTensorMode
 
         is_inference = kwargs.get("is_inference", False)
         compiler_fn = functools.partial(
@@ -555,7 +555,6 @@ def generate_compiler_repro_string(
         distributed_imports = textwrap.dedent(
             """
 import torch.distributed as dist
-from torch.testing._internal.distributed.fake_pg import FakeStore
         """
         ).strip()
 
@@ -611,7 +610,7 @@ if "__compile_source__" in globals():
             model_str += f"# torch cuda version: {torch.version.cuda}\n"
         if hasattr(torch.version, "git_version"):
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
-        model_str += _cuda_system_info_comment()
+        model_str += device_system_info_comment(args)
 
     kernel_side_table_prefix = (
         "torch._higher_order_ops.triton_kernel_wrap.kernel_side_table"
@@ -841,7 +840,9 @@ if "__compile_source__" in globals():
                     f"    _output_size = reader.args[{output_size_idx}]"
                 )
                 writer._lines.append(
-                    "    if isinstance(_repeats, torch.Tensor) and _repeats.dtype == torch.int64:"
+                    "    if isinstance(_repeats, torch.Tensor) and "
+                    "_repeats.dtype in (torch.int32, torch.int64) and "
+                    "_repeats.numel() > 0:"
                 )
                 writer._lines.append("        _n = _repeats.numel()")
                 writer._lines.append("        _repeats.fill_(_output_size // _n)")
@@ -1453,7 +1454,7 @@ def repro_analyze(options: ReproOptions, mod: nn.Module, load_args: Any) -> None
         if new_args:
             raise AssertionError("new_args should be empty after compiled() call")
 
-    def compare_tuples(t1: tuple[Unpack[_Ts]], t2: tuple[Unpack[_Ts]]) -> str | None:
+    def compare_tuples(t1: tuple[*_Ts], t2: tuple[*_Ts]) -> str | None:
         diff_indices = [i for i in range(len(t1)) if t1[i] != t2[i]]
         diff_values = [(t1[i], t2[i]) for i in diff_indices]
 

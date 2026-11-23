@@ -141,6 +141,15 @@ class PrecompileContext:
         """
         return cls._backend_artifacts_by_key.get(_BackendId(key), None)
 
+    @classmethod
+    def take_artifact(cls, key: str) -> BackendCacheArtifact[Any] | None:
+        """
+        Remove and return the backend cache artifact with the associated key, so
+        a capture that owns it does not leave it behind in the process-global list.
+        Ownership moves to the caller: serialize_artifact_by_key no longer finds it.
+        """
+        return cls._backend_artifacts_by_key.pop(_BackendId(key), None)
+
     @staticmethod
     def dump_debug_info(
         dynamo_entries: dict[str, _DynamoCacheEntry],
@@ -180,16 +189,11 @@ class PrecompileContext:
         dynamo_entries = cls._dynamo_cache_entries
         backend_artifacts = cls._backend_artifacts_by_key
 
-        num_artifacts = len(dynamo_entries)
-
         debug_info = PrecompileContext.dump_debug_info(
             dynamo_entries, backend_artifacts
         )
         debug_str = json.dumps(
-            {
-                "num_entries": num_artifacts,
-                "artifacts": debug_info,
-            },
+            {"num_entries": len(dynamo_entries), "artifacts": debug_info}
         )
         torch._logging.trace_structured(
             "artifact",
@@ -205,21 +209,12 @@ class PrecompileContext:
 
         for key, cache_entry in dynamo_entries.items():
             try:
-                result = PrecompileCacheEntry.from_cache_entry(
+                precompile_cache_entries[key] = PrecompileCacheEntry.from_cache_entry(
                     cache_entry, backend_artifacts
                 )
-                if result is not None:
-                    precompile_cache_entries[key] = result
             except Exception as e:
                 logger.warning("Failed to create cache entry %s", key, exc_info=True)
-
-                error = e
-                data = json.dumps(
-                    {
-                        "key": key,
-                        "error": str(error),
-                    }
-                )
+                data = json.dumps({"key": key, "error": str(e)})
                 torch._logging.trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
@@ -228,5 +223,4 @@ class PrecompileContext:
                     },
                     payload_fn=lambda: data,
                 )
-                continue
         return precompile_cache_entries, debug_info

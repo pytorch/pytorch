@@ -17,8 +17,8 @@ from abc import ABC, abstractmethod
 from enum import auto, Enum
 from itertools import chain
 from textwrap import dedent
-from typing import Any, cast, ClassVar, Generic, NamedTuple, TYPE_CHECKING
-from typing_extensions import Self, TypeVar
+from typing import Any, cast, ClassVar, Generic, NamedTuple, Self, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import sympy
 
@@ -64,7 +64,7 @@ from ..virtualized import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, MutableMapping, Sequence
+    from collections.abc import Callable, Iterator, Mapping, MutableMapping, Sequence
 
     from torch.fx import GraphModule
 
@@ -267,12 +267,21 @@ class WorkspaceArg(CodegenSymbol):
 
 
 class TritonScratchWorkspace:
-    def __init__(self, size: int, generate_dtype_str: Callable[..., str]):
+    def __init__(
+        self,
+        size: int,
+        generate_dtype_str: Callable[..., str],
+        generate_device_type_str: Callable[..., str],
+    ):
         self.size = size
         self._generate_dtype_str = generate_dtype_str
+        self._generate_device_type_str = generate_device_type_str
 
     def generate_dtype_str(self) -> str:
         return self._generate_dtype_str()
+
+    def generate_device_type_str(self) -> str:
+        return self._generate_device_type_str()
 
 
 @dataclasses.dataclass
@@ -321,11 +330,30 @@ KernelArgType = WorkspaceArg | TensorArg | SizeArg | TMADescriptorArg | Constexp
 # code expression evaluated at run time (e.g. current_device_idx_expr() under
 # compile-on-one-rank).
 DeviceIdx = int | str
+AtenCShimOpInfo = dict[str, str | dict[str, list[str] | str]]
 
 device_codegens: dict[str, DeviceCodegen] = {}
 
 
 class DeviceOpOverrides:
+    r"""Backend-specific hooks used by Inductor's wrapper code generation."""
+
+    def get_aten_c_shim_ops(self) -> Mapping[str, AtenCShimOpInfo] | None:
+        r"""Return this backend's compile-time ATen C shim table.
+
+        None uses the shared torchgen table. A mapping replaces it for
+        FallbackKernel dispatch, scalar preparation and ABI version selection:
+        overloads absent from it use runtime lookup, so an empty mapping sends
+        every ATen FallbackKernel there. Keys are overloads such as
+        ``aten.mul.Tensor``; values use torchgen's ABI version metadata format.
+        The backend must provide the shim symbols it declares. Other generated
+        shim calls, such as ``get_c_shim_func_name``, are not governed by this
+        table. This does not generate shims or modify the shared table. Treat
+        the returned mapping as read-only and keep it stable throughout a
+        compilation.
+        """
+        return None
+
     def uses_gpu_cpp_wrapper(self) -> bool:
         """Explicitly opt into the CUDA/XPU-style C++ wrapper two-pass path.
 
@@ -510,6 +538,7 @@ class BackendFeature(Enum):
     PREFER_STORE_LOOP_ORDER = auto()
     TRITON_TEMPLATES = auto()
     REDUCE_TO_SINGLE_ELEMENT = auto()
+    INDIRECT_INDEXING = auto()
 
 
 def get_backend_features(
@@ -579,6 +608,52 @@ def get_custom_backend_config_for_device(device: str) -> ConfigModule | None:
 
 # Prevents a hook that re-enters init_backend_registration from firing itself again.
 _privateuse1_backend_init_in_progress = False
+
+
+# Compile options addressed as "<device>.<key>" are applied to that device's
+# registered device_custom_config. The owner module's existing registration
+# folds the patched values into the FX graph cache key (#158254).
+def get_compile_option_owner(name: str) -> tuple[ConfigModule, str] | None:
+    """(owning ConfigModule, config key) for a device-namespaced option name.
+
+    Returns None for names that are not a registered device's config key;
+    callers fall back to torch._inductor.config.
+    """
+    device, _, key = name.replace("-", "_").partition(".")
+    owner = custom_backend_codegen_configs.get(device)
+    if owner is not None and key in owner._config:
+        return owner, key
+    return None
+
+
+def patch_compile_options(config_patches: dict[str, Any] | None):
+    """Patch core and backend options; decorators replay patches on each call."""
+    # the checker cannot see that install_config_module made config a ConfigModule
+    core_config = cast(ConfigModule, config)
+    # Resolve owners now so delayed backward compilation keeps its bindings.
+    grouped: dict[ConfigModule, dict[str, Any]] = {}
+    for name, value in (config_patches or {}).items():
+        normalized = name.replace("-", "_")
+        if normalized in config._config:  # type: ignore[attr-defined]
+            # core inductor keys take precedence over device namespaces
+            owner, key = core_config, normalized
+        else:
+            # a deferred privateuse1 backend may not have registered yet
+            init_backend_registration()
+            owner, key = get_compile_option_owner(normalized) or (
+                core_config,
+                normalized,
+            )
+        grouped.setdefault(owner, {})[key] = value
+
+    @contextlib.contextmanager
+    def patch() -> Iterator[None]:
+        with contextlib.ExitStack() as stack:
+            for owner, values in grouped.items():
+                stack.enter_context(owner.patch(values))
+            yield
+
+    return patch()
 
 
 @functools.cache
@@ -782,6 +857,19 @@ def get_device_op_overrides(device: str) -> DeviceOpOverrides:
     return device_op_overrides_dict[device]
 
 
+def get_aten_c_shim_ops(device: torch.device | None) -> Mapping[str, AtenCShimOpInfo]:
+    r"""Get the backend's effective shim table without changing torchgen defaults."""
+    from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+    if device is not None:
+        _initialize_device_op_overrides()
+        overrides = device_op_overrides_dict.get(device.type)
+        ops = overrides.get_aten_c_shim_ops() if overrides is not None else None
+        if ops is not None:
+            return ops
+    return inductor_fallback_ops
+
+
 def _uses_gpu_cpp_wrapper(device: str) -> bool:
     _initialize_device_op_overrides()
     overrides = device_op_overrides_dict.get(device)
@@ -905,12 +993,13 @@ def check_shape(
         buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
 
 
-def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
+def check_nan(var: CSEVariableType) -> None:
     backend = get_current_backend()
     if backend == "triton":
         msg = "NaN or Inf found"
-        buffer.writeline(
-            f"tl.device_assert(({var} == {var}) & ({var} != float('inf')) & ({var} != float('-inf')), '{msg}')"
+        V.kernel.device_assert_async(
+            f"({var} == {var}) & ({var} != float('inf')) & ({var} != float('-inf'))",
+            msg,
         )
 
 
@@ -2960,7 +3049,7 @@ class CSEProxy(DefaultHandler):
                     check_shape(V.kernel.compute, csevar, shape_to_check)
 
             if config.runtime_triton_nan_asserts:
-                check_nan(V.kernel.compute, csevar)
+                check_nan(csevar)
 
             return csevar
 
@@ -3060,13 +3149,18 @@ class CSEProxy(DefaultHandler):
                     pos = var.bounds & ValueRanges(0, int_oo)
                     new_bounds = new_bounds | pos
 
-            var = self.kernel.cse.generate(
+            wrapped = self.kernel.cse.generate(
                 self.kernel.compute,
                 stm,
                 bounds=new_bounds,
                 dtype=var.dtype,
                 shape=var.shape,
             )
+            if wrap_neg and var.bounds.upper >= 0:
+                # wrapped equals var where var is non-negative, so a backend can
+                # carry what it knows about such values, like being zero.
+                wrapped.update_on_args("indirect_indexing", (var,), {})
+            var = wrapped
 
         sympy_var = self.parent_handler.indirect_indexing(var, size, check)
         if generate_assert(check):

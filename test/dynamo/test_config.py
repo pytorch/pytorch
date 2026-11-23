@@ -12,9 +12,11 @@ from torch.testing._internal import (
     fake_config_module_with_implications as implied_config,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.utils._config_module import _UNSET_SENTINEL
 
 
 # NB: do NOT include this test class in test_dynamic_shapes.py
@@ -22,6 +24,8 @@ from torch.testing._internal.common_utils import (
 
 @instantiate_parametrized_tests
 class ConfigTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_config_module(self, name: str):
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
@@ -189,7 +193,20 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.frame_count, 2)
 
         self.assertEqual(fn(x), x + 2)
-        self.assertGreaterEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_traced_patch_dynamo_config_restores_unset_override(self):
+        entry = torch._dynamo.config._config["verbose"]
+        self.assertIs(entry.user_override.get(), _UNSET_SENTINEL)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            with torch._dynamo.patch_dynamo_config(verbose=True):
+                x = x + 1
+            return x
+
+        fn(torch.randn(4))
+        self.assertIs(entry.user_override.get(), _UNSET_SENTINEL)
 
     def test_custom_config_module_setattr_updates_value(self):
         config = self._make_config_module(f"{__name__}.test_setattr_config")
