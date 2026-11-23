@@ -969,7 +969,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
 
         # empty a and b
         if torch.device(device).type == 'cpu':
-            # only CPU since CUDA does not support overdetermined systems
+            # only CPU since accelerator backends do not support overdetermined systems
             a = torch.rand(2, 2, 0, 3, dtype=dtype, device=device)
             b = torch.rand(2, 2, 0, 3, dtype=dtype, device=device)
             self.assertEqual(
@@ -2439,7 +2439,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @onlyAccelerator
     def test_foreach_powsum_dtype_kwarg(self, device):
         # Test dtype kwarg with bfloat16 input and float32 computation
-        # This tests the dtype conversion path in both slow and fast CUDA paths
+        # This tests the dtype conversion path in both slow and fast accelerator paths
         ords = [1, 2]  # Fast path for p=1 and p=2
         tensors = [make_tensor((10,), dtype=torch.bfloat16, device=device, low=0.1, high=0.9) for _ in range(3)]
         for ord in ords:
@@ -5571,7 +5571,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             torch.tensordot(a, b, dims=([1], [0]), out=d)
 
         with torch.set_grad_enabled(False), warnings.catch_warnings(record=True) as w:
-            # Hack to avoid resize error for CUDA tensors as resize_cuda_ is different to resize_.
+            # Avoid in-place resize error on tensor requiring grad.
             c.requires_grad = False
             torch.tensordot(a, b, dims=([1], [0]), out=c)
             self.assertEqual(len(w), 1)
@@ -8985,7 +8985,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
             expected_B = symmetric(A) @ X if not hermitian else A @ X
             self.assertEqual(B, expected_B)
 
-        # hermitian=True is not supported on CUDA yet
+        # hermitian=True is only supported on CPU (not supported on accelerators yet)
         hermitians = (True, False) if dtype.is_complex and self.device_type == 'cpu' else (False,)
 
         shapes = (5,)
