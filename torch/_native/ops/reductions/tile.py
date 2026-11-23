@@ -475,13 +475,15 @@ def _linear_reduce(vals, op):
 
 def _halving_reduce(vals, op):
     # warp_reduce's decreasing offsets: v[i] += v[i + n / 2], then v[i] += v[i + n / 4], ...
+    # A count below a power of two n skips the combines with slots past it, as if they
+    # held identities.
     from .traits import _offsets
 
     v = list(vals)
-    if len(v) > WARP:
-        raise ValueError(f"halving takes at most {WARP} values, got {len(v)}")
-    for half in _offsets(len(v), ascending=False):
-        v = [op(v[i], v[i + half]) for i in range(half)]
+    if not 0 < len(v) <= WARP:
+        raise ValueError(f"halving takes 1 to {WARP} values, got {len(v)}")
+    for half in _offsets(1 << (len(v) - 1).bit_length(), ascending=False):
+        v = [op(v[i], v[i + half]) if i + half < len(v) else v[i] for i in range(half)]
     return v[0]
 
 
@@ -780,7 +782,8 @@ def fold_linear_rolled(
     warp_reduce: chains of every WARP-th element, then a tree. For rows narrower than
     128 elements that is ATen's association (CUDA) for M >= 16, which covers every M the
     dispatcher routes here. Accumulators past a short row stay at init and combine as
-    identities; TileReduce.row_chains drops them for rows of at most 8 or 16 elements.
+    identities; TileReduce.row_chains drops them for rows of at most 8, 16 or 24
+    elements.
     chains < WARP requires at most one full wave (nchunks * vec <= chains), which
     row_chains guarantees: those rows fold at most one element per accumulator, so a
     whole wave takes leaves and the result combines with init once. Their leaves differ
@@ -1278,8 +1281,8 @@ class TileReduce:
         self.warps_per_row = (
             threads_per_row // WARP
         )  # 0 at threads_per_row == 1: nothing to merge
-        # fold_linear_rolled's single-field accumulators. For rows no wider than 8 or
-        # 16, the top ones of WARP only combine identities into the rest, which every
+        # fold_linear_rolled's single-field accumulators. For rows no wider than 8, 16
+        # or 24, the top ones of WARP only combine identities into the rest, which every
         # single-field trait returns bitwise (a sum leaf 0.0 + y is never -0.0), so
         # fewer keep the bits. Narrow rows then fold leaves, not reduce(init, x), so
         # only traits that promise leaf_is_reduce_init opt in: a norm's leaf rounds its
@@ -1293,7 +1296,7 @@ class TileReduce:
             and trait.nfields == 1
             and getattr(trait, "leaf_is_reduce_init", False)
         )
-        self.row_chains = next((n for n in (8, 16) if narrow and N <= n), WARP)
+        self.row_chains = next((n for n in (8, 16, 24) if narrow and N <= n), WARP)
         self.tiler = (threads_per_block, N)  # TMA box: threads_per_block whole rows
 
     @property
@@ -1308,7 +1311,7 @@ class TileReduce:
         # TMA (static box) keys N, the uniform tree its whole-load count and a tail flag,
         # and fixed DAGs their N; ragged rows take a runtime width and other paths share a
         # vector class, except that row_chains splits a one-thread single-field class
-        # into up to three plans.
+        # into up to four plans.
         return (
             self.axis,
             self.vec,

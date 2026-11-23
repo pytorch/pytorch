@@ -753,7 +753,7 @@ class TestKernelGeneral(TestCase):
     @largeTensorTest("1GB", device="cuda")
     def test_reduce_all_wide_blocks_and_waves(self, op, dtype):
         """Grid-stride 256 MiB full index reductions in B200's 512-thread, eight-wave
-        launch through _reduce_all; test_reduction_config pins the selector."""
+        launch through _reduce_all."""
         if _hw.caps(torch.device("cuda")).cc not in kg._B200_CCS:
             self.skipTest("B200 launch policy")
         x = torch.randn((256 << 20) // dtype.itemsize, device="cuda", dtype=dtype)
@@ -799,7 +799,7 @@ class TestKernelGeneral(TestCase):
     )
     def test_single_stage_warp_blocks(self, op, dtype, count):
         """Fold strided rows in one-warp general blocks, the geometry B200's strided rules
-        launch from 2048 outputs; test_reduction_config pins the selector."""
+        launch from 2048 outputs."""
         rows = 2048
         x = torch.randn(rows, 2 * count, device="cuda", dtype=dtype)[:, ::2]
         trait = {"sum": T.SumOps, "argmax": T.ArgMaxOps}[op](acc=cutlass.Float32)

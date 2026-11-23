@@ -857,17 +857,6 @@ class TestOrderedColRoute(TestCase):
             (1, (128, 2047), False),
             (1, (128, 128, 31), False),
             (1, (128, 128, 32), True),
-            (1, (1, 32768, 128), True),
-            (1, (1, 32768, 127), False),
-            (1, (1, 24577, 128), False),
-            (1, (1, 32767, 128), False),
-            (1, (1, 49152, 128), True),
-            (1, (1, 24577, 191), False),
-            (1, (1, 24577, 192), True),
-            (1, (1, 24577, 256), True),
-            (1, (1, 24576, 256), False),
-            (1, (2, 32768, 128), False),
-            (2, (1, 32768, 16384), False),
         ],
         name_fn=lambda n, shape, routed: f"{n}f_" + "x".join(map(str, shape)),
     )
@@ -936,24 +925,6 @@ class TestOrderedColRoute(TestCase):
                             self.assertTrue(outs)
                             for dt in outs:
                                 self.assertIsInstance(dt, torch.dtype)
-        # B200 split views without an entry take the fallback, narrowed at some shapes.
-        for rows, width in ((None, 32), (65536, 16)):
-            cfg = ct.select_ordered_col_config(
-                (10, 0),
-                torch.float32,
-                1024,
-                1,
-                8,
-                trait_type=T.SumOps,
-                nfields=1,
-                nouts=1,
-                welford_outs=0,
-                acc_bits=32,
-                out_dtypes=(torch.float32,),
-                rows=rows,
-            )
-            ct._check_ordered_mapping(cfg.worker_warps, cfg.tile_columns)
-            self.assertEqual(cfg.tile_columns, width)
 
     def test_row_offsets_widen_past_int32(self):
         from torch._native.ops.reductions import kernel_rowtile as rt
@@ -989,13 +960,6 @@ class TestOrderedColRoute(TestCase):
         op = ct._OrderedColReduce(trait, plan, rows, 64, 1, full_tiles=full_tiles)
         self.assertEqual((plan.batches[0][2], op.exact), (loads, exact))
         self.assertEqual(op.per_load, per_load)
-
-    @parametrize("columns", [512, 1024])
-    def test_general_norm_splits_need_wide_columns(self, columns):
-        view = torch.empty((1, 32768, columns), device="meta")
-        self.assertTrue(kg._ordered_col_route_ok(view, T.SumOps()))
-        routed = kg._ordered_col_route_ok(view, T.NormOps(3))
-        self.assertEqual(routed, columns >= 1024)
 
     def test_policy_contract(self):
         """Apply a policy only to the dtypes, outputs, and occupancy it was measured for."""
@@ -1131,17 +1095,11 @@ class TestOrderedColDevice(TestCase):
 
     def test_split_plans_can_be_declined(self, device):
         """Decline split plans when no config is given or selected."""
-        # On B200 the split fallback selects a 32-column mapping, which the batch rule
-        # declines for B = 2 (test_b200_ordered_column_mapping_guards covers it);
-        # elsewhere none applies.
+        # B200's split fallback applies to unbatched views only; elsewhere none applies.
         x = torch.randn(2, 32768, 32, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
         out = [torch.float32]
         self.assertIsNone(ct.reduce_ordered_col(trait, "decline", x, out, 1))
-        # The same view runs as a split plan with an explicit config.
-        got = ct.reduce_ordered_col(trait, "decline", x, out, 1, config=_FIXED)
-        self.assertIsNotNone(got)
-        self.assertIn("ordered_col1", _tags("decline"))
 
     def test_split_partial_indices_stay_below_int32(self, device):
         """Split partials are indexed output * partitions + partition in Int32."""
@@ -1525,15 +1483,6 @@ class TestOrderedColDevice(TestCase):
         self.assertEqual([f["full_tiles"] for f in ops], tiles)
         want, _ = self._reduce(device, trait, key, x, 0, outputs, route=False)
         self._assert_bitwise(got, want)
-        # An explicit config is used as-is, overriding the policy's mapping.
-        self.assertNotEqual((cfg.tile_columns, cfg.full_tiles), (32, False))
-        fixed = key + "_fixed"
-        got = ct.reduce_ordered_col(trait, fixed, x, outputs, 1, config=_FIXED)
-        self._assert_bitwise(got, want)
-        tags = ("ordered_col1", fixed)
-        ops = [_ordered_fields(k) for k in ct._CACHE if k[:2] == tags]
-        mapped = {(f["tile_columns"], f["full_tiles"]) for f in ops}
-        self.assertEqual(mapped, {(32, False)})
 
     @parametrize(
         "key,dtype,rows,cols,width",

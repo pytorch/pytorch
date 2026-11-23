@@ -102,9 +102,9 @@ class TestKernelRowTile(TestCase):
             kw.setdefault("threads_per_row", 1)
             return tile.TileReduce(trait, f32, "row", n, **kw).row_chains
 
-        widths = (0, 1, 8, 9, 16, 17, 31, 64)
+        widths = (0, 1, 8, 9, 16, 17, 24, 25, 31, 64)
         got = [chains(sum_trait, n) for n in widths]
-        self.assertEqual(got, [8, 8, 8, 16, 16, 32, 32, 32])
+        self.assertEqual(got, [8, 8, 8, 16, 16, 24, 24, 32, 32, 32])
         self.assertEqual(chains(T.AMaxOps(acc=f32), 3), 8)
         # Multi-field, norm and abs-extremum traits, TMA, ragged and multi-thread rows
         # keep WARP.
@@ -114,14 +114,15 @@ class TestKernelRowTile(TestCase):
         self.assertEqual(chains(sum_trait, 16, use_tma=True), 32)
         self.assertEqual(chains(sum_trait, 15, ragged_vector=True), 32)
         self.assertEqual(chains(sum_trait, 16, threads_per_row=32), 32)
-        # 12 and 16 share a plan; 20, in the same vec class, takes the WARP plan.
+        # 12 and 16 share a plan; 20 and 28, in the same vec class, take the 24 and
+        # WARP plans.
         rt._CACHE.clear()
         kw = {"threads_per_row": 1, "use_tma": False}
-        for n in (12, 16, 20):
+        for n in (12, 16, 20, 28):
             x = torch.randn(64, n, device="cuda")
             rt.reduce_row_tile(sum_trait, "narrow_chains", x, [torch.float32], **kw)
         mine = [k for k in rt._CACHE if "narrow_chains" in k]
-        self.assertEqual(len(mine), 2, f"expected two plans, got {sorted(mine)}")
+        self.assertEqual(len(mine), 3, f"expected three plans, got {sorted(mine)}")
 
     @parametrize(
         "dtype, columns",
@@ -130,17 +131,21 @@ class TestKernelRowTile(TestCase):
             (torch.float32, 3),
             (torch.float32, 16),
             (torch.float32, 17),
+            (torch.float32, 20),
+            (torch.float32, 22),
+            (torch.float32, 24),
             (torch.float32, 31),
             (torch.bfloat16, 8),
             (torch.bfloat16, 16),
+            (torch.bfloat16, 24),
             (torch.float64, 8),
         ),
     )
     def test_narrow_one_thread_rows_match_warp_chains(self, dtype, columns):
         """Narrow one-thread rows match the row padded with identities to WARP elements
-        bitwise, signed zeros, a subnormal sum and NaNs included. Widths 16 (fp32), 8 and
-        16 (bf16) and 8 (fp64) reach the leaf branch; 1 and 3 fold only the masked tail,
-        and 17 and 31 keep WARP chains."""
+        bitwise, signed zeros, a subnormal sum and NaNs included. Widths 16 and 24
+        (fp32), 8, 16 and 24 (bf16) and 8 (fp64) reach the leaf branch; 1, 3, 17, 20 and
+        22 fold only the masked tail, and 31 keeps WARP chains."""
         M, inf = 4096, float("inf")
         gen = torch.Generator("cuda").manual_seed(0)
         x = torch.randn(M, columns, device="cuda", generator=gen)
@@ -761,6 +766,8 @@ class TestKernelRowTile(TestCase):
             (torch.float64, 1),  # vec 2, no full vector group
             (torch.float32, 4098),  # even N: residues 0 and 2 only
             (torch.float16, 4096),  # whole vectors: the rolled path
+            (torch.float16, 255),  # narrowest B200 ragged-row width
+            (torch.bfloat16, 16383),  # widest B200 ragged-row width
         ),
     )
     def test_ragged_vector_edges_and_interior(self, dtype, columns):
@@ -1006,22 +1013,12 @@ class TestKernelRowTile(TestCase):
                     trait, "ragged_misaligned", x, [torch.float32], ragged_vector=True
                 )
 
-    @parametrize(
-        "op,dtype,columns",
-        [
-            ("sum", torch.float16, 255),
-            ("sum", torch.bfloat16, 16383),
-            ("argmax", torch.float32, 1025),
-            ("var_mean", torch.float32, 1025),
-        ],
-        name_fn=lambda op, dtype, columns: f"{op}_{str(dtype)[6:]}_{columns}",
-    )
-    def test_ragged_vector_routed_traits(self, op, dtype, columns):
-        """Serve the traits and widths the B200 ragged-row route admits."""
-        # Small integers keep sums exact and give argmax ties to break.
-        x = torch.randint(-4, 5, (33, columns), device="cuda").to(dtype)
+    @parametrize("op", ["argmax", "var_mean"])
+    def test_ragged_vector_int64_index_and_var_mean(self, op):
+        """Return int64 argmax indices and both var_mean fields from ragged rows."""
+        # Small integers give argmax ties to break.
+        x = torch.randint(-4, 5, (33, 1025), device="cuda").to(torch.float32)
         trait, outs = {
-            "sum": (T.SumOps(acc=cutlass.Float32), [torch.float32]),
             "argmax": (T.ArgMaxOps(acc=cutlass.Float32), [torch.int64]),
             "var_mean": (T.VarMeanOps(correction=1), [torch.float32] * 2),
         }[op]
@@ -1029,9 +1026,8 @@ class TestKernelRowTile(TestCase):
         got = rt.reduce_row_tile(trait, f"ragged_{op}", x, outs, **kw)
         with torch.backends.python_native.cutedsl.disabled():
             expected = {
-                "sum": lambda: (x.float().sum(dim=1),),
                 "argmax": lambda: (x.argmax(dim=1),),
-                "var_mean": lambda: torch.var_mean(x.float(), dim=1),
+                "var_mean": lambda: torch.var_mean(x, dim=1),
             }[op]()
         self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
