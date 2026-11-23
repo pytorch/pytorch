@@ -1,5 +1,7 @@
 # Row-reduction launch policy and plan cache for tile.TileReduce. Runtime loops share
-# each kernel across a vector class; narrow rows may use one thread and TMA staging.
+# each kernel across a vector class, except that row_chains splits a one-thread
+# single-field class into up to three plans; narrow rows may use one thread and TMA
+# staging.
 import math
 import os
 import warnings
