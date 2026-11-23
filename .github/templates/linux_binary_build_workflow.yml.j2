@@ -659,7 +659,8 @@ jobs:
         'configs': rocm_configs,
         'if': owner_if,
         'needs': '[get-label-type' ~ (', get-docker-tag' if pin_docker_image else '') ~ ', manywheel-build]',
-        'image_suffix': ''}) %}
+        'image_suffix': docker_image_suffix,
+        'image_registry_host': docker_registry_host}) %}
 {%- endif %}
 {%- if rocm_preview_configs %}
   {%- set _ = rocm_test_lanes.append({
@@ -668,7 +669,8 @@ jobs:
         'configs': rocm_preview_configs,
         'if': preview_test_if,
         'needs': '[get-label-type, get-preview-docker-tag, manywheel-build-rocm-preview]',
-        'image_suffix': preview_docker_image_suffix}) %}
+        'image_suffix': preview_docker_image_suffix,
+        'image_registry_host': preview_docker_registry_host}) %}
 {%- endif %}
 {%- for lane in rocm_test_lanes %}
 
@@ -700,9 +702,8 @@ jobs:
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
-      # ROCm test runners have no ECR pull credentials, so ROCm stays on the
-      # Docker Hub image (excluded from the content-addressed ECR path).
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}!{{ lane['image_suffix'] }}
+      DOCKER_IMAGE_REGISTRY_HOST: "!{{ lane['image_registry_host'] }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
 {%- endfor %}
