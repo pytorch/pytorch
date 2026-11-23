@@ -415,7 +415,7 @@ const auto lgamma_string = jiterator_stringify(
   }
 ); // lgamma_string
 
-const auto polygamma_string = zeta_string + jiterator_stringify(
+const auto polygamma_string = std::string(zeta_string) + std::string(jiterator_stringify(
   template <typename T>
   T polygamma(T x, int n) {
     // already blocked if n <= 1
@@ -423,7 +423,7 @@ const auto polygamma_string = zeta_string + jiterator_stringify(
     return ((n % 2) ? one : -one) * exp(lgamma(static_cast<T>(n) + one)) *
         zeta<T>(static_cast<T>(n + 1), x);
   }
-); // polygamma_string
+)); // polygamma_string
 
 const auto exp2_string = jiterator_stringify(
   template <typename T>
@@ -744,14 +744,14 @@ const auto i1e_string = jiterator_stringify(
   }
 ); // i1e_string
 
-const auto kaiser_window_string = i0_string + jiterator_stringify(
+const auto kaiser_window_string = std::string(i0_string) + std::string(jiterator_stringify(
   template <typename T>
   T kaiser_window(T a, T inv_alpha, T beta, T inv_i0_beta) {
     T x = a * inv_alpha - T{1};
     T y = max(T{0}, T{1} - x * x);
     return i0(beta * sqrt(y)) * inv_i0_beta;
   }
-); // kaiser_window_string
+)); // kaiser_window_string
 
 const auto sinc_string = jiterator_stringify(
   template <typename T>
@@ -1572,7 +1572,7 @@ const auto bessel_j0_string = jiterator_stringify(
     } // bessel_j0_forward(T x)
 ); // bessel_j0_string
 
-const auto bessel_y0_string = bessel_j0_string + jiterator_stringify(
+const auto bessel_y0_string = std::string(bessel_j0_string) + std::string(jiterator_stringify(
     template<typename T>
     T bessel_y0_forward(T x) {
         static const T PP[] = {
@@ -1687,7 +1687,7 @@ const auto bessel_y0_string = bessel_j0_string + jiterator_stringify(
 
         return (pp / pq * sin(x - T(0.785398163397448309615660845819875721)) + T(5.0) / x * (qp / qq) * cos(x - T(0.785398163397448309615660845819875721))) * T(0.797884560802865355879892119868763737) / sqrt(x);
     } // bessel_y0_forward(T x)
-); // bessel_y0_string
+)); // bessel_y0_string
 
 const auto bessel_j1_string = jiterator_stringify(
     template<typename T>
@@ -1799,7 +1799,7 @@ const auto bessel_j1_string = jiterator_stringify(
     } // bessel_j1_forward(T x)
 ); // bessel_j1_string
 
-const auto bessel_y1_string = bessel_j1_string + jiterator_stringify(
+const auto bessel_y1_string = std::string(bessel_j1_string) + std::string(jiterator_stringify(
     template<typename T>
     T bessel_y1_forward(T x) {
         static const T PP[] = {
@@ -1913,7 +1913,7 @@ const auto bessel_y1_string = bessel_j1_string + jiterator_stringify(
 
         return (pp / pq * sin(x - T(2.356194490192344928846982537459627163)) + T(5.0) / x * (qp / qq) * cos(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / sqrt(x);
     } // bessel_y1_forward(T x)
-); // bessel_y1_string
+)); // bessel_y1_string
 
 const auto chebyshev_polynomial_t_string = jiterator_stringify(
     template<typename T>
@@ -2498,7 +2498,7 @@ const auto modified_bessel_i1_string = jiterator_stringify(
     } // modified_bessel_i1_forward(T x)
 ); // modified_bessel_i1_string
 
-const auto modified_bessel_k0_string = modified_bessel_i0_string + jiterator_stringify(
+const auto modified_bessel_k0_string = std::string(modified_bessel_i0_string) + std::string(jiterator_stringify(
     template<typename T>
     T modified_bessel_k0_forward(T x) {
         static const T A[] = {
@@ -2575,9 +2575,9 @@ const auto modified_bessel_k0_string = modified_bessel_i0_string + jiterator_str
 
         return exp(-x) * (T(0.5) * (b - p)) / sqrt(x);
     } // modified_bessel_k0_forward(T x)
-); // modified_bessel_k0_string
+)); // modified_bessel_k0_string
 
-const auto scaled_modified_bessel_k0_string = modified_bessel_i0_string + jiterator_stringify(
+const auto scaled_modified_bessel_k0_string = std::string(modified_bessel_i0_string) + std::string(jiterator_stringify(
     template<typename T>
     T scaled_modified_bessel_k0_forward(T x) {
         static const T A[] = {
@@ -2654,9 +2654,9 @@ const auto scaled_modified_bessel_k0_string = modified_bessel_i0_string + jitera
 
         return T(0.5) * (b - p) / sqrt(x);
     } // T scaled_modified_bessel_k0_forward(T x)
-); // scaled_modified_bessel_k0_string
+)); // scaled_modified_bessel_k0_string
 
-const auto modified_bessel_k1_string = modified_bessel_i1_string + jiterator_stringify(
+const auto modified_bessel_k1_string = std::string(modified_bessel_i1_string) + std::string(jiterator_stringify(
     template<typename T>
     T modified_bessel_k1_forward(T x) {
         static const T A[] = {
@@ -2734,9 +2734,9 @@ const auto modified_bessel_k1_string = modified_bessel_i1_string + jiterator_str
 
         return exp(-x) * (T(0.5) * (b - p)) / sqrt(x);
     } // modified_bessel_k1_forward(T x)
-); // modified_bessel_k1_string
+)); // modified_bessel_k1_string
 
-const auto scaled_modified_bessel_k1_string = modified_bessel_i1_string + jiterator_stringify(
+const auto scaled_modified_bessel_k1_string = std::string(modified_bessel_i1_string) + std::string(jiterator_stringify(
     template<typename T>
     T scaled_modified_bessel_k1_forward(T x) {
         static const T A[] = {
@@ -2814,7 +2814,7 @@ const auto scaled_modified_bessel_k1_string = modified_bessel_i1_string + jitera
 
         return (T(0.5) * (b - p) / sqrt(x));
     } // T scaled_modified_bessel_k1_forward(T x)
-); // scaled_modified_bessel_k1_string
+)); // scaled_modified_bessel_k1_string
 
 const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
     template<typename T>

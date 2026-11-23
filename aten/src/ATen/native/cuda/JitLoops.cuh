@@ -67,7 +67,7 @@ template <
     typename... Args>
 void jitted_gpu_kernel(
     TensorIteratorBase& iter,
-    const std::string& f,
+    std::string_view f,
     at::cuda::jit::BinaryFuncVariant scalar_pos =
         at::cuda::jit::BinaryFuncVariant::NoScalar,
     at::opmath_type<f_inputs_type> scalar_val = 0,
@@ -158,7 +158,7 @@ void jitted_gpu_kernel(
 
 // TODO: support runtime state capture similar to `jitted_gpu_kernel`.
 template <char const *name, typename return_type, typename f_inputs_type>
-void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::string& f) {
+void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, std::string_view f) {
   TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
   //currently jiterator only handles binary functions where both inputs are of the same type (f_inputs_type)
   using opmath_t = at::opmath_type<f_inputs_type>;

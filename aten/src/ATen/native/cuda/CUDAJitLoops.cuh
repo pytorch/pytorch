@@ -293,7 +293,7 @@ template <
     typename... ExtraArgs>
 static void jitted_gpu_kernel_impl(
     TensorIteratorBase& iter,
-    const std::string &f,
+    std::string_view f,
     const bool dynamic_casting,
     at::opmath_type<f_inputs_type> scalar_val,
     const std::tuple<ExtraArgs...>& extra_args) {
@@ -306,7 +306,7 @@ static void jitted_gpu_kernel_impl(
   constexpr int nInputs = arity;
   constexpr int nOutputs = 1;  // TODO: Support more than 1 output
   static const auto desc = at::cuda::jit::make_kernel_descriptor<
-    result_type, f_inputs_type, ExtraArgs...>(name, f, nInputs, nOutputs);
+    result_type, f_inputs_type, ExtraArgs...>(name, std::string(f), nInputs, nOutputs);
 
   auto &cache = device_caches[iter.device().index()];
   auto extra_args_array = tuple_to_array(extra_args);
