@@ -120,6 +120,8 @@ const NOBODY: u32 = u32::MAX - 1;
 
 struct Back {
     pattern: Vec<bool>,
+    /// Which way of running it this is (`Joint::under`).
+    variant: u32,
     /// The gradients that come in, one per result of the pattern.
     incoming: Vec<Value>,
     ops: Vec<Op>,
@@ -153,6 +155,10 @@ pub struct Joint {
     /// front of an addition.
     owner: u32,
     before: u32,
+    /// Which way of running a backward the next one that is begun is taken
+    /// down for: 0 as a backward runs by itself, 1 as one runs under the
+    /// autocast that the forward ran under.
+    variant: u32,
     /// Per node of eager's: the values of the forward it kept, in the order
     /// it looks at them when it runs.
     unpacks: Vec<Vec<Value>>,
@@ -400,8 +406,8 @@ impl Joint {
     /// whether it is asked for) the nodes that lead to none that is asked
     /// for do not run, as the autograd engine runs a backward for some
     /// inputs: a node that runs does all it does.
-    fn part(&self, pattern: &[bool], lenient: bool, needed: Option<&[bool]>) -> PyResult<Part<'_>> {
-        let mut part = self.part_of(pattern, lenient)?;
+    fn part(&self, pattern: &[bool], variant: u32, lenient: bool, needed: Option<&[bool]>) -> PyResult<Part<'_>> {
+        let mut part = self.part_of(pattern, variant, lenient)?;
         let Some(needed) = needed else {
             return Ok(part);
         };
@@ -476,14 +482,14 @@ impl Joint {
         }
     }
 
-    fn part_of(&self, pattern: &[bool], lenient: bool) -> PyResult<Part<'_>> {
+    fn part_of(&self, pattern: &[bool], variant: u32, lenient: bool) -> PyResult<Part<'_>> {
         if pattern.len() != self.results.len() || !pattern.iter().any(|on| *on) {
             return Err(refused("a backward is for some of the results of the graph".to_string()));
         }
-        if let Some(back) = self.backs.iter().find(|back| back.pattern == pattern) {
+        if let Some(back) = self.backs.iter().find(|back| back.variant == variant && back.pattern == pattern) {
             return Ok(Part::whole(back));
         }
-        let covers = |back: &&Back| pattern.iter().zip(&back.pattern).all(|(on, had)| !*on || *had);
+        let covers = |back: &&Back| back.variant == variant && pattern.iter().zip(&back.pattern).all(|(on, had)| !*on || *had);
         let Some(back) = self.backs.iter().find(covers) else {
             return Err(refused("no backward was taken down for these results".to_string()));
         };
@@ -676,6 +682,12 @@ impl Joint {
         self.results.len()
     }
 
+    /// The backwards that are begun from here on are taken down for this
+    /// way of running one.
+    pub(crate) fn under(&mut self, variant: u32) {
+        self.variant = variant;
+    }
+
     /// The backward for the results of `pattern` and, with `needed`, for
     /// the contributions that are asked for, for what runs it: its
     /// operations (described), the values of the gradients that come in,
@@ -685,9 +697,10 @@ impl Joint {
         &self,
         py: Python<'py>,
         pattern: &[bool],
+        variant: u32,
         needed: Option<&[bool]>,
     ) -> PyResult<(Bound<'py, PyList>, Vec<Value>, Vec<(u32, Value)>, Vec<Value>)> {
-        let part = self.part(pattern, false, needed)?;
+        let part = self.part(pattern, variant, false, needed)?;
         let again = self.again_for(&part);
         let none = HashMap::new();
         let mut all: Vec<Bound<'py, PyAny>> = Vec::new();
@@ -749,8 +762,9 @@ impl Joint {
     /// for the results of `pattern` (and the contributions of `needed`)
     /// runs, in the order they do, each with whether the node that looks
     /// at it first is the one that gave it.
-    pub(crate) fn looked_at(&self, pattern: &[bool], needed: Option<&[bool]>) -> Vec<(Value, bool)> {
-        let Ok(part) = self.part(pattern, true, needed) else {
+    pub(crate) fn looked_at(&self, pattern: &[bool], variant: u32, needed: Option<&[bool]>) -> Vec<(Value, bool)> {
+        let known = |variant: u32| self.part(pattern, variant, true, needed);
+        let Ok(part) = known(variant).or_else(|_| known(0)) else {
             return Vec::new();
         };
         let mut reads: Vec<(Value, bool)> = Vec::new();
@@ -868,6 +882,7 @@ impl Joint {
             saved: Vec::new(),
             owner: NOBODY,
             before: NOBODY,
+            variant: 0,
             unpacks: Vec::new(),
             leads: Vec::new(),
         };
@@ -927,7 +942,8 @@ impl Joint {
             values.push(self.define(tensor, Kind::Incoming(*at), "an incoming gradient")?);
         }
         let (ops, owners, handed, gives) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        self.backs.push(Back { pattern, incoming: values, ops, owners, handed, called: Vec::new(), gives });
+        let variant = self.variant;
+        self.backs.push(Back { pattern, variant, incoming: values, ops, owners, handed, called: Vec::new(), gives });
         self.open = true;
         (self.owner, self.before) = (NOBODY, NOBODY);
         Ok(())
@@ -962,7 +978,7 @@ impl Joint {
 
     /// The backward for the results of `pattern`, as `describe` gives one.
     pub fn backward_for<'py>(&self, py: Python<'py>, pattern: Vec<bool>) -> PyResult<Bound<'py, PyAny>> {
-        self.described_part(py, &self.part(&pattern, false, None)?)
+        self.described_part(py, &self.part(&pattern, 0, false, None)?)
     }
 
     /// The tensor of a value, while the run is taken down.
@@ -1022,7 +1038,7 @@ impl Joint {
             return Some("not the same backwards in two runs".to_string());
         }
         for (a, b) in self.backs.iter().zip(&other.backs) {
-            if a.pattern != b.pattern || a.gives != b.gives || a.incoming != b.incoming || a.owners != b.owners || a.handed != b.handed {
+            if a.pattern != b.pattern || a.variant != b.variant || a.gives != b.gives || a.incoming != b.incoming || a.owners != b.owners || a.handed != b.handed {
                 return Some("a backward gives other gradients in another run".to_string());
             }
             if let Some(why) = Self::same_ops(py, &a.ops, &b.ops, "a backward") {
@@ -1131,7 +1147,7 @@ impl Joint {
         made.set_item("writes", self.forward.iter().any(outside))?;
         let backs = PyList::empty(py);
         for back in &self.backs {
-            backs.append(self.described_part(py, &self.part(&back.pattern, false, None)?)?)?;
+            backs.append(self.described_part(py, &self.part(&back.pattern, back.variant, false, None)?)?)?;
         }
         made.set_item("backs", backs)?;
         Ok(made)

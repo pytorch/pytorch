@@ -2511,6 +2511,47 @@ tensor from outside cannot run once more, and neither can one an input of
 which was written to in place since the call: it raises there and says
 which of the two backwards it was asked for.
 
+A backward runs under the autocast of the thread that asks for it: none
+where it is asked for behind the `with torch.autocast(...)` block that the
+forward ran in, which is the usual way, and the forward's where it is asked
+for inside that block. The kernels that eager's nodes run are not the same
+in the two (an operation that autocast runs in float32 casts what it is
+handed). So the backward of a graph whose forward runs under autocast is
+taken down twice, once with autocast off and once under the forward's, and
+each is compared with the autograd engine under the same state. The node
+runs the one that was taken down as its thread runs a backward:
+
+```python
+def casts(x, w, b):
+    h = (x @ w).tanh()
+    return (h * h.exp()).sum() + b.sum(), h.pow(3).mean()
+
+
+def step(fn, inside):
+    w.grad = b.grad = None
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        first, second = fn(x, w, b)
+        loss = first.float() + second.float() * 2
+        if inside:
+            loss.backward()
+    if not inside:
+        loss.backward()
+    return first, w.grad.clone(), b.grad.clone()
+
+
+g = torch.vm(casts, passes=derives)
+for _ in range(3):
+    behind, within = step(g, False), step(g, True)
+type(within[0].grad_fn).__name__, backward_of(g)  # ('GraphBackward', ["the engine's backward"])
+[torch.equal(ours, other) for ours, other in zip(behind, step(casts, False))]  # [True, True, True]
+[torch.equal(ours, other) for ours, other in zip(within, step(casts, True))]  # [True, True, True]
+```
+
+A backward under an autocast that the forward did not run under (autocast
+around the backward only, or another dtype) is served as one with
+`create_graph=True` is: the forward runs once more on the tape, under its
+own autocast, and eager's nodes run under the backward's.
+
 A pass over graphs behind `Graphs(backward=True)` is handed two plain
 graphs for such a form, once it has the engine's backward: the forward,
 which gives the results and what it keeps, and the backward for the results
