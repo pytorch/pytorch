@@ -4542,7 +4542,7 @@ def multilabel_margin_loss(
                                   Default: 'mean'.
 
     Returns:
-       Tensor: Mutilabel margin loss.
+       Tensor: Multilabel margin loss.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -4619,6 +4619,9 @@ def multilabel_soft_margin_loss(
     Args:
        input (Tensor): Predicted values.
        target (Tensor): Ground truth values.
+       weight (Tensor, optional): a manual rescaling weight given to each
+                               class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+                               treated as if having all ones.
        size_average (bool, optional): Deprecated (see :attr:`reduction`).
        reduce (bool, optional): Deprecated (see :attr:`reduction`).
        reduction (str, optional): Specifies the reduction to apply to the output:
@@ -4627,7 +4630,7 @@ def multilabel_soft_margin_loss(
                                   Default: 'mean'.
 
     Returns:
-       Tensor: Mutilabel soft margin loss.
+       Tensor: Multilabel soft margin loss.
     """
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
@@ -7559,6 +7562,16 @@ def scaled_mm(
         use_fast_accum: Request tensor-core fast accumulation for supported recipes.
             Hopper ``BlockWise1x128``/``BlockWise128x128`` require ``False``;
             MNxK4 forwards the flag to cuBLASLt.
+
+    .. note::
+        ``SwizzleType.SWIZZLE_128`` is the gfx1250 layout for MX (block 32)
+        and NVFP4 (block 16). Each block scale has
+        ``rows * round_up(K / block, 128 / block)`` elements: K-groups of
+        ``128 / block`` scales, stored group-major. When ``K`` is a multiple
+        of 128 and ``K > 128``, linear scales have that same count, so passing
+        them with ``SWIZZLE_128`` is accepted and the result is wrong. Reorder
+        the scales. ``torch._scaled_mm`` cannot name a swizzle; on gfx1250 use
+        this function and pass ``SWIZZLE_128``.
     """
 
     scale_a = _expand_single_value(scale_a)
