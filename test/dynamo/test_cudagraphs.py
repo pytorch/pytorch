@@ -14,7 +14,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
 )
-from torch.testing._internal.common_utils import TEST_CUDA_GRAPH, TEST_XPU
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TEST_CUDA_GRAPH,
+    TEST_XPU,
+)
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -61,6 +65,8 @@ N_ITERS = 5
 
 
 class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @patch_all()
     def test_basic(self, device):
         def model(x, y):
@@ -267,7 +273,7 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
         capture = (
             torch.cuda.graph(torch.cuda.CUDAGraph())
             if self.device_type == "cuda"
-            else torch.xpu.graph(torch.xpu.XPUGraph())
+            else torch.accelerator.Graph()
         )
         # Should raise TorchRuntimeError when trying to compile during capture
         with (
