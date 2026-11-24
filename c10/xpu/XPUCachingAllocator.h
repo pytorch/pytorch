@@ -20,23 +20,24 @@ class XPUAllocator : public DeviceAllocator {
   std::pair<size_t, size_t> getMemoryInfo(
       c10::DeviceIndex device_index) override {
     const auto& device = c10::xpu::get_raw_device(device_index);
-    const size_t total = device.get_info<sycl::info::device::global_mem_size>();
+    const size_t total =
+        C10_XPU_CHECK(device.get_info<sycl::info::device::global_mem_size>());
     TORCH_CHECK(
-        device.has(sycl::aspect::ext_intel_free_memory),
+        C10_XPU_CHECK(device.has(sycl::aspect::ext_intel_free_memory)),
         "The device (",
-        device.get_info<sycl::info::device::name>(),
+        C10_XPU_CHECK(device.get_info<sycl::info::device::name>()),
         ") doesn't support querying the available free memory. ",
         "You can file an issue at https://github.com/pytorch/pytorch/issues ",
         "to help us prioritize its implementation.");
     const size_t free =
-        device.get_info<sycl::ext::intel::info::device::free_memory>();
+        C10_XPU_CHECK(device.get_info<sycl::ext::intel::info::device::free_memory>());
 
 #if SYCL_COMPILER_VERSION >= 20260200
     namespace syclex = sycl::ext::oneapi::experimental;
     // Only Xe2+ discrete GPUs need adjustment; integrated GPUs already account
     // for the headroom in the reported free memory.
-    if (device.has(sycl::aspect::ext_oneapi_is_integrated_gpu) ||
-        device.get_info<syclex::info::device::architecture>() <
+    if (C10_XPU_CHECK(device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)) ||
+        C10_XPU_CHECK(device.get_info<syclex::info::device::architecture>()) <
             syclex::architecture::intel_gpu_bmg_g21) {
       return {free, total};
     }
@@ -46,7 +47,8 @@ class XPUAllocator : public DeviceAllocator {
     constexpr double kDiscreteGpuUsableFraction = 0.98;
 #else
     // Linux drivers > 1.18.40196 reserve the same headroom as Windows on Xe.
-    const auto version = device.get_info<sycl::info::device::driver_version>();
+    const auto version =
+        C10_XPU_CHECK(device.get_info<sycl::info::device::driver_version>());
     int major = 0, minor = 0, patch = 0;
     const bool is_new_driver =
         std::sscanf(version.c_str(), "%d.%d.%d", &major, &minor, &patch) == 3 &&

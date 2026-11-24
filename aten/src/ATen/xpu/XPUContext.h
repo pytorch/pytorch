@@ -2,6 +2,7 @@
 
 #include <ATen/Context.h>
 #include <c10/util/Deprecated.h>
+#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <c10/xpu/XPUStream.h>
 
@@ -29,13 +30,15 @@ template <class KernelClass>
     DeviceIndex device_index = c10::xpu::current_device()) {
   auto& context = c10::xpu::get_device_context();
   auto& device = c10::xpu::get_raw_device(device_index);
-  auto kernel_id = sycl::get_kernel_id<KernelClass>();
+  auto kernel_id = C10_XPU_CHECK(sycl::get_kernel_id<KernelClass>());
 
-  auto bundle = sycl::get_kernel_bundle<sycl::bundle_state::executable>(
-      context, {device}, {kernel_id});
-  sycl::kernel kernel = bundle.get_kernel(kernel_id);
-  return kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(
-      device);
+  auto bundle = C10_XPU_CHECK(
+      sycl::get_kernel_bundle<sycl::bundle_state::executable>(
+          context, {device}, {kernel_id}));
+  sycl::kernel kernel = C10_XPU_CHECK(bundle.get_kernel(kernel_id));
+  return C10_XPU_CHECK(
+      kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(
+          device));
 }
 
 // Overload for functor-based kernels: deduces KernelClass from the function
@@ -55,16 +58,18 @@ template <auto* KernelFn>
   auto& device = c10::xpu::get_raw_device(device_index);
   namespace syclex = sycl::ext::oneapi::experimental;
 #if SYCL_COMPILER_VERSION < 20260100
-  auto bundle =
+  auto bundle = C10_XPU_CHECK(
       syclex::get_kernel_bundle<KernelFn, sycl::bundle_state::executable>(
-          context);
-  sycl::kernel kernel = bundle.template ext_oneapi_get_kernel<KernelFn>();
-  return kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(
-      device);
+          context));
+  sycl::kernel kernel =
+      C10_XPU_CHECK(bundle.template ext_oneapi_get_kernel<KernelFn>());
+  return C10_XPU_CHECK(
+      kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(
+          device));
 #else
-  return syclex::get_kernel_info<
+  return C10_XPU_CHECK(syclex::get_kernel_info<
       KernelFn,
-      sycl::info::kernel_device_specific::work_group_size>(context, device);
+      sycl::info::kernel_device_specific::work_group_size>(context, device));
 #endif
 }
 

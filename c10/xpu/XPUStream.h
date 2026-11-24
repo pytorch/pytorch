@@ -2,6 +2,7 @@
 
 #include <c10/core/Stream.h>
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUFunctions.h>
 
 namespace c10::xpu {
@@ -98,13 +99,13 @@ class C10_XPU_API XPUStream {
   /// Return true if all enqueued tasks in this stream have been completed,
   /// otherwise return false.
   bool query() const {
-    return queue().ext_oneapi_empty();
+    return C10_XPU_CHECK(queue().ext_oneapi_empty());
   }
 
   /// Performs a blocking wait for the completion of all enqueued tasks in this
   /// stream.
   void synchronize() const {
-    queue().wait_and_throw();
+    C10_XPU_CHECK(queue().wait_and_throw());
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (interp) [[unlikely]] {
       (*interp)->trace_gpu_stream_synchronization(
@@ -113,7 +114,7 @@ class C10_XPU_API XPUStream {
   }
 
   bool is_capturing() const {
-    return queue().ext_oneapi_get_state() ==
+    return C10_XPU_CHECK(queue().ext_oneapi_get_state()) ==
         sycl::ext::oneapi::experimental::queue_state::recording;
   }
 

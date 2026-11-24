@@ -40,7 +40,7 @@ void initDeviceProperty(DeviceIndex device) {
 void initDeviceGlobalIdx(DeviceIndex device) {
   sycl::device& raw_device = c10::xpu::get_raw_device(device);
   // Get all SYCL devices associated with the SYCL platform.
-  auto devices = sycl::device::get_devices();
+  auto devices = C10_XPU_CHECK(sycl::device::get_devices());
   auto match_device = [raw_device](const auto& dev) -> bool {
     return raw_device == dev;
   };
@@ -92,9 +92,9 @@ bool canDeviceAccessPeer(DeviceIndex device, DeviceIndex peer) {
   if (device == peer) {
     return true;
   }
-  return c10::xpu::get_raw_device(device).ext_oneapi_can_access_peer(
+  return C10_XPU_CHECK(c10::xpu::get_raw_device(device).ext_oneapi_can_access_peer(
       c10::xpu::get_raw_device(peer),
-      sycl::ext::oneapi::peer_access::access_supported);
+      sycl::ext::oneapi::peer_access::access_supported));
 }
 
 } // namespace at::xpu
