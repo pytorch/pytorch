@@ -4477,11 +4477,9 @@ class TestFxGraphCacheHashing(TestCase):
         )
 
     def test_hash_installs_tlx_before_reading_choices_class(self):
-        import threading
-
-        from torch._inductor import virtualized
         from torch._inductor.choices import InductorChoices
         from torch._inductor.heuristics.template import tlx
+        from torch._inductor.virtualized import _choices, threadlocal, V
 
         class ModelChoices(InductorChoices):
             def uuid(self):
@@ -4490,6 +4488,10 @@ class TestFxGraphCacheHashing(TestCase):
         class TLXChoices(InductorChoices):
             def uuid(self):
                 return "tlx"
+
+        class OtherChoices(InductorChoices):
+            def uuid(self):
+                return "other"
 
         def fake_install():
             config.inductor_choices_class = TLXChoices
@@ -4500,17 +4502,36 @@ class TestFxGraphCacheHashing(TestCase):
         gm = torch.fx.GraphModule({}, graph)
         inputs = [torch.randn(2)]
 
-        patches = {"inductor_choices_class": ModelChoices, "triton.tlx_mode": "allow"}
-        with (
-            config.patch(patches),
-            mock.patch.object(tlx, "_install", side_effect=fake_install),
-        ):
-            # No choices handler yet, as when all earlier graphs hit the cache.
-            with mock.patch.object(virtualized, "threadlocal", threading.local()):
-                before, _ = compiled_fx_graph_hash(gm, inputs, {}, [])
-            fake_install()
-            after, _ = compiled_fx_graph_hash(gm, inputs, {}, [])
-        self.assertEqual(before, after)
+        def key(choices_class, tlx_mode):
+            with config.patch(
+                {"inductor_choices_class": choices_class, "triton.tlx_mode": tlx_mode}
+            ):
+                return compiled_fx_graph_hash(gm, inputs, {}, [])[0]
+
+        prior = getattr(threadlocal, _choices._key, None)
+        if prior is not None:
+            delattr(threadlocal, _choices._key)
+        try:
+            with mock.patch.object(tlx, "_install"):
+                no_install_key = key(ModelChoices, "allow")
+            with mock.patch.object(tlx, "_install", side_effect=fake_install):
+                # No choices handler yet, as when all earlier graphs hit the cache:
+                # the key must already name the class TLX installs.
+                tlx_key = key(ModelChoices, "allow")
+                self.assertEqual(tlx_key, key(TLXChoices, "allow"))
+                self.assertNotEqual(tlx_key, no_install_key)
+                # Hashing must not create the handler, or it would stay on the
+                # thread and ignore a later compile's inductor_choices_class.
+                self.assertFalse(hasattr(threadlocal, _choices._key))
+                with config.patch(
+                    {"inductor_choices_class": OtherChoices, "triton.tlx_mode": None}
+                ):
+                    self.assertIsInstance(V.choices, OtherChoices)
+        finally:
+            if hasattr(threadlocal, _choices._key):
+                delattr(threadlocal, _choices._key)
+            if prior is not None:
+                setattr(threadlocal, _choices._key, prior)
 
     def test_hash_config_changes(self):
         """

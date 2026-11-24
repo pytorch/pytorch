@@ -162,7 +162,7 @@ from .remote_cache import cache_stats, create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler
-from .virtualized import V
+from .virtualized import prepare_choices_class_for_cache_key, V
 
 
 T = TypeVar("T")
@@ -1779,9 +1779,9 @@ class FxGraphHashDetails:
         # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
-        # Creating the choices handler installs TLX, which replaces
-        # config.inductor_choices_class; do it before snapshotting the config.
-        _ = V.choices
+        # The first lowering installs TLX, which replaces
+        # config.inductor_choices_class; do that before snapshotting the config.
+        prepare_choices_class_for_cache_key()
         self.inductor_config = config.save_config_portable(
             ignore_private_configs=False, readonly_values=True
         )
