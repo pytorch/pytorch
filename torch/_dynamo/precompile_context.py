@@ -129,9 +129,9 @@ class PrecompileContext:
         """
         Edit the content of an existing artifact
         """
-        if key not in cls._backend_artifacts_by_key:
+        artifact = cls._backend_artifacts_by_key.get(_BackendId(key))
+        if artifact is None:
             raise AssertionError(f"Key {key} not found in artifacts")
-        artifact = cls._backend_artifacts_by_key[_BackendId(key)]
         artifact.edit_contents(edit_fn)
 
     @classmethod
@@ -139,7 +139,7 @@ class PrecompileContext:
         """
         Return the backend cache artifact with the associated key
         """
-        return cls._backend_artifacts_by_key.get(_BackendId(key), None)
+        return cls._backend_artifacts_by_key.get(_BackendId(key))
 
     @classmethod
     def take_artifact(cls, key: str) -> BackendCacheArtifact[Any] | None:
@@ -159,7 +159,6 @@ class PrecompileContext:
         Return a JSON serializable debug dump of all entries in the precompile context
         Called in serialize before serialization, and in populate_caches after deserialization
         """
-        # Print debug information
         debug_info: defaultdict[str, list[Any]] = defaultdict(list)
         for key, cache_entry in dynamo_entries.items():
             info = cache_entry.debug_info()
