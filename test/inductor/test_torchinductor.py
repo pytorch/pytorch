@@ -1546,6 +1546,13 @@ if torch.bfloat16 not in test_dtypes and not HAS_GPU:
     ]
 
 
+def small_int_edge_input(dtype, device):
+    info = torch.iinfo(dtype)
+    spread = torch.arange(-128, 128) * max(1, info.max // 127)
+    edges = torch.tensor([info.min, info.min + 1, -1, 0, 1, info.max - 1, info.max])
+    return torch.cat([spread, edges]).to(dtype).to(device)
+
+
 @instantiate_parametrized_tests
 class CommonTemplate:
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
@@ -21948,6 +21955,64 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x, y = torch.randn(2, 1, 1, 64, 80, device=self.device).unbind(0)
         table = torch.rand(1, 8, 64, 80, device=self.device) * 4
         self.common(fn, (x, y, table), check_lowp=False)
+
+    @parametrize("dtype", [torch.uint8, torch.int8, torch.int16])
+    def test_small_int_arithmetic_wraps(self, dtype):
+        # Check that uint8, int8 and int16 overflow behavior under various
+        # operations is the same for compiled and eager execution.
+        def fn(x):
+            y = x * 2 + x
+            return [
+                y.float(),
+                y > 50,
+                (~x).float(),
+                (x << 3).float(),
+                ((x << 4) >> 4).float(),
+                (x - 100).float(),
+            ]
+
+        self.common(fn, (small_int_edge_input(dtype, self.device),), check_lowp=False)
+
+    @parametrize("dtype", [torch.uint8, torch.int8, torch.int16])
+    def test_small_int_neg_wraps(self, dtype):
+        # minimum gives neg an operand that may already be promoted to int
+        def fn(x):
+            return torch.minimum(x, x.flip(0)).neg().float()
+
+        self.common(fn, (small_int_edge_input(dtype, self.device),), check_lowp=False)
+
+    # Small int gaps on other backends: https://github.com/pytorch/pytorch/issues/205432
+    # hl.abs returns an unsigned type, so abs(-128) is 128
+    @skip_if_halide
+    @parametrize("dtype", [torch.int8, torch.int16])
+    def test_small_int_abs_wraps(self, dtype):
+        if self.device == "cpu":
+            raise unittest.SkipTest("CPU abs of the minimum does not wrap, see #205432")
+
+        def fn(x):
+            return torch.where(x > 0, x, x.flip(0)).abs().float()
+
+        self.common(fn, (small_int_edge_input(dtype, self.device),), check_lowp=False)
+
+    # Halide floordiv goes through float and Triton floordiv computes in int32
+    @skip_if_halide
+    @skip_if_triton
+    @parametrize("dtype", [torch.int8, torch.int16])
+    def test_small_int_floordiv_min_by_neg1_wraps(self, dtype):
+        x = small_int_edge_input(dtype, self.device)
+        self.common(lambda x: (x // -1).float(), (x,), check_lowp=False)
+
+    # Scalar CPU truncdiv returns int, Halide truncdiv goes through float, and
+    # Triton truncdiv of min // -1 is a signed division overflow
+    @skip_if_cpu
+    @skip_if_halide
+    @skip_if_triton
+    @parametrize("dtype", [torch.int8, torch.int16])
+    def test_small_int_truncdiv_min_by_neg1_wraps(self, dtype):
+        def fn(x):
+            return torch.div(x, -1, rounding_mode="trunc").float()
+
+        self.common(fn, (small_int_edge_input(dtype, self.device),), check_lowp=False)
 
     # end of class CommonTemplate - add new tests here
 

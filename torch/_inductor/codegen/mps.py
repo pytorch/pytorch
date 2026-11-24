@@ -383,7 +383,7 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def abs(x: CSEVariable) -> str:
-        return f"metal::abs({x})"
+        return MetalOverrides._wrap_small_int(f"metal::abs({x})", x)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -436,9 +436,52 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def neg(x: CSEVariable) -> str:
-        # TODO: Does it rely on undefined behavior?
-        # If so, add special logic for unsigned types
-        return f"static_cast<decltype({x})>(-{x})"
+        # TODO: -x on the int32 or int64 minimum is signed overflow in Metal
+        return MetalOverrides._wrap_small_int(f"static_cast<decltype({x})>(-{x})", x)
+
+    @staticmethod
+    def _wrap_small_int(expr: str, *args: object) -> str:
+        # Metal promotes char, uchar and short operands to int, so cast the
+        # result back to wrap like eager does. The operand can already be an int
+        # temporary, for example from where, maximum or minimum, so this is
+        # needed for neg and abs as well. uint16 (ushort) is promoted the same
+        # way and is not wrapped yet, because eager MPS has no uint16 add or
+        # mul to test it against, see #205432.
+        dtypes = []
+        for arg in args:
+            if isinstance(arg, CSEVariable):
+                if arg.dtype is None:
+                    return expr
+                dtypes.append(arg.dtype)
+        if not dtypes:
+            return expr
+        dtype = functools.reduce(torch.promote_types, dtypes)
+        if dtype not in (torch.int8, torch.uint8, torch.int16):
+            return expr
+        return f"static_cast<{DTYPE_TO_METAL[dtype]}>({expr})"
+
+    @staticmethod
+    def add(a: OpVarT, b: OpVarT) -> str:
+        return MetalOverrides._wrap_small_int(f"{a} + {b}", a, b)
+
+    @staticmethod
+    def sub(a: OpVarT, b: OpVarT) -> str:
+        return MetalOverrides._wrap_small_int(f"{a} - {b}", a, b)
+
+    @staticmethod
+    def mul(a: OpVarT, b: OpVarT) -> str:
+        return MetalOverrides._wrap_small_int(f"{a} * {b}", a, b)
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_not(x: OpVarT) -> str:
+        return MetalOverrides._wrap_small_int(f"~{OpOverrides.paren(x)}", x)
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_left_shift(a: OpVarT, b: OpVarT) -> str:
+        expr = f"{OpOverrides.paren(a)} << {OpOverrides.paren(b)}"
+        return MetalOverrides._wrap_small_int(expr, a)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -478,7 +521,9 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
         # a and b must be of integer type
-        return f"c10::metal::floor_divide({a}, {b})"
+        return MetalOverrides._wrap_small_int(
+            f"c10::metal::floor_divide({a}, {b})", a, b
+        )
 
     @staticmethod
     # pyrefly: ignore [bad-override]
@@ -545,7 +590,7 @@ class MetalOverrides(OpOverrides):
             b.dtype is not None and b.dtype.is_floating_point
         ):
             return f"metal::trunc({quot})"
-        return quot
+        return MetalOverrides._wrap_small_int(quot, a, b)
 
     @staticmethod
     # pyrefly: ignore [bad-override]
