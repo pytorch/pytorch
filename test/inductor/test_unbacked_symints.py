@@ -953,7 +953,6 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(compiled(counts, x), fn(counts, x))
 
-    @requires_accelerator_triton
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_inplace_multidim_dynamic_slice_tensor_bound(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/183259
@@ -976,7 +975,6 @@ class TestUnbackedSymints(InductorTestCase):
             expected = fn(tensor_span)
             torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_slice_scatter_dynamic_end_invalid_src_size(self, device):
         def fn(x, src, end):
@@ -1007,7 +1005,6 @@ class TestUnbackedSymints(InductorTestCase):
         result = fn(t)
         self.assertEqual(result, 6)
 
-    @requires_accelerator_triton
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_override_optimization_hint_compiled(self, device):
         """Test override_optimization_hint inside a compiled function with fullgraph=True."""
@@ -1022,7 +1019,6 @@ class TestUnbackedSymints(InductorTestCase):
         result = compiled_fn(t)
         self.assertEqual(result, 6)
 
-    @requires_accelerator_triton
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_override_optimization_hint_compiled_tolist(self, device):
         """Test that override_optimization_hint is a no-op on concrete ints from tolist()."""
@@ -1038,7 +1034,6 @@ class TestUnbackedSymints(InductorTestCase):
         result = compiled_fn(t)
         self.assertEqual(result, t.sum())
 
-    @requires_accelerator_triton
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_override_optimization_hint_multiple_items(self, device):
         """Test override_optimization_hint on multiple unbacked symbols from separate .item() calls."""
@@ -1056,7 +1051,6 @@ class TestUnbackedSymints(InductorTestCase):
         result = compiled_fn(tx, ty)
         self.assertEqual(result, 30)
 
-    @requires_accelerator_triton
     def test_override_optimization_hint_rejects_backed_symbol(self, device):
         """Test that override_optimization_hint rejects backed (non-unbacked) symbols."""
 
