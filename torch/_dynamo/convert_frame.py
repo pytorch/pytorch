@@ -2640,6 +2640,44 @@ class ConvertFrameProtocol(typing.Protocol):
     ) -> ConvertFrameReturn: ...
 
 
+def get_frame_skip_reason(
+    frame: DynamoFrameType, backend: object
+) -> tuple[str, bool] | None:
+    """Return ``(skip_reason, apply_to_code)`` if Dynamo will not compile
+    ``frame`` with ``backend``, or ``None`` if it may compile it."""
+    is_skipfile = trace_rules.check(frame.f_code, frame=frame)
+    if sys.version_info >= (3, 13):
+        has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
+    else:
+        has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
+
+    # Check if we should skip due to torch dispatch mode.
+    # When inline_torch_dispatch_torch_compile is True (new behavior), we walk
+    # the stack to check for active modes. When False (old behavior), we use
+    # the global flag that tracks if we're inside any mode.
+    if config.inline_torch_dispatch_torch_compile:
+        should_skip_for_dispatch_mode = any_torch_dispatch_mode_on_stack()
+    else:
+        should_skip_for_dispatch_mode = (
+            is_in_any_mode_without_ignore_compile_internals()
+        )
+
+    # TODO: the has_started_execution condition is not covered by any test
+    if has_started_execution:
+        return "frame has already started executing", True
+    if is_skipfile:
+        return "frame is in the Dynamo skipfiles list", True
+    if config.disable:
+        return "Dynamo tracing is disabled", True
+    if should_skip_for_dispatch_mode and not getattr(backend, "_export", False):
+        return (
+            "non-infra torch dispatch mode present, this is not"
+            " supported today in torch.compile",
+            False,
+        )
+    return None
+
+
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
@@ -2669,46 +2707,9 @@ class CatchErrorsWrapper:
             raise AssertionError("frame_state must not be None")
         input_codes.add(frame.f_code)
 
-        is_skipfile = trace_rules.check(frame.f_code, frame=frame)
-        if sys.version_info >= (3, 13):
-            has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
-        else:
-            has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
-
-        # Check if we should skip due to torch dispatch mode.
-        # When inline_torch_dispatch_torch_compile is True (new behavior), we walk
-        # the stack to check for active modes. When False (old behavior), we use
-        # the global flag that tracks if we're inside any mode.
-        if config.inline_torch_dispatch_torch_compile:
-            should_skip_for_dispatch_mode = any_torch_dispatch_mode_on_stack()
-        else:
-            should_skip_for_dispatch_mode = (
-                is_in_any_mode_without_ignore_compile_internals()
-            )
-
-        if (
-            # TODO: the first condition is not covered by any test
-            has_started_execution
-            or is_skipfile
-            or config.disable
-            or (
-                should_skip_for_dispatch_mode
-                and not getattr(self._torchdynamo_orig_backend, "_export", False)
-            )
-        ):
-            apply_to_code = True
-            if has_started_execution:
-                skip_reason = "frame has already started executing"
-            elif is_skipfile:
-                skip_reason = "frame is in the Dynamo skipfiles list"
-            elif config.disable:
-                skip_reason = "Dynamo tracing is disabled"
-            else:
-                skip_reason = (
-                    "non-infra torch dispatch mode present, this is not"
-                    " supported today in torch.compile"
-                )
-                apply_to_code = False
+        skip = get_frame_skip_reason(frame, self._torchdynamo_orig_backend)
+        if skip is not None:
+            skip_reason, apply_to_code = skip
             return self._handle_skip(
                 ConvertFrameReturn(
                     apply_to_code=apply_to_code, skip_reason=skip_reason

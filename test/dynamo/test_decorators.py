@@ -2109,6 +2109,47 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_set_stance_eager_then_compile_no_nested_compile_on_first_call(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def helper(x):
+            return x.sin()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            return helper(helper(x))
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            x = torch.randn(3)
+            self.assertEqual(fn(x), x.sin().sin())
+            # The first call runs eagerly, so helper must not be compiled
+            # just because it was called twice during that call.
+            self.assertEqual(cnts.frame_count, 0)
+
+    def test_set_stance_then_compile_make_fx_in_eager_call(self):
+        # https://github.com/pytorch/pytorch/issues/205686: make_fx running
+        # inside a region under these stances (as FlexAttention's backward
+        # does) must not have its traced frames captured as example inputs.
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def check(stance, tracing_mode):
+            torch._dynamo.reset()
+
+            @torch.compile(backend="eager")
+            def fn(x):
+                gm = make_fx(lambda t: t.sin() + 1, tracing_mode=tracing_mode)(x)
+                return gm(x)
+
+            with torch.compiler.set_stance(stance):
+                for n in (3, 4, 5):
+                    x = torch.randn(n)
+                    self.assertEqual(fn(x), x.sin() + 1)
+
+        for stance in ("eager_then_compile", "aot_eager_then_compile"):
+            for tracing_mode in ("real", "fake", "symbolic"):
+                with self.subTest(stance=stance, tracing_mode=tracing_mode):
+                    check(stance, tracing_mode)
+
     def test_set_stance_force_eager(self):
         @torch.compile(backend="eager")
         def a(x):
