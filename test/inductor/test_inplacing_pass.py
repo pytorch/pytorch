@@ -221,6 +221,39 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual_inputs, expected_inputs)
 
+    @parametrize("operator_kind", ["index_put", "foreach"])
+    @parametrize("overlapping", [False, True])
+    def test_reinplace_input_view_requires_disjoint_elements(
+        self, operator_kind, overlapping
+    ):
+        if operator_kind == "foreach":
+            functional, inplace = aten._foreach_add.Scalar, aten._foreach_add_.Scalar
+        else:
+            functional, inplace = aten.index_put.default, aten.index_put_.default
+
+        def f(x, replacement):
+            view = x[:5].unfold(0, 4, 1) if overlapping else x.view(2, 5)[:, :4]
+            if operator_kind == "foreach":
+                updated = torch._foreach_add([view], 0.5)[0]
+            else:
+                updated = aten.index_put.default(
+                    view, [torch.tensor([0])], torch.full((1, 4), 0.5)
+                )
+            answer = updated.sum()
+            x.copy_(replacement)
+            return answer
+
+        inputs = (torch.arange(10, dtype=torch.float32), torch.full((10,), 10.0))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        candidate = next(node for node in gm.graph.nodes if node.target is functional)
+        fake_mode = detect_fake_mode([node.meta.get("val") for node in gm.graph.nodes])
+        with V.set_fake_mode(fake_mode):
+            reinplace_inplaceable_ops_core(
+                gm.graph, fake_tensor_updater=FakeTensorUpdater(gm)
+            )
+        self.assertIs(candidate.target, functional if overlapping else inplace)
+        self._assert_graph_matches(gm, f, inputs)
+
     @parametrize(
         "reader",
         [
