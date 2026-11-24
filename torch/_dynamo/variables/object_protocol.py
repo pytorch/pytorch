@@ -196,6 +196,8 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 
 # Flag Include/object.h
+Py_TPFLAGS_SEQUENCE = 1 << 5
+Py_TPFLAGS_MAPPING = 1 << 6
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
 Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
 Py_TPFLAGS_HEAPTYPE = 1 << 9
@@ -392,6 +394,34 @@ def pysequence_check(obj_type: type) -> bool:
     if issubclass(obj_type, dict):
         return False
     return type_implements_sq_item(obj_type)
+
+
+def pymapping_check(obj: VariableTracker) -> bool:
+    """Implements PyMapping_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c (PyMapping_Check)
+    return obj.tp_as_mapping.mp_subscript is not None
+
+
+def pylist_check(obj: VariableTracker) -> bool:
+    """Implements PyList_Check semantics for VariableTracker objects."""
+    return issubclass(obj.python_type(), list)
+
+
+def pytuple_check(obj: VariableTracker) -> bool:
+    """Implements PyTuple_Check semantics for VariableTracker objects."""
+    return issubclass(obj.python_type(), tuple)
+
+
+def mappingproxy_check_mapping(
+    tx: "InstructionTranslatorBase", mapping: VariableTracker
+) -> None:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c (mappingproxy_check_mapping)
+    if not pymapping_check(mapping) or pylist_check(mapping) or pytuple_check(mapping):
+        raise_type_error(
+            tx,
+            "mappingproxy() argument must be a mapping, not "
+            f"{mapping.python_type_name()}",
+        )
 
 
 def pylong_check(obj_type: type) -> bool:
@@ -723,7 +753,7 @@ def pysequence_delitem(
         raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
 
     raise_type_error(
-        tx, f"'{s.python_type_name()}' object does not support item deletion"
+        tx, f"'{s.python_type_name()}' object doesn't support item deletion"
     )
 
 
@@ -738,16 +768,22 @@ def generic_delitem(
     if mp_ass_subscript is not None:
         return o.mp_ass_subscript_impl(tx, key, None)
 
-    key_type = maybe_get_python_type(key)
-    if pyindex_check(key_type):
-        key_value = key.nb_index_impl(tx)
-        return pysequence_delitem(tx, o, key_value)
-    elif o.tp_as_sequence.sq_ass_item is not None:
-        raise_type_error(
-            tx, f"sequence index must be integer, not {key.python_type_name()}"
-        )
+    # Heap types always get a tp_as_sequence struct; static types only when
+    # they fill one of its slots (int, float, object have none).
+    o_type = maybe_get_python_type(o)
+    is_heap_type = o_type.__flags__ & Py_TPFLAGS_HEAPTYPE
+    if is_heap_type or any(slot is not None for slot in o.tp_as_sequence):
+        if pyindex_check(maybe_get_python_type(key)):
+            key_value = key.nb_index_impl(tx)
+            return pysequence_delitem(tx, o, key_value)
+        elif o.tp_as_sequence.sq_ass_item is not None:
+            raise_type_error(
+                tx, f"sequence index must be integer, not '{key.python_type_name()}'"
+            )
 
-    raise_type_error(tx, f"'{o.python_type_name()}' does not support item deletion")
+    raise_type_error(
+        tx, f"'{o.python_type_name()}' object does not support item deletion"
+    )
 
 
 def pynumber_int(

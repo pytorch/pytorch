@@ -124,12 +124,7 @@ from .output_graph import (
     OutputGraph,
     StackLocalsMetadata,
 )
-from .polyfills import (
-    impl_IS_MAPPING,
-    impl_MATCH_CLASS,
-    impl_MATCH_KEYS,
-    impl_MATCH_SEQUENCE,
-)
+from .polyfills import impl_MATCH_CLASS, impl_MATCH_KEYS
 from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
@@ -226,6 +221,8 @@ from .variables.object_protocol import (
     generic_setitem,
     mro_attr_source,
     mro_lookup,
+    Py_TPFLAGS_MAPPING,
+    Py_TPFLAGS_SEQUENCE,
     pyiter_send,
     pysequence_contains,
     type_is_immutable,
@@ -4748,29 +4745,15 @@ class InstructionTranslatorBase(
         else:
             self.push(tos.call_method(self, "__len__", [], {}))
 
+    # CPython tests these tp_flags bits, not isinstance. A type inherits only
+    # one of them, from the first base in its MRO that has one.
     def MATCH_MAPPING(self, inst: Instruction) -> None:
-        """
-        If STACK[-1] is an instance of collections.abc.Mapping, push True.
-        Otherwise, push False
-        """
-        tos = self.stack[-1]
-        self.push(
-            self.inline_user_function_return(
-                VariableTracker.build(self, impl_IS_MAPPING),
-                [tos],
-                {},
-            )
-        )
+        flags = self.stack[-1].python_type().__flags__
+        self.push(VariableTracker.build(self, bool(flags & Py_TPFLAGS_MAPPING)))
 
     def MATCH_SEQUENCE(self, inst: Instruction) -> None:
-        tos = self.stack[-1]
-        self.push(
-            self.inline_user_function_return(
-                VariableTracker.build(self, impl_MATCH_SEQUENCE),
-                [tos],
-                {},
-            )
-        )
+        flags = self.stack[-1].python_type().__flags__
+        self.push(VariableTracker.build(self, bool(flags & Py_TPFLAGS_SEQUENCE)))
 
     def MATCH_CLASS(self, inst: Instruction) -> None:
         subject, cls, names = self.popn(3)
