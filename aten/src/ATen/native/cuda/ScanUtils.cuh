@@ -655,9 +655,9 @@ __device__ __forceinline__ void store_dwords_partial(const T (&x)[ITEMS], T* p, 
   }
 }
 
-// Element loads of partial tiles hold 4-byte rows of 65 to 255 elements below stock speed on
-// gfx950, so there they take vector loads where they can. Elsewhere, and for other sizes, the extra
-// path makes some rows slower.
+// On gfx950, partial tiles of vector-aligned rows of 4-byte elements take vector loads where they can
+// (see load_items): with element loads, rows of 96 to 255 elements were slower than stock. On other
+// targets, and for other element sizes, the extra path makes some rows slower.
 #if defined(__gfx950__)
 template <typename T>
 constexpr bool kVecPartialTile = sizeof(T) == 4;
@@ -666,10 +666,11 @@ template <typename T>
 constexpr bool kVecPartialTile = false;
 #endif
 
-// Loads the ITEMS elements at p + col. kFull: the tile is whole, so every lane's elements are in
-// [0, end). Otherwise elements at or past end are fill, and every lane runs the same branch-free
-// loads, clamped to [0, end): lanes that take different load paths each wait for their own loads,
-// which costs a memory round trip per path.
+// Loads the ITEMS elements at p + col, where p is the row start. kFull: the tile is whole, so every
+// lane's elements are in [0, end). Otherwise elements at or past end are fill, and every lane runs
+// the same branch-free loads, clamped to [0, end): lanes that take different load paths each wait
+// for their own loads, which costs a memory round trip per path. The exception is kVecPartialTile,
+// where only the lane that straddles end adds element loads.
 template <bool kFull, int ITEMS, int VEC, typename T>
 __device__ __forceinline__ void load_items(T (&x)[ITEMS], const T* p, uint64_t col, uint64_t end,
                                            bool vec_ok, T fill) {
@@ -691,10 +692,10 @@ __device__ __forceinline__ void load_items(T (&x)[ITEMS], const T* p, uint64_t c
     }
   } else {
     if constexpr (!kFull && kVecPartialTile<T>) {
-      if (vec_ok) {
+      if (vec_ok && end >= ITEMS) {
         // Lanes whose ITEMS elements are all in [0, end) take the vector loads of a whole tile;
-        // the others load the row start in the same instructions, then only the lane that
-        // straddles end loads its elements one at a time.
+        // the others load the first ITEMS elements of the row (in bounds, as end >= ITEMS) in the
+        // same instructions, then only the lane that straddles end loads its elements one at a time.
         const bool whole = col + ITEMS <= end;
         const uint64_t at = whole ? col : 0;
 #pragma unroll

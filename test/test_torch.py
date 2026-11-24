@@ -3279,13 +3279,15 @@ class TestTorchDeviceType(TestCase):
         # lanes, a warp or a block per row, and long lines split into chunks. The inputs keep
         # every result exact in `dtype` for any combine order: integers wrap around (odd factors for
         # cumprod, so products never reach 0). Floating-point cumsum inputs are differences of a
-        # random 0/1 sequence, so every run of them sums to -1, 0 or 1 (in each of the real and
-        # imaginary parts), and cumprod inputs are +-1 (+-1j).
+        # random sequence of integers that are exact in `dtype`, so every run of them sums to the
+        # difference of two of those integers, which is exact too (in each of the real and imaginary
+        # parts); over that range a wrong carry rarely cancels out. cumprod inputs are +-1 (+-1j).
         shapes = [(8, 5), (5000, 300), (3, 5000), (3, 200_001), (5000,), (2_000_001,)]
         for shape, op in product(shapes, (torch.cumsum, torch.cumprod)):
             if dtype.is_floating_point or dtype.is_complex:
                 if op is torch.cumsum:
-                    b = torch.randint(0, 2, (2, *shape[:-1], shape[-1] + 1)).to(dtype)
+                    high = int(2 / torch.finfo(dtype).eps)
+                    b = torch.randint(0, high, (2, *shape[:-1], shape[-1] + 1)).to(dtype)
                     x = b[0, ..., 1:] - b[0, ..., :-1]
                     if dtype.is_complex:
                         x = x + 1j * (b[1, ..., 1:] - b[1, ..., :-1])
