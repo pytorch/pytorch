@@ -129,8 +129,10 @@ class AllGatherFinalizeMetadata:
     ``all_gather_output`` is the completed collective output and
     ``output_metadata`` is the metadata that ``prepare`` returned for this call.
     ``buffers`` is empty on the group's first unshard and afterwards holds the
-    group's persistent buffers with storage re-allocated, which are the
+    FSDP-owned persistent buffers with storage re-allocated, which are the
     parameters' own outputs if the first unshard used the default layout.
+    For adopted backend-owned outputs it stays empty; the entries in
+    ``param_metadata`` hold their existing ``outputs`` and set ``backend_owned``.
     """
 
     all_gather_output: torch.Tensor
@@ -264,10 +266,13 @@ class AllGatherLayout(ABC):
 
         On the group's first unshard ``metadata.buffers`` is empty: allocate the
         persistent buffers and return outputs that view them, laid out as
-        ``AllGatherOutputs`` describes. Later calls pass the group's buffers, with
-        storage re-allocated, and the outputs in ``metadata.param_metadata``,
-        which are FSDP's if the first unshard used the default layout and must
-        be refilled in place and returned, under preserved version counters.
+        ``AllGatherOutputs`` describes. Later calls pass the FSDP-owned buffers,
+        with storage re-allocated, and the existing outputs in
+        ``metadata.param_metadata``, which must be refilled in place and returned
+        under preserved version counters. A ``BackendOwnedAllGatherLayout`` may
+        instead return no buffers; for its adopted backend-owned outputs, later
+        calls still pass no buffers and may return new views for FSDP to copy
+        into the adopted outputs.
         """
         ...
 

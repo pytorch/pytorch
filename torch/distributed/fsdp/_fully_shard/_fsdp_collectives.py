@@ -453,8 +453,7 @@ def foreach_all_gather(
             all_gather_output = all_gather_comm.allocate(
                 (all_gather_input_numel * world_size,), dtype=dtype, device=device
             )
-            version_ctx = _preserve_all_gather_version(all_gather_output, layout)
-            with version_ctx:
+            with _preserve_all_gather_version(all_gather_output, layout):
                 all_gather_input, all_gather_output = copy_in(
                     all_gather_inputs,
                     all_gather_output,
@@ -463,6 +462,8 @@ def foreach_all_gather(
                     rank,
                 )
             del param_all_gather_inputs, all_gather_inputs
+        # copy_in may return a tensor with a different version counter
+        version_ctx = _preserve_all_gather_version(all_gather_output, layout)
         all_gather_stream.wait_stream(all_gather_copy_in_stream)
         with device_handle.stream(all_gather_stream), version_ctx:
             all_gather_work = all_gather_comm(

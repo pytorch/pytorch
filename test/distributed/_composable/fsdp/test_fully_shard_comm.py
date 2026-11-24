@@ -51,6 +51,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
+    _wait_all_gather,
     AllGatherResult,
     DefaultAllGather,
     DefaultAllReduce,
@@ -4020,6 +4021,70 @@ class TestAllGatherLayouts(TestCase):
             loss.backward()
             self.assertEqual(param.grad, 2 * value)
 
+    @parametrize("async_op", [False, True])
+    @parametrize("rebound", [False, True])
+    def test_backend_owned_copy_in_preserves_versions(self, async_op, rebound):
+        class ReboundAllGather(_BackendOwnedAllGather):
+            def allocate(self, size, *, dtype, device):
+                # A registered buffer may be returned with a fresh version counter.
+                return super().allocate(size, dtype=dtype, device=device).data
+
+            def __call__(
+                self, output_tensor, input_tensor, group, async_op, output_metadata
+            ):
+                def write():
+                    output_tensor.copy_(input_tensor.repeat(group.size()))
+
+                if async_op:
+                    return _ReorderWork(MagicMock(spec=dist.Work), write)
+                write()
+                return None
+
+        class ReboundLayout(_BackendOwnedLayout):
+            def copy_in(self, inputs, output, split_sizes, numel, rank):
+                packed, output = super().copy_in(
+                    inputs, output, split_sizes, numel, rank
+                )
+                return packed, self.comm.output if rebound else output
+
+        comm = ReboundAllGather()
+        layout = ReboundLayout("custom", comm)
+        param = SimpleNamespace(
+            param_dtype=None,
+            all_gather_inputs=[torch.ones(2)],
+            all_gather_output_layouts=[SimpleNamespace(outer_size=1)],
+            fsdp_placement=Shard(0),
+            is_dtensor=False,
+            _sharded_local_tensor=SimpleNamespace(),
+            sharded_state=ShardedState.SHARDED,
+        )
+        group = SimpleNamespace(size=lambda: 2, rank=lambda: 0)
+        stream = torch.cpu.current_stream()
+
+        def gather():
+            result = foreach_all_gather(
+                [param],
+                group,
+                async_op,
+                stream,
+                stream,
+                torch.device("cpu"),
+                comm,
+                layout,
+            )
+            _wait_all_gather(result)
+            return result.all_gather_output
+
+        output = gather()
+        self.assertEqual(output, torch.ones(4))
+        parameter = nn.Parameter(output)
+        loss = parameter.square().sum()
+        version = parameter._version
+        self.assertEqual(gather(), torch.ones(4))
+        self.assertEqual(parameter._version, version)
+        loss.backward()
+        self.assertEqual(parameter.grad, torch.full_like(parameter, 2))
+
     def test_backend_owned_layout_binds_one_group(self):
         layout = _BackendOwnedLayout("custom", None)
         owner = nn.Identity()
@@ -4552,7 +4617,7 @@ def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
 
 
 def _check_backend_owned_layout_training(
-    test, device, mode, reshard, async_op, mixed, keep, compiled=False
+    test, device, mode, reshard, async_op, mixed, compiled=False
 ):
     torch.manual_seed(42)
     ref_model = nn.Sequential(*[MLP(16) for _ in range(3)]).to(device)
@@ -4566,7 +4631,6 @@ def _check_backend_owned_layout_training(
             )
         fully_shard(module, mesh=mesh, mp_policy=mp_policy, reshard_after_forward=False)
         module._set_unshard_async_op(async_op)
-        module.set_keep_unsharded_storage(keep)
     # Each block's comm holds that block's output lease, so each has its own
     comms = [_BackendOwnedAllGather() for _ in model]
     for block, comm in zip(model, comms):
@@ -4640,7 +4704,7 @@ class TestFullyShardLayoutParity(FSDPTestMultiThread):
         self, device, mode, reshard, async_op, mixed
     ):
         _check_backend_owned_layout_training(
-            self, device, mode, reshard, async_op, mixed, keep=False
+            self, device, mode, reshard, async_op, mixed
         )
 
     @parametrize("async_op", [False, True])
@@ -4747,21 +4811,21 @@ class TestFullyShardLayoutParityNCCL(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(4)
     @parametrize(
-        "mode,reshard,async_op,mixed,keep,compiled",
+        "mode,reshard,async_op,mixed,compiled",
         [
-            ("custom", True, True, True, False, False),
-            ("custom", 2, True, True, False, False),
-            ("fallback", True, False, True, False, False),
-            ("rank_major", True, False, False, False, False),
-            ("custom", True, False, True, False, True),
+            ("custom", True, True, True, False),
+            ("custom", 2, True, True, False),
+            ("fallback", True, False, True, False),
+            ("rank_major", True, False, False, False),
+            ("custom", True, False, True, True),
         ],
     )
     def test_backend_owned_layout_training(
-        self, device, mode, reshard, async_op, mixed, keep, compiled
+        self, device, mode, reshard, async_op, mixed, compiled
     ):
         device = torch.device(device).type  # each rank's own device, not device 0
         _check_backend_owned_layout_training(
-            self, device, mode, reshard, async_op, mixed, keep, compiled
+            self, device, mode, reshard, async_op, mixed, compiled
         )
 
 

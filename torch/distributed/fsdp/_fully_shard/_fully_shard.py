@@ -977,9 +977,9 @@ class FSDPModule:
         iterations, while no all-gather is pending and parameters are resharded,
         and never after parameters adopt outputs from a custom layout, since
         only the layout that created those outputs can refill them. A layout
-        whose backend owns its outputs binds to one parameter group, so install
-        one on each module with ``recurse=False``. FSDP checks every group
-        before changing any.
+        whose backend owns its outputs binds to one parameter group. It requires
+        a module with a single parameter group; install one layout per module
+        with ``recurse=False``. FSDP checks every group before changing any.
 
         Args:
             layout (AllGatherLayout): Layout to install; pass
@@ -1007,8 +1007,8 @@ class FSDPModule:
             if len(groups) > 1:
                 raise ValueError(
                     "a BackendOwnedAllGatherLayout cannot be shared across FSDP "
-                    "parameter groups; create one per group and install it with "
-                    "recurse=False"
+                    "parameter groups; use modules with a single parameter group "
+                    "and install one layout per module with recurse=False"
                 )
             for fsdp_param_group in groups:
                 layout._bind_owner(fsdp_param_group)
