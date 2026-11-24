@@ -2904,6 +2904,10 @@ class TestCompileOnOneRankPrecompile(TestCase):
             with torch.compiler.set_stance(stance):
                 out = torch.compile(fn, fullgraph=True)(torch.arange(4.0))
             assert out.tolist() == [[0.0, 1.0], [2.0, 3.0]][rank], out
+            if rank == 1 and not saved_mode:
+                cache_counters = torch._dynamo.utils.counters["dynamo_cache"]
+                assert cache_counters["dynamo_cache_miss"] > 0, cache_counters
+                assert cache_counters["dynamo_cache_hit"] == 0, cache_counters
             if rank == 0:
                 saved = PrecompileContext.save_to_dynamo_cache()
                 assert saved["dynamo"] and saved["backends"], saved

@@ -695,6 +695,17 @@ class _DynamoCodeCacheEntry:
             import_sources=dict(self.import_sources),
         )
 
+    def snapshot(self) -> "_DynamoCodeCacheEntry":
+        """Return a copy with mutable metadata containers detached so later
+        compiles do not mutate an already-recorded cache entry."""
+        return dataclasses.replace(
+            self,
+            guarded_codes=self.guarded_codes.copy(),
+            backend_ids=self.backend_ids.copy(),
+            function_names=self.function_names.copy(),
+            import_sources=self.import_sources.copy(),
+        )
+
 
 def _globals_module(namespace: dict[str, object]) -> types.ModuleType | None:
     name = namespace.get("__name__")
@@ -1055,14 +1066,17 @@ class _DynamoCacheEntry:
         return {backend_id for code in self.codes for backend_id in code.backend_ids}
 
     def check_versions(self) -> None:
-        """Check if the current system is compatible with the system used to create this cache entry."""
+        """Check system compatibility and ``compile_on_one_rank`` portability for this cache entry."""
         current_system_info = SystemInfo.current()
         self.system_info.check_compatibility(current_system_info, self.device_type)
         if torch.compiler.config.compile_on_one_rank and not _all_rank_portable(
             self.codes
         ):
             raise RuntimeError(
-                "Compile package contains code traced without compile_on_one_rank"
+                "Compile package contains code traced with "
+                "torch.compiler.config.compile_on_one_rank=False; "
+                "re-save the package with compile_on_one_rank=True or load it "
+                "with compile_on_one_rank=False."
             )
 
     def debug_info(self) -> dict[str, Any]:
@@ -1376,6 +1390,9 @@ class CompilePackage:
 
     @property
     def source_id(self) -> str:
+        """Cache key for this package based on its function and guarded codes'
+        ``compile_on_one_rank`` mode; may change if a later recompile adds a
+        graph traced without ``compile_on_one_rank``."""
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set")
         return CompilePackage.source_id_from_fn(
@@ -1782,23 +1799,18 @@ class CompilePackage:
                     )
 
     def cache_entry(self) -> _DynamoCacheEntry:
+        """Return a snapshot of this package's current cache entry."""
         self.validate()
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
         return _DynamoCacheEntry(
-            # A later recompile can record this package under a different key.
-            # Its mutable bookkeeping must not change the earlier cache entry.
-            codes=[
-                dataclasses.replace(
-                    code,
-                    guarded_codes=code.guarded_codes.copy(),
-                    backend_ids=code.backend_ids.copy(),
-                    function_names=code.function_names.copy(),
-                    import_sources=code.import_sources.copy(),
-                )
-                for code in self._codes.values()
-            ],
-            source_info=SourceInfo(self._source_info.inlined_sources.copy()),
+            # A later recompile can record this package under a different key;
+            # snapshot mutable bookkeeping so earlier recorded entries stay intact.
+            codes=[code.snapshot() for code in self._codes.values()],
+            source_info=dataclasses.replace(
+                self._source_info,
+                inlined_sources=self._source_info.inlined_sources.copy(),
+            ),
             device_type=_collapse_device_types(self._device_types),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
@@ -1808,6 +1820,11 @@ class CompilePackage:
     def source_id_from_fn(
         fn: Callable[..., Any], compile_on_one_rank: bool | None = None
     ) -> str:
+        """Compute the ``DynamoCache`` key for ``fn``.
+
+        When ``compile_on_one_rank`` is ``None``, reads
+        ``torch.compiler.config.compile_on_one_rank``.
+        """
         from .eval_frame import innermost_fn
 
         innermost_fn_ = innermost_fn(fn)
@@ -1817,8 +1834,10 @@ class CompilePackage:
         sha256_hash = hashlib.sha256()
         sha256_hash.update(innermost_fn_.__qualname__.encode())
         sha256_hash.update(str(innermost_fn_.__code__.co_firstlineno).encode())
-        # Graphs traced without compile_on_one_rank can specialize on the rank.
-        sha256_hash.update(bytes([bool(compile_on_one_rank)]))
+        # Graphs traced without compile_on_one_rank can specialize on the rank;
+        # only perturb the key when True so default-mode keys remain unchanged.
+        if compile_on_one_rank:
+            sha256_hash.update(b"\x01")
         return sha256_hash.hexdigest()
 
 
@@ -1826,9 +1845,11 @@ _Backends = dict[_BackendId, Any]
 
 
 def _all_rank_portable(codes: Iterable[_DynamoCodeCacheEntry]) -> bool:
-    modes = (g.compile_on_one_rank for code in codes for g in code.guarded_codes)
-    # A fully bypassed package has no traced code to constrain its mode.
-    return bool(next(modes, torch.compiler.config.compile_on_one_rank)) and all(modes)
+    modes = [g.compile_on_one_rank for code in codes for g in code.guarded_codes]
+    if not modes:
+        # A fully bypassed package has no traced code to constrain its mode.
+        return bool(torch.compiler.config.compile_on_one_rank)
+    return all(modes)
 
 
 class DynamoStore(abc.ABC):
