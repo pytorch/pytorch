@@ -6,17 +6,31 @@ from typing import NamedTuple
 
 NORMALIZED_SIZES = (128, 512, 1024, 2048, 4096, 8192)
 
+# Compute capabilities with a measured backward launch and weight-only crossover.
+TUNED_ARCHS = ((9, 0), (10, 0), (10, 3))
+
 # Weight-only calls need enough work to pay for the extra output and reduction.
-_WEIGHT_GRAD_MIN_ROWS = {
+# Rows from which the native kernel is faster, as (fp16/bf16, fp32); None means
+# ATen was faster at every row count measured.
+_WEIGHT_GRAD_MIN_ROWS: dict[int, tuple[int | None, int | None]] = {
     128: (8192, 8192),
     512: (8192, 8192),
     1024: (8192, 16384),
     2048: (16384, 16384),
 }
+# Measured on B300 (sm_103), where the native kernel is faster from fewer rows.
+_WEIGHT_GRAD_MIN_ROWS_SM103: dict[int, tuple[int | None, int | None]] = {
+    128: (1024, 1024),
+    512: (2048, 2048),
+    1024: (4096, 4096),
+    2048: (16384, 8192),
+    8192: (8192, None),
+}
 
 
-def weight_grad_min_rows(n: int, element_size: int) -> int | None:
-    rows = _WEIGHT_GRAD_MIN_ROWS.get(n)
+def weight_grad_min_rows(n: int, element_size: int, cc: tuple[int, int]) -> int | None:
+    table = _WEIGHT_GRAD_MIN_ROWS_SM103 if cc == (10, 3) else _WEIGHT_GRAD_MIN_ROWS
+    rows = table.get(n)
     return rows[element_size == 4] if rows is not None else None
 
 
