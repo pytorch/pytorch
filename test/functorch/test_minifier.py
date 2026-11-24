@@ -8,10 +8,16 @@ from functorch import make_fx
 from functorch.compile import minifier
 from torch._functorch.compile_utils import get_outputs, get_placeholders
 from torch._functorch.fx_minifier import dump_state, MinifierSanityCheckFailed
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestMinifier(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_sanity_check_failure_type(self):
         def f(x):
             return torch.sin(x)
@@ -140,12 +146,10 @@ class TestMinifier(TestCase):
         gm = torch.fx.GraphModule({}, graph)
 
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
-        fake_tensor = (
-            torch._subclasses.fake_tensor.FakeTensorConverter().from_meta_and_device(
-                fake_mode,
-                torch.empty_strided((2, 3), (3, 1), device="meta"),
-                torch.device("cuda:7"),
-            )
+        fake_tensor = fake_mode.fake_tensor_converter.from_meta_and_device(
+            fake_mode,
+            torch.empty_strided((2, 3), (3, 1), device="meta"),
+            torch.device("cuda:7"),
         )
 
         buf = io.StringIO()

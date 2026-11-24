@@ -6,10 +6,13 @@ from collections.abc import Sequence
 from torch.onnx import errors
 from torch.onnx._internal.torchscript_exporter import registration
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 @common_utils.instantiate_parametrized_tests
 class TestGlobalHelpers(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @common_utils.parametrize(
         "available_opsets, target, expected",
         [
@@ -48,6 +51,8 @@ class TestGlobalHelpers(common_utils.TestCase):
 
 
 class TestOverrideDict(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.override_dict: registration.OverrideDict[str, int] = (
@@ -168,6 +173,8 @@ class TestOverrideDict(common_utils.TestCase):
 
 
 class TestRegistrationDecorators(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self) -> None:
         registration.registry._registry.pop("test::test_op", None)
 

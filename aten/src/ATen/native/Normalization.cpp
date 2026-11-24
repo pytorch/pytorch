@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -15,6 +16,7 @@
 #include <ATen/native/Normalization.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/mixed_data_type.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <ATen/OpMathType.h>
 
@@ -250,7 +252,7 @@ static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 
   // non-contiguous path
   auto channel_stride = input.strides()[1];
-  auto in_data = input.data_ptr<scalar_t>();
+  auto in_data = input.const_data_ptr<scalar_t>();
   auto reduce_iter = TensorIteratorConfig()
       .add_const_input(input)
       .resize_outputs(false)
@@ -263,7 +265,7 @@ static std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     TensorIterator iter(reduce_iter);
     for (const auto f : c10::irange(b_begin, b_end)) {
       // compute variance per input
-      iter.unsafe_replace_operand(0, in_data + channel_stride * f);
+      iter.unsafe_replace_operand(0, const_cast<scalar_t*>(in_data + channel_stride * f));
       accscalar_t var_sum = 0;
       auto mean = static_cast<accscalar_t>(save_mean_a[f]);
       cpu_serial_kernel(iter, [&](const scalar_t i) -> void {
