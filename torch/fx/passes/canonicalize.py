@@ -22,6 +22,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.nn import functional as F
 
 
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
@@ -44,6 +45,46 @@ _IN_PLACE_OPERATORS = frozenset(
         "itruediv",
         "ixor",
     }
+)
+
+
+_TRAINING_RNG_FUNCTIONS = frozenset(
+    {
+        F.dropout,
+        F.dropout1d,
+        F.dropout2d,
+        F.dropout3d,
+        F.alpha_dropout,
+        F.feature_alpha_dropout,
+        F.rrelu,
+        torch.dropout,
+        torch.feature_dropout,
+        torch.alpha_dropout,
+        torch.feature_alpha_dropout,
+        torch.rrelu,
+    }
+)
+_RUNNING_STAT_FUNCTIONS = frozenset(
+    {F.batch_norm, F.instance_norm, torch.batch_norm, torch.instance_norm}
+)
+_FRACTIONAL_POOL_FUNCTIONS = frozenset(
+    {
+        F.fractional_max_pool2d,
+        F.fractional_max_pool2d_with_indices,
+        F.fractional_max_pool3d,
+        F.fractional_max_pool3d_with_indices,
+    }
+)
+_EMBEDDING_FUNCTIONS = frozenset({F.embedding, F.embedding_bag})
+_ATTENTION_FUNCTIONS = frozenset(
+    {F.scaled_dot_product_attention, F.multi_head_attention_forward}
+)
+_ARGUMENT_EFFECT_FUNCTIONS = (
+    _TRAINING_RNG_FUNCTIONS
+    | _RUNNING_STAT_FUNCTIONS
+    | _FRACTIONAL_POOL_FUNCTIONS
+    | _EMBEDDING_FUNCTIONS
+    | _ATTENTION_FUNCTIONS
 )
 
 
@@ -351,7 +392,8 @@ def _is_safe_to_reorder(
     """Check if a node is safe to reorder during graph canonicalization.
 
     Builds on Node.is_impure() (used by DCE) with additional checks for cases
-    it doesn't cover: in-place methods and functional calls, higher order operators with
+    it doesn't cover: RNG methods, argument-dependent functional effects,
+    in-place methods and functional calls, higher order operators with
     non-reorderable subgraph nodes, functional collectives, nodes binding
     unbacked symbols, and non-OpOverload state-changing functions detected by
     no-node-arguments and no-tensor-or-symbolic-value heuristics, and opaque
@@ -375,6 +417,8 @@ def _is_safe_to_reorder(
     if node.meta.get("unbacked_bindings"):
         return False
     if node.op == "call_method":
+        if node.target in {"bernoulli", "multinomial"}:
+            return False
         return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
     if node.op == "call_module":
         if owning_module is None:
@@ -433,6 +477,48 @@ def _is_safe_to_reorder(
             return False
         if node.kwargs.get("inplace") is True:
             return False
+        if node.target is F.gumbel_softmax:
+            return False
+        if callable(node.target) and node.target in _ARGUMENT_EFFECT_FUNCTIONS:
+            from torch.fx.operator_schemas import normalize_function
+
+            try:
+                normalized = normalize_function(
+                    node.target,
+                    node.args,
+                    node.kwargs,
+                    normalize_to_only_use_kwargs=True,
+                )
+            except (TypeError, ValueError, RuntimeError):
+                return False
+            if normalized is None:
+                return False
+            args = normalized.kwargs
+            if args.get("inplace") is True:
+                return False
+            if node.target in _TRAINING_RNG_FUNCTIONS:
+                if args.get("training", args.get("train")) is not False:
+                    return False
+            elif node.target in _RUNNING_STAT_FUNCTIONS:
+                active = args.get("training", args.get("use_input_stats"))
+                if active is not False and (
+                    args.get("running_mean") is not None
+                    or args.get("running_var") is not None
+                ):
+                    return False
+            elif node.target in _FRACTIONAL_POOL_FUNCTIONS:
+                if args.get("_random_samples") is None:
+                    return False
+            elif node.target in _EMBEDDING_FUNCTIONS:
+                if args.get("max_norm") is not None:
+                    return False
+            elif (
+                node.target is F.scaled_dot_product_attention
+                or args.get("training") is not False
+            ):
+                p = args.get("dropout_p")
+                if not isinstance(p, (int, float)) or p != 0:
+                    return False
         if (
             callable(node.target)
             and getattr(node.target, "__module__", "") == "torch.nn.functional"
