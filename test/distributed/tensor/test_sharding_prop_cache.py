@@ -61,7 +61,7 @@ WORKLOADS = {
 class TestShardingPropCache(TestCase):
     """No DTensor cache may keep a DeviceMesh alive.
 
-    The sharding propagation caches key DTensorSpec by value but sotred the
+    The sharding propagation caches key DTensorSpec by value but stored the
     mesh object, so every Devicemesh ever used stayed reachable for the life
     of the process.
     """
