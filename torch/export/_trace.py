@@ -78,6 +78,7 @@ from torch._library.opaque_object import is_custom_class
 from torch._logging import dtrace_structured
 from torch._subclasses.fake_tensor import (
     allow_non_fake_inputs_temporarily,
+    CppFakeTensorMode,
     FakeTensorMode,
     is_fake_tensor,
 )
@@ -181,7 +182,7 @@ class ExportArtifact:
     aten: ATenExportArtifact
     in_spec: TreeSpec
     out_spec: TreeSpec
-    fake_mode: FakeTensorMode
+    fake_mode: FakeTensorMode | CppFakeTensorMode
     module_call_specs: dict[str, dict[str, pytree.TreeSpec]]
 
 
@@ -1083,6 +1084,7 @@ def _export_to_torch_ir(
                     # Once we delete the old strict export, we can use this fake mode in the
                     # subsequent logic when lowering to aten IR.
                     del gm_torch_level.meta["fake_mode"]
+                    gm_torch_level.meta.pop("tracing_context", None)
 
                 else:
                     if is_shapes_spec:
@@ -1707,7 +1709,7 @@ def _get_range_constraints(
 ):
     gm: torch.fx.GraphModule = export_artifact.aten.gm
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
-    fake_mode: FakeTensorMode = export_artifact.fake_mode
+    fake_mode = export_artifact.fake_mode
     num_lifted = next(
         (
             i
@@ -1730,7 +1732,7 @@ def _get_range_constraints(
     return range_constraints
 
 
-def _get_inline_constraints(fake_mode: FakeTensorMode):
+def _get_inline_constraints(fake_mode: FakeTensorMode | CppFakeTensorMode):
     if fake_mode.shape_env is None:
         raise AssertionError("fake_mode.shape_env must not be None")
     return {
