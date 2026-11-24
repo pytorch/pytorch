@@ -31,6 +31,7 @@ from ..utils import (
     _align,
     AotOnlyBuffer,
     DualIndentedBuffer,
+    get_cpp_wrapper_header_device,
     make_codegen_buffer,
     normalize_name,
 )
@@ -612,11 +613,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     @staticmethod
     def get_device_include_path_jit(device: str) -> str:
-        return f"#include <torch/csrc/inductor/cpp_wrapper/{device}.h>"
+        return f"#include <torch/csrc/inductor/cpp_wrapper/{get_cpp_wrapper_header_device(device)}.h>"
 
     @staticmethod
     def get_device_include_path_aot(device: str) -> str:
-        return f"#include <torch/csrc/inductor/aoti_include/{device}.h>"
+        return f"#include <torch/csrc/inductor/aoti_include/{get_cpp_wrapper_header_device(device)}.h>"
 
     def add_device_include(self, device: str) -> None:
         if device in self.included_devices:
@@ -642,6 +643,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
     def _write_aoti_interface_header(self):
         """Emit the AOTI runtime interface include or inline."""
         if config.aot_inductor.dynamic_linkage:
+            if config.aot_inductor.cudagraphs:
+                self.header.splice_aot("#define AOTI_CUDA_GRAPHS")
             with open(
                 os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
             ) as f:
@@ -732,8 +735,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 }}
                 """)
         self.prefix.writeline_aot("namespace torch::aot_inductor {")
-        if not V.graph.is_const_graph:
-            self.codegen_input_size_and_nan_asserts()
+        self.codegen_input_alignment_and_nan_asserts()
 
     def write_input_output_info(
         self,
@@ -1497,6 +1499,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.prefix.writeline(
                 "this->kernels_ = std::make_unique<AOTInductorModelKernels>();"
             )
+            if config.aot_inductor.cudagraphs:
+                self.prefix.writeline("this->cudagraphs_ = true;")
 
         self.prefix.writeline("}")
 
@@ -1752,10 +1756,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 continue
 
             if is_constant_buffer:
-                # See NOTE(return_constant) above.
+                # See NOTE(return_constant) above. A constant-folding output can be
+                # a non-dense view (e.g. a transposed weight slice) that kernels were
+                # compiled against, so the clone must keep its strides.
                 self.wrapper_call.writeline(
                     "AOTI_TORCH_ERROR_CODE_CHECK("
-                    f"aoti_torch_clone({output}, &output_handles[{idx}]));"
+                    f"aoti_torch_clone_preserve_strides({output}, &output_handles[{idx}]));"
                 )
             else:
                 if output in output2idx:
@@ -3143,8 +3149,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         outer_carried_inputs = [
             buf.codegen_reference() for buf in while_loop.carried_inputs
         ]
+        # Captured view references may be owning temporaries. Preserve one owner
+        # across the condition, body, and all iterations instead of deleting the
+        # same raw handle after the first subgraph call.
         outer_additional_inputs = [
-            buf.codegen_reference() for buf in while_loop.additional_inputs
+            self.create_tmp_raii_handle_var_if_needed(buf.codegen_reference())
+            for buf in while_loop.additional_inputs
         ]
         carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"
@@ -3528,7 +3538,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     and op.namespace != "_c10d_functional"
                 )
             if isinstance(t, torch.OptionalType):
-                return isinstance(t.getElementType(), torch.TensorType)
+                elem = t.getElementType()
+                if isinstance(elem, torch.ListType):
+                    return return_supported(elem)
+                return isinstance(elem, torch.TensorType)
             return isinstance(t, (torch.NoneType, torch.TensorType))
 
         return all(arg_supported(a.real_type) for a in op._schema.arguments) and all(
@@ -4243,9 +4256,16 @@ if (!custom_op_wrapper) {
             )
             dispatch_lines.writeline(f"op.callBoxed(&{stack_var});")
 
+            def is_list_return(t: torch.JitType) -> bool:
+                if isinstance(t, torch.OptionalType):
+                    t = t.getElementType()
+                return isinstance(t, torch.ListType)
+
             returns = op_overload._schema.returns
-            if len(returns) == 1 and isinstance(returns[0].real_type, torch.ListType):
-                outputs_by_return = [(output_args, raw_outputs)]
+            if len(returns) == 1 and is_list_return(returns[0].real_type):
+                # A lone Tensor[]? return that was None when traced has outputs [None].
+                single_output = None if output_args == [None] else output_args
+                outputs_by_return = [(single_output, raw_outputs)]
             else:
                 outputs_by_return = zip(output_args, raw_outputs)
 
@@ -4254,7 +4274,12 @@ if (!custom_op_wrapper) {
             ):
                 if isinstance(raw_output_arg, ir.MutationOutput):
                     continue
-                if isinstance(schema_return.real_type, torch.ListType):
+                return_type = schema_return.real_type
+                if is_list_return(return_type):
+                    is_optional = isinstance(return_type, torch.OptionalType)
+                    if output_arg is None and is_optional:
+                        # A Tensor[]? that was None when traced: nothing to unpack.
+                        continue
                     if not isinstance(output_arg, list):
                         raise AssertionError(
                             f"Expected tensor-list outputs, got {output_arg}"
