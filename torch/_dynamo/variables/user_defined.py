@@ -460,9 +460,8 @@ def _find_pending_class_setattr(
     cls_source: Source | None,
     name: str,
     cls_vt: VariableTracker | None = None,
-    start: int = 0,
 ) -> tuple[VariableTracker, int] | None:
-    """Walk *cls*'s MRO from index *start* for the first class that either has a
+    """Walk *cls*'s MRO for the first class that either has a
     pending setattr of *name* in this frame (returned as ``(VariableTracker,
     MRO index)``) or already holds *name* in its real namespace (None).
     """
@@ -483,8 +482,6 @@ def _find_pending_class_setattr(
     ):
         return None
     for idx, (klass, namespace) in enumerate(iter_mro_static_dicts(cls)):
-        if idx < start:
-            continue
         klass_vt = candidates.get(klass)
         if klass_vt is not None and side_effects.has_pending_mutation_of_attr(
             klass_vt, name
@@ -4133,32 +4130,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value = side_effects.load_attr(owner, name, deleted_ok=True)
 
         if isinstance(value, variables.DeletedVariable):
-            # The class no longer has the name; keep walking the MRO past it.
-            later = _find_pending_class_setattr(
-                tx,
-                type(self.value),
-                self.cls_source,
-                name,
-                start=owner_idx + 1,
+            # The class no longer has the name; look past it in the MRO. A later
+            # pending write of the name is not followed: break below.
+            later_pending = any(
+                klass in side_effects
+                and side_effects.has_pending_mutation_of_attr(side_effects[klass], name)
+                for klass in type(self.value).__mro__[owner_idx + 1 :]
             )
-            if later is not None:
-                return self._generic_getattr_pending_class_attr(
-                    tx, name, stale_type_attr, *later
-                )
-            for _, namespace in list(iter_mro_static_dicts(type(self.value)))[
-                owner_idx + 1 :
-            ]:
-                if name in namespace:
-                    if is_data_descriptor(namespace[name]):
+            if not later_pending:
+                for _, namespace in list(iter_mro_static_dicts(type(self.value)))[
+                    owner_idx + 1 :
+                ]:
+                    if name in namespace:
+                        if is_data_descriptor(namespace[name]):
+                            break
+                        result = self.lookup_instance_dict(tx, name)
+                        if result is not None:
+                            return result
                         break
+                else:
                     result = self.lookup_instance_dict(tx, name)
                     if result is not None:
                         return result
-                    break
-            else:
-                result = self.lookup_instance_dict(tx, name)
-                if result is not None:
-                    return result
             unimplemented(
                 gb_type="Instance lookup of a class attribute deleted in the same frame",
                 context=f"del {owner_name}.{name}; instance.{name}",

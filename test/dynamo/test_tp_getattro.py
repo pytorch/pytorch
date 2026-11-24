@@ -1923,36 +1923,90 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(hasattr(A, "x"))
 
     def test_class_delattr_without_instance_attr_breaks(self):
-        class A:
-            x = 1
+        def make():
+            class A:
+                x = 1
 
-        def fn(t):
-            o = A()
-            del A.x
+            return A
+
+        def fn(t, cls):
+            o = cls()
+            del cls.x
             try:
                 return t + o.x
             except AttributeError:
                 return t - 1
 
         t = torch.zeros(1)
-        self.assertEqual(torch.compile(fn, backend="eager")(t), t - 1)
+        expected = fn(t, make())
+        self.assertEqual(expected, t - 1)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Instance lookup of a class attribute deleted in the same frame",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(t, make())
+        self.assertEqual(torch.compile(fn, backend="eager")(t, make()), expected)
 
     def test_class_delattr_then_base_data_descriptor(self):
-        class Base:
-            @property
-            def x(self):
-                return 10
+        def make():
+            class Base:
+                @property
+                def x(self):
+                    return 10
 
-        class A(Base):
-            x = 1
+            class A(Base):
+                x = 1
 
-        def fn(t):
-            o = A()
-            del A.x
+            return A
+
+        def fn(t, cls):
+            o = cls()
+            del cls.x
             return t + o.x
 
         t = torch.zeros(1)
-        self.assertEqual(torch.compile(fn, backend="eager")(t), t + 10)
+        expected = fn(t, make())
+        self.assertEqual(expected, t + 10)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Instance lookup of a class attribute deleted in the same frame",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(t, make())
+        self.assertEqual(torch.compile(fn, backend="eager")(t, make()), expected)
+
+    def test_class_delattr_then_base_setattr_breaks(self):
+        def make():
+            class Base:
+                x = 1
+
+            class Child(Base):
+                x = 2
+
+            return Base, Child
+
+        def fn_set(t, base, child):
+            del child.x
+            base.x = 5
+            return t + child().x
+
+        def fn_del(t, base, child):
+            del child.x
+            del base.x
+            try:
+                return t + child().x
+            except AttributeError:
+                return t - 1
+
+        t = torch.zeros(1)
+        for fn, value in ((fn_set, t + 5), (fn_del, t - 1)):
+            expected = fn(t, *make())
+            self.assertEqual(expected, value)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "Instance lookup of a class attribute deleted in the same frame",
+            ):
+                torch.compile(fn, backend="eager", fullgraph=True)(t, *make())
+            self.assertEqual(torch.compile(fn, backend="eager")(t, *make()), expected)
 
     def test_class_setattr_slot_replaced_then_instance_getattr(self):
         def make():
