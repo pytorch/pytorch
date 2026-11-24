@@ -8563,10 +8563,14 @@ def meta_histc(input, bins=100, min=0, max=0):
 @register_meta(
     [
         aten._upsample_bilinear2d_aa.default,
+        aten._upsample_bilinear2d_aa.out,
         aten._upsample_bicubic2d_aa.default,
+        aten._upsample_bicubic2d_aa.out,
         aten._upsample_lanczos2d_aa.default,
+        aten._upsample_lanczos2d_aa.out,
     ]
 )
+@out_wrapper(exact_dtype=True, preserve_memory_format=True)
 def meta_upsample_bimode2d_aa(
     input,
     output_size,
@@ -8582,7 +8586,7 @@ def meta_upsample_bimode2d_aa(
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     return input.new_empty(full_output_size).to(
-        memory_format=utils.suggest_memory_format(input)
+        memory_format=utils.upsample_output_memory_format(input)
     )
 
 

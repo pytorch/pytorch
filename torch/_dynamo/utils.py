@@ -3529,6 +3529,18 @@ def check_positional(
         )
 
 
+def check_num_args(
+    tx: InstructionTranslatorBase, args: list[VariableTracker], n: int
+) -> None:
+    # Mirrors CPython check_num_args (Objects/typeobject.c), used by the
+    # slot wrappers (wrap_binaryfunc, wrap_delitem, ...).
+    from torch._dynamo.exc import raise_type_error
+
+    if len(args) != n:
+        s = "" if n == 1 else "s"
+        raise_type_error(tx, f"expected {n} argument{s}, got {len(args)}")
+
+
 def no_positional(
     tx: InstructionTranslatorBase, funcname: str, args: list[VariableTracker]
 ) -> None:
@@ -6106,12 +6118,18 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     return tensor_dict
 
 
-def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
-    return torch._C.Stream(*args, **kwargs)
+def build_stream(
+    args: tuple[Any],
+    kwargs: dict[Any, Any],
+    stream_cls: type[torch.Stream] = torch.Stream,
+) -> torch.Stream:
+    return stream_cls(*args, **kwargs)
 
 
-def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
-    return torch._C.Event(*args, **kwargs)
+def build_event(
+    args: tuple[Any], kwargs: dict[Any, Any], event_cls: type[torch.Event] = torch.Event
+) -> torch.Event:
+    return event_cls(*args, **kwargs)
 
 
 class FrameState(enum.Enum):
