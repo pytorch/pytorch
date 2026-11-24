@@ -121,6 +121,7 @@ class PyCodegen:
         overridden_sources: dict[Source, Source] | None = None,
         *,
         reconstruction_graph_outputs: bool = False,
+        eager_resume_args: VariableTracker | None = None,
     ) -> None:
         self.root = root
         self.top_of_stack: VariableTracker | Source | None = None
@@ -135,6 +136,7 @@ class PyCodegen:
         self.tx = tx
         self.graph_output_var = graph_output_var
         self.reconstruction_graph_outputs = reconstruction_graph_outputs
+        self.eager_resume_args = eager_resume_args
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
@@ -415,7 +417,10 @@ class PyCodegen:
         elif (
             # is_python_constant() would realize (and value-guard) lazy constants
             # that can be reloaded or recomputed instead
-            not _contains_unrealized_lazy_constant(value, self.tx.output.side_effects)
+            value is not self.eager_resume_args
+            and not _contains_unrealized_lazy_constant(
+                value, self.tx.output.side_effects
+            )
             and value.is_python_constant()
             and is_safe_constant(value.as_python_constant())
         ):
