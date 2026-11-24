@@ -1049,7 +1049,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             buf.codegen_reference() for buf in while_loop.carried_inputs
         ]
         outer_additional_inputs = [
-            buf.codegen_reference() for buf in while_loop.additional_inputs
+            self.create_tmp_raii_handle_var_if_needed(buf.codegen_reference())
+            for buf in while_loop.additional_inputs
         ]
         carried_output_names = self._get_while_loop_carried_output_names(while_loop)
         cond_result_name = f"{name}_cond_result"

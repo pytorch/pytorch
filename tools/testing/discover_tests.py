@@ -10,6 +10,24 @@ CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
 CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
 REPO_ROOT = Path(__file__).resolve().parents[2]
+COMPILER_TEST_PREFIXES = (
+    "dynamo/",
+    "inductor/",
+    "functorch/",
+    "export/",
+    "higher_order_ops/",
+    "custom_operator/",
+    "test_custom_ops",
+    "test_dynamic_spec_make_fx",
+    "test_fake_tensor",
+    "test_functionalization",
+    "test_fx",
+    "test_hop_infra",
+    "test_meta",
+    "test_proxy_tensor",
+    "test_python_dispatch",
+    "test_sparse",
+)
 
 
 def parse_test_module(test: str) -> str:
