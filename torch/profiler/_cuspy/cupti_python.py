@@ -159,7 +159,11 @@ def _configure_ctypes(lib: ctypes.CDLL) -> None:
         ]
         lib.cuptiActivityEnable_v2.restype = ctypes.c_int
     if hasattr(lib, "cuptiActivityDisable_v2"):
-        lib.cuptiActivityDisable_v2.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.cuptiActivityDisable_v2.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_void_p,
+        ]
         lib.cuptiActivityDisable_v2.restype = ctypes.c_int
     if hasattr(lib, "cuptiGetTimestamp_v2"):
         lib.cuptiGetTimestamp_v2.argtypes = [
@@ -701,7 +705,7 @@ class _PyLibCupti:
 
     def activity_disable(self, sub_handle: int, kind: ActivityKind) -> None:
         self._check(
-            self._lib.cuptiActivityDisable_v2(ctypes.c_void_p(sub_handle), kind),
+            self._lib.cuptiActivityDisable_v2(ctypes.c_void_p(sub_handle), kind, None),
             "cuptiActivityDisable_v2",
         )
 
