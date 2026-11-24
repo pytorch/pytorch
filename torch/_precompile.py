@@ -2666,8 +2666,8 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     The entry is ``codes[0]``: CompilePackage records the captured callable's
     code first and reads it back by position (``main, *codes``). A bypassed code
     keeps its record, flagged and without variants, the way install() keeps its
-    global binding but none of its guarded codes: a continuation the frame ahead
-    of it names must stay bound, and a bypassed code's guarded codes are dead.
+    global binding but none of its guarded codes: a generated frame the frame
+    ahead of it names must stay bound, and a bypassed code's guarded codes are dead.
     A code that is neither bypassed nor has variants is ``trivial``: it ran as
     plain Python during capture, and the driver rebuilds it as plain Python when
     a resume name reaches it. An unnamed trivial code (a callback the
@@ -2718,9 +2718,10 @@ def _served_modules(frames: list[dict[str, Any]]) -> set[str]:
 def _reachable_frames(frames: list[dict[str, Any]]) -> set[int]:
     """Indices of the frames a standalone driver can actually dispatch.
 
-    The entry is reachable, and a continuation is reachable only once some
+    The entry is reachable, and a frame a graph break generated (a continuation,
+    or the function that runs a comprehension) is reachable only once some
     ALREADY reachable frame's bytecode names it. Asking merely whether a frame
-    carries a resume name is not the same question: a continuation whose parent
+    carries a resume name is not the same question: such a frame whose parent
     is itself unreachable is just as dead, and counting it as covered
     under-reports how much of the artifact will run eager.
     """

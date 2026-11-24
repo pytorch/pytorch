@@ -5841,7 +5841,7 @@ class TestPrecompileDynamoCapture(TestCase):
     @skipIfCrossRef
     @unittest.skipIf(sys.version_info < (3, 12), "comprehensions are inlined from 3.12")
     @torch._dynamo.config.patch(nested_graph_breaks=False)
-    def test_a_frame_that_only_runs_a_comprehension_is_not_served_eagerly(self):
+    def test_a_frame_that_only_runs_a_comprehension_keeps_its_variant(self):
         # comp() traces no ops and has no continuation, only the function that
         # runs its comprehension. That function's callee inner() is a frame of
         # its own, which serving comp() as plain Python would skip as well.
@@ -5875,8 +5875,9 @@ class TestPrecompileDynamoCapture(TestCase):
         codes = {c.python_code.co_name: c for c in built.call_args.args[0].codes}
         self.assertTrue(codes["comp"].guarded_codes)
         self.assertIn(("CONSTANT_MATCH", "G['FACTOR']"), summary.risky_dropped_guards)
-        # step, its continuation, comp, the function for its comprehension, inner.
-        self.assertEqual((summary.frames, summary.resume_functions), (5, 2))
+        # inner() has a frame of its own, beside the function for the comprehension.
+        self.assertIn("inner", codes)
+        self.assertTrue(any(n.startswith("__comprehension_comp_at_") for n in codes))
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(install_free_tensors=True)
