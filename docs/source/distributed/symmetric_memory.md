@@ -32,7 +32,7 @@ project-wide PyTorch stability levels or backward-compatibility guarantees:
 | --- | --- | --- | --- |
 | `empty`, `rendezvous`, `get`, and `get_mem_pool` | Alpha | General | Allocate, establish, access, and reuse symmetric memory. |
 | `fused_all_gather_matmul` and `fused_matmul_reduce_scatter` | Alpha | General | Overlap an unscaled matrix multiplication with a tensor-parallel collective. Ordinary accelerator tensors are accepted; the operators manage a symmetric workspace. These are also targets of the compiler's tensor-parallel fusion pass. |
-| `fused_all_gather_scaled_matmul` and `fused_scaled_matmul_reduce_scatter` | Experimental | Hardware-specific | FP8 or other scaled matrix multiplication when the accelerator supports `aten._scaled_mm`. Their interfaces closely follow compiler lowering requirements. |
+| `fused_all_gather_scaled_matmul` and `fused_scaled_matmul_reduce_scatter` | Experimental | Hardware-specific | FP8 or other scaled matrix multiplication when the accelerator supports `aten._scaled_mm_v2`. Their interfaces closely follow compiler lowering requirements. |
 | `one_shot_all_reduce`, `one_shot_all_reduce_out`, and `two_shot_all_reduce_` | Alpha | Hardware-specific | Low-latency, direct-access all-reduce on a symmetric tensor. |
 | `multimem_all_reduce_` and `multimem_all_gather_out` | Alpha | Hardware-specific | NVIDIA systems with multicast and multimem support, such as NVLink SHARP. |
 | `multimem_one_shot_all_reduce`, `multimem_one_shot_all_reduce_out`, and `multimem_one_shot_reduce_out` | Experimental | Hardware-specific | Compiler-oriented multimem variants. Their reduction order is not fixed, so all ranks are not guaranteed to receive bitwise-identical results. |
@@ -798,19 +798,25 @@ them directly via `torch.ops.symm_mem.<op_name>`.
         multiplication results.
 
 
-.. py:function:: fused_all_gather_scaled_matmul(A_shard: Tensor, Bs: list[Tensor], A_scale: Tensor, B_scales: list[Tensor], gather_dim: int, group_name: str, biases: list[Tensor | None], out_dtypes: list[dtype | None], use_fast_accum: list[bool]) -> tuple[Tensor, list[Tensor]]
+.. py:function:: fused_all_gather_scaled_matmul(A_shard: Tensor, Bs: list[Tensor], A_scale: Tensor, scaling_type_a: int, swizzle_type_a: int, B_scales: list[Tensor], scaling_type_b: int, swizzle_type_b: int, gather_dim: int, group_name: str, biases: list[Tensor | None], out_dtypes: list[dtype | None], use_fast_accum: list[bool]) -> tuple[Tensor, list[Tensor]]
 
     Scaled-matrix-multiplication variant of
     :func:`fused_all_gather_matmul`. Each entry of ``B_scales``, ``biases``,
     ``out_dtypes``, and ``use_fast_accum`` corresponds to the entry at the
-    same position in ``Bs`` and is forwarded to ``aten._scaled_mm``.
+    same position in ``Bs`` and is forwarded to ``aten._scaled_mm_v2``.
 
-    ``A_scale`` may be a tensor-wise scalar, a row-wise scale sharded like
-    ``A_shard``, or a row-wise scale for the fully gathered tensor. The exact
-    dtype, scale-layout, and accelerator requirements are those of
-    ``aten._scaled_mm``. This is a specialized compiler fusion target; support
-    for a particular FP8 format or shape must be checked on the target
-    accelerator.
+    ``scaling_type_a``/``scaling_type_b`` are the integer values of
+    ``torch.nn.functional.ScalingType`` members and ``swizzle_type_a``/``swizzle_type_b``
+    those of ``torch.nn.functional.SwizzleType`` members (e.g.
+    ``ScalingType.RowWise.value``), as in ``aten._scaled_mm_v2``. ``scaling_type_b``
+    applies to every entry of ``Bs``. The scaling types must be both ``TensorWise``
+    or both ``RowWise``. With ``RowWise``, ``A_scale`` may be sharded like
+    ``A_shard`` or cover the fully gathered tensor.
+
+    The exact dtype, scale-layout, and accelerator requirements are those of
+    ``aten._scaled_mm_v2``. This is a specialized compiler fusion target;
+    support for a particular FP8 format or shape must be checked on the
+    target accelerator.
 
     :returns: The gathered ``A`` and the list of scaled-matmul results.
 
@@ -840,7 +846,7 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     :param str group_name: Name of the process group.
 
 
-.. py:function:: fused_scaled_matmul_reduce_scatter(A: Tensor, B: Tensor, A_scale: Tensor, B_scale: Tensor, reduce_op: str, orig_scatter_dim: int, scatter_dim_after_maybe_reshape: int, group_name: str, output_shape: list[int], bias: Tensor | None = None, out_dtype: dtype | None = None, use_fast_accum: bool = False) -> Tensor
+.. py:function:: fused_scaled_matmul_reduce_scatter(A: Tensor, B: Tensor, A_scale: Tensor, scaling_type_a: int, swizzle_type_a: int, B_scale: Tensor, scaling_type_b: int, swizzle_type_b: int, reduce_op: str, orig_scatter_dim: int, scatter_dim_after_maybe_reshape: int, group_name: str, output_shape: list[int], bias: Tensor | None = None, out_dtype: dtype | None = None, use_fast_accum: bool = False) -> Tensor
 
     Scaled-matrix-multiplication variant of
     :func:`fused_matmul_reduce_scatter`. The two scatter dimensions and
@@ -849,9 +855,12 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     call without those reshapes, pass the same value for both scatter
     dimensions and pass ``[*A.shape[:-1], B.shape[1]]`` as ``output_shape``.
 
+    The scaling type and swizzle type arguments are as in
+    :func:`fused_all_gather_scaled_matmul`.
+
     This operator is primarily a compiler target. Its supported dtypes, scale
-    layouts, and hardware follow ``aten._scaled_mm`` and are narrower than the
-    unscaled operator.
+    layouts, and hardware follow ``aten._scaled_mm_v2`` and are narrower than
+    the unscaled operator.
 
 
 .. py:function:: get_remote_tensors(x: Tensor, group_name: str) -> list[Tensor]
