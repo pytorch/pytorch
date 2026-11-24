@@ -1766,6 +1766,56 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @unittest.skipIf(TEST_WITH_ROCM, "Tests the CUDA FA2 kernels")
+    def test_fa2_paged_causal_gqa_decode_honors_num_splits(self, device):
+        """Causal decode-only GQA with paged KV takes the packed path, the only path
+        on which FA2 splits KV for several sequences. So num_splits=2 must change the
+        reduction order (different bits from one split) and keep the values; an
+        unpacked call would run one split whatever num_splits says."""
+        torch.manual_seed(42)
+        num_heads, num_kv_heads, head_dim, page_size = 8, 2, 64, 256
+        kv_lens = [300, 1, 520, 256, 77]
+        batch_size = len(kv_lens)
+        pages_per_seq = (max(kv_lens) + page_size - 1) // page_size
+        max_k = pages_per_seq * page_size
+        q = torch.randn(
+            batch_size, num_heads, head_dim, device=device, dtype=torch.bfloat16
+        )
+        k = torch.randn(
+            batch_size * pages_per_seq,
+            page_size,
+            num_kv_heads,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        v = torch.randn_like(k)
+        kwargs = {
+            "window_size": (-1, 0),
+            "enable_gqa": True,
+            "seqused_k": torch.tensor(kv_lens, device=device, dtype=torch.int32),
+            "block_table": torch.randperm(
+                batch_size * pages_per_seq, device=device, dtype=torch.int32
+            ).view(batch_size, pages_per_seq),
+        }
+        # FA2 needs cu_seq_k for paged KV: each sequence spans its whole page row.
+        cu_seq_k = torch.arange(
+            0, (batch_size + 1) * max_k, max_k, device=device, dtype=torch.int32
+        )
+        cu_seq_q = make_cu_seq([1] * batch_size, device)
+        with _use_backend("fa2"), torch.no_grad():
+            one_split, two_splits = (
+                varlen_attn(
+                    q, k, v, cu_seq_q, cu_seq_k, 1, max_k, num_splits=n, **kwargs
+                )
+                for n in (1, 2)
+            )
+        self.assertFalse(torch.equal(one_split, two_splits))
+        self.assertEqual(two_splits, one_split, atol=5e-4, rtol=0.016)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
     @setSdpaBackendsToDefaultFinally
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize(
