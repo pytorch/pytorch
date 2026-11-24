@@ -661,6 +661,27 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         self.assertFalse(multi_module_state._is_root)
         self.assertFalse(model0_in_proj_state._is_root)
 
+    def test_set_is_last_backward_before_lazy_init(self):
+        """
+        Tests that ``set_is_last_backward`` on a non-root module before lazy
+        initialization applies to the root, whether lazy initialization starts
+        from that module or from the root.
+        """
+        self.run_subtests(
+            {"init_from_root": [False, True]},
+            self._test_set_is_last_backward_before_lazy_init,
+        )
+
+    def _test_set_is_last_backward_before_lazy_init(self, init_from_root: bool):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0])
+        fully_shard(model)
+        model[0].set_is_last_backward(False)
+        fully_shard.state(model if init_from_root else model[0])._lazy_init()
+        root_state = fully_shard.state(model)
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(root_state._state_ctx.is_last_backward)
+
     def test_fully_shard_enclosing_state_does_not_extend_lifetime(self):
         """
         Tests that keeping a nested module alive before lazy initialization

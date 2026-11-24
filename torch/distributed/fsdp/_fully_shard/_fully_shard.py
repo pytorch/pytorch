@@ -484,9 +484,13 @@ class FSDPModule:
         Sets whether the next backward is the last one. On the last backward,
         FSDP waits on pending gradient reduction and clears internal data
         data structures for backward prefetching. This can be useful for
-        microbatching.
+        microbatching. Calling this on a non-root module, including before the
+        first forward, sets it for its root.
         """
         state = self._get_fsdp_state()
+        if state._is_root is None:
+            # Lazy init replaces each non-root state's context with the root's
+            state = state._get_outermost_state()
         state._state_ctx.is_last_backward = is_last_backward
 
     def set_manual_backward_finalization(self, enabled: bool) -> None:
