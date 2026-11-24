@@ -724,7 +724,7 @@ class TritonTemplateKernel(TritonKernel):
         self.store_output_input_producer_groups: dict[str, list[Any]] = {}
         # Load-input fused inputs whose producers preserve a zero mask.
         self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
-        self.prologue_descriptor_vars: dict[str, str] = {}
+        self.prologue_descriptor_vars: dict[Any, str] = {}
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -1240,6 +1240,10 @@ class TritonTemplateKernel(TritonKernel):
         """
         if input_name is not None:
             node = self.named_input_nodes[input_name]
+            if node.get_name() in self.load_input_fused_inputs:
+                # A fused producer is loaded through its own sources in
+                # load_input; the input buffer is never materialized.
+                return ""
         else:
             node = self.output_node
 
@@ -1608,7 +1612,13 @@ class TritonTemplateKernel(TritonKernel):
                 name = "StoreOutputSubstitution"
 
                 def load(self, name: str, index: sympy.Expr):
-                    if prologue_descriptor_offsets is not None:
+                    # Values another fused producer node stored stay in
+                    # registers (CSEProxy's store_cache); only graph sources
+                    # load through descriptors.
+                    if (
+                        prologue_descriptor_offsets is not None
+                        and name not in V.kernel.cse.store_cache
+                    ):
                         if prologue_descriptor_block_shape is None:
                             raise AssertionError("missing descriptor block shape")
                         return V.kernel.load_prologue_descriptor(
@@ -1783,52 +1793,121 @@ class TritonTemplateKernel(TritonKernel):
         offsets: tuple[str, ...],
         block_shape: tuple[str, ...],
     ) -> CSEVariable:
-        """Load a contiguous rank-2 FP32 or BF16 prologue source through TMA."""
+        """Load a prologue source through TMA when its index is affine in the
+        template's tile indices.
+
+        The source's index is ``offset + sum(c_i * index_i)`` over the operand
+        dims. Dims with ``c_i == 0`` are broadcast and dims with ``c_i == 1`` are
+        the descriptor's contiguous dim, so the descriptor's dims are the operand
+        dims with nonzero coefficients, its strides are the coefficients, and the
+        loaded tile is permuted and broadcast back to the operand's tile shape.
+        Anything else (non-affine indexing, misaligned strides or base, an
+        unsupported dtype, dynamic strides) falls back to a pointer load.
+        """
+        from .utils import _TMA_SUPPORTED_DTYPES, TMA_ALIGNMENT
+
+        sizevars = V.graph.sizevars
         buffer = V.graph.get_buffer(name)
-        size = tuple(V.graph.sizevars.simplify(s) for s in buffer.get_size())
-        stride = tuple(V.graph.sizevars.simplify(s) for s in buffer.get_stride())
-        expected_index = sympy_dot(
-            stride,
-            [sympy.Symbol(index_name, integer=True) for index_name in index_names],
-        )
-        if (
-            len(size) != 2
-            or len(stride) != 2
-            or buffer.get_dtype() not in (torch.float32, torch.bfloat16)
-            or size != expected_size
-            or not V.graph.sizevars.statically_known_equals(stride[1], 1)
-            or not V.graph.sizevars.statically_known_equals(stride[0], size[1])
-            or not V.graph.sizevars.statically_known_equals(
-                buffer.get_layout().offset, 0
-            )
+        dtype = buffer.get_dtype()
+        itemsize = dtype.itemsize
+        expr = sympy.sympify(index)
+        # Match symbols by name: the index may carry different assumptions.
+        by_name = {str(sym): sym for sym in expr.free_symbols}
+        syms = [
+            by_name.get(index_name, sympy.Symbol(index_name, integer=True))
+            for index_name in index_names
+        ]
+        if "xindex" in by_name:
             # CSEProxy canonicalizes the exact contiguous expression to xindex.
-            or not (
-                str(index) == "xindex"
-                or V.graph.sizevars.statically_known_equals(index, expected_index)
+            expr = expr.subs(
+                by_name["xindex"],
+                sympy_dot(ir.FlexibleLayout.contiguous_strides(expected_size), syms),
             )
+
+        def aligned(e: sympy.Expr) -> bool:
+            return sizevars.statically_known_multiple_of(e * itemsize, TMA_ALIGNMENT)
+
+        coeffs: list[sympy.Expr] = []
+        try:
+            poly = sympy.Poly(sympy.expand(expr), *syms)
+        except sympy.PolynomialError:
+            poly = None
+        # Every other free symbol must be a graph size; kernel-local index
+        # variables (e.g. split range-tree vars) are not constants per tile.
+        if (
+            poly is not None
+            and poly.total_degree() <= 1
+            and all(
+                sym in syms
+                or symbol_is_type(sym, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+                for sym in expr.free_symbols
+            )
+        ):
+            coeffs = [poly.coeff_monomial(sym) for sym in syms]
+            base_offset = sympy.expand(expr).subs({sym: 0 for sym in syms})
+        tile_dims = [
+            i for i, c in enumerate(coeffs) if not sizevars.statically_known_equals(c, 0)
+        ]
+        inner = [i for i in tile_dims if sizevars.statically_known_equals(coeffs[i], 1)]
+        block_vals = [self.meta.get(b, b) for b in block_shape]
+        if (
+            len(coeffs) != len(syms)
+            or len(offsets) != len(syms)
+            or len(block_shape) != len(syms)
+            # A masked load (e.g. a cat or pad producer) may index outside the
+            # source; a descriptor over the operand's extent would read there.
+            or self._load_mask is not None
+            # TMA strides are unsigned (no flips).
+            or not all(sizevars.statically_known_gt(coeffs[i], 0) for i in tile_dims)
+            or dtype not in _TMA_SUPPORTED_DTYPES
+            or name in V.graph.unaligned_buffers
+            or len(inner) != 1
+            or not 1 <= len(tile_dims) <= 5
+            or not aligned(base_offset)
+            or not all(aligned(coeffs[i]) for i in tile_dims if i != inner[0])
+            or not aligned(expected_size[inner[0]])
+            or not isinstance(block_vals[inner[0]], int)
+            or block_vals[inner[0]] * itemsize < TMA_ALIGNMENT
         ):
             return super().load(name, index)
 
-        descriptor = self.prologue_descriptor_vars.get(name)
+        # Descriptor dims: the operand's nonbroadcast dims, contiguous dim last.
+        desc_dims = [i for i in tile_dims if i != inner[0]] + inner
+        key = (
+            name,
+            base_offset,
+            tuple((coeffs[i], expected_size[i], block_shape[i]) for i in desc_dims),
+        )
+        descriptor = self.prologue_descriptor_vars.get(key)
         if descriptor is None:
             descriptor = f"prologue_descriptor{len(self.prologue_descriptor_vars)}"
-            self.prologue_descriptor_vars[name] = descriptor
+            self.prologue_descriptor_vars[key] = descriptor
             var = self.args.input(name)
-            shape_str = ", ".join(texpr(self.rename_indexing(s)) for s in size)
-            stride_str = ", ".join(texpr(self.rename_indexing(s)) for s in stride)
-            block_shape_str = ", ".join(block_shape)
+            if not sizevars.statically_known_equals(base_offset, 0):
+                var = f"({var} + {texpr(self.rename_indexing(base_offset))})"
+            shape_str = ", ".join(
+                texpr(self.rename_indexing(expected_size[i])) for i in desc_dims
+            )
+            stride_str = ", ".join(
+                texpr(self.rename_indexing(coeffs[i])) for i in desc_dims
+            )
+            block_shape_str = ", ".join(block_shape[i] for i in desc_dims)
             self.prologue.writeline(
                 f"{descriptor} = tl.make_tensor_descriptor("
                 f"{var}, shape=[{shape_str}], strides=[{stride_str}], "
                 f"block_shape=[{block_shape_str}])"
             )
 
-        return self.cse.generate(
-            self.loads,
-            f"{descriptor}.load([{', '.join(offsets)}])",
-            dtype=buffer.get_dtype(),
-            shape=block_shape,
-        )
+        line = f"{descriptor}.load([{', '.join(offsets[i] for i in desc_dims)}])"
+        # Permute the tile from descriptor order back to operand order, then
+        # insert the broadcast dims.
+        if desc_dims != sorted(desc_dims):
+            perm = [desc_dims.index(i) for i in sorted(desc_dims)]
+            line = f"tl.permute({line}, {tuple(perm)})"
+        if len(tile_dims) != len(syms):
+            line = f"({line})[{', '.join(':' if i in tile_dims else 'None' for i in range(len(syms)))}]"
+        shape = tuple(block_shape[i] if i in tile_dims else "1" for i in range(len(syms)))
+        return self.cse.generate(self.loads, line, dtype=dtype, shape=shape)
 
     def unfused_input(
         self,
