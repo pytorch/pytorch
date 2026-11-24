@@ -803,16 +803,13 @@ if HAS_CUDA_AND_TRITON:
                     self.capture_modes = []
 
                 @contextlib.contextmanager
-                def capture(
-                    self, graph, *, stream, pool, mode, enable_annotations=False
-                ):
+                def capture(self, graph, *, stream, pool, mode):
                     self.capture_modes.append(mode)
                     with super().capture(
                         graph,
                         stream=stream,
                         pool=pool,
                         mode=mode,
-                        enable_annotations=enable_annotations,
                     ):
                         yield
 

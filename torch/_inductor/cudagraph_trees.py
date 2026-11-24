@@ -1551,11 +1551,6 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
-        # Per-kernel annotations are emitted directly into the generated wrapper code
-        # via AnnotatedKernelCallLine; enable_annotations tells the CUDA graph capture
-        # to process those mark_kernels calls as they execute.
-        should_annotate = config.triton.cudagraph_kernel_annotations
-
         with (
             preserve_rng_state(
                 device_type=tree_backend.get_device_type(),
@@ -1568,7 +1563,6 @@ class CUDAGraphNode:
                 stream=self.stream,
                 pool=self.cuda_graphs_pool,
                 mode=tree_backend.GraphTreeCaptureMode.MODEL,
-                enable_annotations=should_annotate,
             ),
             # NB: must go after graph capture switches the stream
             _update_current_stream_external_object(),

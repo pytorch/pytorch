@@ -626,7 +626,7 @@ def try_get_name(x):
 # Compute-node tracking for FQN annotation of fused kernels.
 # When active, every Loops.inner_fn that executes records its lowering_fx_node
 # into the sink. Tracing a fused buffer's inner_fn therefore collects ALL the
-# original FX nodes inlined into it — one per original layer that was fused.
+# original FX nodes inlined into it, one per original layer that was fused.
 # Realized inputs are read via ops.load (not inner_fn descent), so they are
 # natural boundaries with no transitive cascade. Thread-local so concurrent
 # compiles don't share a sink; the sink is None when collection is off.
@@ -1231,7 +1231,7 @@ class Loops(IRNode):
         Loops's _tracking_inner_fn fires and records its lowering_fx_node,
         giving the complete set of original-layer FX nodes fused into this
         kernel. Reads of realized buffers go through ops.load (not inner_fn
-        descent) so are natural boundaries — no transitive cascade.
+        descent) so are natural boundaries; no transitive cascade.
         """
         sink: OrderedSet[torch.fx.Node] = OrderedSet()
         with (

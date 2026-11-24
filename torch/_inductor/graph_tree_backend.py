@@ -47,7 +47,6 @@ class GraphTreeGraphInterface(Protocol):
         stream: torch.Stream,
         pool: tuple[int, int],
         mode: GraphTreeCaptureMode,
-        enable_annotations: bool = False,
     ) -> contextlib.AbstractContextManager[None]: ...
 
     def warmup_setup_context(
@@ -200,14 +199,21 @@ class CUDAGraphTreeGraphInterface(GraphTreeGraphInterface):
         stream: torch.Stream,
         pool: tuple[int, int],
         mode: GraphTreeCaptureMode,
-        enable_annotations: bool = False,
     ) -> Generator[None, None, None]:
+        from torch._inductor import config
+
+        # The generated wrapper wraps kernel launches in mark_kernels() when
+        # this flag is on; annotation recording must be on to capture them.
+        annotate = (
+            mode is GraphTreeCaptureMode.MODEL
+            and config.triton.cudagraph_kernel_annotations
+        )
         with torch.cuda.graph(
             graph,  # type: ignore[arg-type]
             stream=stream,  # type: ignore[arg-type]
             pool=cast("_POOL_HANDLE", pool),
             capture_error_mode="thread_local",
-            enable_annotations=enable_annotations,
+            enable_annotations=annotate,
         ):
             yield
 

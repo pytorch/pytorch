@@ -3920,7 +3920,7 @@ def get_fused_kernel_module_fqn(scheduler_nodes: Any) -> str | None:
     """
     Return a human-readable FQN annotation for a fused Triton kernel.
 
-    Uses V.graph.fx_fqn_map — built once during lowering in graph.py:run_node —
+    Uses V.graph.fx_fqn_map (built once during lowering in graph.py:run_node)
     to map FX node names to FQN strings.
 
     For each snode, collects the FX nodes whose compute is actually inlined
@@ -3997,7 +3997,7 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         return ([], [])
 
     def _get_extern_module_fqn(self) -> str | None:
-        """Derive the FQN annotation string for this extern kernel.
+        """Return this extern kernel's FQN from fx_fqn_map, without the L. prefix.
 
         Separated from codegen() so the Scheduler can pre-populate
         fx_extern_fqns before any Triton kernel codegen runs, making
@@ -4005,21 +4005,13 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
         """
         if not isinstance(self.node, ir.ExternKernel):
             raise AssertionError("expected self.node to be an ir.ExternKernel")
-        from torch._inductor.fx_passes.graph_view import (
-            _clean_stack_name,
-            _strip_instance_suffix,
-        )
-
+        # MultiOutput and DynamicScalar launch no kernels.
+        if isinstance(self.node, (ir.MultiOutput, ir.DynamicScalar)):
+            return None
         lowering_node = self.node.get_lowering_fx_node()
-        if lowering_node is not None:
-            stack = lowering_node.meta.get("nn_module_stack")
-            if stack:
-                module_path = _clean_stack_name(next(reversed(stack.values()))[0])
-                if module_path:
-                    return (
-                        f"L.{module_path}.{_strip_instance_suffix(lowering_node.name)}"
-                    )
-        return None
+        if lowering_node is None:
+            return None
+        return V.graph.fx_fqn_map.get(lowering_node.name)
 
     @staticmethod
     def _write_annotated_lines(
@@ -4076,16 +4068,12 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
             and not V.graph.fx_wrapper
         ):
             module_fqn = self._get_extern_module_fqn()
-            # MultiOutput and DynamicScalar launch no kernels; don't wrap them.
-            if module_fqn and not isinstance(
-                self.node, (ir.MultiOutput, ir.DynamicScalar)
-            ):
-                V.graph.fx_extern_fqns.add(module_fqn.removeprefix("L."))
+            if module_fqn:
                 n_before = len(wrapper.lines)
                 self.node.codegen(wrapper)
                 inner_lines = wrapper.lines[n_before:]
                 del wrapper.lines[n_before:]
-                self._write_annotated_lines(wrapper, inner_lines, module_fqn)
+                self._write_annotated_lines(wrapper, inner_lines, f"L.{module_fqn}")
                 return
         return self.node.codegen(wrapper)
 
@@ -13294,7 +13282,7 @@ class Scheduler:
                     if isinstance(snode, ExternKernelSchedulerNode):
                         fqn = snode._get_extern_module_fqn()
                         if fqn:
-                            V.graph.fx_extern_fqns.add(fqn.removeprefix("L."))
+                            V.graph.fx_extern_fqns.add(fqn)
 
         for node in nodes:
             stream_key = (node.get_device(), self.get_node_stream(node))

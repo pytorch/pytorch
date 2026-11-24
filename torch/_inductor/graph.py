@@ -498,7 +498,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers: list[ir.Buffer] = []
         self.operations: list[ir.Operation] = []
         # Maps FX node name -> fully-qualified module FQN string, e.g.
-        # "convolution_1" -> "L.networks.1.conv.convolution".
+        # "convolution_1" -> "networks.1.conv.convolution".
         # Populated during run_node for every FX node that has nn_module_stack.
         self.fx_fqn_map: dict[str, str] = {}
         # FQN strings claimed by ExternKernelSchedulerNodes (e.g. convolution).

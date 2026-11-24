@@ -2436,7 +2436,7 @@ class triton:
 
     # Extends CUDA graph kernel tracing with nn.Module FQN (fully qualified name)
     # annotations on a best-effort basis. Requires cuda-python and CUDA >= 13.1.
-    # Covers fused pointwise/reduction kernels and extern kernels; template,
+    # Covers fused pointwise/reduction, Triton template and extern kernels;
     # combo/foreach, mix-order reduction and user-defined Triton kernels are
     # left unannotated.
     # Python wrapper only (not cpp_wrapper or fx_wrapper).
