@@ -28,6 +28,16 @@ def _as_int64(value: int) -> int:
     return ((value + 2**63) % 2**64) - 2**63
 
 
+def _wrap_scalar_as_float64(
+    value: float | torch.Tensor, device: torch.device
+) -> torch.Tensor:
+    # Wrap as float64 to match the scalar overloads. torch.full fills on device,
+    # avoiding torch.tensor's host-to-device copy.
+    if isinstance(value, torch.Tensor):
+        return value
+    return torch.full((), value, dtype=torch.float64, device=device)
+
+
 def key(
     seed: int, *, device: torch.device | None = None, impl: str = "philox4x32-10"
 ) -> torch.Tensor:
@@ -148,8 +158,8 @@ def normal_(
     key: torch.Tensor,
     result: torch.Tensor,
     *,
-    mean: float = 0.0,
-    std: float = 1.0,
+    mean: float | torch.Tensor = 0.0,
+    std: float | torch.Tensor = 1.0,
 ) -> torch.Tensor:
     r"""Fill ``result`` in-place with normal random values from a PRNG key.
 
@@ -161,12 +171,19 @@ def normal_(
     dimensions of ``result`` must be broadcastable with ``*batch`` and each key
     independently generates its slice of the output.
 
+    Gradients flow to tensor ``mean`` / ``std`` as for a reparameterized sample
+    (like :meth:`torch.distributions.Distribution.rsample`).
+
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         result (Tensor): The output tensor to fill in-place.
-        mean (float): Mean of the normal distribution. Default: ``0.0``.
-        std (float): Standard deviation of the normal distribution. Default: ``1.0``.
+        mean (float or Tensor): Mean of the normal distribution. A
+            floating-point tensor must broadcast to ``result`` and gives a mean
+            per element. Default: ``0.0``.
+        std (float or Tensor): Standard deviation of the normal distribution.
+            A floating-point tensor must broadcast to ``result`` and gives a
+            standard deviation per element. Default: ``1.0``.
 
     Returns:
         ``result``, filled with normal random values.
@@ -177,14 +194,19 @@ def normal_(
         >>> result = torch.empty(1000, device="cuda")  # doctest: +SKIP
         >>> torch.func._random.normal_(key, result)  # doctest: +SKIP
     """
-    return torch.ops.aten._philox_normal_(result, key, mean, std)
+    if not isinstance(mean, torch.Tensor) and not isinstance(std, torch.Tensor):
+        return torch.ops.aten._philox_normal_(result, key, mean, std)
+
+    mean = _wrap_scalar_as_float64(mean, result.device)
+    std = _wrap_scalar_as_float64(std, result.device)
+    return torch.ops.aten._philox_normal_.Tensor(result, key, mean, std)
 
 
 def normal(
     key: torch.Tensor,
     *shape: tuple[int, ...],
-    mean: float = 0.0,
-    std: float = 1.0,
+    mean: float | torch.Tensor = 0.0,
+    std: float | torch.Tensor = 1.0,
     dtype: torch.dtype | None = None,
 ) -> torch.Tensor:
     r"""Generate normally distributed random values from a PRNG key.
@@ -198,12 +220,19 @@ def normal(
     dimensions of ``shape`` must be broadcastable with ``*batch`` and each key
     independently generates its slice of the output.
 
+    Gradients flow to tensor ``mean`` / ``std`` as for a reparameterized sample
+    (like :meth:`torch.distributions.Distribution.rsample`).
+
     Args:
         key (Tensor): A PRNG key returned by :func:`key`, :func:`split`, or
             :func:`fold_in`.
         *shape (int): The desired output shape.
-        mean (float): Mean of the normal distribution. Default: ``0.0``.
-        std (float): Standard deviation of the normal distribution. Default: ``1.0``.
+        mean (float or Tensor): Mean of the normal distribution. A
+            floating-point tensor must broadcast to ``shape`` and gives a mean
+            per element. Default: ``0.0``.
+        std (float or Tensor): Standard deviation of the normal distribution.
+            A floating-point tensor must broadcast to ``shape`` and gives a
+            standard deviation per element. Default: ``1.0``.
         dtype (:class:`torch.dtype`, optional): The desired dtype. Default: ``torch.float32``.
 
     Returns:
@@ -267,13 +296,8 @@ def uniform_(
     if not isinstance(low, torch.Tensor) and not isinstance(high, torch.Tensor):
         return torch.ops.aten._philox_uniform_(result, key, low, high)
 
-    def wrap_scalar(bound):
-        # float64 matches the scalar overload's double rounding.
-        if isinstance(bound, torch.Tensor):
-            return bound
-        return torch.tensor(bound, dtype=torch.float64, device=result.device)
-
-    low, high = wrap_scalar(low), wrap_scalar(high)
+    low = _wrap_scalar_as_float64(low, result.device)
+    high = _wrap_scalar_as_float64(high, result.device)
     return torch.ops.aten._philox_uniform_.Tensor(result, key, low, high)
 
 

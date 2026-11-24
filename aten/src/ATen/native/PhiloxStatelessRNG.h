@@ -21,8 +21,12 @@ constexpr int elems_per_call = sizeof(scalar_t) == 8 ? 2 : 4;
 // reduction scales as range / 2^32; this bounds it to ~6%.
 constexpr uint64_t kMaxRange32 = uint64_t{1} << 28;
 
-inline void philox_check_bound(
-    const char* op_name, const char* name, const Tensor& bound, const Tensor& self) {
+// Validates a tensor bound and converts it to dtype. The kernels write self
+// while the bound is still read, so a bound sharing self's storage is cloned:
+// assert_no_overlap lets through aliases it can't analyze (e.g. a non-dense
+// view of self).
+inline Tensor philox_prepare_bound(
+    const char* op_name, const char* name, const Tensor& bound, const Tensor& self, ScalarType dtype) {
   TORCH_CHECK(bound.is_floating_point(),
       op_name, ": ", name, " must be a floating point tensor, got ",
       bound.scalar_type());
@@ -30,6 +34,8 @@ inline void philox_check_bound(
       op_name, ": ", name, " shape ", bound.sizes(),
       " is not broadcastable to the output shape ", self.sizes());
   at::assert_no_overlap(self, bound);
+  auto converted = bound.to(dtype);
+  return converted.is_alias_of(self) ? converted.clone() : converted;
 }
 
 } // namespace at::native

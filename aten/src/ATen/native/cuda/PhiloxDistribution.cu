@@ -286,6 +286,15 @@ __device__ __forceinline__ auto uniform_sample(uint64_t seed, uint64_t offset) {
   }
 }
 
+template <typename scalar_t>
+__device__ __forceinline__ auto normal_sample(uint64_t seed, uint64_t offset) {
+  if constexpr (std::is_same_v<scalar_t, double>) {
+    return box_muller_double(philox_4x32(seed, offset));
+  } else {
+    return box_muller_float(philox_4x32(seed, offset));
+  }
+}
+
 } // anonymous namespace
 
 Tensor& _philox_uniform_cuda_(
@@ -315,15 +324,13 @@ Tensor& _philox_uniform_tensor_cuda_(
   TORCH_CHECK(self.is_floating_point(),
       "_philox_uniform_: self must be a floating point tensor, got ",
       self.scalar_type());
-  philox_check_bound("_philox_uniform_", "low", low, self);
-  philox_check_bound("_philox_uniform_", "high", high, self);
+  auto lo = philox_prepare_bound("_philox_uniform_", "low", low, self, self.scalar_type()).expand(self.sizes());
+  auto hi = philox_prepare_bound("_philox_uniform_", "high", high, self, self.scalar_type()).expand(self.sizes());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_uniform_", [&] {
     auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
       return uniform_sample<scalar_t>(seed, offset);
     };
-    auto lo = low.to(self.scalar_type()).expand(self.sizes());
-    auto hi = high.to(self.scalar_type()).expand(self.sizes());
     const scalar_t* lo_ptr = lo.const_data_ptr<scalar_t>();
     const scalar_t* hi_ptr = hi.const_data_ptr<scalar_t>();
     auto index_type = canUse32BitIndexMath(lo) && canUse32BitIndexMath(hi) ? kInt : kLong;
@@ -350,26 +357,48 @@ Tensor& _philox_normal_cuda_(
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
     using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
-    auto sample_func = []() {
-      if constexpr (std::is_same_v<scalar_t, double>) {
-        return [] __device__ (uint64_t seed, uint64_t offset) {
-          return box_muller_double(philox_4x32(seed, offset));
-        };
-      } else {
-        return [] __device__ (uint64_t seed, uint64_t offset) {
-          return box_muller_float(philox_4x32(seed, offset));
-        };
-      }
-    }();
-
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      return normal_sample<scalar_t>(seed, offset);
+    };
     auto mu = static_cast<compute_t>(mean);
     auto sigma = static_cast<compute_t>(stddev);
     auto param_func = [mu, sigma] __device__ (compute_t rand, int64_t /*idx*/) {
       return static_cast<scalar_t>(rand * sigma + mu);
     };
-
     philox_distribution_kernel<scalar_t>(
         "_philox_normal_", self, key, sample_func, param_func);
+  });
+  return self;
+}
+
+Tensor& _philox_normal_tensor_cuda_(
+    Tensor& self, const Tensor& key, const Tensor& mean, const Tensor& std) {
+  TORCH_CHECK(self.is_floating_point(),
+      "_philox_normal_: self must be a floating point tensor, got ",
+      self.scalar_type());
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf, kBFloat16, self.scalar_type(), "_philox_normal_", [&] {
+    using compute_t = std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
+    auto sample_func = [] __device__ (uint64_t seed, uint64_t offset) {
+      return normal_sample<scalar_t>(seed, offset);
+    };
+    // Like the scalar overload, the parameters keep compute_t precision.
+    constexpr auto compute_dtype = c10::CppTypeToScalarType<compute_t>::value;
+    auto mu = philox_prepare_bound("_philox_normal_", "mean", mean, self, compute_dtype).expand(self.sizes());
+    auto sigma = philox_prepare_bound("_philox_normal_", "std", std, self, compute_dtype).expand(self.sizes());
+    const compute_t* mu_ptr = mu.const_data_ptr<compute_t>();
+    const compute_t* sigma_ptr = sigma.const_data_ptr<compute_t>();
+    auto index_type = canUse32BitIndexMath(mu) && canUse32BitIndexMath(sigma) ? kInt : kLong;
+    AT_DISPATCH_INDEX_TYPES(index_type, "_philox_normal_", [&] {
+      using calc_index_t = std::make_unsigned_t<index_t>;
+      auto calc = make_bounds_offset_calculator<calc_index_t>(mu, sigma);
+      auto param_func = [mu_ptr, sigma_ptr, calc] __device__ (compute_t rand, int64_t idx) {
+        auto offsets = calc.get(static_cast<calc_index_t>(idx));
+        return static_cast<scalar_t>(rand * sigma_ptr[offsets[1]] + mu_ptr[offsets[0]]);
+      };
+      philox_distribution_kernel<scalar_t>(
+          "_philox_normal_", self, key, sample_func, param_func);
+    });
   });
   return self;
 }
