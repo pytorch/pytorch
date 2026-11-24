@@ -144,10 +144,11 @@ class TestKernelRowTile(TestCase):
     )
     def test_narrow_one_thread_rows_match_warp_chains(self, dtype, columns):
         """Narrow one-thread rows match the row padded with identities to WARP elements
-        bitwise, signed zeros and NaNs included, plus a subnormal sum for fp32 and bf16
-        (fp64's Float64 accumulator keeps that sum normal). Widths 16 and 24
-        (fp32), 8, 16 and 24 (bf16) and 8 and 24 (fp64) reach the leaf branch; 1, 3, 17,
-        20 and 22 fold only the masked tail, and 31 keeps WARP chains."""
+        bitwise, signed zeros and NaNs included. From width 2 the rows add inf + -inf
+        and a subnormal sum for fp32 and bf16 (fp64's Float64 accumulator keeps that sum
+        normal). Widths 16 and 24 (fp32), 8, 16 and 24 (bf16) and 8 and 24 (fp64) reach
+        the leaf branch; 1, 3, 17, 20 and 22 fold only the masked tail, and 31 keeps
+        WARP chains."""
         M, inf = 4096, float("inf")
         gen = torch.Generator("cuda").manual_seed(0)
         x = torch.randn(M, columns, device="cuda", generator=gen)
@@ -156,8 +157,9 @@ class TestKernelRowTile(TestCase):
         # An all -0.0 row, whose sum sign only the final combine with init restores.
         x[64] = -0.0
         x[M // 2 : M // 2 + 64, columns // 2] = float("nan")
-        x[-64:, 0], x[-64:, -1] = inf, -inf
-        x[:64, 0], x[:64, -1] = -1.5e-38, 1e-38
+        if columns > 1:
+            x[-64:, 0], x[-64:, -1] = inf, -inf
+            x[:64, 0], x[:64, -1] = -1.5e-38, 1e-38
         x = x.to(dtype)
         kw = {"threads_per_row": 1, "use_tma": False}
         # fp64 accumulates and stores in Float64, as the dispatcher does.
