@@ -1817,10 +1817,18 @@ def is_affine_indexing(index: sympy.Expr) -> bool:
         return False
 
 
-# The constructs InductorChoices.use_modular_indexing decides about.
+# The view kinds differ in what avoiding them costs: nothing for view_linear,
+# a copy for view_copy, a kernel and a pass of its own for view_pass, and an
+# intermediate that a kernel upstream stores or several users share for view.
 ModularIndexingUse = Literal[
-    "view",  # dim-merging view whose inlined loads need it
-    "reduction",  # flat split of a multi-dim reduction
+    "view",  # dim-merging view of unrealized compute whose inlined loads need it
+    "view_pass",  # the same, where realizing the compute adds a pass over it
+    "view_linear",  # dim-merging view whose inlined loads are affine anyway
+    "view_copy",  # dim-merging view of a realized buffer or a load/cast of one
+    "reduction",  # flat split of a multi-dim reduction whose loads need it
+    # flat split over dims that are row-major contiguous, or of a reduction
+    # over the same ranges and a common buffer as an earlier one that kept it
+    "reduction_linear",
     "repeat",
     "roll",
     "slice_scatter",  # strided slice_scatter

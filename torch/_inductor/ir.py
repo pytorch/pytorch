@@ -88,6 +88,7 @@ from torch.utils._sympy.functions import (
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from . import config, dependencies
 from .codegen.common import (
@@ -130,6 +131,7 @@ from .utils import (
     is_affine_indexing,
     is_dynamic,
     is_gpu,
+    ModularIndexingUse,
     sympy_dot,
     sympy_index_symbol,
     sympy_index_symbol_with_prefix,
@@ -2341,9 +2343,40 @@ class Reduction(Loops):
         return None if pos == len(reduction_sizes) - 1 else pos
 
     @classmethod
+    def _flat_reduction_reads(
+        cls,
+        inner_fns: Sequence[Callable[..., Any]],
+        ranges: Sequence[_IntLike],
+        reduction_ranges: Sequence[_IntLike],
+        input_node: IRNode | None,
+    ) -> tuple[bool, list[str]]:
+        """
+        Whether inner_fns load with affine indices through the flattened
+        reduction index (the reduced dims are row-major contiguous in every
+        operand, so the flat split leaves at most the modulus of its masked
+        tail in the kernel), and the buffers they read.
+        """
+        numel = sympy_product(reduction_ranges)
+        dense = cls.check_for_split_dense_dim_reindexing(numel, input_node)
+        reindex = View.dynamic_reshape_indexer(reduction_ranges, [numel], dense)
+
+        def flat(index: Sequence[Expr], reduction_index: Sequence[Expr]) -> None:
+            for fn in inner_fns:
+                fn(index, reindex(reduction_index))
+
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            rw = dependencies.extract_read_writes(flat, ranges, [numel])
+        var_ranges = rw.var_ranges or {}
+        simplify = V.graph.sizevars.simplify_with_ranges
+        reads = [dep for dep in rw.reads if isinstance(dep, dependencies.MemoryDep)]
+        affine = all(is_affine_indexing(simplify(d.index, var_ranges)) for d in reads)
+        return affine, list(dict.fromkeys(dep.name for dep in reads))
+
+    @classmethod
     def _split_reduction_ranges(
         cls,
         device: torch.device,
+        inner_fns: Sequence[Callable[..., Any]],
         ranges: Sequence[_IntLike],
         reduction_ranges: Sequence[_IntLike],
         split: _IntLike,
@@ -2357,21 +2390,38 @@ class Reduction(Loops):
         uneven one needs a mask). Like the flat split, a full reduction over
         an input whose dense dim is not the last one reduces the dense dim
         innermost. Returns None when the flat split stays: the backend keeps
-        it, a range is symbolic or there is one reduction dim, whose flat
-        split is affine as it is.
+        it, a range is symbolic, there is one reduction dim, whose flat split
+        is affine as it is, or the backend keeps it for reduced dims that are
+        row-major contiguous in every operand. Reductions over the same ranges
+        that read a common buffer take the decision of the first one lowered.
         """
-        if V.choices.use_modular_indexing(
+        use_modular_indexing = functools.partial(
+            V.choices.use_modular_indexing,
             device,
             numel=sympy_product([*ranges, *reduction_ranges]),
             reduction_numel=sympy_product(reduction_ranges),
-            kind="reduction",
-        ):
+        )
+        if use_modular_indexing(kind="reduction"):
             return None
         if not all(_is_static(r) for r in [*reduction_ranges, split]):
             return None
         sizes = [int(r) for r in reduction_ranges]
         if sum(s != 1 for s in sizes) <= 1:
             return None
+        if use_modular_indexing(kind="reduction_linear"):
+            args = (inner_fns, ranges, reduction_ranges, input_node)
+            keeps_flat, reads = cls._flat_reduction_reads(*args)
+            # Reductions over the same ranges that read a common buffer split
+            # alike, so that their first stages still fuse with each other and
+            # join one mix-order kernel: the first one lowered decides.
+            shape = (device, tuple(ranges), tuple(reduction_ranges))
+            decided = V.graph.reductions_keeping_flat_split
+            earlier = [decided[shape, r] for r in reads if (shape, r) in decided]
+            keeps_flat = earlier[0] if earlier else keeps_flat
+            for name in reads:
+                decided[shape, name] = keeps_flat
+            if keeps_flat:
+                return None
         perm = None
         dense = cls._dense_reduction_dim(sizes, input_node)
         if dense is not None:
@@ -2535,7 +2585,7 @@ class Reduction(Loops):
             None
             if strict_reduction
             else cls._split_reduction_ranges(
-                device, ranges, reduction_ranges, split, input_node
+                device, [inner_fn], ranges, reduction_ranges, split, input_node
             )
         )
         if aligned is not None:
@@ -2933,7 +2983,7 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
     ) -> Sequence[TensorBox]:
         reduction_numel = sympy_product(reduction_ranges)
         aligned = cls._split_reduction_ranges(
-            device, ranges, reduction_ranges, split, input_node
+            device, [inner_fn], ranges, reduction_ranges, split, input_node
         )
         if aligned is not None:
             aligned_split = aligned
@@ -3198,7 +3248,9 @@ class WelfordReduction(MultiOutputReduction):
         recursively
         """
         reduction_numel = sympy_product(reduction_ranges)
-        aligned = cls._split_reduction_ranges(device, ranges, reduction_ranges, split)
+        aligned = cls._split_reduction_ranges(
+            device, inner_fns, ranges, reduction_ranges, split
+        )
         if aligned is not None:
             need_mask = aligned.need_mask
         else:
@@ -4265,7 +4317,9 @@ class View(GenericView):
             if reindex is not None and (
                 all(map(is_affine_indexing, reindex(cls._view_symbols(new_size))))
                 or V.choices.use_modular_indexing(
-                    x.get_device(), numel=sympy_product(new_size), kind="view"
+                    x.get_device(),
+                    numel=sympy_product(new_size),
+                    kind=lambda: cls._merge_kind(x, new_size, reindex),
                 )
             ):
                 return cls(data=x, size=list(new_size), reindex=reindex)
@@ -4355,6 +4409,140 @@ class View(GenericView):
 
         V.graph.sizevars.check_equals(sympy_product(old_size), sympy_product(new_size))
         return old_size, new_size
+
+    _COPY_LIKE_OPS = OrderedSet(["load", "to_dtype", "constant", "index_expr"])
+
+    @classmethod
+    def _merge_kind(
+        cls,
+        x: IRNode,
+        new_size: Sequence[Expr],
+        reindex: Callable[[Sequence[Expr]], Sequence[Expr]],
+    ) -> ModularIndexingUse:
+        """
+        Classify a view that merges dims of x for
+        InductorChoices.use_modular_indexing:
+        "view_linear" when the loads are affine once the view is inlined (a
+        row-major merge of row-major loads) or the only non-affine loads touch
+        far fewer elements than the view (labels or position tables broadcast
+        over the merged dims, whose index arithmetic is negligible next to the
+        affine traffic), "view_copy" when realizing x only copies an existing
+        buffer (x is realized, or a load/cast of one), and, for fresh compute
+        whose inlined loads need ModularIndexing, "view" when realizing x
+        costs no extra pass (_realized_view_fuses) and "view_pass" when it
+        does.
+        """
+        if is_storage_and_layout(x):
+            return "view_copy"
+        loader = x.make_loader()
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            rw = dependencies.extract_read_writes(
+                lambda index: loader(reindex(index)), new_size
+            )
+        # the raw loads carry the reindex's FloorDiv/ModularIndexing; a
+        # row-major merge of row-major loads simplifies back to affine, which
+        # is what the kernel will see
+        var_ranges = rw.var_ranges or {}
+        sizevars = V.graph.sizevars
+
+        def spans_modulus(e: Expr) -> bool:
+            # A merged dim whose size is its own symbol (x.view(y.shape))
+            # equals the product of the dims it merges only through the
+            # view's size guard, which the range simplification does not
+            # use: the modulus is left over, the load is still row-major.
+            return (
+                isinstance(e, ModularIndexing)
+                and e.args[1] == 1
+                and e.args[0] in var_ranges
+                and sizevars.statically_known_leq(var_ranges[e.args[0]], e.args[2])
+            )
+
+        modular = [
+            index
+            for dep in rw.reads
+            if isinstance(dep, dependencies.MemoryDep)
+            and not is_affine_indexing(
+                index := sizevars.simplify_with_ranges(dep.index, var_ranges).replace(
+                    spans_modulus, lambda e: e.args[0]
+                )
+            )
+        ]
+        if not modular:
+            return "view_linear"
+        # the value range of an index bounds the elements the load touches
+        # (a table indexed by d0 % 8 spans 8 rows, not the merged range);
+        # symbolic sizes and indirect indices count as large
+        if all(isinstance(s, (int, sympy.Integer)) for s in var_ranges.values()):
+            bounds = {v: ValueRanges(0, int(s) - 1) for v, s in var_ranges.items()}
+            spans: list[int] = []
+            for index in modular:
+                if not index.free_symbols <= bounds.keys():
+                    break
+                b = bound_sympy(index, bounds)
+                span = b.upper - b.lower + 1
+                if not isinstance(span, sympy.Integer):
+                    break  # int_oo is not an Integer
+                spans.append(int(span))
+            else:
+                hint = V.graph.sizevars.optimization_hint
+                if 4 * sum(spans) <= hint(sympy_product(new_size)):
+                    return "view_linear"
+        inner = x
+        while isinstance(inner, (MutableBox, BaseView)) and not isinstance(
+            inner, ReinterpretView
+        ):
+            inner = inner.data
+        # a view chain over a realized buffer, or a load/cast of one
+        if isinstance(inner, (ReinterpretView, Buffer)) or (
+            isinstance(inner, Pointwise)
+            and inner.inner_fn_opcount().used_ops <= cls._COPY_LIKE_OPS
+        ):
+            return "view_copy"
+        return "view" if cls._realized_view_fuses(x, new_size) else "view_pass"
+
+    @staticmethod
+    def _realized_view_fuses(x: IRNode, new_size: Sequence[Expr]) -> bool:
+        """
+        Whether realizing x, the fresh compute under a dim-merging view of
+        new_size, is expected to cost no pass of its own. Realizing cuts the
+        kernel at the view. The cut is free when x reads its large inputs in
+        row-major order, so that it shares their loop order, and either the
+        view has several users (those of the FX node being lowered: x is
+        computed once instead of once per user) or x reads the result of a
+        reduction that iterates over as many elements as x has (that
+        reduction's kernel can store x). Otherwise the realized buffer needs
+        its own kernel, a transposing one when x permutes its inputs, and its
+        users read it in one more pass.
+        """
+        node = V.graph.current_node
+        fuses = node is not None and len(node.users) > 1
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            rw = dependencies.extract_read_writes(x.make_loader(), x.get_size())
+        var_ranges = rw.var_ranges or {}
+        sizevars = V.graph.sizevars
+        hint = sizevars.optimization_hint
+        numel = sympy_product(new_size)
+        reads_large_input = False
+        for dep in rw.reads:
+            buf = V.graph.try_get_buffer(dep.name)
+            if not isinstance(dep, dependencies.MemoryDep) or buf is None:
+                continue
+            if isinstance(buf, ComputedBuffer) and isinstance(buf.data, Reduction):
+                loops = [*buf.data.ranges, *buf.data.reduction_ranges]
+                if sizevars.statically_known_equals(sympy_product(loops), numel):
+                    fuses = True
+            if 4 * hint(buf.get_numel()) < hint(numel):
+                continue  # a table or per-row operand broadcast over the view
+            index = sizevars.simplify_with_ranges(dep.index, var_ranges)
+            if dep.is_indirect() or not is_affine_indexing(index):
+                return False
+            strides = sizevars.stride_vars(index, list(var_ranges))
+            # a stride without a hint (unbacked) cannot be ordered
+            hints = [abs(hint(s, fallback=0)) for s in strides if s != 0]
+            if 0 in hints or hints != sorted(hints, reverse=True):
+                return False
+            reads_large_input = True
+        return fuses and reads_large_input
 
     @staticmethod
     def _view_symbols(new_size: Sequence[_IntLike]) -> list[sympy.Symbol]:
