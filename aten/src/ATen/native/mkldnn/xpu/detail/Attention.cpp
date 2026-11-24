@@ -1169,12 +1169,23 @@ void sdpa_backward(
   // requirements (64-byte base address). Attention, logsumexp, grad_query,
   // grad_key, grad_value are guaranteed to be aligned because they are newly
   // allocated.
-  const Tensor grad_out_aligned = ensure_alignment_for_sdpa(grad_out);
+  Tensor grad_out_aligned = ensure_alignment_for_sdpa(grad_out);
   const Tensor query_aligned = ensure_alignment_for_sdpa(query);
   const Tensor key_aligned = ensure_alignment_for_sdpa(key);
   const Tensor value_aligned = ensure_alignment_for_sdpa(value);
   if (attn_mask.has_value()) {
     attn_mask = ensure_alignment_for_sdpa(*attn_mask);
+  }
+
+  // autograd may hand us an expanded grad: out.sum().backward() produces a
+  // grad_out whose strides are all zero, out.mean(dim=1)...backward() one
+  // that is only expanded over the head dim. undo_broadcast() would fold the
+  // stride-0 dims to size 1, which oneDNN cannot broadcast on the M/N/K dims
+  // of the MatMul grad_out feeds, and which breaks the GQA view of grad_out
+  // as [batch, group_num, group_size, seq_len_q, head_dim_v] on the batch and
+  // head dims. Materialize every expanded dim instead.
+  if (is_broadcast(grad_out_aligned)) {
+    grad_out_aligned = grad_out_aligned.contiguous();
   }
 
   const auto get_tril_mask = [&]() {
