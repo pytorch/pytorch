@@ -46,4 +46,26 @@ parse_to_conversion(PythonArgs& r, bool allow_copy) {
         r.memoryformatOptional(3));
   }
 }
+// Like parse_to_conversion, for parsers whose signatures end with
+// `c10::string_view? round=None` after memory_format: also returns round, which
+// allow_round is to accept for Tensor.to but not nn.Module.to.
+inline std::tuple<
+    std::optional<at::Device>,
+    std::optional<at::ScalarType>,
+    bool,
+    bool,
+    std::optional<at::MemoryFormat>,
+    std::optional<std::string_view>>
+parse_to_conversion_with_round(
+    PythonArgs& r,
+    bool allow_copy,
+    bool allow_round) {
+  const int round_index = r.idx == 0 ? 5 : 4;
+  TORCH_CHECK(
+      allow_round || r.isNone(round_index),
+      ".to() does not accept round argument");
+  return std::tuple_cat(
+      parse_to_conversion(r, allow_copy),
+      std::make_tuple(r.stringViewOptional(round_index)));
+}
 } // namespace torch::autograd::utils

@@ -1894,6 +1894,23 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st_16 = st.to(torch.float16)
         self.assertFalse(st_16 is st)
         self.assertEqual(st_16.dtype, torch.float16)
+        # round is forwarded to the local shards
+        st_rand = sharded_tensor.rand(spec, h, w)
+        st_16 = st_rand.to(torch.float16, round="toward_zero")
+        self.assertEqual(st_16.dtype, torch.float16)
+        self.assertEqual(
+            st_16.local_tensor(),
+            st_rand.local_tensor().to(torch.float16, round="toward_zero"),
+            atol=0,
+            rtol=0,
+        )
+        # Validated on every rank, including rank 3, which holds no shard here.
+        spec_3 = ChunkShardingSpec(
+            dim=0, placements=[f"rank:{r}/cuda:{r}" for r in range(3)]
+        )
+        st_3 = sharded_tensor.zeros(spec_3, h, w)
+        with self.assertRaisesRegex(RuntimeError, "rounding is only supported"):
+            st_3.to(dtype=st_3.dtype, round="toward_zero")
         # test device to
         st_cpu = st.to(device=torch.device("cpu"))
         self.assertFalse(st_cpu is st)

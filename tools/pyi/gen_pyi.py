@@ -1767,6 +1767,7 @@ def gen_pyi(
                             "copy: _bool = False",
                             "*",
                             "memory_format: torch.memory_format | None = None",
+                            "round: str | None = None",
                         ],
                         "Tensor",
                     )
