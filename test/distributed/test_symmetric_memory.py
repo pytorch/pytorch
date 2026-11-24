@@ -44,6 +44,7 @@ from torch.distributed._symmetric_memory._nccl import (
     NcclCommRegistration,
     register_external_nccl_comm,
 )
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -2090,12 +2091,22 @@ class AsyncTPTest(MultiProcContinuousTest):
             out_dtypes = [torch.bfloat16] * 3
         else:
             raise AssertionError(f"Invalid scale_mode: {scale_mode}")
+        scaling_type = (
+            ScalingType.TensorWise
+            if scale_mode == "tensor-wise"
+            else ScalingType.RowWise
+        ).value
+        no_swizzle = SwizzleType.NO_SWIZZLE.value
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
             A_shard,
             Bs,
             A_scale,
+            scaling_type,
+            no_swizzle,
             B_scales,
+            scaling_type,
+            no_swizzle,
             gather_dim=gather_dim,
             group_name=group.group_name,
             biases=[None] * len(Bs),
@@ -2106,7 +2117,11 @@ class AsyncTPTest(MultiProcContinuousTest):
             A_shard,
             Bs,
             A_scale,
+            scaling_type,
+            no_swizzle,
             B_scales,
+            scaling_type,
+            no_swizzle,
             gather_dim=gather_dim,
             group_name=group.group_name,
             biases=[None] * len(Bs),
@@ -2238,6 +2253,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             B_scale = torch.tensor(0.1, device=device_type)
 
         output_shape = [*A.shape[:-1], B.shape[1]]
+        scaling_type = (
+            ScalingType.RowWise if rowwise else ScalingType.TensorWise
+        ).value
+        no_swizzle = SwizzleType.NO_SWIZZLE.value
 
         outputs = []
         for context in test_contexts:
@@ -2247,7 +2266,11 @@ class AsyncTPTest(MultiProcContinuousTest):
                         A,
                         B,
                         A_scale,
+                        scaling_type,
+                        no_swizzle,
                         B_scale,
+                        scaling_type,
+                        no_swizzle,
                         "avg",
                         scatter_dim,
                         scatter_dim,
