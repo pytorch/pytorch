@@ -1827,6 +1827,7 @@ def linalg_cross_strategy(
         aten._upsample_bilinear2d_aa.default,
         aten._upsample_bicubic2d_aa.default,
         aten._upsample_lanczos2d_aa.default,
+        aten._upsample_inter_area2d.default,
         aten.upsample_bicubic2d.default,
         aten.upsample_bilinear2d.default,
         aten.upsample_linear1d.default,
@@ -1853,14 +1854,19 @@ def interp_upsample_1out_1in_strategy(
     args_schema: tuple[Any, ...],
     kwargs_schema: dict[str, Any],
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # 1 output + 1 input = 2 placements; shard on batch (0) and channel (1)
-    # Upsample is a linear transformation so Partial(sum/avg) is valid.
-    return [
+    # 1 output + 1 input = 2 placements; shard on batch (0) and channel (1).
+    strategies: list[list[Placement | _ShardingPlaceholder]] = [
         [_ShardingPlaceholder(0)] * 2,
         [_ShardingPlaceholder(1)] * 2,
-        [Partial("sum"), Partial("sum")],
-        [Partial("avg"), Partial("avg")],
     ]
+    # uint8 inter-area rounds, so partial inputs must be reduced before resize.
+    if (
+        op == aten._upsample_inter_area2d.default
+        and cast(TensorMeta, args_schema[0]).dtype == torch.uint8
+    ):
+        return strategies
+    strategies.extend([[Partial("sum")] * 2, [Partial("avg")] * 2])
+    return strategies
 
 
 @register_single_dim_strategy(
