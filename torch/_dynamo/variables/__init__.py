@@ -18,7 +18,6 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 
 from .base import VariableTracker
 from .builtin import (
-    BaseBuiltinVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
     DictBuiltinVariable,
@@ -27,6 +26,7 @@ from .builtin import (
     IterBuiltinVariable,
     ListBuiltinVariable,
     SetAttrBuiltinVariable,
+    TypeVariable,
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
@@ -96,10 +96,12 @@ from .functions import (
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
+    FunctionWrapperVariable,
     FunctoolsPartialVariable,
     InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
+    LruCacheWrapperVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     PyTreeGetNodeTypeFunctionVariable,
@@ -233,8 +235,8 @@ __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
-    "BaseBuiltinVariable",
     "BaseListVariable",
+    "TypeVariable",
     "BuiltinVariable",
     "ByteArrayBuiltinVariable",
     "ByteArrayIteratorVariable",

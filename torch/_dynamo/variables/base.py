@@ -38,16 +38,10 @@ from torch._C._dynamo import (
 
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
-from ..exc import (
-    ObservedAttributeError,
-    raise_attribute_error,
-    raise_type_error,
-    unimplemented,
-    Unsupported,
-)
+from ..exc import raise_attribute_error, raise_type_error, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, Source
-from ..utils import format_source_range, istype
+from ..utils import check_positional, format_source_range, istype
 
 
 # Stands in for the %p address object_repr/slot_tp_repr print: the real address
@@ -463,6 +457,13 @@ class Member:
     setter: Setter
 
 
+def unmodeled_get(self: Any, tx: InstructionTranslatorBase) -> None:
+    """Getter for a tp_getset/tp_members entry whose read half is not modeled
+    here: returning None declines, so the read falls through to the VT's
+    tp_getattro_impl. Used by entries that exist only to model the setter."""
+    return None
+
+
 def readonly_setter(
     self: Any, tx: InstructionTranslatorBase, value: VariableTracker | None
 ) -> NoReturn:
@@ -520,6 +521,18 @@ def getset_build(
     return lambda self, tx: VariableTracker.build(tx, accessor(self))
 
 
+def graph_break_on_untracked_vt(
+    obj: VariableTracker, name: str, value: VariableTracker | None
+) -> None:
+    unimplemented(
+        gb_type="Attribute mutation on a sourced but untracked user-defined object",
+        context=f"object={obj}, name={name}, value={value}",
+        explanation="Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+        hints=[*graph_break_hints.DYNAMO_BUG],
+        log_warning=True,
+    )
+
+
 def store_attr_mutation(
     tx: InstructionTranslatorBase,
     item: VariableTracker,
@@ -534,13 +547,8 @@ def store_attr_mutation(
         # Their sourced owners must already be tracked; unlike generic Python
         # setattr, this closed path has no valid sourced-untracked fallback.
         if item.source is not None:
-            raise AssertionError(
-                f"{item} has a source but was never registered via "
-                "track_object_existing (usually missing at its VariableBuilder "
-                "construction site) -- writes to its writable Member/GetSet "
-                "entries would otherwise be silently dropped instead of "
-                "raising here."
-            )
+            # ref: https://github.com/pytorch/pytorch/pull/196865/
+            graph_break_on_untracked_vt(item, name, value)
         se.track_attribute_mutation_new(item)
     value_to_store = variables.DeletedVariable() if value is None else value
     se.store_attr(item, name, value_to_store)
@@ -595,6 +603,13 @@ def getset_set(name: str) -> Callable[..., None]:
         store_attr_mutation(tx, vt, name, value)
 
     return setter
+
+
+def attr_getset(name: str, obj: Callable[[Any], Any]) -> GetSet:
+    """GetSet for a plain writable attribute: read via getattr(obj(self), name),
+    written through store_attr_mutation."""
+    getter = getset_load_or_build(lambda vt: getattr(obj(vt), name), name)
+    return GetSet(getter, getset_set(name))
 
 
 # This helps users of `as_python_constant` to catch unimplemented error with
@@ -653,6 +668,17 @@ def _wrap_hashfunc(
     from .constant import ConstantVariable, FakeValueKind
 
     h, is_fake = func(self, tx)
+    if is_fake and self.source is not None:
+        # A folded identity hash has no guard, so comparing it could go stale.
+        unimplemented(
+            gb_type="Identity-based __hash__ escapes to user code",
+            context=f"{self}.__hash__()",
+            explanation="Dynamo cannot guard an identity-based hash, so its value could go stale.",
+            hints=[
+                "Use hash(x) if calling x's own hash implementation is intended.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
     if is_fake:
         return SourcelessBuilder.create_internal_fake_id(h, kind=FakeValueKind.HASH)
     return ConstantVariable.create(h)
@@ -928,6 +954,10 @@ def _wrap_setattr(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 2:
         raise_type_error(tx, f"expected 2 arguments, got {len(args)}")
+    if not issubclass(args[0].python_type(), str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{args[0].python_type_name()}'"
+        )
     return func(self, tx, args[0], args[1])
 
 
@@ -943,7 +973,11 @@ def _wrap_delattr(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) != 1:
         raise_type_error(tx, f"expected 1 argument, got {len(args)}")
-    return func(self, tx, args[0])
+    if not issubclass(args[0].python_type(), str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{args[0].python_type_name()}'"
+        )
+    return func(self, tx, args[0], None)
 
 
 def _wrap_getattro(
@@ -974,20 +1008,19 @@ def _wrap_descr_get(
     kwargs: dict[str, VariableTracker],
 ) -> VariableTracker:
     # tp_descr_get via __get__(obj, owner=None): owner defaults to type(obj).
+    from .constant import ConstantVariable
+
     if kwargs:
         raise_type_error(tx, "this method takes no keyword arguments")
-    if len(args) not in (1, 2):
-        raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+
+    check_positional(tx, "__get__", len(args), 1, 2)
+
+    obj = args[0]
+    owner = args[1] if len(args) > 1 else ConstantVariable.create(None)
     # wrap_descr_get treats None as absent for both arguments and rejects the
     # call when both are absent.
-    if all(a.is_constant_none() for a in args):
+    if obj.is_constant_none() and owner.is_constant_none():
         raise_type_error(tx, "__get__(None, None) is invalid")
-    obj = args[0]
-    owner = (
-        args[1]
-        if len(args) > 1 and not args[1].is_constant_none()
-        else obj.tp_getattro_impl(tx, "__class__")
-    )
     return func(self, tx, obj, owner)
 
 
@@ -1275,19 +1308,18 @@ _SLOTDEFS: list[SlotDef] = [
         PyTypeSlots.TP_GETATTRO,
         _wrap_getattro,
     ),
-    # This needs one to model tp_setattro first + PyObject_GenericSetAttr / PyObject_GenericDelAttr
-    # TPSLOT(
-    #     "__setattr__",
-    #     "setattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_setattr,
-    # ),
-    # TPSLOT(
-    #     "__delattr__",
-    #     "delattro_impl",
-    #     PyTypeSlots.TP_SETATTRO,
-    #     _wrap_delattr,
-    # ),
+    TPSLOT(
+        "__setattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_setattr,
+    ),
+    TPSLOT(
+        "__delattr__",
+        "tp_setattro_impl",
+        PyTypeSlots.TP_SETATTRO,
+        _wrap_delattr,
+    ),
     TPSLOT(
         "__lt__",
         "tp_richcompare_impl",
@@ -1822,38 +1854,38 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             getter=lambda self, tx: VariableTracker.build(
                 tx,
                 self.python_type(),
-                AttrSource(self.source, "__class__") if self.source else None,
+                AttrSource(self.source, "__class__")
+                if self.source and self.source.subguards_allowed()
+                else None,
             ),
             setter=unmodeled_setter,
         ),
     }
     tp_members: dict[str, Member] = {}
 
-    def _lookup_tp_table(self, name: str, *table_attrs: str) -> Any:
+    @classmethod
+    def _lookup_tp_table(cls, name: str, *table_attrs: str) -> Any:
         """Resolve *name* in the given declarative tables across the class MRO.
 
         Mirrors CPython method/getset/member inheritance: each class contributes
         its own table entries into its own tp_dict, and lookup walks the MRO with
         the most-derived class winning. A subclass table therefore *adds* to
         (rather than replaces) the entries it inherits. Within a class the tables
-        are consulted in the order given. A table may be a property of the
-        instance, for a VT that wraps several Python types.
+        are consulted in the order given.
         """
-        for klass in type(self).__mro__:
+        for klass in cls.__mro__:
             d = klass.__dict__
             for attr in table_attrs:
                 table = d.get(attr)
-                if isinstance(table, property):
-                    table = table.__get__(self)
                 if table is not None and name in table:
                     return table[name]
         return None
 
     def lookup_tp_getset_member(self, name: str) -> GetSet | Member | None:
-        return self._lookup_tp_table(name, "tp_getset", "tp_members")
+        return type(self)._lookup_tp_table(name, "tp_getset", "tp_members")
 
     def lookup_tp_method(self, name: str) -> Method | None:
-        return self._lookup_tp_table(name, "tp_methods")
+        return type(self)._lookup_tp_table(name, "tp_methods")
 
     def lookup_slotdefs(self, name: str) -> SlotDef | None:
         return self._slotdefs.get(name)
@@ -2212,12 +2244,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """
         return type(self)
 
-    def get_value_for_setattr(self) -> object | None:
-        """Return the wrapped Python object for generic STORE_ATTR mutation,
-        or None to decline.  Only override for VTs with __dict__ and
-        standard __setattr__."""
-        return None
-
     def lookup_instance_dict(
         self, tx: InstructionTranslatorBase, name: str
     ) -> VariableTracker | None:
@@ -2279,6 +2305,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         __getattr__).  UDOV overrides to walk the MRO for __getattr__.
         """
         return None
+
+    def tp_setattro_impl(
+        self,
+        tx: InstructionTranslatorBase,
+        name: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        from .object_protocol import object_generic_setattr
+
+        return object_generic_setattr(tx, self, name, value)
 
     def tp_getattro_impl(
         self, tx: InstructionTranslatorBase, name: str
@@ -2395,35 +2431,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def call_obj_hasattr(
         self, tx: InstructionTranslatorBase, name: str
     ) -> ConstantVariable:
-        """Dynamo's hasattr(): try tp_getattro_impl, catch AttributeError.
-
-        Mirrors CPython's PyObject_HasAttr (via PyObject_GetOptionalAttr):
-        call tp_getattro, suppress AttributeError via PyErr_Clear, return
-        True/False.
-        https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1346
-        """
-        result = self._hasattr_check_side_effects(tx, name)
-        if result is not None:
-            return result
-
-        try:
-            self.tp_getattro_impl(tx, name)
-            return variables.ConstantVariable.create(True)
-        except ObservedAttributeError:
-            tx.exn_vt_stack.clear_current_exception()
-            return variables.ConstantVariable.create(False)
-        except (NotImplementedError, Unsupported):
-            pass
-
-        unimplemented(
-            gb_type="Unsupported hasattr call",
-            context=f"call_obj_hasattr {self} {name}",
-            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
-            hints=[
-                f"Avoid calling `hasattr({self.__class__.__name__}, {name})` in your code.",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
+        """VT-specific hasattr shortcut. generic_hasattr_str only calls an
+        override; the default raises so an override can defer via super()."""
+        # Do not overload this unless you really need it: e.g. non-trivial
+        # hasattr behavior which cannot be captured by the generic_hasattr function.
+        raise NotImplementedError
 
     def tp_iter_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """
@@ -3606,8 +3618,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> None:
         original_method = getattr(cls, method)
 
-        if original_method is getattr(VariableTracker, method) or hasattr(
-            original_method, "_call_once_guarded"
+        # A constant holds no other VTs, so it cannot be self-referential and
+        # skips the guard, which costs a contextvar lookup and a set update per
+        # call. ConstantVariable is not defined yet when its own class body is
+        # processed, hence the name check.
+        is_constant = (
+            cls.__name__ == "ConstantVariable"
+            and cls.__module__ == "torch._dynamo.variables.constant"
+        )
+        if (
+            is_constant
+            or original_method is getattr(VariableTracker, method)
+            or hasattr(original_method, "_call_once_guarded")
         ):
             return
 
