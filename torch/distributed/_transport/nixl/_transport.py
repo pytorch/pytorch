@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import os
 import time
 import uuid
@@ -36,7 +37,7 @@ from ._work import _live_transports, _NIXLWork
 
 
 if TYPE_CHECKING:
-    from .._api import Memory
+    from .._api import Memory, Storage
 
 
 # Fits every NIXL network plugin: GPUNetIO caps a notification, including the
@@ -44,14 +45,6 @@ if TYPE_CHECKING:
 _MAX_NOTIFICATION_SIZE = 4 << 10
 
 _STORAGE_TYPES = ("FILE", "OBJ", "BLOCK")
-
-
-def _reject_stream_storage(remote_buffer: RemoteBuffer) -> None:
-    # Unregistering storage cannot see transfers queued on a stream or graph.
-    if isinstance(remote_buffer, NIXLRemoteBuffer) and (
-        remote_buffer.memory_type in _STORAGE_TYPES
-    ):
-        raise ValueError("storage does not support stream transfers")
 
 
 def _load_backend() -> Any:
@@ -140,6 +133,8 @@ class NIXLTransport(Transport):
         self._remote_agents: set[str] = set()
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
         self._storage: dict[tuple[str, int], _StorageRegistration] = {}
+        # NIXL identifies objects by device id; keys are passed alongside.
+        self._storage_ids = itertools.count()
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
         self._operation_lock = RLock()
@@ -364,54 +359,58 @@ class NIXLTransport(Transport):
     def register_storage(
         self,
         memory_type: str,
-        device_id: int,
+        location: int | str,
         length: int,
         *,
-        key: str = "",
         timeout: float | None = None,
     ) -> NIXLStorage:
         """Register storage with the plugin for local reads and writes.
 
-        ``memory_type`` is ``"FILE"`` with an open file descriptor as
-        ``device_id``, ``"OBJ"`` with the object name as ``key`` and a unique
-        ``device_id``, or ``"BLOCK"`` with the plugin's block device id.
-        ``to_remote_buffer()`` of the result is a descriptor that only this
-        registration accepts; ``write`` stores a local view at the descriptor's
-        byte offset, and ``read`` loads from it. Object plugins reject writes at
-        nonzero offsets. Stream transfers and notifications are not supported.
-        Unregister with ``unregister_memory``.
+        ``"FILE"`` takes a path, opened read-write until unregistration, or an
+        open file descriptor; ``"OBJ"`` takes the object key; ``"BLOCK"`` takes
+        the plugin's block device id. Object plugins reject writes at nonzero
+        offsets. See :meth:`Transport.register_storage`.
         """
         return self._call(
-            lambda: self._register_storage(memory_type, device_id, length, key),
-            timeout,
+            lambda: self._register_storage(memory_type, location, length), timeout
         )
 
     def _register_storage(
-        self, memory_type: str, device_id: int, length: int, key: str
+        self, memory_type: str, location: int | str, length: int
     ) -> NIXLStorage:
         agent = self._ensure_open()
         if memory_type not in _STORAGE_TYPES:
             raise ValueError(f"memory_type must be one of {_STORAGE_TYPES}")
-        for name, value in (("device_id", device_id), ("length", length)):
-            if type(value) is not int:
-                raise TypeError(f"{name} must be an int")
-        if not isinstance(key, str):
-            raise TypeError("key must be a str")
-        if memory_type == "FILE" and key:
-            raise ValueError(
-                "FILE storage is an open file descriptor; key must be empty"
-            )
-        if device_id < 0:
-            raise ValueError("device_id must be non-negative")
+        if type(length) is not int:
+            raise TypeError("length must be an int")
         if length <= 0:
             raise ValueError("cannot register empty storage")
-        if (memory_type, device_id) in self._storage:
-            raise ValueError(f"{memory_type} {device_id} is already registered")
-        descs = agent.register_memory(
-            [(0, length, device_id, key)], memory_type, backends=[self._plugin]
-        )
+        key = ""
+        owned_fd = None
+        if memory_type == "OBJ":
+            if not isinstance(location, str) or not location:
+                raise TypeError("OBJ storage requires a non-empty object key")
+            key, device_id = location, next(self._storage_ids)
+        elif type(location) is int:
+            if location < 0:
+                raise ValueError("location must be non-negative")
+            device_id = location
+        elif memory_type == "FILE" and isinstance(location, str):
+            owned_fd = device_id = os.open(location, os.O_RDWR | os.O_CLOEXEC)
+        else:
+            raise TypeError(f"{memory_type} storage location has the wrong type")
+        try:
+            if (memory_type, device_id) in self._storage:
+                raise ValueError(f"{memory_type} {device_id} is already registered")
+            descs = agent.register_memory(
+                [(0, length, device_id, key)], memory_type, backends=[self._plugin]
+            )
+        except BaseException:
+            if owned_fd is not None:
+                os.close(owned_fd)
+            raise
         registration = _StorageRegistration(
-            descs, memory_type, device_id, length, os.urandom(16)
+            descs, memory_type, device_id, length, os.urandom(16), owned_fd
         )
         self._storage[memory_type, device_id] = registration
         _live_transports.add(self)
@@ -431,13 +430,13 @@ class NIXLTransport(Transport):
                 "storage has pending transfers; wait before unregistering"
             )
         agent.deregister_memory(registration.descs, backends=[self._plugin])
-        registration.active = False
+        registration.release()
         del self._storage[key]
         if not self._registrations and not self._storage and not self._transfers:
             _live_transports.discard(self)
 
     def unregister_memory(
-        self, memory: Memory | NIXLStorage, *, timeout: float | None = None
+        self, memory: Memory | Storage, *, timeout: float | None = None
     ) -> None:
         with self._locked(timeout):
             agent = self._ensure_open()
@@ -488,29 +487,10 @@ class NIXLTransport(Transport):
             metadata,
         )
 
-    def write_stream(
-        self,
-        local_buffer: MemoryView,
-        remote_buffer: RemoteBuffer,
-        *,
-        stream: torch.cuda.Stream | None = None,
-        timeout: float | None = None,
-    ) -> None:
-        _reject_stream_storage(remote_buffer)
-        super().write_stream(
-            local_buffer, remote_buffer, stream=stream, timeout=timeout
+    def _is_storage(self, remote_buffer: RemoteBuffer) -> bool:
+        return isinstance(remote_buffer, NIXLRemoteBuffer) and (
+            remote_buffer.memory_type in _STORAGE_TYPES
         )
-
-    def read_stream(
-        self,
-        local_buffer: MutableMemoryView,
-        remote_buffer: RemoteBuffer,
-        *,
-        stream: torch.cuda.Stream | None = None,
-        timeout: float | None = None,
-    ) -> None:
-        _reject_stream_storage(remote_buffer)
-        super().read_stream(local_buffer, remote_buffer, stream=stream, timeout=timeout)
 
     def _check_transfer(
         self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
@@ -829,7 +809,7 @@ class NIXLTransport(Transport):
             del self._registrations[key]
         for key, storage in list(self._storage.items()):
             agent.deregister_memory(storage.descs, backends=[self._plugin])
-            storage.active = False
+            storage.release()
             del self._storage[key]
         for name in list(self._remote_agents):
             agent.remove_remote_agent(name)
