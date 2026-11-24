@@ -1955,7 +1955,7 @@ def forward(self, x_1, output_1):
         # What UserKernelHOPInfo.get_mutated_tensors is documented to be passed. With
         # caches on, a graph compiled before would not be lowered again.
         from torch._inductor.ir import IRNode
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         info = get_user_kernel_hop_info(triton_kernel_wrapper_mutation)
         calls = []
@@ -1977,7 +1977,7 @@ def forward(self, x_1, output_1):
             self.assertEqual(torch.compile(f)(x, y), x + y)
         ((hop_kwargs, kernel_kwargs),) = calls
         self.assertIsInstance(hop_kwargs["kwargs"]["in_ptr0"], IRNode)
-        self.assertIsInstance(kernel_kwargs["in_ptr0"], FakeTensor)
+        self.assertTrue(is_fake_tensor(kernel_kwargs["in_ptr0"]))
 
     @common_utils.parametrize(
         "scale_layout", ["needs_fixed_stride_order", "flexible_layout"]
