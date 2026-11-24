@@ -2311,7 +2311,6 @@ torch.ones(10) * 2
             enable_cuda_sync_events=True,
             enable_environment_counters=True,
             enable_graph_dependencies=False,
-            enable_event_node_ids=False,
         )
         p = profile(
             activities=[
@@ -2328,7 +2327,6 @@ torch.ones(10) * 2
                         "enable_cuda_sync_events": False,
                         "enable_environment_counters": True,
                         "enable_graph_dependencies": True,
-                        "enable_event_node_ids": True,
                     }
                 )
             ),
@@ -2354,7 +2352,6 @@ torch.ones(10) * 2
         self.assertTrue(observer.call_args.kwargs["enable_cuda_sync"])
         self.assertTrue(observer.call_args.kwargs["enable_environment_counters"])
         self.assertFalse(observer.call_args.kwargs["enable_graph_dependencies"])
-        self.assertFalse(observer.call_args.kwargs["enable_event_node_ids"])
         self.assertEqual(observer.call_args.kwargs["pm_sampling_interval_ms"], 0.5)
         self.assertEqual(observer.call_args.kwargs["pm_lookback_window_ms"], 2000)
 
@@ -5207,7 +5204,7 @@ class TestPythonChromeTraceExport(TestCase):
 
 
 instantiate_device_type_tests(
-    TestPythonChromeTraceExport, globals(), except_for=("cpu",)
+    TestPythonChromeTraceExport, globals(), except_for=("cpu",), allow_xpu=True
 )
 
 

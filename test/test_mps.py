@@ -202,6 +202,26 @@ class TestAutocastMPS(TestCase):
         y = F.scaled_dot_product_attention(query, key, value.to(torch.float32))
         self.assertEqual(y.to(y_autocast.dtype), y_autocast)
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/201630
+    # None and "eager" are baselines that worked before the fix. "aot_eager"
+    # used to fail.
+    @parametrize("backend", [None, "eager", "aot_eager"])
+    def test_nested_autocast_compiled(self, backend):
+        def f(x):
+            with torch.autocast(device_type=x.device.type, enabled=False):
+                return x @ x
+
+        device = "mps"
+
+        x = torch.rand(64, 64, device=device) + 10.0
+        x.requires_grad_()
+        torch._dynamo.reset()
+        fn = f if backend is None else torch.compile(f, fullgraph=True, backend=backend)
+        with torch.autocast(device, dtype=torch.float16):
+            out = fn(x)
+
+        self.assertEqual(out.dtype, x.dtype)
+
     def test_conv_transpose3d_autocast_fp32(self):
         m = nn.ConvTranspose3d(16, 33, 3, stride=2).to("mps")
         x = torch.randn(20, 16, 10, 50, 100, device="mps")
@@ -12717,6 +12737,7 @@ class TestSDPA(TestCaseMPS):
             "mT": ((q, rand(2, 4, 16, 8).mT, q), {}),
             "dv_ne_d": ((q, q, rand(2, 4, 8, 32)), {}),
             "gqa": ((rand(2, 8, 8, 16), q, q), {"enable_gqa": True}),
+            "kv1": ((q, rand(2, 1, 8, 16), rand(2, 1, 8, 16)), {}),
             "bool_mask": ((q, q, q), {"attn_mask": mask}),
             "fully_masked_row": ((q, q, q), {"attn_mask": masked_row}),
             "float_mask": ((q, q, q), {"attn_mask": rand(4, 8, 8)}),
@@ -12745,6 +12766,13 @@ class TestSDPA(TestCaseMPS):
                 self.assertIn(torch.ops.aten._scaled_dot_product_attention_math_for_mps.default, flash_ops.ops)
                 self.assertNotIn(torch.ops.aten._scaled_dot_product_attention_math_for_mps.default, math_ops.ops)
 
+    def test_flash_attention_priority_order(self):
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+        q = torch.randn(1, 4, 8, 16, device="mps")
+        for order in ([SDPBackend.MATH, SDPBackend.FLASH_ATTENTION], [SDPBackend.FLASH_ATTENTION, SDPBackend.MATH]):
+            with sdpa_kernel(order, set_priority=True):
+                self.assertEqual(torch._fused_sdp_choice(q, q, q), order[0].value)
+
     def test_flash_attention_unsupported_shapes(self):
         from torch.nn.attention import sdpa_kernel, SDPBackend
         q2d = torch.randn(8, 16, device="mps")
@@ -12755,6 +12783,11 @@ class TestSDPA(TestCaseMPS):
         self.assertEqual(torch._fused_sdp_choice(q, kv, kv, enable_gqa=True), SDPBackend.FLASH_ATTENTION.value)
         kv1 = torch.randn(1, 1, 8, 16, device="mps")
         self.assertEqual(torch._fused_sdp_choice(q, kv1, kv1), SDPBackend.FLASH_ATTENTION.value)
+        # Math broadcasts mismatched K/V heads, the Metal kernels do not
+        for qkv, kwargs in [((q, kv1, q), {}), ((q, q, kv1), {}), ((torch.randn(1, 8, 8, 16, device="mps"), kv, q), {"enable_gqa": True})]:
+            self.assertEqual(torch._fused_sdp_choice(*qkv, **kwargs), SDPBackend.MATH.value)
+            self.assertEqual(F.scaled_dot_product_attention(*qkv, **kwargs),
+                             F.scaled_dot_product_attention(*(t.cpu() for t in qkv), **kwargs))
         with self.assertRaisesRegex(RuntimeError, "must match the size"):
             F.scaled_dot_product_attention(q, kv, kv)
         with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
@@ -12762,6 +12795,8 @@ class TestSDPA(TestCaseMPS):
                 F.scaled_dot_product_attention(q2d, q2d, q2d)
             with self.assertRaisesRegex(RuntimeError, "enable_gqa is not set"):
                 F.scaled_dot_product_attention(q, kv, kv)
+            with self.assertRaisesRegex(RuntimeError, "key and value have different numbers of heads"):
+                F.scaled_dot_product_attention(q, kv1, q)
 
     @parametrize("dtype", [torch.float32, torch.float16])
     def test_flash_attention_backward(self, dtype):
@@ -12783,7 +12818,7 @@ class TestSDPA(TestCaseMPS):
                     with _RecordOpsMode() as bwd_ops:
                         grads.append(torch.autograd.grad(y, inputs, grad_out))
                     self.assertEqual(
-                        torch.ops.aten._scaled_dot_product_attention_math_for_mps_backward.default in bwd_ops.ops,
+                        torch.ops.aten._scaled_dot_product_flash_attention_for_mps_backward.default in bwd_ops.ops,
                         backend == SDPBackend.FLASH_ATTENTION,
                     )
                 self.assertEqual(grads[0], grads[1], **tol)
@@ -14085,12 +14120,7 @@ class TestNondeterministic(TestCaseMPS):
         input = torch.randn(1, 2, 6, 6, device=device, requires_grad=True)
         res = module(input)
         grad = torch.ones_like(res)
-
-        def f():
-            res.backward(grad, retain_graph=True)
-            return input.grad
-
-        return f
+        return lambda: torch.autograd.grad(res, input, grad, retain_graph=True)
 
     def _case_upsample_bilinear2d_aa_backward(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)

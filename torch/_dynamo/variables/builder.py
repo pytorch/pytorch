@@ -24,6 +24,7 @@ import contextlib
 import contextvars
 import copy
 import dataclasses
+import datetime
 import enum
 import functools
 import gc
@@ -139,7 +140,6 @@ from ..source import (
     ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
-    CurrentStreamSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
@@ -1302,6 +1302,9 @@ class VariableBuilder:
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
             CustomClassObjectVariable,
+            UserFunctionVariable,
+            SkipFunctionVariable,
+            PolyfilledFunctionVariable,
         }
 
     def get_source(self) -> Source:
@@ -1969,7 +1972,7 @@ class VariableBuilder:
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            if isinstance(self.source, CurrentStreamSource):
+            if self.source == self.tx.symbolic_stream_state.current_stream_source:
                 # Reuse the index pre-allocated in SymbolicStreamState.__init__
                 index = CURRENT_STREAM_INDEX
             else:
@@ -6007,7 +6010,15 @@ class SourcelessBuilder:
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(
-            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
+            value,
+            (
+                importlib.machinery.ModuleSpec,
+                torch.utils._pytree.TreeSpec,
+                datetime.date,
+                datetime.time,
+                datetime.timedelta,
+                datetime.tzinfo,
+            ),
         ):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (re.Pattern, re.Match)):

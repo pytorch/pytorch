@@ -4542,7 +4542,7 @@ def multilabel_margin_loss(
                                   Default: 'mean'.
 
     Returns:
-       Tensor: Mutilabel margin loss.
+       Tensor: Multilabel margin loss.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(
@@ -4619,6 +4619,9 @@ def multilabel_soft_margin_loss(
     Args:
        input (Tensor): Predicted values.
        target (Tensor): Ground truth values.
+       weight (Tensor, optional): a manual rescaling weight given to each
+                               class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+                               treated as if having all ones.
        size_average (bool, optional): Deprecated (see :attr:`reduction`).
        reduce (bool, optional): Deprecated (see :attr:`reduction`).
        reduction (str, optional): Specifies the reduction to apply to the output:
@@ -4627,7 +4630,7 @@ def multilabel_soft_margin_loss(
                                   Default: 'mean'.
 
     Returns:
-       Tensor: Mutilabel soft margin loss.
+       Tensor: Multilabel soft margin loss.
     """
     if has_torch_function_variadic(input, target, weight):
         return handle_torch_function(
@@ -6549,8 +6552,8 @@ scaled_dot_product_attention = _add_docstr(
             - `Memory-Efficient Attention`_
             - A PyTorch implementation defined in C++ matching the above formulation
 
-        The function may call optimized kernels for improved performance when using the CUDA, XPU, CPU or MPS backends,
-        and falls back to the PyTorch implementation otherwise.
+        The function may call optimized kernels for improved performance when using the CUDA backend.
+        For all other backends, the PyTorch implementation will be used.
 
         All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
         most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
@@ -6561,9 +6564,6 @@ scaled_dot_product_attention = _add_docstr(
             - :func:`torch.backends.cuda.enable_flash_sdp`: Globally enables or disables FlashAttention.
             - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally enables or disables  Memory-Efficient Attention.
             - :func:`torch.backends.cuda.enable_math_sdp`: Globally enables or disables  the PyTorch C++ implementation.
-
-        Despite their ``torch.backends.cuda`` namespace, these global toggles also affect CPU, XPU and MPS.
-        CPU and MPS only implement the flash and math backends, so the other toggles have no effect there.
 
         Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
         disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.

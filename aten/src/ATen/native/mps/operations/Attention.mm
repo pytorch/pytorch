@@ -1,6 +1,7 @@
 #include <string>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <fmt/format.h>
+#include <algorithm>
 #include <optional>
 
 #include <ATen/ExpandUtils.h>
@@ -20,8 +21,8 @@
 #else
 #include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_safe_softmax.h>
-#include <ATen/ops/_scaled_dot_product_attention_math_for_mps_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_attention_math_for_mps_native.h>
+#include <ATen/ops/_scaled_dot_product_flash_attention_for_mps_backward_native.h>
 #include <ATen/ops/_softmax_backward_data.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/matmul.h>
@@ -423,7 +424,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
 }
 
 // Recomputes the attention weights with ATen ops rather than saving them in the forward.
-std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_attention_math_mps_backward(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_mps_backward(
     const Tensor& grad_out,
     const Tensor& query,
     const Tensor& key,
@@ -446,8 +447,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_attention_math_mp
     shape.append({t.sym_size(-3), reps, t.sym_size(-2), t.sym_size(-1)});
     return t.to(opmath).unsqueeze(-3).expand_symint(shape).flatten(-4, -3);
   };
-  auto reduce = [](const Tensor& grad, const Tensor& t) {
-    const auto heads = grad.unflatten_symint(-3, {t.sym_size(-3), grad.sym_size(-3) / t.sym_size(-3)});
+  auto reduce = [](const Tensor& grad, const Tensor& t, const c10::SymInt& reps) {
+    const auto heads = grad.unflatten_symint(-3, {t.sym_size(-3), reps});
     return at::sum_to(heads.sum(-3), t.sym_sizes()).to(t.scalar_type());
   };
   const auto q = expand(query, 1);
@@ -469,9 +470,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_attention_math_mp
   const auto attn = at::_safe_softmax(scores, -1);
   const auto grad = grad_out.to(opmath);
   const auto grad_scores = at::_softmax_backward_data(at::matmul(grad, v.mT()), attn, -1, opmath);
-  return {grad_input_mask[0] ? reduce(at::matmul(grad_scores, k).mul(scale_factor), query) : Tensor(),
-          grad_input_mask[1] ? reduce(at::matmul(grad_scores.mT(), q_scaled), key) : Tensor(),
-          grad_input_mask[2] ? reduce(at::matmul(attn.mT(), grad), value) : Tensor(),
+  return {grad_input_mask[0] ? reduce(at::matmul(grad_scores, k).mul(scale_factor), query, 1) : Tensor(),
+          grad_input_mask[1] ? reduce(at::matmul(grad_scores.mT(), q_scaled), key, groups) : Tensor(),
+          grad_input_mask[2] ? reduce(at::matmul(attn.mT(), grad), value, groups) : Tensor(),
           grad_input_mask[3] ? at::sum_to(grad_scores, attn_mask.sym_sizes()).to(attn_mask.scalar_type()) : Tensor()};
 }
 
@@ -495,11 +496,17 @@ int64_t _fused_sdp_choice_mps(const Tensor& query,
     reason = "it only supports floating point inputs";
   } else if (query.dim() < 3 || key.dim() < 3 || value.dim() < 3) {
     reason = "it requires inputs with a heads dimension";
+  } else if (key.sym_size(-3) != value.sym_size(-3)) {
+    reason = "key and value have different numbers of heads";
   } else if (!enable_gqa && key.sym_size(-3) != 1 && query.sym_size(-3) != key.sym_size(-3)) {
     // The kernels would broadcast K/V heads, while math only broadcasts a single one
     reason = "query and key have different numbers of heads and enable_gqa is not set";
   } else {
-    return static_cast<int64_t>(sdp::SDPBackend::flash_attention);
+    const auto order = ctx.sDPPriorityOrder();
+    const auto pos = [&](sdp::SDPBackend b) { return std::find(order.begin(), order.end(), b); };
+    if (!ctx.userEnabledMathSDP() || pos(sdp::SDPBackend::flash_attention) < pos(sdp::SDPBackend::math)) {
+      return static_cast<int64_t>(sdp::SDPBackend::flash_attention);
+    }
   }
   TORCH_CHECK(ctx.userEnabledMathSDP(),
               "Flash attention kernel not used because ",

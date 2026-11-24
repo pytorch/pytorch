@@ -7192,6 +7192,7 @@
   dispatch:
     CUDA: _scaled_grouped_mm_cuda_v2_out
     XPU: _scaled_grouped_mm_xpu_v2_out
+    MPS: _scaled_grouped_mm_mps_v2_out
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
@@ -15280,9 +15281,9 @@
     MPS: _scaled_dot_product_attention_math_mps
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_attention_math_for_mps_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor attn_mask, bool is_causal, bool[4] grad_input_mask, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value, Tensor grad_attn_mask)
+- func: _scaled_dot_product_flash_attention_for_mps_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor attn_mask, bool is_causal, bool[4] grad_input_mask, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value, Tensor grad_attn_mask)
   dispatch:
-    MPS: _scaled_dot_product_attention_math_mps_backward
+    MPS: _scaled_dot_product_flash_attention_mps_backward
 
 - func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
   dispatch:

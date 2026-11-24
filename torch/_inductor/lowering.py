@@ -4063,7 +4063,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d, override_decomp=True)
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
-make_fallback(aten._scaled_dot_product_attention_math_for_mps_backward)  # @malfet
+make_fallback(aten._scaled_dot_product_flash_attention_for_mps_backward)  # @malfet
 make_fallback(aten._scaled_addmm.default, warn=False)
 make_fallback(aten._scaled_addmm_.default, warn=False)
 make_fallback(aten._quantize_tensor.default, warn=False)
