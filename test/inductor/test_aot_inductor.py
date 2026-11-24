@@ -108,6 +108,7 @@ from torch.testing._internal.common_utils import (
     runOnRocm,
     set_cwd,
     skipIfCachingAllocatorDisabled,
+    skipIfCppFakeTensor,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -4081,6 +4082,53 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("view_kind", ["repeat", "dtype", "slice"])
+    @common_utils.parametrize("iterations", [0, 1, 3])
+    def test_while_loop_captured_view_handle_lifetime(self, view_kind, iterations):
+        # A no-op or dtype view creates an owning handle expression before the
+        # loop. Condition/body binding must borrow it across all iterations.
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                if view_kind == "repeat":
+                    y = y.repeat_interleave(1, 0)
+                elif view_kind == "dtype":
+                    y = y.view(torch.int32)
+                else:
+                    y = y[1:]
+                return torch.while_loop(
+                    lambda i, x: i < iterations,
+                    lambda i, x: (i + 1, x + y),
+                    (torch.zeros((), dtype=torch.int64, device=x.device), x),
+                )
+
+        def inputs():
+            if view_kind == "dtype":
+                x = torch.randint(0, 10, (4,), device=self.device, dtype=torch.int32)
+                # Small integer bit patterns avoid overflow after viewing y back
+                # as int32, without doing floating-point arithmetic on its data.
+                y = torch.randint(0, 10, (4,), device=self.device, dtype=torch.int32)
+                y = y.view(torch.float32)
+            else:
+                x = torch.randn(4, device=self.device)
+                y = torch.randn(5 if view_kind == "slice" else 4, device=self.device)
+            return x, y
+
+        model = Model()
+        example_inputs = inputs()
+        with config.patch(
+            {
+                "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+                "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+            }
+        ):
+            package_path = torch._inductor.aoti_compile_and_package(
+                torch.export.export(model, example_inputs)
+            )
+        compiled = AOTIRunnerUtil.load_package(package_path)
+        for _ in range(3):
+            args = inputs()
+            self.assertEqual(compiled(*args), model(*args))
+
     def test_while_loop_nested(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -7608,17 +7656,22 @@ class AOTInductorTestsTemplate:
             package_path: str = AOTIRunnerUtil.compile(
                 model, (x,), dynamic_shapes=dynamic_shapes
             )
-        aot_inductor_module = torch._inductor.aoti_load_package(package_path)
+        aot_inductor_module = torch._inductor.aoti_load_package(
+            package_path, num_runners=1
+        )
         # dynamic dim works fine
         _ = aot_inductor_module(y0)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "unmatched dim value at 1"):
             aot_inductor_module(y1)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "unmatched stride value at 1"):
             aot_inductor_module(y2)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "dim value is too large at 0"):
             aot_inductor_module(y3)
-        with self.assertRaisesRegex(Exception, ""):
+        with self.assertRaisesRegex(Exception, "dim value is too large at 0"):
             aot_inductor_module(y4)
+        # The package runs one model instance, so each rejected call must have
+        # returned it to the pool for this call to run.
+        self.assertEqual(aot_inductor_module(y0), y0)
 
     @skip_if_device(
         lambda device: device != GPU_TYPE or device == "mps",
@@ -7720,6 +7773,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 3, device=self.device), [3, 4])
         self.check_model(Model(), example_inputs)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_jagged(self):
         class Model(nn.Module):
             def __init__(self) -> None:

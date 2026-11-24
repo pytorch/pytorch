@@ -4509,6 +4509,45 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             compiled(x, w, group_size, group_name)
 
 
+@unittest.skipIf(not c10d.is_gloo_available(), "Gloo is not available")
+class TestCollectiveReinplacementCPU(MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self):
+        return 2
+
+    @torch._inductor.config.patch(
+        {"_collective.auto_select": False, "compile_threads": 1}
+    )
+    def test_all_reduce_non_contiguous_intermediate(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            "gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        try:
+
+            def f(a, b):
+                intermediate = torch.mm(a, b).t()
+                return (
+                    _functional_collectives.all_reduce(
+                        intermediate, "sum", c10d.group.WORLD
+                    )
+                    + 1
+                )
+
+            a = torch.arange(16, dtype=torch.float32).reshape(4, 4) + self.rank + 1
+            b = torch.eye(4)
+            expected = f(a.clone(), b.clone())
+            with fresh_inductor_cache():
+                actual = torch.compile(f, fullgraph=True)(a.clone(), b.clone())
+            self.assertEqual(actual, expected)
+        finally:
+            c10d.destroy_process_group()
+
+
 class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
     """
     The compile time sync runs on a gloo process group over CPU, so unlike the rest of
