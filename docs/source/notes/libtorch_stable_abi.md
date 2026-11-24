@@ -91,9 +91,10 @@ iterables and single values are rejected), and `std::vector<T>` or
 `torch::headeronly::HeaderOnlyArrayRef<T>` is written as a Python `list`. These
 nest, for example `std::optional<std::vector<std::optional<torch::stable::Tensor>>>`.
 
-The dtype, device, layout and memory format helpers translate through the
-stable enum mappings, which cover a subset of all dtypes and device types;
-converting a valid `torch.dtype` or `torch.device` outside that subset raises.
+The helpers above that translate through the stable enum mappings
+(e.g., dtype, device and layout), can only cover the subset of types that
+have stable encodings. E.g., converting a valid `torch.dtype` or
+`torch.device` outside that subset would raise an error.
 
 Like the rest of the stable ABI, an extension using them can just link
 `libtorch`.
