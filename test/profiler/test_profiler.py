@@ -20,6 +20,7 @@ import time
 import types
 import unittest
 import warnings
+from decimal import Decimal
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -1424,6 +1425,47 @@ torch.ones(10) * 2
             op.time_range.end,
             max(e.time_range.end for e in p.events() if e.name != op.name),
         )
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_stop_collection_ends_trace(self):
+        # Both _finalize() and a later stop() process the trace.
+        for finish in ("_finalize", "stop"):
+            ready = []
+            p = profile(
+                activities=[ProfilerActivity.CPU],
+                with_stack=True,
+                on_trace_ready=ready.append,
+            )
+            p.start()
+            with record_function("open_at_stop"):
+                torch.ones(1).add_(1)
+                p._stop_collection()
+            time.sleep(0.5)
+            torch.ones(1).mul_(2)
+            p.step()  # Steps leave the trace unprocessed.
+            self.assertEqual(ready, [], finish)
+            getattr(p, finish)()
+            p._finalize()  # Nothing left to process.
+            self.assertEqual(ready, [p], finish)
+            with TemporaryFileName(mode="w+") as fname:
+                p.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f, parse_float=Decimal)["traceEvents"]
+            names = {e["name"] for e in events}
+            span = next(e for e in events if e["name"].startswith("PyTorch Profiler"))
+            add = next(e for e in events if e["name"] == "aten::add_")
+            open_at_stop = next(e for e in events if e["name"] == "open_at_stop")
+            window_end = next(e for e in events if e["name"] == "Record Window End")
+            # Decimal preserves nanosecond precision for large trace timestamps.
+            span_end = span["ts"] + span["dur"]
+            # The trace ends at the stop, not when it is processed after the sleep.
+            self.assertNotIn("aten::mul_", names, finish)
+            self.assertGreaterEqual(span_end, add["ts"] + add["dur"], finish)
+            self.assertLessEqual(span_end, window_end["ts"], finish)
+            # An op still running at the stop ends inside the window too.
+            open_end = open_at_stop["ts"] + open_at_stop["dur"]
+            self.assertLessEqual(open_end, window_end["ts"], finish)
+            self.assertLess(window_end["ts"] - span["ts"], 500_000, finish)
 
     def test_profiler_correlation_id(self):
         """
