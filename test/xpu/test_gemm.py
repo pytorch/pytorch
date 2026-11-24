@@ -1230,6 +1230,24 @@ class TestBasicGEMM(TestCase):
             torch.tensor(0.0, device=device), fn(torch.dot, (0,), (0,), test_out=True)
         )
 
+    # oneDNN cannot create grouped memory descriptors with zero-sized dims.
+    @dtypes(torch.bfloat16, torch.float32)
+    def test_grouped_mm_empty(self, device, dtype):
+        grouped_mm = torch.nn.functional.grouped_mm
+        offs = torch.zeros(4, device=device, dtype=torch.int32)
+        # 2d x 3d with no rows
+        a = torch.randn(0, 64, device=device, dtype=dtype)
+        b = torch.randn(4, 32, 64, device=device, dtype=dtype)
+        out = grouped_mm(a, b.transpose(-2, -1), offs=offs)
+        self.assertEqual(out.shape, (0, 32))
+        # 2d x 2d with an empty contraction: the result is zeros, not uninitialized memory.
+        # Strides are padded to 16 bytes as required by grouped_mm.
+        alignment = 16 // dtype.itemsize
+        a = torch.randn(16, alignment, device=device, dtype=dtype)[:, :0]
+        b = torch.randn(32, alignment, device=device, dtype=dtype)[:, :0]
+        out = grouped_mm(a, b.transpose(-2, -1), offs=offs)
+        self.assertEqual(out, torch.zeros(4, 16, 32, device=device, dtype=dtype))
+
     @tf32_on_and_off(0.005)
     def test_large_bmm_backward(self, device):
         A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
