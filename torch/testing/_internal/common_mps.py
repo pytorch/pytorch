@@ -23,7 +23,6 @@ if torch.backends.mps.is_available():
         # ops below are xfailed for complex32/complex64. Drill this list down as
         # complex support is added.
         UNSUPPORTED_COMPLEX_OPS = {
-            "addr",
             "cholesky_inverse",
             "float_power",
             "geqrf",
@@ -234,8 +233,6 @@ if torch.backends.mps.is_available():
             # sign-flip encode + ulong atomic_min/max bracket and work fine.
             # bool prod is excluded via dtypesIfMPS in the OpInfo, and mean doesn't list bool.
             "scatter_reduceprod": [torch.int64],
-            "_segment_reducelengths": None,
-            "_segment_reduceoffsets": None,
             "sparse.sampled_addmm": None,
             "sparse.mmreduce": None,
             "special.log_ndtr": None,
@@ -315,15 +312,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.bfloat16,
             ],
-            # CPU Errors:
-            "addr": [
-                torch.bool,
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.int8,
-            ],  # "addmv_impl_cpu" not implemented for 'Half'
             "as_stridedpartial_views": None,  # cpu result off, showing random values
             # random results
             # mps vs cpu:
@@ -425,7 +413,7 @@ if torch.backends.mps.is_available():
             },
             "test_reference_numerics_small": {
                 # MPS bug: cancellation for small arguments
-                **dict.fromkeys(("expm1", "_refs.expm1", "sinc"), (torch.complex64,)),
+                "sinc": (torch.complex64,),
                 # NumPy deviates from C99 for atan(+-1j)
                 "_refs.atan": (torch.complex64,),
                 # NumPy reference computes int8/uint8 in float16
@@ -519,6 +507,8 @@ if torch.backends.mps.is_available():
     def mps_ops_grad_modifier(ops: Sequence[OpInfo]) -> Sequence[OpInfo]:
         XFAILLIST_GRAD = {
             # Unimplemented ops
+            "_segment_reducelengths": None,
+            "_segment_reduceoffsets": None,
             # No 5-D bicubic sampler on MPS; the grad leg fails in its forward call.
             # TODO: drop this when MPS has 5-D bicubic.
             "nn.functional.grid_sample": [torch.float32],
