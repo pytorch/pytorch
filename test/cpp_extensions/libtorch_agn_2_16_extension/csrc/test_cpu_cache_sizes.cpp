@@ -1,4 +1,4 @@
-#include <torch/csrc/stable/cpu/Utils.h>
+#include <torch/csrc/stable/cpu/utils.h>
 #include <torch/csrc/stable/library.h>
 
 #include <cstdint>

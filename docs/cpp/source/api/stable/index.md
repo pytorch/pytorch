@@ -55,7 +55,7 @@ For more information on the stable ABI, see the
 - `torch/csrc/stable/device.h` - Stable device structures
 - `torch/csrc/stable/inference_mode.h` - Thread-local inference mode guard
 - `torch/csrc/stable/accelerator.h` - Accelerator support
-- `torch/csrc/stable/cpu/Utils.h` - CPU cache size queries
+- `torch/csrc/stable/cpu/utils.h` - CPU cache size queries
 - `torch/csrc/stable/macros.h` - Stable API macros
 
 ## Stable API Categories
