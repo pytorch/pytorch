@@ -17,11 +17,31 @@ SCRIPT = (
     Path(__file__).resolve().parents[3] / "scripts/codeowners/generate_codeowners.py"
 )
 sys.path.insert(0, str(SCRIPT.parent))
-from generate_codeowners import load_ownership, render_codeowners, SECTION_MARKER
+from generate_codeowners import (
+    LABEL_RULES_BEGIN,
+    LABEL_RULES_END,
+    load_ownership,
+    OwnershipFile,
+    render_codeowners,
+    SECTION_MARKER,
+    splice_label_rules,
+)
+
+
+KNOWN_LABELS = {
+    "module: dynamo",
+    "module: nn",
+    "module: linear cross entropy",
+    "oncall: pt2",
+}
 
 
 OWNERSHIP = """\
 planned_labels: ["module: tvm"]
+label_parents:
+  "module: dynamo": "oncall: pt2"
+  "module: tvm": "module: dynamo"
+  "module: linear cross entropy": "module: nn"
 sections:
   - compiler_dynamo
   - python_nn_api
@@ -67,12 +87,26 @@ ownership:
       - /CODEOWNERS: [albanD]
 """
 
+LABEL_RULES = f"""\
+- any:
+  - "good first issue"
+  then:
+  - "actionable"
+{LABEL_RULES_BEGIN}
+- stale
+{LABEL_RULES_END}
+"""
 
-def render(ownership: str) -> str:
+
+def load(ownership: str) -> OwnershipFile:
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory, "OWNERSHIP.yaml")
         path.write_text(ownership)
-        return render_codeowners(load_ownership(path))
+        return load_ownership(path, KNOWN_LABELS)
+
+
+def render(ownership: str) -> str:
+    return render_codeowners(load(ownership))
 
 
 def replace_once(text: str, old: str, new: str) -> str:
@@ -125,7 +159,8 @@ class TestGenerateCodeowners(TestCase):
         )
 
     def test_no_planned_labels(self):
-        text = render(replace_once(OWNERSHIP, '["module: tvm"]', "[]"))
+        ownership = replace_once(OWNERSHIP, '  "module: tvm": "module: dynamo"\n', "")
+        text = render(replace_once(ownership, '["module: tvm"]', "[]"))
         self.assertNotIn("Labels planned", text)
 
     def test_invalid_ownership(self):
@@ -161,11 +196,65 @@ class TestGenerateCodeowners(TestCase):
                 "  protected_codeownership:\n    - ",
                 "  protected:\n    - ",
             ),
+            "not in tools/linter/adapters/pytorch_labels.json": (
+                '"module: tvm": "module: dynamo"',
+                '"module: tvm": "module: dynamoo"',
+            ),
+            "cycle through 'module: dynamo'": (
+                '"module: dynamo": "oncall: pt2"',
+                '"module: dynamo": "oncall: pt2"\n  "oncall: pt2": "module: dynamo"',
+            ),
+            "cycle through 'module: nn'": (
+                '"module: linear cross entropy": "module: nn"',
+                '"module: linear cross entropy": "module: nn"\n  "module: nn": "module: nn"',
+            ),
+            "'module: lce' is not in": (
+                '"module: linear cross entropy": "module: nn"',
+                '"module: lce": "module: nn"',
+            ),
+            "parent 'module: tvm' is not in": (
+                '"module: linear cross entropy": "module: nn"',
+                '"module: linear cross entropy": "module: tvm"',
+            ),
+            "expected 'label: parent'": (
+                '"module: tvm": "module: dynamo"',
+                '"module: tvm": ["module: dynamo"]',
+            ),
         }
         for message, (old, new) in cases.items():
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
                     render(replace_once(OWNERSHIP, old, new))
+
+    def test_label_rules(self):
+        self.assertEqual(
+            splice_label_rules(LABEL_RULES, load(OWNERSHIP)),
+            f"""\
+- any:
+  - "good first issue"
+  then:
+  - "actionable"
+{LABEL_RULES_BEGIN}
+- any:
+  - "module: dynamo"
+  then:
+  - "oncall: pt2"
+- any:
+  - "module: tvm"
+  then:
+  - "module: dynamo"
+- any:
+  - "module: linear cross entropy"
+  then:
+  - "module: nn"
+{LABEL_RULES_END}
+""",
+        )
+        reversed_markers = f"{LABEL_RULES_END}\n{LABEL_RULES_BEGIN}\n"
+        for current in ("- any: []\n", reversed_markers, LABEL_RULES + LABEL_RULES):
+            with self.subTest(current=current):
+                with self.assertRaisesRegex(ValueError, "needs one line"):
+                    splice_label_rules(current, load(OWNERSHIP))
 
     def test_groups_nesting_both_ways(self):
         ownership = replace_once(
@@ -182,11 +271,19 @@ class TestGenerateCodeowners(TestCase):
             render(ownership)
 
 
-def run_generator(*, ownership: str, codeowners: str, args: list[str]):
-    """Run the generator in a throwaway repo; return the result and final CODEOWNERS."""
+def run_generator(
+    *, ownership: str, codeowners: str, args: list[str], label_rules: str = LABEL_RULES
+):
+    """Run the generator in a throwaway repo; return the result and final CODEOWNERS and label rules."""
     with tempfile.TemporaryDirectory() as repo:
         Path(repo, "OWNERSHIP.yaml").write_text(ownership)
         Path(repo, "CODEOWNERS").write_text(codeowners)
+        Path(repo, ".github").mkdir()
+        Path(repo, ".github/label_to_label.yml").write_text(label_rules)
+        Path(repo, "tools/linter/adapters").mkdir(parents=True)
+        Path(repo, "tools/linter/adapters/pytorch_labels.json").write_text(
+            json.dumps(sorted(KNOWN_LABELS))
+        )
         subprocess.check_output(["git", "init", "-q"], cwd=repo)
         result = subprocess.run(
             [sys.executable, str(SCRIPT), *args],
@@ -194,7 +291,11 @@ def run_generator(*, ownership: str, codeowners: str, args: list[str]):
             capture_output=True,
             text=True,
         )
-        return result, Path(repo, "CODEOWNERS").read_text()
+        return (
+            result,
+            Path(repo, "CODEOWNERS").read_text(),
+            Path(repo, ".github/label_to_label.yml").read_text(),
+        )
 
 
 class TestGeneratorModes(TestCase):
@@ -202,46 +303,55 @@ class TestGeneratorModes(TestCase):
 
     def test_up_to_date(self):
         generated = render(OWNERSHIP)
-        result, _ = run_generator(
-            ownership=OWNERSHIP, codeowners=generated, args=["--check"]
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        result, _ = run_generator(
-            ownership=OWNERSHIP, codeowners=generated, args=["--lintrunner"]
-        )
-        self.assertEqual((result.returncode, result.stdout), (0, ""))
+        label_rules = splice_label_rules(LABEL_RULES, load(OWNERSHIP))
+        for args in (["--check"], ["--lintrunner"]):
+            result, _, _ = run_generator(
+                ownership=OWNERSHIP,
+                codeowners=generated,
+                label_rules=label_rules,
+                args=args,
+            )
+            self.assertEqual((result.returncode, result.stdout), (0, ""), result.stderr)
 
-    def test_stale_codeowners(self):
+    def test_stale_outputs(self):
         generated = render(OWNERSHIP)
-        result, _ = run_generator(
+        label_rules = splice_label_rules(LABEL_RULES, load(OWNERSHIP))
+        result, _, _ = run_generator(
             ownership=OWNERSHIP, codeowners="stale\n", args=["--check"]
         )
         self.assertEqual(result.returncode, 1)
-        result, _ = run_generator(
+        result, _, _ = run_generator(
             ownership=OWNERSHIP, codeowners="stale\n", args=["--lintrunner"]
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        message = json.loads(result.stdout)
+        messages = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(
-            (
-                message["path"],
-                message["code"],
-                message["original"],
-                message["replacement"],
-            ),
-            ("CODEOWNERS", "CODEOWNERS_GENERATED", "stale\n", generated),
+            [(m["path"], m["code"], m["original"], m["replacement"]) for m in messages],
+            [
+                ("CODEOWNERS", "CODEOWNERS_GENERATED", "stale\n", generated),
+                (
+                    ".github/label_to_label.yml",
+                    "CODEOWNERS_GENERATED",
+                    LABEL_RULES,
+                    label_rules,
+                ),
+            ],
         )
-        result, codeowners = run_generator(
+        result, codeowners, written_rules = run_generator(
             ownership=OWNERSHIP, codeowners="stale\n", args=[]
         )
-        self.assertEqual((result.returncode, codeowners), (0, generated))
+        self.assertEqual(
+            (result.returncode, codeowners, written_rules), (0, generated, label_rules)
+        )
 
     def test_invalid_ownership(self):
         invalid = replace_once(OWNERSHIP, "name: nn\n", "name: dynamo\n")
-        result, _ = run_generator(ownership=invalid, codeowners="x\n", args=["--check"])
+        result, _, _ = run_generator(
+            ownership=invalid, codeowners="x\n", args=["--check"]
+        )
         self.assertEqual(result.returncode, 1)
         self.assertIn("duplicate OWNERSHIP.yaml names", result.stderr)
-        result, _ = run_generator(
+        result, _, _ = run_generator(
             ownership=invalid, codeowners="x\n", args=["--lintrunner"]
         )
         self.assertEqual(result.returncode, 0, result.stderr)

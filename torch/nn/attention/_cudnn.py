@@ -33,15 +33,21 @@ class _OverridesHandle(Protocol):
     def remove(self) -> None: ...
 
 
+class _FrontendVersionError(RuntimeError):
+    """The installed nvidia-cudnn-frontend is older than this switch requires."""
+
+
 # Set while the provider's kernels are installed.
 _ACTIVE_HANDLE: _OverridesHandle | None = None
 
 
 def is_available(module_path: str = _CUDNN_MODULE_PATH) -> bool:
-    # find_spec imports the parent package, but not the provider itself.
+    # find_spec imports the parent package, but not the provider itself. An
+    # installed package that fails to load (say, a missing native library) is
+    # unavailable too; enable() reports the underlying error.
     try:
         return importlib.util.find_spec(module_path) is not None
-    except (ImportError, ValueError):
+    except Exception:
         return False
 
 
@@ -51,16 +57,25 @@ def is_enabled() -> bool:
 
 def _check_frontend_version(module_path: str) -> None:
     # Imports only the parent package, never the provider.
-    package = importlib.import_module(module_path.partition(".")[0])
+    package_name = module_path.partition(".")[0]
+    required = f"nvidia-cudnn-frontend>={_MIN_FRONTEND_VERSION}"
+    try:
+        package = importlib.import_module(package_name)
+    except ModuleNotFoundError as e:
+        if e.name != package_name:
+            raise
+        raise ModuleNotFoundError(
+            f"{required} is required, but no '{package_name}' package is installed",
+            name=package_name,
+        ) from e
     found = getattr(package, "__version__", None)
     try:
         ok = isinstance(found, str) and Version(found) >= Version(_MIN_FRONTEND_VERSION)
     except InvalidVersion:
         ok = False
     if not ok:
-        raise RuntimeError(
-            f"nvidia-cudnn-frontend>={_MIN_FRONTEND_VERSION} is required; "
-            f"'{module_path}' comes from version {found}"
+        raise _FrontendVersionError(
+            f"{required} is required; '{module_path}' comes from version {found}"
         )
 
 
