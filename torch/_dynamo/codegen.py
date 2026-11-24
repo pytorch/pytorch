@@ -119,6 +119,8 @@ class PyCodegen:
         graph_output_var: str | None = None,
         tempvars: dict[VariableTracker | Source, Any] | None = None,
         overridden_sources: dict[Source, Source] | None = None,
+        *,
+        reconstruction_graph_outputs: bool = False,
     ) -> None:
         self.root = root
         self.top_of_stack: VariableTracker | Source | None = None
@@ -132,6 +134,7 @@ class PyCodegen:
         self.tempvars: dict[VariableTracker | Source, Any] = tempvars or {}
         self.tx = tx
         self.graph_output_var = graph_output_var
+        self.reconstruction_graph_outputs = reconstruction_graph_outputs
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
@@ -151,12 +154,16 @@ class PyCodegen:
         self.pycodes.append(pycode.format(*[a.reconstruct_pycode(self) for a in args]))
 
     def restore_stack(
-        self, stack_values: list[Any], *, value_from_source: bool = True
+        self,
+        stack_values: list[Any],
+        *,
+        value_from_source: bool = True,
     ) -> None:
         prev = self.value_from_source
         self.value_from_source &= value_from_source
         try:
-            self.foreach(stack_values)
+            for value in stack_values:
+                self(value)
             # `restore_stack` is called once per codegen pass (e.g. pass1 for
             # use tracking, pass2 for actual emission). Reset the stack counter
             # so each pass produces the same `__stackN` names.
@@ -165,6 +172,50 @@ class PyCodegen:
                 self.add_pycode(f"{self.tx.new_pycode_varname('stack')} = {{}}", v)
         finally:
             self.value_from_source = prev
+
+    def can_reconstruct(
+        self,
+        value: VariableTracker | Source,
+        *,
+        allow_cache: bool = True,
+        visiting: set[int] | None = None,
+    ) -> bool | None:
+        """Conservatively classify reconstruction without realizing or emitting code."""
+        if visiting is None:
+            visiting = set()
+        value_id = id(value)
+        if value_id in visiting:
+            return None
+        visiting.add(value_id)
+        try:
+            if allow_cache and self.top_of_stack is value:
+                return True
+            if isinstance(value, Source):
+                if self.overridden_sources:
+                    value = self.overridden_sources.get(value, value)
+                if allow_cache and self.tempvars.get(value) is not None:
+                    return True
+                return value.can_reconstruct(self, visiting=visiting)
+
+            if allow_cache and self.tempvars.get(value) is not None:
+                return True
+            return value.can_reconstruct(
+                self, allow_cache=allow_cache, visiting=visiting
+            )
+        finally:
+            visiting.remove(value_id)
+
+    def can_reconstruct_values(
+        self, values: Iterable[VariableTracker], *, visiting: set[int]
+    ) -> bool | None:
+        result: bool | None = True
+        for value in values:
+            status = self.can_reconstruct(value, visiting=visiting)
+            if status is False:
+                return False
+            if status is None:
+                result = None
+        return result
 
     def graph_output_vars(self) -> list[VariableTracker]:
         return [x.variable for x in self.graph_outputs.values()]

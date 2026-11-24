@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 import abc
 import itertools
+import operator
 import unittest
 
 import torch
@@ -72,6 +73,109 @@ class GraphBreakingInt(int):
 @instantiate_parametrized_tests
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("depth", [1, 4, 8])
+    @parametrize("tensor_branch", [False, True])
+    @parametrize("container,dead_cell", [(False, False), (True, False), (True, True)])
+    def test_unreconstructable_dict_iterator_does_not_retry_helpers(
+        self, depth, tensor_branch, container, dead_cell
+    ):
+        def leaf(x, events):
+            if tensor_branch:
+                if x.sum() < 0:
+                    return x.sin()
+            else:
+                torch._dynamo.graph_break()
+            events.append("leaf")
+            return x.cos()
+
+        child = leaf
+        for _ in range(depth):
+
+            def wrap(inner):
+                def helper(x, events):
+                    return inner(x + 1, events) * 2
+
+                return helper
+
+            child = wrap(child)
+
+        def owner(x, events):
+            iterator = (iter({1: x}),) if container else iter({1: x})
+            events.append("owner")
+            x.add_(0.25)
+            y = child(x, events)
+            return y + next(iterator[0] if container else iterator)
+
+        def fn(x, events):
+            if dead_cell:
+                ghost = iter({0: x})
+
+                def consume():
+                    return next(ghost)
+
+                consume()
+            return owner(x.sin(), events).cos()
+
+        attempts = []
+        recorder = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        def backend(gm, inputs):
+            attempts.append(torch._guards.CompileContext.get().attempt + 1)
+            return recorder(gm, inputs)
+
+        x = torch.linspace(0.1, 0.8, 4)
+        events = []
+        eager_events = []
+        expected = fn(x.clone(), eager_events)
+        compiled = torch.compile(fn, backend=backend)
+        self.assertEqual(compiled(x, events), expected)
+        self.assertEqual(events, eager_events)
+        # Recovery inspects pre-call states on one fresh tracing attempt.
+        self.assertEqual(attempts[0], 3 if tensor_branch else 4)
+        branch_ops = ["sum", operator.lt] if tensor_branch else []
+        graphs = [
+            [n.target for n in gm.graph.nodes if n.op.startswith("call")]
+            for gm in recorder.graphs
+        ]
+        self.assertEqual(
+            graphs,
+            [
+                ["sin"],
+                [operator.add] * depth + branch_ops,
+                ["cos"] + [operator.mul] * depth,
+                ["cos"],
+            ],
+        )
+        count = len(attempts)
+        events.clear()
+        self.assertEqual(compiled(x, events), expected)
+        self.assertEqual(events, eager_events)
+        self.assertEqual(len(attempts), count)
+
+    @torch._dynamo.config.patch(trace_autograd_ops=False)
+    def test_requires_grad_restart_before_backward(self):
+        def helper(x):
+            leaf = x.sin().cos().requires_grad_()
+            leaf.square().sum().backward()
+            return leaf.grad
+
+        def fn(x):
+            return helper(x + 1) + 2
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        torch.compile(fn, backend="eager")(torch.ones(3))
+        metrics = torch._dynamo.utils.get_compilation_metrics()
+        reasons = metrics[0].restart_reasons
+        self.assertIn(
+            "source-less requires_grad_() intermediate leaked as output", reasons
+        )
+        self.assertFalse(
+            any(
+                reason.startswith("Unsupported Tensor.backward() call")
+                for reason in reasons
+            )
+        )
 
     def test_single_graph_break(self):
         # NOTE marking f1, f2, f3 as global
@@ -1752,7 +1856,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(torch.compile(g, backend=cnts)(x), x + 1)
 
     def test_ngb_suppressed_for_inline_module(self):
-        """NGB should be suppressed for functions in NGB_SUPPRESS_INLINELIST."""
+        """NGB should be suppressed for functions in NGB_SUPPRESS_MODULES."""
         from unittest.mock import patch
 
         def inner(x):
@@ -1769,7 +1873,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3)
         inner_file = inner.__code__.co_filename
         with patch(
-            "torch._dynamo.trace_rules.is_ngb_suppressed_inline",
+            "torch._dynamo.trace_rules.is_ngb_suppressed_module",
             side_effect=lambda f: f == inner_file,
         ):
             self.assertEqual(outer(inp), inp + 6)
@@ -1777,6 +1881,102 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         # NGB normally handles an inlined graph break in 2 frames.
         # With suppression, the break propagates to the parent, producing more.
         self.assertGreater(cnts.frame_count, 2)
+
+    def test_ngb_with_unhashable_qualname(self):
+        class UnhashableQualname(str):
+            __slots__ = ()
+            __hash__ = None
+
+        events = []
+
+        def inner(x):
+            events.append("before")
+            result = x.sin()
+            torch._dynamo.graph_break()
+            events.append("after")
+            return result.cos()
+
+        inner.__module__ = "torch._prims_common.wrappers"
+        inner.__qualname__ = UnhashableQualname("inner")
+
+        def outer(x):
+            return inner(x + 1) + 2
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(outer, backend=backend)
+        x = torch.arange(3, dtype=torch.float64)
+        for _ in range(2):
+            events.clear()
+            self.assertEqual(compiled(x), (x + 1).sin().cos() + 2)
+            self.assertEqual(events, ["before", "after"])
+        self.assertEqual(
+            [
+                [node.target for node in graph.graph.nodes if node.op == "call_method"]
+                for graph in backend.graphs
+            ],
+            [["sin"], ["cos"]],
+        )
+
+    @parametrize("dynamic", [False, True])
+    def test_ngb_suppressed_for_resize_out(self, dynamic):
+        from torch._prims_common.wrappers import _maybe_resize_out
+
+        def fn(x, out):
+            result = x.sin()
+            return _maybe_resize_out(out, result.shape).copy_(result)
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        x = torch.arange(3, dtype=torch.float64)
+        out = torch.empty(2, dtype=x.dtype)
+        with self.assertWarns(UserWarning):
+            actual = torch.compile(fn, backend=backend, dynamic=dynamic)(x, out)
+        self.assertIs(actual, out)
+        self.assertEqual(actual, x.sin())
+        targets = [
+            node.target
+            for graph in backend.graphs
+            for node in graph.graph.nodes
+            if node.op == "call_method"
+        ]
+        self.assertIn("sin", targets)
+        self.assertIn("copy_", targets)
+        metrics = torch._dynamo.utils.get_compilation_metrics()
+        self.assertTrue(
+            all(metric.graph_op_count for metric in metrics),
+            [(metric.co_name, metric.graph_op_count) for metric in metrics],
+        )
+
+    def test_ngb_allowed_in_testing_callback(self):
+        from torch.testing._internal.common_utils import outs_and_grads
+
+        events = []
+
+        def callback(x):
+            events.append("before")
+            result = x.sin()
+            torch._dynamo.graph_break()
+            events.append("after")
+            return result.cos()
+
+        def fn(x):
+            result, _ = outs_and_grads(callback, (x + 1,), ())
+            return result + 2
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=backend)
+        x = torch.arange(3, dtype=torch.float64)
+        for _ in range(2):
+            events.clear()
+            self.assertEqual(compiled(x), (x + 1).sin().cos() + 2)
+            self.assertEqual(events, ["before", "after"])
+        self.assertEqual(
+            [
+                [node.target for node in graph.graph.nodes if node.op == "call_method"]
+                for graph in backend.graphs
+            ],
+            [["sin"], ["cos"]],
+        )
 
     def test_complex_nan_constant_across_graph_break(self):
         """Graph break with complex constants containing nan/inf imaginary parts.
@@ -2529,6 +2729,194 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         values, specs_equal = torch.compile(fn, backend=cnts)()
         self.assertEqual(values, [1])
         self.assertTrue(specs_equal)
+
+
+# Module-level so they are traced as plain functions rather than closures.
+def _break(x):
+    x = x + 1
+    torch._dynamo.graph_break()
+    return x + 2
+
+
+def _call_break(x):
+    return _break(x + 4) + 8
+
+
+def _call_call_break(x):
+    return _call_break(x + 16) + 32
+
+
+def _report_grad(x, graph_break):
+    x = x + 1
+    if graph_break:
+        torch._dynamo.graph_break()
+    return x + 2, torch.is_grad_enabled()
+
+
+class _BreakModule(torch.nn.Module):
+    def forward(self, x):
+        return _break(x)
+
+
+class _CallBreakModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.inner = _BreakModule()
+
+    def forward(self, x):
+        return self.inner(x + 4) + 8
+
+
+class _ReportGrad:
+    def method(self, x, graph_break):
+        return _report_grad(x, graph_break)
+
+
+_report_grad_obj = _ReportGrad()
+
+
+def _no_grad_function(x, graph_break):
+    x, inner_grad = torch.no_grad()(_report_grad)(x + 4, graph_break)
+    return x + 8, inner_grad, torch.is_grad_enabled()
+
+
+def _no_grad_closure(x, graph_break):
+    def inner(y):
+        return _report_grad(y, graph_break)
+
+    x, inner_grad = torch.no_grad()(inner)(x + 4)
+    return x + 8, inner_grad, torch.is_grad_enabled()
+
+
+def _no_grad_method(x, graph_break):
+    x, inner_grad = torch.no_grad()(_report_grad_obj.method)(x + 4, graph_break)
+    return x + 8, inner_grad, torch.is_grad_enabled()
+
+
+def _call_break_under_no_grad(x):
+    with torch.no_grad():
+        x, inner_grad = _report_grad(x + 4, True)
+    return x + 8, inner_grad, torch.is_grad_enabled()
+
+
+def _data_dependent(x):
+    x = x + 1
+    if x.sum() > 0:
+        return x + 2
+    return x - 2
+
+
+def _call_data_dependent(x):
+    return _data_dependent(x + 4) + 8
+
+
+def _call_break_in_try(x):
+    try:
+        x = _break(x + 1)
+    finally:
+        pass
+    return x + 2
+
+
+def _call_call_break_in_try(x):
+    return _call_break_in_try(x + 4) + 8
+
+
+@instantiate_parametrized_tests
+class NestedGraphBreakSmokeTests(torch._dynamo.test_case.TestCase):
+    """Runs nested graph breaks with nested_graph_breaks on and off.
+
+    The rest of the suite runs with nested graph breaks on, so these tests are
+    the main coverage for the legacy behavior, where the graph break moves to
+    each caller's call site and the callee is compiled as its own frame.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _check(self, fn, nested, frame_count, op_count, *args):
+        x = torch.ones(3)
+        cnts = torch._dynamo.testing.CompileCounter()
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            expected = fn(x, *args)
+            opt_fn = torch.compile(fn, backend=cnts)
+            self.assertEqual(opt_fn(x, *args), expected)
+            self.assertEqual(cnts.frame_count, frame_count)
+            self.assertEqual(cnts.op_count, op_count)
+            # Re-running must reuse the compiled frames and resume functions.
+            self.assertEqual(opt_fn(x, *args), expected)
+        self.assertEqual(cnts.frame_count, frame_count)
+        self.assertEqual(cnts.op_count, op_count)
+
+    @parametrize("nested", [True, False])
+    def test_doubly_nested_break(self, nested):
+        self._check(_call_call_break, nested, 2 if nested else 6, 6)
+
+    @parametrize("nested", [True, False])
+    def test_break_in_submodule_forward(self, nested):
+        self._check(_CallBreakModule(), nested, 2 if nested else 4, 4)
+
+    @parametrize("graph_break", [True, False])
+    @parametrize(
+        "fn",
+        [_no_grad_function, _no_grad_closure, _no_grad_method],
+        name_fn=lambda fn: fn.__name__.lstrip("_"),
+    )
+    @parametrize("nested", [True, False])
+    def test_ctx_manager_decorated_callee(self, nested, fn, graph_break):
+        # Without a graph break the callee is inlined under the context
+        # manager, and each mode enters it through a different code path.
+        if graph_break:
+            frame_count = 2 if nested else 4
+            op_count = 8 if nested else 4
+        else:
+            frame_count = 1
+            op_count = 6
+        self._check(fn, nested, frame_count, op_count, graph_break)
+
+    @parametrize("nested", [True, False])
+    def test_break_with_ctx_manager_active_in_caller(self, nested):
+        self._check(
+            _call_break_under_no_grad, nested, 2 if nested else 4, 8 if nested else 6
+        )
+
+    @parametrize("nested", [True, False])
+    def test_break_mutating_cells(self, nested):
+        def fn(x):
+            a = x + 1
+            b = x + 2
+
+            def inner():
+                nonlocal a
+                a = a + 4
+                torch._dynamo.graph_break()
+                return a + b
+
+            return inner() + a
+
+        self._check(fn, nested, 2 if nested else 4, 5)
+
+    @parametrize("nested", [True, False])
+    def test_data_dependent_branch_in_callee(self, nested):
+        cnts = torch._dynamo.testing.CompileCounter()
+        with torch._dynamo.config.patch(nested_graph_breaks=nested):
+            opt_fn = torch.compile(_call_data_dependent, backend=cnts)
+            frame_count = 2 if nested else 4
+            op_count = 6
+            # The negative branch adds one frame, then both branches reuse it.
+            for sign in (1, 1, -10, -10, 1, -10):
+                x = torch.ones(3) * sign
+                if sign < 0:
+                    frame_count = 3 if nested else 5
+                    op_count = 8 if nested else 7
+                self.assertEqual(opt_fn(x), _call_data_dependent(x))
+                self.assertEqual(cnts.frame_count, frame_count)
+                self.assertEqual(cnts.op_count, op_count)
+
+    @parametrize("nested", [True, False])
+    def test_break_in_try_block_falls_back(self, nested):
+        # Nested resumption cannot cross a try block, so both modes break at
+        # the call site.
+        self._check(_call_call_break_in_try, nested, 4, 4)
 
 
 if __name__ == "__main__":

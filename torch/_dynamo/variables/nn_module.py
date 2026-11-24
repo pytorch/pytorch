@@ -83,6 +83,7 @@ from .user_defined import can_guard_class_function_code, UserDefinedObjectVariab
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
@@ -276,6 +277,11 @@ class NNModuleVariable(VariableTracker):
         "nn_module_stack_source",
         *VariableTracker._nonvar_fields,
     }
+
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        return None
 
     def __init__(
         self, module_type: type, module_key: str, value: torch.nn.Module, **kwargs: Any

@@ -440,6 +440,25 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 num_args += 1
         codegen.append_output(create_instruction("BUILD_MAP", arg=num_args))
 
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not ConstDictVariable:
+            return super().can_reconstruct_value(codegen, visiting=visiting)
+        children: list[VariableTracker] = []
+        for key, item in self.items.items():
+            original = self.original_items.get(key.vt)
+            if not self.should_reconstruct_all:
+                if original is item:
+                    continue
+                if (
+                    type.__instancecheck__(variables.LazyVariableTracker, original)
+                    and cast(variables.LazyVariableTracker, original)._cache.vt is item
+                ):
+                    continue
+            children.extend((key.vt, item))
+        return codegen.can_reconstruct_values(children, visiting=visiting)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self._contains_self_reference() and self.source is None:
             codegen.extend_output(

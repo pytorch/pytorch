@@ -2388,6 +2388,34 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def reconstruct(self, codegen: PyCodegen) -> None:
         raise NotImplementedError
 
+    def can_reconstruct(
+        self,
+        codegen: PyCodegen,
+        *,
+        allow_cache: bool = True,
+        visiting: set[int],
+    ) -> bool | None:
+        """Return True/False only when proven; None is unknown. Never realize or emit."""
+        if self.source is not None and allow_cache:
+            if codegen.value_from_source or isinstance(
+                self.mutation_type, ValueMutationExisting
+            ):
+                return codegen.can_reconstruct(self.source, visiting=visiting)
+        return self.can_reconstruct_value(codegen, visiting=visiting)
+
+    def can_reconstruct_value(
+        self, codegen: PyCodegen, *, visiting: set[int]
+    ) -> bool | None:
+        # Keep positive proofs aligned with reconstruct and PyCodegen's special routes.
+        if isinstance(self.mutation_type, AttributeMutationNew):
+            return None
+        if (
+            type(self).reconstruct is VariableTracker.reconstruct
+            and type(self).as_python_constant is VariableTracker.as_python_constant
+        ):
+            return False
+        return None
+
     def reconstruct_pycode(self, codegen: PyCodegen) -> str:
         raise NotImplementedError(f"reconstruct_pycode not implemented for {self}")
 
