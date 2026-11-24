@@ -1111,8 +1111,9 @@ class NativeFunction:
         # but is not actually random, feel free to amend this to special case.
         # The stateless _philox_* ops are fully determined by their key input
         # (e.g. _philox_randint_), so they are intentionally not tagged.
+        is_philox = "_philox_" in str(self.func.name)
         if (
-            ("rand" in str(self.func.name) and "_philox_" not in str(self.func.name))
+            ("rand" in str(self.func.name) and not is_philox)
             or (
                 (
                     "dropout" in str(self.func.name)
@@ -1123,6 +1124,7 @@ class NativeFunction:
                 # Backwards of dropout is typically deterministic
                 and "backward" not in str(self.func.name)
                 and str(self.func.name.name) != "_cudnn_init_dropout_state"
+                and not is_philox
             )
             or self.func.arguments.has_generator_arg()
         ):
