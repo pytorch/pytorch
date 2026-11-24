@@ -178,6 +178,37 @@ class TestStaticTritonLauncherUnit(TestCase):
             asm={"hsaco": b"hsaco"}, global_scratch_size=0, tmem_size=1024
         ).load_kernel(0)
 
+    @parametrize(
+        "binary,version,uses_static_lds",
+        [
+            ("hsaco", (3, 9), False),
+            ("hsaco", (3, 10), True),
+            ("cubin", (3, 10), False),
+        ],
+    )
+    def test_static_lds_launches_without_dynamic_shared_memory(
+        self, binary, version, uses_static_lds
+    ):
+        shared = 135040
+        with mock.patch(
+            "torch._inductor.runtime.static_triton_launcher.get_triton_version",
+            return_value=version,
+        ):
+            kernel = self._global_scratch_kernel(
+                asm={binary: binary.encode()}, global_scratch_size=0, shared=shared
+            )
+        self.assertEqual(kernel.uses_static_lds, uses_static_lds)
+        kernel.function = None
+        kernel.C_impl = mock.Mock()
+        kernel.C_impl._load_kernel.return_value = (1, 2, 3, 4)
+        kernel.load_kernel(0)
+        kernel.run(1, 1, 1, 0, 5)
+        self.assertEqual(kernel.C_impl._load_kernel.call_args.args[2], shared)
+        self.assertEqual(
+            kernel.C_impl._launch_kernel.call_args.args[5],
+            0 if uses_static_lds else shared,
+        )
+
     @parametrize("retry_succeeds", [False, True])
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @skipIfRocm
@@ -409,6 +440,19 @@ class TestStaticTritonLauncherUnit(TestCase):
         del fast_launcher
         gc.collect()
         self.assertIsNone(owner_ref())
+
+    @parametrize("uses_static_lds", [False, True])
+    def test_build_fast_launcher_static_lds(self, uses_static_lds):
+        autotuner, launcher, kernel = self._make_autotuner_and_static_launcher(
+            "hip", StaticallyLaunchedCudaKernel
+        )
+        kernel.shared = 135040
+        kernel.uses_static_lds = uses_static_lds
+        with mock.patch("torch._C._FastCudaLauncher", create=True) as fast_launcher:
+            self.assertIsNotNone(autotuner._build_fast_launcher(launcher))
+        self.assertEqual(
+            fast_launcher.call_args.args[2], 0 if uses_static_lds else 135040
+        )
 
     def test_build_fast_launcher_unsupported_device(self):
         # Backends that register a static launcher of their own through

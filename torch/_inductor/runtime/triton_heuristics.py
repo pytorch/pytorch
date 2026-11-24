@@ -2945,7 +2945,7 @@ class CachingAutotuner(KernelInterface):
             # A raw CUfunction on CUDA/HIP, the loaded kernel's capsule on XPU.
             kernel_function = kernel.function
             num_warps = kernel.num_warps
-            shared = kernel.shared
+            shared = 0 if kernel.uses_static_lds else kernel.shared
             arg_tys = kernel.arg_tys
             if kernel_function is None or num_warps is None:
                 return None
