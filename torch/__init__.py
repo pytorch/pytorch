@@ -28,7 +28,10 @@ from types import ModuleType as _ModuleType
 from typing import (
     Any as _Any,
     get_origin as _get_origin,
+    LiteralString as _LiteralString,
+    Never as _Never,
     overload as _overload,
+    Self as _Self,
     TYPE_CHECKING,
     TypeAlias as _TypeAlias,
     TypeGuard as _TypeGuard,
@@ -36,10 +39,7 @@ from typing import (
 )
 from typing_extensions import (
     deprecated as _deprecated,
-    LiteralString as _LiteralString,
-    Never as _Never,
     ParamSpec as _ParamSpec,
-    Self as _Self,
     TypeIs as _TypeIs,
 )
 
@@ -209,6 +209,7 @@ if sys.platform == "win32":
             sysconfig.get_config_var("userbase"), "Library", "bin"
         )
         py_root_bin_path = os.path.join(sys.exec_prefix, "bin")
+        cudnn_dll_path = th_dll_path
         if cuda_version:
             try:
                 # CUDA Pathfinder locates and loads the CUDA runtime DLLs installed
@@ -228,7 +229,15 @@ if sys.platform == "win32":
                     "cupti",
                     "cudnn",
                 ):
-                    load_nvidia_dynamic_lib(lib)
+                    try:
+                        loaded = load_nvidia_dynamic_lib(lib)
+                        if lib == "cudnn" and loaded.abs_path:
+                            cudnn_dll_path = os.path.dirname(loaded.abs_path)
+                    except Exception:
+                        warnings.warn(
+                            f"cuda-pathfinder is unable to find {lib} lib in the current python environment or sys PATH variable",
+                            stacklevel=2,
+                        )
             except Exception:
                 warnings.warn(
                     "cuda-pathfinder is not installed or is unable to find DLLs; falling back to CUDA DLLs from the torch package.",
@@ -287,12 +296,7 @@ if sys.platform == "win32":
         )
 
         kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
-        with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
         prev_error_mode = kernel32.SetErrorMode(0x0001)
-
-        kernel32.LoadLibraryW.restype = ctypes.c_void_p
-        if with_load_library_flags:
-            kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
         for dll_path in dll_paths:
             os.add_dll_directory(dll_path)
@@ -312,32 +316,35 @@ if sys.platform == "win32":
                 ).strip()
             )
 
-        dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
-        path_patched = False
-        for dll in dlls:
-            is_loaded = False
-            if with_load_library_flags:
-                res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
-                last_error = ctypes.get_last_error()
-                if res is None and last_error != 126:
-                    err = ctypes.WinError(last_error)
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
-                elif res is not None:
-                    is_loaded = True
-            if not is_loaded:
-                if not path_patched:
-                    os.environ["PATH"] = ";".join(dll_paths + [os.environ["PATH"]])
-                    path_patched = True
-                res = kernel32.LoadLibraryW(dll)
-                if res is None:
-                    err = ctypes.WinError(ctypes.get_last_error())
-                    err.strerror += (
-                        f' Error loading "{dll}" or one of its dependencies.'
-                    )
-                    raise err
+        # cudnn64_9.dll loads its sub-libraries (cudnn_graph64_9.dll, ...) by bare
+        # name on first use, which searches PATH. Preload them from the directory
+        # cudnn64_9.dll comes from (cuda-pathfinder's, else torch\lib) so a missing
+        # or different cuDNN on PATH is never used.
+        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+        for dll in glob.glob(os.path.join(cudnn_dll_path, "cudnn*.dll")):
+            if kernel32.LoadLibraryExW(dll, None, 0x00001100) is None:
+                err = ctypes.WinError(ctypes.get_last_error()).strerror
+                warnings.warn(f'Failed to preload "{dll}": {err}', stacklevel=2)
+
+        # The XPU runtime DLLs (SYCL, Unified Runtime, oneMKL) are installed in
+        # <prefix>\Library\bin and resolve some of their dependencies, such as
+        # libmmd.dll and mkl_core.3.dll, through the standard search order, which
+        # includes PATH but not os.add_dll_directory. Conda activation puts that
+        # directory on PATH; a venv does not, so add it here.
+        from torch.version import xpu as xpu_version
+
+        if xpu_version:
+            path_entries = os.environ.get("PATH", "").split(os.pathsep)
+            on_path = {os.path.normcase(os.path.normpath(p)) for p in path_entries if p}
+            xpu_dll_paths = [
+                p
+                for p in (py_dll_path, base_py_dll_path)
+                if p
+                and os.path.exists(p)
+                and os.path.normcase(os.path.normpath(p)) not in on_path
+            ]
+            if xpu_dll_paths:
+                os.environ["PATH"] = os.pathsep.join([*xpu_dll_paths, *path_entries])
 
         kernel32.SetErrorMode(prev_error_mode)
 
@@ -1804,7 +1811,15 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReplicationPad1d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReplicationPad3d` when attempting to differentiate a CUDA tensor
-        * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.bmm` when called on sparse-dense CUDA tensors, except for a sparse
+          CSR tensor on ROCm
+        * :func:`torch.mm`, :func:`torch.addmm`, :func:`torch.sparse.mm` and
+          :func:`torch.sparse.addmm` when called on sparse-dense CUDA tensors with a
+          sparse COO, CSR or CSC operand, except on ROCm
+        * :func:`torch.mv` when called on a sparse COO, CSR or CSC CUDA tensor and
+          :func:`torch.addmv` when called on a sparse CSR or CSC CUDA tensor, except on ROCm
+        * :func:`torch.baddbmm` when called on a sparse CSR CUDA tensor, except on ROCm
+        * :func:`torch.hspmm` when called on a CUDA tensor, except on ROCm
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.__getitem__` when attempting to differentiate a CPU tensor
           and the index is a list of tensors
@@ -1822,16 +1837,18 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.scatter` when `src` type is Tensor and called on CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='sum'`` or ``reduce='mean'`` and called on CUDA tensor
         * :class:`torch.nn.MaxPool3d` when attempting to differentiate a CUDA tensor
+        * :func:`torch.nn.functional.interpolate` with ``mode='bilinear'`` and ``antialias=False``
+          when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.Embedding` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on MPS tensor
         * :func:`torch.Tensor.index_reduce` with ``reduce='prod'\'mean'``
           when called on an MPS tensor with floating or complex dtype
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate an MPS tensor
         * :func:`torch.nn.MaxPool2d`, :func:`torch.nn.MaxPool3d`, :func:`torch.nn.AdaptiveMaxPool2d`,
-          :func:`torch.nn.AvgPool2d`, and :func:`torch.nn.AvgPool3d` when attempting to differentiate
-          an MPS tensor
+          and :func:`torch.nn.AvgPool3d` when attempting to differentiate an MPS tensor
         * :func:`torch.nn.functional.interpolate` when attempting to differentiate an MPS tensor
           in some cases
+        * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when ``mode=True``:
@@ -1849,7 +1866,6 @@ def use_deterministic_algorithms(
           and one of the following modes is used:
 
           - ``linear``
-          - ``bilinear``
           - ``bicubic``
           - ``trilinear``
 
@@ -1857,7 +1873,6 @@ def use_deterministic_algorithms(
         * :class:`torch.nn.ReflectionPad2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.ReflectionPad3d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.NLLLoss` when called on a CUDA tensor
-        * :class:`torch.nn.CTCLoss` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.EmbeddingBag` when attempting to differentiate a CUDA tensor when
           ``mode='max'``
         * :func:`torch.Tensor.put_` when ``accumulate=False``
@@ -1867,6 +1882,10 @@ def use_deterministic_algorithms(
           tensor is given
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.Tensor.scatter_reduce` when called on a CUDA tensor
+        * :func:`torch.mm`, :func:`torch.addmm`, :func:`torch.sparse.mm`, :func:`torch.sparse.addmm`,
+          :func:`torch.mv`, :func:`torch.addmv`, :func:`torch.baddbmm` and :func:`torch.hspmm`
+          when called on sparse-dense tensors on ROCm, with the sparse layouts listed above, and
+          :func:`torch.bmm` when called on a sparse CSR tensor on ROCm
         * :func:`torch.Tensor.index_put` with ``accumulate=True`` when called on
           an MPS tensor with floating or complex dtype
         * :func:`torch.kthvalue` when called on an MPS tensor
@@ -2705,9 +2724,7 @@ del _LegacyStorage
 # needs to be before the submodule imports to avoid circular dependencies
 def _assert(condition: object, message: object) -> None:
     r"""A wrapper around Python's assert which is symbolically traceable."""
-    if type(condition) is not torch.Tensor and overrides.has_torch_function(
-        (condition,)
-    ):
+    if overrides.has_torch_function((condition,)):
         return overrides.handle_torch_function(
             _assert, (condition,), condition, message
         )

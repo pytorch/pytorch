@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _init_counter = 0
 _init_counter_lock = threading.Lock()
+_deprecation_warned = False
 
 
 def is_available() -> bool:
@@ -102,6 +103,10 @@ if is_available():
         and distributed autograd, which immediately makes the current
         process ready to send and receive RPCs.
 
+        .. deprecated:: 2.16
+            ``torch.distributed.rpc`` is deprecated and will be removed in
+            a future version. See :ref:`distributed-rpc-framework` for alternatives.
+
         Args:
             name (str): a globally unique name of this node. (e.g.,
                 ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
@@ -126,6 +131,15 @@ if is_available():
                 are available.
         """
         torch._C._log_api_usage_once("torch.distributed.init_rpc")
+        global _deprecation_warned
+        if not _deprecation_warned or torch.is_warn_always_enabled():
+            warnings.warn(
+                "torch.distributed.rpc is deprecated since 2.16 and will be removed in a future version. "
+                "See https://docs.pytorch.org/docs/main/distributed/rpc.html for alternatives.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            _deprecation_warned = True
         if backend is not None and not isinstance(
             backend, backend_registry.BackendType
         ):

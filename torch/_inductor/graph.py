@@ -24,6 +24,10 @@ import torch.fx
 from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._higher_order_ops.user_kernel_hop import (
+    get_user_kernel_hop_info,
+    is_user_kernel_mutation_hop,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     is_custom_class,
@@ -36,7 +40,11 @@ from torch._prims_common import (
     compute_required_storage_length,
     make_channels_last_strides_for,
 )
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensorMode,
+    is_fake_tensor,
+)
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -116,6 +124,7 @@ from .utils import (
     get_donated_idxs,
     get_sympy_Expr_dtype,
     GraphPartitionMap,
+    GraphPartitionPlan,
     is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
@@ -303,10 +312,7 @@ def mark_nodes_dislike_padding(
         )
 
     for cur in reversed(g.nodes):
-        if isinstance(
-            cur.target,
-            torch._higher_order_ops.triton_kernel_wrap.TritonKernelWrapperMutation,
-        ):
+        if is_user_kernel_mutation_hop(cur.target):
             cur.meta["dislike_padding"] = True
             continue
 
@@ -422,6 +428,7 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+        partition_plan: GraphPartitionPlan | None = None,
     ) -> None:
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
@@ -461,6 +468,7 @@ class GraphLowering(torch.fx.Interpreter):
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
         self.graph_input_storage_offsets: dict[str, Expr] = {}
+        self.inputs_with_negative_as_strided_offset: OrderedSet[str] = OrderedSet()
         self.symbolic_input_sources: dict[
             sympy.Symbol, tuple[str, Literal["size", "stride"], int]
         ] = {}
@@ -601,7 +609,19 @@ class GraphLowering(torch.fx.Interpreter):
         ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
+        # An as_strided of a graph input that may read outside the input's own
+        # elements. AOTI's CUDA graphs copy only those, so
+        # aot_inductor.cudagraphs rejects such graphs.
+        self.input_as_strided_node: torch.fx.Node | None = None
         self.kernel_free_cudagraph: bool = False
+        # How this compile is split into partitions, and what for. Without a
+        # plan it follows config.graph_partition, which is patched off during
+        # cpp_wrapper/fx_wrapper/AOT lowering (maybe_disable_graph_partition).
+        self.partition_plan = (
+            GraphPartitionPlan.from_config()
+            if partition_plan is None
+            else partition_plan
+        )
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -1009,6 +1029,7 @@ class GraphLowering(torch.fx.Interpreter):
             is_inference=self.is_inference,
             is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
+            partition_plan=GraphPartitionPlan.no_partition(),
         )
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
@@ -1080,15 +1101,19 @@ class GraphLowering(torch.fx.Interpreter):
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
-    def add_device_info(self, device: torch.device) -> None:
+    def add_device_info(self, device: torch.device, *, runs_work: bool = True) -> None:
         self.device_types.add(device.type)
         if device.index is not None:
             self.device_idxs.add(device.index)
-        if V.graph.current_node and device not in self.device_node_mapping:
+        if (
+            runs_work
+            and V.graph.current_node
+            and device not in self.device_node_mapping
+        ):
             self.device_node_mapping[device] = V.graph.current_node
 
     @property
-    def fake_mode(self) -> torch._subclasses.fake_tensor.FakeTensorMode:
+    def fake_mode(self) -> FakeTensorMode | CppFakeTensorMode:
         return V.fake_mode
 
     @property
@@ -1572,7 +1597,7 @@ class GraphLowering(torch.fx.Interpreter):
                         old_args, old_kwargs = normalize(old_args, old_kwargs)
 
                         args, kwargs = constrain_to_fake_tensors(
-                            args, kwargs, fake_args, fake_kwargs
+                            args, kwargs, fake_args, fake_kwargs, fx_node=n
                         )
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
@@ -1903,18 +1928,17 @@ class GraphLowering(torch.fx.Interpreter):
                 return name is not None and name == new_arg.maybe_get_name()
             return False
 
-        if fx_node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+        user_kernel_hop = get_user_kernel_hop_info(fx_node.target, "mutation")
+        if user_kernel_hop is not None:
             kwargs = fx_node.kwargs["kwargs"]
             if not isinstance(kwargs, dict):
                 raise AssertionError(f"Expected dict, got {type(kwargs)}")
-            mutated = torch._higher_order_ops.triton_kernel_wrap.get_mutated_tensors(
-                old_kwargs["kernel_idx"],
-                old_kwargs["constant_args_idx"],
+            mutated = user_kernel_hop.get_mutated_tensors(
+                old_kwargs,
                 {
                     k: v.meta["val"] if isinstance(v, torch.fx.Node) else v
                     for k, v in kwargs.items()
                 },
-                old_kwargs["tma_descriptor_metadata"],
             )
             for name in mutated:
                 old_arg = old_kwargs["kwargs"][name]
@@ -2101,14 +2125,11 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
-                and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
-                and config.triton_kernel_default_layout_constraint != "flexible_layout"
+                and (info := get_user_kernel_hop_info(n.target, "mutation")) is not None
+                and (constraint := info.get_layout_constraint()) != "flexible_layout"
             ):
-                debug("user_defined_triton_kernel_layout_constraints")
-                if (
-                    config.triton_kernel_default_layout_constraint
-                    == "needs_fixed_stride_order"
-                ):
+                debug("user_defined_kernel_layout_constraints")
+                if constraint == "needs_fixed_stride_order":
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
 
@@ -2122,6 +2143,7 @@ class GraphLowering(torch.fx.Interpreter):
                             kwargs,
                             inp_args,
                             inp_kwargs,
+                            fx_node=n,
                         )
                     else:
                         args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
@@ -2129,7 +2151,8 @@ class GraphLowering(torch.fx.Interpreter):
                     self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
                 else:
                     raise RuntimeError(
-                        f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
+                        f"Unknown layout constraint for {info.dsl} user kernels: "
+                        f"{constraint}"
                     )
             else:
                 debug("")
@@ -2984,7 +3007,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # The JIT wrapper keeps lazy kernel state in function-local statics.
         # Compile a fresh wrapper for each first pass so autotuning always reruns.
-        cpp_source += f"\n// AOTI lazy autotune first pass: {id(self)}\n"
+        # Not id(self): a later graph can reuse a freed graph's id.
+        cpp_source += f"\n// AOTI lazy autotune first pass: {self.post_grad_graph_id}\n"
         for name in kernel_names:
             CudaKernelParamCache.cache.pop(name, None)
 
@@ -3282,14 +3306,27 @@ class GraphLowering(torch.fx.Interpreter):
     def get_output_names(self) -> list[str]:
         return self._get_output_names(self.graph_outputs)
 
+    def is_zero_dim_cpu_buffer(self, name: str) -> bool:
+        """Check CPU scalar eligibility, not whether codegen unwraps the buffer.
+
+        GPU consumers must first register intermediate buffers with the
+        scheduler; `should_unwrap_unspec_arg` decides whether to unwrap them.
+        """
+        buffer = self.name_to_buffer.get(name, self.graph_inputs.get(name))
+        return (
+            isinstance(buffer, (ir.Buffer, TensorBox))
+            and get_device_type(buffer) == "cpu"
+            and not isinstance(
+                buffer.get_output_spec(), (ir.NoneLayout, ir.MultiOutputLayout)
+            )
+            and buffer.get_size() == []
+        )
+
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
         return (
-            name in self.graph_inputs
-            and self.graph_inputs[name].get_numel() == 1
-            and len(self.graph_inputs[name].get_size()) == 0
-            and get_device_type(self.graph_inputs[name]) == "cpu"
+            name in self.graph_inputs and self.is_zero_dim_cpu_buffer(name)
         ) or name in self.zero_dim_cpu_tensor_list
 
 
