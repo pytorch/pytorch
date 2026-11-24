@@ -129,6 +129,8 @@ void set_params_fprop(Flash_fwd_params &params,
         params.k_batch_stride = k.stride(0);
         params.v_batch_stride = v.stride(0);
         params.o_batch_stride = out.stride(0);
+        // mha_varlen_fwd's packed path passes 4D views of q and out, whose stride(0) already is
+        // the batch stride; do not scale it by seqlen_q as upstream does for its 3D packed q.
     }
 
     params.cu_seqlens_q = static_cast<int *>(cu_seqlens_q_d);
@@ -681,8 +683,9 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
     // H/t Daniel Haziza
-    // The packed layout drops cu_seqlens_q, so every sequence needs exactly one query token
-    // (total_q == batch_size); a sequence with none would break the view below.
+    // The packed layout drops cu_seqlens_q, so every sequence needs exactly one query token:
+    // with q holding no rows past cu_seqlens_q[-1] (T_q = sum of query lengths, as varlen_attn
+    // documents), that is total_q == batch_size. A sequence with none would break the view below.
     const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && q.size(0) == batch_size && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
     at::Tensor temp_q = q;
     const int ngroups = num_heads / num_heads_k;

@@ -1533,8 +1533,10 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         the KV heads repeated, which FA2 runs unpacked and without split-KV."""
         torch.manual_seed(42)
         num_heads, num_kv_heads, head_dim, page_size = 8, 2, 64, 256
-        kv_lens = [300, 1, 520, 256]
-        q_lens = [1, 0, 1, 1] if empty_sequence else [1, 1, 1, 1]
+        # 5 sequences against 4 query heads per KV head, so that the packed LSE layouts
+        # (nheads_kv, ngroups, b) and (nheads_kv, b, ngroups) differ in shape.
+        kv_lens = [300, 1, 520, 256, 77]
+        q_lens = [1, 0, 1, 1, 1] if empty_sequence else [1, 1, 1, 1, 1]
         batch_size = len(kv_lens)
         group = num_heads // num_kv_heads
 
@@ -1709,6 +1711,53 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         decode_out = run(num_decode)
         mixed_out = run(len(kv_lens))
         self.assertEqual(mixed_out[:num_decode], decode_out, atol=0, rtol=0)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support num_splits or block_table")
+    def test_fa2_paged_split_kv_writes_only_out(self, device):
+        """Split-KV's combine kernel writes max_seqlen_q rows per sequence whatever
+        cu_seqlens_q says. A paged call whose one sequence is shorter than max_seqlen_q
+        must therefore not split, or it writes past ``out``."""
+        torch.manual_seed(42)
+        num_heads, head_dim, page_size, num_pages = 4, 64, 256, 4
+        q_len, max_q, kv_len = 1, 4, num_pages * page_size
+        buffer = torch.full(
+            (max_q, num_heads, head_dim),
+            float("nan"),
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        out = buffer[:q_len]
+        q = torch.randn_like(out)
+        k = torch.randn(
+            num_pages,
+            page_size,
+            num_heads,
+            head_dim,
+            device=device,
+            dtype=torch.bfloat16,
+        )
+        v = torch.randn_like(k)
+        with _use_backend("fa2"), torch.no_grad():
+            varlen_attn_out(
+                out,
+                q,
+                k,
+                v,
+                make_cu_seq([q_len], device),
+                make_cu_seq([kv_len], device),
+                max_q,
+                kv_len,
+                num_splits=2,
+                seqused_k=torch.tensor([kv_len], device=device, dtype=torch.int32),
+                block_table=torch.arange(
+                    num_pages, device=device, dtype=torch.int32
+                ).view(1, num_pages),
+            )
+        self.assertFalse(out.isnan().any())
+        self.assertTrue(buffer[q_len:].isnan().all())
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

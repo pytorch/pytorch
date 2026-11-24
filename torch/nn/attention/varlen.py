@@ -414,9 +414,9 @@ def varlen_attn(
             bitwise identical outputs are guaranteed for a given sequence
             regardless of what other sequences are in the batch, at the
             cost of lower GPU utilization when there are few queries. When
-            ``None`` (default), the kernel chooses automatically. FA2 runs a
-            single split for calls it cannot split, such as most calls with paged
-            KV and several sequences.
+            ``None`` (default), the kernel chooses automatically. FA2 splits KV
+            only for some decode and paged-KV calls and runs a single split for
+            the others.
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H_q, D)`.
