@@ -6248,11 +6248,51 @@ class TestSDPAAccelerator(NNTestCase):
             fudge_factors=fudge_factors,
         )
 
+    @onlyCUDA
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm CK SDPA regression")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CK_SDPA, "CK SDPA is not available")
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("head_dim", [32, 64, 80, 96, 128, 160, 192, 256])
+    @parametrize("is_causal", [False, True])
+    def test_flash_attention_ck_head_dims_gradients(
+        self, device, dtype: torch.dtype, head_dim: int, is_causal: bool
+    ):
+        previous_library = torch.backends.cuda.preferred_rocm_fa_library()
+        try:
+            torch.backends.cuda.preferred_rocm_fa_library("ck")
+            self.assertEqual(
+                torch.backends.cuda.preferred_rocm_fa_library(),
+                torch._C._ROCmFABackend.Ck,
+            )
+            seqlen_q, seqlen_k = 129, 129 if is_causal else 145
+            shapes = (
+                (2, 2, seqlen_q, head_dim),
+                (2, 2, seqlen_k, head_dim),
+                (2, 2, seqlen_k, head_dim),
+            )
+            q, k, v = (
+                torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+                for shape in shapes
+            )
+            refs = query_key_value_clones(q, k, v, dtype=torch.float32)
+            grad_out = torch.randn_like(q)
+            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                out = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
+                grads = torch.autograd.grad(out, (q, k, v), grad_out)
+            with sdpa_kernel(backends=[SDPBackend.MATH]), tf32_off():
+                ref_out = F.scaled_dot_product_attention(*refs, is_causal=is_causal)
+                ref_grads = torch.autograd.grad(ref_out, refs, grad_out.float())
+            for name, actual, expected in zip(
+                ("out", "dq", "dk", "dv"), (out, *grads), (ref_out, *ref_grads)
+            ):
+                with self.subTest(tensor=name):
+                    self.assertTrue(torch.isfinite(actual).all())
+                    self.assertTrue(torch.isfinite(expected).all())
+                    self.assertEqual(actual.float(), expected, atol=1e-2, rtol=1e-2)
+        finally:
+            torch.backends.cuda.preferred_rocm_fa_library(previous_library)
+
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Does not support SDPA or pre-SM80 hardware",
-    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_CK_SDPA,
         "Regression is specific to the ROCm CK SDPA backend",
@@ -6352,10 +6392,6 @@ class TestSDPAAccelerator(NNTestCase):
             self.assertEqual(actual.float(), expected, atol=tol * expected.abs().max().item(), rtol=0, msg=name)
 
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Does not support SDPA or pre-SM80 hardware",
-    )
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_CK_SDPA,
         "Regression is specific to the ROCm CK SDPA backend",
@@ -6490,10 +6526,6 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertEqual(kept, grad_v.transpose(-2, -1) != 0)
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Does not support SDPA or pre-SM80 hardware",
-    )
-    @unittest.skipIf(
         not PLATFORM_SUPPORTS_CK_SDPA,
         "Regression is specific to the ROCm CK SDPA backend",
     )
@@ -6560,10 +6592,6 @@ class TestSDPAAccelerator(NNTestCase):
                 _check_equal(golden, lp_ref, out, 4.0, f"out[{name}]")
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Does not support SDPA or pre-SM80 hardware",
-    )
-    @unittest.skipIf(
         not PLATFORM_SUPPORTS_CK_SDPA,
         "Regression is specific to the ROCm CK SDPA backend",
     )
@@ -6576,7 +6604,7 @@ class TestSDPAAccelerator(NNTestCase):
         # The shape from D108947199: 4000 query heads over 2 kv heads at
         # seqlen_q == 1, which mha_fwd_ck.hip:314 rewrites into a seqlen_q == 2000
         # launch (ngroups becomes the query length). test_flash_attention_ck_gqa_
-        # seqlen_q_1 above only reaches ngroups 4 and 8, so nothing else covers a
+        # seqlen_q_1 above only reaches ngroups 4 and 2, so nothing else covers a
         # post-swap query length in the thousands. D108947199 itself is a separate
         # accepted-but-unlanded follow-up; this pins the numerics of the swapped
         # launch, it is not a fail-before repro for that diff.
@@ -7864,6 +7892,23 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
             self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
             self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("backend", [SDPBackend.OVERRIDEABLE, SDPBackend.MATH], name_fn=lambda b: b.name.lower())
+    @parametrize("batch", [4, 64, 512, 18432])
+    def test_sdpa_single_kv_token(self, device, batch, backend, dtype):
+        # https://github.com/pytorch/pytorch/issues/203509: with a single key/value token,
+        # SDPA returned NaN/Inf from finite fp16/bf16 inputs at large batch sizes.
+        # The softmax over one key is exactly 1, so the output must equal v broadcast over the queries.
+        torch.manual_seed(0)
+        heads, seq_q, head_dim = 5, 14, 64
+        q = torch.randn(batch, heads, seq_q, head_dim, device=device, dtype=dtype)
+        k = torch.randn(batch, heads, 1, head_dim, device=device, dtype=dtype)
+        v = torch.randn(batch, heads, 1, head_dim, device=device, dtype=dtype)
+        with sdpa_kernel(backends=[backend]):
+            out = F.scaled_dot_product_attention(q, k, v)
+        self.assertTrue(torch.isfinite(out).all())
+        self.assertEqual(out, v.expand_as(out))
 
 class TestAttnBias(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
