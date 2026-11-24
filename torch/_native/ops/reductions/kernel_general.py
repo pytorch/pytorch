@@ -19,6 +19,7 @@ from ...cutedsl import launch as _L
 from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from . import tile
+from .inner_tree_plan import _K_INNER_TREE_THRESHOLD
 from .traits import WARP
 
 
@@ -546,9 +547,12 @@ def _reduce(
 
     from . import kernel_rowtile as rt
 
+    # Warps past a row's end start at column count and add up to one chunk, at most one
+    # _K_INNER_TREE_THRESHOLD batch, and their Int32 columns must not wrap.
     if (
         rt.inner_tree_order_enabled()
-        and 0 < count < _INT32_LIMIT
+        and 0 < count
+        and count + _K_INNER_TREE_THRESHOLD < _INT32_LIMIT
         and num_o < _INT32_LIMIT
     ):
         red_pairs, kept_pairs = _ti_pairs(x, _probe(x, red_axes))
