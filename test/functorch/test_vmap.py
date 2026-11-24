@@ -3622,6 +3622,25 @@ class TestVmapOperators(Namespace.TestVmapBase):
                 chunk_size=2,
             )(x)
 
+    def test_vmap_chunk_size_empty_batch(self):
+        # chunk_size must not change semantics on an empty batch.
+        x = torch.randn(0, 3)
+
+        def f(t):
+            return t * 2
+
+        expected = vmap(f)(x)
+        for chunk_size in (1, 2, 100):
+            output = vmap(f, chunk_size=chunk_size)(x)
+            self.assertEqual(output, expected)
+
+        def g(t):
+            return t * 2, t + 1
+
+        expected = vmap(g)(x)
+        output = vmap(g, chunk_size=2)(x)
+        self.assertEqual(output, expected)
+
     @parametrize("in_dim", [0, 1])
     @parametrize("out_dim", [0, 1])
     @parametrize("randomness", ["error", "same"])
