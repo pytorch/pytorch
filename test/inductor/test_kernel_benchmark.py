@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     recover_orig_fp32_precision,
-    skipIf,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 from torch.utils._triton import has_triton
@@ -421,8 +420,12 @@ class TestKernelBenchmark(TestCase):
     @config.patch(
         max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
     )
-    @skipIf(not IS_BIG_GPU, "requires a big GPU (not enough SM)")
     def test_slice_mm_bandwidth_computation(self, device):
+        if torch.device(device).type == "xpu" and not torch._inductor.utils.is_big_gpu(
+            torch.device(device)
+        ):
+            raise unittest.SkipTest("unsupported device")
+
         M, N, K = 1000, 2000, 3000
 
         @torch.compile
