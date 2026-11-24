@@ -148,8 +148,8 @@ class PrecompileContext:
         backend_artifacts: dict[_BackendId, BackendCacheArtifact[Any]],
     ) -> dict[str, Any]:
         """
-        Return a JSON serializable debug dump of all entries in the precompile context
-        Called in serialize before serialization, and in populate_caches after deserialization
+        Return a JSON serializable debug dump of all entries in the precompile context.
+        create_cache_entries logs it as a structured trace artifact and returns it.
         """
         debug_info: defaultdict[str, list[Any]] = defaultdict(list)
         for key, cache_entry in dynamo_entries.items():
