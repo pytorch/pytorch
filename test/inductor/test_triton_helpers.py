@@ -686,27 +686,25 @@ instantiate_device_type_tests(
     allow_xpu=True,
 )
 
-if HAS_TRITON:
-    instantiate_device_type_tests(
-        MinimumMaximumTest,
-        globals(),
-        except_for=("cpu",),
-        allow_xpu=True,
-    )
+instantiate_device_type_tests(
+    MinimumMaximumTest,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
-if HAS_TRITON:
-    instantiate_device_type_tests(
-        OnlineSoftmaxCombineTest,
-        globals(),
-        except_for=("cpu",),
-        allow_xpu=True,
-    )
-    instantiate_device_type_tests(
-        RoundingToIntTest,
-        globals(),
-        except_for=("cpu",),
-        allow_xpu=True,
-    )
+instantiate_device_type_tests(
+    OnlineSoftmaxCombineTest,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    RoundingToIntTest,
+    globals(),
+    except_for=("cpu",),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
