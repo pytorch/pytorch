@@ -1067,6 +1067,7 @@ _complex_dtypes = (torch.complex32, torch.bcomplex32, torch.complex64, torch.com
 _uncastable_shell_dtypes = frozenset(
     (
         torch.float4_e2m1fn_x2,
+        torch.float6_e2m3fn_x4,
         torch.bits1x8,
         torch.bits2x4,
         torch.bits4x2,
@@ -1091,6 +1092,15 @@ def check_shell_dtype_cast(src: torch.dtype, dst: torch.dtype) -> None:
             "the nibbles (low 4 bits are the first element, high 4 bits the "
             "second); to encode, pack fp4 codes into torch.uint8 and "
             ".view(torch.float4_e2m1fn_x2)."
+        )
+    if torch.float6_e2m3fn_x4 in (src, dst):
+        raise NotImplementedError(
+            f"Casting from {src} to {dst} is not supported. "
+            "torch.float6_e2m3fn_x4 packs four fp6 values into three bytes, so "
+            "there is no elementwise conversion. To decode, use .view(torch.uint8) "
+            "and unpack each 3-byte group as a little-endian 24-bit word whose "
+            "bits [6i, 6i + 6) hold value i; to encode, pack fp6 codes the same way "
+            "into torch.uint8 and .view(torch.float6_e2m3fn_x4)."
         )
     shell = src if src in _uncastable_shell_dtypes else dst
     raise NotImplementedError(

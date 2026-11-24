@@ -9,7 +9,9 @@
     A :class:`bool` that, if True, causes uninitialized memory to be filled with
     a known value when :meth:`torch.use_deterministic_algorithms()` is set to
     ``True``. Floating point and complex values are set to NaN, and integer
-    values are set to the maximum value.
+    values are set to the maximum value. ``torch.float4_e2m1fn_x2`` and
+    ``torch.float6_e2m3fn_x4`` have no NaN, so every byte is set to ``0xFF``,
+    which makes each value the most negative finite one.
 
     Default: ``True``
 

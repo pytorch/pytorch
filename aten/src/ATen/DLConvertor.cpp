@@ -1,5 +1,6 @@
 #include <ATen/DLConvertor.h>
 #include <memory>
+#include <type_traits>
 
 using namespace std;
 namespace at {
@@ -88,6 +89,11 @@ DLDataType getDLDataType(const Tensor& t) {
       dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn;
       dtype.lanes = 2;
       dtype.bits = 4;
+      break;
+    case ScalarType::Float6_e2m3fn_x4:
+      dtype.code = DLDataTypeCode::kDLFloat6_e2m3fn;
+      dtype.lanes = 4;
+      dtype.bits = 6;
       break;
     case ScalarType::QInt8:
     case ScalarType::QUInt8:
@@ -196,7 +202,8 @@ Device dlDeviceToTorchDevice(
 
 ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype = ScalarType::Undefined;
-  if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn) {
+  if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn &&
+      dtype.code != DLDataTypeCode::kDLFloat6_e2m3fn) {
     TORCH_CHECK_BUFFER(
         dtype.lanes == 1,
         "ATen does not support lanes != 1 for dtype code", std::to_string(dtype.code));
@@ -359,6 +366,13 @@ ScalarType toScalarType(const DLDataType& dtype) {
               false, "Unsupported kDLFloat4_e2m1fn bits ", std::to_string(dtype.bits));
       }
       break;
+    case DLDataTypeCode::kDLFloat6_e2m3fn:
+      TORCH_CHECK_BUFFER(
+          dtype.bits == 6 && dtype.lanes == 4,
+          "Unsupported kDLFloat6_e2m3fn bits ", std::to_string(dtype.bits),
+          " lanes ", std::to_string(dtype.lanes), "; only bits=6, lanes=4 is supported");
+      stype = ScalarType::Float6_e2m3fn_x4;
+      break;
     default:
       TORCH_CHECK_BUFFER(false, "Unsupported code ", std::to_string(dtype.code));
   }
@@ -462,6 +476,14 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
   Device device = dlDeviceToTorchDevice(
       dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
   ScalarType stype = toScalarType(dl_tensor.dtype);
+  if constexpr (std::is_same_v<T, DLManagedTensorVersioned>) {
+    TORCH_CHECK_BUFFER(
+        dl_tensor.dtype.bits >= 8 ||
+            !(src->flags & DLPACK_FLAG_BITMASK_IS_SUBBYTE_TYPE_PADDED),
+        "Padded sub-byte DLPack tensors are not supported; ",
+        toString(stype),
+        " expects packed values");
+  }
 
   if (!dl_tensor.strides) {
     TORCH_CHECK_VALUE(dl_tensor.byte_offset == 0, "Expected zero byte_offset");
