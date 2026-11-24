@@ -42,7 +42,7 @@ void _fused_adagrad_kernel_cpu_(
   }
   TORCH_CHECK(
       at::native::check_fast_path_restrictions({params, grads, state_sums}),
-      "params, grads, and state_sums must have same dtype, device, and layout");
+      "params, grads, and state_sums must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
   for (const auto i : c10::irange(n_tensors)) {
     fused_adagrad_stub(
         kCPU,

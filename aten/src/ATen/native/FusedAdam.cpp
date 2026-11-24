@@ -56,12 +56,12 @@ void _fused_adam_kernel_cpu_(
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
-        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
   } else {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs}),
-        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
+        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
   }
   at::Tensor max_exp_avg_sq = at::Tensor();
   for (const auto i : c10::irange(n_tensors)){
@@ -146,12 +146,12 @@ void _fused_adamw_kernel_cpu_(
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
-        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
   } else {
     TORCH_CHECK(
         at::native::check_fast_path_restrictions(
             {params, grads, exp_avgs, exp_avg_sqs}),
-        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
+        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout, matching sizes and strides, and non-overlapping, dense memory");
   }
   at::Tensor max_exp_avg_sq = at::Tensor();
   for (const auto i : c10::irange(n_tensors)){
