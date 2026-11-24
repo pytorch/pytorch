@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
     from .memory import FreeableInputBuffer
+    from .select_algorithm import PrologueReuse
     from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
@@ -5969,6 +5970,106 @@ def _can_fuse_atomic_add_template_epilogue(
     ) and _is_atomic_add_mutation_epilogue(epilogue_node)
 
 
+def descriptor_prologue_source_tile_bytes(
+    reads: Any,
+    produced: Any,
+    tile_elems: int,
+    operand_numel: int,
+    why: Any = None,
+) -> int | None:
+    """Shared-memory bytes per pipeline stage for the source tiles of a
+    producer fused into a template's TMA descriptor loads, or None when a
+    source would not load through a descriptor (the template would gather it).
+
+    Mirrors load_prologue_descriptor: an affine index with positive aligned
+    strides and a contiguous dim, a TMA dtype, and an aligned base.
+    """
+    from .utils import _TMA_SUPPORTED_DTYPES, TMA_ALIGNMENT
+
+    sizevars = V.graph.sizevars
+    source_tile_bytes = 0
+    for dep in reads:
+        if not isinstance(dep, MemoryDep) or dep.name in produced:
+            continue
+        dtype = V.graph.get_dtype(dep.name)
+        coeffs = [dep.index.coeff(var) for var in dep.var_names]
+        offset = dep.index.subs(dict.fromkeys(dep.var_names, 0))
+        tma_ok = (
+            dtype in _TMA_SUPPORTED_DTYPES
+            and dep.name not in V.graph.unaligned_buffers
+            and is_affine_indexing(dep.index)
+            and all(sizevars.statically_known_gt(c, 0) for c in coeffs)
+            and (
+                not dep.var_names
+                or any(sizevars.statically_known_equals(c, 1) for c in coeffs)
+            )
+            and all(
+                sizevars.statically_known_multiple_of(e * dtype.itemsize, TMA_ALIGNMENT)
+                for e in [offset, *(c for c in coeffs if c != 1)]
+            )
+        )
+        if not tma_ok:
+            if why is not None:
+                why(
+                    "descriptor prologue fusion: source %s would not load via TMA",
+                    dep.name,
+                )
+            return None
+        if sizevars.optimization_hint(dep.get_numel(), fallback=0) >= operand_numel:
+            source_tile_bytes += tile_elems * dtype.itemsize
+    return source_tile_bytes
+
+
+def descriptor_prologue_times(
+    device: torch.device,
+    operand_dtype: torch.dtype,
+    record: PrologueReuse,
+    read_bytes: int,
+    write_bytes: int,
+    operand_numel: int,
+    out_numel: int,
+) -> tuple[float, float]:
+    """(unfused, fused) seconds for a producer of a template operand the
+    template reads through TMA descriptors (record: the input's PrologueReuse).
+
+    Unfused, the producer reads its sources and writes the operand, and the
+    template is bound by its MMAs or by reading its operands. Fused, the
+    template reads the sources instead and recomputes the producer once per
+    output tile that reads an operand tile (reuse). The producer's work runs in
+    the warps that feed the MMAs, so it adds to the MMA time, while the source
+    reads overlap both. Source re-reads hit L2 when the sources of the operand
+    tiles one wave of persistent CTAs touches fit in half of it; otherwise every
+    re-read goes to DRAM.
+    """
+    from .utils import get_device_tflops, get_gpu_dram_gbps, get_num_sms
+
+    props = torch.cuda.get_device_properties(device)
+    dram_bw = get_gpu_dram_gbps() * 1e9
+    num_sms = get_num_sms()
+    tflops = get_device_tflops(operand_dtype, device)
+    mma_s = 2 * out_numel * record.k / (tflops * 1e12) if tflops > 0 else 0.0
+    wave_tiles = math.ceil(num_sms / record.reuse)
+    working_set = read_bytes * min(1.0, wave_tiles / max(record.tiles, 1))
+    source_reads = (
+        read_bytes
+        if working_set <= props.L2_cache_size / 2
+        else read_bytes * record.reuse
+    )
+    transform_s = (
+        operand_numel
+        * record.reuse
+        / (
+            num_sms
+            * props.clock_rate
+            * 1e3
+            * config.triton.prologue_transform_elems_per_cycle
+        )
+    )
+    unfused_s = (read_bytes + write_bytes) / dram_bw + max(mma_s, write_bytes / dram_bw)
+    fused_s = max(source_reads / dram_bw, mma_s + transform_s)
+    return unfused_s, fused_s
+
+
 def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     """Check per-template flag, fall back to global config."""
     tb = template_node.get_template_node()
@@ -10673,26 +10774,11 @@ class Scheduler:
 
         Rejects the fusion when a source would not load through a descriptor
         (so the template would gather it), when the source tiles would not fit
-        in shared memory next to the compiled kernel's, or when it is slower
-        than materializing the operand:
-
-        Unfused, the producer reads its sources and writes the operand, and the
-        template is bound by its MMAs or by reading its operands. Fused, the
-        template reads the sources instead and recomputes the producer once per
-        output tile that reads an operand tile (reuse). The producer's work runs
-        in the warps that feed the MMAs, so it adds to the MMA time, while the
-        source reads overlap both. Source re-reads hit L2 when the sources of
-        the operand tiles one wave of persistent CTAs touches fit in half of
-        it; otherwise every re-read goes to DRAM.
+        in shared memory next to the compiled kernel's, or when
+        descriptor_prologue_times says it is slower than materializing the
+        operand.
         """
-        from .utils import (
-            _TMA_SUPPORTED_DTYPES,
-            get_device_tflops,
-            get_gpu_dram_gbps,
-            get_gpu_shared_memory,
-            get_num_sms,
-            TMA_ALIGNMENT,
-        )
+        from .utils import get_gpu_shared_memory
 
         record = template_buf.load_input_reuse[operand_name]
         sizevars = V.graph.sizevars
@@ -10700,41 +10786,15 @@ class Scheduler:
         operand_numel = sizevars.optimization_hint(
             sympy_product(operand.get_size()), fallback=0
         )
-        produced = prologue_node.get_buffer_names()
-
-        # Mirror load_prologue_descriptor: an affine index with positive
-        # aligned strides and a contiguous dim, a TMA dtype, aligned base.
-        source_tile_bytes = 0
-        for dep in prologue_node.read_writes.reads:
-            if not isinstance(dep, MemoryDep) or dep.name in produced:
-                continue
-            dtype = V.graph.get_dtype(dep.name)
-            coeffs = [dep.index.coeff(var) for var in dep.var_names]
-            offset = dep.index.subs({var: 0 for var in dep.var_names})
-            tma_ok = (
-                dtype in _TMA_SUPPORTED_DTYPES
-                and dep.name not in V.graph.unaligned_buffers
-                and is_affine_indexing(dep.index)
-                and all(sizevars.statically_known_gt(c, 0) for c in coeffs)
-                and (
-                    not dep.var_names
-                    or any(sizevars.statically_known_equals(c, 1) for c in coeffs)
-                )
-                and all(
-                    sizevars.statically_known_multiple_of(
-                        e * dtype.itemsize, TMA_ALIGNMENT
-                    )
-                    for e in [offset, *(c for c in coeffs if c != 1)]
-                )
-            )
-            if not tma_ok:
-                why(
-                    "descriptor prologue fusion: source %s would not load via TMA",
-                    dep.name,
-                )
-                return False
-            if sizevars.optimization_hint(dep.get_numel(), fallback=0) >= operand_numel:
-                source_tile_bytes += record.tile_elems * dtype.itemsize
+        source_tile_bytes = descriptor_prologue_source_tile_bytes(
+            prologue_node.read_writes.reads,
+            prologue_node.get_buffer_names(),
+            record.tile_elems,
+            operand_numel,
+            why,
+        )
+        if source_tile_bytes is None:
+            return False
 
         shared = getattr(template_buf, "n_shared", None)
         if shared is not None:
@@ -10750,36 +10810,18 @@ class Scheduler:
                 )
                 return False
 
-        device = template_buf.get_device_or_error()
-        props = torch.cuda.get_device_properties(device)
-        dram_bw = get_gpu_dram_gbps() * 1e9
-        num_sms = get_num_sms()
         out_numel = sizevars.optimization_hint(
             sympy_product(template_buf.get_size()), fallback=0
         )
-        tflops = get_device_tflops(operand.get_dtype(), device)
-        mma_s = 2 * out_numel * record.k / (tflops * 1e12) if tflops > 0 else 0.0
-        wave_tiles = math.ceil(num_sms / record.reuse)
-        working_set = read_bytes * min(1.0, wave_tiles / max(record.tiles, 1))
-        source_reads = (
-            read_bytes
-            if working_set <= props.L2_cache_size / 2
-            else read_bytes * record.reuse
+        unfused_s, fused_s = descriptor_prologue_times(
+            template_buf.get_device_or_error(),
+            operand.get_dtype(),
+            record,
+            read_bytes,
+            write_bytes,
+            operand_numel,
+            out_numel,
         )
-        transform_s = (
-            operand_numel
-            * record.reuse
-            / (
-                num_sms
-                * props.clock_rate
-                * 1e3
-                * config.triton.prologue_transform_elems_per_cycle
-            )
-        )
-        unfused_s = (read_bytes + write_bytes) / dram_bw + max(
-            mma_s, write_bytes / dram_bw
-        )
-        fused_s = max(source_reads / dram_bw, mma_s + transform_s)
         if fused_s >= unfused_s:
             why(
                 "descriptor prologue fusion not profitable: fused %.1f us (reuse %d) "

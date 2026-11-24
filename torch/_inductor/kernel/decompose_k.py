@@ -10,9 +10,11 @@ import torch
 from torch._inductor import inductor_prims, ir
 from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
 from torch._inductor.lowering import register_lowering
-from torch._inductor.utils import can_use_tma, get_num_sms
+from torch._inductor.utils import can_use_tma, get_num_sms, sympy_product
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._ordered_set import OrderedSet
 
+from .. import config as inductor_config
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, Layout
 from ..virtualized import V
@@ -180,16 +182,182 @@ class DecomposeKSubgraphTemplate(SubgraphTemplate):
                 ),
                 decompositions,
             )
-            return super().generate(
+            choice = super().generate(
                 name=name,
                 input_nodes=input_nodes,
                 layout=layout,
                 make_fx_graph=fn,
                 description=description,
             )
+        from ..autotune_process import use_pipelined_autotuning
+
+        # Pipelined autotuning returns no timings to apply a credit to.
+        if (
+            bmm_backend == "triton"
+            and inductor_config.prologue_fusion
+            and inductor_config.triton.decompose_k_prologue_fusion_credit
+            and not use_pipelined_autotuning()
+        ):
+            credit_s = _partial_bmm_prologue_credit_s(
+                input_nodes[0], input_nodes[1], k_split, bmm_config_index
+            )
+            # Inlining makes the partial BMM an ordinary template, so producers
+            # of its operands can fuse into its descriptor loads.
+            choice.inline_after_autotune = credit_s > 0
+            choice.fusion_credit_ms = credit_s * 1e3
+        return choice
 
 
 decompose_k_subgraph_template = DecomposeKSubgraphTemplate()
+
+
+def _pointwise_producer(node: Any) -> ir.ComputedBuffer | None:
+    """The pointwise ComputedBuffer computing ``node`` in this graph, if any."""
+    name = node.get_name()
+    buf = V.graph.try_get_buffer(name)
+    if (
+        name in V.graph.graph_inputs
+        or not isinstance(buf, ir.ComputedBuffer)
+        or not isinstance(buf.data, ir.Pointwise)
+    ):
+        return None
+    return buf
+
+
+def _operand_has_single_use(index: int) -> bool:
+    """Whether the mm being lowered reads operand ``index`` through single-use
+    views of a single-use pointwise producer. Prologue fusion only fuses a
+    producer whose one reader is the template, so a producer read elsewhere
+    stays unfused and must not earn the decompose-K choice a credit."""
+    aten = torch.ops.aten
+    views = OrderedSet(
+        [
+            aten.view.default,
+            aten.reshape.default,
+            aten._unsafe_view.default,
+            aten.permute.default,
+            aten.t.default,
+            aten.transpose.int,
+            aten.slice.Tensor,
+            aten.select.int,
+            aten.squeeze.dim,
+            aten.unsqueeze.default,
+            aten.expand.default,
+            aten.alias.default,
+        ]
+    )
+    node = V.graph.current_node
+    if node is None or node.target is not aten.mm.default:
+        return False
+    arg = node.args[index]
+    while isinstance(arg, torch.fx.Node) and arg.op == "call_function":
+        if len(arg.users) != 1:
+            return False
+        if arg.target not in views:
+            return isinstance(arg.target, torch._ops.OpOverload) and (
+                torch.Tag.pointwise in arg.target.tags
+            )
+        arg = arg.args[0]
+    return False
+
+
+def partial_bmm_prologue_reuse(
+    is_a: bool, cfg: BlackwellBMMConfig, m: int, n: int, k: int, k_split: int
+) -> tuple[int, int, int]:
+    """(reuse, tiles, contraction length) of a partial-BMM operand, as the
+    template records them for the prologue cost model (prologue_reuse_counts in
+    triton_blackwell_ws_persistent_tma_bmm.py.jinja's VIRTUAL_BATCH loads)."""
+    m_tiles = math.ceil(m / cfg.block_m)
+    n_tiles = math.ceil(n / cfg.block_n)
+    k_part = math.ceil(math.ceil(k / k_split) / cfg.block_k) * cfg.block_k
+    if is_a:
+        return n_tiles, k_split * m_tiles, k_part
+    return m_tiles, k_split * n_tiles, k_part
+
+
+def _partial_bmm_prologue_credit_s(
+    mat1: Any, mat2: Any, k_split: int, config_index: int
+) -> float:
+    """Seconds saved by fusing the pointwise producers of ``mat1``/``mat2`` into
+    the Blackwell partial BMM's descriptor loads, per the scheduler's prologue
+    eligibility and cost model; 0 when neither operand has a producer that
+    would fuse."""
+    from ..scheduler import (
+        descriptor_prologue_source_tile_bytes,
+        descriptor_prologue_times,
+    )
+    from ..select_algorithm import PrologueReuse
+    from ..utils import get_gpu_shared_memory
+
+    cfg = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[config_index]
+    two_ctas = effective_two_ctas(cfg)
+    hint = V.graph.sizevars.optimization_hint
+    m, k = (hint(s, fallback=1) for s in mat1.get_size())
+    n = hint(mat2.get_size()[1], fallback=1)
+    out_numel = k_split * math.ceil(m / cfg.block_m) * cfg.block_m * n
+    # Bytes per stage of the operand rings; a fused operand's ring holds its
+    # source tiles instead. The warp-specialization memory planner sizes each
+    # ring separately and shrinks them to fit, so only one stage of every ring
+    # must fit (a 2-stage bound rejects kernels that compile and run).
+    a_tile, b_tile = cfg.block_m * cfg.block_k, cfg.block_k * cfg.block_n
+    stage_bytes = (
+        a_tile * mat1.get_dtype().itemsize + b_tile * mat2.get_dtype().itemsize
+    )
+    credit = 0.0
+    for is_a, node in ((True, mat1), (False, mat2)):
+        if not is_a and two_ctas:
+            # The 2-CTA template loads B without prologue descriptors.
+            continue
+        producer = _pointwise_producer(node)
+        if producer is None or not _operand_has_single_use(0 if is_a else 1):
+            continue
+        # The producer's read indices are in its own loop order. Only a 2-D
+        # producer read as itself or transposed keeps them affine in the
+        # operand's (row, col); behind a reshape the template gathers instead.
+        sizes = [hint(s, fallback=-1) for s in node.get_size()]
+        producer_sizes = [hint(s, fallback=-2) for s in producer.get_size()]
+        if sizes not in (producer_sizes, producer_sizes[::-1]):
+            continue
+        tile_elems = a_tile if is_a else b_tile
+        numel = hint(sympy_product(node.get_size()), fallback=0)
+        source_tile_bytes = descriptor_prologue_source_tile_bytes(
+            producer.get_read_writes().reads,
+            OrderedSet([producer.get_name()]),
+            tile_elems,
+            numel,
+        )
+        if source_tile_bytes is None:
+            continue
+        fused_stage_bytes = (
+            stage_bytes + source_tile_bytes - tile_elems * node.get_dtype().itemsize
+        )
+        if fused_stage_bytes > get_gpu_shared_memory():
+            continue
+        stage_bytes = fused_stage_bytes
+        read_bytes = sum(
+            hint(sympy_product(V.graph.get_buffer(r).get_size()), fallback=0)
+            * V.graph.get_dtype(r).itemsize
+            for r in producer.get_read_names()
+        )
+        reuse, tiles, k_part = partial_bmm_prologue_reuse(is_a, cfg, m, n, k, k_split)
+        record = PrologueReuse(
+            reuse=reuse,
+            tiles=tiles,
+            tile_elems=tile_elems,
+            num_stages=cfg.num_stages,
+            k=k_part,
+        )
+        unfused_s, fused_s = descriptor_prologue_times(
+            node.get_device_or_error(),
+            node.get_dtype(),
+            record,
+            read_bytes,
+            numel * node.get_dtype().itemsize,
+            numel,
+            out_numel,
+        )
+        credit += max(0.0, unfused_s - fused_s)
+    return credit
 
 
 def _blackwell_decompose_k_partial_kwargs(

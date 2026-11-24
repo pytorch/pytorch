@@ -2664,6 +2664,15 @@ class triton:
     # the operand for the MMA), used by the prologue fusion cost model. The
     # default is measured on B200 with autoWS, where the producer runs in the
     # epilogue partition, serialized with the MMA.
+    # Credit the Blackwell decompose-K choice with the time a TMA prologue
+    # fusion into its partial BMM is modeled to save, and inline the winning
+    # subgraph so the producer can fuse (needs prologue_fusion). Off by
+    # default: the inlined fusion is not benchmarked, and the cost model
+    # overestimates the saving for large fp32 cast producers.
+    decompose_k_prologue_fusion_credit = (
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_PROLOGUE_FUSION_CREDIT", "0") == "1"
+    )
+
     prologue_transform_elems_per_cycle = float(
         os.environ.get("TORCHINDUCTOR_PROLOGUE_TRANSFORM_ELEMS_PER_CYCLE", "6")
     )
