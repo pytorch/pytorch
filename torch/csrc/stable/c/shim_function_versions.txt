@@ -174,6 +174,7 @@ torch_cpublas_brgemm: TORCH_VERSION_2_16_0
 torch_cpublas_brgemm_release: TORCH_VERSION_2_16_0
 torch_cpublas_could_pack: TORCH_VERSION_2_16_0
 torch_cpublas_gemm_no_downcast_float64: TORCH_VERSION_2_16_0
+torch_create_inference_mode_guard: TORCH_VERSION_2_16_0
 torch_delete_inference_mode_guard: TORCH_VERSION_2_16_0
 torch_is_conj: TORCH_VERSION_2_16_0
 torch_is_inference: TORCH_VERSION_2_16_0
@@ -183,4 +184,3 @@ torch_is_warn_always_enabled: TORCH_VERSION_2_16_0
 torch_transpose_type_conj_transpose: TORCH_VERSION_2_16_0
 torch_transpose_type_no_transpose: TORCH_VERSION_2_16_0
 torch_transpose_type_transpose: TORCH_VERSION_2_16_0
-torch_new_inference_mode_guard: TORCH_VERSION_2_16_0

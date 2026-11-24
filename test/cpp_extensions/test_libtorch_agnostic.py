@@ -1507,6 +1507,8 @@ for warning in w:
         view.fill_(-1)
         self.assertEqual(x, expected)
 
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
     @parametrize("outer_enabled", [False, True])
     @parametrize("inner_enabled", [None, False, True])
     def test_inference_mode_guard(self, device, outer_enabled, inner_enabled):

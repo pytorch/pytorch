@@ -709,7 +709,7 @@ torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference) {
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_new_inference_mode_guard(
+AOTI_TORCH_EXPORT AOTITorchError torch_create_inference_mode_guard(
     bool enabled,
     InferenceModeGuardHandle* ret_guard) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -724,6 +724,7 @@ torch_delete_inference_mode_guard(InferenceModeGuardHandle guard) {
       { delete reinterpret_cast<c10::InferenceMode*>(guard); });
 }
 
+// This reads a thread-local flag and is not expected to throw.
 AOTI_TORCH_EXPORT bool torch_is_inference_mode_enabled() {
   return c10::InferenceMode::is_enabled();
 }
