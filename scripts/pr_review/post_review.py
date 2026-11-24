@@ -72,6 +72,7 @@ import urllib.request
 from pathlib import Path
 
 from extract_verdict import (
+    _PARTIAL_TOKEN,
     is_neutral_prose,
     MAX_FINDINGS,
     MAX_SUMMARY,
@@ -318,37 +319,58 @@ def report_url(
 
 NON_BLOCKING = "Non-blocking"
 MAX_HEADLINE = 150
-_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+# A sentence ends before a capital, so "e.g. `x`" does not end one.
+_SENTENCE_END = re.compile(r"[.!?](?=\s+[A-Z]|\s*$)")
+# The markdown escapes `neutralize` adds, and bold markers: on the summary line
+# they would show as typed, since an HTML block's lines are not markdown.
+_MD_ESCAPE = re.compile(r"\\([\[\]#])")
+_CODE_SPAN = re.compile(r"`([^`\n]+)`")
 
 
-def headline(message: str) -> tuple[str, str]:
+def split_headline(message: str) -> tuple[str, str]:
     """`message` split into its first sentence and the rest. A first line with
-    no sentence end is the headline; one over MAX_HEADLINE is cut, and the rest
-    is then the whole message, so nothing is shown only cut."""
+    no sentence end is all headline."""
     first, _, after = message.strip().partition("\n")
     end = _SENTENCE_END.search(first)
     head, rest = (first[: end.end()], first[end.end() :]) if end else (first, "")
-    rest = "\n".join(part for part in (rest.strip(), after.strip()) if part)
-    if len(head) > MAX_HEADLINE:
-        return head[: MAX_HEADLINE - 1].rstrip() + "…", message.strip()
-    return head, rest
+    return head, "\n".join(part for part in (rest.strip(), after.strip()) if part)
+
+
+def summary_line(head: str) -> tuple[str, bool]:
+    """The collapsed finding's summary as HTML, and whether it was cut.
+
+    Messages arrive neutralized, already HTML-escaped and with markdown escapes,
+    so the text is unescaped to what a reader should see, labelled, cut to
+    MAX_HEADLINE at a word, and escaped once. Code spans become `<code>`.
+    """
+    text = html.unescape(_MD_ESCAPE.sub(r"\1", head).replace("**", ""))
+    if NON_BLOCKING.lower() not in text.lower():
+        text = f"{NON_BLOCKING}: {text}"
+    cut = len(text) > MAX_HEADLINE
+    if cut:
+        kept = text[: MAX_HEADLINE - 1]
+        text = (_PARTIAL_TOKEN.sub("", kept).rstrip() or kept) + "…"
+    escaped = html.escape(text, quote=False)
+    return _CODE_SPAN.sub(lambda m: f"<code>{m.group(1)}</code>", escaped), cut
 
 
 def comment_body(finding: dict, report: str = "", blocking: bool = True) -> str:
     """A blocking finding in full; a non-blocking one collapsed under its first
-    sentence, which is all a reader sees until they open it."""
+    sentence, which is all of it a reader sees until they open it. The report
+    link stays visible below either."""
     if blocking:
         # Not contained like the body: that would break every closed code block
         # to save the link from a rare unclosed one, where it just shows as text.
         lines = marked(BLOCKING_MARK, finding["message"].split("\n"))
     else:
-        head, rest = headline(finding["message"])
-        if not head.lower().startswith(NON_BLOCKING.lower()):
-            head = f"{NON_BLOCKING}: {head}"
+        head, rest = split_headline(finding["message"])
+        summary, cut = summary_line(head)
+        if cut:
+            rest = finding["message"].strip()
         # Contained: an unclosed fence would swallow the closing tag.
         lines = [
             "<details>",
-            f"<summary>{FOLDED_MARK} {html.escape(head, quote=False)}</summary>",
+            f"<summary>{FOLDED_MARK} {summary}</summary>",
             "",
             *(contained(rest) if rest else []),
             "",
@@ -429,14 +451,19 @@ def review_body(
     repo: str,
     inline: bool,
     report: str = "",
+    inline_non_blocking: bool = True,
 ) -> str:
     """Verdict, summary, and the findings not posted inline (non-blocking ones
-    folded). Over MAX_BODY, findings are dropped from the end and counted."""
+    folded). With `inline`, blocking findings are inline, and non-blocking ones
+    too unless `inline_non_blocking` is false. Over MAX_BODY, findings are
+    dropped from the end and counted."""
     blocking = blocking_findings(verdict, findings)
     non_blocking = [f for f in findings if f not in blocking]
     if inline:
         in_body = [f for f in blocking if f.get("discussion")]
-        folded = [f for f in non_blocking if f.get("discussion")]
+        folded = [
+            f for f in non_blocking if f.get("discussion") or not inline_non_blocking
+        ]
     else:
         in_body, folded = blocking, non_blocking
     keep_body, keep_folded = len(in_body), len(folded)
@@ -529,28 +556,43 @@ def _compose(
 def post(
     gh: GitHub, pr: int, sha: str, verdict, summary, findings, run_link: str = ""
 ) -> dict:
-    """Create the review. If GitHub refuses the inline comments (422), they go
-    into the body; if it refuses REQUEST_CHANGES, the review is a COMMENT."""
+    """Create the review. GitHub refuses all inline comments if it refuses one
+    (422): then only the blocking ones are tried inline, and then none, with the
+    rest in the body. If it refuses REQUEST_CHANGES, the review is a COMMENT."""
     path = f"/repos/{gh.repo}/pulls/{pr}/reviews"
     report = report_url(gh.repo, pr, sha, run_link)
     event = "REQUEST_CHANGES" if verdict == "changes_requested" else "COMMENT"
     base = {"commit_id": sha, "event": event}
     blocking = blocking_findings(verdict, findings)
-    comments = [
-        {
-            "path": unescape_path(f["path"]),
-            "line": f["line"],
-            "side": "LEFT" if f.get("removed") else "RIGHT",
-            "body": comment_body(
-                f, report_url(gh.repo, pr, sha, run_link, f), f in blocking
-            ),
-        }
-        for f in findings
-        if not f.get("discussion")
-    ]
-    if comments:
+
+    def inline_comments(fs: list[dict]) -> list[dict]:
+        return [
+            {
+                "path": unescape_path(f["path"]),
+                "line": f["line"],
+                "side": "LEFT" if f.get("removed") else "RIGHT",
+                "body": comment_body(
+                    f, report_url(gh.repo, pr, sha, run_link, f), f in blocking
+                ),
+            }
+            for f in fs
+            if not f.get("discussion")
+        ]
+
+    every, blocking_only = inline_comments(findings), inline_comments(blocking)
+    attempts = [(every, True)] if every else []
+    if blocking_only and len(blocking_only) < len(every):
+        attempts.append((blocking_only, False))
+    for comments, with_non_blocking in attempts:
         body = review_body(
-            verdict, summary, findings, sha, gh.repo, inline=True, report=report
+            verdict,
+            summary,
+            findings,
+            sha,
+            gh.repo,
+            inline=True,
+            report=report,
+            inline_non_blocking=with_non_blocking,
         )
         try:
             return gh.request(
@@ -559,9 +601,9 @@ def post(
         except GitHubError as exc:
             if exc.status != 422:
                 raise
-            warn(
-                f"GitHub refused the inline comments ({exc}); posting them in the body"
-            )
+            warn(f"GitHub refused {count(len(comments), 'inline comment')} ({exc})")
+    if attempts:
+        warn("posting the findings in the body")
     body = review_body(
         verdict, summary, findings, sha, gh.repo, inline=False, report=report
     )
@@ -768,7 +810,7 @@ def take_down(
     fold(gh, pr, review, reason)
     if comments is None:
         comments = pr_comments(gh, pr)
-    kept = delete_unreplied(gh, pr, rid, comments)
+    kept = delete_unreplied(gh, pr, rid, comments, Budget(pause=TAKE_DOWN_PAUSE))
     try:
         resolved = kept is not None and resolve_threads(gh, pr, kept)
     except GitHubError as exc:
@@ -1033,6 +1075,9 @@ def delete_unreplied(
 MAX_BACKFILL = 50
 BACKFILL_SECONDS = 90
 BACKFILL_PAUSE = 1.0
+# Most findings are inline, so a superseded review can cost a delete per
+# finding; paced like backfill to stay clear of GitHub's secondary rate limits.
+TAKE_DOWN_PAUSE = BACKFILL_PAUSE
 
 
 def backfill(gh: GitHub, pr: int, author: str, new_id: int) -> None:

@@ -25,7 +25,11 @@ import post_review  # noqa: E402
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
 from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
-from extract_verdict import neutralize, neutralize_path  # noqa: E402
+from extract_verdict import (  # noqa: E402
+    neutralize,
+    neutralize_message,
+    neutralize_path,
+)
 from post_review import (  # noqa: E402
     contained,
     defuse_bot_commands,
@@ -300,6 +304,14 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertEqual((c["path"], c["line"], c["side"]), ("torch/x.py", 3, "RIGHT"))
         self.assertIn("Off by one.", c["body"])
 
+    def fell_back(self, gh):
+        """The review posted after every inline attempt was refused."""
+        *tried, last = gh.posted()
+        self.assertTrue(tried, "no inline attempt was made")
+        self.assertTrue(all("comments" in t for t in tried), tried)
+        self.assertNotIn("comments", last)
+        return last
+
     def test_a_finding_on_a_deleted_file_is_posted_on_the_left_side(self):
         findings = [
             {"path": "gone.py", "line": 7, "severity": "major", "message": "Used."},
@@ -326,7 +338,7 @@ class TestWhatIsPosted(unittest.TestCase):
         # has no blob at the head.
         gh = FakeGitHub(files=files, refuse_inline=True)
         go(gh, row(findings=findings))
-        text = gh.posted()[-1]["body"]
+        text = self.fell_back(gh)["body"]
         digest = hashlib.sha256(b"gone.py").hexdigest()
         self.assertIn(f"https://github.com/o/r/pull/1/files#diff-{digest}L9", text)
         self.assertNotIn(f"/blob/{SHA}/gone.py", text)
@@ -448,9 +460,7 @@ class TestWhatIsPosted(unittest.TestCase):
         ]
         gh = FakeGitHub(refuse_inline=True)
         go(gh, row(findings=findings))
-        body = gh.posted()[-1]
-        self.assertNotIn("comments", body)
-        text = body["body"]
+        text = self.fell_back(gh)["body"]
         self.assertNotIn("attached to the code below", text)
         details = text.split("<details>\n", 1)[1].split("</details>", 1)[0]
         self.assertTrue(
@@ -464,6 +474,30 @@ class TestWhatIsPosted(unittest.TestCase):
         )
         self.assertTrue(details.endswith(f"/c.py#L9\n\nNote.\n\n"), details)
         self.assertNotIn("a.py", details)
+
+    def test_a_refusal_keeps_the_blocking_findings_inline(self):
+        class RefuseCollapsed(FakeGitHub):
+            def request(self, method, path, body=None, idempotent=None):
+                comments = (body or {}).get("comments") or []
+                if any(c["body"].startswith("<details>") for c in comments):
+                    self.calls.append((method, path, body))
+                    raise GitHubError(422, "line must be part of the diff")
+                return super().request(method, path, body, idempotent)
+
+        findings = [
+            {"path": "a.py", "line": 3, "severity": "major", "message": "Bug."},
+            {"path": "b.py", "line": 7, "severity": "minor", "message": "Nit."},
+        ]
+        gh = RefuseCollapsed()
+        go(gh, row(findings=findings))
+        first, second = gh.posted()
+        self.assertEqual([c["path"] for c in first["comments"]], ["a.py", "b.py"])
+        self.assertEqual([c["path"] for c in second["comments"]], ["a.py"])
+        text = second["body"]
+        self.assertIn("\U0001f534 1 blocking finding is attached", text)
+        self.assertIn("<summary>\u26aa 1 non-blocking finding</summary>", text)
+        self.assertIn(f"{BLOB}/b.py#L7", text)
+        self.assertNotIn("attached to the code below, collapsed", text)
 
     def test_a_non_blocking_finding_by_a_replied_thread_stays_folded(self):
         minor = {
@@ -480,33 +514,68 @@ class TestWhatIsPosted(unittest.TestCase):
         self.assertIn("discussion_r9", body)
         self.assertNotIn("attached to the code below", body)
 
-    def test_a_collapsed_finding_shows_its_first_sentence(self):
-        def body(message):
-            return post_review.comment_body({"message": message}, blocking=False)
+    @staticmethod
+    def summary_of(message):
+        """The collapsed summary of `message` as the pipeline delivers it."""
+        text = post_review.comment_body(
+            {"message": neutralize_message(message)}, blocking=False
+        )
+        return text.split("<summary>", 1)[1].split("</summary>", 1)[0]
 
-        text = body("Non-blocking: `a.b` is unused. Drop it.\nSee x.py:3.")
+    def test_a_collapsed_finding_shows_its_first_sentence(self):
+        message = neutralize_message(
+            "Non-blocking: `a.b` is unused. Drop it.\nSee x.py:3."
+        )
+        text = post_review.comment_body({"message": message}, blocking=False)
         self.assertTrue(
             text.startswith(
-                "<details>\n<summary>\u26aa Non-blocking: `a.b` is unused.</summary>\n\n"
-                "Drop it.\nSee x.py:3.\n\n</details>"
+                "<details>\n<summary>\u26aa Non-blocking: <code>a.b</code> is unused."
+                "</summary>\n\nDrop it.\nSee x.py:3.\n\n</details>"
             ),
             text,
         )
-        # The label is added once, whatever the message's case.
-        self.assertIn(
-            "<summary>\u26aa non-blocking: tidy.</summary>", body("non-blocking: tidy.")
+
+    def test_a_summary_is_escaped_once(self):
+        # neutralize already escaped these; the summary must not do it again.
+        self.assertEqual(
+            self.summary_of("a < b && c -> d."),
+            "\u26aa Non-blocking: a &lt; b &amp;&amp; c -&gt; d.",
         )
-        self.assertIn("<summary>\u26aa Non-blocking: Tidy.</summary>", body("Tidy."))
-        # The summary is HTML, so markup in the sentence cannot end it early.
-        self.assertIn("&lt;/summary&gt;&lt;b&gt;x", body("</summary><b>x"))
+
+    def test_a_summary_drops_markdown_it_cannot_render(self):
+        summary = self.summary_of("Non-blocking: `x[0]` is **wrong** on #12 inputs.")
+        self.assertEqual(
+            summary, "\u26aa Non-blocking: <code>x[0]</code> is wrong on # 12 inputs."
+        )
+
+    def test_the_label_is_added_once_wherever_the_message_has_it(self):
+        self.assertEqual(self.summary_of("Tidy."), "\u26aa Non-blocking: Tidy.")
+        self.assertEqual(
+            self.summary_of("non-blocking: tidy."), "\u26aa non-blocking: tidy."
+        )
+        self.assertEqual(
+            self.summary_of("**Non-blocking**: x."), "\u26aa Non-blocking: x."
+        )
+        self.assertEqual(
+            self.summary_of("Nit (non-blocking): x."), "\u26aa Nit (non-blocking): x."
+        )
+
+    def test_an_abbreviation_does_not_end_the_first_sentence(self):
+        self.assertEqual(
+            self.summary_of("Prefer X, e.g. `with` blocks. More here."),
+            "\u26aa Non-blocking: Prefer X, e.g. <code>with</code> blocks.",
+        )
 
     def test_a_long_first_sentence_is_cut_and_the_whole_message_kept(self):
-        message = "Non-blocking: " + "word " * 60 + "end."
+        message = neutralize_message("word " * 60 + "end.")
         text = post_review.comment_body({"message": message}, blocking=False)
         summary = text.split("<summary>", 1)[1].split("</summary>", 1)[0]
-        self.assertTrue(summary.endswith("…"))
-        self.assertLessEqual(len(summary), post_review.MAX_HEADLINE + 2)
-        self.assertIn(message, text)
+        shown = summary.removeprefix("\u26aa ")
+        self.assertTrue(shown.startswith("Non-blocking: word word"), shown)
+        self.assertTrue(shown.endswith("word…"), shown)
+        self.assertLessEqual(len(shown), post_review.MAX_HEADLINE)
+        # The whole message is under the cut summary.
+        self.assertIn(message, text.split("</summary>", 1)[1])
 
     def test_an_unclosed_fence_cannot_swallow_a_collapsed_finding(self):
         message = "Non-blocking: see.\n```\ncode"
@@ -549,7 +618,7 @@ class TestWhatIsPosted(unittest.TestCase):
         ]
         gh = FakeGitHub(refuse_inline=True)
         go(gh, row(verdict="ready_for_human_review", summary="s", findings=findings))
-        text = gh.posted()[-1]["body"]
+        text = self.fell_back(gh)["body"]
         self.assertIn("x\n\\`\\`\\`\ny\n\n---\n", text)
         # Everything after the quote is outside it: the next permalink still
         # starts its own line, and the section still closes.
@@ -565,7 +634,7 @@ class TestWhatIsPosted(unittest.TestCase):
         with mock.patch("post_review.MAX_BODY", 5000):
             gh = FakeGitHub(refuse_inline=True)
             go(gh, row(verdict="ready_for_human_review", findings=findings))
-        text = gh.posted()[-1]["body"]
+        text = self.fell_back(gh)["body"]
         self.assertLessEqual(len(text), 5000)
         shown = text.count(BLOB)
         self.assertGreater(shown, 0)
@@ -617,7 +686,7 @@ class TestWhatIsPosted(unittest.TestCase):
         go(gh, row(verdict="ready_for_human_review", findings=[minor]))
         self.assertIn(
             f"\n{BLOB}/docs/a%20b/%40x%231.md#L2\n",
-            gh.posted()[-1]["body"],
+            self.fell_back(gh)["body"],
         )
 
     def test_a_ready_verdict_is_a_comment_never_an_approval(self):
@@ -1195,6 +1264,16 @@ class TestEarlierReviewsAreDecluttered(unittest.TestCase):
         self.assertEqual(resolved(gh), ["T60"])
         self.assertEqual(sorted(c["id"] for c in gh.comments), [60, 61, 9990])
         self.assertEqual(minimized(gh), ["N6", "N5"])
+
+    def test_taking_down_a_review_paces_its_deletes(self):
+        comments = [comment(50, 5), comment(51, 5), comment(52, 5)]
+        gh = FakeGitHub(reviews=[old_review(5)], comments=comments)
+        with mock.patch("post_review._sleep") as sleep:
+            go(gh)
+        self.assertEqual(sorted(deleted(gh)), [50, 51, 52])
+        pause = mock.call(post_review.TAKE_DOWN_PAUSE)
+        pauses = [c for c in sleep.call_args_list if c == pause]
+        self.assertEqual(len(pauses), 2)
 
     def test_the_earlier_body_is_folded_once_with_no_link(self):
         old = old_review(5, body=MARKER + "\n**Automated review** of c: x.\n\nOne bug.")
