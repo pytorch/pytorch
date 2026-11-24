@@ -1,14 +1,17 @@
 # Owner(s): ["oncall: distributed"]
 
 import asyncio
+import dataclasses
 import multiprocessing
 import os
+import tempfile
 import unittest
 
 import torch
 import torch.distributed as dist
 from torch.distributed._transport import new_transport, wait_all
-from torch.distributed._transport.nixl import NIXLRemoteBuffer
+from torch.distributed._transport.nixl import NIXLRemoteBuffer, NIXLTransport
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -262,6 +265,56 @@ class TestNIXLNative(TestCase):
     def test_three_process_cpu_connect_rank(self):
         store = dist.TCPStore("127.0.0.1", 0, is_master=True, wait_for_workers=False)
         self._spawn(_connect_rank_worker, [(store.port,)] * 3, [])
+
+    def _check_file_storage(self, plugin, device):
+        with (
+            tempfile.TemporaryFile() as file,
+            NIXLTransport(device, plugin=plugin, timeout=10) as transport,
+        ):
+            size = 1 << 20
+            os.ftruncate(file.fileno(), size)
+            source = torch.arange(size // 4, dtype=torch.int32, device=device)
+            destination = torch.zeros_like(source)
+            source_view = transport.register_memory(source).to_view()
+            destination_view = transport.register_memory(destination).to_mutable_view()
+            storage = transport.register_storage("FILE", file.fileno(), size)
+            remote = storage.to_remote_buffer()
+            half = size // 2
+
+            transport.write(source_view.slice(0, half), remote.slice(half, half))
+            transport.write(source_view.slice(half, half), remote.slice(0, half))
+            transport.read(destination_view.slice(0, half), remote.slice(half, half))
+            transport.read(destination_view.slice(half, half), remote.slice(0, half))
+            self.assertEqual(destination, source)
+            os.lseek(file.fileno(), half, os.SEEK_SET)
+            self.assertEqual(
+                os.read(file.fileno(), 16), source[:4].cpu().numpy().tobytes()
+            )
+
+            with self.assertRaisesRegex(ValueError, "registered storage"):
+                transport.write(
+                    source_view.slice(0, 8),
+                    dataclasses.replace(remote, address=size - 4),
+                )
+            with self.assertRaisesRegex(ValueError, "notifications"):
+                transport.write(source_view, remote, notification=b"done")
+            with self.assertRaisesRegex(ValueError, "already registered"):
+                transport.register_storage("FILE", file.fileno(), size)
+            transport.unregister_memory(storage)
+            with self.assertRaisesRegex(ValueError, "not registered"):
+                transport.read(destination_view, remote)
+            with self.assertRaisesRegex(RuntimeError, "unregistered"):
+                storage.to_remote_buffer()
+
+    def test_posix_file_storage(self):
+        self._check_file_storage("POSIX", "cpu")
+
+    @unittest.skipUnless(
+        TEST_CUDA and os.environ.get("TORCH_TEST_NIXL_GDS") == "1",
+        "set TORCH_TEST_NIXL_GDS=1 with CUDA and GPUDirect Storage",
+    )
+    def test_gds_file_storage(self):
+        self._check_file_storage("GDS", "cuda")
 
     def _spawn(self, worker, args, connections):
         context = multiprocessing.get_context("spawn")

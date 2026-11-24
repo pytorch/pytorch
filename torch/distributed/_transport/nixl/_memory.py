@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class NIXLRemoteBuffer(_WireDescriptor):
-    """A serializable descriptor for memory registered by a NIXL peer."""
+    """A serializable descriptor for NIXL-registered memory or storage."""
 
     _backend = "nixl"
     _fields = {
@@ -62,6 +62,40 @@ class _Registration:
     def ensure_active(self) -> None:
         if not self.active:
             raise RuntimeError("memory has been unregistered")
+
+
+@dataclass
+class _StorageRegistration:
+    descs: Any
+    memory_type: str
+    device_id: int
+    length: int
+    token: bytes
+    active: bool = True
+
+
+class NIXLStorage:
+    """A file, object, or block range registered with a NIXL storage plugin."""
+
+    def __init__(
+        self, transport: NIXLTransport, registration: _StorageRegistration
+    ) -> None:
+        self._transport = transport
+        self._registration = registration
+
+    def to_remote_buffer(self) -> NIXLRemoteBuffer:
+        """Return a descriptor for transfers by the registering transport only."""
+        registration = self._registration
+        if not registration.active:
+            raise RuntimeError("storage has been unregistered")
+        return NIXLRemoteBuffer(
+            self._transport.peer_id,
+            0,
+            registration.length,
+            registration.device_id,
+            registration.memory_type,
+            registration.token,
+        )
 
 
 class NIXLMemoryView:

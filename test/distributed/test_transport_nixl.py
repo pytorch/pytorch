@@ -268,6 +268,73 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         first.unregister_memory(memory)
         self.assertFalse(first._agent.registrations)
 
+    def test_storage_is_local(self):
+        first, second, memory, _ = self.registered_pair()
+        agent = first._agent
+        with patch.object(agent, "register_memory", return_value="descs") as register:
+            storage = first.register_storage("FILE", 7, 64)
+            with self.assertRaisesRegex(ValueError, "already registered"):
+                first.register_storage("FILE", 7, 64)
+            with self.assertRaisesRegex(ValueError, "memory_type"):
+                first.register_storage("VRAM", 8, 64)
+            with self.assertRaisesRegex(TypeError, "device_id"):
+                first.register_storage("FILE", True, 64)
+            with self.assertRaisesRegex(ValueError, "non-negative"):
+                first.register_storage("FILE", -1, 64)
+            with self.assertRaisesRegex(ValueError, "key must be empty"):
+                first.register_storage("FILE", 8, 64, key="/etc/passwd")
+        register.assert_called_once_with([(0, 64, 7, "")], "FILE", backends=["UCX"])
+        remote = storage.to_remote_buffer()
+        self.assertEqual(
+            (remote.agent_name, remote.address, remote.length, remote.device_id),
+            ("first", 0, 64, 7),
+        )
+        other = second.register_memory(torch.ones(8)).to_view()
+        with self.assertRaisesRegex(ValueError, "not registered by this transport"):
+            second.write(other, remote)
+        forged = replace(remote, metadata=b"")
+        with self.assertRaisesRegex(ValueError, "not registered by this transport"):
+            first.write(memory.to_view(), forged)
+        with self.assertRaisesRegex(ValueError, "registered storage"):
+            first.write(memory.to_view(), replace(remote, address=40))
+        with self.assertRaisesRegex(ValueError, "notifications"):
+            first.write(memory.to_view(), remote, notification=b"done")
+        with self.assertRaisesRegex(ValueError, "stream"):
+            first.write_stream(memory.to_view(), remote)
+        with self.assertRaisesRegex(ValueError, "stream"):
+            first.read_stream(memory.to_mutable_view(), remote)
+
+        transfer = _Transfer("WRITE", None, None, "first")
+        with (
+            patch.object(agent, "initialize_xfer", return_value=transfer) as init,
+            patch.object(agent, "add_remote_agent") as add_remote_agent,
+            patch.object(agent, "transfer_state", "PROC"),
+        ):
+            work = first.write(memory.to_view(), remote.slice(32), async_op=True)
+            with self.assertRaisesRegex(RuntimeError, "pending transfers"):
+                first.unregister_memory(storage)
+        add_remote_agent.assert_not_called()
+        _, local, remote_descs, remote_agent = init.call_args.args
+        self.assertEqual(remote_agent, "first")
+        self.assertEqual(remote_descs, _Descriptors("FILE", [(32, 32, 7)]))
+        work.wait()
+        with patch.object(agent, "deregister_memory") as deregister:
+            first.unregister_memory(storage)
+        deregister.assert_called_once_with("descs", backends=["UCX"])
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            storage.to_remote_buffer()
+        with patch.object(agent, "register_memory", return_value="descs"):
+            renewed = first.register_storage("FILE", 7, 64)
+        with self.assertRaisesRegex(ValueError, "not registered by this transport"):
+            first.write(memory.to_view(), remote)
+        with self.assertRaisesRegex(TypeError, "not registered by this transport"):
+            second.unregister_memory(renewed)
+        with patch.object(agent, "deregister_memory") as deregister:
+            first.close()
+        deregister.assert_any_call("descs", backends=["UCX"])
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            renewed.to_remote_buffer()
+
     def test_unregister_failure_can_be_retried(self):
         first, second, memory, remote = self.registered_pair()
         with patch.object(

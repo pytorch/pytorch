@@ -140,5 +140,81 @@ cannot interrupt a blocked native call, even when it releases the GIL.
 
 ```{eval-rst}
 .. autoclass:: torch.distributed._transport.nixl.NIXLTransport
-   :members: close_async
+   :members: close_async, register_storage
+.. autoclass:: torch.distributed._transport.nixl.NIXLStorage
+   :members:
 ```
+
+### Storage
+
+A transport constructed with a NIXL storage plugin moves registered tensors to
+and from files, objects, or block devices. `register_storage` returns a
+{class}`~torch.distributed._transport.nixl.NIXLStorage` whose remote buffer
+addresses byte offsets in that storage. Storage descriptors are accepted only by
+the registering transport and become invalid after unregistering. They grant
+access to the storage: do not send them to peers or pass descriptors received
+from peers to `read` or `write`. Storage
+transfers cannot carry notifications or use `read_stream`/`write_stream`. Plugin availability depends on the NIXL build; check
+`nixl_agent.get_plugin_list()`. `GUSLI` requires a `config_file` backend option
+and `AZURE_BLOB` requires `AZURE_STORAGE_CONTAINER_NAME` with an account URL or
+connection string.
+
+| Plugin | Storage | Tensors | Registration |
+| --- | --- | --- | --- |
+| `POSIX` | Local or network files | CPU | `"FILE"`, file descriptor |
+| `GDS`, `GDS_MT` | Files via GPUDirect Storage (cuFile), including NVMe-oF and parallel file systems | CPU, CUDA | `"FILE"`, file descriptor |
+| `OBJ` | S3-compatible objects | CPU | `"OBJ"`, object `key` |
+| `AZURE_BLOB` | Azure Blob Storage | CPU | `"OBJ"`, blob `key` |
+| `GUSLI` | NVMe block devices | CPU | `"BLOCK"`, device id |
+
+Write a CUDA tensor to a file with GPUDirect Storage and read it back:
+
+```python
+import os
+import torch
+from torch.distributed._transport.nixl import NIXLTransport
+
+fd = os.open("/mnt/nvme/shard0.bin", os.O_RDWR | os.O_CREAT | os.O_DIRECT)
+tensor = torch.randn(1 << 20, device="cuda")
+size = tensor.nbytes
+os.ftruncate(fd, size)
+with NIXLTransport("cuda", plugin="GDS") as transport:
+    memory = transport.register_memory(tensor)
+    storage = transport.register_storage("FILE", fd, size)
+    file = storage.to_remote_buffer()
+    transport.write(memory.to_view(), file)  # tensor -> file offset 0
+    transport.read(memory.to_mutable_view(), file)  # file offset 0 -> tensor
+    transport.unregister_memory(storage)
+os.close(fd)
+```
+
+Use `plugin="POSIX"` with CPU tensors and a file opened without `O_DIRECT` when
+GPUDirect Storage is unavailable; `backend_options={"use_uring": "true"}`
+selects io_uring. Slices address file offsets:
+`transport.write(view, file.slice(offset, view.size()))`. With `O_DIRECT`,
+offsets, sizes, and buffers must meet the file system's alignment.
+
+Store a CPU tensor as an S3 object:
+
+```python
+tensor = torch.randn(1 << 20)
+with NIXLTransport(
+    "cpu",
+    plugin="OBJ",
+    backend_options={
+        "bucket": "checkpoints",
+        "endpoint_override": "https://s3.example.com",  # @lint-ignore
+        "region": "us-east-1",
+    },
+) as transport:
+    memory = transport.register_memory(tensor)
+    storage = transport.register_storage(
+        "OBJ", 0, tensor.nbytes, key="step100/shard0"
+    )
+    transport.write(memory.to_view(), storage.to_remote_buffer())
+```
+
+`device_id` must be unique among a transport's registrations of the same type.
+Object plugins write whole objects: writes must start at offset 0, while reads
+may use any offset. Credentials follow the AWS SDK defaults unless
+`access_key` and `secret_key` are set in `backend_options`.
