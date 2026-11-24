@@ -999,8 +999,9 @@ class CompileTestCPU(TestCase):
             for op in include_ops:
                 self.assertIn(op, code)
 
-        # Test aoti
-        AOTIRunnerUtil.run(func, (arg,))
+        # AOTI uses the same configuration for both wrapper variants.
+        if not cpp_wrapper:
+            AOTIRunnerUtil.run(func, (arg,))
         torch.cpu.synchronize()
 
     def test_inductor_all_reduce_cpu(self):
@@ -1026,6 +1027,48 @@ class CompileTestCPU(TestCase):
             ),
         ):
             torch.compile(func)(args)
+
+    @fresh_cache()
+    def test_inductor_rooted_collectives_cpu(self):
+        def func(arg: torch.Tensor) -> list[torch.Tensor]:
+            return [
+                funcol.wait_tensor(funcol.reduce(arg + 1, 1, "sum", "0")),
+                funcol.wait_tensor(funcol.gather(arg + 2, 1, "0")),
+                funcol.wait_tensor(funcol.scatter(arg + 3, 1, "0")),
+            ]
+
+        arg = torch.rand(4, 4)
+        out, (code,) = run_and_get_code(torch.compile(func), arg)
+        for op in ("reduce", "gather", "scatter"):
+            self.assertIn(f"torch.ops._c10d_functional.{op}.default", code)
+        self.assertEqual([o.shape for o in out], [(4, 4), (8, 4), (2, 4)])
+
+    @fresh_cache()
+    def test_inductor_batch_p2p_cpu(self):
+        class Receive(torch.nn.Module):
+            def forward(self, x):
+                received = funcol.batch_p2p_ops_inplace(
+                    ["irecv", "irecv"], [1, 1], [0, 1], [x * 2, x + 3], "0"
+                )
+                return funcol.wait_tensor(received[0]) + funcol.wait_tensor(received[1])
+
+        class Send(torch.nn.Module):
+            def forward(self, x):
+                funcol.batch_p2p_ops_inplace(["isend"], [1], [0], [x * 2], "0")
+                return x + 1
+
+        arg = torch.rand(4, 4)
+        next_arg = torch.rand(4, 4)
+        for model in (Receive(), Send()):
+            torch._dynamo.reset()
+            with torch._inductor.config.patch({"cpp_wrapper": True}):
+                compiled = torch.compile(model, fullgraph=True)
+                self.assertEqual(compiled(arg), model(arg))
+                self.assertEqual(compiled(next_arg), model(next_arg))
+
+        torch._dynamo.reset()
+        receive = Receive()
+        self.assertEqual(AOTIRunnerUtil.run(receive, (arg,)), receive(arg))
 
 
 class CompileTest(TestCase):
@@ -1218,6 +1261,7 @@ class CompileTest(TestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         buf0, buf1 = find_buffer_assignments(code)
+        (reused_buf,) = re.findall(rf"(buf\d+) = {buf0}; del {buf0}  # reuse", code)
         (
             FileCheck()
             # Expect allocation
@@ -1228,10 +1272,10 @@ class CompileTest(TestCase):
             .check(f"{buf1} = empty")
             .check(f"extern_kernels.mm(arg0_1, {buf0}, out={buf1}")
             # Expect {buf0} to be reused
-            .check(f"buf8 = {buf0}; del {buf0}  # reuse")
-            .check(f"extern_kernels.mm(arg0_1, {buf1}, out=buf8")
+            .check(f"{reused_buf} = {buf0}; del {buf0}  # reuse")
+            .check(f"extern_kernels.mm(arg0_1, {buf1}, out={reused_buf}")
             # Expect no extra copy on return
-            .check(f"return ({buf1}, buf8, )")
+            .check(f"return ({buf1}, {reused_buf}, )")
             .run(code)
         )
         if "= torch.ops._c10d_functional.wait_tensor.default" in code:

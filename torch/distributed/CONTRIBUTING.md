@@ -9,6 +9,7 @@ In this document, we mostly focus on some of the code structure for PyTorch dist
 ### Onboarding Tasks
 
 A list of onboarding tasks can be found [here](https://github.com/pytorch/pytorch/issues?q=is%3Aopen%20is%3Aissue%20label%3A%22pt_distributed_rampup%22).
+Issues labeled [`oncall: distributed` and `good first issue`](https://github.com/pytorch/pytorch/issues?q=is%3Aopen%20is%3Aissue%20label%3A%22oncall%3A%20distributed%22%20label%3A%22good%20first%20issue%22) are also a good place to start.
 
 
 ## Code Pointers
@@ -21,7 +22,7 @@ This is the place to look if you are trying to find low-level communication APIs
 
 - API layer: [torch/distributed/distributed_c10d.py](https://github.com/pytorch/pytorch/blob/main/torch/distributed/distributed_c10d.py)
 - Python Bindings: [torch/csrc/distributed/c10d/init.cpp](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/init.cpp)
-- Implementations: [torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp)
+- Implementations: [torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.cpp](https://github.com/pytorch/pytorch/blob/main/torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.cpp)
 
 #### DTensor
 
