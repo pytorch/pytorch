@@ -274,14 +274,15 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
         for x in b:
-            if x == a:
+            if x is a or x == a:
                 return True
         return False
     if hasattr(b, "__getitem__"):
         i = 0
         while True:
             try:
-                if b.__getitem__(i) == a:
+                item = b.__getitem__(i)
+                if item is a or item == a:
                     return True
                 i += 1
             except IndexError:
@@ -494,7 +495,7 @@ def mutable_mapping_update(
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
             self[key] = value
-    # FIXME: Enabling the `elif`-branch below needs too many `VariableClass.call_obj_hasattr` changes.
+    # FIXME: Enabling the `elif`-branch below needs too many `tp_getattro_impl` changes.
     #   >>> class Foo:
     #   ...     def __init__(self):
     #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method

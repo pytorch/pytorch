@@ -3,6 +3,8 @@
 """Tests for triton_helpers functions.
 
 Covers:
+- rounding_to_int: integer inputs bypass floating-point-only libdevice
+  functions while floating inputs use the requested rounding operation.
 - exclusive_scan_decoupled_lookback_64 dtype fix (D89705211): ensures
   `test_target` maintains consistent dtype by using `tl.full([], -1, index.dtype)`
   instead of the literal `-1`.
@@ -25,7 +27,9 @@ from torch._inductor.runtime.triton_helpers import (
     online_softmax_combine_with_sum,
     rand4x,
     randn4x,
+    rounding_to_int,
     select_one,
+    trunc_to_float,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
@@ -161,6 +165,29 @@ if HAS_GPU:
             tl.store(max_ptr + row, max2(x, 0))
 
     @triton.jit
+    def test_kernel_rounding_to_int(
+        x_ptr,
+        result_ptr,
+        BLOCK_SIZE: tl.constexpr,
+        ROUNDING: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK_SIZE)
+        x = tl.load(x_ptr + offsets)
+        result = rounding_to_int(x, tl.int64, ROUNDING)
+        tl.store(result_ptr + offsets, result)
+
+    @triton.jit
+    def test_kernel_trunc_to_float(
+        x_ptr,
+        result_ptr,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        offsets = tl.arange(0, BLOCK_SIZE)
+        x = tl.load(x_ptr + offsets)
+        result = trunc_to_float(x, tl.float32)
+        tl.store(result_ptr + offsets, result)
+
+    @triton.jit
     def test_kernel_online_softmax_combine(
         a_ptr,
         b_ptr,
@@ -201,6 +228,30 @@ if HAS_GPU:
         tl.store(actual_ptr + offsets + N, result_sum, mask)
         tl.store(expected_ptr + offsets, maximum_value, mask)
         tl.store(expected_ptr + offsets + N, expected_sum, mask)
+
+
+class RoundingToIntTest(TestCase):
+    @dtypes(torch.int32, torch.int64, torch.float32, torch.float64)
+    @parametrize("rounding_type", ["ceil", "floor", "trunc"])
+    def test_integer_and_float_inputs(self, device, dtype, rounding_type) -> None:
+        rounding_fn = getattr(torch, rounding_type)
+        values = [-3.75, -2.0, -1.0, 0.0, 1.0, 2.0, 3.75, 5.5]
+        x = torch.tensor(values, dtype=dtype, device=device)
+        result = torch.empty(x.numel(), dtype=torch.int64, device=device)
+        test_kernel_rounding_to_int[(1,)](
+            x, result, BLOCK_SIZE=x.numel(), ROUNDING=rounding_type
+        )
+        self.assertEqual(result, rounding_fn(x).to(torch.int64))
+
+    @dtypes(torch.int32, torch.int64, torch.float32)
+    def test_trunc_to_float_integer_and_float_inputs(self, device, dtype) -> None:
+        values = [-3.75, -2.0, -1.0, -0.0, 0.0, 1.0, 2.0, 3.75]
+        x = torch.tensor(values, dtype=dtype, device=device)
+        result = torch.empty(x.numel(), dtype=torch.float32, device=device)
+        test_kernel_trunc_to_float[(1,)](x, result, BLOCK_SIZE=x.numel())
+
+        expected = torch.trunc(x.to(torch.float32)) + torch.zeros_like(result)
+        self.assertEqual(result.view(torch.int32), expected.view(torch.int32))
 
 
 class OnlineSoftmaxCombineTest(TestCase):
@@ -610,6 +661,12 @@ if HAS_GPU:
         OnlineSoftmaxCombineTest, globals(), only_for=GPU_TYPE, allow_xpu=True
     )
     instantiate_device_type_tests(MinimumMaximumTest, globals(), only_for=GPU_TYPE)
+    instantiate_device_type_tests(
+        RoundingToIntTest,
+        globals(),
+        only_for=GPU_TYPE,
+        allow_xpu=True,
+    )
 
 
 if __name__ == "__main__":

@@ -73,7 +73,7 @@ IF(NOT MKLDNN_FOUND)
       endif()
       ExternalProject_Add(xpu_mkldnn_proj
         GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
-        GIT_TAG v3.14
+        GIT_TAG v3.14.2
         PREFIX "${_xpu_mkldnn_prefix}"
         BUILD_IN_SOURCE 0
         CMAKE_ARGS  -DCMAKE_C_COMPILER=${DNNL_C_COMPILER}
@@ -84,6 +84,7 @@ IF(NOT MKLDNN_FOUND)
         -DDNNL_BUILD_EXAMPLES=OFF
         -DONEDNN_BUILD_GRAPH=ON
         -DDNNL_LIBRARY_TYPE=STATIC
+        -DONEDNN_EXPERIMENTAL_GROUPED_MEMORY=ON
         -DDNNL_DPCPP_HOST_COMPILER=${DNNL_HOST_COMPILER}
         -G ${CMAKE_GENERATOR}
         BUILD_COMMAND ${DNNL_MAKE_COMMAND}
@@ -104,12 +105,12 @@ IF(NOT MKLDNN_FOUND)
     target_include_directories(xpu_mkldnn INTERFACE ${XPU_MKLDNN_INCLUDE})
   endif()
 
-  IF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
+  IF(NOT APPLE AND NOT WIN32)
     MESSAGE("-- Will build oneDNN Graph")
     SET(LLGA_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
     SET(BUILD_ONEDNN_GRAPH ON)
     SET(ONEDNN_BUILD_GRAPH ON CACHE BOOL "" FORCE)
-  ENDIF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
+  ENDIF(NOT APPLE AND NOT WIN32)
 
   IF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
     IF(CPU_POWER OR CPU_RISCV)
@@ -184,6 +185,8 @@ IF(NOT MKLDNN_FOUND)
     ENDIF()
     # oneDNN includes the Accelerate.h umbrella header, whose global bfloat16_t from arm_bf16.h clashes
     # with dnnl::impl::bfloat16_t, so shadow it with a header that only provides the CBLAS interface
+    # TODO: Replace the shim with -DACCELERATE_NEW_LAPACK once the oneDNN submodule includes
+    # https://github.com/uxlfoundation/oneDNN/pull/6436
     SET(ONEDNN_ACCELERATE_SHIM_DIR "${CMAKE_BINARY_DIR}/onednn_accelerate_shim")
     FILE(WRITE "${ONEDNN_ACCELERATE_SHIM_DIR}/Accelerate.h"
       "#pragma once\n#define ACCELERATE_NEW_LAPACK\n#include <vecLib/cblas_new.h>\n")

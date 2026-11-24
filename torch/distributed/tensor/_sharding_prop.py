@@ -11,7 +11,7 @@ import torch
 from torch._guards import detect_fake_mode
 from torch._logging import LazyString
 from torch._ops import OpOverload
-from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._decompositions import DecompShardingStrategy

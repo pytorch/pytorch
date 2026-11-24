@@ -150,6 +150,17 @@ class TestQuantizedTensor(TestCase):
         y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
         self.assertTrue(torch.equal(x_q, y_q))
 
+    def test_qtensor_equal_sub_byte_dtypes(self):
+        # gh-203767: equal used to over-read quint2x4 storage (caught by ASAN)
+        for dtype in (torch.quint4x2, torch.quint2x4):
+            x = torch.rand(7)  # odd numel exercises the partial trailing byte
+            a = torch.quantize_per_tensor(x, 1.0, 0, dtype)
+            b = torch.quantize_per_tensor(x, 1.0, 0, dtype)
+            self.assertTrue(torch.equal(a, b))
+            storage = b.untyped_storage()
+            storage[storage.nbytes() - 1] ^= 1
+            self.assertFalse(torch.equal(a, b))
+
     def test_per_tensor_qtensor_to_memory_format(self):
         n = np.random.randint(1, 10)
         c = np.random.randint(2, 10)
@@ -1425,7 +1436,7 @@ class TestQuantizedTensor(TestCase):
                     super().__init__()
                     self.fname = fname
 
-                @torch.jit.script_method
+                @torch.jit._script.script_method
                 def forward(self, x, y):
                     torch.save((x, y), self.fname)
                     return y
@@ -1447,31 +1458,6 @@ class TestQuantizedTensor(TestCase):
 
     def test_pickle_checkpoint_qtensor(self):
         self._test_pickle_checkpoint_qtensor('cpu')
-
-    def test_jit_serialization(self):
-        class SimpleQTensor(torch.jit.ScriptModule):
-            def __init__(self, per_channel):
-                super().__init__()
-                x = torch.rand(5, 5).float()
-                if not per_channel:
-                    x_q = torch.quantize_per_tensor(x, 0.2, 10, torch.quint8)
-                else:
-                    s = torch.rand(5, dtype=torch.float64) + 0.1
-                    zp = torch.randint(5, 15, (5,))
-                    x_q = torch.quantize_per_channel(x, s, zp, 1, torch.quint8)
-                self.x = torch.nn.Buffer(x_q)
-
-            @torch.jit.script_method
-            def forward(self):
-                return self.x
-
-        for per_channel in [False, True]:
-            model = SimpleQTensor(per_channel)
-            buffer = io.BytesIO()
-            torch.jit.save(model, buffer)
-            buffer.seek(0)
-            model_loaded = torch.jit.load(buffer)
-            self.assertEqual(model_loaded(), model())
 
     def test_bfp16_quantize(self):
         X = torch.randn(5 , 10)
