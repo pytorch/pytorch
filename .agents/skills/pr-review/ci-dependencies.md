@@ -20,7 +20,7 @@ The fix is to add the package to the CI image: `.ci/docker/requirements-ci.txt`,
 
 Adding a package to `requirements-ci.txt` is the fix even though some jobs still resolve it on each run: s390x installs that file at test time into an image that doesn't preinstall it, and macOS and Windows have no image.
 
-When the changed dependency is used only by workflows that don't run on PRs by default, ask for a representative ciflow label that exercises it (for example `ciflow/inductor-periodic` for a benchmark-only dependency). A shared change, such as to `requirements-ci.txt` or a base Dockerfile, does not by itself call for every consumer workflow's label; the image builds are already exercised by `ciflow/docker`.
+When the changed dependency is used only by workflows that don't run on PRs by default, ask for a representative ciflow label that exercises it (for example `ciflow/inductor-periodic` for a benchmark-only dependency). Check the PR's labels first (`labels` from `gh pr view`) and do not ask for one that is already applied; if the labels are not available (GitHub Actions mode does not provide them, and Local Branch mode has no PR), ask for the label and say it may already be applied. A label covers only the workflows its tag triggers: `ciflow/docker` does not exercise a benchmark-only dependency. A shared change, such as to `requirements-ci.txt` or a base Dockerfile, does not by itself call for every consumer workflow's label; the image builds are already exercised by `ciflow/docker`.
 
 A job that needs its own venv should layer it over the image with `create_venv_over_image` (`.ci/pytorch/common_utils.sh`) instead of resolving everything again in a fresh one.
 
