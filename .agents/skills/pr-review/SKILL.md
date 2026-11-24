@@ -137,7 +137,14 @@ Any directory may contain a `REVIEW.md` with review rules for code under it. It 
 
 ## Maintainer Comments
 
-When reviewing a PR, check that every comment from a maintainer has been addressed. A maintainer is a user with triage access or above on the repository; bots and other users do not count. A comment is addressed when the code at HEAD fixes the specific problem it raises, or when the author replied explaining why no change is needed and no maintainer pushed back afterwards. It is also addressed when a maintainer, or a PR author with triage access or above, reacted with a thumbs-down to the automated review's earlier inline comment that reported it, and no maintainer has raised it again in a comment posted after that finding. Approvals, praise, and questions already answered in the thread need nothing. Report each unaddressed maintainer comment as a finding that names the maintainer and states what they asked.
+When reviewing a PR, check that every maintainer comment that asks the author for something has been addressed.
+
+- **Maintainer:** a user with triage access or above on the repository; bots and other users do not count.
+- **Asks the author for something:** the comment asks for a change to the PR or for an answer to a question. A maintainer who points out a problem in the PR, says the PR should do something different, or endorses another reviewer's request ("+1, please fix") is asking for that change, however it is phrased. Pointing out a problem means saying that something in the PR is wrong; a statement of fact that does not say so, from which a request could only be inferred, gives context. A comment that only explains, gives context, approves or praises, or answers another reviewer without asking for a change needs nothing, even when nobody replied to it.
+- **Marked optional:** a request the maintainer marked optional ("nit", "optional", "up to you", "no big deal") is not an unaddressed maintainer comment. Judge the point on its own merits like any other: a correctness bug marked "nit" still blocks under principle 5.
+- **Addressed:** the code at HEAD fixes the specific problem the comment raises, or the author replied explaining why no change is needed and no maintainer pushed back afterwards, or the question was answered in the thread. It is also addressed when a maintainer, or a PR author with triage access or above, reacted with a thumbs-down to the automated review's earlier inline comment that reported it, and no maintainer has raised it again in a comment posted after that finding.
+
+Report each unaddressed maintainer comment as a finding that names the maintainer and states what they asked.
 
 In Local CLI Mode, fetch the conversation and check each commenter's access:
 
@@ -177,7 +184,7 @@ Before reviewing, build understanding of what the PR touches and why:
 3. Note the scope of changes (files affected, lines changed)
 4. Spawn sub-agents to read the unchanged code surrounding each significantly changed file to understand existing patterns and infrastructure
 5. List the `REVIEW.md` files that apply to each changed file (see "Directory Review Guides" above); leave reading them to sub-agents unless you review or fact-check a file yourself
-6. For a PR, list the maintainer comments and whether each is addressed (see "Maintainer Comments" above)
+6. For a PR, list the maintainer comments that ask the author for something and whether each is addressed (see "Maintainer Comments" above)
 7. On a re-review, read the earlier automated findings and what was said about them, and follow "Re-reviews converge" (see "Earlier Automated Findings" above)
 
 ### Step 2: Deep Review

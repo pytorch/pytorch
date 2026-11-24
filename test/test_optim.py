@@ -14,7 +14,6 @@ from unittest.mock import patch
 
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
-from optim.test_swa_utils import TestSWAUtils, TestSWAUtilsGeneric  # noqa: F401
 
 import torch
 from torch.nn import Parameter
@@ -1119,10 +1118,10 @@ class TestOptimRenewed(TestCase):
                 import gc
 
                 gc.collect()
-                torch.cuda.reset_peak_memory_stats()
+                torch.accelerator.reset_peak_memory_stats()
                 optimizer.step()
                 gc.collect()
-                max_mems.append(torch.cuda.max_memory_allocated())
+                max_mems.append(torch.accelerator.max_memory_allocated())
 
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
@@ -3082,7 +3081,6 @@ class TestOptimizerLoadStateDictContext(TestCase):
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
-instantiate_device_type_tests(TestSWAUtils, globals(), allow_mps=True)
 
 
 if __name__ == "__main__":
