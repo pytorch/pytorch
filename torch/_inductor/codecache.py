@@ -122,6 +122,7 @@ from torch._inductor.utils import (
     is_linux,
     is_windows,
     parallel_num_threads,
+    strict_constraint_symbols,
     XPU_KERNEL_FORMAT,
 )
 from torch._library.fake_class_registry import FakeScriptObject
@@ -1750,6 +1751,15 @@ class FxGraphHashDetails:
         self.conv_template_allow_tf32 = self._template_allow_tf32(
             device_types, lambda iface: iface.conv_allow_tf32()
         )
+        # mm_allow_tf32 adds no hint guard for dims under a strict user min/max,
+        # and neither the key nor the replayed guards record those constraints.
+        # Without this, an entry compiled with a plain mark_dynamic would replay
+        # its guard onto a constrained dim and raise ConstraintViolationError.
+        shape_env = FxGraphCache._get_shape_env()
+        if shape_env is not None and (
+            strict_syms := strict_constraint_symbols(shape_env)
+        ):
+            self.strict_constraint_symbols = sorted(str(s) for s in strict_syms)
 
         # compile-on-one-rank changes wrapper and kernel codegen (runtime device
         # resolution, DeviceProperties(index=None)) even for graphs that contain no
