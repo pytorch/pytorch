@@ -8,7 +8,7 @@ using torch::stable::Tensor;
 namespace {
 
 Tensor my_index_fill_(
-    Tensor self,
+    const Tensor& self,
     int64_t dim,
     const Tensor& index,
     const Tensor& value) {

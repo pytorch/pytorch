@@ -1542,7 +1542,8 @@ for warning in w:
         self.assertEqual(actual, x.repeat_interleave(2, dim=1, output_size=6))
         actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2)
         self.assertEqual(actual, x.repeat_interleave(2))
-        with self.assertRaisesRegex(RuntimeError, "Invalid output_size"):
+        with self.assertRaisesRegex(RuntimeError, "API call failed"):
+            # TODO (qqaatw): add a helper that branches and checks the actual error message from Aten when torch >= 2.13.
             libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, output_size=5)
         ops = libtorch_agnostic.ops
         repeats = torch.tensor([1, 3, 0], device=device)

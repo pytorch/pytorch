@@ -8,13 +8,11 @@ using torch::stable::Tensor;
 namespace {
 
 Tensor my_index_fill_scalar_(
-    Tensor self,
+    const Tensor& self,
     int64_t dim,
     const Tensor& index,
     double value) {
-  Tensor& result = torch::stable::index_fill_(self, dim, index, value);
-  STD_TORCH_CHECK(&result == &self, "index_fill_ must return self");
-  return result;
+  return torch::stable::index_fill_(self, dim, index, value);
 }
 
 } // namespace

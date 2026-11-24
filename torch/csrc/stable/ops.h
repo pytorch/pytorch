@@ -2140,9 +2140,11 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> median(
 /// @param dim The dimension to index.
 /// @param index The indices to fill.
 /// @param value The zero-dimensional tensor containing the fill value.
-/// @return A reference to the modified input tensor.
-inline torch::stable::Tensor& index_fill_(
-    torch::stable::Tensor& self,
+/// @note Following torch::stable::fill_, this wrapper returns the tensor
+///       handle by value. The ATen C++ API returns a mutable tensor reference.
+/// @return The modified input tensor.
+inline torch::stable::Tensor index_fill_(
+    const torch::stable::Tensor& self,
     int64_t dim,
     const torch::stable::Tensor& index,
     const torch::stable::Tensor& value) {
@@ -2176,13 +2178,18 @@ inline torch::stable::Tensor& index_fill_(
 /// Minimum compatible version: PyTorch 2.16.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note The value parameter is typed as double
+///       API uses double for the Scalar parameter.
+///
 /// @param self The tensor to modify.
 /// @param dim The dimension to index.
 /// @param index The indices to fill.
 /// @param value The real fill value.
-/// @return A reference to the modified input tensor.
-inline torch::stable::Tensor& index_fill_(
-    torch::stable::Tensor& self,
+/// @note Following torch::stable::fill_, this wrapper returns the tensor
+///       handle by value. The ATen C++ API returns a mutable tensor reference.
+/// @return The modified input tensor.
+inline torch::stable::Tensor index_fill_(
+    const torch::stable::Tensor& self,
     int64_t dim,
     const torch::stable::Tensor& index,
     double value) {
