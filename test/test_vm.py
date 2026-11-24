@@ -22948,7 +22948,6 @@ ONE_NODE = ["the engine's backward"]
 TWO_NODES = ["in parts", "the engine's backward", "the engine's backward"]
 
 
-@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class VmHookedStop(Exception):
     """What a hook raises to leave the operation it runs under."""
 
@@ -23310,6 +23309,262 @@ def vm_hooked_graphs(compiled):
     ]
 
 
+class VmTotalNet(torch.nn.Module):
+    """What a function can write to from outside: a buffer, and the statistics of a batch norm in training mode."""
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("total", torch.zeros(()))
+        self.norm = torch.nn.BatchNorm1d(4)
+
+
+class VmTotalBox:
+    def __init__(self):
+        self.net = None
+        self.calls = 0
+        self.seen = []
+
+
+VM_TOTAL_BOX = VmTotalBox()
+
+# What a function does in front of the operation, by what it is: a line of the function.
+VM_TOTAL_EFFECTS = {
+    "a write to an input": "x.add_(1.0)",
+    "a write to a row of an input": "x[0] = x[1] * 2.0",
+    "a write through a view of an input": "x.view(-1).mul_(1.5)",
+    "a write with out=": "torch.add(x, 1.0, out=x)",
+    "a buffer": "VM_TOTAL_BOX.net.total.add_(x.mean())",
+    "the statistics of a batch norm": "x = VM_TOTAL_BOX.net.norm(x)",
+    "a draw": "x = x + torch.rand_like(x)",
+    "a dropout": "x = torch.nn.functional.dropout(x, 0.5)",
+    "a counter and an append": "VM_TOTAL_BOX.calls += 1; VM_TOTAL_BOX.seen.append(len(VM_TOTAL_BOX.seen))",
+}
+# The effects that are operations of a graph, which then can neither be run again nor taken back. A write
+# with `out=` is none (the graph starts behind it), nor is a store into an object.
+VM_TOTAL_OUTSIDE = tuple(
+    name
+    for name in VM_TOTAL_EFFECTS
+    if name not in ("a write with out=", "a counter and an append")
+)
+
+
+def vm_total_number(goes, fails, across=False):
+    """A 0-d tensor with a number that an operation reads: one that fits, another in every call, or one that
+    does not. `across`: on the CPU whatever the device of the rest."""
+
+    def make(bad, at, device):
+        number = fails if bad else goes + (at % 2 if isinstance(goes, float) else 0)
+        return torch.tensor(number, device="cpu" if across else device)
+
+    return make
+
+
+def vm_total_leaf(bad, at, device):
+    w = torch.ones(4, device=device, requires_grad=True)
+    return w if bad else w * 1.0
+
+
+def vm_total_view_of_a_leaf(bad, at, device):
+    w = torch.ones(4, device=device, requires_grad=True)
+    return w.view(4) if bad else (w * 1.0).view(4)
+
+
+def vm_total_view_without_gradients(bad, at, device):
+    w = torch.ones(4, device=device, requires_grad=True) * 1.0
+    if bad:
+        with torch.no_grad():
+            return w.view(4)
+    return w.view(4)
+
+
+def vm_total_view(bad, at, device):
+    return torch.ones(8, device=device)[:4] if bad else torch.ones(4, device=device)
+
+
+# Operations that fail for what a tensor they are handed holds or is, which no form checks: the line (`h` is a
+# float tensor of four rows, `n` four zeros of int64, `v` the tensor), the operator that is none of a graph
+# that writes outside, what makes `v` (one that goes, or one the operation fails for), and whether the
+# operation is itself a write to a tensor from outside.
+VM_TOTAL_OPERATIONS = {
+    # A number read off a tensor that does not fit the dtype, or is no place of the tensor.
+    "masked_fill": (
+        "r = n.masked_fill(n == 0, v)",
+        "aten::masked_fill.Tensor",
+        vm_total_number(2.0, float("inf")),
+        False,
+    ),
+    "masked_fill_": (
+        "r = n.masked_fill_(n == 0, v)",
+        "aten::masked_fill_.Tensor",
+        vm_total_number(2.0, float("inf")),
+        False,
+    ),
+    "linspace": (
+        "r = torch.linspace(v, 8, 4, dtype=torch.int64, device=h.device)",
+        "aten::linspace.Tensor_Scalar",
+        vm_total_number(2.0, float("inf")),
+        False,
+    ),
+    "narrow": (
+        "r = h.narrow(0, v, 2)",
+        "aten::narrow.Tensor",
+        vm_total_number(1, 7),
+        False,
+    ),
+    "tensor_split": (
+        "r = torch.tensor_split(h, v)[0]",
+        "aten::tensor_split.tensor_indices_or_sections",
+        vm_total_number(2, 0, across=True),
+        False,
+    ),
+    "fill_ across devices": (
+        "r = n.fill_(v)",
+        "aten::fill_.Tensor",
+        vm_total_number(2.0, float("inf"), across=True),
+        False,
+    ),
+    # A write in place that autograd refuses for what the tensor is to it.
+    "a write to a leaf": ("r = v.sub_(0.5)", "aten::sub_.Tensor", vm_total_leaf, True),
+    "a write to a view of a leaf": (
+        "r = v.sub_(0.5)",
+        "aten::sub_.Tensor",
+        vm_total_view_of_a_leaf,
+        True,
+    ),
+    "a write to a view made without gradients": (
+        "r = v.sub_(0.5)",
+        "aten::sub_.Tensor",
+        vm_total_view_without_gradients,
+        True,
+    ),
+    "a store into a leaf": (
+        "v[0] = 2.0; r = v",
+        "aten::fill_.Scalar",
+        vm_total_leaf,
+        True,
+    ),
+    "detach_ of a view": ("r = v.detach_()", "aten::detach_", vm_total_view, True),
+}
+
+VM_TOTAL_SHAPES = {
+    "caught": """
+def vm_total(x, w, v):
+    EFFECT
+    h = ((x * w).sin() * 2 + 1).cos()
+    n = torch.zeros(4, dtype=torch.int64, device=x.device)
+    try:
+        OPERATION
+    except (RuntimeError, IndexError):
+        return h.sum() - 1
+    return h.sum() + r.sum()
+""",
+    "not caught": """
+def vm_total(x, w, v):
+    EFFECT
+    h = ((x * w).sin() * 2 + 1).cos()
+    n = torch.zeros(4, dtype=torch.int64, device=x.device)
+    OPERATION
+    return h.sum() + r.sum()
+""",
+    "in a callee": """
+def vm_total_inner(h, n, v):
+    OPERATION
+    return r.sum()
+
+
+def vm_total(x, w, v):
+    EFFECT
+    h = ((x * w).sin() * 2 + 1).cos()
+    n = torch.zeros(4, dtype=torch.int64, device=x.device)
+    try:
+        s = vm_total_inner(h, n, v)
+    except (RuntimeError, IndexError):
+        return h.sum() - 1
+    return h.sum() + s
+""",
+    "in a loop": """
+def vm_total(x, w, v):
+    EFFECT
+    h = ((x * w).sin() * 2 + 1).cos()
+    n = torch.zeros(4, dtype=torch.int64, device=x.device)
+    total = h.sum()
+    for _ in range(2):
+        try:
+            OPERATION
+        except (RuntimeError, IndexError):
+            total = total - 1
+        else:
+            total = total + r.sum()
+    return total
+""",
+}
+
+
+def vm_total_function(effect, operation, shape):
+    """The function of one case, made of its source."""
+    source = (
+        VM_TOTAL_SHAPES[shape]
+        .replace("EFFECT", VM_TOTAL_EFFECTS[effect])
+        .replace("OPERATION", VM_TOTAL_OPERATIONS[operation][0])
+    )
+    scope = {"torch": torch, "VM_TOTAL_BOX": VM_TOTAL_BOX}
+    exec(compile(source, "<vm total>", "exec"), scope)
+    return scope["vm_total"]
+
+
+def vm_total_call(operation, bad, graded):
+    """One call: the operation fails in the calls of `bad`. What came out or was raised (and where the traceback
+    stands in the function), the gradient, and everything the call could have written to: the input, the buffer
+    and the statistics, the next numbers of the generators, the counter and the list."""
+    make = VM_TOTAL_OPERATIONS[operation][2]
+
+    def case(run, fn, device, at):
+        torch.manual_seed(at)
+        x = torch.randn(4, 4, device=device)
+        w = torch.randn(4, 4, device=device, requires_grad=graded)
+        v = make(at in bad, at, device)
+        try:
+            out = run(x, w, v)
+        except (RuntimeError, IndexError) as error:
+            said = (
+                "raised",
+                type(error).__name__,
+                str(error),
+                vm_hooked_where(error, fn),
+            )
+        else:
+            grad = torch.autograd.grad(out, w)[0].tolist() if graded else None
+            said = (out.tolist(), grad)
+        net, box = VM_TOTAL_BOX.net, VM_TOTAL_BOX
+        left = (
+            x.tolist(),
+            v.tolist(),
+            net.total.tolist(),
+            net.norm.running_mean.tolist(),
+            net.norm.running_var.tolist(),
+            int(net.norm.num_batches_tracked),
+        )
+        return (
+            said,
+            left,
+            torch.rand(2, device=device).tolist(),
+            torch.rand(2).tolist(),
+            box.calls,
+            list(box.seen),
+        )
+
+    return case
+
+
+def vm_total_rows(run, fn, device, case, calls):
+    """`vm_hooked_rows` on a net, a counter and a list of its own."""
+    torch.manual_seed(0)
+    VM_TOTAL_BOX.net = VmTotalNet().to(device)
+    VM_TOTAL_BOX.calls, VM_TOTAL_BOX.seen = 0, []
+    return vm_hooked_rows(run, fn, device, case, calls)
+
+
+@unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphBackward(TestCase):
     """`Graphs(backward=True)`: the engine derives the backward of a graph
     whose inputs need a gradient."""
@@ -26022,6 +26277,122 @@ class TestVmGraphBackward(TestCase):
                                 before,
                                 msg=msg,
                             )
+
+    def test_what_fails_for_what_a_tensor_holds_or_is_stands_behind_a_graph_that_writes(
+        self, device
+    ):
+        # What was made of a graph that writes to a tensor from outside, or
+        # draws random numbers, cannot be run a second time and cannot be
+        # taken back, so such a graph holds only operations that cannot
+        # fail at a later call. A form is for sizes, strides, dtypes and
+        # devices, and for the numbers a call hands over. It does not
+        # check what a tensor holds: an operator that reads a number off a
+        # tensor it is handed fails where the number does not fit, a value
+        # to fill with that the dtype cannot hold (`masked_fill`, `fill_`
+        # across devices, `linspace`), a start or a count that is no place
+        # of the tensor (`narrow`, `tensor_split`). Nor what a tensor is to
+        # autograd: a write in place to a tensor that a gradient is
+        # recorded for is refused for a leaf, for a view of one and for a
+        # view that was made without gradients, and `detach_` for a view.
+        # None of these is an operation of a path that writes outside (the
+        # writes are themselves such): the path ends in front of it, the
+        # instruction runs behind the graph, and what it raises is caught
+        # where the function catches it, with the write done once, the
+        # statistics moved once and the numbers drawn once.
+        # (Each of them was taken to be unable to fail: in a call that it
+        # failed in, behind a write to an input, the error left the call
+        # where eager mode runs the `except`; what a compiler had made of
+        # the graph lost the write as well, and for `detach_` of a view it
+        # returned a value.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        tape = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs(backward=False), keep)
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES, False, True),
+            ("graphs", graphs, False, True),
+            ("a pass", (*graphs, keep), False, True),
+            ("AOTAutograd", (*graphs, torch.vm.passes.AOTAutograd()), False, False),
+            ("a gradient", graphs, True, True),
+            ("a gradient and a pass", (*graphs, keep), True, True),
+            ("a gradient on eager's tape", tape, True, True),
+        )
+        warm, early, every_other = (12, 14, 15), (0, 1, 2, 3, 5), tuple(range(0, 20, 2))
+        accelerator = torch.device(device).type != "cpu"
+
+        def check(operation, effect, shape, way, bad):
+            _, operator, _, writes = VM_TOTAL_OPERATIONS[operation]
+            label, passes, graded, exact = way
+            msg = f"{operation} behind {effect}, {shape}, {label}, fails in the calls {bad}"
+            fn = vm_total_function(effect, operation, shape)
+            compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+            case = vm_total_call(operation, bad, graded)
+            got = vm_total_rows(compiled, fn, device, case, range(20))
+            expected = vm_total_rows(fn, fn, device, case, range(20))
+            if exact:
+                self.assertEqual(got, expected, msg=msg)
+            else:
+                for mine, eagers in zip(got, expected):
+                    self.assertEqual(mine, eagers, rtol=1e-4, atol=1e-5, msg=msg)
+            # Eager mode raises out of the call only where nothing catches.
+            raised = [at for at, row in enumerate(expected) if row[0][0] == "raised"]
+            self.assertEqual(
+                raised, list(bad) if shape == "not caught" else [], msg=msg
+            )
+            if label == "the default passes":
+                return
+            found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+            holds = [g["ops"] for g in found if operator in g["operators"]]
+            if (
+                effect in ("a draw", "a dropout")
+                and label in ("graphs", "a gradient")
+                and not writes
+            ):
+                # What draws is an operation only of a graph that a pass
+                # is handed.
+                return
+            if writes or effect in VM_TOTAL_OUTSIDE:
+                # No graph of the function holds the operation, and one
+                # runs in front of it.
+                self.assertEqual(holds, [], msg=msg)
+                if bad == warm and (graded or label in ("a pass", "AOTAutograd")):
+                    self.assertTrue(
+                        any(g["hits"] > 0 for g in found), msg=f"{msg}: {found}"
+                    )
+            elif bad == warm and not graded:
+                # Without a write the operation is one of the graph, as it
+                # was: where it raises, the instructions run.
+                self.assertTrue(holds, msg=f"{msg}: {found}")
+
+        for operation in VM_TOTAL_OPERATIONS:
+            if operation == "fill_ across devices" and not accelerator:
+                continue
+            # Each operation behind each effect, in a warm function.
+            for effect in VM_TOTAL_EFFECTS:
+                for way in (ways[1], ways[2], ways[5]):
+                    check(operation, effect, "caught", way, warm)
+            # In each shape, each way and each schedule (the calls in
+            # which a path is taken down among them), behind a write, a
+            # draw and a store.
+            thorough = operation in (
+                "masked_fill",
+                "narrow",
+                "a write to a leaf",
+                "detach_ of a view",
+            )
+            for effect in (
+                "a write to an input",
+                "the statistics of a batch norm",
+                "a draw",
+                "a write with out=",
+                "a counter and an append",
+            ):
+                for shape in VM_TOTAL_SHAPES:
+                    for way in ways:
+                        for bad in (warm, early, every_other):
+                            if thorough or (shape, bad) == ("caught", warm):
+                                check(operation, effect, shape, way, bad)
 
     def test_no_graph_is_entered_while_a_node_creation_hook_is_on(self, device):
         # `torch.autograd.graph.node_creation_hook` is Python code that eager

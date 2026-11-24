@@ -1338,6 +1338,8 @@ unsafe fn versions_of(values: &[Obj], api: &TcfgApi) -> Vec<(Obj, u64)> {
 /// path of the graph was taken down.
 const WARNS: &str = "gave a warning when a path was taken down";
 const CHANGES_KIND: &str = "changes the sizes of a tensor from outside, or whether it requires a gradient";
+const REBASES: &str = "writes in place to a tensor from outside that a gradient is recorded for";
+const DETACHES: &str = "detaches a tensor from outside in place";
 
 /// The kind, sizes and strides of each tensor among some values, as the
 /// forms of a graph check them.
@@ -5486,7 +5488,7 @@ impl Compiled {
     unsafe fn total(&self, inst: &Inst, regs: &[Obj], operators: Option<&str>, api: &TcfgApi) -> bool {
         // half, float, double, the complex types, bfloat16
         const FLOATING: [i32; 7] = [5, 6, 7, 8, 9, 10, 15];
-        let mut floats = true;
+        let (mut floats, mut devices) = (true, Vec::new());
         let mut taken: Vec<Obj> = Vec::new();
         inst.op.for_each_use(|v| taken.push(reg(regs, v)));
         if let Op::Call { callee, .. } | Op::CallEx { callee, .. } = &inst.op {
@@ -5496,6 +5498,9 @@ impl Compiled {
             let mut info = TcfgTensorInfo::empty();
             if (api.tensor_info)(item, &mut info) != 0 {
                 floats &= FLOATING.contains(&info.dtype);
+                if !devices.contains(&info.device) {
+                    devices.push(info.device);
+                }
             }
         }
         let names = Self::operators_of(inst, operators);
@@ -5503,8 +5508,37 @@ impl Compiled {
             && names.iter().all(|name| match graph::total_operator(name) {
                 graph::Total::Always => true,
                 graph::Total::Floats => floats,
+                graph::Total::OneDevice => devices.len() <= 1,
                 graph::Total::Never => false,
             })
+    }
+
+    /// Whether an operation writes in place to a tensor that requires a
+    /// gradient, in a call that records gradients: the tensor is the
+    /// first one it is handed, in the order of the call.
+    unsafe fn rebases(&self, inst: &Inst, regs: &[Obj], operators: Option<&str>, api: &TcfgApi) -> bool {
+        if (api.call_modes)() & 1 == 0 {
+            return false;
+        }
+        let writes = match &inst.op {
+            Op::Dispatch(d) => d.slot.traits() & capi::SITE_WRITES != 0,
+            Op::SetItem { .. } => true,
+            _ => operators.is_some_and(|names| names.split('+').any(|name| !(graph::pure_operator(name) || graph::seeded_operator(name)))),
+        };
+        if !writes {
+            return false;
+        }
+        let mut taken: Vec<Obj> = Vec::new();
+        if let Op::Call { callee, .. } | Op::CallEx { callee, .. } = &inst.op {
+            taken.extend(self.bound_tensor(regs, *callee, api).map(|(tensor, ..)| tensor));
+        }
+        match &inst.op {
+            Op::SetItem { obj, .. } => taken.push(reg(regs, *obj)),
+            op => op.for_each_use(|v| taken.push(reg(regs, v))),
+        }
+        let mut info = TcfgTensorInfo::empty();
+        let written = flattened(&taken).into_iter().find(|item| (api.tensor_info)(*item, &mut info) != 0);
+        written.is_some() && info.requires_grad != 0
     }
 
     /// Whether the sizes of what an operation gave follow from the sizes
@@ -7579,6 +7613,21 @@ impl Compiled {
         let Some(kind) = kind else {
             return ends();
         };
+        // A write in place to a tensor from outside that a gradient is
+        // recorded for is asked of autograd first, which refuses it for
+        // what the tensor is there (a leaf, a view of one, a view that was
+        // made where no gradient was recorded): nothing a form checks. The
+        // instruction does the write, and what autograd raises is raised
+        // where the function has it.
+        if kind == Kind::Node && outside.get() && self.rebases(inst, regs, operators.as_deref(), api) {
+            return Taken::Ends(REBASES.to_string());
+        }
+        // `detach_` of a tensor from outside does nothing to one that
+        // requires no gradient, unless that is a view, which it is
+        // refused for.
+        if kind == Kind::Node && outside.get() && Self::operators_of(inst, operators.as_deref()) == ["aten::detach_"] {
+            return Taken::Ends(DETACHES.to_string());
+        }
         // One that gave a warning when it ran for a path of this graph: a
         // warning is shown by Python code, for the place the function is
         // at, so the instruction runs where the function has it.

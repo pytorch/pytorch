@@ -4980,6 +4980,8 @@ pub enum Total {
     Always,
     /// It cannot on floating point tensors (an integer division can).
     Floats,
+    /// It cannot where its tensors are on one device.
+    OneDevice,
     /// It can, or it is not known.
     Never,
 }
@@ -5016,12 +5018,40 @@ const WHOLE_NUMBERS: [&str; 23] = [
     "bitwise_not", "sign",
 ];
 
+/// Operators that the schema or a tag would have unable to fail, and that
+/// fail for what no form checks: how much memory a tensor stands in
+/// (`aten::as_strided`), and whether its storage can grow or be
+/// exchanged (`aten::resize_`, `aten::resize_as_`, `aten::set_`). By the
+/// name without the overload and the `_`.
+const MEMORY_BOUND: [&str; 4] = ["as_strided", "resize", "resize_as", "set"];
+
+/// The overloads that read a number off a tensor they are handed, by their
+/// full names: the number may not fit the dtype it is put into (a value to
+/// fill with, the ends of a range), or be no place of the tensor it counts
+/// into (where a view starts, where a tensor is split). The overloads that
+/// take the number itself are handed one that the form checks.
+const READS_A_NUMBER: [&str; 7] = [
+    "aten::masked_fill.Tensor",
+    "aten::masked_fill_.Tensor",
+    "aten::linspace.Tensor_Tensor",
+    "aten::linspace.Tensor_Scalar",
+    "aten::linspace.Scalar_Tensor",
+    "aten::narrow.Tensor",
+    "aten::tensor_split.tensor_indices_or_sections",
+];
+
+/// The overloads that read such a number only off a tensor on another
+/// device than the one they write to, and copy what is on the same one
+/// (a copy converts without a check).
+const READS_ACROSS_DEVICES: [&str; 2] = ["aten::fill.Tensor", "aten::fill_.Tensor"];
+
 /// See `Total`. A view gives its argument seen another way and reads
 /// nothing of it (its schema says that it is one, or its tag that it
 /// makes its argument one); the operators that work element by element,
 /// and those that reduce, say so in their tags;
-/// the rest is the list above. `aten::as_strided` is a view that can fail
-/// for how much memory there is, which no form checks.
+/// the rest is the list above. In front of all of them stand the
+/// operators that can fail all the same (`MEMORY_BOUND`,
+/// `READS_A_NUMBER`, `READS_ACROSS_DEVICES`).
 pub fn total_operator(name: &str) -> Total {
     static KNOWN: pyffi::Once<Shared<HashMap<String, Total>>> = pyffi::Once::new();
     let known = KNOWN.get_or_init(|| Shared::new(HashMap::new()));
@@ -5032,8 +5062,11 @@ pub fn total_operator(name: &str) -> Total {
     let base = qualified.rsplit("::").next().unwrap_or(qualified);
     let base = base.strip_suffix('_').filter(|rest| !rest.is_empty()).unwrap_or(base);
     let asked = |py: Python<'_>| -> PyResult<Total> {
-        if base == "as_strided" {
+        if MEMORY_BOUND.contains(&base) || READS_A_NUMBER.contains(&name) {
             return Ok(Total::Never);
+        }
+        if READS_ACROSS_DEVICES.contains(&name) {
+            return Ok(Total::OneDevice);
         }
         if TOTAL.contains(&base) {
             return Ok(Total::Always);
