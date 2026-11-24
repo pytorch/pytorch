@@ -186,6 +186,101 @@ def fp8e4m3fn_to_float32(x):
     return tl.where((exp == 0xF) & (mant == 0x7), nan, result)
 
 
+# The rounding functions below take MODE as the round argument of
+# Tensor.to(..., round=...). round_toward also takes "to_odd": truncating, and
+# setting the last bit if inexact. Rounded to odd into a format with at least
+# two more bits, such as float64 into float32, x then rounds once into the
+# narrower dtypes.
+
+
+@triton.jit
+def round_toward(x, DTYPE: tl.constexpr, MODE: tl.constexpr, SATURATION: tl.constexpr):
+    """
+    Converts x to the narrower floating-point DTYPE, rounding in MODE: Triton's
+    conversion rounds to nearest, and the result is then stepped one value
+    toward the rounding direction where it lies on the other side of x (to odd:
+    toward x where it is even and inexact). The encodings of the magnitudes are
+    consecutive, so this adds one to or subtracts one from the bits, across
+    zero, subnormals and up to infinity, but not past SATURATION, the largest
+    finite value of formats that saturate (0 for others). Comparisons with NaN
+    are false, so NaN is left alone.
+    """
+    rounded = x.to(DTYPE, fp_downcast_rounding="rtne")
+    if MODE == "to_nearest_even" and DTYPE.primitive_bitwidth > 8:
+        return rounded
+    back = tl.abs(rounded.to(x.dtype))
+    idtype: tl.constexpr = tl.core.get_int_dtype(DTYPE.primitive_bitwidth, signed=True)
+    bits = rounded.to(idtype, bitcast=True)
+    if SATURATION > 0:
+        up = tl.where((back < tl.abs(x)) & (back != SATURATION), 1, 0)
+    else:
+        up = tl.where(back < tl.abs(x), 1, 0)
+    down = tl.where(back > tl.abs(x), -1, 0)
+    if MODE == "to_nearest_even":
+        # Before sm_89, Triton converts float32 to float8_e5m2 through float16
+        # rounded toward zero, so its result is only faithful: take the nearer
+        # of x rounded toward zero and the next value away from zero, even on
+        # ties.
+        lo = bits + down.to(bits.dtype)
+        lo_mag = tl.abs(lo.to(DTYPE, bitcast=True).to(x.dtype))
+        hi_mag = tl.abs((lo + 1).to(DTYPE, bitcast=True).to(x.dtype))
+        below = tl.abs(x) - lo_mag
+        above = hi_mag - tl.abs(x)
+        tie_up = (above == below) & ((lo & 1) == 1)
+        step = tl.where((below > 0) & ((above < below) | tie_up), 1, 0) + down
+    elif MODE == "toward_zero":
+        step = down
+    elif MODE == "toward_positive":
+        step = tl.where(x < 0, down, up)
+    elif MODE == "toward_negative":
+        step = tl.where(x < 0, up, down)
+    else:
+        step = tl.where((bits & 1) == 0, up + down, 0)
+    result = bits + step.to(bits.dtype)
+    if DTYPE.primitive_bitwidth == 8:
+        # Before sm_89, Triton's float8_e5m2 conversion can turn NaN into -0
+        # (the mantissa of the canonical NaN, 0x7FFF, carries into the sign).
+        result = tl.where(x != x, result | 0x7F, result)
+    return result.to(DTYPE, bitcast=True)
+
+
+@triton.jit
+def float8_e5m2_infinities(x, y, MODE: tl.constexpr):
+    """
+    Triton's conversions of x to float8_e5m2 (y) saturate, unlike eager's: gives
+    infinity for infinite x and, rounding to nearest, from 61440, halfway
+    between the largest finite value (57344) and 2^16.
+    """
+    if MODE == "to_nearest_even":
+        overflow = tl.abs(x) >= 61440.0
+    else:
+        overflow = tl.abs(x) == float("inf")
+    inf = tl.where(x < 0, 0xFC, 0x7C).to(tl.uint8).to(tl.float8e5, bitcast=True)
+    return tl.where(overflow, inf, y)
+
+
+@triton.jit
+def float32_to_float8_e8m0(x, MODE: tl.constexpr):
+    """
+    Rounds the magnitude of float32 x to a power of two, as float8_e8m0fnu bits
+    (uint8): adding to the bits carries into the exponent when rounding up.
+    Below 2^-126 (subnormals), the codes 0 and 1 are 2^-127 and 2^-126, half as
+    far apart in the bits. NaN, infinity and values that round up past 2^127
+    give NaN.
+    """
+    unsigned = x.to(tl.int32, bitcast=True) & 0x7FFFFFFF
+    subnormal = unsigned < 0x800000
+    nan = unsigned > 0x7F800000
+    if MODE == "to_nearest_even":
+        carry = 0x400000  # Ties round up.
+    elif MODE == "toward_positive":
+        carry = 0x7FFFFF
+    else:
+        carry = 0
+    code = (unsigned + tl.where(subnormal, carry >> 1, carry)) >> 23
+    return tl.where(nan, 0xFF, code).to(tl.uint8)
+
+
 @triton.jit
 def div_floor_integer(a, b):
     # NOTE: a // b is C division, but we want floor division
