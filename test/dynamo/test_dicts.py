@@ -27,6 +27,7 @@ from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch._dynamo.variables.lazy import LazyVariableTracker
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -4039,15 +4040,271 @@ class DictTests(torch._dynamo.test_case.TestCase):
         graph = fx.Graph()
         x = graph.placeholder("x")
         args, kwargs = (x,), {}
+        if activation == "dropout":
+            kwargs["training"] = False
         if inplace is not None:
             if positional:
-                args += (inplace,) if activation == "relu" else (1.0, True, inplace)
+                args += (inplace,) if activation == "relu" else (1.0, False, inplace)
+                kwargs.clear()
             else:
                 kwargs["inplace"] = inplace
         target = getattr(torch.nn.functional, activation)
         node = graph.call_function(target, args, kwargs)
         node.meta["example_value"] = torch.empty(0)
         self.assertEqual(_is_safe_to_reorder(node), inplace is not True)
+
+    @parametrize(
+        "name",
+        [
+            "dropout",
+            "dropout1d",
+            "dropout2d",
+            "dropout3d",
+            "alpha_dropout",
+            "feature_alpha_dropout",
+        ],
+    )
+    @parametrize(
+        "form", ["default", "keyword_train", "positional_train", "keyword_eval", "zero"]
+    )
+    def test_canonical_graph_functional_rng(self, name, form):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        args, kwargs = (x,), {}
+        safe = name in {"alpha_dropout", "feature_alpha_dropout"}
+        if form == "positional_train":
+            args += (0.5, True)
+            safe = False
+        elif form != "default":
+            kwargs["training"] = form != "keyword_eval"
+            if form == "zero":
+                kwargs["p"] = 0.0
+            safe = form == "keyword_eval"
+        node = graph.call_function(getattr(torch.nn.functional, name), args, kwargs)
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(_is_safe_to_reorder(node), safe)
+
+    @parametrize("form", ["default", "keyword_train", "positional_train"])
+    def test_canonical_graph_functional_rrelu(self, form):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        args, kwargs = (x,), {}
+        if form == "keyword_train":
+            kwargs["training"] = True
+        elif form == "positional_train":
+            args += (0.125, 1.0 / 3, True)
+        node = graph.call_function(torch.nn.functional.rrelu, args, kwargs)
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(_is_safe_to_reorder(node), form == "default")
+
+    @parametrize(
+        "name",
+        [
+            "dropout",
+            "feature_dropout",
+            "alpha_dropout",
+            "feature_alpha_dropout",
+            "rrelu",
+        ],
+    )
+    @parametrize("form", ["keyword_train", "positional_train", "keyword_eval"])
+    def test_canonical_graph_torch_rng(self, name, form):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        training = form != "keyword_eval"
+        args, kwargs = (x,), {}
+        if form == "positional_train":
+            args += (0.125, 1.0 / 3, training) if name == "rrelu" else (0.5, training)
+        elif name == "rrelu":
+            kwargs["training"] = training
+        else:
+            kwargs.update(p=0.5, train=training)
+        node = graph.call_function(getattr(torch, name), args, kwargs)
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(_is_safe_to_reorder(node), not training)
+
+    @parametrize("scope", ["functional", "torch"])
+    @parametrize("name", ["batch_norm", "instance_norm"])
+    @parametrize(
+        "positional,buffers,active",
+        [
+            (False, True, True),
+            (True, True, True),
+            (False, True, False),
+            (False, False, True),
+        ],
+    )
+    def test_canonical_graph_running_stat_effects(
+        self, scope, name, positional, buffers, active
+    ):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        mean, var = (
+            (graph.placeholder("mean"), graph.placeholder("var"))
+            if buffers
+            else (None, None)
+        )
+        target = getattr(torch.nn.functional if scope == "functional" else torch, name)
+        flag = "training" if name == "batch_norm" else "use_input_stats"
+        if scope == "functional":
+            args, kwargs = (x, mean, var), {flag: active}
+            if positional:
+                args += (None, None, active)
+                kwargs = {}
+        else:
+            args, kwargs = (
+                (x, None, None, mean, var),
+                {flag: active, "momentum": 0.1, "eps": 1e-5, "cudnn_enabled": True},
+            )
+            if positional:
+                args += (active, 0.1, 1e-5, True)
+                kwargs = {}
+        node = graph.call_function(target, args, kwargs)
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(_is_safe_to_reorder(node), not (buffers and active))
+
+    @parametrize("name", ["batch_norm", "instance_norm"])
+    @parametrize("buffers", [False, True])
+    def test_canonical_graph_running_stat_defaults(self, name, buffers):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        mean, var = (
+            (graph.placeholder("mean"), graph.placeholder("var"))
+            if buffers
+            else (None, None)
+        )
+        node = graph.call_function(getattr(torch.nn.functional, name), (x, mean, var))
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(_is_safe_to_reorder(node), name == "batch_norm" or not buffers)
+
+    @parametrize(
+        "name",
+        [
+            "fractional_max_pool2d",
+            "fractional_max_pool2d_with_indices",
+            "fractional_max_pool3d",
+            "fractional_max_pool3d_with_indices",
+        ],
+    )
+    @parametrize("form", ["default", "keyword_samples", "positional_samples"])
+    def test_canonical_graph_fractional_pool_rng(self, name, form):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        size = (2,) * (3 if "3d" in name else 2)
+        args, kwargs = (x, 2), {"output_size": size}
+        if form == "keyword_samples":
+            kwargs["_random_samples"] = x
+        elif form == "positional_samples":
+            args += (size, None, False, x)
+            kwargs = {}
+        node = graph.call_function(getattr(torch.nn.functional, name), args, kwargs)
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(_is_safe_to_reorder(node), form != "default")
+
+    @parametrize("name", ["embedding", "embedding_bag"])
+    @parametrize("form", ["default", "keyword_maxnorm", "positional_maxnorm"])
+    def test_canonical_graph_embedding_renorm(self, name, form):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        args, kwargs = (x, x), {}
+        if form == "keyword_maxnorm":
+            kwargs["max_norm"] = 1.0
+        elif form == "positional_maxnorm":
+            args += (None, 1.0)
+        node = graph.call_function(getattr(torch.nn.functional, name), args, kwargs)
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(_is_safe_to_reorder(node), form == "default")
+
+    @parametrize(
+        "attention,dropout_p",
+        [
+            ("sdpa", None),
+            ("sdpa", 0.0),
+            ("sdpa", 0.5),
+            ("mha_eval", 0.5),
+            ("mha_train", 0.0),
+            ("mha_train", 0.5),
+        ],
+    )
+    def test_canonical_graph_attention_rng(self, attention, dropout_p):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        args, kwargs = (x, x, x), {}
+        if dropout_p is not None:
+            kwargs["dropout_p"] = dropout_p
+        if attention == "sdpa":
+            target = torch.nn.functional.scaled_dot_product_attention
+        else:
+            target = torch.nn.functional.multi_head_attention_forward
+            kwargs.update(
+                embed_dim_to_check=4,
+                num_heads=1,
+                in_proj_weight=x,
+                in_proj_bias=None,
+                bias_k=None,
+                bias_v=None,
+                add_zero_attn=False,
+                out_proj_weight=x,
+                out_proj_bias=None,
+                training=attention == "mha_train",
+            )
+        node = graph.call_function(target, args, kwargs)
+        node.meta["example_value"] = torch.empty(0)
+        self.assertEqual(
+            _is_safe_to_reorder(node), attention == "mha_eval" or not dropout_p
+        )
+
+    @parametrize("method", ["bernoulli", "multinomial"])
+    def test_canonical_graph_tensor_rng(self, method):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        args = (x, 3, True) if method == "multinomial" else (x,)
+        self.assertFalse(_is_safe_to_reorder(graph.call_method(method, args)))
+
+    def test_canonical_graph_gumbel_rng(self):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        node = graph.call_function(torch.nn.functional.gumbel_softmax, (x,))
+        node.meta["example_value"] = torch.empty(0)
+        self.assertFalse(_is_safe_to_reorder(node))
+
+    @parametrize("failure", [None, TypeError, ValueError, RuntimeError])
+    def test_canonical_graph_effect_normalization_fail_closed(self, failure):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        node = graph.call_function(
+            torch.nn.functional.dropout, (x,), {"training": False}
+        )
+        node.meta["example_value"] = torch.empty(0)
+        with patch(
+            "torch.fx.operator_schemas.normalize_function",
+            return_value=None,
+            side_effect=failure,
+        ) as normalize:
+            self.assertFalse(_is_safe_to_reorder(node))
+            normalize.assert_called_once()
 
     @parametrize("nested", [False, True])
     @parametrize("activation", ["relu", "dropout"])
@@ -4428,6 +4685,111 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
 
 instantiate_parametrized_tests(DictTests)
+
+
+class CanonicalGraphEffectsTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("kind", ["functional", "methods"])
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_rng_order(self, device, kind):
+        if kind == "functional":
+
+            def fn(z, a):
+                first = torch.nn.functional.dropout(z, p=0.5, training=True)
+                second = torch.nn.functional.alpha_dropout(a, p=0.5, training=True)
+                return first, second
+
+            targets = [torch.nn.functional.dropout, torch.nn.functional.alpha_dropout]
+        else:
+
+            def fn(z, a):
+                first = z.multinomial(3, replacement=True)
+                second = a.bernoulli()
+                return first, second
+
+            targets = ["multinomial", "bernoulli"]
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        z = torch.arange(1, 13, dtype=torch.float64, device=device).reshape(3, 4)
+        a = torch.linspace(0.1, 0.9, 12, dtype=torch.float64, device=device).reshape(
+            3, 4
+        )
+        rng = torch if self.device_type == "cpu" else torch.get_device_module(device)
+        for offset, seed in ((0, 1927), (7, 2731)):
+            inputs = (z + offset, a.flip(-1) if offset else a)
+            torch.manual_seed(seed)
+            expected = fn(*inputs)
+            state = rng.get_rng_state()
+            torch.manual_seed(seed)
+            self.assertEqual(compiled(*inputs), expected)
+            self.assertEqual(rng.get_rng_state(), state)
+            self.assertEqual(counter.frame_count, 1)
+        self.assertEqual(counter.op_count, 2)
+        self.assertEqual(
+            [
+                node.target
+                for node in counter.graphs[0].graph.nodes
+                if node.op in {"call_function", "call_method"}
+            ],
+            targets,
+        )
+
+    @parametrize("name", ["batch_norm", "instance_norm"])
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_norm_alias_read(self, device, name):
+        target = getattr(torch.nn.functional, name)
+        flags = {"training" if name == "batch_norm" else "use_input_stats": True}
+
+        def fn(x, mean, var):
+            y = target(x, mean, var, **flags)
+            return mean.abs(), var.abs(), y
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.arange(12, dtype=torch.float64, device=device).reshape(2, 2, 3)
+        mean = torch.tensor([-2.0, 3.0], dtype=torch.float64, device=device)
+        var = torch.tensor([2.0, 4.0], dtype=torch.float64, device=device)
+        expected_mean, expected_var = mean.clone(), var.clone()
+        for offset in (0, 7):
+            expected = fn(x + offset, expected_mean, expected_var)
+            self.assertEqual(compiled(x + offset, mean, var), expected)
+            self.assertEqual(mean, expected_mean)
+            self.assertEqual(var, expected_var)
+            self.assertEqual(counter.frame_count, 1)
+        nodes = [
+            node
+            for node in counter.graphs[0].graph.nodes
+            if node.op in {"call_function", "call_method"}
+        ]
+        self.assertEqual(counter.op_count, 3)
+        self.assertIs(nodes[0].target, target)
+        self.assertEqual([node.target for node in nodes[1:]], ["abs", "abs"])
+
+    @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
+    def test_canonical_graph_pure_calls_reorder(self, device):
+        def fn(x):
+            relu = torch.nn.functional.relu(x, inplace=False)
+            absolute = x.abs()
+            sine = x.sin()
+            cosine = x.cos()
+            return relu + absolute, sine + cosine
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True)
+        x = torch.tensor([-2.0, 3.0], dtype=torch.float64, device=device)
+        for value in (x, x + 4):
+            self.assertEqual(compiled(value), fn(value))
+            self.assertEqual(counter.frame_count, 1)
+        targets = [node.target for node in counter.graphs[0].graph.nodes]
+        self.assertLess(targets.index("abs"), targets.index(torch.nn.functional.relu))
+        self.assertLess(targets.index("cos"), targets.index("sin"))
+
+
+instantiate_device_type_tests(
+    CanonicalGraphEffectsTests, globals(), except_for=("mps",)
+)
 
 
 class DictGuardTests(LoggingTestCase):
