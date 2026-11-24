@@ -712,6 +712,7 @@ class TestLibtorchAgnostic(TestCase):
             torch._mkldnn,
             torch.jagged,
         ],
+        name_fn=lambda layout: str(layout).removeprefix("torch."),
     )
     def test_pyobject_layout_roundtrip(self, device, layout):
         import libtorch_agn_2_16 as libtorch_agnostic
@@ -721,7 +722,11 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 16)
-    @parametrize("layout", [torch.strided, torch.sparse_coo])
+    @parametrize(
+        "layout",
+        [torch.strided, torch.sparse_coo],
+        name_fn=lambda layout: str(layout).removeprefix("torch."),
+    )
     def test_pyobject_tensor_layout(self, device, layout):
         import libtorch_agn_2_16 as libtorch_agnostic
 
@@ -748,6 +753,7 @@ class TestLibtorchAgnostic(TestCase):
             torch.channels_last,
             torch.channels_last_3d,
         ],
+        name_fn=lambda memory_format: str(memory_format).removeprefix("torch."),
     )
     def test_pyobject_memory_format_roundtrip(self, device, memory_format):
         import libtorch_agn_2_16 as libtorch_agnostic
