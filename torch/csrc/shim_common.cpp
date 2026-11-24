@@ -1,5 +1,6 @@
 #include <ATen/native/CPUBlas.h>
 #include <c10/core/Device.h>
+#include <c10/core/InferenceMode.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
@@ -706,6 +707,26 @@ torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference) {
         torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
     *ret_is_inference = t->is_inference();
   });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_create_inference_mode_guard(
+    bool enabled,
+    InferenceModeGuardHandle* ret_guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_guard = reinterpret_cast<InferenceModeGuardHandle>(
+        new c10::InferenceMode(enabled));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_inference_mode_guard(InferenceModeGuardHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<c10::InferenceMode*>(guard); });
+}
+
+// This reads a thread-local flag and is not expected to throw.
+AOTI_TORCH_EXPORT bool torch_is_inference_mode_enabled() {
+  return c10::InferenceMode::is_enabled();
 }
 
 // Python interop conversions. These are the only stable
