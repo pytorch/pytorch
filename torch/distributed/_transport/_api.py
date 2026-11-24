@@ -5,6 +5,7 @@ import builtins
 import contextlib
 import numbers
 import operator
+import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from functools import partial
@@ -23,10 +24,12 @@ import torch
 import torch.distributed as dist
 from torch.distributed import Work
 
-from ._work import _validate_timeout, wait_all
+from ._work import _BatchWork, _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from ._cuda_stream import _CudaStreamOrdering
 
 
@@ -46,6 +49,10 @@ def _subrange(
     if length < 0 or length > size - offset:
         raise ValueError(f"range exceeds the {name}")
     return offset, length
+
+
+def _remaining(deadline: float | None) -> float | None:
+    return None if deadline is None else max(0.0, deadline - time.monotonic())
 
 
 PeerId = str
@@ -167,6 +174,23 @@ class Transport(ABC):
     ``read_async`` and ``write_async`` are asyncio coroutines. Cancellation or
     timeout may leave transfers pending. ``wait_all`` awaits their completion
     futures without blocking the event loop.
+
+    ``write_batch`` and ``read_batch`` transfer a sequence of ``(local view,
+    remote buffer)`` pairs as one operation, returning zero or one Work like
+    ``write``/``read``. The built-in backends check every pair before starting
+    any, so a pair with the wrong buffer type, an unconnected peer, a view
+    larger than the remote buffer, or an inactive registration raises with
+    nothing in flight. Pairs may name different peers and complete in any order;
+    zero-length pairs are skipped. A batch is not atomic: the Work completes
+    only once every transfer is terminal and fails if any transfer failed, in
+    which case the contents of every destination range are unspecified. A
+    transfer can still fail to start after others have, for example if the
+    backend rejects it or memory is concurrently unregistered; the Work then
+    waits for the started transfers and fails with that error. ``timeout`` bounds the wait for the
+    whole batch, and no transfer starts once it has passed: the batch raises
+    ``TimeoutError``, or fails its Work with it after the started transfers
+    finish. For ``read_batch_async``/``write_batch_async`` it also covers time
+    spent waiting for an executor thread.
 
     Operations use byte ranges, not tensor shapes or dtypes. An endpoint may
     connect to multiple peers, and remote descriptors identify their peer. No
@@ -473,6 +497,86 @@ class Transport(ABC):
         transfer completes once it has been sent.
         """
 
+    def write_batch(
+        self,
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        *,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        """Write each local view to its remote buffer as one batch."""
+        return self._transfer_batch(
+            "WRITE", transfers, async_op=async_op, timeout=timeout
+        )
+
+    def read_batch(
+        self,
+        transfers: Sequence[tuple[MutableMemoryView, RemoteBuffer]],
+        *,
+        async_op: bool = False,
+        timeout: float | None = None,
+    ) -> int | Work:
+        """Read each remote buffer into its local view as one batch."""
+        return self._transfer_batch(
+            "READ", transfers, async_op=async_op, timeout=timeout
+        )
+
+    def _transfer_batch(
+        self,
+        operation: Literal["WRITE", "READ"],
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        *,
+        async_op: bool,
+        timeout: float | None,
+    ) -> int | Work:
+        _validate_timeout(timeout)
+        timeout = self._default_timeout if timeout is None else timeout
+        deadline = None if timeout is None else time.monotonic() + timeout
+        # A batch is not atomic. If dispatch fails partway, the started transfers
+        # finish before the error is reported, so no buffer is still in use when
+        # the caller sees it, but some destinations may already be written.
+        # Backends must not promise more, so callers behave the same on all of them.
+        works, dispatch_error = self._submit_batch(operation, list(transfers), deadline)
+        remaining = _remaining(deadline)
+        batch = _BatchWork(works, dispatch_error, timeout if async_op else remaining)
+        if async_op:
+            return batch
+        batch.wait()
+        return 0
+
+    def _submit_batch(
+        self,
+        operation: Literal["WRITE", "READ"],
+        transfers: list[tuple[MemoryView, RemoteBuffer]],
+        deadline: float | None,
+    ) -> tuple[list[Work], Exception | None]:
+        """Validate every pair, then start each non-empty one.
+
+        Backends with native batches override this. Returns the started Works
+        and the error that stopped dispatch; raises if nothing started.
+        Overrides must run ``_check_transfer`` on every pair before starting any,
+        and must not start a transfer once ``deadline`` has passed.
+        """
+        mutable = operation == "READ"
+        transfer: Callable[..., int | Work] = self.read if mutable else self.write
+        for local, remote in transfers:
+            self._check_transfer(local, remote, mutable=mutable)
+        works: list[Work] = []
+        for local, remote in transfers:
+            if local.size() == 0:
+                continue
+            timeout = _remaining(deadline)
+            try:
+                if timeout == 0:
+                    raise TimeoutError("transport batch timed out before dispatch")
+                work = transfer(local, remote, async_op=True, timeout=timeout)
+            except Exception as error:
+                if not works:
+                    raise
+                return works, error
+            works.append(cast(Work, work))
+        return works, None
+
     def write_stream(
         self,
         local_buffer: MemoryView,
@@ -515,7 +619,12 @@ class Transport(ABC):
     def _check_transfer(  # noqa: B027
         self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
     ) -> None:
-        """Validate a transfer before it is enqueued on a CUDA stream."""
+        """Validate a transfer before it is enqueued on a CUDA stream or batched.
+
+        Must not have side effects. Backends should reject here everything they
+        can detect up front; failures only detectable at submit time fall under
+        the non-atomic batch contract in ``_transfer_batch``.
+        """
 
     def _cuda_stream(self, stream: torch.cuda.Stream) -> _CudaStreamOrdering:
         from ._cuda_stream import _CudaStreamOrdering
@@ -595,6 +704,42 @@ class Transport(ABC):
             else max(0.0, timeout - (asyncio.get_running_loop().time() - started))
         )
         await wait_all((work,), timeout=remaining)
+
+    async def write_batch_async(
+        self,
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Write a batch, yielding to asyncio until every transfer finishes."""
+        await self._transfer_batch_async(self.write_batch, transfers, timeout)
+
+    async def read_batch_async(
+        self,
+        transfers: Sequence[tuple[MutableMemoryView, RemoteBuffer]],
+        *,
+        timeout: float | None = None,
+    ) -> None:
+        """Read a batch, yielding to asyncio until every transfer finishes."""
+        await self._transfer_batch_async(self.read_batch, transfers, timeout)
+
+    async def _transfer_batch_async(
+        self,
+        transfer_batch: Callable[..., int | Work],
+        transfers: Sequence[tuple[MemoryView, RemoteBuffer]],
+        timeout: float | None,
+    ) -> None:
+        _validate_timeout(timeout)
+        timeout = self._default_timeout if timeout is None else timeout
+        # Time spent queued for an executor thread counts against the timeout.
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        def dispatch() -> int | Work:
+            return transfer_batch(transfers, async_op=True, timeout=_remaining(deadline))
+
+        # Dispatch may wait on backend locks, so keep it off the event loop.
+        work = cast(Work, await asyncio.to_thread(dispatch))
+        await wait_all((work,), timeout=_remaining(deadline))
 
     @abstractmethod
     def close(self, *, timeout: float | None = None) -> None:
