@@ -128,6 +128,10 @@ class TestAllowTf32DynamicShapes(TestCase):
         m_range=None,
         strict_min=None,
         warn_only=False,
+        b200=False,
+        n=512,
+        n_range=None,
+        batched=False,
     ):
         shape_env = ShapeEnv()
         tracing_context = contextlib.nullcontext()
@@ -161,6 +165,10 @@ class TestAllowTf32DynamicShapes(TestCase):
             sym_m = shape_env.create_symbol(m, ConstantSource("m"))
         if m_range is not None:
             shape_env.constrain_symbol_range(sym_m, *m_range)
+        sym_n = n
+        if n_range is not None:
+            sym_n = shape_env.create_symbol(n, ConstantSource("n"))
+            shape_env.constrain_symbol_range(sym_n, *n_range)
         gm = make_fx(lambda: torch.zeros(2, 2))()
         graph = GraphLowering(gm, shape_env=shape_env, aot_mode=aot_mode)
         orig = torch.backends.cuda.matmul.fp32_precision
@@ -170,17 +178,23 @@ class TestAllowTf32DynamicShapes(TestCase):
                 tracing_context,
                 V.set_graph_handler(graph),
                 mock.patch(
-                    "torch._inductor.heuristics.template.triton._cuda_tf32_major",
-                    return_value=9 if tf32 else None,
+                    f"{mm_allow_tf32.__module__}._cuda_tf32_major",
+                    return_value=(10 if b200 else 9) if tf32 else None,
                 ),
+                mock.patch("torch.version.hip", None),
             ):
-                dtype_arg = () if dtype is None else (dtype,)
-                result = mm_allow_tf32(sym_m, 512, 512, "cuda", *dtype_arg)
+                if dtype is None:
+                    result = mm_allow_tf32(sym_m, sym_n, 512, "cuda")
+                else:
+                    result = mm_allow_tf32(
+                        sym_m, sym_n, 512, "cuda", dtype, batched=batched
+                    )
         finally:
             torch.backends.cuda.matmul.fp32_precision = orig
-        return result, [
-            str(g.expr.subs(sym_m, sympy.Symbol("m"))) for g in shape_env.guards
-        ]
+        names = {sym_m: sympy.Symbol("m")}
+        if n_range is not None:
+            names[sym_n] = sympy.Symbol("n")
+        return result, [str(g.expr.subs(names)) for g in shape_env.guards]
 
     @parametrize(
         "m,expected,guards",
@@ -200,14 +214,61 @@ class TestAllowTf32DynamicShapes(TestCase):
             (8, (2, 15), False, []),
         ],
     )
-    def test_cuda_gate_bounded_range(self, m, m_range, expected, guards):
-        self.assertEqual(self._gate(m, m_range=m_range), (expected, guards))
+    @parametrize("b200", (False, True))
+    def test_cuda_gate_bounded_range(self, m, m_range, expected, guards, b200):
+        result = self._gate(m, m_range=m_range, b200=b200)
+        self.assertEqual(result, (expected, guards))
+
+    @parametrize(
+        "n,n_range,batched,expected,guards",
+        [
+            # SM10x mm: N >= 16 with M >= 17, or N >= 512 with M == 16.
+            (
+                128,
+                (2, int_oo),
+                False,
+                True,
+                ["(m >= 16) & (n >= 16) & ((m >= 17) | (n >= 512))"],
+            ),
+            # A bounded N range spanning a threshold needs a proof.
+            (128, (2, 4096), False, False, []),
+            # SM10x batched: N >= 64 with M >= 17, or N >= 512 with M == 16.
+            (
+                128,
+                (2, int_oo),
+                True,
+                True,
+                ["(m >= 16) & (n >= 64) & ((m >= 17) | (n >= 512))"],
+            ),
+            (
+                32,
+                (2, int_oo),
+                True,
+                False,
+                ["~((m >= 16) & (n >= 64) & ((m >= 17) | (n >= 512)))"],
+            ),
+            # A user range on one side of every threshold is not narrowed by
+            # the N terms (they are implied by the range).
+            (
+                128,
+                (65, 500),
+                True,
+                True,
+                ["(m >= 16) & (n >= 64) & ((m >= 17) | (n >= 512))"],
+            ),
+        ],
+    )
+    def test_cuda_gate_sm10x_symbolic_n(self, n, n_range, batched, expected, guards):
+        result = self._gate(1024, b200=True, n=n, n_range=n_range, batched=batched)
+        self.assertEqual(result, (expected, guards))
 
     @parametrize("strict_min", (2, 4))
-    def test_cuda_gate_strict_min_only_needs_proof(self, strict_min):
+    @parametrize("b200", (False, True))
+    def test_cuda_gate_strict_min_only_needs_proof(self, strict_min, b200):
         # A min-only user range has no finite upper bound (and min=2 equals the
         # default range), but a guard would still narrow it.
-        self.assertEqual(self._gate(1024, strict_min=strict_min), (False, []))
+        result = self._gate(1024, strict_min=strict_min, b200=b200)
+        self.assertEqual(result, (False, []))
 
     def test_cuda_gate_warn_only_min_follows_hint(self):
         # maybe_mark_dynamic(min=) is warn_only: produce_guards only logs when a
@@ -281,6 +342,7 @@ class TestAllowTf32DynamicShapes(TestCase):
         self.assertEqual(self._gate(1024, aot_mode=True), (False, []))
 
 
+@instantiate_parametrized_tests
 class TestAllowTf32ExtraKwargs(TestCase):
     mixin = MMTemplateConfigMixin()
 
@@ -305,16 +367,21 @@ class TestAllowTf32ExtraKwargs(TestCase):
         super().tearDown()
 
     def _mm_kernel_inputs(
-        self, device_type: str, m: int = 2, n: int = 2, k: int = 2
+        self,
+        device_type: str,
+        m: int = 2,
+        n: int = 2,
+        k: int = 2,
+        dtype: torch.dtype = torch.float32,
     ) -> MMKernelInputs:
         device = torch.device(device_type)
         mat1 = Buffer(
             name="mat1",
-            layout=FixedLayout(device, torch.float32, (m, k)),
+            layout=FixedLayout(device, dtype, (m, k)),
         )
         mat2 = Buffer(
             name="mat2",
-            layout=FixedLayout(device, torch.float32, (k, n)),
+            layout=FixedLayout(device, dtype, (k, n)),
         )
         return MMKernelInputs([mat1, mat2])
 
@@ -358,6 +425,56 @@ class TestAllowTf32ExtraKwargs(TestCase):
             self.assertTrue(extra["ALLOW_TF32"])
         finally:
             torch.backends.cuda.matmul.fp32_precision = orig
+
+    @parametrize(
+        "b200,hip,op,mnk,dtype,expected",
+        [
+            (False, None, "mm", (16, 512, 512), torch.float32, True),
+            (False, None, "mm", (1365, 512, 320), torch.float32, False),
+            (False, None, "mm", (15, 4096, 4096), torch.float32, False),
+            (True, None, "mm", (1365, 512, 320), torch.float32, True),
+            (True, None, "mm", (16, 128, 128), torch.float32, False),
+            (True, None, "mm", (16, 512, 512), torch.float32, True),
+            (True, None, "bmm", (16, 512, 512), torch.float32, True),
+            (True, None, "bmm", (16, 256, 4096), torch.float32, False),
+            (True, None, "mm", (16, 511, 4096), torch.float32, False),
+            (True, None, "mm", (16, 4096, 511), torch.float32, False),
+            (True, None, "mm", (17, 128, 128), torch.float32, True),
+            (True, None, "mm", (1365, 15, 320), torch.float32, False),
+            (True, None, "mm", (1365, 16, 320), torch.float32, True),
+            (True, None, "mm", (1365, 1, 320), torch.float32, False),
+            (True, None, "mm", (1365, 512, 15), torch.float32, False),
+            (True, None, "mm", (1365, 18, 320), torch.float32, True),
+            (True, None, "bmm", (1365, 63, 320), torch.float32, False),
+            (True, None, "bmm", (1365, 64, 320), torch.float32, True),
+            (True, None, "bmm", (1365, 65, 67), torch.float32, True),
+            (True, None, "bmm", (17, 64, 64), torch.float32, True),
+            (True, None, "bmm", (16, 4096, 4096), torch.float32, True),
+            (True, None, "baddbmm", (1365, 320, 63), torch.float32, False),
+            (True, None, "baddbmm", (1365, 320, 65), torch.float32, True),
+            (True, "7.0", "mm", (1365, 512, 320), torch.float32, False),
+            (True, None, "mm", (1365, 512, 320), torch.bfloat16, False),
+        ],
+    )
+    def test_cuda_shape_threshold_b200(self, b200, hip, op, mnk, dtype, expected):
+        # Default: M >= 16, min(N, K) >= 512. SM10x fp32 mm: min(N, K) >= 16 and
+        # (M >= 17 or (M == 16 and min(N, K) >= 512)); batched: the same with
+        # min(N, K) >= 64.
+        kernel_inputs = self._mm_kernel_inputs("cuda", *mnk, dtype=dtype)
+        orig = torch.backends.cuda.matmul.fp32_precision
+        try:
+            torch.backends.cuda.matmul.fp32_precision = "tf32"
+            with (
+                mock.patch(
+                    f"{mm_allow_tf32.__module__}._cuda_tf32_major",
+                    return_value=10 if b200 else 9,
+                ),
+                mock.patch("torch.version.hip", hip),
+            ):
+                extra = self.mixin.get_extra_kwargs(kernel_inputs, op)
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = orig
+        self.assertEqual(extra["ALLOW_TF32"], expected)
 
     def test_xpu_unaffected_by_cuda_shape_threshold(self):
         # Platform check. On a non-XPU build both sides are False, so this does

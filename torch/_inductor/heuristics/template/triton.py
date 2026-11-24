@@ -2865,8 +2865,13 @@ def mm_allow_tf32(
     k: Any,
     device: torch.device | str | None,
     dtype: torch.dtype | None = None,
+    *,
+    batched: bool = False,
 ) -> bool:
-    """Whether a Triton GEMM template should use TF32, matching eager matmul."""
+    """Whether a Triton GEMM template should use TF32, matching eager matmul.
+
+    ``batched`` selects the bmm/baddbmm thresholds.
+    """
     if isinstance(device, str):
         device = torch.device(device)
     device_type = device.type if device is not None else None
@@ -2879,14 +2884,36 @@ def mm_allow_tf32(
         else:
             allow_tf32 = bool(iface.allow_tf32())
     if device_type == "cuda" and allow_tf32:
-        # Match when cuBLAS uses TF32 (reverse engineered on H100, CUDA 12.8).
+        # Match when cuBLAS uses TF32 (reverse engineered on H100 and SM10x).
+        # SM10x: M >= 17 and min(N, K) >= 16 (64 for batched GEMMs, whose cuBLAS
+        # choice depends on layout), or M == 16 and min(N, K) >= 512 as on H100.
         # Only fp32 dots read ALLOW_TF32. Backed dynamic dims follow their hint
         # and get a guard; unbacked dims, AOT mode (no runtime guard check),
         # dims whose bounded range spans a threshold, and dims under a user
         # min/max (a guard would narrow the user's range) need a proof.
-        thresholds = [(m, 16), (n, 512), (k, 512)]
-        size_threshold = sympy.And(*(sympy.Ge(d, t) for d, t in thresholds))
-        fp32_tf32 = dtype == torch.float32 and _cuda_tf32_major(device) is not None
+        tf32_major = _cuda_tf32_major(device) if dtype == torch.float32 else None
+        fp32_tf32 = tf32_major is not None
+        if not torch.version.hip and tf32_major == 10:
+            min_nk = 64 if batched else 16
+            thresholds = [
+                (m, 16),
+                (m, 17),
+                (n, min_nk),
+                (k, min_nk),
+                (n, 512),
+                (k, 512),
+            ]
+            size_threshold = sympy.And(
+                sympy.Ge(m, 16),
+                sympy.Ge(n, min_nk),
+                sympy.Ge(k, min_nk),
+                sympy.Or(
+                    sympy.Ge(m, 17), sympy.And(sympy.Ge(n, 512), sympy.Ge(k, 512))
+                ),
+            )
+        else:
+            thresholds = [(m, 16), (n, 512), (k, 512)]
+            size_threshold = sympy.And(*(sympy.Ge(d, t) for d, t in thresholds))
         if (
             not fp32_tf32
             or V.graph.aot_mode
@@ -2951,14 +2978,15 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # kernels are unaffected.
     ascending_k: bool = False
 
-    def _allow_tf32(self, kernel_inputs: KernelInputs) -> bool:
+    def _allow_tf32(self, kernel_inputs: KernelInputs, op_name: str) -> bool:
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
         dtype = kernel_inputs.mat1mat2()[0].get_dtype()
         # Skip the gate (and its guard) when this template yields no configs.
+        batched = op_name in ("bmm", "baddbmm")
         return self.should_run(kernel_inputs) and mm_allow_tf32(
-            m, n, k, kernel_inputs.device(), dtype
+            m, n, k, kernel_inputs.device(), dtype, batched=batched
         )
 
     def get_extra_kwargs(
@@ -2967,7 +2995,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         op_name: str,
     ) -> dict[str, Any]:
         extra_kwargs = {
-            "ALLOW_TF32": self._allow_tf32(kernel_inputs),
+            "ALLOW_TF32": self._allow_tf32(kernel_inputs, op_name),
         }
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
@@ -3588,7 +3616,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             raise AssertionError("Blackwell GEMM requires MMKernelInputs")
         _, mat2 = kernel_inputs.mat1mat2()
         element_size = mat2.get_dtype().itemsize
-        allow_tf32 = self._allow_tf32(kernel_inputs)
+        allow_tf32 = self._allow_tf32(kernel_inputs, op_name)
 
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
