@@ -87,8 +87,9 @@ jobs:
         env:
           ECR_IMAGE: ${{ matrix.docker-image }}
         run: |
-            ecr_image="${ECR_IMAGE}"
-            ghcr_image="ghcr.io/pytorch/ci-image:${ecr_image##*:}"
+            # Only main and release docker-builds runs trigger this, and they
+            # mirror their images to ci-image-trusted, which PR runs can't write
+            ghcr_image="ghcr.io/pytorch/ci-image-trusted:${ECR_IMAGE##*:}"
             echo "ghcr_image=${ghcr_image}" >> "$GITHUB_OUTPUT"
 
       - name: Pull docker image
@@ -113,7 +114,13 @@ jobs:
           else
             echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
           fi
+          # ECR_IMAGE is in pytorch/trusted/ci-image, which trunk jobs pull. Also
+          # tag it with the pytorch/ci-image name that PR jobs pull.
+          trusted_repo="/pytorch/trusted/ci-image:"
+          pr_repo="/pytorch/ci-image:"
+          PR_ECR_IMAGE="${ECR_IMAGE/"${trusted_repo}"/${pr_repo}}"
           docker tag "${GHCR_IMAGE}" "${ECR_IMAGE}"
+          docker tag "${GHCR_IMAGE}" "${PR_ECR_IMAGE}"
           # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
-          docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp "${ECR_IMAGE}"
-          mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar
+          docker save -o "${HOME}/pytorch-data/docker/${docker_image_tag}.tar.tmp" "${ECR_IMAGE}" "${PR_ECR_IMAGE}"
+          mv "${HOME}/pytorch-data/docker/${docker_image_tag}.tar.tmp" "${HOME}/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar"

@@ -62,7 +62,8 @@ jobs:
       - get-label-type
     with:
       build-environment: ${{ needs.linux-jammy-aarch64-cuda13_4-py3_12-gcc13-build.outputs.build-environment }}
-      docker-image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
+      # main and release docker-builds runs mirror their images to ci-image-trusted, which PR runs can't write
+      docker-image: ghcr.io/pytorch/${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'ci-image-trusted' || 'ci-image' }}:pytorch-linux-jammy-aarch64-cuda13.4-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
       force-no-td: true
       python-version: "3.12"
       test-matrix: ${{ needs.linux-jammy-aarch64-cuda13_4-py3_12-gcc13-build.outputs.test-matrix }}

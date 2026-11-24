@@ -264,7 +264,7 @@ jobs:
         if: contains(matrix.docker-image-name, 'rocm')
         run: |
           docker_image_name="${{ matrix.docker-image-name }}"
-          docker_image_tag="${{ steps.tag.outputs.pr-docker-image }}"
+          docker_image_tag="${{ steps.tag.outputs.docker-image }}"
           echo "${docker_image_name}=${docker_image_tag}" >> "docker-builds-output-${docker_image_name}.txt"
 
       - name: Upload artifacts
