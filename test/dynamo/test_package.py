@@ -38,7 +38,7 @@ from torch._dynamo.precompile_context import PrecompileContext
 from torch._dynamo.precompile_package import default_guard_filter_fn
 from torch._dynamo.replay_record import DummyModule, ExecutionRecorder
 from torch._dynamo.symbolic_convert import _import_module, UNNAMED_SCOPE_PREFIX
-from torch._dynamo.testing import reduce_to_scalar_loss
+from torch._dynamo.testing import reduce_to_scalar_loss, skipIfNotPy312
 from torch._dynamo.utils import CleanupManager
 from torch._functorch import config as functorch_config
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -340,6 +340,12 @@ def itertools_count(x):
     y = x.sin()
     torch._dynamo.graph_break()
     return y + next(steps)
+
+
+def comprehension_with_a_bound_variable(x):
+    i = 0
+    ys = [torch._dynamo.graph_break() or x + i for i in range(2)]
+    return ys[0] + ys[1]
 """
 
 
@@ -1772,12 +1778,27 @@ def fn(x):
                 compiled_fn = torch._dynamo.optimize(package=package)(fn)
                 package.install(backends)
                 self.assertEqual(compiled_fn(x), expected)
+        return package
 
     @parametrize("fn_name", ("range_iterator", "itertools_count"))
     def test_an_iterator_rebuilt_at_a_graph_break_is_served(self, fn_name):
         # Rebuilding the iterator calls a builtin or a module attribute, loaded
         # through a global the loading process has to bind as well.
         self._serve_from_a_fresh_import(fn_name)
+
+    @skipIfNotPy312
+    @parametrize(
+        "fn_name",
+        [
+            "comprehension_with_a_bound_variable",
+        ],
+    )
+    def test_a_comprehension_graph_break_is_served(self, fn_name):
+        # The bytecode calls the function Dynamo generated to run the
+        # comprehension, by the name it bound it under while tracing.
+        package = self._serve_from_a_fresh_import(fn_name)
+        names = [n for c in package.cache_entry().codes for n in c.function_names]
+        self.assertTrue(any(n.startswith("__comprehension_") for n in names))
 
     def test_file_change(self):
         ctx = DiskDynamoStore()

@@ -104,13 +104,15 @@ class PrecompileSummary:
             ``eager_fallbacks`` ones included, so the digest's frame clauses
             cut into this count rather than add to it. Also included are the
             frames the artifact deliberately runs as plain Python: a frame
-            other than the entry that compiled no graph or graph-break
-            continuation and either lost a guard to the filter or was
-            bypassed. Running its original bytecode gives up no compiled
-            code, so it is served that way rather than through a variant
-            missing a guard, and it is listed in neither ``bypassed`` nor
-            ``uncovered_frames``.
-        resume_functions: Of those, the graph-break continuations.
+            other than the entry for which no graph was compiled and no graph
+            break generated a continuation or a comprehension function, and
+            which either lost a guard to the filter or was bypassed. Running
+            its original bytecode gives up no compiled code, so it is served
+            that way rather than through a variant missing a guard, and it is
+            listed in neither ``bypassed`` nor ``uncovered_frames``.
+        resume_functions: Of those, the frames a graph break generated: its
+            continuation, and for a comprehension the function that runs it,
+            one for each compile of the frame the comprehension is in.
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
         bypassed: The ``co_name`` of each frame the package holds nothing

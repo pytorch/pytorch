@@ -1,8 +1,9 @@
 """
 Helpers behind the multi-graph precompile: the capture of a callable into one
 artifact holding every frame Dynamo produces while the caller's calls run --
-the entry frame, the ``torch_dynamo_resume_in_*`` continuations graph breaks
-create, and the recompiled variants of each -- stored through CompilePackage
+the entry frame, the frames graph breaks generate (``torch_dynamo_resume_in_*``
+continuations and ``__comprehension_*`` functions), and the recompiled variants
+of each -- stored through CompilePackage
 (``torch/_dynamo/package.py``), a low-level component not meant to be used
 directly. It is not ``torch.compiler.precompile``, the ahead-of-time capture
 API this repository already has (``torch/_precompile.py``), which does not call
@@ -1682,9 +1683,10 @@ def _frame_key(code: Any) -> tuple[str, str, int]:
 class _CapturePackage(CompilePackage):
     """A CompilePackage that remembers which frames compiled any compute.
 
-    A frame is recorded once any compile of it registers a backend graph or a
-    graph-break continuation, or traces a graph that output_graph bypasses before
-    registering it, whether or not that compile is later bypassed.
+    A frame is recorded once any compile of it registers a backend graph, a
+    graph-break continuation or the function that runs a comprehension, or traces
+    a graph that output_graph bypasses before registering it, whether or not that
+    compile is later bypassed.
     """
 
     records_graph_break_ops = True
