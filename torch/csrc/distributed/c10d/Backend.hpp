@@ -127,6 +127,32 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // not initialized until reconfigure() is called. Backends that support
     // fault tolerance honor this; others ignore it.
     bool enable_reconfigure = false;
+
+    // Holds the Python object of a Python subclass of Backend.Options while
+    // C++ references it, so its Python attributes survive; see
+    // PyBackendOptions.
+    c10::impl::PyObjectSlot* pyobj_slot() {
+      return &pyobj_slot_;
+    }
+
+    const c10::impl::PyObjectSlot* pyobj_slot() const {
+      return &pyobj_slot_;
+    }
+
+    void incref_pyobject() const noexcept final;
+    void decref_pyobject() const noexcept final;
+    bool try_incref_pyobject() const noexcept final;
+
+   private:
+    // A copy is a distinct C++ object and gets its own Python object, if any.
+    struct CopyResetPyObjectSlot : c10::impl::PyObjectSlot {
+      CopyResetPyObjectSlot() = default;
+      CopyResetPyObjectSlot(const CopyResetPyObjectSlot& /* other */) {}
+      CopyResetPyObjectSlot& operator=(const CopyResetPyObjectSlot&) = delete;
+      ~CopyResetPyObjectSlot() = default;
+    };
+
+    CopyResetPyObjectSlot pyobj_slot_;
   };
 
   explicit Backend(int rank, int size);
@@ -294,39 +320,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             "Backend ",
             getBackendName(),
             " does not support unregisterAbortHook"));
-  }
-
-  // Completion Hook API
-  //
-  // Completion hooks are invoked when the backend establishes that an operation
-  // has completed, which a backend with a watchdog already does to garbage
-  // collect its work queue. Same hook_id keying and same capability query as
-  // the abort hooks above; see Hooks.hpp for what is reported and the threading
-  // contract. A backend without them leaves its consumers to poll, so
-  // supportsCompletionHooks is what lets a caller choose a fallback rather than
-  // catch a throw.
-  virtual bool supportsCompletionHooks() const {
-    return false;
-  }
-
-  virtual void registerCompletionHook(
-      int64_t /* hook_id */,
-      CompletionHook /* hook */) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            getBackendName(),
-            " does not support registerCompletionHook"));
-  }
-
-  virtual void unregisterCompletionHook(int64_t /* hook_id */) {
-    TORCH_CHECK(
-        false,
-        c10::str(
-            "Backend ",
-            getBackendName(),
-            " does not support unregisterCompletionHook"));
   }
 
   virtual void startCoalescing() {
@@ -694,6 +687,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of enableCollectivesTiming.");
   }
 
+  // Whether Works constructed after this returns report getDuration() once
+  // complete without throwing. Called on the issuing thread for every op
+  // FlightRecorderHook records, so it must be cheap and safe against a
+  // concurrent enableCollectivesTiming(). When true the hook holds each Work
+  // until its result to read duration_ms.
+  virtual bool collectivesTimingEnabled() const {
+    return false;
+  }
+
   // The caller namespaces each child's rendezvous keys, but the Store may use
   // the parent's live connection. Implementations that block while holding or
   // mutate connection-global state, such as the timeout, must clone it first.
@@ -859,6 +861,14 @@ template <class T>
 struct TargetTraits<
     T,
     std::enable_if_t<std::is_base_of_v<c10d::Backend, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<
+        std::is_base_of_v<c10d::Backend::Options, std::remove_cv_t<T>>>> {
   static constexpr bool can_have_pyobject = true;
 };
 #endif

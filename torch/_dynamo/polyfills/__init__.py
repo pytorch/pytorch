@@ -274,14 +274,15 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
         for x in b:
-            if x == a:
+            if x is a or x == a:
                 return True
         return False
     if hasattr(b, "__getitem__"):
         i = 0
         while True:
             try:
-                if b.__getitem__(i) == a:
+                item = b.__getitem__(i)
+                if item is a or item == a:
                     return True
                 i += 1
             except IndexError:
@@ -420,6 +421,13 @@ def dictview_richcompare(
     return all(item in self for item in other)
 
 
+def dictview_isdisjoint(self: Iterable[T], other: Iterable[T]) -> bool:
+    """Mirrors dictviews_isdisjoint in Objects/dictobject.c, without its
+    iterate-the-shorter-operand optimization, which does not change the result.
+    """
+    return not any(item in self for item in other)
+
+
 def assert_dict_equal(
     self_: Any, d1: dict[T, U], d2: dict[T, U], msg: str | None = None
 ) -> None:
@@ -443,6 +451,19 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
         return obj.__getitem__(key)
     except KeyError:
         return value
+
+
+def unpack_mapping_keys_and_values(
+    mapping: Mapping[T, U],
+) -> tuple[tuple[T, ...], tuple[U, ...]]:
+    # Snapshot `items()` once to keep keys and values aligned, including overrides.
+    items = list(mapping.items())
+    keys: list[T] = []
+    values: list[U] = []
+    for key, value in items:
+        keys.append(key)
+        values.append(value)
+    return tuple(keys), tuple(values)
 
 
 def instantiate_user_defined_class_object(
@@ -474,7 +495,7 @@ def mutable_mapping_update(
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
             self[key] = value
-    # FIXME: Enabling the `elif`-branch below needs too many `VariableClass.call_obj_hasattr` changes.
+    # FIXME: Enabling the `elif`-branch below needs too many `tp_getattro_impl` changes.
     #   >>> class Foo:
     #   ...     def __init__(self):
     #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method

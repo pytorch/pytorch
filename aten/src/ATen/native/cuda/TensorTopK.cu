@@ -441,7 +441,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     if constexpr (!kLast) {
       #pragma unroll
       for (int u = 0; u < U; ++u) {
-        v_next[u] = doLdg(&inputSliceStart[min(rowOff + (U + u) * rowStep + tidOff, lastOff)]);
+        v_next[u] = doLdg(&inputSliceStart[::min(rowOff + (U + u) * rowStep + tidOff, lastOff)]);
       }
     }
 
@@ -574,7 +574,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
   if (inputSliceSize <= stride) {
     // Short slice: one round per phase.
-    v[0] = doLdg(&inputSliceStart[min(tidOff, lastOff)]);
+    v[0] = doLdg(&inputSliceStart[::min(tidOff, lastOff)]);
     gatherRound.template operator()<1, false, true>(0, 0);
     // A single round never overflows the held equals (kEqCap >= 1), so this always finishes the output.
     finishWithHeldEquals(/*mayOverflow=*/false);
@@ -589,7 +589,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   auto loadFirstRound = [&]() {
     #pragma unroll
     for (int u = 0; u < kGatherBatch; ++u) {
-      v[u] = doLdg(&inputSliceStart[min(u * rowStep + tidOff, lastOff)]);
+      v[u] = doLdg(&inputSliceStart[::min(u * rowStep + tidOff, lastOff)]);
     }
   };
 

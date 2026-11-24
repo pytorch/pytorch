@@ -72,7 +72,6 @@ from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     initialize_temp_directories,
     MultiProcessTestCase,
-    nccl_skip_if_lt_x_gpu,
     require_n_gpus_for_nccl_backend,
     requires_nccl_version,
     simple_sparse_reduce_tests,
@@ -226,6 +225,16 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
             )
         )
     ]
+
+
+def _default_pg_is_nccl_legacy():
+    if not dist.distributed_c10d._NCCL_LEGACY_AVAILABLE:
+        return False
+    pg = dist.distributed_c10d._get_default_group()
+    return isinstance(
+        pg._get_backend(torch.device("cuda")),
+        dist.distributed_c10d.ProcessGroupNCCL,
+    )
 
 
 def get_profiler_nccl_meta(prof):
@@ -576,6 +585,15 @@ class TestDistBackend(MultiProcessTestCase):
         # crash a process due to TORCH_NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = [self.test_ddp_has_finalized.__wrapped__]
 
+    @classmethod
+    def mark_statically_skipped(cls):
+        if not IS_SANDCASTLE:
+            for name in unittest.defaultTestLoader.getTestCaseNames(cls):
+                test = getattr(cls, name)
+                reason = getattr(test, "_skipped_reason", None)
+                if reason is not None and not getattr(test, "__unittest_skip__", False):
+                    setattr(cls, name, unittest.skip(reason)(test))
+
     def tearDown(self):
         cleanup_temp_dir()
         super().tearDown()
@@ -687,6 +705,7 @@ class DistributedTest:
             """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
             We test for basic fields in this profiler event that correspond to the nccl communication
             collectives"""
+            is_legacy = _default_pg_is_nccl_legacy()
             per_coll_meta = defaultdict(list)
             for e in nccl_meta_events:
                 args = e.get("args", {})
@@ -698,12 +717,14 @@ class DistributedTest:
                 if collname == "wait":
                     continue
 
-                self.assertEqual(args["Process Group Description"], "default_pg")
                 self.assertNotEqual(args["Process Group Ranks"], "")
-
                 self.assertGreaterEqual(args.get("In msg nelems", -1), 0)
                 self.assertGreaterEqual(args.get("Out msg nelems", -1), 0)
                 self.assertGreaterEqual(args.get("Group size", -1), 0)
+                # nccl2 does not report the PG description or global ranks.
+                if not is_legacy:
+                    continue
+                self.assertEqual(args["Process Group Description"], "default_pg")
                 self.assertGreaterEqual(args.get("Global rank start", -1), 0)
                 self.assertGreaterEqual(args.get("Global rank stride", -1), 0)
 
@@ -2672,6 +2693,9 @@ class DistributedTest:
                     group_id,
                     async_op=async_op,
                     tensor_shapes=tensor_shapes,
+                )
+                self.assertEqual(
+                    tensor, _build_tensor(src + 1, expected_value, dtype=dtype)
                 )
                 # Gloo and NCCL are the only backends that reach here; every other
                 # backend skips the enclosing tests.
@@ -5382,7 +5406,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_accumulate_gradients_no_sync(self):
             """
             Runs _test_accumulate_gradients_no_sync using default inputs
@@ -5393,7 +5417,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_accumulate_gradients_no_sync_grad_is_view(self):
             """
             Runs _test_accumulate_gradients_no_sync using default inputs
@@ -5404,7 +5428,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_accumulate_gradients_no_sync_allreduce_hook(self):
             """
             Runs multiple iterations on _test_accumulate_gradients_no_sync
@@ -5432,7 +5456,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
             """
             Runs multiple iterations on _test_accumulate_gradients_no_sync using allreduce
@@ -5466,7 +5490,7 @@ class DistributedTest:
             BACKEND != "mpi" and BACKEND != "nccl" and BACKEND != "gloo",
             "get_future is only supported on mpi, nccl and gloo",
         )
-        @nccl_skip_if_lt_x_gpu(BACKEND, 2)
+        @require_n_gpus_for_nccl_backend(2, BACKEND)
         def test_get_future(self):
             def mult(fut):
                 return [t * 3 for t in fut.wait()]
@@ -6761,6 +6785,13 @@ class DistributedTest:
             self.assertEqual(len(indices_list), local_num_samples)
             validate_global_samples(local_num_samples)
 
+        def _nccl_object_test_device(self):
+            # Legacy also covers rank != GPU device; nccl2 rejects tensors off
+            # the group's bound device.
+            if _default_pg_is_nccl_legacy():
+                return (self.rank + 1) % int(self.world_size)
+            return self.rank
+
         def _test_allgather_object(self, subgroup=None):
             # Only set device for NCCL backend since it must use GPUs.
 
@@ -6768,9 +6799,7 @@ class DistributedTest:
 
             backend = os.environ["BACKEND"]
             if backend == "nccl":
-                # Case where rank != GPU device.
-                next_rank = (self.rank + 1) % int(self.world_size)
-                torch.cuda.set_device(next_rank)
+                torch.cuda.set_device(self._nccl_object_test_device())
 
             # If GPU test, add object with GPU tensor
             if backend == "nccl":
@@ -6813,9 +6842,7 @@ class DistributedTest:
 
             backend = os.environ["BACKEND"]
             if backend == "nccl":
-                # Case where rank != GPU device.
-                next_rank = (self.rank + 1) % int(self.world_size)
-                torch.cuda.set_device(next_rank)
+                torch.cuda.set_device(self._nccl_object_test_device())
 
             # If GPU test, add object with GPU tensor
             if backend == "nccl":
@@ -7107,16 +7134,22 @@ class DistributedTest:
             self.assertGreater(len(nccl_meta_events), 0)
 
             nccl_meta = self._sanity_check_profiler_nccl_meta(nccl_meta_events)
+            is_legacy = _default_pg_is_nccl_legacy()
 
             # additionally check the specific collectives in this test case
-            self.assertEqual(len(nccl_meta["allreduce"]), 2)
-            self.assertEqual(len(nccl_meta["wait"]), 1)
+            allreduce = nccl_meta["allreduce" if is_legacy else "all_reduce"]
+            self.assertEqual(len(allreduce), 2)
+            # nccl2 skips the wait record if the work already completed.
+            if is_legacy:
+                self.assertEqual(len(nccl_meta["wait"]), 1)
+            else:
+                self.assertLessEqual(len(nccl_meta["wait"]), 1)
 
             # check allreduce message sizes
-            a0 = nccl_meta["allreduce"][0]
+            a0 = allreduce[0]
             self.assertEqual(a0["Out msg nelems"], 100, msg=f"{a0}")
             self.assertEqual(a0["dtype"], "Float", msg=f"{a0}")
-            a1 = nccl_meta["allreduce"][1]
+            a1 = allreduce[1]
             self.assertEqual(a1["Out msg nelems"], 1, msg=f"{a1}")
             self.assertEqual(a1["dtype"], "Int", msg=f"{a1}")
 

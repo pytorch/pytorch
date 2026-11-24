@@ -39,7 +39,10 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyAccelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     parametrize,
@@ -153,15 +156,19 @@ def _train(model, optim, train_steps=1):
 
 class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     hw_classification = HardwareClassification.ACCELERATOR
+    _do_cuda_memory_leak_check = False
+    _do_cuda_non_default_stream = False
 
-    @property
-    def backend(self):
-        curr_backend = dist.get_default_backend_for_device(self.device_type)
-        return f"cpu:gloo,{self.device_type}:{curr_backend}"
+    @classmethod
+    def backend_str(cls, device) -> str:
+        curr_backend = dist.get_default_backend_for_device(device)
+        return f"cpu:gloo,{device}:{curr_backend}"
 
     def _create_model(self, device, compile, model_type, state_dict_options=None):
         device_type = torch.device(device).type
-        dummy_model = TestDummyModel().to(device_type)
+        # Device parametrization supplies the same index in every worker.
+        local_device = torch.device(device_type, self.rank)
+        dummy_model = TestDummyModel().to(local_device)
 
         if model_type not in ModelType:
             raise AssertionError(f"{model_type} is not supported.")
@@ -215,6 +222,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def _optim(self, model):
         return torch.optim.Adam(model.parameters(), lr=0.1)
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
@@ -225,6 +233,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def test_e2e(self, device, compile, model_type):
         self._run_e2e_test(device, compile, model_type)
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
@@ -344,6 +353,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)
 
+    @onlyAccelerator
     @skip_if_lt_x_gpu(4)
     @with_comms
     @with_temp_dir
@@ -393,7 +403,7 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
     world_size = NUM_DEVICES
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         device = _get_device_type(cls.world_size)
         if device == "cpu":
             return "gloo"
@@ -481,9 +491,9 @@ class TestCheckpointOrderingAndOverwrite(DTensorContinuousTestBase):
 class TestNoCPU(DTensorTestBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    @property
-    def backend(self):
-        return dist.get_default_backend_for_device(self.device_type)
+    @classmethod
+    def backend_str(cls, device) -> str:
+        return dist.get_default_backend_for_device(device)
 
     @skip_if_lt_x_gpu(NUM_DEVICES)
     @with_comms
