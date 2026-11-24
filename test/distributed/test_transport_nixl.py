@@ -6,6 +6,7 @@ import json
 import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ from transport_test_utils import TransportTestMixin
 
 import torch
 import torch.distributed as dist
-from torch.distributed._transport import new_transport, wait_all
+from torch.distributed._transport import _api, new_transport, wait_all
 from torch.distributed._transport.nixl import _transport as _nixl
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1038,6 +1039,32 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         written = torch.arange(8, dtype=torch.uint8) * (rejected == "third")
         self.assertEqual(targets[0], written)
         self.assertEqual(targets[1].count_nonzero(), 0)
+        self.assertEqual((first._transfers, first._pending), ({}, {}))
+
+    def test_batch_lock_wait_past_deadline_starts_nothing(self):
+        first, source, targets, remotes = self.connect_peers()
+        clock = SimpleNamespace(now=0.0)
+        clock.monotonic = lambda: clock.now
+        locked = first._locked
+
+        @contextmanager
+        def slow_lock(timeout):
+            # The lock is acquired only after the batch's deadline has passed.
+            clock.now = 1.0
+            with locked(timeout):
+                yield
+
+        agent = first._agent
+        start = patch.object(agent, "initialize_xfer", wraps=agent.initialize_xfer)
+        with (
+            patch.object(_api, "time", clock),
+            patch.object(first, "_locked", slow_lock),
+            start as starts,
+        ):
+            with self.assertRaisesRegex(TimeoutError, "before dispatch"):
+                first.write_batch([(source.to_view(), remotes[0])], timeout=0.5)
+        self.assertEqual(starts.call_count, 0)
+        self.assertEqual(targets[0].count_nonzero(), 0)
         self.assertEqual((first._transfers, first._pending), ({}, {}))
 
     def test_batch_checks_metadata_before_dispatch(self):

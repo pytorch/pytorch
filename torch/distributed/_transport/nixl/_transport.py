@@ -584,6 +584,8 @@ class NIXLTransport(Transport):
         with self._locked(_remaining(deadline)):
             # Lock wait counts against the deadline, so children get what is left.
             timeout = _remaining(deadline)
+            if timeout == 0:
+                raise TimeoutError("transport batch timed out before dispatch")
             timeout = self._timeout if timeout is None else timeout
             return self._submit_requests(operation, transfers, timeout)
 
