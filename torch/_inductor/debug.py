@@ -14,7 +14,7 @@ import pstats
 import shutil
 import tempfile
 import traceback
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any, IO
 from unittest.mock import patch
 
@@ -36,6 +36,8 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_leaves, tree_map
 
 from . import config, ir
+from .freezing_utils import is_frozen_param
+from .fx_passes.graph_view import _clean_stack_name, _get_module_stack
 from .ir import ExternKernel
 from .scheduler import (
     BaseSchedulerNode,
@@ -355,6 +357,8 @@ _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 _pre_grad_graph_id: int | None = None
 _inductor_pre_grad_node_stack_trace: dict[str, str] = {}
 _inductor_kernel_stack_trace: dict[str, list[str]] = {}
+_inductor_kernel_module_fqn: dict[str, list[str]] = {}
+_inductor_kernel_weight_fqn: dict[str, list[str]] = {}
 _kernel_information_jsons: dict[str, dict[str, Any]] = {}
 _inductor_kernel_provenance_debug_handle: int = 0
 
@@ -373,10 +377,54 @@ def get_kernel_information_jsons() -> dict[str, dict[str, Any]]:
     return _kernel_information_jsons
 
 
+def innermost_module_fqn(node: fx.Node) -> str | None:
+    """FQN of the innermost module owning `node`; None for the compiled module."""
+    stack = _get_module_stack(node)
+    if not stack:
+        return None
+    return _clean_stack_name(stack[-1][0]) or None
+
+
+def owning_module_fqns(origins: Iterable[fx.Node]) -> OrderedSet[str]:
+    """FQNs of the modules owning `origins`, in first-seen order."""
+    return OrderedSet(fqn for fqn in map(innermost_module_fqn, origins) if fqn)
+
+
+def read_weight_fqns(buffer_names: Iterable[str]) -> OrderedSet[str]:
+    """FQNs of the parameters and buffers among `buffer_names`; empty outside AOTI."""
+    graph = V.graph
+    fqns: OrderedSet[str] = OrderedSet()
+    for name in buffer_names:
+        fqn = graph.allocated_constant_name.get(name)
+        # Lifted constants are buffers of the unlifted module; AOTI's
+        # ConstantType also tells them apart by name.
+        if fqn is None or fqn.startswith("_tensor_constant"):
+            continue
+        if name in graph.folded_constants:
+            continue
+        for get_state in (graph.orig_gm.get_parameter, graph.orig_gm.get_buffer):
+            try:
+                tensor = get_state(fqn)
+            except AttributeError:
+                continue
+            if not is_frozen_param(tensor):
+                fqns.add(fqn)
+            break
+    return fqns
+
+
 def alias_kernel_provenance(original_kernel_name: str, alias_kernel_name: str) -> None:
     """Expose existing kernel provenance under an additional generated name."""
     if original_kernel_name in _inductor_kernel_stack_trace:
         _inductor_kernel_stack_trace[alias_kernel_name] = _inductor_kernel_stack_trace[
+            original_kernel_name
+        ]
+    if original_kernel_name in _inductor_kernel_module_fqn:
+        _inductor_kernel_module_fqn[alias_kernel_name] = _inductor_kernel_module_fqn[
+            original_kernel_name
+        ]
+    if original_kernel_name in _inductor_kernel_weight_fqn:
+        _inductor_kernel_weight_fqn[alias_kernel_name] = _inductor_kernel_weight_fqn[
             original_kernel_name
         ]
     if original_kernel_name in _inductor_triton_kernel_to_post_grad_node_info:
@@ -399,6 +447,8 @@ def reset_provenance_globals() -> Iterator[None]:
     global _inductor_triton_kernel_to_post_grad_node_info
     global _inductor_pre_grad_node_stack_trace
     global _inductor_kernel_stack_trace
+    global _inductor_kernel_module_fqn
+    global _inductor_kernel_weight_fqn
     global _inductor_kernel_provenance_debug_handle
     global _inductor_kernel_extern_info
 
@@ -412,6 +462,8 @@ def reset_provenance_globals() -> Iterator[None]:
         _inductor_pre_grad_node_stack_trace.copy()
     )
     original_inductor_kernel_stack_trace = _inductor_kernel_stack_trace.copy()
+    original_inductor_kernel_module_fqn = _inductor_kernel_module_fqn.copy()
+    original_inductor_kernel_weight_fqn = _inductor_kernel_weight_fqn.copy()
     original_inductor_kernel_provenance_debug_handle = (
         _inductor_kernel_provenance_debug_handle
     )
@@ -423,6 +475,8 @@ def reset_provenance_globals() -> Iterator[None]:
     _inductor_triton_kernel_to_post_grad_node_info = {}
     _inductor_pre_grad_node_stack_trace = {}
     _inductor_kernel_stack_trace = {}
+    _inductor_kernel_module_fqn = {}
+    _inductor_kernel_weight_fqn = {}
     # Kernel timeline information is populated from compile_fx_inner while this
     # context is active.  It must outlive the reset scope so the profiler can
     # consume it during export_chrome_trace, which then clears it.
@@ -439,6 +493,8 @@ def reset_provenance_globals() -> Iterator[None]:
             original_triton_kernel_to_post_grad_node_info
         )
         _inductor_kernel_stack_trace = original_inductor_kernel_stack_trace
+        _inductor_kernel_module_fqn = original_inductor_kernel_module_fqn
+        _inductor_kernel_weight_fqn = original_inductor_kernel_weight_fqn
         _inductor_pre_grad_node_stack_trace = (
             original_inductor_pre_grad_node_stack_trace
         )
@@ -1174,6 +1230,8 @@ def create_kernel_information_json() -> dict[str, dict[str, Any]]:
     try:
         global _inductor_post_to_pre_grad_nodes
         global _inductor_kernel_stack_trace
+        global _inductor_kernel_module_fqn
+        global _inductor_kernel_weight_fqn
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_extern_info
 
@@ -1212,6 +1270,8 @@ def create_kernel_information_json() -> dict[str, dict[str, Any]]:
                 "post_grad_nodes": post_grad_nodes,
                 "pre_grad_nodes": pre_grad_list,
                 "extern_semantic_key": extern_semantic_key,
+                "module_fqns": _inductor_kernel_module_fqn.get(kernel_key, []),
+                "weight_fqns": _inductor_kernel_weight_fqn.get(kernel_key, []),
             }
 
             # Merge shape metadata if available (extern ops only)
@@ -1252,11 +1312,15 @@ def set_kernel_post_grad_provenance_tracing(
 
         global _inductor_triton_kernel_to_post_grad_node_info
         global _inductor_kernel_stack_trace
+        global _inductor_kernel_module_fqn
+        global _inductor_kernel_weight_fqn
         global _inductor_kernel_provenance_debug_handle
         global _inductor_kernel_extern_info
 
         _inductor_kernel_provenance_debug_handle += 1
         stack_traces: list[str] = []
+        module_fqns: OrderedSet[str] = OrderedSet()
+        weight_fqns: OrderedSet[str] = OrderedSet()
         kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
         if is_extern:
             if not isinstance(node_schedule, ExternKernel):
@@ -1325,6 +1389,16 @@ def set_kernel_post_grad_provenance_tracing(
             except Exception as e:
                 log.debug("Shape extraction failed for %s: %s", kernel_name, e)
             stack_traces = list(node_schedule.get_stack_traces())
+            # Prefer origin_node over origins, as get_stack_traces does.
+            module_fqns.update(
+                owning_module_fqns(
+                    [node_schedule.origin_node]
+                    if node_schedule.origin_node
+                    else node_schedule.origins
+                )
+            )
+            reads = node_schedule.get_reads()
+            weight_fqns.update(read_weight_fqns(dep.name for dep in reads))
         else:
             if not isinstance(node_schedule, list):
                 raise AssertionError(f"expected list, got {type(node_schedule)}")
@@ -1345,8 +1419,16 @@ def set_kernel_post_grad_provenance_tracing(
                             for origin in snode.node.origins
                             if origin.name not in curr_node_info
                         )
+                        # pyrefly: ignore [missing-attribute]
+                        module_fqns.update(owning_module_fqns(snode.node.origins))
+                        reads = snode.read_writes.reads
+                        weight_fqns.update(read_weight_fqns(dep.name for dep in reads))
             stack_traces = list(stack_traces_set)
         _inductor_kernel_stack_trace.setdefault(kernel_name, []).extend(stack_traces)
+        if module_fqns:
+            _inductor_kernel_module_fqn.setdefault(kernel_name, []).extend(module_fqns)
+        if weight_fqns:
+            _inductor_kernel_weight_fqn.setdefault(kernel_name, []).extend(weight_fqns)
         return _inductor_kernel_provenance_debug_handle
     except Exception as e:
         # Since this is just debugging, it should never interfere with regular

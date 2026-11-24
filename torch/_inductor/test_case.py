@@ -1,6 +1,7 @@
 import contextlib
 import inspect
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 from torch._dynamo.test_case import (
@@ -24,6 +25,19 @@ STRICT_FLEXIBLE_LAYOUT_STRIDES_FILES = OrderedSet(
 
 def run_tests(needs: str | tuple[str, ...] = ()) -> None:
     dynamo_run_tests(needs)
+
+
+@contextlib.contextmanager
+def maybe_fresh_cache() -> Iterator[None]:
+    """fresh_cache(), unless INDUCTOR_TEST_DISABLE_FRESH_CACHE=1 or TORCH_COMPILE_DEBUG=1."""
+    if (
+        os.environ.get("INDUCTOR_TEST_DISABLE_FRESH_CACHE") != "1"
+        and os.environ.get("TORCH_COMPILE_DEBUG") != "1"
+    ):
+        with fresh_cache():
+            yield
+    else:
+        yield
 
 
 class TestCase(DynamoTestCase):
@@ -61,8 +75,4 @@ class TestCase(DynamoTestCase):
                 config.patch({"strict_flexible_layout_strides": True})
             )
 
-        if (
-            os.environ.get("INDUCTOR_TEST_DISABLE_FRESH_CACHE") != "1"
-            and os.environ.get("TORCH_COMPILE_DEBUG") != "1"
-        ):
-            self._inductor_test_stack.enter_context(fresh_cache())
+        self._inductor_test_stack.enter_context(maybe_fresh_cache())
