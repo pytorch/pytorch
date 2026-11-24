@@ -84,6 +84,7 @@ from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.hints import TritonMeta
+from .runtime.tiling import pointwise_prefixes
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
@@ -463,6 +464,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
         if name not in self.fixed_inputs:
+            self.kernel._record_negative_offset(name, index)
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
@@ -621,7 +623,7 @@ class TritonTemplateKernel(TritonKernel):
                     f"TMA template output rank must be in {supported_ranks}, "
                     f"got {output_rank}"
                 )
-            prefixes = ("x", "y", "z")
+            prefixes = tuple(reversed(pointwise_prefixes(output_rank)))
             tiling = dict(zip(prefixes, output_node.get_size()))
             tiling["r0_"] = sympy.S.One
         else:
@@ -636,7 +638,8 @@ class TritonTemplateKernel(TritonKernel):
         )
         if tma_tiled:
             # By default `construct_range_trees` will return the range_trees in the order
-            # ["z", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
+            # ["z0_", "y", "x", "r0_", "r1_", "r2_"] using runtime.tiling's
+            # get_pointwise_prefixes and get_reduction_prefixes filters,
             # and this order defines what the kernel block shape will be. So if the template
             # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
             # trees in the order ["y", "x"]. This would mean that the template would need to transpose
@@ -999,7 +1002,8 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         # Rendered from a deferred hook, so the body -- including any subgraph
-        # modifications that emit atomics -- already exists at this point.
+        # modifications that emit atomics and the accesses that record negative
+        # offsets -- already exists at this point.
         triton_meta["configs"] = [
             config_of(signature, pointer_range_override=self.pointer_range_override())
         ]
@@ -1142,11 +1146,13 @@ class TritonTemplateKernel(TritonKernel):
                 continue
 
             arg_name = self.args.input_buffers[input_node.get_name()]
-            if input_node.get_layout().offset == 0:
+            offset = input_node.get_layout().offset
+            if offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
             else:
-                offset = texpr(self.rename_indexing(input_node.get_layout().offset))
-                renames.writeline(f"{name} = {arg_name} + {offset}")
+                self._record_negative_offset(input_node.get_name(), offset)
+                offset_expr = texpr(self.rename_indexing(offset))
+                renames.writeline(f"{name} = {arg_name} + {offset_expr}")
 
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order
@@ -1850,7 +1856,7 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(val_shape),
-                                block_name=range_tree.symt.name,
+                                block_name=f"{range_tree.prefix.upper()}BLOCK",
                             )
                         )
                         # Generate the xmask and ymask
@@ -1864,7 +1870,7 @@ class TritonTemplateKernel(TritonKernel):
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
 
-                        val_shape_copy[i] = range_tree.symt.name
+                        val_shape_copy[i] = f"{range_tree.prefix.upper()}BLOCK"
                     # pyrefly: ignore [bad-assignment]
                     val_shape = tuple(val_shape_copy)
                 else:
@@ -2419,9 +2425,13 @@ class TritonTemplateKernel(TritonKernel):
                                 self.prologue_fused_inputs_preserve_zero |= (
                                     prologue_node.get_buffer_names()
                                 )
-                        prologue_node.codegen(
-                            self.split_and_set_ranges(prologue_node.get_ranges())
-                        )
+                        # Masked lanes of a prologue load reach the template's tl.dot,
+                        # and zero-preserving prologues are not re-masked, so the load
+                        # itself must fill them with zeros.
+                        with patch.object(self, "_load_other", 0):
+                            prologue_node.codegen(
+                                self.split_and_set_ranges(prologue_node.get_ranges())
+                            )
                     self.cse.invalidate(OrderedSet())
 
     def _finalize_partial_render(
@@ -4455,6 +4465,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "kpack",
                 "matrix_instr_nonkdim",
                 "waves_per_eu",
+                "NUM_XCCS",
             ]
         )
     )
