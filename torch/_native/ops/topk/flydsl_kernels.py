@@ -72,7 +72,7 @@ from flydsl.runtime.device import is_rdna_arch
 import torch
 from torch._native.flydsl.cache import CachedCompile, CacheInfo
 from torch._native.flydsl.compile_args import make_compile_arg, read_only_tensor
-from torch._native.flydsl.intrinsics import atomic_add, maxsi, minsi, wave_barrier
+from torch._native.flydsl.intrinsics import atomic_add, maxsi, minsi
 from torch._native.flydsl_utils import _resolve_rocm_arch
 from torch._native.instrumentation import instrumented_flydsl_cache
 
@@ -314,7 +314,7 @@ def _find_from_top(arr, top, size, k_rem, base):
     Precondition: `k_rem` is reachable, i.e. ``base + sum(entries) >= k_rem``.
     Otherwise every entry is below `k_rem` and ``idx`` ends at ``top - size``,
     outside the walked range. ``topk_radix_out`` guarantees it for the whole
-    kernel by rejecting ``k > n``.
+    kernel by rejecting any ``k`` outside ``1 <= k <= n``.
     """
     cum = base
     above = base
@@ -377,14 +377,6 @@ def _build_radix_select_topk_module(
                 f"this config can count {max_step_elems} elements per step"
             )
     warp_size = 32 if is_rdna_arch(arch) else 64
-    # The group-sum lanes (tid < _N_SCAN_GROUPS) and thread 0 must share one
-    # wave, since the scan orders them with wave_barrier() instead of a
-    # block barrier.
-    if _N_SCAN_GROUPS > warp_size:
-        raise AssertionError(
-            f"_N_SCAN_GROUPS={_N_SCAN_GROUPS} group-sum lanes must fit in one "
-            f"wave of {warp_size}"
-        )
     num_warps = block_threads // warp_size
     tile = block_threads * spec.vec
 
@@ -529,15 +521,14 @@ def _build_radix_select_topk_module(
             gpu.barrier()
 
             # Select the radix threshold. Threads 0.._N_SCAN_GROUPS-1 each sum
-            # one group of bins. They are all in wave 0, and so is thread 0, so
-            # a wave barrier orders their stores before thread 0's reads. Thread
-            # 0 then walks the group sums and the bins of one group.
+            # one group of bins, then a block barrier orders those stores before
+            # thread 0 walks the group sums and the bins of one group.
             if tid < fx.Int32(_N_SCAN_GROUPS):
                 group_sum = fx.Int32(0)
                 for j in range_constexpr(_SCAN_GROUP_BINS):
                     group_sum = group_sum + s_hist[tid * _SCAN_GROUP_BINS + j]
                 s_groups[tid] = group_sum
-            wave_barrier()
+            gpu.barrier()
             if tid == 0:
                 remaining_k = s_rem_k[0]
                 # Find the group, the "meta bucket" that holds the
@@ -1018,7 +1009,7 @@ def topk_radix_out(
     # _find_from_top assumes k is reachable (k <= n), so reject anything else
     # before the kernel can read outside the walked range.
     if not 1 <= k <= n:
-        raise ValueError(f"topk_radix needs 1 <= k <= n, got k={k}, n={n}")
+        raise ValueError(f"topk_radix_out needs 1 <= k <= n, got k={k}, n={n}")
     device_index = input_2d.device.index
     arch: str = _resolve_rocm_arch(device_index)  # pyrefly: ignore[bad-assignment]
     spec = topk_spec(input_2d.dtype, largest)

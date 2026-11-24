@@ -4,7 +4,7 @@ from enum import Enum
 
 import flydsl.expr as fx
 from flydsl._mlir.dialects import llvm
-from flydsl.expr import arith, gpu
+from flydsl.expr import arith
 from flydsl.expr.typing import Float, Integer, Numeric, Pointer
 
 
@@ -21,14 +21,7 @@ class AtomicSyncScope(Enum):
     WORKGROUP = fx.rocdl.SyncScope.Workgroup
 
 
-__all__ = [
-    "AtomicOrdering",
-    "AtomicSyncScope",
-    "atomic_add",
-    "maxsi",
-    "minsi",
-    "wave_barrier",
-]
+__all__ = ["AtomicOrdering", "AtomicSyncScope", "atomic_add", "maxsi", "minsi"]
 
 
 def maxsi(lhs: Integer, rhs: Integer) -> Integer:
@@ -39,24 +32,6 @@ def maxsi(lhs: Integer, rhs: Integer) -> Integer:
 def minsi(lhs: Integer, rhs: Integer) -> Integer:
     """Return the signed minimum of two FlyDSL integers."""
     return lhs.dtype(arith.minsi(arith.unwrap(lhs), arith.unwrap(rhs)))
-
-
-def wave_barrier() -> None:
-    """Synchronize the lanes of one wave and order their memory accesses.
-
-    ``rocdl.wave.barrier`` alone is modelled as touching no memory, so LLVM
-    may move loads and stores across it. The wavefront-scope release and
-    acquire fences around it keep them in place; on gfx9 they emit no
-    instructions. FlyDSL releases without ``rocdl.wave_barrier`` (0.3.0) get a
-    workgroup barrier instead: still correct, but slower.
-    Every lane that must be ordered has to be in the same wave.
-    """
-    if not hasattr(fx.rocdl, "wave_barrier"):
-        gpu.barrier()
-        return
-    llvm.FenceOp(llvm.AtomicOrdering.release, syncscope="wavefront")
-    fx.rocdl.wave_barrier()
-    llvm.FenceOp(llvm.AtomicOrdering.acquire, syncscope="wavefront")
 
 
 def atomic_add(
