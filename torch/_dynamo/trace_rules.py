@@ -3437,13 +3437,6 @@ BUILTIN_SKIPLIST = (
     linecache,
 )
 
-# Builtin modules that should be skipped at the top-level (PEP 523 frame
-# evaluation) but inlined when called from code dynamo is already tracing.
-# For example, copy.deepcopy should be inlined when the user calls it inside
-# a compiled function, but copy module frames should be skipped when they
-# appear as top-level frames (e.g. called internally by autograd).
-BUILTIN_INLINE_WHEN_CALLED: set[str] = set()
-
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
@@ -3779,8 +3772,14 @@ SKIP_DIRS = [
 ]
 SKIP_DIRS.extend(map(_as_posix_path, filter(None, map(_module_dir, BUILTIN_SKIPLIST))))
 
-BUILTIN_INLINE_WHEN_CALLED.update(
-    filter(None, (_module_dir(copy), _as_posix_path(_config_module.__file__)))
+# Builtin modules that should be skipped at the top-level (PEP 523 frame
+# evaluation) but inlined when called from code dynamo is already tracing.
+# For example, copy.deepcopy should be inlined when the user calls it inside
+# a compiled function, but copy module frames should be skipped when they
+# appear as top-level frames (e.g. called internally by autograd).
+# Preserve the previous set iteration order for custom filename matchers.
+BUILTIN_INLINE_WHEN_CALLED: tuple[str, ...] = tuple(
+    set(filter(None, (_module_dir(copy), _as_posix_path(_config_module.__file__))))
 )
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
@@ -3871,9 +3870,7 @@ def check_file(filename: str | None, is_inlined_call: bool = False) -> SkipResul
             return SkipResult(False, f"file matches LEGACY_MOD_INLINELIST ({d})")
     if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(False, f"file matches MOD_INLINELIST ({filename})")
-    if is_inlined_call and any(
-        filename.startswith(d) for d in BUILTIN_INLINE_WHEN_CALLED
-    ):
+    if is_inlined_call and filename.startswith(BUILTIN_INLINE_WHEN_CALLED):
         return SkipResult(
             False, f"file matches BUILTIN_INLINE_WHEN_CALLED ({filename})"
         )

@@ -4574,6 +4574,7 @@ class SubgraphTracer(fx.Tracer):
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
+        self._non_empty_graph_calls: tuple[fx.Node, fx.Node] | None = None
 
         # See note [Export inputs must be explicitly passed in]
         self.is_export = is_export
