@@ -704,12 +704,6 @@ _MAX_DIVISIBILITY_VARIANTS = 4
 _MAX_DIVISIBILITY_DISPATCH = 64
 
 
-def _same_binary(a: Any, b: Any) -> bool:
-    """Whether two compile results of one kernel compiled to the same code."""
-    digest = getattr(a, "binary_digest", None)
-    return digest is not None and digest == getattr(b, "binary_digest", None)
-
-
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -723,6 +717,7 @@ class CachingAutotuner(KernelInterface):
     # Defaults for kernels pickled before tt.divisibility variants existed.
     _divisibility_variant_args: tuple[int, ...] = ()
     _divisibility_base_launch = False
+    _is_divisibility_variant = False
     # The state set after __init__ that falling back keeps, rather than taking the
     # unpinned instance's: the held lock, and the launch a lazy precompile from run()
     # is part of.
@@ -880,6 +875,8 @@ class CachingAutotuner(KernelInterface):
         )
         # Set while this kernel itself launches for a new divisibility pattern.
         self._divisibility_base_launch = False
+        # sha256 of each compiled config's binary, while variants are possible.
+        self._binary_digests: dict[Any, str] = {}
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
         # them on every kernel launch.
@@ -1733,13 +1730,20 @@ class CachingAutotuner(KernelInterface):
             )
         else:
             result = TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
-        # Lets a tt.divisibility variant tell whether it compiled to new code; the
-        # static launcher drops its cubin once loaded.
-        asm = getattr(binary, "asm", None)
-        code = (asm.get("cubin") or asm.get("hsaco")) if isinstance(asm, dict) else None
-        result.binary_digest = (
-            hashlib.sha256(code).hexdigest() if isinstance(code, bytes) else None
-        )
+        if self._divisibility_variant_args or self._is_divisibility_variant:
+            # Lets a tt.divisibility variant tell whether it compiled to new code
+            # (the static launcher drops its cubin once loaded). Keyed by config,
+            # since coordinate descent's winner is not kept in compile_results.
+            asm = getattr(binary, "asm", None)
+            code = (
+                (asm.get("cubin") or asm.get("hsaco"))
+                if isinstance(asm, dict)
+                else None
+            )
+            if isinstance(code, bytes):
+                self._binary_digests[triton_config_to_hashable(cfg)] = hashlib.sha256(
+                    code
+                ).hexdigest()
         return result
 
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
@@ -2781,11 +2785,14 @@ class CachingAutotuner(KernelInterface):
             torch, self.device_props.type.replace("hip", "cuda"), None
         )
         capturing = getattr(device_module, "is_current_stream_capturing", None)
-        if (capturing is not None and capturing()) or is_compilation_forbidden():
+        if capturing is not None and capturing():
             # Never compile or load a module inside a capture; a later eager
             # launch with these values builds it.
             return
         variants = self._divisibility_variants
+        if is_compilation_forbidden():
+            variants[key] = None
+            return
         if len(self.launchers) != 1 or len(variants) >= _MAX_DIVISIBILITY_VARIANTS:
             variants[key] = None
             return
@@ -2806,15 +2813,8 @@ class CachingAutotuner(KernelInterface):
             if variant is None:
                 return
             config = triton_config_to_hashable(variant.launchers[0].config)
-            base = next(
-                (
-                    r
-                    for r in self.compile_results
-                    if triton_config_to_hashable(r.config) == config
-                ),
-                None,
-            )
-            if base is not None and _same_binary(base, variant.compile_results[0]):
+            digest = self._binary_digests.get(config)
+            if digest is not None and digest == variant._binary_digests.get(config):
                 log.debug("%s: tt.divisibility variant gains nothing", self.fn.__name__)
                 if key == self._divisibility_variant_args:
                     # Even every arg divisible changes nothing: drop the dispatch.
@@ -2856,6 +2856,7 @@ class CachingAutotuner(KernelInterface):
             reset_to_zero_arg_names=self.reset_to_zero_arg_names,
         )
         variant.configs = [config]
+        variant._is_divisibility_variant = True
         variant.precompile()
         if len(variant.launchers) != 1:
             return None
