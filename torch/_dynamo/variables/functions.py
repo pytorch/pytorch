@@ -1390,6 +1390,15 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     __repr__ = __str__
 
+    def can_reconstruct(
+        self,
+        codegen: "PyCodegen",
+        *,
+        allow_cache: bool = True,
+        visiting: set[int],
+    ) -> bool | None:
+        return None
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         from torch._dynamo.side_effects import disallow_side_effects_in_generator
         from torch._dynamo.symbolic_convert import (

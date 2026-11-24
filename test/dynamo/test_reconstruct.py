@@ -12,7 +12,14 @@ from unittest import mock
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.codegen import PyCodegen
+from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
+from torch._dynamo.source import LocalSource
+from torch._dynamo.variables.base import AttributeMutationNew
+from torch._dynamo.variables.lazy import LazyConstantVariable, LazyVariableTracker
+from torch._dynamo.variables.tensor import TensorVariable
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -46,6 +53,119 @@ def _force_tensor_descriptor_support():
 
 @instantiate_parametrized_tests
 class ReconstructTest(torch._dynamo.test_case.TestCase):
+    @parametrize("pending_attr", [False, True])
+    def test_plain_tensor_continuation_reconstruction(self, pending_attr):
+        proofs = []
+
+        def inspect(ctx):
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            value = tx.symbolic_locals["y"]
+            self.assertIs(type(value), TensorVariable)
+            self.assertIs(value.class_type, torch.Tensor)
+            self.assertIsNone(value.source)
+            self.assertIsInstance(value.mutation_type, AttributeMutationNew)
+            codegen = PyCodegen(tx.output.root_tx)
+            self.assertIs(codegen.can_reconstruct(value, allow_cache=False), True)
+            attrs = tx.output.side_effects.store_attr_mutations.get(value, {})
+            self.assertEqual(bool(attrs), pending_attr)
+            status = tx.output.can_reconstruct_continuation(tx)
+            self.assertIs(status, None if pending_attr else True)
+            proofs.append(True)
+
+        def fn(x, inspect, pending_attr):
+            y = x + 1
+            if pending_attr:
+                y.tag = x
+            comptime(inspect)
+            return y
+
+        torch.compile(fn, backend="eager", fullgraph=True)(
+            torch.ones(3), inspect, pending_attr
+        )
+        self.assertTrue(proofs)
+
+    @parametrize("kind", ["range", "deque", "bytearray"])
+    def test_builtin_container_reconstruction_proof(self, kind):
+        proofs = []
+
+        def inspect(ctx):
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            value = tx.symbolic_locals["value"]
+            codegen = PyCodegen(tx.output.root_tx)
+            guards = set(tx.output.guards)
+            options = tx.output.code_options.copy()
+            globals_before = {
+                name: id(item) for name, item in tx.output.global_scope.items()
+            }
+            imports = tx._import_source_memo.copy()
+            for _ in range(2):
+                self.assertIs(codegen.can_reconstruct(value, allow_cache=False), True)
+            self.assertEqual(set(tx.output.guards), guards)
+            self.assertEqual(tx.output.code_options, options)
+            self.assertEqual(
+                {name: id(item) for name, item in tx.output.global_scope.items()},
+                globals_before,
+            )
+            self.assertEqual(tx._import_source_memo, imports)
+            self.assertEqual(codegen._output, [])
+            self.assertEqual(codegen.tempvars, {})
+            proofs.append(True)
+
+        def fn():
+            if kind == "range":
+                value = range(5)
+            elif kind == "deque":
+                value = collections.deque([1, 2], maxlen=3)
+            else:
+                value = bytearray(b"ab")
+            comptime(inspect)
+            return value, value
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        first, alias = compiled()
+        second, second_alias = compiled()
+        self.assertIs(first, alias)
+        self.assertIs(second, second_alias)
+        self.assertIsNot(first, second)
+        expected = {
+            "range": range(5),
+            "deque": collections.deque([1, 2], maxlen=3),
+            "bytearray": bytearray(b"ab"),
+        }
+        self.assertEqual(first, expected[kind])
+        self.assertEqual(second, expected[kind])
+        self.assertTrue(proofs)
+
+    @parametrize("scalar", [False, True])
+    def test_unrealized_lazy_source_reconstruction(self, scalar):
+        proofs = []
+
+        def inspect(ctx):
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            value = tx.symbolic_locals["payload"]
+            expected_type = LazyConstantVariable if scalar else LazyVariableTracker
+            self.assertIs(type(value), expected_type)
+            self.assertFalse(value.is_realized())
+            cache = vars(value._cache).copy()
+            guards = set(tx.output.guards)
+            codegen = PyCodegen(tx.output.root_tx)
+            self.assertIs(codegen.can_reconstruct(value), True)
+            self.assertIsNone(codegen.can_reconstruct(value, allow_cache=False))
+            self.assertFalse(value.is_realized())
+            self.assertEqual(vars(value._cache), cache)
+            self.assertEqual(set(tx.output.guards), guards)
+            self.assertEqual(codegen._output, [])
+            proofs.append(True)
+
+        def fn(payload):
+            comptime(inspect)
+            return payload
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for payload in (11, 42) if scalar else ([None], [None, None]):
+            self.assertIs(compiled(payload), payload)
+        self.assertTrue(proofs)
+
     @contextlib.contextmanager
     def register_bytecode_hook(self, fn):
         def hook(code, out_code):
@@ -1776,6 +1896,157 @@ class ReconstructTest(torch._dynamo.test_case.TestCase):
 
         torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3), obj, holder)
         self.assertIs(holder.obj, obj)
+
+
+class ReconstructDeviceTest(torch._dynamo.test_case.TestCase):
+    @parametrize("kind", ["size", "slice", "tensor_method"])
+    def test_graph_output_reconstruction_proof(self, device, kind):
+        proofs = []
+
+        def inspect(ctx):
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            value = tx.symbolic_locals["value"]
+            self.assertIsNone(value.source)
+            guards = set(tx.output.guards)
+            nodes = tuple(tx.output.root_tracer.graph.nodes)
+            options = tx.output.code_options.copy()
+            ordinary = PyCodegen(tx.output.root_tx)
+            continuation = PyCodegen(
+                tx.output.root_tx, reconstruction_graph_outputs=True
+            )
+            for _ in range(2):
+                self.assertIsNone(ordinary.can_reconstruct(value, allow_cache=False))
+                self.assertIs(
+                    continuation.can_reconstruct(value, allow_cache=False), True
+                )
+            self.assertEqual(set(tx.output.guards), guards)
+            self.assertEqual(tuple(tx.output.root_tracer.graph.nodes), nodes)
+            self.assertEqual(tx.output.code_options, options)
+            self.assertEqual(continuation._output, [])
+            self.assertEqual(continuation.graph_outputs, {})
+            self.assertEqual(continuation.tempvars, {})
+            proofs.append(True)
+
+        def fn(x):
+            y = x + 1
+            n = x.shape[0] + 1
+            if kind == "size":
+                value = torch.Size((n, n + 1))
+            elif kind == "slice":
+                value = slice(n, n + 1, 1)
+            else:
+                value = y.clone
+            comptime(inspect)
+            return y, value, value
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        previous = None
+        for size in (3, 6):
+            x = torch.ones(size, device=device)
+            y, value, alias = compiled(x)
+            self.assertEqual(y, x + 1)
+            self.assertIs(value, alias)
+            if previous is not None:
+                self.assertIsNot(value, previous)
+            if kind == "size":
+                self.assertEqual(value, torch.Size((size + 1, size + 2)))
+            elif kind == "slice":
+                self.assertEqual(
+                    (value.start, value.stop, value.step), (size + 1, size + 2, 1)
+                )
+            else:
+                self.assertIs(value.__self__, y)
+                self.assertEqual(value(), y)
+            previous = value
+        self.assertTrue(proofs)
+
+    @parametrize(
+        "kind", ["module", "defaults", "closure", "list_subclass", "realized_lazy"]
+    )
+    def test_source_reconstruction_proof(self, device, kind):
+        proofs = []
+
+        def inspect(ctx):
+            tx = ctx._i_will_not_complain_if_bc_breaks_InstructionTranslator()
+            value = tx.symbolic_locals["value"]
+            if kind == "realized_lazy":
+                self.assertTrue(value.is_realized())
+                self.assertIs(type(value), LazyVariableTracker)
+            cg = PyCodegen(tx.output.root_tx)
+            guards = set(tx.output.guards)
+            nodes = tuple(tx.output.root_tracer.graph.nodes)
+            options = tx.output.code_options.copy()
+            for _ in range(2):
+                self.assertIs(cg.can_reconstruct(value), True)
+            if kind == "realized_lazy":
+                cache = value._cache.__dict__.copy()
+                overridden = PyCodegen(
+                    tx.output.root_tx,
+                    overridden_sources={value.source: LocalSource("missing_local")},
+                )
+                self.assertIsNone(overridden.can_reconstruct(value))
+                self.assertIs(
+                    overridden.can_reconstruct(value, allow_cache=False), True
+                )
+                overridden.value_from_source = False
+                self.assertIs(overridden.can_reconstruct(value), True)
+                self.assertEqual(value._cache.__dict__, cache)
+            self.assertEqual(set(tx.output.guards), guards)
+            self.assertEqual(tuple(tx.output.root_tracer.graph.nodes), nodes)
+            self.assertEqual(tx.output.code_options, options)
+            self.assertEqual(cg._output, [])
+            self.assertEqual(cg.tempvars, {})
+            proofs.append(True)
+
+        def fn(x, payload):
+            if kind in ("defaults", "closure"):
+                value = payload()
+            elif kind == "list_subclass":
+                value = payload[0]
+            else:
+                value = payload
+            y = value + 1 if kind == "realized_lazy" else x + 1
+            comptime(inspect)
+            return y, value
+
+        token = object()
+        if kind == "module":
+            payload = torch.nn.ReLU()
+        elif kind == "defaults":
+
+            def payload(value=token):
+                return value
+        elif kind == "closure":
+
+            def payload():
+                return token
+        elif kind == "list_subclass":
+
+            class ListSubclass(list):
+                pass
+
+            payload = ListSubclass([token])
+        else:
+            payload = torch.ones(3, device=device)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for token in (object(), object()):
+            expected = payload
+            if kind == "defaults":
+                payload.__defaults__ = (token,)
+                expected = token
+            elif kind == "closure":
+                expected = token
+            elif kind == "list_subclass":
+                payload[0] = token
+                expected = token
+            x = torch.ones(3, device=device)
+            y, value = compiled(x, payload)
+            self.assertEqual(y, x + 1)
+            self.assertIs(value, expected)
+        self.assertTrue(proofs)
+
+
+instantiate_device_type_tests(ReconstructDeviceTest, globals())
 
 
 if __name__ == "__main__":

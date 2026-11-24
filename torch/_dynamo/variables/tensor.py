@@ -406,6 +406,13 @@ class TensorVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is TensorVariable and isinstance(self.proxy, torch.fx.Proxy):
+            return True
+        return None
+
     def reconstruct_pycode(self, codegen) -> str:
         if id(self.proxy) in codegen.graph_outputs:
             return f"__graph_out[{codegen.graph_outputs[id(self.proxy)].index}]"
@@ -3243,6 +3250,20 @@ class SymNodeVariable(VariableTracker):
         "sym_num",
         *VariableTracker._nonvar_fields,
     }
+
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not SymNodeVariable or not isinstance(
+            self.proxy, torch.fx.Proxy
+        ):
+            return None
+        if (
+            codegen.graph_output_var is None
+            and not codegen.reconstruction_graph_outputs
+        ):
+            return None
+        return True if type(self.sym_num) in (torch.SymInt, torch.SymBool) else None
 
     def debug_repr(self) -> str:
         return repr(self.sym_num)

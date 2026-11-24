@@ -982,6 +982,13 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.sq_length_impl(tx)
 
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not RangeVariable or "range" in codegen.tx.f_globals:
+            return None
+        return codegen.can_reconstruct_values(self.items, visiting=visiting)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if "range" in codegen.tx.f_globals:
             raise AssertionError("'range' must not be shadowed in f_globals")
@@ -1227,6 +1234,13 @@ class ListVariable(BaseListVariable):  # noqa: RVT001
         return tx.output.side_effects.track_new_user_defined_object(
             self, args[0], [], tx=tx
         )
+
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not ListVariable:
+            return super().can_reconstruct_value(codegen, visiting=visiting)
+        return codegen.can_reconstruct_values(self.items, visiting=visiting)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Only a sourceless object needs the empty-then-fill placeholder. Once
@@ -1727,6 +1741,15 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
     def is_python_constant(self) -> bool:
         return super().is_python_constant() and self.maxlen.is_python_constant()
 
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not DequeVariable:
+            return None
+        return codegen.can_reconstruct_values(
+            [self.maxlen, *self.items], visiting=visiting
+        )
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # To deal with self-referential sets
         codegen.add_push_null(
@@ -2061,6 +2084,13 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
         return tx.output.side_effects.track_new_user_defined_object(
             self, args[0], args[1:], tx=tx
         )
+
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not TupleVariable:
+            return super().can_reconstruct_value(codegen, visiting=visiting)
+        return codegen.can_reconstruct_values(self.items, visiting=visiting)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
@@ -3051,6 +3081,13 @@ class ByteArrayVariable(VariableTracker):
         "isupper": Method(bytearray_isupper),
     }
 
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is ByteArrayVariable and type(self.data) is bytearray:
+            return True
+        return None
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
             lambda: codegen.append_output(codegen.create_load_python_module(bytearray))  # type: ignore[arg-type]
@@ -3169,6 +3206,13 @@ class SizeVariable(TupleVariable):  # noqa: RVT001
             ),
         )
         return proxy
+
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not SizeVariable:
+            return None
+        return codegen.can_reconstruct_values(self.items, visiting=visiting)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "Size"))
@@ -3435,6 +3479,13 @@ class SliceVariable(VariableTracker):  # noqa: RVT001
         self_tuple = TupleVariable(list(self.items))
         other_tuple = TupleVariable(list(other.items))
         return generic_richcompare(tx, self_tuple, other_tuple, op)
+
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not SliceVariable:
+            return None
+        return codegen.can_reconstruct_values(self.items, visiting=visiting)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
