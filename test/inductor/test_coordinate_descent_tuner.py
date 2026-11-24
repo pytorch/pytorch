@@ -121,6 +121,41 @@ class TestCoordinateDescentTuner(TestCase):
             ],
         )
 
+    @parametrize("axis", ["y", "z0_", "z1_"])
+    def test_nd_grid_overflow_neighbors(self, axis):
+        hints = {"x": 16, "y": 1, "z0_": 1, "z1_": 1}
+        hints[axis] = 65536 if axis == "y" else 65534
+        if axis != "y":
+            hints["z1_" if axis == "z0_" else "z0_"] = 2
+        tuner = CoordescTuner(size_hints=hints)
+        blocks = {f"{p.upper()}BLOCK": 1 for p in hints}
+        blocks[f"{axis.upper()}BLOCK"] = 2
+        baseline = triton.Config(blocks)
+        self.assertTrue(tuner.is_valid_config(baseline))
+        neighbors = tuner.get_neighbour_configs(baseline, f"{axis.upper()}BLOCK")
+        self.assertEqual([c.kwargs[f"{axis.upper()}BLOCK"] for c in neighbors], [4])
+        invalid = triton.Config({**blocks, f"{axis.upper()}BLOCK": 1})
+        self.assertFalse(tuner.is_valid_config(invalid))
+        hints[axis] = 65535 if axis == "y" else 32767
+        self.assertTrue(tuner.is_valid_config(invalid))
+
+    @parametrize("axis", ["y", "z0_"])
+    def test_3d_rounded_size_hint_keeps_tuning_neighbors(self, axis):
+        hints = {"x": 64, "y": 8, "z0_": 8, axis: 1 << 26}
+        baseline = triton.Config(
+            {"XBLOCK": 16, "YBLOCK": 8, "Z0_BLOCK": 8, f"{axis.upper()}BLOCK": 1024}
+        )
+        tuner = CoordescTuner(size_hints=hints)
+        self.assertTrue(tuner.is_valid_config(baseline))
+        neighbors = tuner.get_neighbour_configs(baseline, "XBLOCK")
+        self.assertCountEqual([c.kwargs["XBLOCK"] for c in neighbors], [8, 32])
+
+    def test_y_grid_overflow_without_z(self):
+        tuner = CoordescTuner(size_hints={"x": 16, "y": 65536})
+        self.assertTrue(
+            tuner.is_valid_config(triton.Config({"XBLOCK": 1, "YBLOCK": 1}))
+        )
+
     def test_abs_function(self):
         """
         The benchmark result is simply abs(XBLOCK - 15)
