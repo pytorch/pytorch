@@ -1368,6 +1368,27 @@ def error_inputs_dot_vdot(op_info, device, is_ref=False, **kwargs):
                          error_regex='Expected all tensors to be on the same device')
 
 
+def error_inputs_bool_matmul(op_info, device, **kwargs):
+    # CPU, CUDA and MPS raise NotImplementedError for these products on bool.
+    # MPS used to fail inside its Metal kernel lookup instead. XPU raises a
+    # RuntimeError from oneDNN, so it is not covered here.
+    if torch.device(device).type not in ("cpu", "cuda", "mps"):
+        return
+    make_input = partial(make_tensor, device=device, dtype=torch.bool)
+    mat, vec, batch = make_input(S, S), make_input(S), make_input(2, S, S)
+    input, args = {
+        "mm": (mat, (mat,)),
+        "addmm": (mat, (mat, mat)),
+        "bmm": (batch, (batch,)),
+        "baddbmm": (batch, (batch, batch)),
+        "addbmm": (mat, (batch, batch)),
+        "mv": (mat, (vec,)),
+        "addmv": (vec, (mat, vec)),
+    }[op_info.name]
+    yield ErrorInput(SampleInput(input, args=args), error_type=NotImplementedError,
+                     error_regex="not implemented for 'Bool'")
+
+
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -5154,6 +5175,17 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                 mode=mode,
                 align_corners=align_corners,
             )
+            if rank in (2, 3):
+                # Channels-last except for the stride of the size-1 batch dim, like img[None] for an image
+                # whose channels are its last dim in memory.
+                x = make_tensor((D,) * rank + (C,), device=device, dtype=dtype)
+                yield SampleInput(
+                    x.permute(rank, *range(rank))[None].requires_grad_(requires_grad),
+                    shape(S, rank, False),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=align_corners,
+                )
             if mode in ("nearest", "nearest-exact") and rank == 3:
                 # https://github.com/pytorch/pytorch/issues/183771
                 yield SampleInput(
@@ -12735,6 +12767,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           error_inputs_func=error_inputs_bool_matmul,
            sample_inputs_func=sample_inputs_addmm,
            decorators=[
                DecorateInfo(
@@ -12796,6 +12829,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=2e-5, rtol=3e-6)}),
                             "TestConsistency", "test_output_grad_match", device_type="mps"),
            ],
+           error_inputs_func=error_inputs_bool_matmul,
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
            ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.zeros_like(M) if beta == 0 else
@@ -12813,6 +12847,7 @@ op_db: list[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_bool_matmul,
            sample_inputs_func=sample_inputs_addbmm,
            decorators=[
                DecorateInfo(
@@ -12871,6 +12906,7 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type=('cuda', 'xpu')),
            ],
+           error_inputs_func=error_inputs_bool_matmul,
            sample_inputs_func=sample_inputs_baddbmm,
            skips=(
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
@@ -12932,6 +12968,7 @@ op_db: list[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                             "TestCommon", "test_out"),
            ),
+           error_inputs_func=error_inputs_bool_matmul,
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -12954,6 +12991,7 @@ op_db: list[OpInfo] = [
                    dtypes=(torch.float32,),
                ),
            ],
+           error_inputs_func=error_inputs_bool_matmul,
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -18116,6 +18154,7 @@ op_db: list[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_bool_matmul,
            sample_inputs_func=sample_inputs_mm,
            skips=(
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
