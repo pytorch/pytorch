@@ -20,6 +20,7 @@
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/string_view.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
@@ -189,13 +190,12 @@ TypePtr resolveType(
     const std::shared_ptr<CompilationUnit>& cu) {
   TypePtr type;
   std::string_view type_str(type_string);
-  if (c10::starts_with(type_str, kCustomClassPrefix)) {
+  if (type_str.starts_with(kCustomClassPrefix)) {
     type = getCustomClass(type_string);
     TORCH_CHECK(
         type, "The implementation of class ", type_string, " cannot be found.");
   } else if (
-      c10::starts_with(type_str, kTorchPrefix) ||
-      c10::starts_with(type_str, kJitPrefix)) {
+      type_str.starts_with(kTorchPrefix) || type_str.starts_with(kJitPrefix)) {
     c10::QualifiedName qn(type_string);
     if (cu->get_class(qn) == nullptr) {
       auto classtype = ClassType::create(qn, cu, true);
@@ -502,7 +502,6 @@ at::Tensor parseTensorFromMetadata(
             false,
             "Unsupported tensor quantization type in serialization ",
             toString(qscheme_type));
-        break;
     }
   } else {
     tensor = at::empty({0}, options);
@@ -617,8 +616,7 @@ ClassTypePtr FlatbufferLoader::getOrCreateClassTypeForObject(
   if (cls == nullptr) {
     std::string_view qn_str(
         obj_type->type_name()->c_str(), obj_type->type_name()->size());
-    if (c10::starts_with(qn_str, kTorchPrefix) ||
-        c10::starts_with(qn_str, kJitPrefix)) {
+    if (qn_str.starts_with(kTorchPrefix) || qn_str.starts_with(kJitPrefix)) {
       c10::QualifiedName qn(obj_type->type_name()->str());
       cls = cu_->get_class(qn);
       if (cls == nullptr) {

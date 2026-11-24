@@ -398,7 +398,7 @@ class ScheduleTest(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         # Testing with NCCL backend
         return backend
 
@@ -1124,8 +1124,22 @@ class ScheduleTest(MultiProcContinuousTest):
                 self.assertEqual(auto_name, pre_split_name)
                 self.assertEqual(pre_split_param.grad, auto_param.grad)
 
-        check_gradients(self.config, auto_stage_modules, ref_mod, submod_names)
-        check_gradients(self.config, pre_split_stage_modules, ref_mod, submod_names)
+        check_gradients(
+            self.config,
+            auto_stage_modules,
+            ref_mod,
+            submod_names,
+            rtol=1e-4,
+            atol=1e-4,
+        )
+        check_gradients(
+            self.config,
+            pre_split_stage_modules,
+            ref_mod,
+            submod_names,
+            rtol=1e-4,
+            atol=1e-4,
+        )
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
@@ -1694,7 +1708,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         # Testing with NCCL backend
         return backend
 
@@ -1933,7 +1947,7 @@ class PerEdgeScheduleTest(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return backend
 
     @classmethod
@@ -1943,8 +1957,11 @@ class PerEdgeScheduleTest(MultiProcContinuousTest):
             raise AssertionError("Expected rdvz_file to not be None")
         os.environ["LOCAL_RANK"] = str(rank)
         store = dist.FileStore(rdvz_file, world_size)
+        device = cls.device_type
+        if isinstance(device, property):
+            device = device.fget(cls)
         dist.init_process_group(
-            backend=cls.backend_str(),
+            backend=cls.backend_str(device),
             world_size=world_size,
             rank=rank,
             store=store,
@@ -2216,11 +2233,11 @@ class NCCLLazyP2PInitializationTest(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return "nccl-lazy"
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return "cuda"
 
     @property

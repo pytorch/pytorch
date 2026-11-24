@@ -23,7 +23,6 @@ from github_api import (
     PullRequestRef,
     SUBMITTED_REVIEW_STATES,
 )
-from identifiers import TARGET_BASE_REF
 from schemas import (
     IntakeFacts,
     IntakeResult,
@@ -47,7 +46,9 @@ PASSIVE_TIMELINE_EVENTS = frozenset(
         "unsubscribed",
     }
 )
-TRIGGER_LABEL = "open source"
+# Changing these is not maintainer engagement: `bot-retriage` starts a run, and
+# an external labeler adds `open source` to OSS PRs.
+TRIGGER_LABELS = frozenset({"bot-retriage", "open source"})
 HANDLED_LABELS = frozenset(
     {
         "triaged",
@@ -211,7 +212,7 @@ def fetch_maintainer_activity(
             if (
                 event_name in {"labeled", "unlabeled"}
                 and isinstance(label, dict)
-                and label.get("name") == TRIGGER_LABEL
+                and label.get("name") in TRIGGER_LABELS
             ):
                 continue
             login = _human_login(
@@ -451,6 +452,18 @@ def verify_description_claims(
     return sorted(supporters, key=str.casefold), actionable_issues
 
 
+def native_stack_trunk(pr_data: dict[str, Any]) -> str | None:
+    """Return the trunk of the GitHub-native stack the PR is in, or None when it is in none.
+
+    GitHub omits ``stack`` for a PR in no stack.
+    """
+
+    stack = pr_data.get("stack")
+    base = stack.get("base") if isinstance(stack, dict) else None
+    ref = base.get("ref") if isinstance(base, dict) else None
+    return ref if isinstance(ref, str) else None
+
+
 def assess_intake(
     pr: PullRequestRef,
     /,
@@ -486,9 +499,15 @@ def assess_intake(
         raise RuntimeError("pull request response is incomplete")
     if pr_number != pr.number or base_repo.casefold() != pr.repo.casefold():
         raise RuntimeError("pull request identity does not match the target")
-    is_open_non_draft_pr_against_main = (
-        base_ref == TARGET_BASE_REF and state == "open" and not draft
+    # ghstack opens each PR in a stack against its own gh/<user>/<N>/base branch;
+    # a GitHub-native stack opens each PR above the bottom against the branch of
+    # the PR below it, and names the stack's trunk in `stack.base.ref`.
+    targets_main = (
+        base_ref == "main"
+        or (base_ref.startswith("gh/") and base_ref.endswith("/base"))
+        or native_stack_trunk(pr_data) == "main"
     )
+    is_open_non_draft_pr_against_main = targets_main and state == "open" and not draft
 
     already_handled = is_already_handled(pr_data.get("labels"))
     body = pr_data.get("body") or ""
@@ -604,7 +623,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("pr", type=int, help="pull request number")
     parser.add_argument("--repository", required=True)
     parser.add_argument("--workflow-sha", required=True)
-    parser.add_argument("--expected-base-ref", required=True)
     parser.add_argument("--proxy", default=os.environ.get("HTTPS_PROXY"))
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--github-output", type=Path)
@@ -617,8 +635,6 @@ def main() -> int:
     args = parse_args()
     if args.pr < 1:
         raise SystemExit("PR number must be positive")
-    if args.expected_base_ref != TARGET_BASE_REF:
-        raise SystemExit(f"--expected-base-ref must be {TARGET_BASE_REF}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     try:
         intake = assess_intake(

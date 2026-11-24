@@ -93,6 +93,7 @@ jobs:
           { config: "operator_microbenchmark_norm_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
           { config: "operator_microbenchmark_scaled_mm_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
           { config: "operator_microbenchmark_scaled_grouped_mm_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
+          { config: "operator_microbenchmark_grouped_mm_test", shard: 1, num_shards: 1, runner: "linux.dgx.b200" },
         ]}
       python-version: "3.12"
       compiler: gcc11
@@ -125,10 +126,11 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-rocm-py3_11
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      rocm-arch-list: gfx950
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx950.1" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi350.1" },
         ]}
     secrets: inherit
 
