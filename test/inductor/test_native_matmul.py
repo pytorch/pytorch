@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 
+import contextlib
 from collections.abc import Callable
 
 import torch
@@ -21,25 +22,34 @@ from torch.testing._internal.common_device_type import (
     largeTensorTest,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     parametrize,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-
-
-aten = torch.ops.aten
+from torch.utils._triton import has_triton, has_triton_for_device
 
 
 # These tests check codegen and numerics. Benchmarking every reduction config of
 # their matmul kernels takes most of this file's runtime, so they use one config.
-@inductor_config.patch(
-    {
-        "triton.native_matmul": True,
-        "test_configs.force_filter_reduction_configs": True,
-    }
-)
 class TestTritonDotReduction(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        if not has_triton_for_device(self.device_type):
+            self.skipTest(f"requires Triton on {self.device_type}")
+        super().setUp()
+
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(
+            inductor_config.patch(
+                {
+                    "triton.native_matmul": True,
+                    "test_configs.force_filter_reduction_configs": True,
+                }
+            )
+        )
+
     def _check_equal(
         self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4
     ):
@@ -63,50 +73,50 @@ class TestTritonDotReduction(TestCase):
             "tl.dot", dot_count, exactly=True
         ).run(code)
 
-    def test_matmul(self):
+    def test_matmul(self, device):
         def f(x, y):
             z = x @ y
             return z
 
         M, K, N = 128, 128, 128
-        x = rand_strided((M, K), (K, 1), device=GPU_TYPE)
-        y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+        x = rand_strided((M, K), (K, 1), device=device)
+        y = rand_strided((K, N), (N, 1), device=device)
 
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
 
-    def test_mm_1d_expand(self):
+    def test_mm_1d_expand(self, device):
         def f(x, y, M, K):
             z = x[:, None].expand(M, K) @ y
             return z
 
         M, K, N = 128, 128, 128
-        x = rand_strided((M,), (1,), device=GPU_TYPE)
-        y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+        x = rand_strided((M,), (1,), device=device)
+        y = rand_strided((K, N), (N, 1), device=device)
 
         self._check_equal(f, (x, y, M, K))
         self._check_code(f, (x, y, M, K), 1, 1)
 
-    def test_mm_2_expand(self):
+    def test_mm_2_expand(self, device):
         def f(x, y, M, K):
             z = x[:, None].expand(M, K) @ y
             return z
 
         M, K, N = 128, 128, 128
-        x = rand_strided((1,), (0,), device=GPU_TYPE)
-        y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+        x = rand_strided((1,), (0,), device=device)
+        y = rand_strided((K, N), (N, 1), device=device)
 
         self._check_equal(f, (x, y, M, K))
         self._check_code(f, (x, y, M, K), 1, 1)
 
-    def test_matmul_fp16(self):
+    def test_matmul_fp16(self, device):
         def f(x, y):
             z = x @ y.to(x.dtype)
             return z
 
         M, K, N = 128, 128, 128
-        x = rand_strided((M, K), (K, 1), dtype=torch.float16, device=GPU_TYPE)
-        y = rand_strided((K, N), (N, 1), dtype=torch.float32, device=GPU_TYPE)
+        x = rand_strided((M, K), (K, 1), dtype=torch.float16, device=device)
+        y = rand_strided((K, N), (N, 1), dtype=torch.float32, device=device)
 
         # _check_equal calls torch._dynamo.utils.same with kwarg tol=1e-4.
         # For fp16 dtype, torch.allclose() defaults to atol=1e-3 rtol=1e-5,
@@ -115,13 +125,13 @@ class TestTritonDotReduction(TestCase):
         self._check_equal(f, (x, y), tol=1e-3)
         self._check_code(f, (x, y), 1, 1)
 
-    def test_reduction_mask_zeroout(self):
+    def test_reduction_mask_zeroout(self, device):
         def f(x, y):
             return (x + 1) @ (y - 2)
 
         M, K, N = 62, 62, 62
-        x = rand_strided((M, K), (K, 1), device=GPU_TYPE)
-        y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+        x = rand_strided((M, K), (K, 1), device=device)
+        y = rand_strided((K, N), (N, 1), device=device)
 
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
@@ -134,48 +144,48 @@ class TestTritonDotReduction(TestCase):
     # Hardware limit: 163840". The num_stages=1 retry does not help, because the
     # loop's num_stages = 2 wins. Autotuning skips the configs that do not fit.
     @inductor_config.patch({"test_configs.force_filter_reduction_configs": False})
-    def test_3mm_add(self):
+    def test_3mm_add(self, device):
         def f(x, y, z, w, r, t):
             return x @ y + z @ w + r @ t
 
         M, K, N = 128, 128, 128
-        x = rand_strided((M, K), (K, 1), device=GPU_TYPE)
-        y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
-        w = rand_strided((M, K), (K, 1), device=GPU_TYPE)
-        z = rand_strided((K, N), (N, 1), device=GPU_TYPE)
-        r = rand_strided((M, K), (K, 1), device=GPU_TYPE)
-        t = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+        x = rand_strided((M, K), (K, 1), device=device)
+        y = rand_strided((K, N), (N, 1), device=device)
+        w = rand_strided((M, K), (K, 1), device=device)
+        z = rand_strided((K, N), (N, 1), device=device)
+        r = rand_strided((M, K), (K, 1), device=device)
+        t = rand_strided((K, N), (N, 1), device=device)
 
         self._check_equal(f, (x, y, z, w, r, t))
         self._check_code(f, (x, y, z, w, r, t), 1, 3)
 
-    def test_mm_complex(self):
+    def test_mm_complex(self, device):
         def f(x, y, z, w):
             return x[z] @ y + w + 3
 
         M, K, N = 128, 128, 128
-        x = rand_strided((M, K), (K, 1), device=GPU_TYPE)
-        y = rand_strided((K, N), (N, 1), device=GPU_TYPE)
+        x = rand_strided((M, K), (K, 1), device=device)
+        y = rand_strided((K, N), (N, 1), device=device)
 
-        z = torch.randint(M, (M, K), dtype=torch.long, device=GPU_TYPE)
-        w = rand_strided((M, N), (N, 1), device=GPU_TYPE)
+        z = torch.randint(M, (M, K), dtype=torch.long, device=device)
+        w = rand_strided((M, N), (N, 1), device=device)
 
         self._check_equal(f, (x, y, z, w))
         self._check_code(f, (x, y, z, w), 1, 1)
 
-    def test_batchmatmul(self):
+    def test_batchmatmul(self, device):
         def f(x, y):
             z = torch.bmm(x, y)
             return z
 
         B, M, K, N = 256, 128, 128, 128
-        x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
-        y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
+        x = rand_strided((B, M, K), (M * K, K, 1), device=device)
+        y = rand_strided((B, K, N), (K * N, N, 1), device=device)
 
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
 
-    def test_bmm_vertical_fusion(self):
+    def test_bmm_vertical_fusion(self, device):
         def f(x, y):
             z = torch.bmm(x, y)
             w = torch.nn.functional.relu(z)
@@ -183,43 +193,43 @@ class TestTritonDotReduction(TestCase):
             return v
 
         B, M, K, N = 128, 16, 128, 16
-        x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
-        y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
+        x = rand_strided((B, M, K), (M * K, K, 1), device=device)
+        y = rand_strided((B, K, N), (K * N, N, 1), device=device)
 
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
 
-    def test_bmm_horizontal_fusion(self):
+    def test_bmm_horizontal_fusion(self, device):
         def f(x, y, z, w):
             bmm1 = torch.bmm(x, y)
             bmm2 = torch.bmm(z, w)
             return bmm1 - bmm2 + bmm1 * bmm2
 
         B, M, K, N = 128, 16, 128, 16
-        x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
-        y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
-        z = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
-        w = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
+        x = rand_strided((B, M, K), (M * K, K, 1), device=device)
+        y = rand_strided((B, K, N), (K * N, N, 1), device=device)
+        z = rand_strided((B, M, K), (M * K, K, 1), device=device)
+        w = rand_strided((B, K, N), (K * N, N, 1), device=device)
 
         self._check_equal(f, (x, y, z, w))
         self._check_code(f, (x, y, z, w), 1, 2)
 
-    def test_mm_bmm_not_fused(self):
+    def test_mm_bmm_not_fused(self, device):
         # Both read x and have equal numel and K, but no tiling reads the bmm's
         # y operand, y[b, k, n] with b = m // 20, by the mm's [40, 136] tiles.
         def f(x, w, y):
             return x @ w, torch.bmm(x.view(2, 20, 72), y)
 
-        x = torch.randn(40, 72, device=GPU_TYPE)
-        w = torch.randn(72, 136, device=GPU_TYPE)
-        y = torch.randn(2, 72, 136, device=GPU_TYPE)
+        x = torch.randn(40, 72, device=device)
+        w = torch.randn(72, 136, device=device)
+        y = torch.randn(2, 72, 136, device=device)
 
         self._check_equal(f, (x, w, y))
         code = run_and_get_triton_code(torch.compile(f), x, w, y)
         self.assertEqual(code.count("@triton.jit"), 2)
         self.assertEqual(code.count("tl.dot("), 2)
 
-    def test_bmm_fusion_complex1(self):
+    def test_bmm_fusion_complex1(self, device):
         # Out[O[b,i],j] += Input[I[b,i],r] * Weight[W[b],r,j] * Val[b,i]
         def f(inp, weight, val, I_idx, W_idx, O_idx, out):
             x = inp[I_idx]  # [B,I,R]
@@ -233,20 +243,20 @@ class TestTritonDotReduction(TestCase):
         N_w = 64
         N_out = 128
 
-        inp = rand_strided((N_in, R), (R, 1), device=GPU_TYPE)
-        weight = rand_strided((N_w, R, J), (R * J, J, 1), device=GPU_TYPE)
-        val = rand_strided((B, I), (I, 1), device=GPU_TYPE)
+        inp = rand_strided((N_in, R), (R, 1), device=device)
+        weight = rand_strided((N_w, R, J), (R * J, J, 1), device=device)
+        val = rand_strided((B, I), (I, 1), device=device)
 
-        I_idx = torch.randint(0, N_in, (B, I), device=GPU_TYPE, dtype=torch.int64)
-        W_idx = torch.randint(0, N_w, (B,), device=GPU_TYPE, dtype=torch.int64)
-        O_idx = torch.randint(0, N_out, (B, I), device=GPU_TYPE, dtype=torch.int64)
+        I_idx = torch.randint(0, N_in, (B, I), device=device, dtype=torch.int64)
+        W_idx = torch.randint(0, N_w, (B,), device=device, dtype=torch.int64)
+        O_idx = torch.randint(0, N_out, (B, I), device=device, dtype=torch.int64)
 
-        out = torch.zeros((N_out, J), device=GPU_TYPE)
+        out = torch.zeros((N_out, J), device=device)
 
         self._check_equal(f, (inp, weight, val, I_idx, W_idx, O_idx, out))
         self._check_code(f, (inp, weight, val, I_idx, W_idx, O_idx, out), 1, 1)
 
-    def test_bmm_fusion_complex2(self):
+    def test_bmm_fusion_complex2(self, device):
         # out[Ai[g],m,n] += Av[g,m,k,p] * B[Ak[g,p],k,n]
         def f(Av, B, Ai, Ak, out):
             Bg = B[Ak]  # [G,P,K,N]
@@ -258,25 +268,25 @@ class TestTritonDotReduction(TestCase):
         NB = 128
         NA = 128
 
-        Av = rand_strided((G, M, K, P), (M * K * P, K * P, P, 1), device=GPU_TYPE)
-        B = rand_strided((NB, K, N), (K * N, N, 1), device=GPU_TYPE)
+        Av = rand_strided((G, M, K, P), (M * K * P, K * P, P, 1), device=device)
+        B = rand_strided((NB, K, N), (K * N, N, 1), device=device)
 
-        Ai = torch.randint(0, NA, (G,), device=GPU_TYPE, dtype=torch.int64)
-        Ak = torch.randint(0, NB, (G, P), device=GPU_TYPE, dtype=torch.int64)
+        Ai = torch.randint(0, NA, (G,), device=device, dtype=torch.int64)
+        Ak = torch.randint(0, NB, (G, P), device=device, dtype=torch.int64)
 
-        out = torch.zeros((NA, M, N), device=GPU_TYPE)
+        out = torch.zeros((NA, M, N), device=device)
 
         self._check_equal(f, (Av, B, Ai, Ak, out))
         self._check_code(f, (Av, B, Ai, Ak, out), 1, 1)
 
-    def test_bmm_large_batch_reversed_pid(self):
+    def test_bmm_large_batch_reversed_pid(self, device):
         def f(x, y):
             z = torch.bmm(x, y)
             return z
 
         B, M, K, N = 65537, 16, 16, 16
-        x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
-        y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
+        x = rand_strided((B, M, K), (M * K, K, 1), device=device)
+        y = rand_strided((B, K, N), (K * N, N, 1), device=device)
 
         f = torch.compile(f)
         code = run_and_get_triton_code(f, x, y)
@@ -285,14 +295,14 @@ class TestTritonDotReduction(TestCase):
             "yoffset = tl.program_id(1)"
         ).check("xoffset = tl.program_id(2)").run(code)
 
-    def test_bmm_no_z_broadcast(self):
+    def test_bmm_no_z_broadcast(self, device):
         def f(x, y):
             z = torch.bmm(x, y)
             return z
 
         B, M, K, N = 128, 16, 128, 16
-        x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
-        y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
+        x = rand_strided((B, M, K), (M * K, K, 1), device=device)
+        y = rand_strided((B, K, N), (K * N, N, 1), device=device)
 
         f = torch.compile(f)
         code = run_and_get_triton_code(f, x, y)
@@ -304,9 +314,9 @@ class TestTritonDotReduction(TestCase):
             "tl.arange(0, R0_BLOCK)[None, None, None, :]"
         ).run(code)
 
-    def test_out_dtype(self):
-        x = torch.randn(40, 72, device=GPU_TYPE, dtype=torch.bfloat16)
-        y = torch.randn(72, 136, device=GPU_TYPE, dtype=torch.bfloat16)
+    def test_out_dtype(self, device):
+        x = torch.randn(40, 72, device=device, dtype=torch.bfloat16)
+        y = torch.randn(72, 136, device=device, dtype=torch.bfloat16)
         for f, args in [
             (lambda x, y: torch.mm(x, y, out_dtype=torch.float32), (x, y)),
             (
@@ -321,7 +331,7 @@ class TestTritonDotReduction(TestCase):
                 self.assertEqual(actual.dtype, torch.float32)
                 self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
 
-    def test_zero_alpha_beta(self):
+    def test_zero_alpha_beta(self, device):
         M, K, N = 40, 72, 136
         cases = {
             "addmm_alpha0": (
@@ -343,7 +353,7 @@ class TestTritonDotReduction(TestCase):
         }
         for name, (f, shapes) in cases.items():
             with self.subTest(name):
-                args = [torch.randn(shape, device=GPU_TYPE) for shape in shapes]
+                args = [torch.randn(shape, device=device) for shape in shapes]
                 torch._dynamo.reset()
                 actual, (code,) = run_and_get_code(torch.compile(f), *args)
                 # The native lowering, not an extern kernel.
@@ -351,10 +361,21 @@ class TestTritonDotReduction(TestCase):
                 self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
 
 
-@instantiate_parametrized_tests
+instantiate_device_type_tests(
+    TestTritonDotReduction, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 class TestNativeMatmulChoices(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        if not has_triton_for_device(self.device_type):
+            self.skipTest(f"requires Triton on {self.device_type}")
+        super().setUp()
+
     @parametrize("native_matmul", [False, True])
-    def test_choices_use_native_matmul(self, native_matmul):
+    def test_choices_use_native_matmul(self, device, native_matmul):
         # V.choices decides which matmuls are lowered natively, whatever
         # triton.native_matmul says.
         asked = []
@@ -378,8 +399,8 @@ class TestNativeMatmulChoices(TestCase):
         ):
             for dtype, native in dtypes.items():
                 with self.subTest(dtype=dtype):
-                    a = torch.randn(40, 72, device=GPU_TYPE, dtype=dtype)
-                    b = torch.randn(72, 136, device=GPU_TYPE, dtype=dtype)
+                    a = torch.randn(40, 72, device=device, dtype=dtype)
+                    b = torch.randn(72, 136, device=device, dtype=dtype)
                     torch._dynamo.reset()
                     actual, (code,) = run_and_get_code(torch.compile(torch.mm), a, b)
                     self.assertEqual("tl.dot" in code, native)
@@ -390,10 +411,23 @@ class TestNativeMatmulChoices(TestCase):
         self.assertEqual(set(asked), {torch.float32, torch.bfloat16, torch.float64})
 
 
-@inductor_config.patch({"triton.native_matmul": True})
-@instantiate_parametrized_tests
+instantiate_device_type_tests(
+    TestNativeMatmulChoices, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 class TestNativeMatmulRowReduction(TestCase):
     """[M, N] -> [M] reductions of a native matmul fuse into the matmul kernel."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        if not has_triton_for_device(self.device_type):
+            self.skipTest(f"requires Triton on {self.device_type}")
+        super().setUp()
+        stack = contextlib.ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(inductor_config.patch({"triton.native_matmul": True}))
 
     def check(self, f, args, *, fused, tol=5e-2):
         metrics.reset()
@@ -414,29 +448,29 @@ class TestNativeMatmulRowReduction(TestCase):
             (128, 64, 64),
         ),
     )
-    def test_output_reduction(self, shape):
+    def test_output_reduction(self, device, shape):
         def f(x, w1, bias1, w2, bias2):
             hidden = torch.relu(x @ w1 + bias1)
             return (hidden * w2).sum(dim=-1) + bias2
 
         m, k, n = shape
         args = (
-            torch.randn(m, k, dtype=torch.float16),
-            torch.randn(k, n, dtype=torch.float16),
-            torch.randn(n, dtype=torch.float16),
-            torch.randn(n, dtype=torch.float16),
-            torch.randn(1, dtype=torch.float16),
+            torch.randn(m, k, dtype=torch.float16, device=device),
+            torch.randn(k, n, dtype=torch.float16, device=device),
+            torch.randn(n, dtype=torch.float16, device=device),
+            torch.randn(n, dtype=torch.float16, device=device),
+            torch.randn(1, dtype=torch.float16, device=device),
         )
         self.check(f, args, fused=k <= 512, tol=5e-1)
 
-    def test_reduced_epilogue(self):
+    def test_reduced_epilogue(self, device):
         def f(x, weight, scale):
             return torch.sqrt((x @ weight).sum(-1).abs()) * scale
 
         args = (
-            torch.randn(100, 64, dtype=torch.float16),
-            torch.randn(64, 100, dtype=torch.float16),
-            torch.randn(100, dtype=torch.float16),
+            torch.randn(100, 64, dtype=torch.float16, device=device),
+            torch.randn(64, 100, dtype=torch.float16, device=device),
+            torch.randn(100, dtype=torch.float16, device=device),
         )
         code = self.check(f, args, fused=True)
         # The row stage is rank 2, so [M] stores are not repeated across a row.
@@ -444,12 +478,12 @@ class TestNativeMatmulRowReduction(TestCase):
             "local_xindex_mask)"
         ).run(code)
 
-    def test_matmul_output_precision(self):
+    def test_matmul_output_precision(self, device):
         def f(x, weight):
             return (x @ weight).sum(-1)
 
-        x = torch.ones((16, 16), dtype=torch.float16)
-        weight = torch.empty((16, 8), dtype=torch.float16)
+        x = torch.ones((16, 16), dtype=torch.float16, device=device)
+        weight = torch.empty((16, 8), dtype=torch.float16, device=device)
         weight[:, 0::2] = 5000
         weight[:, 1::2] = -5000
         code = self.check(f, (x, weight), fused=True, tol=0)
@@ -457,45 +491,45 @@ class TestNativeMatmulRowReduction(TestCase):
             ".to(tl.float16)"
         ).check("tl.sum").run(code)
 
-    def test_row_reduction_output_precision(self):
+    def test_row_reduction_output_precision(self, device):
         def f(x, weight):
             reduced = (x @ weight).sum(-1)
             return (reduced - 4.3984375) * 1000
 
-        x = torch.zeros((16, 16), dtype=torch.float16)
+        x = torch.zeros((16, 16), dtype=torch.float16, device=device)
         x[:, 0] = 1
-        weight = torch.zeros((16, 8), dtype=torch.float16)
+        weight = torch.zeros((16, 8), dtype=torch.float16, device=device)
         weight[0, ::2] = 1
         weight[0, 1::2] = 0.1
         code = self.check(f, (x, weight), fused=True, tol=0)
         FileCheck().check("tl.dot").check("tl.sum").check(".to(tl.float16)").run(code)
 
-    def test_indirect_index_from_row_reduction_not_fused(self):
+    def test_indirect_index_from_row_reduction_not_fused(self, device):
         def f(x, weight, table):
             index = (x @ weight).amax(-1).clamp(0, 15).long()
             return table[index] * 2
 
         args = (
-            torch.rand(100, 64, dtype=torch.float16),
-            torch.rand(64, 48, dtype=torch.float16) * 0.01,
-            torch.randn(16),
+            torch.rand(100, 64, dtype=torch.float16, device=device),
+            torch.rand(64, 48, dtype=torch.float16, device=device) * 0.01,
+            torch.randn(16, device=device),
         )
         self.check(f, args, fused=False, tol=0)
 
     @parametrize("reduction_type", ("prod", "any"))
-    def test_additional_reduction_types(self, reduction_type):
+    def test_additional_reduction_types(self, device, reduction_type):
         def f(x, weight):
             output = x @ weight
             return output.prod(-1) if reduction_type == "prod" else output.any(-1)
 
         args = (
-            torch.eye(16, dtype=torch.float16).repeat(2, 1),
-            torch.full((16, 8), 0.5, dtype=torch.float16),
+            torch.eye(16, dtype=torch.float16, device=device).repeat(2, 1),
+            torch.full((16, 8), 0.5, dtype=torch.float16, device=device),
         )
         self.check(f, args, fused=True, tol=1e-3)
 
     @parametrize("reduction_type", ("amax", "amin"))
-    def test_padded_lanes(self, reduction_type):
+    def test_padded_lanes(self, device, reduction_type):
         def f(x, weight):
             output = x @ weight
             if reduction_type == "amax":
@@ -504,23 +538,23 @@ class TestNativeMatmulRowReduction(TestCase):
 
         sign = -1 if reduction_type == "amax" else 1
         args = (
-            torch.ones(16, 16, dtype=torch.float16),
-            torch.full((16, 8), sign, dtype=torch.float16),
+            torch.ones(16, 16, dtype=torch.float16, device=device),
+            torch.full((16, 8), sign, dtype=torch.float16, device=device),
         )
         code = self.check(f, args, fused=True, tol=0)
         FileCheck().check("tl.where(local_r0_index_mask").run(code)
 
-    def test_atomic_add(self):
+    def test_atomic_add(self, device):
         def f(x, weight, index, out):
             return out.index_add_(0, index, (x @ weight).sum(dim=-1))
 
         torch.manual_seed(6928)
         args = (
-            torch.randn(16, 16, dtype=torch.float16),
-            torch.randn(16, 8, dtype=torch.float16),
-            torch.zeros(16, dtype=torch.int64),
+            torch.randn(16, 16, dtype=torch.float16, device=device),
+            torch.randn(16, 8, dtype=torch.float16, device=device),
+            torch.zeros(16, dtype=torch.int64, device=device),
         )
-        out = torch.zeros(1, dtype=torch.float16)
+        out = torch.zeros(1, dtype=torch.float16, device=device)
         expected = f(*args, out.clone())
         with (
             fresh_inductor_cache(),
@@ -533,25 +567,25 @@ class TestNativeMatmulRowReduction(TestCase):
         ).run(code[0])
         FileCheck().check_not("'mutated_arg_names': []").run(code[0])
 
-    @largeTensorTest("3GB", device=GPU_TYPE, inductor=True)
-    def test_index_dtype(self):
+    @largeTensorTest("3GB", inductor=True)
+    def test_index_dtype(self, device):
         def f(x, weight, scale):
             return ((x @ weight) * scale).sum(dim=-1)
 
         # Only the row stage reads scale, and its storage spans > 2**31
         # elements, so the fused kernel must use 64-bit indexing.
         stride = 2**27 + 2**24
-        scale_storage = torch.ones(15 * stride + 1, dtype=torch.uint8)
+        scale_storage = torch.ones(15 * stride + 1, dtype=torch.uint8, device=device)
         args = (
-            torch.randn(16, 16, dtype=torch.float16),
-            torch.randn(16, 16, dtype=torch.float16),
+            torch.randn(16, 16, dtype=torch.float16, device=device),
+            torch.randn(16, 16, dtype=torch.float16, device=device),
             scale_storage[::stride],
         )
         code = self.check(f, args, fused=True)
         if not TEST_WITH_ROCM:
             FileCheck().check(".to(tl.int64)").run(code)
 
-    def test_reused_prologue(self):
+    def test_reused_prologue(self, device):
         # K == N, so the [M, K] prologue and [M, N] output share a numel.
         def f(x, weight):
             prologue = x + 1
@@ -559,45 +593,45 @@ class TestNativeMatmulRowReduction(TestCase):
             return (output + prologue).sum(dim=-1)
 
         args = (
-            torch.randn(64, 64, dtype=torch.float16),
-            torch.randn(64, 64, dtype=torch.float16),
+            torch.randn(64, 64, dtype=torch.float16, device=device),
+            torch.randn(64, 64, dtype=torch.float16, device=device),
         )
         self.check(f, args, fused=True)
 
-    def test_column_reduction_not_fused(self):
+    def test_column_reduction_not_fused(self, device):
         def f(x, weight):
             return (x @ weight).sum(dim=0)
 
         args = (
-            torch.randn(16, 32, dtype=torch.float16),
-            torch.randn(32, 16, dtype=torch.float16),
+            torch.randn(16, 32, dtype=torch.float16, device=device),
+            torch.randn(32, 16, dtype=torch.float16, device=device),
         )
         self.check(f, args, fused=False)
 
-    def test_mismatched_row_reduction_not_fused(self):
+    def test_mismatched_row_reduction_not_fused(self, device):
         def f(x, weight, other):
             return (x @ weight).sum(-1) + other.sum(-1)
 
         args = (
-            torch.randn(16, 16, dtype=torch.float16),
-            torch.randn(16, 16, dtype=torch.float16),
-            torch.randn(16, 32, dtype=torch.float16),
+            torch.randn(16, 16, dtype=torch.float16, device=device),
+            torch.randn(16, 16, dtype=torch.float16, device=device),
+            torch.randn(16, 32, dtype=torch.float16, device=device),
         )
         self.check(f, args, fused=False)
 
-    def test_transposed_pointwise_not_fused(self):
+    def test_transposed_pointwise_not_fused(self, device):
         def f(x, weight):
             output = torch.ops._inductor_test.realize((x @ weight).T + 1)
             return output.sum(dim=-1)
 
         args = (
-            torch.randn(64, 32, dtype=torch.float16),
-            torch.randn(32, 64, dtype=torch.float16),
+            torch.randn(64, 32, dtype=torch.float16, device=device),
+            torch.randn(32, 64, dtype=torch.float16, device=device),
         )
         self.check(f, args, fused=False)
 
     @parametrize("case", ("flattened", "reshaped"))
-    def test_partial_row_reduction_not_fused(self, case):
+    def test_partial_row_reduction_not_fused(self, device, case):
         def f(x, weight):
             output = x @ weight
             if case == "flattened":
@@ -606,33 +640,45 @@ class TestNativeMatmulRowReduction(TestCase):
 
         m, n = (4, 8) if case == "flattened" else (16, 16)
         args = (
-            torch.randn(m, 64, dtype=torch.float16),
-            torch.randn(64, n, dtype=torch.float16),
+            torch.randn(m, 64, dtype=torch.float16, device=device),
+            torch.randn(64, n, dtype=torch.float16, device=device),
         )
         self.check(f, args, fused=False)
 
     @parametrize("op", ("sort", "cumsum"))
-    def test_sort_scan_not_fused(self, op):
+    def test_sort_scan_not_fused(self, device, op):
         def f(x, weight):
             output = x @ weight
             return output.sort(-1).values if op == "sort" else output.cumsum(-1)
 
-        args = (torch.randn(64, 32), torch.randn(32, 16))
+        args = (torch.randn(64, 32, device=device), torch.randn(32, 16, device=device))
         self.check(f, args, fused=False, tol=1e-4)
 
-    def test_broadcast_consumer_not_fused(self):
+    def test_broadcast_consumer_not_fused(self, device):
         def f(x, weight):
             hidden = x @ weight
             return hidden - hidden.sum(-1, keepdim=True)
 
         args = (
-            torch.randn(256, 128, dtype=torch.float16),
-            torch.randn(128, 16, dtype=torch.float16),
+            torch.randn(256, 128, dtype=torch.float16, device=device),
+            torch.randn(128, 16, dtype=torch.float16, device=device),
         )
         self.check(f, args, fused=False)
 
 
+instantiate_device_type_tests(
+    TestNativeMatmulRowReduction, globals(), except_for="cpu", allow_xpu=True
+)
+
+
 class TestNativeMatmulRowReductionScheduling(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        if not has_triton_for_device(self.device_type):
+            self.skipTest(f"requires Triton on {self.device_type}")
+        super().setUp()
+
     @parametrize("coalesce", (False, True))
     def test_benchmark_fusion(self, device, coalesce):
         def f(x, weight):
@@ -727,11 +773,18 @@ class TestNativeMatmulRowReductionScheduling(TestCase):
 
 
 instantiate_device_type_tests(
-    TestNativeMatmulRowReductionScheduling, globals(), only_for=GPU_TYPE
+    TestNativeMatmulRowReductionScheduling, globals(), except_for="cpu", allow_xpu=True
 )
 
 
 class TestNativeMatmulRowReductionHeuristic(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        if not has_triton_for_device(self.device_type):
+            self.skipTest(f"requires Triton on {self.device_type}")
+        super().setUp()
+
     @parametrize("k", (511, 512, 513, 1024))
     @parametrize("m,n", ((256, 128), (4096, 64)))
     def test_matvec_k_limit(self, device, k, m, n):
@@ -750,13 +803,10 @@ class TestNativeMatmulRowReductionHeuristic(TestCase):
 
 
 instantiate_device_type_tests(
-    TestNativeMatmulRowReductionHeuristic, globals(), only_for=GPU_TYPE
+    TestNativeMatmulRowReductionHeuristic, globals(), except_for="cpu", allow_xpu=True
 )
 
 
-if HAS_GPU:
-    torch.set_default_device(GPU_TYPE)
-
 if __name__ == "__main__":
-    if HAS_GPU:
+    if has_triton():
         run_tests()
