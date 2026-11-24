@@ -393,15 +393,9 @@ createCustomAllocator(
   return allocator;
 }
 
-bool graphAllocatorsEnabled();
-
 void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator) {
-  TORCH_CHECK(
-      !graphAllocatorsEnabled(),
-      "change_current_allocator cannot be used once CUDA graph allocators "
-      "are enabled");
   TORCH_CHECK(
       !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");
@@ -419,17 +413,33 @@ namespace CCA = c10::cuda::CUDACachingAllocator;
 using c10::cuda::CaptureId_t;
 using c10::cuda::MempoolId_t;
 
-// The current CUDA allocator after torch.cuda.memory._enable_graph_allocators:
-// a layer over the native caching allocator (inner) that forwards every call
-// to it.
+// A layer over the native caching allocator (inner) that forwards every call
+// to it. A graph allocator window (beginGraphAllocatorWindow) makes it the
+// current CUDA allocator until the window ends.
 class LayeredAllocator final : public CCA::CUDAAllocator {
  public:
-  void install(CCA::CUDAAllocator* inner) {
-    inner_.store(inner);
+  void beginWindow() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto* current = CCA::allocator.load();
+    TORCH_CHECK(
+        current != this, "a CUDA graph allocator window is already open");
+    // The layer forwards to the caching allocator, which keeps owning
+    // everything allocated so far.
+    TORCH_CHECK(
+        current->name() == "native",
+        "CUDA graph allocator windows require the native CUDA caching "
+        "allocator, but the current allocator is '",
+        current->name(),
+        "'");
+    inner_.store(current);
     CCA::allocator.store(this);
   }
-  bool installed() const {
-    return CCA::allocator.load() == this;
+  // Idempotent.
+  void endWindow() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (CCA::allocator.load() == this) {
+      CCA::allocator.store(inner());
+    }
   }
 
   // A virtual added to CUDAAllocator (or its bases) must be forwarded here, or
@@ -452,24 +462,6 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
       recordStream,
       (const c10::DataPtr& ptr, c10::cuda::CUDAStream stream),
       (ptr, stream))
-  LAYERED_FORWARD(
-      void,
-      setPoolCaptureAllocator,
-      (c10::DeviceIndex device,
-       MempoolId_t mempool_id,
-       CaptureId_t capture_id,
-       std::shared_ptr<CCA::CUDAAllocator> allocator),
-      (device, mempool_id, capture_id, std::move(allocator)))
-  LAYERED_FORWARD(
-      void,
-      clearPoolCaptureAllocator,
-      (c10::DeviceIndex device, MempoolId_t mempool_id, CaptureId_t capture_id),
-      (device, mempool_id, capture_id))
-  LAYERED_FORWARD(
-      size_t,
-      markCaptureEnd,
-      (c10::DeviceIndex device, CaptureId_t capture_id),
-      (device, capture_id))
   LAYERED_FORWARD(c10::DeleterFnPtr, raw_deleter, () const, ())
   LAYERED_FORWARD(
       void,
@@ -539,12 +531,6 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
       endAllocateToPool,
       (c10::DeviceIndex device, MempoolId_t mempool_id),
       (device, mempool_id))
-  LAYERED_FORWARD(
-      void,
-      markCaptureBegin,
-      (c10::DeviceIndex device,
-       const c10::cuda::CUDAGraphMemory::CaptureRegistration& registration),
-      (device, registration))
   LAYERED_FORWARD(void, markCaptureBegin, (c10::DeviceIndex device), (device))
   LAYERED_FORWARD(void, markCaptureEnd, (c10::DeviceIndex device), (device))
   LAYERED_FORWARD(bool, isCaptureContext, (c10::DeviceIndex device), (device))
@@ -553,11 +539,6 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
       releasePool,
       (c10::DeviceIndex device, MempoolId_t mempool_id),
       (device, mempool_id))
-  LAYERED_FORWARD(
-      MempoolId_t,
-      getAllocationPool,
-      (c10::DeviceIndex device, cudaStream_t stream),
-      (device, stream))
   LAYERED_FORWARD(
       int,
       getPoolUseCount,
@@ -719,9 +700,13 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
   }
 
   std::atomic<CCA::CUDAAllocator*> inner_{nullptr};
+  std::mutex mutex_;
 };
 
-// Never destroyed: once enabled, it stays the current allocator until exit.
+// Current only while a graph allocator window is open (a planned capture
+// runs). Never deleted, because storages created during a window keep a raw
+// pointer to it (the resize rule dynamic_casts it, and storage ops like
+// _lazy_clone call it).
 LayeredAllocator& layered() {
   static auto* allocator = new LayeredAllocator();
   return *allocator;
@@ -729,30 +714,12 @@ LayeredAllocator& layered() {
 
 } // namespace
 
-void enableGraphAllocators() {
-  auto& layer = layered();
-  if (layer.installed()) {
-    return;
-  }
-  static std::mutex enable_mutex;
-  std::lock_guard<std::mutex> lock(enable_mutex);
-  if (layer.installed()) {
-    return;
-  }
-  auto* current = c10::cuda::CUDACachingAllocator::allocator.load();
-  // Any time: the layer forwards to the caching allocator, which keeps owning
-  // everything allocated so far.
-  TORCH_CHECK(
-      current->name() == "native",
-      "CUDA graph allocators: the layer requires the native CUDA caching "
-      "allocator, but the current allocator is '",
-      current->name(),
-      "'");
-  layer.install(current);
+void beginGraphAllocatorWindow() {
+  layered().beginWindow();
 }
 
-bool graphAllocatorsEnabled() {
-  return layered().installed();
+void endGraphAllocatorWindow() {
+  layered().endWindow();
 }
 
 } // namespace torch::cuda::CUDAPluggableAllocator

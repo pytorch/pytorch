@@ -198,7 +198,9 @@ class MooncakeTransport(Transport):
         if registration := self._registrations.get(key):
             return MooncakeMemory(self, registration)
         device_id = max(tensor.get_device(), 0)
-        location = f"cuda:{device_id}" if tensor.is_cuda else "cpu:0"
+        # "*" lets Mooncake (>= 0.3.14) pick NICs by the memory's NUMA node;
+        # "cpu:0" would use NUMA node 0's NICs for every host buffer.
+        location = f"cuda:{device_id}" if tensor.is_cuda else "*"
         if engine.register_memory(tensor.data_ptr(), length, location) != 0:
             raise RuntimeError("Mooncake memory registration failed")
         registration = _Registration(
@@ -359,8 +361,12 @@ class MooncakeTransport(Transport):
                 if status != 0:
                     settled.append((batch_id, future, registration, status))
             with self._poll_cv:
-                for batch_id, *_ in settled:
-                    del self._batches[batch_id]
+                for batch_id, future, *_ in settled:
+                    # A batch id is a BatchDesc address that Mooncake freed in
+                    # the status check, so a concurrent submit may reuse it.
+                    entry = self._batches.get(batch_id)
+                    if entry is not None and entry[0] is future:
+                        del self._batches[batch_id]
             for _, future, registration, status in settled:
                 if status == 1:
                     future.set_result(None)
