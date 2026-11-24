@@ -144,6 +144,8 @@ struct AllocParams {
   bool has_memory_pressure = false;
   // mps_large_alloc_threshold_mb, for HeapBlock::createHeapBlock()
   size_t oversize_threshold_bytes = 0;
+  // at or above oversize_threshold_bytes: placed only in heaps sized for such requests
+  bool dedicated = false;
 };
 
 struct HeapBlock {
@@ -159,6 +161,9 @@ struct HeapBlock {
   id_t heap_id;
   // this heap's blocks in offset order
   BufferBlock* first_block = nullptr;
+  // created for a request at or above mps_large_alloc_threshold_mb; only such
+  // requests are placed in it, and they are placed in no other heap
+  bool dedicated = false;
   // counter to assign unique ids to heap blocks
   static uint64_t heap_counter;
 
@@ -218,6 +223,7 @@ struct HeapBlock {
       if (heap) {
         [heap setPurgeableState:MTLPurgeableStateNonVolatile];
         heapBlock = new HeapBlock([heap size], heap, params.pool);
+        heapBlock->dedicated = params.dedicated;
       }
       [d release];
     }

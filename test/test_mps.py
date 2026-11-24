@@ -9180,6 +9180,21 @@ class TestMPS(TestCaseMPS):
         self.assertGreater(heap_growth(0), 900 * 1024 * 1024)
         self.assertLess(heap_growth(10), 100 * 1024 * 1024)
 
+    def test_large_alloc_threshold_keeps_heaps_separate(self):
+        self.addCleanup(torch.mps.empty_cache)
+        self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
+        torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:64")
+        torch.mps.empty_cache()
+        baseline = torch.mps.driver_allocated_memory()
+        # Below the threshold: a shared 1 GiB heap. At or above it: a heap of its own,
+        # even though the shared heap has room, so freeing the small one releases 1 GiB.
+        small = torch.empty(50 * 1024 * 1024, dtype=torch.uint8, device="mps")
+        large = torch.empty(100 * 1024 * 1024, dtype=torch.uint8, device="mps")
+        del small
+        torch.mps.empty_cache()
+        self.assertLess(torch.mps.driver_allocated_memory() - baseline, 200 * 1024 * 1024)
+        del large
+
     def test_large_alloc_threshold_config_keys(self):
         self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
         with self.assertRaisesRegex(ValueError, "Unrecognized key 'mps_larg_alloc_threshold_mb'"):

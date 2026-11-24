@@ -215,6 +215,9 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   auto stream_it = pool.available_buffers_by_stream.find(getCurrentMPSStream());
   if (stream_it != pool.available_buffers_by_stream.end()) {
     auto it = stream_it->second.lower_bound(&params.search_key);
+    while (it != stream_it->second.end() && (*it)->heap->dedicated != params.dedicated) {
+      ++it;
+    }
     if (it != stream_it->second.end() && (*it)->buffer && (*it)->size - alloc_size < pool.min_split &&
         (params.allow_in_flight_reuse || (*it)->retainCount() == 1)) {
       params.buffer_block = split_free_block(params, *it);
@@ -225,6 +228,9 @@ bool MPSHeapAllocatorImpl::get_free_buffer(AllocParams& params) {
   // which is also what makes it safe to hand over to a different stream.
   if (!params.buffer_block) {
     auto it = pool.available_buffers.lower_bound(&params.search_key);
+    while (it != pool.available_buffers.end() && (*it)->heap->dedicated != params.dedicated) {
+      ++it;
+    }
     if (it != pool.available_buffers.end() && (!(*it)->buffer || (*it)->retainCount() <= 1)) {
       params.buffer_block = split_free_block(params, *it);
     }
@@ -358,7 +364,7 @@ bool MPSHeapAllocatorImpl::coalesce_free_blocks(AllocParams& params) {
   const size_t alloc_size = params.size();
 
   for (HeapBlock* heap : pool.heaps) {
-    if (heap->max_free_run < alloc_size) {
+    if (heap->max_free_run < alloc_size || heap->dedicated != params.dedicated) {
       continue;
     }
     // walk the heap in offset order, tracking the run of free blocks and the
@@ -489,6 +495,8 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   // low watermark limit has been reached
   params.has_memory_pressure = !(pool.usage & UsageFlags::SMALL) && getLowWatermarkValue() <= 0;
   params.oversize_threshold_bytes = MPSAllocatorConfig::instance().large_alloc_threshold_bytes();
+  params.dedicated = params.oversize_threshold_bytes > 0 && alloc_size > kMaxSmallAlloc &&
+      alloc_size >= params.oversize_threshold_bytes;
 
   // first, try to get a block from the existing pool.
   bool block_found = get_free_buffer(params);
