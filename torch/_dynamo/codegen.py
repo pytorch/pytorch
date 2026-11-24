@@ -656,8 +656,10 @@ class PyCodegen:
     def pop_null(self) -> list[Instruction]:
         # POP_TOP doesn't work for null, so we pop nulls by pushing in a
         # nop function, calling it (which consumes the null), and popping the result.
+        # The nop must be importable by name: saved packages pickle co_consts (see
+        # package.SerializedCode).
         return [
-            self.create_load_const_unchecked(lambda: None),
+            self.create_load_const_unchecked(utils.nothing),
             # 3.13 swapped NULL and callable
             *(
                 (create_instruction("SWAP", arg=2),)

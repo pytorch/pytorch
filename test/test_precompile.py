@@ -4990,6 +4990,13 @@ def comprehension_with_a_bound_variable(model, x):
 
 def calls_comprehension_with_a_bound_variable(model, x):
     return comprehension_with_a_bound_variable(model, x) + 1
+
+
+def comprehension_with_an_unbound_variable(model, x):
+    # torch.stack is a pending call while the comprehension graph-breaks, and i
+    # is unbound before it.
+    y = model(x)
+    return torch.stack([torch._dynamo.graph_break() or y + i for i in range(2)])
 """
 
 _GOLDEN_LOADER = """
@@ -5268,12 +5275,15 @@ class TestPrecompileDynamoCapture(TestCase):
         [
             ("comprehension_with_a_bound_variable", "standalone"),
             ("calls_comprehension_with_a_bound_variable", "installed"),
+            ("comprehension_with_an_unbound_variable", "standalone"),
         ],
     )
     @torch._dynamo.config.patch(nested_graph_breaks=False)
     def test_a_comprehension_graph_break_is_served(self, fn_name, mode):
         # The bytecode calls the function Dynamo generated to run the
         # comprehension, by the name it bound it under while tracing.
+        # With an unbound loop variable it also pops a NULL, by calling a nop it
+        # holds as a constant, which the artifact pickles.
         self._capture_and_serve(fn_name, mode)
 
     @skipIfCrossRef
