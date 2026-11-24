@@ -480,7 +480,7 @@ struct Copy<dst_t, c10::complex<float>> {
   }
 };
 
-// The dtypes the fused copy dispatches, for both self and src.
+// The dtypes the fused converting copy dispatches, for both self and src.
 #define FUSED_COPY_TYPES                                        \
   AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kHalf, kBFloat16, kBool, \
       kFloat8_e4m3fn, kFloat8_e4m3fnuz, kFloat8_e5m2, kFloat8_e5m2fnuz
@@ -565,6 +565,9 @@ void foreach_tensor_copy_list_kernel_cuda_(
     TensorList src,
     const bool non_blocking) {
   check_foreach_api_restrictions(self, src);
+  const auto dst_dtype = self[0].scalar_type();
+  const auto src_dtype = src[0].scalar_type();
+  const bool same_dtype = dst_dtype == src_dtype;
   if (!(_check_tensors_share_device_and_dtype(
             {self, src}, /* skip_dtype_check */ true) &&
         std::all_of(
@@ -580,62 +583,67 @@ void foreach_tensor_copy_list_kernel_cuda_(
               return t.dtype() == self[0].dtype();
             }) &&
         _check_tensors_share_sizes_and_strides({self, src}) &&
-        // Other dtypes, e.g. barebones unsigned ones or float8_e8m0fnu, are
-        // copied one by one.
-        has_fused_copy_kernel(self[0].scalar_type()) &&
-        has_fused_copy_kernel(src[0].scalar_type()))) {
+        // A same-dtype copy moves bits, so it only needs whole-byte elements;
+        // a converting copy needs both dtypes in the fused kernel.
+        (same_dtype ? !isSubByteIntType(dst_dtype)
+                    : has_fused_copy_kernel(dst_dtype) &&
+                 has_fused_copy_kernel(src_dtype)))) {
     return at::native::foreach_tensor_copy_list_kernel_slow_(
         self, src, non_blocking);
   }
 
   auto tensor_lists = c10::make_nested<Tensor>(src.vec(), self.vec());
 
-  AT_DISPATCH_V2(
-      self[0].scalar_type(),
-      "foreach_tensor_copy",
-      AT_WRAP([&]() {
-        using dst_t = scalar_t;
-        AT_DISPATCH_V2(
-            src[0].scalar_type(),
-            "foreach_tensor_copy",
-            AT_WRAP([&]() {
-              using src_t = scalar_t;
-              if constexpr (std::is_same_v<dst_t, src_t>) {
-                // Copies bits: the functor's round trip through float would
-                // canonicalize the NaNs of 1- and 2-byte floating types.
-                using bits_t = std::conditional_t<
-                    sizeof(dst_t) == 1,
-                    uint8_t,
-                    std::conditional_t<sizeof(dst_t) == 2, uint16_t, dst_t>>;
-                multi_tensor_apply<2>(
-                    tensor_lists,
-                    UnaryOpFunctor<
-                        bits_t,
-                        /* depth */ 2,
-                        /* r_args_depth */ 1,
-                        /* res_arg_index */ 1>(),
-                    Copy<bits_t, bits_t>());
-              } else {
-                // Ref:
-                // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301
-                if (!self[0].is_complex() && src[0].is_complex()) {
-                  TORCH_WARN_ONCE(
-                      "Casting complex values to real discards the imaginary part");
+  if (same_dtype) {
+    // Copies the elements as opaque same-size types: a round trip through
+    // opmath would canonicalize the NaNs of reduced floating types.
+    AT_DISPATCH_V2(
+        c10::opaqueScalarType(dst_dtype),
+        "foreach_tensor_copy",
+        AT_WRAP([&]() {
+          multi_tensor_apply<2>(
+              tensor_lists,
+              UnaryOpFunctor<
+                  scalar_t,
+                  /* depth */ 2,
+                  /* r_args_depth */ 1,
+                  /* res_arg_index */ 1>(),
+              Copy<scalar_t>());
+        }),
+        AT_EXPAND(AT_OPAQUE_TYPES));
+  } else {
+    // Ref:
+    // https://github.com/pytorch/pytorch/blob/656134c38f4737d13c3f43fc5c59470bc23c1d2f/aten/src/ATen/native/Copy.cpp#L299-L301
+    if (!self[0].is_complex() && src[0].is_complex()) {
+      TORCH_WARN_ONCE(
+          "Casting complex values to real discards the imaginary part");
+    }
+    AT_DISPATCH_V2(
+        dst_dtype,
+        "foreach_tensor_copy",
+        AT_WRAP([&]() {
+          using dst_t = scalar_t;
+          AT_DISPATCH_V2(
+              src_dtype,
+              "foreach_tensor_copy",
+              AT_WRAP([&]() {
+                using src_t = scalar_t;
+                if constexpr (!std::is_same_v<dst_t, src_t>) {
+                  multi_tensor_apply<2>(
+                      tensor_lists,
+                      CopyFunctor<
+                          dst_t,
+                          src_t,
+                          /* depth */ 2,
+                          /* r_args_depth */ 1,
+                          /* res_arg_index */ 1>(),
+                      Copy<dst_t, src_t>());
                 }
-                multi_tensor_apply<2>(
-                    tensor_lists,
-                    CopyFunctor<
-                        dst_t,
-                        src_t,
-                        /* depth */ 2,
-                        /* r_args_depth */ 1,
-                        /* res_arg_index */ 1>(),
-                    Copy<dst_t, src_t>());
-              }
-            }),
-            AT_EXPAND(FUSED_COPY_TYPES));
-      }),
-      AT_EXPAND(FUSED_COPY_TYPES));
+              }),
+              AT_EXPAND(FUSED_COPY_TYPES));
+        }),
+        AT_EXPAND(FUSED_COPY_TYPES));
+  }
   increment_version(self);
 }
 

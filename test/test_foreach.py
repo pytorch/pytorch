@@ -1825,7 +1825,8 @@ class TestForeachDevice(TestCase):
     @onlyAccelerator
     @dtypes(torch.uint16, torch.uint32, torch.uint64, torch.float8_e8m0fnu)
     def test_foreach_copy_unfused_dtypes(self, device, dtype):
-        # The fused kernel doesn't instantiate these, so they take the slow path.
+        # The fused kernel copies same-dtype lists of these as bits, but it
+        # doesn't convert to or from them, so mixed pairs take the slow path.
         other = torch.float32 if dtype == torch.float8_e8m0fnu else torch.int64
         dtype_pairs = ((dtype, dtype), (dtype, other), (torch.float32, dtype))
         for dst_dtype, src_dtype in dtype_pairs:
@@ -1833,7 +1834,7 @@ class TestForeachDevice(TestCase):
             dst = [torch.zeros(n, device=device, dtype=dst_dtype) for n in (3, 5)]
             ref = [torch.empty_like(d).copy_(s) for d, s in zip(dst, src)]
             ForeachFuncWrapper(torch.foreach.copy_)(
-                (dst, src), device=device, expect_fastpath=False
+                (dst, src), device=device, expect_fastpath=dst_dtype == src_dtype
             )
             self.assertEqual(dst, ref)
 
@@ -1880,13 +1881,14 @@ class TestForeachDevice(TestCase):
                 foreach_op(dsts, others, alpha=True)
 
     @onlyAccelerator
-    @dtypes(torch.float16, torch.bfloat16, torch.float8_e5m2)
+    @dtypes(torch.float16, torch.bfloat16, torch.float8_e5m2, torch.float8_e8m0fnu)
     def test_foreach_copy_preserves_nan_bits(self, device, dtype):
         # Same-dtype lists, which the fused kernel copies, keep NaN signs and payloads.
         nans = {
             torch.float16: [-1, 0x7C01, 0x7D00],
             torch.bfloat16: [-1, 0x7F81, 0x7FC1],
             torch.float8_e5m2: [-3, 0x7D, 0x7E],
+            torch.float8_e8m0fnu: [-1, 0x7F, 0x01],
         }
         int_dtype = torch.int8 if dtype.itemsize == 1 else torch.int16
         bits = torch.tensor(nans[dtype] + [1], dtype=int_dtype, device=device)
