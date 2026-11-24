@@ -464,6 +464,10 @@ def _default_cpu_bench(self, f, *, warmup, rep, **kw):
 
 def _default_cuda_bench(self, f, *, warmup, rep, **kw):
     kw.setdefault("device_type", "cuda")
+    if inductor_config.autotune_duty_cycle_benchmarking and not (
+        inductor_config.autotune_cudagraph_benchmarking
+    ):
+        return self.benchmark_gpu_duty_cycle(f, **kw)
     return self.benchmark_gpu(f, warmup=warmup, rep=rep, **kw)
 
 
@@ -556,6 +560,9 @@ def _get_callable_device_kernel_time_us(
 
 
 class TritonBenchmarker(Benchmarker):
+    """Benchmarks GPU callables with Triton's `do_bench`, or in short bursts
+    when `autotune_duty_cycle_benchmarking` is set."""
+
     @cached_property
     def triton_do_bench(self: Self) -> Callable[..., Any]:
         """Lazily import Triton's `do_bench`."""
@@ -564,6 +571,63 @@ class TritonBenchmarker(Benchmarker):
         except ImportError as e:
             raise NotImplementedError("requires Triton") from e
         return do_bench
+
+    @may_distort_benchmarking_result
+    @time_and_count
+    @gpu_benchmark_lock
+    def benchmark_gpu_duty_cycle(
+        self: Self,
+        _callable: Callable[[], Any],
+        bursts: int = 8,
+        warmup_iters: int = 2,
+        timed_iters: int = 5,
+        idle_s: float = 0.010,
+        is_vetted_benchmarking: bool = False,
+        device_type: str = "cuda",
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark the GPU callable in short bursts separated by idle gaps and
+        return the median runtime, in milliseconds. A sustained benchmark can push
+        a power-capped GPU into power throttling, which slows some kernels more
+        than others; short bursts time every candidate at the same clock.
+
+        Each burst runs `warmup_iters` untimed and `timed_iters` timed calls, with
+        the L2 cache flushed before every call, then idles for `idle_s` seconds.
+        Other benchmarking kwargs (e.g. `warmup`, `rep`) are ignored.
+        """
+        if not is_vetted_benchmarking:
+            may_ban_benchmarking()
+        device_interface = get_interface_for_device(device_type)
+        props = device_interface.get_device_properties()
+        cache_size = getattr(props, "L2_cache_size", 0) or getattr(
+            props, "last_level_cache_size", 0
+        )
+        cache = torch.empty(
+            max(cache_size // 4, 1), dtype=torch.int, device=device_type
+        )
+        _callable()
+        device_interface.synchronize()
+        timings: list[float] = []
+        for _ in range(bursts):
+            for _ in range(warmup_iters):
+                cache.zero_()
+                _callable()
+            event_pairs = [
+                (
+                    device_interface.Event(enable_timing=True),
+                    device_interface.Event(enable_timing=True),
+                )
+                for _ in range(timed_iters)
+            ]
+            for start_event, end_event in event_pairs:
+                cache.zero_()
+                start_event.record()
+                _callable()
+                end_event.record()
+            device_interface.synchronize()
+            timings.extend(start.elapsed_time(end) for start, end in event_pairs)
+            time.sleep(idle_s)
+        return median(timings)
 
     @may_distort_benchmarking_result
     @time_and_count
