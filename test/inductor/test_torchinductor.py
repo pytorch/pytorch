@@ -14913,6 +14913,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (
                 aten.roll(a, [-3, 10], [1, 2]),
                 aten.roll(a, [5]),
+                aten.roll(a, [60], [1]),
             )
 
         self.common(
