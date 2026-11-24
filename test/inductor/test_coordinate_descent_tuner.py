@@ -652,10 +652,13 @@ class TestCoordinateDescentTuner(TestCase):
     @config.patch({"coordinate_descent_tuning": True})
     def test_split_scan_respects_min_split_scan_rblock(self):
         def fn(x):
-            return torch.cumsum(x.t(), dim=-1)
+            return torch.cumsum(x, dim=-1)
 
-        x = torch.randn(256, 64, dtype=torch.float32, device=GPU_TYPE)
+        # A single long row is split across blocks on every GPU, whatever its
+        # SM/CU count. Small integers keep the float32 cumsum exact.
+        x = torch.randint(0, 4, (2**20,), device=GPU_TYPE).to(torch.float32)
         ref = fn(x)
+        min_rblock = config.triton.min_split_scan_rblock
         observed_min_rblocks = []
         orig_value_too_small = CoordescTuner.value_too_small
 
@@ -673,10 +676,10 @@ class TestCoordinateDescentTuner(TestCase):
         ):
             got = torch.compile(fn, backend="inductor")(x)
 
-        torch.testing.assert_close(got, ref, atol=1e-4, rtol=1e-4)
-        self.assertTrue(len(observed_min_rblocks) > 0)
+        self.assertEqual(got, ref, atol=0, rtol=0)
+        self.assertTrue(observed_min_rblocks, "expected a split-scan kernel")
         for meta_min_rblock in observed_min_rblocks:
-            self.assertEqual(meta_min_rblock, config.triton.min_split_scan_rblock)
+            self.assertEqual(meta_min_rblock, min_rblock)
 
 
 if __name__ == "__main__":
