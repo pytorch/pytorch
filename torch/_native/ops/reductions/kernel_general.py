@@ -20,6 +20,7 @@ from ...cutedsl.dtypes import cute2torch, torch2cute
 from ...cutedsl.plan_cache import cached_plan
 from ...utils.device import check_current
 from . import tile
+from .inner_tree_plan import _K_INNER_TREE_THRESHOLD
 from .traits import NormOps, WARP, WelfordOps
 
 
@@ -789,7 +790,9 @@ def _reduce(
     order = rt.reduction_order(order)
     if order == "inner_tree" and count > 0:
         ordered = None
-        if count >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
+        # Warps past a row's end start at column count and add up to one chunk, at most
+        # one _K_INNER_TREE_THRESHOLD batch, and their Int32 columns must not wrap.
+        if count + _K_INNER_TREE_THRESHOLD >= _INT32_LIMIT or num_o >= _INT32_LIMIT:
             reason = rt._INNER_TREE_WIDE
         else:
             reason = rt._INNER_TREE_GEOMETRY
@@ -1029,7 +1032,8 @@ def _reduce_all(
     x2 = xf.view(1, -1)
 
     if order == "inner_tree" and L > 0:
-        if L < _INT32_LIMIT:
+        # As in _reduce, the row's Int32 columns need one batch of headroom.
+        if L + _K_INNER_TREE_THRESHOLD < _INT32_LIMIT:
             outs = rt.reduce_row_tile(
                 trait,
                 trait_key,
