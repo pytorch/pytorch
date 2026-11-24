@@ -5,7 +5,6 @@ import multiprocessing
 import os
 import pickle
 import queue
-import subprocess
 import sys
 import tempfile
 import textwrap

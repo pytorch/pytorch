@@ -35,7 +35,6 @@ from torch._inductor.kernel.vendored_templates.cutedsl.kernels.cutedsl_grouped_g
 
 _prep_fn_cache = {}
 _gemm_fn_cache = {}
-_gemm_seed_cache = {}
 
 _KERNEL_CONFIG_KEY = (
     TILE_M, TILE_N, CLUSTER_M, CLUSTER_N,
@@ -67,57 +66,39 @@ def _to_fake_cute_tensor(t, assumed_align=16):
     )
 
 
-def _get_gemm_leading_dim(t):
-    leading_dim = next(
-        (
-            dim
-            for dim, (size, stride) in enumerate(zip(t.shape, t.stride()))
-            if int(size) != 1 and int(stride) == 1
-        ),
-        None,
-    )
-    if leading_dim is None:
-        raise AssertionError("Grouped GEMM operands must have a unit-stride dimension")
-    return leading_dim
+def _get_gemm_leading_dim(shape, stride):
+    for dim, (size, dim_stride) in enumerate(zip(shape, stride)):
+        if size != 1 and dim_stride == 1:
+            return dim
+    raise AssertionError("Grouped GEMM operands must have a unit-stride dimension")
 
 
 def _to_fake_gemm_tensor(dtype, leading_dim, assumed_align=16):
-    """Build a symbolic layout independent of runtime tensor extents."""
-    shape = (cute.sym_int64(), cute.sym_int64(), 1)
-    stride_divisibility = max(
-        assumed_align // torch.empty((), dtype=dtype).element_size(), 1
-    )
+    """Symbolic (rows, cols, 1) layout; only dtype and leading dim are fixed."""
+    divisibility = max(assumed_align // dtype.itemsize, 1)
     stride = [
-        cute.sym_int64(divisibility=stride_divisibility),
-        cute.sym_int64(divisibility=stride_divisibility),
+        cute.sym_int64(divisibility=divisibility),
+        cute.sym_int64(divisibility=divisibility),
         cute.sym_int64(),
     ]
     stride[leading_dim] = 1
     return cute.runtime.make_fake_tensor(
         _TORCH_TO_CUTLASS_DTYPE[dtype],
-        shape,
+        (cute.sym_int64(), cute.sym_int64(), 1),
         stride=tuple(stride),
         assumed_align=assumed_align,
     )
 
 
-def _get_gemm_seed_tensor(t, assumed_align=16):
-    """Keep a small layout-matched seed alive for runtime CuTe compilation."""
-    leading_dim = _get_gemm_leading_dim(t)
-    itemsize = int(t.element_size())
-    seed_dim = max(assumed_align // itemsize, 1)
-    key = (t.device, t.dtype, t.ndim, leading_dim, seed_dim)
-    if key not in _gemm_seed_cache:
-        shape = tuple(
-            seed_dim if dim != t.ndim - 1 else 1 for dim in range(t.ndim)
-        )
-        stride = [seed_dim] * t.ndim
-        stride[leading_dim] = 1
-        stride[-1] = 1
-        _gemm_seed_cache[key] = torch.empty_strided(
-            shape, tuple(stride), dtype=t.dtype, device=t.device
-        )
-    return _gemm_seed_cache[key]
+@functools.lru_cache
+def _get_gemm_seed_tensor(dtype, leading_dim, device, assumed_align=16):
+    """Uninitialized tensor the kernel's initial TMA descriptors are encoded from."""
+    seed_dim = max(assumed_align // dtype.itemsize, 1)
+    stride = [seed_dim, seed_dim, 1]
+    stride[leading_dim] = 1
+    return torch.empty_strided(
+        (seed_dim, seed_dim, 1), tuple(stride), dtype=dtype, device=device
+    )
 
 
 @functools.lru_cache
@@ -350,14 +331,14 @@ def launch_build_group_ptrs_from_bases(
     )
     gemm_executor = disk_cache_get(_gemm_fn_cache, __file__, _KERNEL_CONFIG_KEY, gemm_cache_key, dev_idx)
 
-    a_unsq = input_a.unsqueeze(-1)
-    b_unsq = input_b[0].unsqueeze(-1)
-    c_unsq = {{get_output()}}.unsqueeze(-1)
-    # These initial tensors seed TMA descriptors; the kernel updates their
-    # address, shape, and stride from runtime metadata before the first TMA load.
-    seed_a = _get_gemm_seed_tensor(a_unsq)
-    seed_b = _get_gemm_seed_tensor(b_unsq)
-    seed_c = _get_gemm_seed_tensor(c_unsq)
+    a_dim = _get_gemm_leading_dim(input_a.shape, input_a.stride())
+    b_dim = _get_gemm_leading_dim(input_b.shape[1:], input_b.stride()[1:])
+    c_dim = _get_gemm_leading_dim({{get_output()}}.shape, {{get_output()}}.stride())
+    # Seeds only encode the initial TMA descriptors and may alias each other; the kernel
+    # replaces address, shape and stride from ptrs_t/probs_t/strides_t before any TMA load.
+    seed_a = _get_gemm_seed_tensor(input_a.dtype, a_dim, dev)
+    seed_b = _get_gemm_seed_tensor(input_b.dtype, b_dim, dev)
+    seed_c = _get_gemm_seed_tensor({{get_output()}}.dtype, c_dim, dev)
 
     if gemm_executor is None:
         grouped_gemm = GroupedGemmKernel(
@@ -370,9 +351,9 @@ def launch_build_group_ptrs_from_bases(
 
         gemm_executor = cute.compile(
             grouped_gemm,
-            _to_fake_gemm_tensor(seed_a.dtype, _get_gemm_leading_dim(seed_a)),
-            _to_fake_gemm_tensor(seed_b.dtype, _get_gemm_leading_dim(seed_b)),
-            _to_fake_gemm_tensor(seed_c.dtype, _get_gemm_leading_dim(seed_c)),
+            _to_fake_gemm_tensor(input_a.dtype, a_dim),
+            _to_fake_gemm_tensor(input_b.dtype, b_dim),
+            _to_fake_gemm_tensor({{get_output()}}.dtype, c_dim),
             G,
             _to_fake_cute_tensor(probs_t, assumed_align=4),
             _to_fake_cute_tensor(strides_t, assumed_align=4),
@@ -400,7 +381,7 @@ def launch_build_group_ptrs_from_bases(
 def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile_dtypes, device_index=0, device_capability=None, hw_info=None):
     """Compile CuTe DSL kernels using fake tensors (no CUDA tensor allocation).
 
-    Called by the subprocess worker to warm the disk cache. Uses fake compact
+    Called by the subprocess worker to warm the disk cache. Uses fake
     CuTe tensors for cute.compile(), avoiding torch.cuda.* calls so this can
     run in forked subprocess workers where PyTorch CUDA is unavailable.
     """
@@ -441,14 +422,9 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
     def _cpu_proxy(shape, stride, dtype):
         return torch.empty_strided(shape, stride, dtype=dtype, device="cpu")
 
-    # _main transposes then unsqueezes: a.unsqueeze(-1), b[0].unsqueeze(-1), c.unsqueeze(-1)
-    # Replicate those stride transformations on CPU proxies.
-    proxy_a = _cpu_proxy(shape_a, stride_a, dtype_a).unsqueeze(-1)
-    proxy_b_transposed = _cpu_proxy(
-        trans_shape_b, trans_stride_b, dtype_b,
-    )
-    proxy_b_unsq = proxy_b_transposed[0].unsqueeze(-1)
-    proxy_out = _cpu_proxy(shape_out, stride_out, dtype_out).unsqueeze(-1)
+    a_dim = _get_gemm_leading_dim(shape_a, stride_a)
+    b_dim = _get_gemm_leading_dim(trans_shape_b[1:], trans_stride_b[1:])
+    c_dim = _get_gemm_leading_dim(shape_out, stride_out)
 
     proxy_offs = _cpu_proxy(shape_offs, (1,), torch.int32)
     proxy_ptrs = _cpu_proxy((G, 3), (3, 1), torch.int64)
@@ -544,11 +520,9 @@ def {{kernel_name}}_precompile(precompile_shapes, precompile_strides, precompile
 
     gemm_executor = cute.compile(
         grouped_gemm,
-        _to_fake_gemm_tensor(proxy_a.dtype, _get_gemm_leading_dim(proxy_a)),
-        _to_fake_gemm_tensor(
-            proxy_b_unsq.dtype, _get_gemm_leading_dim(proxy_b_unsq)
-        ),
-        _to_fake_gemm_tensor(proxy_out.dtype, _get_gemm_leading_dim(proxy_out)),
+        _to_fake_gemm_tensor(dtype_a, a_dim),
+        _to_fake_gemm_tensor(dtype_b, b_dim),
+        _to_fake_gemm_tensor(dtype_out, c_dim),
         G,
         _to_fake_cute_tensor(proxy_probs, assumed_align=4),
         _to_fake_cute_tensor(proxy_strides, assumed_align=4),
