@@ -2,23 +2,25 @@
 
 import gc
 import weakref
+
 import torch
-import torch.nn as nn
 import torch.distributed as dist
+import torch.nn as nn
 import torch.nn.functional as F
-
-
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Replicate, Shard
-from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel, loss_parallel
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    loss_parallel,
+    parallelize_module,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TestCase
+    TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-
 
 
 def _plain(mesh):
@@ -47,12 +49,17 @@ def _loss_parallel(mesh):
         F.cross_entropy(logits, torch.randint(0, 8, (4,)))
 
 
-WORKLOADS = {"plain": _plain, "redistribute": _redistribute, "conv": _conv, "loss_parallel": _loss_parallel}
+WORKLOADS = {
+    "plain": _plain,
+    "redistribute": _redistribute,
+    "conv": _conv,
+    "loss_parallel": _loss_parallel,
+}
 
 
 class TestShardingPropCache(TestCase):
     """No DTensor cache may keep a DeviceMesh alive.
-    
+
     The sharding propagation caches key DTensorSpec by value but sotred the
     mesh object, so every Devicemesh ever used stayed reachable for the life
     of the process.
@@ -60,9 +67,7 @@ class TestShardingPropCache(TestCase):
 
     def setUp(self):
         super().setUp()
-        dist.init_process_group(
-            backend="fake", rank=0, world_size=1, store=FakeStore()
-        )
+        dist.init_process_group(backend="fake", rank=0, world_size=1, store=FakeStore())
         self.mesh = init_device_mesh("cpu", (1, 1), mesh_dim_names=("dp", "tp"))
 
     def tearDown(self):
