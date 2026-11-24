@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/BFloat16-math.h>
 #include <cmath>
 #include <limits>
 #include <type_traits>
@@ -14,9 +15,6 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 #endif
 
 namespace c10 {
-
-struct Half;
-struct BFloat16;
 
 /// Returns true if x < 0
 /// NOTE: Will fail on an unsigned custom type
@@ -114,8 +112,7 @@ C10_HOST_DEVICE inline bool _signbit(T x) {
 #else
     return std::signbit(x);
 #endif
-  } else if constexpr (
-      std::is_same_v<T, c10::Half> || std::is_same_v<T, c10::BFloat16>) {
+  } else if constexpr (c10::is_reduced_floating_point_v<T>) {
     // Read the bit directly: device Half->float conversion canonicalizes NaN
     return (x.x & 0x8000) != 0;
   } else {
