@@ -965,7 +965,9 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             with self.assertRaisesRegex(NameError, "name '_dg_a' is not defined"):
                 torch.compile(fn, backend="eager", fullgraph=False)(x)
 
-    @parametrize("shape", ("hasattr", "attr", "contains"))
+    @parametrize(
+        "shape", ("hasattr", "attr", "contains", "getattr", "getattr_default", "dir")
+    )
     def test_delete_global_module_read_after(self, shape):
         me = sys.modules[__name__]
 
@@ -987,10 +989,31 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             del _dg_a
             return x + (1 if "_dg_a" in me.__dict__ else 0)
 
+        def fn_getattr(x):
+            global _dg_a
+            del _dg_a
+            try:
+                return x + getattr(me, "_dg_a")  # noqa: B009
+            except AttributeError:
+                return x - 1
+
+        def fn_getattr_default(x):
+            global _dg_a
+            del _dg_a
+            return x + getattr(me, "_dg_a", 0)
+
+        def fn_dir(x):
+            global _dg_a
+            del _dg_a
+            return x + (1 if "_dg_a" in dir(me) else 0)
+
         fn, expected = {
             "hasattr": (fn_hasattr, lambda x: x),
             "attr": (fn_attr, lambda x: x - 1),
             "contains": (fn_contains, lambda x: x),
+            "getattr": (fn_getattr, lambda x: x - 1),
+            "getattr_default": (fn_getattr_default, lambda x: x),
+            "dir": (fn_dir, lambda x: x),
         }[shape]
         with mock.patch.dict(globals(), {"_dg_a": 1}):
             x = torch.ones(2, 2)

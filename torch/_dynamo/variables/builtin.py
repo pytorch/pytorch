@@ -2773,6 +2773,8 @@ class BuiltinVariable(TypeVariable):
             return VariableTracker.build(tx, dir(arg.fn))
         if isinstance(arg, TypeVariable):
             return VariableTracker.build(tx, dir(arg._fn))
+        if isinstance(arg, variables.PythonModuleVariable):
+            tx.output.check_deleted_global_access(arg.value.__dict__, None)
         # Enable specialized VTs for constants to work with dir()
         if arg.is_python_constant():
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
@@ -3914,6 +3916,13 @@ class GetAttrBuiltinVariable(BuiltinVariable):
                 obj, variables.UserDefinedClassVariable
             ) and obj.getattr_needs_tracing(tx, args[1].as_python_constant()):
                 raise
+            if isinstance(obj, variables.PythonModuleVariable):
+                # Folding reads the real module, which still holds globals
+                # this trace deleted (the delete is replayed after the graph).
+                name = args[1].as_python_constant()
+                tx.output.check_deleted_global_access(
+                    obj.value.__dict__, None if name == "__dict__" else name
+                )
         return self._call_constant_getattr(tx, args)
 
     def _call_constant_getattr(
