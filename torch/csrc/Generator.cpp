@@ -50,7 +50,7 @@ static void THPGenerator_dealloc(PyObject* _self) {
   auto self = reinterpret_cast<THPGenerator*>(_self);
   if (self->cdata.defined()) {
     // See Note [Generator PyObject cache]
-    std::lock_guard<std::mutex> lock(generator_pyobj_mutex);
+    std::scoped_lock<std::mutex> lock(generator_pyobj_mutex);
     if (self->cdata.pyobj() == _self) {
       self->cdata.set_pyobj(nullptr);
     }
@@ -465,7 +465,7 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
 
   {
     // See Note [Generator PyObject cache]
-    std::lock_guard<std::mutex> lock(generator_pyobj_mutex);
+    std::scoped_lock<std::mutex> lock(generator_pyobj_mutex);
     auto obj = pyobj(gen);
     if (obj && PyUnstable_TryIncRef(obj)) {
       return obj;
@@ -499,7 +499,7 @@ PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
   PyUnstable_EnableTryIncRef(obj.get());
   PyObject* cached = nullptr;
   {
-    std::lock_guard<std::mutex> lock(generator_pyobj_mutex);
+    std::scoped_lock<std::mutex> lock(generator_pyobj_mutex);
     cached = pyobj(g->cdata);
     if (!cached || !PyUnstable_TryIncRef(cached)) {
       set_pyobj(g->cdata, obj.get());
