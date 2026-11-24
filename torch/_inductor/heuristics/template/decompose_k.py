@@ -104,7 +104,9 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         # tcgen05 cannot lower never reach codegen. Checked before the guarded
         # TMA checks so a layout no config supports installs no guards.
         a_row_major = mat1.get_stride()[1] == 1
-        allow_tf32 = mm_allow_tf32(m, n, k, mat1.get_device().type)
+        # Without a dtype this is a guard-free lower bound; the exact check,
+        # matching the partial kernel, runs on the specialized sizes below.
+        allow_tf32 = mm_allow_tf32(m, n, k, mat1.get_device())
         if not any(
             blackwell_tma_mma_layout_supported(
                 mat1.get_dtype(), allow_tf32, a_row_major, partial_config.block_m
@@ -136,7 +138,10 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             )
         dtype_size = mat1.get_dtype().itemsize
         # Re-evaluated on the now-specialized sizes, which can only enable TF32.
-        allow_tf32 = mm_allow_tf32(m_hint, n_hint, k_hint, mat1.get_device().type)
+        # Same arguments as the partial kernel's ALLOW_TF32, so both agree.
+        allow_tf32 = mm_allow_tf32(
+            m_hint, n_hint, k_hint, mat1.get_device(), mat1.get_dtype()
+        )
         config_indices = [
             config_index
             for config_index in config_indices
