@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: r2p"]
 
+import os
 import tempfile
 import time
-
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
 
+import torch
 from torch.monitor import (
     _WaitCounter,
     Aggregation,
@@ -111,6 +113,59 @@ class TestMonitor(TestCase):
         )
         with wait_counter.guard():
             pass
+
+
+@skipIfTorchDynamo("CUDA availability mocks interfere with Dynamo's CUDA RNG setup")
+class TestCUDAIsAvailableWaitCounter(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def setUp(self):
+        super().setUp()
+        self.events = []
+        self.counter = MagicMock()
+        guard = self.counter.return_value.guard.return_value
+        guard.__enter__.side_effect = lambda: self.events.append("enter")
+        guard.__exit__.side_effect = lambda *args: self.events.append("exit")
+        for p in (
+            patch.object(torch._C._monitor, "_WaitCounter", self.counter),
+            patch.object(torch.cuda, "_is_compiled", return_value=True),
+            patch.object(torch.cuda, "device_count", side_effect=self.probe),
+            patch.object(
+                torch._C, "_cuda_getDeviceCount", create=True, side_effect=self.probe
+            ),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def probe(self):
+        self.events.append("probe")
+        return 1
+
+    def test_not_compiled(self):
+        with patch.object(torch.cuda, "_is_compiled", return_value=False):
+            self.assertFalse(torch.cuda.is_available())
+        self.counter.assert_not_called()
+
+    def test_probe_runs_inside_guard(self):
+        key = "pytorch.wait_counter.cuda.is_available"
+        for nvml_check in ("0", "1"):
+            self.events.clear()
+            with (
+                self.subTest(nvml_check=nvml_check),
+                patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": nvml_check}),
+            ):
+                self.assertTrue(torch.cuda.is_available())
+                self.assertEqual(self.events, ["enter", "probe", "exit"])
+                self.counter.assert_called_with(key)
+
+    def test_probe_error_propagates(self):
+        error = RuntimeError("probe failed")
+        torch._C._cuda_getDeviceCount.side_effect = error
+        with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "0"}):
+            with self.assertRaises(RuntimeError) as caught:
+                torch.cuda.is_available()
+        self.assertIs(caught.exception, error)
+        self.assertEqual(self.events, ["enter", "exit"])
 
 
 @skipIfTorchDynamo("Really weird error")
