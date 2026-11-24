@@ -2004,6 +2004,15 @@ static PyObject* THCPModule_ensureCUDADeviceGuardSet(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_ensureXPUDeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureXPUDeviceGuardSet();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 struct TorchModuleState {
   PyObject* log_api_usage_seen; // dict used by _log_api_usage_once
 };
@@ -2407,6 +2416,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_ensureCUDADeviceGuardSet",
      THCPModule_ensureCUDADeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
+    {"_ensureXPUDeviceGuardSet",
+     THPModule_ensureXPUDeviceGuardSet,
      METH_NOARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}
@@ -2885,6 +2898,11 @@ Call this whenever a new thread is created in order to propagate values from
     return t.is_fake();
   });
 
+  py_module.def("_enable_fake_tensor_custom_op_profiles", []() {
+    torch::fake_tensor::custom_op_profiles_ever_enabled.store(
+        true, std::memory_order_relaxed);
+  });
+
   py_module.def("_fake_device", [](const at::Tensor& t) -> c10::Device {
     auto fd = t.unsafeGetTensorImpl()->fake_device();
     TORCH_CHECK(fd.has_value(), "Tensor does not have a fake device");
@@ -3139,8 +3157,8 @@ Call this whenever a new thread is created in order to propagate values from
           // dispatcher too.
           torch::DisableTorchDispatch no_dispatch;
           c10::impl::DisablePythonDispatcher no_python_dispatcher;
-          out_impl = impl->shallow_copy_and_detach(
-              impl->version_counter(), /*allow_tensor_metadata_change=*/true);
+          out_impl = meta.detach().getIntrusivePtr();
+          out_impl->set_allow_tensor_metadata_change(true);
         }
         // Before marking the shared storage, as this can throw
         out_impl->set_requires_grad(meta.requires_grad());
