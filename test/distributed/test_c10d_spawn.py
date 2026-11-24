@@ -27,6 +27,10 @@ if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
 
 class AbstractProcessGroupShareTensorTest:
     world_size = 2
@@ -124,7 +128,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = torch.device(f"{device_type}:{self.rank}")
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
         y = torch.distributed.nn.broadcast(x, 1)
@@ -144,7 +148,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = torch.device(f"{device_type}:{self.rank}")
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
         y = torch.distributed.nn.reduce(x, 1, op=c10d.ReduceOp.SUM)
@@ -165,7 +169,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = torch.device(f"{device_type}:{self.rank}")
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
         y = torch.distributed.nn.all_reduce(x, op=c10d.ReduceOp.SUM)
@@ -184,7 +188,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = torch.device(f"{device_type}:{self.rank}")
         x = torch.ones(5, 5, device=device) + self.rank
         x.requires_grad = True
         tensors = torch.distributed.nn.all_gather(x)
@@ -204,7 +208,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = torch.device(f"{device_type}:{self.rank}")
         x0 = torch.ones(5, 5, device=device) + 2 * self.rank
         x1 = torch.ones(5, 5, device=device) + 2 * self.rank
         x0.requires_grad = True
@@ -228,7 +232,7 @@ class TestDistributedNNFunctions(MultiProcessTestCase):
         c10d.init_process_group(
             store=store, rank=self.rank, world_size=self.world_size, backend=backend
         )
-        device = torch.device(f"cuda:{self.rank}")
+        device = torch.device(f"{device_type}:{self.rank}")
         row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
         x = torch.ones(int(row), 5, device=device) * (self.rank + 1)
         x.requires_grad = True

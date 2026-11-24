@@ -5,6 +5,7 @@ import functools
 import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 from unittest.mock import patch
@@ -17,7 +18,9 @@ import torch.utils._pytree as pytree
 from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
+from torch.distributed.tensor._utils import compute_local_shape_and_chunks
 from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.fx._graph_pickler import GraphPickler, Options
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -2000,6 +2003,19 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
     @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_stream_explicit_index_refused_under_coor(self):
+        def f(x):
+            return device_module.current_stream(1), x + 1
+
+        x = torch.zeros(1, device=f"{device_type}:0")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.CompileOnOneRankUnsupported,
+            "current_stream with an explicit device index",
+        ):
+            torch.compile(f, backend="eager", fullgraph=True)(x)
+
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_cpu_stream_equality_under_coor(self):
         def f(x, stream):
             return x + (1 if stream == torch.accelerator.current_stream() else 2)
@@ -2792,6 +2808,124 @@ class TestCompileOnOneRankLegacyCollective(TestCase):
         gm = make_fx(self._fn, tracing_mode="fake")(torch.arange(4.0), self.mesh)
         self.assertIn("c10d.allreduce_.default", _call_targets(gm))
         self.assertTrue(_baked_pg_constants(gm))
+
+
+@unittest.skipIf(not dist.is_available(), "distributed not available")
+class TestCompileOnOneRankLocalShapeAndChunks(TestCase):
+    """compute_local_shape_and_chunks traced under compile_on_one_rank.
+
+    The graph reads the mesh coordinate when it runs, so every rank traces the same
+    graph. Single process with a fake PG, initialized as each rank of a 2 x 2 mesh
+    in turn.
+    """
+
+    @staticmethod
+    def _chunk_values(global_shape, mesh, placements, x):
+        # make_fx traces a function of tensors; x is unused.
+        return pytree.tree_leaves(
+            compute_local_shape_and_chunks(global_shape, mesh, placements)
+        )
+
+    def test_compute_local_shape_and_chunks(self):
+        # (global_shape, placements, number of mesh dims that shard)
+        cases = [
+            ((8, 2), [_StridedShard(0, split_factor=2), Replicate()], 1),
+            ((7, 6), [_StridedShard(0, split_factor=2), Shard(0)], 2),
+            ((7, 6), [Shard(1), _StridedShard(0, split_factor=3)], 2),
+            ((13, 4), [Shard(0), _StridedShard(0, split_factor=2)], 2),
+            ((5, 3), [Replicate(), Replicate()], 0),
+        ]
+        for global_shape, placements, num_shard_dims in cases:
+            with self.subTest(global_shape=global_shape, placements=placements):
+                graphs = set()
+                for rank in range(4):
+                    with self.subTest(rank=rank):
+                        dist.init_process_group(
+                            backend="fake", store=FakeStore(), rank=rank, world_size=4
+                        )
+                        try:
+                            mesh = init_device_mesh("cpu", (2, 2))
+                            chunks = functools.partial(
+                                self._chunk_values, global_shape, mesh, placements
+                            )
+                            with compiler_config.patch(compile_on_one_rank=True):
+                                gm = make_fx(chunks, tracing_mode="symbolic")(
+                                    torch.zeros(1)
+                                )
+                            graphs.add(gm.code)
+                            # The coordinate is read only for the mesh dims that shard.
+                            self.assertEqual(
+                                _call_targets(gm).count(
+                                    "device_mesh._runtime_compute_coordinate_on_dim.default"
+                                ),
+                                num_shard_dims,
+                            )
+                            self.assertEqual(
+                                [int(v) for v in gm(torch.zeros(1))],
+                                chunks(torch.zeros(1)),
+                            )
+                        finally:
+                            dist.destroy_process_group()
+                self.assertEqual(len(graphs), 1)
+
+
+@unittest.skipIf(not dist.is_available(), "distributed not available")
+class TestCompileOnOneRankPrecompile(TestCase):
+    def test_dtensor_package_loads_in_fresh_process(self):
+        # Rank 0 saves a package and rank 1 serves it without tracing, so only an
+        # import can have registered the device_mesh ops the compiled graph calls.
+        # Needs fresh processes: an op this process traced stays registered.
+        script = textwrap.dedent(
+            """
+            import sys
+
+            import torch
+            import torch.distributed as dist
+            from torch._dynamo.precompile_context import PrecompileContext
+            from torch.distributed.device_mesh import init_device_mesh
+            from torch.distributed.tensor import DTensor, Replicate, Shard
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            rank = int(sys.argv[1])
+            torch.compiler.config.compile_on_one_rank = True
+            torch._dynamo.config.caching_precompile = True
+            dist.init_process_group("fake", store=FakeStore(), rank=rank, world_size=2)
+            mesh = init_device_mesh("cpu", (2,))
+
+
+            def fn(x):
+                d = DTensor.from_local(x, mesh, [Replicate()], run_check=False)
+                return d.redistribute(mesh, [Shard(0)]).to_local()
+
+
+            with torch.compiler.set_stance("default" if rank == 0 else "fail_on_recompile"):
+                out = torch.compile(fn, fullgraph=True)(torch.arange(4.0))
+            assert out.tolist() == [[0.0, 1.0], [2.0, 3.0]][rank], out
+            if rank == 0:
+                saved = PrecompileContext.save_to_dynamo_cache()
+                assert saved["dynamo"] and saved["backends"], saved
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "script.py")
+            with open(path, "w") as f:
+                f.write(script)
+            env = {
+                **os.environ,
+                "TORCHINDUCTOR_CACHE_DIR": os.path.join(tmp, "cache"),
+                "TORCHINDUCTOR_COMPILE_THREADS": "1",
+            }
+            for rank, step in enumerate(("save", "load")):
+                proc = subprocess.run(
+                    [sys.executable, path, str(rank)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                    check=False,
+                )
+                msg = f"rank {rank} ({step}) failed:\n{proc.stderr[-3000:]}"
+                self.assertEqual(proc.returncode, 0, msg)
 
 
 if __name__ == "__main__":
