@@ -34,6 +34,18 @@ def my_is_inference(t: torch.Tensor) -> bool:
     return torch.ops.libtorch_agn_2_16.my_is_inference.default(t)
 
 
+def my_inference_mode_guard(enabled: bool) -> bool:
+    return torch.ops.libtorch_agn_2_16.my_inference_mode_guard.default(enabled)
+
+
+def my_default_inference_mode_guard() -> bool:
+    return torch.ops.libtorch_agn_2_16.my_default_inference_mode_guard.default()
+
+
+def my_is_inference_mode_enabled() -> bool:
+    return torch.ops.libtorch_agn_2_16.my_is_inference_mode_enabled.default()
+
+
 def my_is_warn_always_enabled() -> bool:
     """Stable ``torch_is_warn_always_enabled`` (2.16+)."""
     return torch.ops.libtorch_agn_2_16.my_is_warn_always_enabled.default()
