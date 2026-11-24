@@ -1968,8 +1968,9 @@ class DiskDynamoStore(DynamoStore):
         """
         Clear all CompilePackages from disk.
         """
-        if self.path_prefix():
-            shutil.rmtree(self.path_prefix(), ignore_errors=True)
+        prefix = self.path_prefix()
+        if prefix:
+            shutil.rmtree(prefix, ignore_errors=True)
 
     def write(
         self,
