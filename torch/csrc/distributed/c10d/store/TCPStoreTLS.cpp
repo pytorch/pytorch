@@ -243,9 +243,9 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
         value(opts.tlsCa, "tls_ca"),
         value(opts.tlsPsk, "tls_psk")};
     pskFile = value(opts.tlsPskFile, "tls_psk_file");
-    config.peerCertOid = value(opts.tlsPeerCertOid, "tls_peer_cert_oid");
-    config.peerCertValue = value(opts.tlsPeerCertValue, "tls_peer_cert_value");
-    config.peerCertPrefix =
+    config.peerCert.oid = value(opts.tlsPeerCertOid, "tls_peer_cert_oid");
+    config.peerCert.value = value(opts.tlsPeerCertValue, "tls_peer_cert_value");
+    config.peerCert.prefix =
         value(opts.tlsPeerCertPrefix, "tls_peer_cert_prefix");
   } else {
     auto env = [&](const char* name) {
@@ -258,16 +258,16 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
         env("TORCH_TCPSTORE_TLS_PSK"),
         /*fromEnv=*/true};
     pskFile = env("TORCH_TCPSTORE_TLS_PSK_FILE");
-    config.peerCertOid = env("TORCH_TCPSTORE_TLS_PEER_CERT_OID");
-    config.peerCertValue = env("TORCH_TCPSTORE_TLS_PEER_CERT_VALUE");
-    config.peerCertPrefix = env("TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX");
+    config.peerCert.oid = env("TORCH_TCPSTORE_TLS_PEER_CERT_OID");
+    config.peerCert.value = env("TORCH_TCPSTORE_TLS_PEER_CERT_VALUE");
+    config.peerCert.prefix = env("TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX");
   }
-  if (!config.peerCertOid.empty() || !config.peerCertValue.empty() ||
-      !config.peerCertPrefix.empty()) {
+  if (!config.peerCert.oid.empty() || !config.peerCert.value.empty() ||
+      !config.peerCert.prefix.empty()) {
     TORCH_CHECK_WITH(
         DistStoreError,
-        !config.peerCertOid.empty() &&
-            (config.peerCertValue.empty() != config.peerCertPrefix.empty()) &&
+        !config.peerCert.oid.empty() &&
+            (config.peerCert.value.empty() != config.peerCert.prefix.empty()) &&
             !config.cert.empty() && !config.key.empty() && !config.ca.empty() &&
             config.psk.empty() && pskFile.empty(),
         "TCPStore TLS: peer certificate policy requires certificate mode, an OID, and exactly one value or prefix; explicit TLS options replace all TLS environment settings",
@@ -275,8 +275,8 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
                        : " (from TCPStore options)");
     TORCH_CHECK_WITH(
         DistStoreError,
-        config.peerCertValue.find(',') == std::string::npos &&
-            config.peerCertPrefix.find(',') == std::string::npos,
+        config.peerCert.value.find(',') == std::string::npos &&
+            config.peerCert.prefix.find(',') == std::string::npos,
         "TCPStore TLS: peer certificate value or prefix must be a single identity (no comma)",
         config.fromEnv
             ? " (TORCH_TCPSTORE_TLS_PEER_CERT_VALUE or TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX)"
@@ -521,8 +521,8 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
       ssl.SSL_CTX_load_verify_locations(ctx, ca.c_str(), nullptr) == 1,
       "CA",
       ca);
-  if (!config.peerCertOid.empty()) {
-    res->peerCertOid_ = ssl.OBJ_txt2obj(config.peerCertOid.c_str(), 1);
+  if (!config.peerCert.oid.empty()) {
+    res->peerCertOid_ = ssl.OBJ_txt2obj(config.peerCert.oid.c_str(), 1);
     TORCH_CHECK_WITH(
         DistStoreError,
         res->peerCertOid_,
@@ -531,13 +531,13 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
                        : "tls_peer_cert_oid",
         ": ",
         errorString());
-    res->peerCertPrefix_ = config.peerCertPrefix;
-    res->peerCertValue_ = config.peerCertValue;
-    if (!config.peerCertPrefix.empty()) {
+    res->peerCertPrefix_ = config.peerCert.prefix;
+    res->peerCertValue_ = config.peerCert.value;
+    if (!config.peerCert.prefix.empty()) {
       auto extension = readIdentityExtension(
           ssl.SSL_CTX_get0_certificate(ctx), res->peerCertOid_);
       auto identity =
-          uniqueIdentity(extension.get(), config.peerCertPrefix, true);
+          uniqueIdentity(extension.get(), config.peerCert.prefix, true);
       TORCH_CHECK_WITH(
           DistStoreError,
           identity,

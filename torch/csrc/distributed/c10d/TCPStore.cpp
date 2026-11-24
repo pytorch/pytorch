@@ -315,13 +315,13 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     tlsCert_ = tls.cert;
     tlsKey_ = tls.key;
     tlsCa_ = tls.ca;
-    if (!tls.peerCertOid.empty()) {
-      tlsPeerCertOid_ = tls.peerCertOid;
-      if (!tls.peerCertValue.empty()) {
-        tlsPeerCertValue_ = tls.peerCertValue;
+    if (!tls.peerCert.oid.empty()) {
+      tlsPeerCertOid_ = tls.peerCert.oid;
+      if (!tls.peerCert.value.empty()) {
+        tlsPeerCertValue_ = tls.peerCert.value;
       }
-      if (!tls.peerCertPrefix.empty()) {
-        tlsPeerCertPrefix_ = tls.peerCertPrefix;
+      if (!tls.peerCert.prefix.empty()) {
+        tlsPeerCertPrefix_ = tls.peerCert.prefix;
       }
     }
   }

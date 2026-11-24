@@ -28,15 +28,21 @@ constexpr std::array<uint8_t, 7> kTLSProtocolVersionAlert =
 // Larger than any pid so it cannot match a ping nonce.
 constexpr uint32_t tlsRequiredMagicNumber = 0x7F4C5352;
 
+struct TLSPeerCertConfig {
+  std::string oid;
+  std::string value;
+  std::string prefix;
+
+  bool operator==(const TLSPeerCertConfig&) const = default;
+};
+
 struct TLSConfig {
   std::string cert;
   std::string key;
   std::string ca;
   std::string psk; // Secret key value, never a filename or diagnostic argument.
   bool fromEnv = false;
-  std::string peerCertOid;
-  std::string peerCertValue;
-  std::string peerCertPrefix;
+  TLSPeerCertConfig peerCert;
 
   bool enabled() const {
     return !cert.empty() || !key.empty() || !ca.empty() || !psk.empty();
@@ -44,9 +50,7 @@ struct TLSConfig {
 
   bool sameSettings(const TLSConfig& other) const {
     return cert == other.cert && key == other.key && ca == other.ca &&
-        psk == other.psk && peerCertOid == other.peerCertOid &&
-        peerCertValue == other.peerCertValue &&
-        peerCertPrefix == other.peerCertPrefix;
+        psk == other.psk && peerCert == other.peerCert;
   }
 };
 
