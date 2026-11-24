@@ -2117,17 +2117,33 @@ class TestMaxAutotune(TestCase):
     )
     def test_max_autotune_decompose_k_compile_failure(self):
         from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
-        from torch._inductor.compile_worker.subproc_pool import SubprocException
+        from torch._inductor.compile_worker.subproc_pool import (
+            SubprocException,
+            SubprocMain,
+            SubprocPickler,
+        )
 
+        # Build the SubprocException a pool worker sends back when the job
+        # raises, by running the worker's job wrapper in process. Skip pickling
+        # so the job can be a closure.
+        class NoPickle(SubprocPickler):
+            def dumps(self, obj):
+                return obj
+
+            def loads(self, data):
+                return data
+
+        def job():
+            raise RuntimeError("injected compile failure")
+
+        info = SubprocMain.do_job(NoPickle(), 0, job)
         a, b = self._make_matrices(
             32, 32768, 32, dtype=torch.float32, device=GPU_TYPE, requires_grad=False
         )
         with mock.patch.object(
             SubgraphChoiceCaller,
             "_compile_for_benchmarking",
-            side_effect=SubprocException(
-                "injected compile failure", "triton_tem_fused_0"
-            ),
+            side_effect=SubprocException(info.details, "triton_tem_fused_0"),
         ) as compile_mock:
             out, code = run_and_get_code(torch.compile(lambda a, b: a @ b), a, b)
         self.assertTrue(compile_mock.called)
@@ -2152,19 +2168,27 @@ class TestMaxAutotune(TestCase):
     )
     def test_max_autotune_decompose_k_lowering_bug_propagates(self):
         # Only kernel compile failures drop a subgraph choice; a bug in its
-        # lowering still fails the compile.
+        # lowering, or a failure of the compile pool itself, still fails the
+        # compile.
         from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
 
         a, b = self._make_matrices(
             32, 32768, 32, dtype=torch.float32, device=GPU_TYPE, requires_grad=False
         )
-        with mock.patch.object(
-            SubgraphChoiceCaller,
-            "_compile_for_benchmarking",
-            side_effect=KeyError("injected lowering bug"),
+        for exc in (
+            KeyError("injected lowering bug"),
+            SubprocException("SubprocPool failed to deliver a result for job 0"),
         ):
-            with self.assertRaisesRegex(Exception, "injected lowering bug"):
-                torch.compile(lambda a, b: a @ b)(a, b)
+            with self.subTest(type(exc).__name__):
+                torch._dynamo.reset()
+                with mock.patch.object(
+                    SubgraphChoiceCaller, "_compile_for_benchmarking", side_effect=exc
+                ):
+                    with self.assertRaisesRegex(
+                        Exception, "injected lowering bug|failed to deliver a result"
+                    ):
+                        torch.compile(lambda a, b: a @ b)(a, b)
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"

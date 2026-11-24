@@ -72,7 +72,10 @@ def _is_kernel_compile_failure(e: BaseException) -> bool:
     from torch._inductor.compile_worker.subproc_pool import SubprocException
 
     if isinstance(e, SubprocException):
-        return True
+        # A job that raised in a worker carries the worker's traceback. The pool's
+        # own failures (e.g. a result it could not deliver) carry no traceback and
+        # are not a failure of this kernel, so they propagate.
+        return e.details.startswith("Traceback (most recent call last):")
     try:
         from triton.compiler.errors import CompilationError
         from triton.runtime.errors import OutOfResources
