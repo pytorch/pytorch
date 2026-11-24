@@ -1198,8 +1198,15 @@ def _set_sdp_use_overrideable(
 ) -> None: ...  # THPModule_setSDPUseOverrideable
 def _get_sdp_priority_order() -> list[_int]: ...  # THPModule_getSDPPriorityOrder
 def _set_sdp_priority_order(
-    arg: list[_int],
+    arg: list[_int] | tuple[_int, ...],
 ) -> None: ...  # THPModule_setSDPPriorityOrder
+def _reset_sdp_priority_order() -> None: ...  # THPModule_resetSDPPriorityOrder
+def _has_user_sdp_priority_order() -> (
+    _bool
+): ...  # THPModule_hasUserSDPPriorityOrder
+def _is_cudnn_sdp_deprioritized() -> (
+    _bool
+): ...  # THPModule_isCuDNNSDPDeprioritized
 def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_cudnn(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn

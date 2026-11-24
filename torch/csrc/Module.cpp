@@ -1025,6 +1025,30 @@ static PyObject* THPModule_sDPPriorityOrder(
   }
   return order.release();
 }
+static PyObject* THPModule_resetSDPPriorityOrder(
+    PyObject* _unused,
+    PyObject* noargs) {
+  at::globalContext().resetSDPPriorityOrder();
+  Py_RETURN_NONE;
+}
+static PyObject* THPModule_hasUserSDPPriorityOrder(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().hasUserSetSDPPriorityOrder())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+static PyObject* THPModule_isCuDNNSDPDeprioritized(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") == true)
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
 static PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -2122,6 +2146,18 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_sdp_priority_order", THPModule_setSDPPriorityOrder, METH_O, nullptr},
     {"_get_sdp_priority_order",
      THPModule_sDPPriorityOrder,
+     METH_NOARGS,
+     nullptr},
+    {"_reset_sdp_priority_order",
+     THPModule_resetSDPPriorityOrder,
+     METH_NOARGS,
+     nullptr},
+    {"_has_user_sdp_priority_order",
+     THPModule_hasUserSDPPriorityOrder,
+     METH_NOARGS,
+     nullptr},
+    {"_is_cudnn_sdp_deprioritized",
+     THPModule_isCuDNNSDPDeprioritized,
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},

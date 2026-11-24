@@ -285,6 +285,9 @@ class TORCH_API Context {
   // The math SDP kernel can be disabled by setting
   // at::globalContext().setUserEnabledMathSDP(false) flag.
   void setSDPPriorityOrder(const std::vector<int64_t>& order);
+  void setDefaultSDPPriorityOrder(const std::vector<int64_t>& order);
+  void resetSDPPriorityOrder();
+  bool hasUserSetSDPPriorityOrder() const;
   std::array<at::SDPBackend, at::num_sdp_backends> sDPPriorityOrder();
 
   void setSDPUseFlash(bool /*e*/);
@@ -506,12 +509,14 @@ class TORCH_API Context {
   bool _deterministic_algorithms = false;
   bool _deterministic_algorithms_warn_only = false;
   bool _deterministic_fill_uninitialized_memory = true;
-  std::array<at::SDPBackend, at::num_sdp_backends> sdp_priority_order = {
+  std::array<at::SDPBackend, at::num_sdp_backends> default_sdp_priority_order = {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,
       at::SDPBackend::math,
       at::SDPBackend::cudnn_attention,
       at::SDPBackend::overrideable};
+  std::optional<std::array<at::SDPBackend, at::num_sdp_backends>>
+      user_sdp_priority_order = std::nullopt;
   bool enabled_flashSDP = true;
   bool enabled_fa3SDP = false;
   bool enabled_fa4SDP = false;

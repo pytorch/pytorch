@@ -2078,6 +2078,80 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend="eager")
         opt_f(torch.randn(2, 2))
 
+    def test_sdpa_kernel_ctx_manager_set_priority_graph_break(self):
+        backends = [
+            torch.nn.attention.SDPBackend.MATH,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+        ]
+        expected_prefix = [int(b) for b in backends]
+        default_priority = torch._C._get_sdp_priority_order()
+
+        @torch._dynamo.allow_in_graph
+        def check_priority_active():
+            self.assertTrue(torch._C._has_user_sdp_priority_order())
+            self.assertEqual(
+                torch._C._get_sdp_priority_order()[:2],
+                expected_prefix,
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(backends=backends, set_priority=True):
+                x = x + 1
+                check_priority_active()
+                torch._dynamo.graph_break()
+                check_priority_active()
+                x = x + 1
+            return x
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f(torch.randn(2, 2))
+        self.assertFalse(torch._C._has_user_sdp_priority_order())
+        self.assertEqual(torch._C._get_sdp_priority_order(), default_priority)
+
+    def test_sdpa_kernel_ctx_manager_set_priority_nested_and_duplicate(self):
+        outer = [
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+            torch.nn.attention.SDPBackend.CUDNN_ATTENTION,
+        ]
+        inner = [
+            torch.nn.attention.SDPBackend.MATH,
+            torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+        ]
+        default_priority = torch._C._get_sdp_priority_order()
+
+        @torch._dynamo.allow_in_graph
+        def check_prefix(expected):
+            self.assertTrue(torch._C._has_user_sdp_priority_order())
+            self.assertEqual(
+                tuple(torch._C._get_sdp_priority_order()[: len(expected)]),
+                expected,
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(backends=outer, set_priority=True):
+                check_prefix(
+                    (
+                        int(torch.nn.attention.SDPBackend.FLASH_ATTENTION),
+                        int(torch.nn.attention.SDPBackend.CUDNN_ATTENTION),
+                    )
+                )
+                with torch.nn.attention.sdpa_kernel(backends=inner, set_priority=True):
+                    check_prefix(tuple(int(b) for b in inner))
+                    x = x + 1
+                check_prefix(
+                    (
+                        int(torch.nn.attention.SDPBackend.FLASH_ATTENTION),
+                        int(torch.nn.attention.SDPBackend.CUDNN_ATTENTION),
+                    )
+                )
+            return x
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        opt_f(torch.randn(2, 2))
+        self.assertFalse(torch._C._has_user_sdp_priority_order())
+        self.assertEqual(torch._C._get_sdp_priority_order(), default_priority)
+
     def test_torch_profiler_use_after_with_block(self):
         counters.clear()
 

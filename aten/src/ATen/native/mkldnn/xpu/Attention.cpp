@@ -8,6 +8,7 @@
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <torch/library.h> // NOLINT(misc-header-include-cycle)
 #include <array>
+#include <mutex>
 #include <utility>
 
 namespace {
@@ -216,21 +217,24 @@ bool can_use_mem_efficient_attention(
   return true;
 }
 
-bool priority_order_init = false;
+std::once_flag priority_order_init_flag;
 
 std::array<sdp::SDPBackend, sdp::num_backends> priority_order(
     sdp::sdp_params const& params) {
-  if (!priority_order_init) {
-    priority_order_init = true;
-    const std::vector<int64_t> priority_order = {
+  auto& ctx = at::globalContext();
+  if (ctx.hasUserSetSDPPriorityOrder()) {
+    return ctx.sDPPriorityOrder();
+  }
+  std::call_once(priority_order_init_flag, [&]() {
+    const std::vector<int64_t> default_order = {
         static_cast<int64_t>(at::SDPBackend::overrideable),
         static_cast<int64_t>(at::SDPBackend::flash_attention),
         static_cast<int64_t>(at::SDPBackend::math),
         static_cast<int64_t>(at::SDPBackend::efficient_attention),
         static_cast<int64_t>(at::SDPBackend::cudnn_attention)};
-    at::globalContext().setSDPPriorityOrder(priority_order);
-  }
-  return at::globalContext().sDPPriorityOrder();
+    ctx.setDefaultSDPPriorityOrder(default_order);
+  });
+  return ctx.sDPPriorityOrder();
 }
 
 sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {

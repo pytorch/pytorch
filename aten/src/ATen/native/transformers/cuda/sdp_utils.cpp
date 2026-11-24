@@ -15,6 +15,7 @@
 #include <array>
 #include <c10/util/Exception.h>
 #include <algorithm>
+#include <mutex>
 #include <string_view>
 #include <vector>
 
@@ -74,17 +75,9 @@ constexpr bool kCuDNNFrontendSupportsD256 =
 constexpr bool kCuDNNFrontendSupportsD256 = false;
 #endif
 
-// tracks whether we've set the default priority order once, to avoid setting
-// it redundantly or overwriting a user-specified priority order
-// when the priority order context manager is used before the default priority
-// order is initialized the following happens:
-// (1) the current priority order is queried
-// (2) priority_order() is called, which initializes it to the default as init_ is false
-// (3) the user-specified priority order is set
-// (3.1) we are in the priority context...
-// (3.2) we exit the priority context...
-// (4) the previous priority order (default) is restored
-bool priority_order_init_ = false;
+// Initialize the platform default priority order once, only when no
+// user-specified priority order is active.
+std::once_flag priority_order_init_flag_;
 
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
@@ -119,17 +112,22 @@ bool check_prefer_cudnn_attention() {
 
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
-  if (!priority_order_init_) {
-    priority_order_init_ = true;
-    if (check_prefer_cudnn_attention()) {
-        const std::vector<int64_t> cudnn_order = {static_cast<int64_t>(at::SDPBackend::cudnn_attention),
-                                                  static_cast<int64_t>(at::SDPBackend::flash_attention),
-                                                  static_cast<int64_t>(at::SDPBackend::efficient_attention),
-                                                  static_cast<int64_t>(at::SDPBackend::math)};
-        at::globalContext().setSDPPriorityOrder(cudnn_order);
-    }
+  auto& ctx = at::globalContext();
+  if (ctx.hasUserSetSDPPriorityOrder()) {
+    return ctx.sDPPriorityOrder();
   }
-  return at::globalContext().sDPPriorityOrder();
+  std::call_once(priority_order_init_flag_, [&]() {
+    if (check_prefer_cudnn_attention()) {
+      const std::vector<int64_t> cudnn_order = {
+          static_cast<int64_t>(at::SDPBackend::cudnn_attention),
+          static_cast<int64_t>(at::SDPBackend::flash_attention),
+          static_cast<int64_t>(at::SDPBackend::efficient_attention),
+          static_cast<int64_t>(at::SDPBackend::math),
+          static_cast<int64_t>(at::SDPBackend::overrideable)};
+      ctx.setDefaultSDPPriorityOrder(cudnn_order);
+    }
+  });
+  return ctx.sDPPriorityOrder();
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {

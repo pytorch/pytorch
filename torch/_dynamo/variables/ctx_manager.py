@@ -1584,6 +1584,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
     ) -> "SDPAKernelVariable":
         if isinstance(backends, torch.nn.attention.SDPBackend):
             backends = [backends]
+        backends = list(dict.fromkeys(backends))
         var = SDPAKernelVariable(
             target_values=backends,
             initial_values=None,
@@ -1622,13 +1623,16 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return nodes
 
     def enter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends(
-            with_priority=self.set_priority
+        self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends()
+        self.prev_priority = (
+            tuple(torch._C._get_sdp_priority_order())
+            if self.set_priority and torch._C._has_user_sdp_priority_order()
+            else None
         )
         self.set_cleanup_hook(
             tx,
-            lambda: torch.nn.attention._sdpa_kernel(
-                self.prev_backends, set_priority=self.set_priority
+            lambda: torch.nn.attention._restore_sdpa_kernel(
+                self.prev_backends, self.set_priority, self.prev_priority
             ),
         )
         torch.nn.attention._sdpa_kernel(
@@ -1650,8 +1654,8 @@ class SDPAKernelVariable(ContextWrappingVariable):
         arg = self._backends_to_nodes(tx, self.prev_backends)
         tx.output.create_node(
             "call_function",
-            torch.nn.attention._sdpa_kernel,
-            (arg, bool(self.set_priority)),
+            torch.nn.attention._restore_sdpa_kernel,
+            (arg, bool(self.set_priority), self.prev_priority),
             {},
         )
         return variables.ConstantVariable.create(None)
@@ -1659,10 +1663,14 @@ class SDPAKernelVariable(ContextWrappingVariable):
     def module_name(self) -> str:
         return "torch.nn.attention"
 
-    # use a private version of sdpa_kernel that accepts variadic arguments
+    # use private versions of sdpa_kernel that accept variadic arguments
     # since dynamo reconstructs the contents of target_values one-by-one
     def fn_name(self) -> str:
-        return "_sdpa_kernel_variadic"
+        return (
+            "_sdpa_kernel_variadic_with_priority"
+            if self.set_priority
+            else "_sdpa_kernel_variadic"
+        )
 
     def python_type(self) -> type:
         return contextlib._GeneratorContextManager

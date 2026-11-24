@@ -50,6 +50,8 @@ def _get_sdp_priority_order() -> list[int]:
     """Capture varlen backend priority at trace time."""
     if _is_sdp_priority_order_active():
         return torch._C._get_sdp_priority_order()
+    if torch._C._is_cudnn_sdp_deprioritized():
+        return [_FLASH_ATTENTION_BACKEND, _CUDNN_ATTENTION_BACKEND]
     return [_CUDNN_ATTENTION_BACKEND, _FLASH_ATTENTION_BACKEND]
 
 
@@ -367,7 +369,8 @@ def varlen_attn(
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
     Backend enablement follows :func:`torch.nn.attention.sdpa_kernel`. By default,
-    eligible cuDNN is preferred over Flash; ``set_priority=True`` overrides this order.
+    eligible cuDNN is preferred over Flash unless ``TORCH_CUDNN_SDPA_DEPRIORITIZED=1``
+    is set; ``set_priority=True`` overrides this order.
 
     Args:
         query (Tensor): Query tensor; shape :math:`(T_q, H_q, D)`
