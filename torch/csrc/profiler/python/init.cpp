@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/util/overloaded.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
@@ -597,7 +598,18 @@ void initPythonBindings(PyObject* module) {
           })
       .def_readonly("scope", &torch_op_t::scope_)
       .def_readonly("sequence_number", &torch_op_t::sequence_number_)
-      .def_readonly("allow_tf32_cublas", &torch_op_t::allow_tf32_cublas_);
+      .def_property_readonly(
+          "allow_tf32_cublas",
+          torch::wrap_pybind_function([](const torch_op_t& op) {
+            TORCH_WARN_ONCE(
+                "_ExtraFields_TorchOp.allow_tf32_cublas is deprecated as of "
+                "PyTorch 2.16 and will be removed in 2.18. It reports the TF32 "
+                "matmul setting from when profiling started. Read "
+                "torch.backends.cuda.matmul.fp32_precision instead.");
+            return op.allow_tf32_cublas_;
+          }),
+          ".. deprecated:: 2.16\n"
+          "    Read torch.backends.cuda.matmul.fp32_precision instead.");
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");

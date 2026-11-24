@@ -99,10 +99,9 @@ probing workflow uses `allow-unlisted-model: "true"`; normal callers keep the al
 `.github/workflows/issue-triage-pi.yml` is stage 2 of issue triage, after
 `issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill with
 `global.openai.gpt-6.1-sol` at medium thinking. Other allowlisted models remain available
-through the `model` dispatch input. Distributed triage uses the same default:
+through the `model` dispatch input:
 
-1. **plan** (`pi-triage-plan.yml`, shared with distributed triage; Bedrock, `issues: read`,
-   egress blocked): the model reads the issue through
+1. **plan** (Bedrock, `issues: read`, egress blocked): the model reads the issue through
    read-only `gh` tools (`.github/pi/extensions/github-issue-tools.ts`: `get_issue`,
    `get_issue_comments`, `search_issues`, fixed to the workflow repository) and submits a plan
    matching `.github/pi/schemas/issue-triage-plan.json`.
@@ -110,8 +109,7 @@ through the `model` dispatch input. Distributed triage uses the same default:
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
    dropped), only adds labels, posts fixed template or related-issue comments the bot
    has not already posted, and adds `bot-triaged`. It closes usage questions, expected
-   numerical behavior, or covered reports for catalog-enabled closing umbrellas. It then
-   hands the issue to `distributed-triage-pi.yml`.
+   numerical behavior, or covered reports for catalog-enabled closing umbrellas.
 
 Related-issue discovery uses the existing `search_issues` tool with GitHub search syntax,
 with `get_issue` / `get_issue_comments` for candidate evidence. Triage includes checking for
@@ -144,12 +142,5 @@ redacts download/storage links from the current issue body using a fixed policy 
 the self-contained-reproduction template. Other issue text is preserved; the model cannot
 supply replacement prose.
 
-## Distributed triage
-
-`.github/workflows/distributed-triage-pi.yml` runs the `distributed-triage` skill on issues
-in the `oncall: distributed` queue: after `issue-triage-pi.yml` hands one off, and when the
-daily sweep (`claude-distributed-triage-cron.yml`) dispatches it. It uses the same
-`pi-triage-plan.yml` model job; `scripts/issue_triage_pi/apply_distributed_plan.py` applies
-the plan and adds the `ptd-bot-triaged` marker that the sweep checks. A model-free `record`
-job appends the result to the daily manifest. Dispatch with `mode: dry-run` to see the
-effects without writing.
+Distributed issues are routed in the same pass: the plan picks one `oncall: distributed`
+sub-queue (and module labels for parallelisms), and the apply step adds the parent queue.
