@@ -90,6 +90,9 @@ def index(
 ) -> int:
     from itertools import islice
 
+    if start != 0 or end is not None:
+        start, end, _ = slice(start, end).indices(len(iterator))  # type: ignore[arg-type]
+
     for i, elem in islice(enumerate(iterator), start, end):
         if elem is item or elem == item:
             return i

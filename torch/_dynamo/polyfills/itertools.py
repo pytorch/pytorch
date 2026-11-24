@@ -76,6 +76,7 @@ def accumulate(
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.combinations
 @substitute_in_graph(itertools.combinations, is_embedded_type=True)  # type: ignore[arg-type]
 def combinations(iterable: Iterable[_T], r: int, /) -> Iterator[tuple[_T, ...]]:
+    r = operator.index(r)
     pool = tuple(iterable)
     n = len(pool)
 
@@ -134,29 +135,38 @@ def cycle(iterable: Iterable[_T]) -> Iterator[_T]:
 @substitute_in_graph(itertools.dropwhile, is_embedded_type=True)  # type: ignore[arg-type]
 def dropwhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
     # dropwhile(lambda x: x < 5, [1, 4, 6, 3, 8]) -> 6 3 8
-    if not callable(predicate):
-        raise TypeError(f"'{type(predicate).__name__}' object is not callable")
-
     iterator = iter(iterable)
-    for x in iterator:
-        if not predicate(x):
-            yield x
-            break
 
-    yield from iterator
+    def _dropwhile() -> Iterator[_T]:
+        if not callable(predicate):
+            raise TypeError(f"'{type(predicate).__name__}' object is not callable")
+
+        for x in iterator:
+            if not predicate(x):
+                yield x
+                break
+
+        yield from iterator
+
+    return _dropwhile()
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.takewhile
 @substitute_in_graph(itertools.takewhile, is_embedded_type=True)  # type: ignore[arg-type]
 def takewhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
     # takewhile(lambda x: x<5, [1,4,6,3,8]) → 1 4
-    if not callable(predicate):
-        raise TypeError(f"'{type(predicate).__name__}' object is not callable")
+    iterator = iter(iterable)
 
-    for x in iterable:
-        if not predicate(x):
-            break
-        yield x
+    def _takewhile() -> Iterator[_T]:
+        if not callable(predicate):
+            raise TypeError(f"'{type(predicate).__name__}' object is not callable")
+
+        for x in iterator:
+            if not predicate(x):
+                break
+            yield x
+
+    return _takewhile()
 
 
 @overload
@@ -196,11 +206,16 @@ def starmap(
 # pyrefly: ignore [implicit-any]
 def starmap(function: Callable[..., _T], iterable: Iterable, /) -> Iterable[_T]:
     # starmap(pow, [(2,5), (3,2), (10,3)]) → 32 9 1000
-    if not callable(function):
-        raise TypeError(f"'{type(function).__name__}' object is not callable")
+    iterator = iter(iterable)
 
-    for args in iterable:
-        yield function(*args)
+    def _starmap() -> Iterator[_T]:
+        if not callable(function):
+            raise TypeError(f"'{type(function).__name__}' object is not callable")
+
+        for args in iterator:
+            yield function(*args)
+
+    return _starmap()
 
 
 @substitute_in_graph(itertools.filterfalse, is_embedded_type=True)  # type: ignore[arg-type]
@@ -215,30 +230,55 @@ def filterfalse(function: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.islice
 @substitute_in_graph(itertools.islice, is_embedded_type=True)  # type: ignore[arg-type]
 def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
-    s = slice(*args)
-    start = 0 if s.start is None else s.start
-    stop = s.stop
-    step = 1 if s.step is None else s.step
-    if start < 0 or (stop is not None and stop < 0) or step <= 0:
-        raise ValueError(
-            "Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.",
-        )
+    if not 1 <= len(args) <= 3:
+        bound = "at least 2" if not args else "at most 4"
+        raise TypeError(f"islice expected {bound} arguments, got {len(args) + 1}")
 
-    if stop is None:
-        # TODO: use indices = itertools.count() and merge implementation with the else branch
-        #       when we support infinite iterators
+    def _as_ssize(value: object) -> int:
+        try:
+            index = operator.index(value)  # type: ignore[arg-type]
+        except TypeError:
+            return -1
+        return index if -sys.maxsize - 1 <= index <= sys.maxsize else -1
+
+    start, stop, step = 0, -1, 1
+    stop_arg = args[0] if len(args) == 1 else args[1]
+    if len(args) > 1 and args[0] is not None:
+        start = _as_ssize(args[0])
+    if stop_arg is not None:
+        stop = _as_ssize(stop_arg)
+        if stop == -1:
+            raise ValueError(
+                "Stop argument for islice() must be None or an integer: 0 <= x <= sys.maxsize."
+            )
+    if start < 0 or stop < -1:
+        raise ValueError(
+            "Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize."
+        )
+    if len(args) == 3 and args[2] is not None:
+        step = _as_ssize(args[2])
+    if step < 1:
+        raise ValueError("Step for islice() must be a positive integer or None.")
+
+    iterator = iter(iterable)
+
+    def _islice() -> Iterator[_T]:
         next_i = start
-        for i, element in enumerate(iterable):
-            if i == next_i:
-                yield element
-                next_i += step
-    else:
-        indices = range(max(start, stop))
-        next_i = start
-        for i, element in zip(indices, iterable):
-            if i == next_i:
-                yield element
-                next_i += step
+        if stop == -1:
+            # TODO: use indices = itertools.count() and merge implementation with the else branch
+            #       when we support infinite iterators
+            for i, element in enumerate(iterator):
+                if i == next_i:
+                    yield element
+                    next_i += step
+        else:
+            indices = range(max(start, stop))
+            for i, element in zip(indices, iterator):
+                if i == next_i:
+                    yield element
+                    next_i += step
+
+    return _islice()
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
@@ -261,7 +301,10 @@ def permutations(
 ) -> Iterator[tuple[_T, ...]]:
     pool = tuple(iterable)
     n = len(pool)
-    r = n if r is None else r
+    if r is None:
+        r = n
+    elif not isinstance(r, int):
+        raise TypeError("Expected int as r")
 
     if r < 0:
         raise ValueError("r must be non-negative")
@@ -294,6 +337,12 @@ def permutations(
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
 @substitute_in_graph(itertools.tee)
 def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
+    n = operator.index(n)
+    if n < 0:
+        raise ValueError("n must be >= 0")
+    if n == 0:
+        return ()
+
     iterator = iter(iterable)
     shared_link = [None, None]
 
@@ -316,11 +365,12 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
 def combinations_with_replacement(
     iterable: Iterable[_T], r: int, /
 ) -> Iterator[tuple[_T, ...]]:
-    if r < 0:
-        raise ValueError("r must be non-negative")
-
+    r = operator.index(r)
     pool = tuple(iterable)
     n = len(pool)
+
+    if r < 0:
+        raise ValueError("r must be non-negative")
 
     def _combinations_with_replacement() -> Iterator[tuple[_T, ...]]:
         if r == 0:
