@@ -11,8 +11,11 @@ import abc
 import collections
 import contextlib
 import enum
+import functools
+import inspect
 import operator
 import sys
+import threading
 import types
 import typing
 from collections.abc import Callable, Generator
@@ -32,7 +35,9 @@ from torch._C._dynamo import (
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
+    ObservedAttributeError,
     ObservedTypeError,
+    raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
     UnhandledDescriptorError,
@@ -43,6 +48,8 @@ from ..source import (
     AttrSource,
     DictGetItemSource,
     GetItemSource,
+    is_constant_source,
+    is_from_skip_guard_source,
     Source,
     TypeDictSource,
     TypeMROSource,
@@ -50,6 +57,7 @@ from ..source import (
 )
 from ..utils import (
     get_type_mro_no_user_code,
+    has_custom_metaclass_accessor,
     iter_mro_static_attrs,
     iter_mro_static_dicts,
     specialize_symnode,
@@ -57,8 +65,12 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
+    GetSet,
+    graph_break_on_untracked_vt,
     maybe_get_python_type,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
+    type_qualified_name,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -185,6 +197,15 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 # Flag Include/object.h
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
+Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
+Py_TPFLAGS_HEAPTYPE = 1 << 9
+
+
+def type_is_immutable(obj_type: type, /) -> bool:
+    return bool(
+        type.__dict__["__flags__"].__get__(obj_type, type(obj_type))
+        & Py_TPFLAGS_IMMUTABLETYPE
+    )
 
 
 def type_disallows_instantiation(obj_type: type) -> bool:
@@ -350,6 +371,12 @@ def type_implements_tp_call(obj_type: type) -> bool:
     """Check whether obj_type implements the tp_call slot."""
     _, _, _, type_slot = _get_cached_slots(obj_type)
     return has_slot(type_slot, PyTypeSlots.TP_CALL)
+
+
+def type_implements_tp_descr_set(obj_type: type) -> bool:
+    """Check whether obj_type implements the tp_descr_set slot."""
+    _, _, _, type_slot = _get_cached_slots(obj_type)
+    return has_slot(type_slot, PyTypeSlots.TP_DESCR_SET)
 
 
 def pyiter_check(obj_type: type) -> bool:
@@ -737,8 +764,10 @@ def pynumber_int(
     # Fast path for int (sub)class instances — mirrors PyLong_Check at the
     # top of PyNumber_Long (abstract.c:1531). Avoids infinite recursion for
     # int subclasses like IntEnum whose __int__ calls int() again.
-    if obj.is_python_constant() and isinstance(obj.as_python_constant(), int):
-        return ConstantVariable.create(int(obj.as_python_constant()))
+    if obj.is_python_constant():
+        value = obj.as_python_constant()
+        if isinstance(value, int) and type(value).__int__ is int.__int__:
+            return ConstantVariable.create(int(value))
 
     if obj.tp_as_number.nb_int is not None:
         res = obj.nb_int_impl(tx)
@@ -1227,9 +1256,12 @@ def is_nb_not_implemented(result: VariableTracker) -> bool:
 
 
 def is_python_subtype(w: VariableTracker, v: VariableTracker) -> bool:
-    """Check if w's underlying Python type is a proper subtype of v's."""
+    """Check if w's underlying Python type is a subtype of v's (PyType_IsSubtype).
+
+    Uses the MRO, not issubclass, so ABC virtual subclasses do not count.
+    """
     try:
-        return issubclass(w.python_type(), v.python_type())
+        return v.python_type() in w.python_type().__mro__
     except NotImplementedError:
         return False
 
@@ -1860,36 +1892,6 @@ def slot_wrapper_iadd(
 is_richcompare_not_implemented = is_nb_not_implemented
 
 
-def object_richcompare(
-    self: VariableTracker,
-    tx: "InstructionTranslatorBase",
-    other: VariableTracker,
-    op: str,
-) -> VariableTracker:
-    """object's tp_richcompare.
-
-    https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6263-L6305
-    - __eq__: identity check, else NotImplemented
-    - __ne__: delegates to tp_richcompare(self, other, Py_EQ) and inverts
-    - ordering
-    """
-    if op == "__eq__":
-        identity = vt_identity_compare(self, other)
-        if identity is not None and identity.as_python_constant():
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(NotImplemented)
-    elif op == "__ne__":
-        # https://github.com/python/cpython/blob/e76aa128fe/Objects/typeobject.c#L6279-L6298
-        # Safe to call as_python_constant(): only identity-based types use
-        # object_richcompare, so eq_result is always True or NotImplemented.
-        eq_result = self.tp_richcompare_impl(tx, other, "__eq__")
-        if is_richcompare_not_implemented(eq_result):
-            return eq_result
-        return ConstantVariable.create(not eq_result.as_python_constant())
-    else:
-        return ConstantVariable.create(NotImplemented)
-
-
 def python_constant_richcompare_impl(
     self: VariableTracker,
     tx: "InstructionTranslatorBase",
@@ -2001,7 +2003,7 @@ def generic_richcompare(
         v_type is not None
         and w_type is not None
         and v_type is not w_type
-        and issubclass(w_type, v_type)
+        and v_type in w_type.__mro__
     ):
         checked_reverse = True
         result = w.tp_richcompare_impl(tx, v, reflected)
@@ -2069,11 +2071,11 @@ def generic_hash_impl(
 ) -> tuple[int, bool]:
     """Internal API: compute hash as (value, is_fake).
 
-    Dispatches to the VT's hash_impl.  Called by generic_hash (which wraps
+    Dispatches to the VT's tp_hash_impl.  Called by generic_hash (which wraps
     the result in a VT), container hash_impls (which propagate is_fake),
     and HashableTracker (which just needs the int).
     """
-    return obj.hash_impl(tx)
+    return obj.tp_hash_impl(tx)
 
 
 def generic_hash(
@@ -2274,13 +2276,14 @@ def mro_lookup(py_type: type, name: str) -> object:
 
 
 def _mro_entry_source(klass: type, klass_source: Source, idx: int) -> Source:
-    """Source for ``klass.__mro__[idx]``.
+    r"""Source for ``klass.__mro__[idx]``.
 
     Entry 0 is spelled as the class itself when it is the class, which it is for
     every MRO CPython computes. A metaclass overriding ``mro()`` can put
     something else there, so check rather than assume.
     """
-    if not idx and get_type_mro_no_user_code(klass)[0] is klass:
+    base = get_type_mro_no_user_code(klass)[idx]
+    if not idx and base is klass:
         return klass_source
     return GetItemSource(TypeMROSource(klass_source), idx)
 
@@ -2293,16 +2296,19 @@ def guard_mro_absent(
     stop: int,
 ) -> None:
     """Guard that *name* stays out of the ``__dict__`` of ``klass.__mro__[:stop]``."""
+    guards_context = tx.output.tracing_context.guards_context
+    if guards_context.skip_install or is_from_skip_guard_source(klass_source):
+        return
     for idx in range(stop):
         absent_key = (id(klass), idx, name)
         if absent_key in tx.output.guarded_mro_absent_keys:
             continue
-        tx.output.guarded_mro_absent_keys.add(absent_key)
         install_guard(
             TypeDictSource(_mro_entry_source(klass, klass_source, idx)).make_guard(
                 partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
             )
         )
+        tx.output.guarded_mro_absent_keys.add(absent_key)
 
 
 def mro_attr_source(
@@ -2311,17 +2317,32 @@ def mro_attr_source(
     klass_source: Source,
     name: str,
 ) -> "DictGetItemSource | None":
-    """Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
+    r"""Source naming the raw descriptor *name* resolves to in ``klass.__mro__``.
 
     Reading the attribute back as ``klass_source.name`` would go through
     ``type.__getattribute__``, where a data descriptor on the metaclass wins over
     the class chain -- a different object than `mro_lookup` returned. Index the
     owning class's ``__dict__`` instead.
 
-    Returns None if *name* is absent from the whole MRO; callers decide whether
-    that is an error.
+    Guards absence in every skipped class, including a complete MRO miss.
+    Returns None on a complete miss; callers decide whether that is an error.
     """
     for idx, (base, namespace) in enumerate(iter_mro_static_dicts(klass)):
+        if not is_constant_source(klass_source):
+            direct = not idx and base is klass
+            attr = None
+            if has_custom_metaclass_accessor(base, "__dict__"):
+                attr = "__dict__"
+            elif not direct and has_custom_metaclass_accessor(klass, "__mro__"):
+                attr = "__mro__"
+            if attr is not None:
+                unimplemented(
+                    gb_type="Custom metaclass metadata access",
+                    context=f"metadata={attr}, name={name}",
+                    explanation="Dynamo cannot safely construct a class metadata source "
+                    "through custom metaclass accessors.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         if name not in namespace:
             continue
 
@@ -2345,7 +2366,70 @@ def mro_attr_source(
         tx.output.mro_source_cache[cache_key] = source
         return source
 
+    guard_mro_absent(
+        tx, klass, klass_source, name, len(get_type_mro_no_user_code(klass))
+    )
     return None
+
+
+def _resolve_descriptor_set(  # noqa: RVT001
+    tx: "InstructionTranslatorBase",
+    descriptor: object,
+    obj: VariableTracker,
+    value: VariableTracker | None,
+    source: "Source | None",
+) -> "VariableTracker | None":
+    if isinstance(descriptor, property):
+        prop_vt = variables.PropertyVariable(descriptor, source=source)
+        return prop_vt.tp_descr_set_impl(tx, obj, value)
+    if isinstance(descriptor, types.GetSetDescriptorType):
+        gs_vt = variables.GetSetDescriptorVariable(descriptor, source=source)
+        return gs_vt.tp_descr_set_impl(tx, obj, value)
+    if isinstance(descriptor, types.MemberDescriptorType):
+        md_vt = variables.MemberDescriptorVariable(descriptor, source=source)
+        return md_vt.tp_descr_set_impl(tx, obj, value)
+    _tuplegetter = collections._tuplegetter  # pyrefly: ignore[missing-attribute]
+    if isinstance(descriptor, _tuplegetter):
+        tg_vt = variables.TupleGetterVariable(descriptor, source=source)
+        return tg_vt.tp_descr_set_impl(tx, obj, value)
+    # Any other type with a non-NULL tp_descr_set, e.g. a descriptor class
+    if type_implements_tp_descr_set(type(descriptor)):
+        if source is None:
+            descr_vt: VariableTracker = variables.UserDefinedObjectVariable(descriptor)
+        else:
+            descr_vt = VariableTracker.build(tx, descriptor, source)
+        return descr_vt.tp_descr_set_impl(tx, obj, value)
+    return None
+
+
+def _is_skipped_constant_property(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> bool:
+    if type(name) is not str:
+        return False
+    obj = obj.realize()
+    if (
+        not variables.ConstantVariable.is_constant_vt(obj)
+        or tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+        or obj.lookup_tp_getset_member(name) is not None
+    ):
+        return False
+    type_attr = mro_lookup(obj.python_type(), name)
+    if type(type_attr) is not property:
+        return False
+    # Python getters can have specialized SkipFunctionVariable handlers.
+    if isinstance(type_attr.fget, types.FunctionType):
+        return False
+    prop_source = (
+        mro_attr_source(tx, obj.python_type(), TypeSource(obj.source), name)
+        if obj.source
+        else None
+    )
+    prop_vt = variables.PropertyVariable.create(type_attr, prop_source)
+    fget_vt = prop_vt.tp_getattro_impl(tx, "fget").realize()
+    return isinstance(fget_vt, variables.SkipFunctionVariable)
 
 
 def _resolve_descriptor_get(
@@ -2500,8 +2584,7 @@ def object_generic_getattr(
         # graph nodes, suppression) that MRO-based resolution via
         # UserMethodVariable would bypass.
         if _is_method_type(type_attr) and (
-            obj._lookup_tp_table(name, "tp_methods") is not None
-            or _has_custom_call_method(obj)
+            obj.lookup_tp_method(name) is not None or _has_custom_call_method(obj)
         ):
             return variables.CallMethodVariable(obj, name, source=source)
 
@@ -2523,7 +2606,20 @@ def object_generic_getattr(
     if getattr_result is not None:
         return getattr_result
 
-    # Step 7: Attribute not found -- signal to caller to fall back.
+    # Step 7: Attribute not found. With generic tp_getattro, no instance
+    # __dict__ and no __getattr__, the MRO walk was the whole lookup, so this
+    # is CPython's AttributeError; otherwise signal the caller to fall back.
+    from .user_defined import _safe_c_slots
+
+    if (
+        py_type.__dictoffset__ == 0
+        and py_type.__getattribute__ in _safe_c_slots()
+        and mro_lookup(py_type, "__getattr__") is NO_SUCH_SUBOBJ
+    ):
+        raise_attribute_error(
+            tx,
+            f"'{py_type.__name__}' object has no attribute '{name}'",
+        )
     raise _UnhandledDescriptorError(
         f"object_generic_getattr: '{py_type.__name__}' has no attribute '{name}'"
     )
@@ -2550,7 +2646,12 @@ def generic_getattr(
     # Side effects: check for pending attribute mutations.
     if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
-            value = tx.output.side_effects.load_attr(obj, name)
+            is_module = isinstance(obj, variables.PythonModuleVariable)
+            value = tx.output.side_effects.load_attr(obj, name, deleted_ok=is_module)
+            if isinstance(value, variables.DeletedVariable):
+                if default is _NO_DEFAULT:
+                    raise_observed_exception(AttributeError, tx)
+                return default  # type: ignore[return-value]
             # A pending store of a descriptor onto a class lands in cls.__dict__,
             # so reading it back has to run tp_descr_get the way type_getattro
             # does -- otherwise `C.h = staticmethod(f); type(C.h)` reports
@@ -2572,18 +2673,13 @@ def generic_getattr(
 
     # Handle default for getattr(obj, name, default).
     if default is not _NO_DEFAULT:
-        hasattr_var = obj.call_obj_hasattr(tx, name)
-        if not hasattr_var.is_constant_match(True, False):
-            raise AssertionError(
-                f"hasattr_var must be a constant True or False, got {hasattr_var}"
-            )
-        if not hasattr_var.as_python_constant():
+        if not generic_hasattr_str(tx, obj, name):
             return default  # type: ignore[return-value]
 
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a tp_getattro_impl override need not repeat the consult.
     getset = obj.lookup_tp_getset_member(name)
-    if getset is not None:
+    if getset is not None and getset.getter is not None:
         result = getset.getter(obj, tx)
         if result is not None:
             return result
@@ -2596,3 +2692,276 @@ def generic_getattr(
         raise
     except NotImplementedError:
         return variables.GetAttrVariable(obj, name, source=source)
+
+
+def generic_hasattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: VariableTracker,
+) -> ConstantVariable:
+    """Dynamo's PyObject_HasAttr: validate the name, then delegate.
+
+    https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1414
+    """
+    if not issubclass(name.python_type(), str):
+        raise_type_error(
+            tx, f"attribute name must be string, not '{name.python_type_name()}'"
+        )
+    attr_name = name.as_python_constant()
+    return ConstantVariable.create(generic_hasattr_str(tx, obj, attr_name))
+
+
+def generic_hasattr_str(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+) -> bool:
+    """Dynamo's PyObject_GetOptionalAttrString: call tp_getattro, suppress AttributeError.
+
+    CPython has no tp_hasattr slot. hasattr() is PyObject_GetOptionalAttr over
+    tp_getattro, so it cannot disagree with getattr();
+    https://github.com/python/cpython/blob/848cb25624ab44c9fef2966c777419376b65af1b/Objects/object.c#L1321
+    """
+    if type(obj).call_obj_hasattr is not VariableTracker.call_obj_hasattr:
+        try:
+            return obj.call_obj_hasattr(tx, name).as_python_constant()
+        except NotImplementedError:
+            pass
+
+    try:
+        # generic_getattr, not tp_getattro_impl, so pending in-frame stores
+        # and tp_getset/tp_members resolve the same way getattr() sees them.
+        # A typed GetAttrVariable is built only after a real getattr found the
+        # value, so it proves the attribute exists; an untyped one is a
+        # deferred read and no evidence, so fall through to the graph break.
+        # A lazy VT wraps a real value, and realizing it would install guards
+        # on a value hasattr never reads.
+        value = generic_getattr(tx, obj, name)
+        if (
+            isinstance(value, variables.LazyVariableTracker)
+            or not isinstance(value, variables.GetAttrVariable)
+            or value.py_type is not None
+        ):
+            # A lazy read installs no guards, so HASATTR keeps a True answer
+            # valid. Skip it when only a user __getattr__ found the name:
+            # HASATTR runs the real hasattr() when guards are built, which would
+            # call that __getattr__, and it may mutate the object
+            # (tempfile._TemporaryFileWrapper caches into __dict__). The traced
+            # __getattr__ already guarded its own reads.
+            found_by_user_getattr = (
+                isinstance(obj, variables.UserDefinedObjectVariable)
+                and isinstance(obj._check_for_getattr(), types.FunctionType)
+                and inspect.getattr_static(obj.value, name, NO_SUCH_SUBOBJ)
+                is NO_SUCH_SUBOBJ
+            )
+            if obj.source and not found_by_user_getattr:
+                install_guard(
+                    obj.source.make_guard(
+                        functools.partial(GuardBuilder.HASATTR, attr=name)
+                    )
+                )
+            return True
+    except ObservedAttributeError:
+        tx.exn_vt_stack.clear_current_exception()
+        # No CPython analogue. A False answer rests on the attribute staying
+        # absent, and nothing else guards that.
+        if obj.source:
+            install_guard(
+                obj.source.make_guard(
+                    functools.partial(GuardBuilder.HASATTR, attr=name)
+                )
+            )
+        return False
+    except NotImplementedError:
+        pass
+
+    unimplemented(
+        gb_type="Unsupported hasattr call",
+        context=f"generic_hasattr {obj} {name}",
+        explanation=f"Dynamo does not know how to trace the function `{obj.debug_repr()}`",
+        hints=[
+            f"Avoid calling `hasattr({obj.__class__.__name__}, {name})` in your code.",
+            *graph_break_hints.SUPPORTABLE,
+        ],
+    )
+
+
+def object_generic_setattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: VariableTracker,
+    value: "VariableTracker | None",
+) -> VariableTracker:
+    return object_generic_setattr_str(tx, obj, name.as_python_constant(), value)
+
+
+def object_generic_setattr_str(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: str,
+    value: "VariableTracker | None",
+) -> VariableTracker:
+    """Dynamo's PyObject_GenericSetAttr.
+
+    ``value is None`` means delete (CPython passes NULL for __delattr__).
+
+    Steps:
+      1. tp_getset/tp_members -> the type's data descriptors, as modeled
+      2. Data descriptor -> obj.setattr_descriptor(tx, name, value)
+      3. Instance dict
+      4. AttributeError
+    """
+
+    if (
+        torch.distributed.is_available()
+        and isinstance(obj, variables.UserDefinedObjectVariable)
+        and type(obj.value) is torch.distributed.P2POp
+        and (
+            tx.output.side_effects.has_pending_mutation_of_attr(obj, name)
+            or name in obj.value.__dict__
+        )
+    ):
+        unimplemented(
+            gb_type="P2POp mutation",
+            context=f"object={obj}, name={name}, value={value}",
+            explanation="Dynamo does not support mutating torch.distributed.P2POp instances.",
+            hints=[
+                "Construct a new torch.distributed.P2POp instead of mutating an existing one inside torch.compile.",
+            ],
+        )
+
+    py_type = maybe_get_python_type(obj)
+    getset = obj.lookup_tp_getset_member(name)
+    if getset is not None:
+        # getset_set's wording; a READONLY tp_members entry keeps
+        # PyMember_SetOne's "readonly attribute" from readonly_setter itself.
+        if getset.setter is None or (
+            isinstance(getset, GetSet) and getset.setter is readonly_setter
+        ):
+            raise_attribute_error(
+                tx,
+                f"attribute '{name}' of '{type_qualified_name(py_type)}' objects is not writable",
+            )
+        else:
+            result = getset.setter(obj, tx, value)
+            if result is not None:
+                return result
+
+    # Heap types can have data descriptors that override instance dict
+    attr = mro_lookup(py_type, name)
+
+    if attr is not NO_SUCH_SUBOBJ:
+        # The descriptor lives in a class __dict__ along the MRO, so it is
+        # sourced by walking it (as the getattr path does).  AttrSource(
+        # obj.source, name) would instead name the value it computes.  An
+        # object built during tracing has no source, but its class may.
+        cls_source = getattr(obj, "cls_source", None) or (
+            TypeSource(obj.source) if obj.source else None
+        )
+        descr_source = (
+            mro_attr_source(tx, py_type, cls_source, name) if cls_source else None
+        )
+
+        result = _resolve_descriptor_set(tx, attr, obj, value, descr_source)
+        if result is not None:
+            return result
+
+    has_dict = py_type.__dictoffset__ != 0 or isinstance(
+        getattr(obj, "value", None), threading.local
+    )
+
+    if has_dict is False:
+        # _PyObject_GenericSetAttrWithDict: the message depends on whether
+        # _PyType_Lookup found anything, then on whether tp_setattro is generic.
+        if attr is not NO_SUCH_SUBOBJ:
+            raise_attribute_error(
+                tx,
+                f"'{obj.python_type_name()}' object attribute '{name}' is read-only",
+            )
+        if py_type.__setattr__ is object.__setattr__:
+            raise_attribute_error(
+                tx,
+                f"'{obj.python_type_name()}' object has no attribute '{name}' and no __dict__ for setting new attributes",
+            )
+        raise_attribute_error(
+            tx,
+            f"'{obj.python_type_name()}' object has no attribute '{name}'",
+        )
+    else:
+        se = tx.output.side_effects
+        obj = obj.realize()
+        if not se.is_attribute_mutation(obj):
+            if isinstance(obj, variables.UserDefinedObjectVariable):
+                # A user-defined object reaches a write untracked only when it
+                # predates tracing but arrived without a source, so there is no
+                # way to reload it afterwards and replay the write onto it.
+                from ..side_effects import SideEffects
+
+                if SideEffects.cls_supports_mutation_side_effects(type(obj.value)):
+                    if obj.source is not None:
+                        graph_break_on_untracked_vt(obj, name, value)
+                    unimplemented(
+                        gb_type="Attribute mutation on an untracked user-defined object",
+                        context=f"object={obj}, name={name}, value={value}",
+                        explanation="Dynamo cannot replay this mutation after the "
+                        "graph: the object predates tracing but has no source to "
+                        "reload it from.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+            if obj.is_tensor() or isinstance(obj, variables.PythonModuleVariable):
+                # handle_traced_output leaves aliased Tensor outputs untracked
+                # (repeated objects, returned inputs): replaying onto them as
+                # new objects would be wrong.
+                unimplemented(
+                    gb_type="setattr() on unsupported type",
+                    context=f"setattr({obj}, {name}, {value})",
+                    explanation=f"setattr() is not supported on type {obj.python_type_name()}",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            se.track_attribute_mutation_new(obj)
+
+        if value is None:
+            # Can only delete attributes that exists
+            def raise_missing_attr():
+                raise_attribute_error(
+                    tx,
+                    f"'{obj.python_type_name()}' object has no attribute '{name}'",
+                )
+
+            if se.has_pending_mutation_of_attr(obj, name):
+                attr = se.load_attr(obj, name, deleted_ok=True)
+                if isinstance(attr, variables.DeletedVariable):
+                    raise_missing_attr()
+            elif not obj.get_dict_vt(tx).contains(name):
+                raise_missing_attr()
+
+        se.store_attr(
+            obj,
+            name,
+            variables.DeletedVariable() if value is None else value,
+            AttrMutationKind.INSTANCE_DICT,
+        )
+    return ConstantVariable.create(None)
+
+
+def generic_setattr(
+    tx: "InstructionTranslatorBase",
+    obj: VariableTracker,
+    name: VariableTracker,
+    value: "VariableTracker | None",
+) -> VariableTracker:
+    """Dynamo's PyObject_SetAttr / PyObject_DelAttr: assignment dispatch.
+
+    Resolves the name to a str and calls the VT's tp_setattro_impl.  Returns
+    None (the value of a `setattr()` call), not the stored value.
+    """
+    obj = obj.realize()
+    if value is not None:
+        value = value.realize()
+    if not issubclass(name.python_type(), str):
+        raise_type_error(
+            tx,
+            f"attribute name must be string, not '{name.python_type_name()}'",
+        )
+    obj.tp_setattro_impl(tx, name, value)
+    return ConstantVariable.create(None)

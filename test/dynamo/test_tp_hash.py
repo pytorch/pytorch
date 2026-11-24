@@ -1,14 +1,23 @@
 # Owner(s): ["module: dynamo"]
-"""Tests for hash_impl: unified hash() / __hash__ protocol in Dynamo."""
+"""Tests for tp_hash_impl: unified hash() / __hash__ protocol in Dynamo."""
 
 import sys
+import unittest
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 
 
+@instantiate_parametrized_tests
 class TpHashTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_hash_equals(self, value):
         """Assert Dynamo's hash(value) matches eager Python's hash(value)."""
         expected = hash(value)
@@ -300,6 +309,123 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
                 return self.x * 31
 
         self._assert_hash_equals(MyObj(7))
+
+    @parametrize(
+        "value",
+        [
+            -1,
+            -2,
+            0,
+            1,
+            sys.maxsize,
+            -sys.maxsize - 1,
+            sys.hash_info.modulus,
+            sys.maxsize + 1,
+            -sys.maxsize - 2,
+            2**100,
+            -(2**100),
+        ],
+    )
+    def test_custom_hash_normalization(self, value):
+        class CustomHash:
+            def __hash__(self):
+                return value
+
+        def fn(x, obj):
+            return x + 1, hash(obj), obj.__hash__()
+
+        x = torch.ones(1)
+        obj = CustomHash()
+        expected = fn(x, obj)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), expected)
+        self.assertEqual(expected[2], value)
+
+    @parametrize("value", [-1, 2**100, -(2**100)])
+    def test_custom_hash_normalization_container_lookup(self, value):
+        class CustomHash:
+            def __hash__(self):
+                return value
+
+            def __eq__(self, other):
+                return other == normalized
+
+        normalized = hash(CustomHash())
+        obj = CustomHash()
+
+        def fn(x, obj):
+            return (
+                x + {obj: 7}.get(normalized, 0),
+                normalized in {obj},
+                obj in {normalized},
+                {normalized: 9}.get(obj, 0),
+            )
+
+        x = torch.ones(1)
+        expected = fn(x, obj)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), expected)
+        self.assertEqual(expected[1:], (True, True, 9))
+
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_custom_hash_normalization_symbolic(self):
+        class ShapeHash:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __hash__(self):
+                return self.tensor.size(0) - 6
+
+        def fn(x):
+            return x + 1, hash(ShapeHash(x))
+
+        x = torch.ones(5)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(fn(x)[1], -2)
+
+    @parametrize("value", [-1, sys.maxsize, 2**100])
+    def test_custom_hash_int_subclass_ignores_overrides(self, value):
+        class HashInt(int):
+            def __index__(self):
+                raise AssertionError("must not call __index__")
+
+            def __hash__(self):
+                raise AssertionError("must not call returned int's __hash__")
+
+        returned = HashInt(value)
+
+        class CustomHash:
+            def __hash__(self):
+                return returned
+
+        obj = CustomHash()
+
+        def fn(x, obj):
+            return x + 1, hash(obj)
+
+        x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, obj), fn(x, obj))
+
+    def test_custom_hash_normalizer_bypasses_int_override(self):
+        from torch._dynamo.variables.user_defined import _normalize_custom_hash
+
+        class HashInt(int):
+            def __int__(self):
+                raise AssertionError("must not call __int__")
+
+            def __index__(self):
+                raise AssertionError("must not call __index__")
+
+            def __hash__(self):
+                raise AssertionError("must not call returned int's __hash__")
+
+        for value in (-1, sys.maxsize, 2**100):
+            expected = -2 if value == -1 else value
+            if value > sys.maxsize:
+                expected = int.__hash__(value)
+            self.assertEqual(_normalize_custom_hash(HashInt(value)), expected)
 
     def test_hash_user_class_custom_hash_as_dict_key(self):
         """Custom __hash__ works for dict key usage."""
@@ -593,7 +719,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         self._assert_hash_equals(len)
 
     def test_hash_list_type(self):
-        """hash(list) exercises the as_python_constant fallback in base hash_impl."""
+        """hash(list) exercises the as_python_constant fallback in base tp_hash_impl."""
         self._assert_hash_equals(list)
 
     # --- C tp_hash types ---
@@ -650,10 +776,11 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
 
     # --- DistributedVariable ---
 
+    @unittest.skipIf(
+        not torch.distributed.is_available(), "torch.distributed not available"
+    )
     def test_hash_distributed_group_member(self):
         """DistributedVariable (WorldMetaClassVariable): hash of GroupMember."""
-        if not torch.distributed.is_available():
-            self.skipTest("torch.distributed not available")
         import torch.distributed as dist
 
         self._assert_hash_equals(dist.GroupMember)
@@ -681,6 +808,119 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         self._assert_hash_equals(_HashTestOpaque(42))
 
     # --- Dunder __hash__ and consistency ---
+
+    def test_dunder_hash_exact_bool(self):
+        def fn(x, value):
+            return x.sin(), bool.__hash__(value)
+
+        x = torch.tensor(0)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        for value in (True, False, True):
+            self.assertEqual(compiled(x, value), fn(x, value))
+
+    def test_dunder_hash_bool_accepts_int(self):
+        def fn(x):
+            return x.sin(), bool.__hash__(5)
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_dunder_hash_bound_builtin_extra_argument(self):
+        def fn(x):
+            try:
+                return x.sin(), len.__hash__(x)
+            except TypeError as exc:
+                return x.sin(), str(exc)
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_dunder_hash_object_alias_second_call(self):
+        def fn(x, a, b):
+            return x.sin(), object.__hash__(a) == object.__hash__(b)
+
+        x = torch.tensor(0)
+        a, b = object(), object()
+        compiled = torch.compile(fn, backend="eager")
+        self.assertEqual(compiled(x, a, b), fn(x, a, b))
+        self.assertEqual(compiled(x, a, a), fn(x, a, a))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, a, b)
+
+    # The second call makes the range bounds symbolic and RangeVariable.tp_hash_impl
+    # needs constants, so it raises an internal error instead of a graph break.
+    @unittest.expectedFailure
+    def test_dunder_hash_range_second_call(self):
+        def fn(x, r):
+            return x.sin(), range.__hash__(r)
+
+        x = torch.tensor(0)
+        compiled = torch.compile(fn, backend="eager")
+        for r in (range(3), range(4)):
+            self.assertEqual(compiled(x, r), fn(x, r))
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported unbound builtin __hash__ call"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, range(3))
+
+    @parametrize("receiver", ["object", "bytes_subclass"])
+    @parametrize("catch_type_error", [False, True])
+    def test_dunder_hash_preserves_base_method(self, receiver, catch_type_error):
+        class HashedBytes(bytes):
+            def __hash__(self):
+                return 123
+
+        value = HashedBytes(b"hello")
+
+        def object_hash():
+            return object.__hash__(5)
+
+        def bytes_hash():
+            return bytes.__hash__(value)
+
+        hash_fn = object_hash if receiver == "object" else bytes_hash
+
+        def fn(x):
+            y = x.sin()
+            if catch_type_error:
+                try:
+                    return y, hash_fn()
+                except TypeError:
+                    return y, None
+            return y, hash_fn()
+
+        x = torch.tensor(0)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_dunder_hash_bool_type_invalid_receiver(self):
+        def fn(x):
+            return x.sin(), bool.__hash__("hello")
+
+        x = torch.tensor(0)
+        with self.assertRaises(TypeError) as eager_error:
+            fn(x)
+        with self.assertRaises(TypeError) as compiled_error:
+            torch.compile(fn, backend="eager")(x)
+        self.assertEqual(str(compiled_error.exception), str(eager_error.exception))
+
+        def catches_type_error(x):
+            try:
+                return fn(x)
+            except TypeError as exc:
+                return x.sin(), str(exc)
+
+        self.assertEqual(
+            torch.compile(catches_type_error, backend="eager", fullgraph=True)(x),
+            catches_type_error(x),
+        )
 
     def test_dunder_hash_int(self):
         expected = (42).__hash__()

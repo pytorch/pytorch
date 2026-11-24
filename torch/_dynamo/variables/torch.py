@@ -65,6 +65,7 @@ from ..device_interface import (
     get_registered_device_interfaces,
 )
 from ..exc import (
+    CompileOnOneRankUnsupported,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -83,6 +84,7 @@ from ..source import (
     CallFunctionNoArgsSource,
     GlobalStateSource,
     ImportSource,
+    is_constant_source,
     SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
@@ -587,8 +589,10 @@ class BaseTorchVariable(VariableTracker):
             install_guard(source.make_guard(GuardBuilder.MODULE_MATCH))
         elif inspect.isfunction(value):
             install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
-        elif inspect.isbuiltin(value) or isinstance(
-            value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket)
+        elif (
+            inspect.isbuiltin(value)
+            or (inspect.ismethoddescriptor(value) and not is_constant_source(source))
+            or isinstance(value, (torch._ops.OpOverload, torch._ops.OpOverloadPacket))
         ):
             install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         elif is_wrapper_or_member_descriptor(value) or isinstance(
@@ -622,6 +626,13 @@ class BaseTorchVariable(VariableTracker):
 
     def get_real_python_backed_value(self) -> Any:
         return self.value
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
 
     def nb_or_impl(
         self,
@@ -660,21 +671,13 @@ class BaseTorchVariable(VariableTracker):
             return VariableTracker.build(tx, NotImplemented)
         return VariableTracker.build(tx, result)
 
-    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+    def tp_hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
-        result = hasattr(self.value, name)
-        return VariableTracker.build(tx, result)
+        return VariableTracker.build(tx, hasattr(self.value, name))  # type: ignore[return-value]
 
     def can_constant_fold_through(self) -> bool:
         if self.value in constant_fold_functions:
@@ -1003,6 +1006,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             )
         elif self.value is torch.nn.attention.sdpa_kernel.__wrapped__:  # type: ignore[attr-defined]
             name_to_arg_map = bind_args_cached(
+                self,
                 self.value,
                 tx,
                 self.source,
@@ -1979,6 +1983,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and tf_state.in_torch_function_mode()
             ):
                 return VariableTracker.build(tx, True)
+            if not tf_state.torch_function_subclass_enabled:
+                return VariableTracker.build(tx, False)
             elems = (
                 unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
@@ -3116,7 +3122,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-                stream_var = tx.symbolic_stream_state.cur_stream(device)
+                stream_var = tx.symbolic_stream_state.cur_stream(device, tx=tx)
                 stream_variable_cls = _get_stream_variable_cls(self.value)
                 if stream_variable_cls is not None and not isinstance(
                     stream_var, stream_variable_cls
@@ -3129,7 +3135,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         source=stream_var.source,
                     )
                 return stream_var
-            except Unsupported:
+            except (CompileOnOneRankUnsupported, Unsupported):
                 raise
             except Exception as e:
                 unimplemented(
@@ -5043,13 +5049,6 @@ class DispatchKeySetVariable(BaseTorchVariable):
     ) -> "DispatchKeySetVariable":
         install_guard(source.make_guard(GuardBuilder.DISPATCH_KEY_SET_MATCH))
         return cls(value, source=source)
-
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import python_constant_richcompare_impl
-
-        return python_constant_richcompare_impl(self, tx, other, op)
 
     def has(
         self,

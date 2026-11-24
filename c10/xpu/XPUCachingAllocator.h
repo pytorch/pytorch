@@ -2,6 +2,7 @@
 
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/util/llvmMathExtras.h>
 #include <c10/xpu/XPUStream.h>
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -33,13 +34,15 @@ class XPUAllocator : public DeviceAllocator {
 
 #if SYCL_COMPILER_VERSION >= 20260200
     namespace syclex = sycl::ext::oneapi::experimental;
-    const auto arch = C10_XPU_CHECK(device.get_info<syclex::info::device::architecture>());
-    if (arch < syclex::architecture::intel_gpu_bmg_g21) {
+    // Only Xe2+ discrete GPUs need adjustment; integrated GPUs already account
+    // for the headroom in the reported free memory.
+    if (C10_XPU_CHECK(device.has(sycl::aspect::ext_oneapi_is_integrated_gpu)) ||
+        C10_XPU_CHECK(device.get_info<syclex::info::device::architecture>()) <
+            syclex::architecture::intel_gpu_bmg_g21) {
       return {free, total};
     }
     // See
     // https://github.com/intel/compute-runtime/blob/master/programmers-guide/DEVICE_MEMORY_ACCOUNTING.md#umd-headroom.
-    constexpr double kIntegratedGpuUsableFraction = 0.94;
 #ifdef _WIN32
     constexpr double kDiscreteGpuUsableFraction = 0.98;
 #else
@@ -52,12 +55,12 @@ class XPUAllocator : public DeviceAllocator {
         std::make_tuple(major, minor, patch) > std::make_tuple(1, 18, 40196);
     const double kDiscreteGpuUsableFraction = is_new_driver ? 0.98 : 0.95;
 #endif
-    const double usable_fraction =
-        C10_XPU_CHECK(device.has(sycl::aspect::ext_oneapi_is_integrated_gpu))
-        ? kIntegratedGpuUsableFraction
-        : kDiscreteGpuUsableFraction;
-    const size_t free_adjust =
-        free + static_cast<size_t>((1 - usable_fraction) * total);
+    // NEO page-aligns the advertised total (usable_fraction * KMD size):
+    // https://github.com/intel/compute-runtime/blob/034eda04584302c2be0e227d186e33a7eba0d034/shared/source/device/device_caps.cpp#L78
+    // Use 4096 here as the same with NEO's MemoryConstants::pageSize.
+    const size_t umd_total = c10::llvm::alignDown(
+        static_cast<uint64_t>(kDiscreteGpuUsableFraction * total), 4096);
+    const size_t free_adjust = free + (total - umd_total);
     TORCH_CHECK(
         free_adjust <= total, "Calculated free memory exceeds total memory.");
     return {free_adjust, total};
