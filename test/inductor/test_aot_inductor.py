@@ -1585,19 +1585,8 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skip_if_device(
-        lambda device: device == "cpu" and GPU_TYPE == "xpu",
-        "In this scenario, the test case will run XPU code in AOTIModelContainerRunnerCpu, which is not reasonable,See issue #140805",
-    )
     @requires_gpu
     def test_multi_device(self):
-        if self.device == "cpu" and GPU_TYPE == "xpu":
-            raise unittest.SkipTest(
-                "In this scenario, the test case will run XPU code in "
-                "AOTIModelContainerRunnerCpu, which is not reasonable,"
-                "See issue #140805"
-            )
-
         class Model(torch.nn.Module):
             def forward(self, x):
                 x = x + 1
@@ -8179,9 +8168,6 @@ class AOTInductorTestsTemplate:
             # ~1e-3; the profiling assertions above are this test's focus.
             self.check_model(Model(self.device), example_inputs, atol=1e-2, rtol=1e-2)
 
-    @skip_if_device(
-        lambda device: device == "xpu", "XPU has no fused fp32 SDPA backend"
-    )
     @unittest.skipIf(
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
@@ -8195,8 +8181,6 @@ class AOTInductorTestsTemplate:
         #
         # A fused backend is required: without one SDPA decomposes to math and
         # emits no extern shim. CPU always has one; XPU has no fp32 fused path.
-        if self.device == "xpu":
-            raise unittest.SkipTest("XPU has no fused fp32 SDPA backend")
         if self.device != "cpu" and not (
             PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
         ):
