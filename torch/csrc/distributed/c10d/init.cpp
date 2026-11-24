@@ -39,6 +39,7 @@
 #include <torch/csrc/distributed/c10d/NCCLCommon.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/nccl/NCCLXStub.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NCCLMemAllocator.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLLazy.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
@@ -4725,6 +4726,14 @@ Returns:
 #endif
 
 #ifdef USE_C10D_NCCL
+  // Returned by ProcessGroupNCCL2.mem_allocator and allocator(); pybind can
+  // only convert it to Python when the dynamic type is registered.
+  py::class_<
+      ::c10d::nccl2::NCCLMemAllocator,
+      c10::cuda::CUDACachingAllocator::CUDAAllocator,
+      std::shared_ptr<::c10d::nccl2::NCCLMemAllocator>>(
+      module, "_NCCLMemAllocator");
+
   processGroupNCCL2
       .def(
           py::init(
@@ -4769,16 +4778,23 @@ Returns:
           &::c10d::nccl2::ProcessGroupNCCL::getError,
           py::call_guard<py::gil_scoped_release>())
       .def(
+          "allocator",
+          [](::c10d::nccl2::ProcessGroupNCCL& self, bool symm) {
+            return self.getMemAllocator(symm);
+          },
+          py::arg("symm") = false,
+          R"(Return an allocator for ``torch.cuda.MemPool``; the same object on every call with the same ``symm``. With ``symm=False`` it is the process-wide ``mem_allocator``; its segments, like all segments, are registered with every communicator. With ``symm=True`` it belongs to this communicator: each segment also gets a symmetric window on it when allocated, removed when the pool frees the segment (``empty_cache`` or the pool's destruction). That is collective: every rank must allocate from the pool in the same order and sizes, and free it at the same point.)")
+      .def(
           "register_mem_pool",
           &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
           py::arg("pool"),
           py::arg("symm") = false,
-          R"(Register ``pool``'s segments with this communicator. With ``symm=True``, its segments also get symmetric windows; this is collective, as are later allocations from the pool. Call :meth:`deregister_mem_pool` before re-registering with a different ``symm``.)")
+          R"(No-op: every segment is registered with this communicator, and a pool from ``allocator(symm=True)`` already has its symmetric windows. Raises if ``symm`` does not match how ``pool`` was created, or if a ``symm=True`` pool came from another communicator's allocator.)")
       .def(
           "deregister_mem_pool",
           &::c10d::nccl2::ProcessGroupNCCL::deregisterMemPool,
           py::arg("pool"),
-          R"(Deregister ``pool`` from this communicator and tear down its segment windows.)")
+          R"(No-op: a pool's symmetric windows are removed when the pool frees its segments.)")
       .def(
           "perform_nocolor_split",
           &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
@@ -4855,13 +4871,20 @@ Returns:
             self.getPrimary()->performNocolorSplit(device);
           })
       .def(
+          "allocator",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self, bool symm) {
+            return self.getPrimary()->getMemAllocator(symm);
+          },
+          py::arg("symm") = false,
+          R"(Return ``allocator(symm)`` of the primary communicator. See ``ProcessGroupNCCL2.allocator``.)")
+      .def(
           "register_mem_pool",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self,
              at::cuda::MemPool* pool,
              bool symm) { self.getPrimary()->registerMemPool(pool, symm); },
           py::arg("pool"),
           py::arg("symm") = false,
-          R"(Register ``pool``'s segments with the primary communicator. With ``symm=True``, its segments also get symmetric windows; this is collective, as are later allocations from the pool. Call :meth:`deregister_mem_pool` before re-registering with a different ``symm``.)")
+          R"(No-op: every segment is registered with the primary communicator, and a pool from ``allocator(symm=True)`` already has its symmetric windows. Raises if ``symm`` does not match how ``pool`` was created, or if a ``symm=True`` pool came from another communicator's allocator.)")
       .def(
           "deregister_mem_pool",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self,
@@ -4869,7 +4892,7 @@ Returns:
             self.getPrimary()->deregisterMemPool(pool);
           },
           py::arg("pool"),
-          R"(Deregister ``pool`` from the primary communicator and tear down its segment windows.)")
+          R"(No-op: a pool's symmetric windows are removed when the pool frees its segments.)")
       .def(
           "_comm_ptr",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {

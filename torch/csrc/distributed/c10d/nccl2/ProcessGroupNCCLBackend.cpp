@@ -18,47 +18,17 @@
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/NCCLMemAllocator.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
 
 namespace c10d::nccl2 {
 
 namespace {
-
-#if defined(USE_ROCM)
-struct NcclAllocatorSegmentRegistry {
-  std::mutex mutex;
-  std::map<std::pair<int, uintptr_t>, size_t> segments;
-};
-
-NcclAllocatorSegmentRegistry& ncclAllocatorSegmentRegistry() {
-  static auto* registry = new NcclAllocatorSegmentRegistry();
-  return *registry;
-}
-
-void trackNcclAllocatorSegment(void* ptr, size_t size, int device) {
-  auto& registry = ncclAllocatorSegmentRegistry();
-  std::lock_guard<std::mutex> lock(registry.mutex);
-  const auto key = std::make_pair(device, reinterpret_cast<uintptr_t>(ptr));
-  TORCH_INTERNAL_ASSERT(
-      registry.segments.emplace(key, size).second,
-      "NCCL allocator returned an address that is already live");
-}
-
-void untrackNcclAllocatorSegment(void* ptr, int device) {
-  auto& registry = ncclAllocatorSegmentRegistry();
-  std::lock_guard<std::mutex> lock(registry.mutex);
-  const auto key = std::make_pair(device, reinterpret_cast<uintptr_t>(ptr));
-  TORCH_INTERNAL_ASSERT(
-      registry.segments.erase(key) == 1,
-      "NCCL allocator freed an address that was not tracked");
-}
-#endif
 
 bool isEqualSplit(
     const std::vector<int64_t>& split_sizes,
@@ -404,50 +374,20 @@ void ProcessGroupNCCL::shutdown() {
 }
 
 std::shared_ptr<c10::Allocator> ProcessGroupNCCL::getMemAllocator() {
-  // Symmetric (VMM-backed) CUDA allocator backed by ncclMemAlloc/ncclMemFree.
-  // Moved here from torchcomms' TorchCommFactory allocator registration.
-  static std::shared_ptr<c10::Allocator> allocator = [] {
-    auto nccl_api = std::make_shared<DefaultNcclApi>();
-    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-        [nccl_api](size_t size, int device, cudaStream_t stream) {
-          at::cuda::OptionalCUDAGuard gpuGuard(device);
-          void* ptr = nullptr;
-          ncclResult_t result = nccl_api->memAlloc(&ptr, size);
-          TORCH_CHECK(
-              result == ncclSuccess,
-              "ncclMemAlloc failed: ",
-              nccl_api->getErrorString(result));
-#if defined(USE_ROCM)
-          trackNcclAllocatorSegment(ptr, size, device);
-#endif
-          return ptr;
-        },
-        [nccl_api](void* ptr, size_t size, int device, cudaStream_t stream) {
-          at::cuda::OptionalCUDAGuard gpuGuard(device);
-          ncclResult_t result = nccl_api->memFree(ptr);
-          TORCH_CHECK(
-              result == ncclSuccess,
-              "ncclMemFree failed: ",
-              nccl_api->getErrorString(result));
-#if defined(USE_ROCM)
-          untrackNcclAllocatorSegment(ptr, device);
-#endif
-        });
-  }();
-  return allocator;
+  return getMemAllocator(/*symm=*/false);
 }
 
-#if defined(USE_ROCM)
-bool ProcessGroupNCCL::isNcclAllocatorSegment(const void* ptr, size_t len)
-    const {
-  auto& registry = ncclAllocatorSegmentRegistry();
-  std::lock_guard<std::mutex> lock(registry.mutex);
-  const auto key = std::make_pair(
-      static_cast<int>(device_.index()), reinterpret_cast<uintptr_t>(ptr));
-  auto it = registry.segments.find(key);
-  return it != registry.segments.end() && len <= it->second;
+std::shared_ptr<NCCLMemAllocator> ProcessGroupNCCL::getMemAllocator(bool symm) {
+  if (!symm) {
+    return NCCLMemAllocator::global();
+  }
+  std::lock_guard<std::mutex> lock(symm_allocator_mutex_);
+  if (!symm_allocator_) {
+    symm_allocator_ = std::make_shared<NCCLMemAllocator>(/*symm=*/true);
+    symm_allocator_->attach(*this);
+  }
+  return symm_allocator_;
 }
-#endif
 
 bool ProcessGroupNCCL::supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
   return ::c10d::cuda::deviceSupportsMulticast(deviceIdx);
@@ -482,11 +422,8 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   at::cuda::OptionalCUDAGuard gpuGuard(device);
 
   if (!memPool_) {
-    auto allocator = std::static_pointer_cast<
-        c10::cuda::CUDACachingAllocator::CUDAAllocator>(getMemAllocator());
-    auto pool = std::make_unique<at::cuda::MemPool>(std::move(allocator));
-    registerMemPool(pool.get(), /*symm=*/false);
-    memPool_ = std::move(pool);
+    memPool_ =
+        std::make_unique<at::cuda::MemPool>(getMemAllocator(/*symm=*/false));
   }
 
   auto threadId = std::this_thread::get_id();

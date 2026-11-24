@@ -4,9 +4,9 @@
 // NCCLCachingAllocatorHook: a process-wide singleton that watches allocator
 // SEGMENT_ALLOC/SEGMENT_FREE trace events and forwards them to every
 // registered ProcessGroupNCCL as register_address/deregister_address, so
-// segments from the NCCL mempool are registered with each communicator
-// (ncclCommRegister, plus the collective NCCL_WIN_COLL_SYMMETRIC window for new
-// segments of a pool registered with register_mem_pool(symm=True)).
+// every segment is registered with each communicator (ncclCommRegister). The
+// trace tracker runs under the caching allocator's mutex, so it must not make
+// collective calls; symmetric windows belong to NCCLMemAllocator.
 
 #pragma once
 

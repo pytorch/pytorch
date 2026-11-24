@@ -20,10 +20,8 @@ void ncclCachingAllocatorHookFn(
   NCCLCachingAllocatorHook::getInstance().regDeregMem(te);
 }
 
-// registeredComms_ is ordered by pointer, which differs between ranks. Any NCCL
-// call these hooks make that waits on peers (deregister_address tearing down a
-// symmetric window does so on NCCL builds that barrier there) must be issued in
-// the same order everywhere, so order by the group name instead.
+// registeredComms_ is ordered by pointer, which differs between ranks; order by
+// the group name so every rank issues its NCCL calls in the same order.
 std::vector<ProcessGroupNCCL*> commsForDevice(
     const std::set<ProcessGroupNCCL*>& comms,
     c10::DeviceIndex device) {
@@ -96,7 +94,7 @@ void NCCLCachingAllocatorHook::regDeregMem(
         !registeredMemMap_.count(addr), "Memory already registered with NCCL");
     registeredMemMap_.emplace(addr, MemInfo{len, te.device_});
     for (auto* comm : commsForDevice(registeredComms_, te.device_)) {
-      comm->register_address(addr, len, te.mempool_);
+      comm->register_address(addr, len);
     }
   } else if (
       te.action_ ==
@@ -107,7 +105,7 @@ void NCCLCachingAllocatorHook::regDeregMem(
         registeredMemMap_.count(addr), "Memory not registered with NCCL");
     registeredMemMap_.erase(addr);
     for (auto* comm : commsForDevice(registeredComms_, te.device_)) {
-      comm->deregister_address(addr, /*from_allocator_hook=*/true);
+      comm->deregister_address(addr);
     }
   }
 }
