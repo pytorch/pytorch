@@ -32,8 +32,6 @@ It consists of
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
 (e.g. `getCurrentStream`, `DeviceGuard`).
 - torch/csrc/stable/inference_mode.h: Provides `torch::stable::InferenceMode` for managing inference mode on the current thread.
-- torch/csrc/stable/cpu/utils.h: Provides `torch::stable::cpu::get_cpu_capabilities<T>(key)` for typed CPU capability lookups that return `std::nullopt` on a miss. Pass a second argument to supply a fallback.
-- torch/csrc/stable/cpu/utils.h: Provides `torch::stable::cpu::get_cpu_capability<T>(key)` for typed CPU capability lookups that return `std::nullopt` on a miss. Pass a second argument to supply a fallback.
 - torch/csrc/stable/cpu.h: Provides `torch::stable::cpu::get_cpu_capability<T>(key)` for typed CPU capability lookups that return `std::nullopt` on a miss. Use `.value_or(fallback)` to supply a fallback.
 - torch/csrc/stable/pyobject.h: Provides conversions between Python objects and their `torch::stable` equivalents, such as `tensor_from_pyobject` / `tensor_to_pyobject` for a Python `torch.Tensor`. To access these APIs, you still need to only link `libtorch`, but `libtorch_python` must be loaded at runtime; see the Python interop shims section below.
 
