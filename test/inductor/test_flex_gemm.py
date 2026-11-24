@@ -34,7 +34,7 @@ from torch._inductor.heuristics.template.flex_gemm import (
 from torch._inductor.kernel.flex_gemm import lowering
 from torch._inductor.ops_handler import ReductionType
 from torch._inductor.utils import run_and_get_code
-from torch._subclasses.fake_tensor import is_fake
+from torch._subclasses.fake_tensor import is_fake, maybe_get_fake_mode
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     BF16X9_SUPPORTED,
@@ -1035,7 +1035,8 @@ class TestFlexGemmRuntimeHelpers(TestCase):
                     body, tracing_mode="symbolic" if symbolic else "real"
                 )(torch.randn(4, 8), torch.randn(8, 16))
                 gemm = gemm_node(graph_module, torch.ops.aten.mm.default)
-                shape_env = gemm.meta["val"].fake_mode.shape_env if symbolic else None
+                val = gemm.meta["val"]
+                shape_env = maybe_get_fake_mode(val).shape_env if symbolic else None
                 if not symbolic and expected_transform is None:
                     shape_env = ShapeEnv()
                     symbol = shape_env.create_symbol(8, ConstantSource("split_size"))
@@ -2910,6 +2911,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(SM120OrLater, "Quack TF32 GEMM requires SM100/SM110")
     @recover_orig_fp32_precision
     def test_mm_fp32_high_precision_runs_tf32_on_quack(self):
         torch.set_float32_matmul_precision("high")
