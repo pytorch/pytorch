@@ -1,7 +1,7 @@
-// CUDA driver and graph calls for torch.cuda.memory_planning, bound to Python
-// as thin wrappers: virtual address space and physical memory (through
+// CUDA driver and graph calls for torch.cuda.MemoryPlannedGraph, bound to
+// Python as thin wrappers: virtual address space and physical memory (through
 // c10::cuda::DriverAPI, as expandable segments use them), the capture
-// frontier of a stream, the device of a stream, and the topology of a graph.
+// frontier of a stream, and the topology of a graph.
 // Addresses and handles are passed as integers.
 
 #include <c10/cuda/CUDAException.h>
@@ -96,8 +96,8 @@ std::pair<uintptr_t, std::vector<uintptr_t>> streamCaptureInfo(
   cudaStreamCaptureStatus status{};
   cudaGraph_t graph = nullptr;
   const cudaGraphNode_t* deps = nullptr;
-  // edge data must be requested, or edges that carry it make the query fail
-  // as lossy
+  // Edge data is requested only so that the query does not fail as lossy on
+  // edges that carry it; it is not used: every edge counts as ordering.
   const cudaGraphEdgeData* edge_data = nullptr;
   size_t num_deps = 0;
 #if CUDA_VERSION >= 13000
@@ -127,43 +127,6 @@ std::pair<uintptr_t, std::vector<uintptr_t>> streamCaptureInfo(
     nodes[i] = reinterpret_cast<uintptr_t>(deps[i]);
   }
   return {reinterpret_cast<uintptr_t>(graph), std::move(nodes)};
-}
-
-int64_t streamDevice(uintptr_t stream) {
-  int device = 0;
-#if CUDA_VERSION >= 12080
-  C10_CUDA_CHECK(
-      cudaStreamGetDevice(reinterpret_cast<cudaStream_t>(stream), &device));
-#else
-  // (no cudaStreamGetDevice) the device of the stream's context
-  static const auto lookup = [](const char* name) {
-    void* fn = nullptr;
-    cudaDriverEntryPointQueryResult status{};
-    C10_CUDA_CHECK(
-        cudaGetDriverEntryPoint(name, &fn, cudaEnableDefault, &status));
-    TORCH_CHECK(
-        status == cudaDriverEntryPointSuccess && fn != nullptr,
-        "CUDA driver entry point not found: ",
-        name);
-    return fn;
-  };
-  static const auto get_ctx =
-      reinterpret_cast<CUresult (*)(CUstream, CUcontext*)>(
-          lookup("cuStreamGetCtx"));
-  static const auto push_ctx =
-      reinterpret_cast<CUresult (*)(CUcontext)>(lookup("cuCtxPushCurrent"));
-  static const auto pop_ctx =
-      reinterpret_cast<CUresult (*)(CUcontext*)>(lookup("cuCtxPopCurrent"));
-  static const auto get_device =
-      reinterpret_cast<CUresult (*)(CUdevice*)>(lookup("cuCtxGetDevice"));
-  CUcontext ctx = nullptr;
-  C10_CUDA_DRIVER_CHECK(get_ctx(reinterpret_cast<CUstream>(stream), &ctx));
-  C10_CUDA_DRIVER_CHECK(push_ctx(ctx));
-  const CUresult result = get_device(&device);
-  C10_CUDA_DRIVER_CHECK_WARN(pop_ctx(&ctx), "cuCtxPopCurrent");
-  C10_CUDA_DRIVER_CHECK(result);
-#endif
-  return device;
 }
 
 size_t graphEdges(
@@ -200,8 +163,8 @@ graphTopology(uintptr_t graph) {
   }
   size_t num_edges = graphEdges(g, nullptr, nullptr, nullptr, 0);
   std::vector<cudaGraphNode_t> from(num_edges), to(num_edges);
-  // edges that carry data (e.g. programmatic dependencies) make the query fail
-  // without it
+  // (requested only so that the query does not fail on edges that carry data;
+  // not used: every edge counts as ordering)
   std::vector<cudaGraphEdgeData> edge_data(num_edges);
   if (num_edges != 0) {
     num_edges =
@@ -250,7 +213,6 @@ void initMemoryPlanningUtilsBindings(PyObject* module) {
       py::arg("nbytes"));
   m.def("_cuda_vmmRelease", &vmmRelease, py::arg("handle"));
   m.def("_cuda_streamCaptureInfo", &streamCaptureInfo, py::arg("stream"));
-  m.def("_cuda_streamDevice", &streamDevice, py::arg("stream"));
   m.def("_cuda_graphSize", &graphSize, py::arg("graph"));
   m.def("_cuda_graphTopology", &graphTopology, py::arg("graph"));
 #endif

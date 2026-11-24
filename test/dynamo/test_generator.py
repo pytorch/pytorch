@@ -2256,6 +2256,47 @@ class TestGeneratorCoroutine(GeneratorTestsBase):
         g.close()  # close normally
 
     @make_dynamo_test
+    def test_gi_frame_f_back(self):
+        def f():
+            yield
+
+        def outer():
+            yield from f()
+
+        g = f()
+        frame = g.gi_frame
+        self.assertIsInstance(frame, types.FrameType)
+        self.assertIs(type(frame), types.FrameType)
+        self.assertIsNone(frame.f_back)
+        self.assertIs(g.gi_frame, frame)
+        next(g)
+        self.assertIsNone(g.gi_frame.f_back)
+        self.assertEqual(list(g), [])
+        self.assertIsNone(g.gi_frame)
+
+        g = outer()
+        next(g)
+        self.assertIsNone(g.gi_frame.f_back)
+
+    def test_gi_frame_unmodeled_graph_break(self):
+        def f():
+            yield
+
+        def f_back_after_close():
+            g = f()
+            frame = g.gi_frame
+            g.close()
+            return frame.f_back is None
+
+        def f_trace():
+            return f().gi_frame.f_trace is None
+
+        with self.assertRaisesRegex(Unsupported, "generator frame f_back"):
+            torch.compile(f_back_after_close, backend="eager", fullgraph=True)()
+        with self.assertRaisesRegex(Unsupported, "generator frame attribute"):
+            torch.compile(f_trace, backend="eager", fullgraph=True)()
+
+    @make_dynamo_test
     def test_generator_exit_not_caught_by_except_exception(self):
         log = []
 
