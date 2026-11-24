@@ -2245,6 +2245,19 @@ class BenchmarkRunner:
             model, example_inputs = self.maybe_cast(model, example_inputs)
             accuracy_status = "pass"
 
+            cpu_rng_state = torch.get_rng_state()
+            dev_type = torch.device(current_device).type if current_device else "cpu"
+            dev_mod = getattr(torch, dev_type, None) if dev_type != "cpu" else None
+            has_dev_rng = (
+                dev_mod is not None
+                and hasattr(dev_mod, "is_available")
+                and dev_mod.is_available()
+                and hasattr(dev_mod, "get_rng_state")
+            )
+            dev_rng_state = dev_mod.get_rng_state() if has_dev_rng else None
+            py_rng_state = random.getstate()
+            np_rng_state = np.random.get_state()
+
             # Get results of native pytorch
             reset_rng_state()
             model_copy = None
@@ -2265,6 +2278,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                self.optimizer = None
                 empty_gpu_cache(current_device)
 
             # Rerun native pytorch
@@ -2287,6 +2301,7 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
             finally:
                 del model_copy
+                self.optimizer = None
                 empty_gpu_cache(current_device)
 
             # Two eager runs should have exactly same result, within tolerance.
@@ -2319,11 +2334,15 @@ class BenchmarkRunner:
 
             correct_rerun_result = None
 
-            # Collect the fp64 reference outputs to be used later for accuracy checking.
+            # Collect the fp64 reference outputs using the pre-eager RNG state.
             fp64_outputs = None
             model_fp64 = None
             inputs_fp64 = None
-            reset_rng_state()
+            torch.set_rng_state(cpu_rng_state)
+            if dev_rng_state is not None:
+                dev_mod.set_rng_state(dev_rng_state)
+            random.setstate(py_rng_state)
+            np.random.set_state(np_rng_state)
             try:
                 model_fp64, inputs_fp64 = cast_to_fp64(
                     self.deepcopy_and_maybe_parallelize(model),
@@ -2407,6 +2426,7 @@ class BenchmarkRunner:
                     )
                 finally:
                     del model_copy
+                    self.optimizer = None
 
                 if name in self.skip_accuracy_check_as_eager_non_deterministic:
                     return record_status(
