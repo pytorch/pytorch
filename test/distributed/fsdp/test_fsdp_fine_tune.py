@@ -28,8 +28,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
 )
 
-
-
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -398,7 +396,9 @@ class TestFSDPFineTune(FSDPTestContinuous):
         torch.manual_seed(self.rank + 1)
         losses = []
         for _ in range(6):
-            frozen_input = torch.randn((4, 4), device=self.device_type, requires_grad=False)
+            frozen_input = torch.randn(
+                (4, 4), device=self.device_type, requires_grad=False
+            )
             for _model, _optim in ((model, model_optim), (ref_model, ref_model_optim)):
                 loss = _model(frozen_input, frozen_input).sum()
                 losses.append(loss)
