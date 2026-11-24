@@ -66,6 +66,86 @@ Imported by every stage via
   `--env-out` hand-off (POSIX PATH conversion + bash-identifier filtering).
 - `download()` -- streaming download with backoff.
 
+## Linux wheel customization
+
+`linux/repair_wheel.py` supports downstream customization through
+`PYTORCH_RUNTIME_DEPENDENCY_POLICY`. The default value, `default`, preserves
+the built-in dependency copying, accelerator runtime paths, and manylinux
+platform tagging. It does not load a downstream hook. The `custom` policy
+replaces dependency copying with a user-provided function and uses the runtime
+paths and platform tag behavior described below. Other policy values are rejected.
+
+### Dependency hook
+
+Set these variables in the environment used by the Linux repair stage:
+
+```bash
+export PYTORCH_RUNTIME_DEPENDENCY_POLICY=custom
+export PYTORCH_CUSTOM_WHEEL_DEPENDENCY_HOOK=/opt/downstream/copy_dependencies.py
+```
+
+In custom mode, the dependency hook is required. If it is unset or empty,
+repair fails without falling back to the default copier.
+
+The hook path points to a Python file defining `copy_runtime_dependencies`.
+For example, a hook that bundles only a downstream copy of libgomp can contain:
+
+```python
+import shutil
+from pathlib import Path
+
+
+def copy_runtime_dependencies(
+    torch_dir: Path,
+    arch: str,
+    use_cuda: bool,
+    gpu_arch_type: str,
+    gpu_arch_version: str,
+) -> None:
+    shutil.copy("/opt/downstream/lib/libgomp.so.1", torch_dir / "lib/libgomp.so.1")
+```
+
+The file is executed before repairing wheels. The function receives five
+positional arguments and runs once per unpacked wheel; `torch_dir` points to
+that wheel's `torch/` directory. The hook is checked to ensure it accepts these
+five positional arguments. Parameter type annotations are not validated or
+enforced at runtime.
+
+The hook completely replaces the default copier. A hook that copies nothing
+can simply return. The hook returns `None` on success (including an implicit
+return) and raises an exception on failure. A non-`None` return value is an error.
+
+The hook owns dependency-specific ELF rewrites and checks. After it returns,
+repair applies RPATHs, handles platform tags, and repacks the wheel. If copying,
+RPATH updates, or retagging fails, repair skips repacking the current wheel.
+
+### Runtime paths
+
+In `custom` mode, repair sets `$ORIGIN:$ORIGIN/lib` on `torch/*.so*` and
+`$ORIGIN` on `torch/lib/*.so*`, using `patchelf --force-rpath` to write
+`DT_RPATH`. Accelerator-specific package paths are not added.
+
+Hooks copying libraries into nested directories must handle those libraries'
+runtime paths themselves, for example, within `copy_runtime_dependencies()`.
+Downstream deployments must provide compatible versions of any dependencies
+not bundled by the hook and make them available to the dynamic loader.
+
+### Platform tags
+
+In `custom` mode, leaving `PYTORCH_CUSTOM_WHEEL_PLATFORM_TAG` unset preserves
+the input wheel's platform tags. To replace them, set a single platform tag:
+
+```bash
+export PYTORCH_CUSTOM_WHEEL_PLATFORM_TAG=linux_x86_64
+```
+
+In `default` mode, this variable is ignored and repair uses the architecture's
+built-in manylinux tag.
+
+Tag validation checks syntax only; it does not verify ABI or manylinux
+compatibility. Downstream builds are responsible for the compatibility claimed
+by their chosen tag.
+
 ## Dependencies outside `.ci/wheel/`
 
 - **CI wiring.** The workflows are generated, not hand-written. Edit
