@@ -27,9 +27,13 @@ from torch.testing._internal.common_cuda import (
     IS_SM10X,
     IS_SM90,
     _get_torch_cuda_version,
+    _get_torch_rocm_version,
+    evaluate_gfx_arch_within,
+    mx_scale_swizzle,
     rocm_mx_swizzle,
     PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_CUBLASLT_FP32_BLOCK_GROUPED_GEMM,
+    PLATFORM_SUPPORTS_CUBLASLT_MNK4,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -50,6 +54,7 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     skipCUDAIf,
     skipMPS,
+    skipXPU,
     skipXPUIf,
     skipCUDAIfNotRocm,
 )
@@ -60,10 +65,12 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     isRocmArchAnyOf,
     MI350_ARCH,
+    MI450_ARCH,
     NAVI4_ARCH,
     NAVI_ARCH,
     parametrize,
     instantiate_parametrized_tests,
+    subtest,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
     runOnRocmArch,
@@ -77,12 +84,14 @@ from torch.testing._internal.common_quantized import (
     _bfloat16_to_float4_e2m1fn_x2,
     _floatx_unpacked_to_f32,
     ceil_div, to_blocked,
+    to_mx_swizzled_gfx1250,
     to_mxfp,
     compute_error,
     data_to_nvfp4_scale,
     from_blocked_format,
     generate_jagged_offs,
     pack_uint4,
+    to_mnk4,
 )
 from torch._inductor.utils import infer_scale_swizzle
 
@@ -98,6 +107,7 @@ mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
 cublaslt_fp32_block_skip_msg = "cuBLASLt grouped FP32 block scaling requires SM90 and CUDA 13.4+"
 cublaslt_grouped_mm_skip_msg = "cuBLASLt scaled grouped GEMM requires SM9.x/SM10.x/SM11.x with CUDA 13.4+"
+cublaslt_mnk4_skip_msg = "cuBLASLt MNxK4 requires SM10.x/SM11.x with CUDA 13.4+ and cuBLASLt 13.8.1+"
 
 
 def xfailIfNoFP8(fn):
@@ -229,15 +239,23 @@ def round_up(x: int, y: int) -> int:
     return ((x + y - 1) // y) * y
 
 
+def rocm_nvfp4_supported() -> bool:
+    if not torch.version.hip:
+        return False
+    return evaluate_gfx_arch_within(["gfx1250"]) and _get_torch_rocm_version() >= (10, 0)
+
+
 def mx_swizzle_for(device, mat_dtype) -> SwizzleType:
-    """The MX block-scale layout to request for `mat_dtype` on this device.
+    """Swizzle request for block scales of `mat_dtype` on this device.
 
     gfx950 takes either ROCm layout, so tests have to name the one they built
     instead of relying on `infer_scale_swizzle`, whose element counts do not
     distinguish the two where their paddings coincide.
     """
-    if not torch.version.hip and "xpu" not in device:
+    if not torch.version.hip and "xpu" not in device and "mps" not in device:
         return SwizzleType.SWIZZLE_32_4_4
+    if torch.version.hip and evaluate_gfx_arch_within(["gfx1250"]) and rocm_mx_swizzle(mat_dtype):
+        return SwizzleType.SWIZZLE_128
     return SwizzleType.SWIZZLE_32_8 if rocm_mx_swizzle(mat_dtype) else SwizzleType.NO_SWIZZLE
 
 
@@ -290,6 +308,7 @@ def scaled_mm_wrap(
             use_fast_accum=use_fast_accum,
         )
         return out
+
 
 def _as_int_list(v):
     # Mirror functional._enum_list_as_int_list: flatten scalar-or-list of enums
@@ -722,8 +741,11 @@ def _build_scaled_grouped_mm_kwargs(scale_a, scale_b, offs, format):
 
 
 def combine_grouped_gemm_values(values, cat_dim):
+    dtype = values[0].dtype
+    if dtype == torch.float8_e8m0fnu:
+        values = [value.view(torch.uint8) for value in values]
     result = torch.stack(values) if cat_dim is None else torch.cat(values, dim=cat_dim)
-    return result
+    return result.view(dtype)
 
 
 def make_grouped_gemm_inputs(
@@ -830,6 +852,97 @@ class TestFP8MatmulGeneric(TestCase):
         lp_data_actual = pack_uint4(hp_data)
         lp_data_expected = torch.tensor([0b10110010], dtype=torch.uint8)
         torch.testing.assert_close(lp_data_actual, lp_data_expected, atol=0, rtol=0)
+
+
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("case", ["dtype", "numel", "noncontiguous", "mismatched_swizzle", "extra_swizzle", "trailing_swizzle", "recipe",
+                         "input_dtype"])
+    def test_scaled_mm_mnk4_validation(self, recipe, case):
+        a = torch.ones((16, 512), device="cpu", dtype=torch.float8_e4m3fn)
+        b = torch.ones_like(a).t()
+        elems = 256 if recipe == ScalingType.BlockWise1x32 else 64
+        scale_a = torch.empty(elems, device="cpu", dtype=torch.float8_e8m0fnu)
+        scale_b = torch.empty_like(scale_a)
+        swizzle_a = swizzle_b = SwizzleType.SWIZZLE_MN_K4
+        recipe_b = recipe
+        if case == "input_dtype":
+            a, b = a.to(torch.float8_e5m2), b.to(torch.float8_e5m2)
+            message = "at least one float8_e4m3fn input"
+        elif case == "dtype":
+            scale_a = scale_a.view(torch.uint8)
+            message = f"got {elems} elements, dtype Byte, contiguous=true"
+        elif case == "numel":
+            scale_a = scale_a[:-1]
+            message = f"got {elems - 1} elements, dtype Float8_e8m0fnu, contiguous=true"
+        elif case == "noncontiguous":
+            scale_a = torch.empty(elems * 2, device="cpu", dtype=scale_a.dtype)[::2]
+            message = f"got {elems} elements, dtype Float8_e8m0fnu, contiguous=false"
+        elif case == "mismatched_swizzle":
+            swizzle_b = SwizzleType.SWIZZLE_32_4_4
+            message = "must each be SWIZZLE_MN_K4"
+        elif case == "extra_swizzle":
+            swizzle_a = swizzle_b = [swizzle_a, swizzle_a]
+            message = "must each be SWIZZLE_MN_K4"
+        elif case == "trailing_swizzle":
+            swizzle_a = swizzle_b = [SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_MN_K4]
+            message = "must each be SWIZZLE_MN_K4"
+        else:
+            recipe_b = ScalingType.TensorWise
+            message = "matching BlockWise1x32 or BlockWise1x128 recipes"
+        with self.assertRaisesRegex(ValueError, message):
+            scaled_mm(a, b, scale_a, recipe, scale_b, recipe_b, swizzle_a=swizzle_a, swizzle_b=swizzle_b)
+
+
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_mnk4_output_dtype_fake(self, recipe, out_dtype):
+        with FakeTensorMode():
+            a = torch.ones(2, 16, 128, device="cpu", dtype=torch.float8_e4m3fn)
+            scale = torch.ones(2, 64, device="cpu", dtype=torch.float8_e8m0fnu)
+            result = scaled_grouped_mm(
+                a, a.transpose(-2, -1), scale, recipe, scale, recipe,
+                swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+                output_dtype=out_dtype,
+            )
+            self.assertEqual(result.shape, (2, 16, 16))
+            self.assertEqual(result.dtype, out_dtype)
+
+
+    @parametrize("case", ["block_block", "tensor_row", "mixed_block", "one_swizzle", "extra_swizzle",
+                          "e5m2_mnk4", "fp4_mnk4"])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_scaled_grouped_mm_invalid_recipe_fake(self, case, out_dtype):
+        with FakeTensorMode():
+            a = torch.empty(2, 16, 128, device="cpu", dtype=torch.float8_e4m3fn)
+            scale = torch.empty(2, 64, device="cpu", dtype=torch.float8_e8m0fnu)
+            recipe_a = recipe_b = ScalingType.BlockWise1x32
+            swizzle_a = swizzle_b = SwizzleType.SWIZZLE_MN_K4
+            message = "packed MNxK4 requires"
+            if case == "block_block":
+                recipe_a = recipe_b = ScalingType.BlockWise128x128
+                swizzle_a = swizzle_b = None
+                message = "Grouped scaling configuration requires BFloat16 output"
+            elif case == "tensor_row":
+                recipe_a, recipe_b = ScalingType.TensorWise, ScalingType.RowWise
+                swizzle_a = swizzle_b = None
+                message = "Grouped scaling configuration requires BFloat16 output"
+            elif case == "mixed_block":
+                recipe_b = ScalingType.BlockWise1x128
+                swizzle_a = swizzle_b = None
+                message = "Grouped scaling configuration requires BFloat16 output"
+            elif case == "one_swizzle":
+                swizzle_b = None
+            elif case == "extra_swizzle":
+                swizzle_b = [SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_MN_K4]
+            elif case == "e5m2_mnk4":
+                a = a.to(torch.float8_e5m2)
+            elif case == "fp4_mnk4":
+                a = torch.empty(2, 16, 64, device="cpu", dtype=torch.float4_e2m1fn_x2)
+            with self.assertRaisesRegex(ValueError, message):
+                scaled_grouped_mm(
+                    a, a.transpose(-2, -1), scale, recipe_a, scale, recipe_b,
+                    swizzle_a=swizzle_a, swizzle_b=swizzle_b, output_dtype=out_dtype,
+                )
 
 
     @parametrize("wrap_v2", [False, True])
@@ -946,6 +1059,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             # Non-CUDA: test basic TN layout as sanity check
             self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=True, y_cm=False)
 
+
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
         with self.assertRaises(
@@ -1012,6 +1127,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
     @onlyAccelerator
     @skipMPS
+    @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     @parametrize("G", [1, 4, 16])
     @parametrize("M", [2048, 2049])
@@ -1097,14 +1213,14 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("M", [16640])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
-    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
+    @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda or torch.version.xpu else []))
     @parametrize("use_out", [False, True])
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format, use_out, device):
         torch.manual_seed(42)
 
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
-        block_size = 32
+        block_size = 16 if format == "nvfp4" else 32
         total_M = M  # Alias for clarity that M dim contains groups.
         X = torch.randn((total_M, K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((G, N, K), dtype=torch.bfloat16, device=device) * 0.01
@@ -1191,6 +1307,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             return xh, xq, x_scale, x_global_scales
 
         xh, xq, x_blocked_scales, x_global_scales = _2d_to_blocked_scaled(X, K, G, input_group_end_offsets, format)
+
+        if torch.device(device).type == "xpu":
+            # XPU OneDNN GroupedMM expects weight scales in [G, K/blocks, N] layout;
+            # the helper above returns them as [G, N, K/blocks], so transpose them here.
+            w_blocked_scales = w_blocked_scales.transpose(-2, -1)
 
         if format in ["mxfp8", "mxfp4"]:
             kwargs = _build_scaled_grouped_mm_kwargs(
@@ -2507,9 +2628,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @skipIfRocm
     @onlyAccelerator
-    @skipMPS
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("mkn", [
         # Nice shapes
@@ -2536,7 +2655,11 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     def test_blockwise_nvfp4_with_global_scale(self, mkn, device) -> None:
         if "xpu" in device and not Xe2_Or_Later:
             raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
+        if torch.version.hip and not rocm_nvfp4_supported():
+            raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         M, K, N = mkn
+        if torch.version.hip and not (M % 2 == 0 and N % 2 == 0 and K % 16 == 0):
+            raise unittest.SkipTest("gfx1250 NVFP4 requires even M and N and K a multiple of 16, skipping")
         BLOCK_SIZE = 16
         # Note: SQNR target from `test_blockwise_mxfp8_nvfp4_mxfp4_numerics` test
         approx_match_sqnr_target = 15.8
@@ -2551,6 +2674,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             A_scale = to_blocked(A_scale)
             B_scale = to_blocked(B_scale)
             swizzle = [SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE]
+        elif torch.version.hip:
+            A_scale = to_mx_swizzled_gfx1250(A_scale, BLOCK_SIZE)
+            B_scale = to_mx_swizzled_gfx1250(B_scale, BLOCK_SIZE)
+            swizzle = [SwizzleType.SWIZZLE_128, SwizzleType.NO_SWIZZLE]
         else:
             swizzle = [SwizzleType.NO_SWIZZLE, SwizzleType.NO_SWIZZLE]
 
@@ -2573,7 +2700,6 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
     @onlyAccelerator
-    @skipMPS
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("test_case_name", [
         "a_eye_b_eye",
@@ -2612,8 +2738,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     ], name_fn=lambda mkn: f"{mkn[0]}_{mkn[1]}_{mkn[2]}")
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
     @decorateIf(
-        unittest.skip('nvfp4 not supported on ROCm, skipping'),
-        lambda p: torch.version.hip and p['recipe'] == 'nvfp4',
+        unittest.skip('nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping'),
+        lambda p: torch.version.hip and p['recipe'] == 'nvfp4' and not rocm_nvfp4_supported(),
     )
     @decorateIf(
         unittest.skip('fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping'),
@@ -2632,6 +2758,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: 'xpu' in p['device'] and p['recipe'] == 'nvfp4' and (not Xe2_Or_Later),
     )
     @decorateIf(
+        unittest.skip('MXFP4 is not supported on MPS'),
+        lambda p: 'mps' in p['device'] and p['recipe'] == 'mxfp4',
+    )
+    @decorateIf(
         unittest.skip('K must be divisible by 32 for nvfp4 cublas gemm, skipping'),
         lambda p: p['recipe'] == 'nvfp4' and p['mkn'][1] % 32 != 0,
     )
@@ -2648,8 +2778,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: p['test_case_name'] == 'a_eye_b_eye' and (not p['mkn'][0] == p['mkn'][1] == p['mkn'][2]),
     )
     def test_blockwise_mxfp8_nvfp4_mxfp4_numerics(self, test_case_name, fast_accum, mkn, recipe, device) -> None:
-        if torch.version.hip and recipe == "nvfp4":
-            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
+        if torch.version.hip and recipe == "nvfp4" and not rocm_nvfp4_supported():
+            raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
         if recipe == "mxfp4" and IS_SM12X:
@@ -2659,16 +2789,24 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 raise unittest.SkipTest("fast_accum not supported on XPU, skipping")
             if recipe == "nvfp4" and not Xe2_Or_Later:
                 raise unittest.SkipTest("NVFP4 numerics require Xe2+ on XPU")
+        if "mps" in device and recipe == "mxfp4":
+            raise unittest.SkipTest("MXFP4 is not supported on MPS")
         M, K, N = mkn
         if recipe == "nvfp4" and K % 32 != 0:
             raise unittest.SkipTest("K must be divisible by 32 for nvfp4 cublas gemm, skipping")
 
         if torch.version.hip and recipe in ("mxfp8", "mxfp4"):
             mat_dtype = torch.float4_e2m1fn_x2 if recipe == "mxfp4" else torch.float8_e4m3fn
-            # SWIZZLE_32_8 only requires K % 32, checked via BLOCK_SIZE below.
+            # SWIZZLE_32_8 only requires K % 32, checked via BLOCK_SIZE below,
+            # except gfx1250 MX FP4, which also needs even M and N.
             # NO_SWIZZLE requires M and N multiples of 16 and K a multiple of 128.
             if not rocm_mx_swizzle(mat_dtype) and not (M % 16 == 0 and K % 128 == 0 and N % 16 == 0):
                 raise unittest.SkipTest("M and N must be multiples of 16 and K must be a multiple of 128 for NO_SWIZZLE on ROCm, skipping")
+            if recipe == "mxfp4" and evaluate_gfx_arch_within(["gfx1250"]) and (M % 2 != 0 or N % 2 != 0 or K % 32 != 0):
+                raise unittest.SkipTest("gfx1250 MX FP4 requires even M and N and K a multiple of 32, skipping")
+
+        if torch.version.hip and recipe == "nvfp4" and rocm_nvfp4_supported() and (M % 2 != 0 or N % 2 != 0 or K % 16 != 0):
+            raise unittest.SkipTest("gfx1250 NVFP4 requires even M and N and K a multiple of 16, skipping")
 
         fp4_scaling_dtype = torch.float8_e8m0fnu if recipe == "mxfp4" else torch.float8_e4m3fn
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
@@ -2858,9 +2996,9 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         C_ref = A_ref @ B_ref.t()
 
         # convert to swizzled format
-        if rocm_mx_swizzle(A.dtype) or (not torch.version.hip and "xpu" not in device):
-            A_scale = to_blocked(A_scale, swizzle_32_8=rocm_mx_swizzle(A.dtype))
-            B_scale = to_blocked(B_scale, swizzle_32_8=rocm_mx_swizzle(B.dtype))
+        if rocm_mx_swizzle(A.dtype) or (not torch.version.hip and "xpu" not in device and "mps" not in device):
+            A_scale = mx_scale_swizzle(A_scale, A.dtype, BLOCK_SIZE)
+            B_scale = mx_scale_swizzle(B_scale, B.dtype, BLOCK_SIZE)
 
         block_recipe = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
         swizzle = mx_swizzle_for(device, A.dtype)
@@ -2885,6 +3023,32 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
             if sqnr.item() <= approx_match_sqnr_target:
                 raise AssertionError(f"sqnr {sqnr.item()} should be > {approx_match_sqnr_target}")
 
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @parametrize("M", [2, 31, 128])
+    def test_blockwise_mxfp8_special_scales(self, M, device) -> None:
+        # e8m0 scales of 2^120 and 2^-120 multiply to 1 without overflowing their product, and the NaN
+        # code 0xff makes its row of A or column of B NaN
+        K, N = 128, 128
+        a = torch.ones(M, K, device=device).to(torch.float8_e4m3fn)
+        b = torch.ones(N, K, device=device).to(torch.float8_e4m3fn)
+        sa = torch.full((M, K // 32), 127 + 120, dtype=torch.uint8, device=device)
+        sb = torch.full((N, K // 32), 127 - 120, dtype=torch.uint8, device=device)
+        sa[0, 1] = sb[1, 2] = 0xFF
+        swizzle = mx_swizzle_for(device, a.dtype)
+
+        def scales(s):
+            s = s.view(torch.float8_e8m0fnu)
+            return s if swizzle == SwizzleType.NO_SWIZZLE else mx_scale_swizzle(s, a.dtype)
+
+        out = scaled_mm_wrap(
+            a, b.t(), scales(sa), scales(sb),
+            scale_recipe_a=ScalingType.BlockWise1x32, scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=swizzle, swizzle_b=swizzle, out_dtype=torch.bfloat16,
+        )
+        expected = torch.full_like(out, K)
+        expected[0, :] = expected[:, 1] = float("nan")
+        self.assertEqual(out, expected, equal_nan=True)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4", "nvfp4"])
@@ -2893,8 +3057,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         lambda p: 'xpu' in p['device'],
     )
     @decorateIf(
-        unittest.skip('nvfp4 not supported on ROCm, skipping'),
-        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip,
+        unittest.skip('nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping'),
+        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip and not rocm_nvfp4_supported(),
     )
     @decorateIf(
         unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
@@ -2903,8 +3067,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     def test_blockwise_mxfp8_nvfp4_mxfp4_error_messages(self, device, recipe) -> None:
         if "xpu" in device:
             raise unittest.SkipTest("Error messages test not supported on XPU, skipping")
-        if recipe == "nvfp4" and torch.version.hip:
-            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
+        if recipe == "nvfp4" and torch.version.hip and not rocm_nvfp4_supported():
+            raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
@@ -2930,13 +3094,21 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         )
         if not torch.version.hip:
             swizzle = SwizzleType.SWIZZLE_32_4_4
+        elif evaluate_gfx_arch_within(["gfx1250"]) and rocm_mx_swizzle(x_lowp.dtype):
+            swizzle = SwizzleType.SWIZZLE_128
         elif rocm_mx_swizzle(x_lowp.dtype):
             swizzle = SwizzleType.SWIZZLE_32_8
         else:
             swizzle = SwizzleType.NO_SWIZZLE
 
         num_k_blocks = ceil_div(K, BLOCK_SIZE_K)
-        if swizzle == SwizzleType.SWIZZLE_32_8:
+        if swizzle == SwizzleType.SWIZZLE_128:
+            # gfx1250 groups 128/block K-scales (4 for MX, 8 for NVFP4).
+            group = 128 // BLOCK_SIZE_K
+            padded_num_k_blocks = ceil_div(num_k_blocks, group) * group
+            expected_a_size = M * padded_num_k_blocks
+            expected_b_size = N * padded_num_k_blocks
+        elif swizzle == SwizzleType.SWIZZLE_32_8:
             padded_num_k_blocks = ceil_div(num_k_blocks, 8) * 8
             expected_a_size = 32 * ceil_div(M, 32) * padded_num_k_blocks
             expected_b_size = 32 * ceil_div(N, 32) * padded_num_k_blocks
@@ -3015,6 +3187,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     # _scaled_grouped_mm(), for supporting more than one inputs layout
     # combinations.
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3057,7 +3230,13 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    @parametrize("wrap_v2", [True, False])
+    @parametrize(
+        "wrap_v2",
+        [
+            True,
+            subtest(False, decorators=[skipXPU]),  # v1 _scaled_grouped_mm has no XPU kernel
+        ],
+    )
     def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2, device):
 
         fp8_dtype = e4m3_type
@@ -3099,6 +3278,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 3d x 3d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3125,6 +3305,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 3d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -3180,8 +3361,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
         if rocm_mx_swizzle(A.dtype):
-            A_scale = to_blocked(A_scale, swizzle_32_8=True)
-            B_scale = to_blocked(B_scale, swizzle_32_8=True)
+            A_scale = mx_scale_swizzle(A_scale, A.dtype)
+            B_scale = mx_scale_swizzle(B_scale, B.dtype)
 
         C_ref = A_ref @ B_ref.t()
 
@@ -3207,18 +3388,24 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     @parametrize("recipe", ["nvfp4", "mxfp4"])
     @decorateIf(
-        unittest.skip('nvfp4 not supported on ROCm, skipping'),
-        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip,
+        unittest.skip('nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping'),
+        lambda p: p['recipe'] == 'nvfp4' and torch.version.hip and not rocm_nvfp4_supported(),
     )
     @decorateIf(
         unittest.skip('MXFP4 on CUDA only supported on B200/B300'),
         lambda p: p['recipe'] == 'mxfp4' and IS_SM12X,
     )
+    @decorateIf(
+        unittest.skip('MXFP4 is not supported on MPS'),
+        lambda p: 'mps' in p['device'] and p['recipe'] == 'mxfp4',
+    )
     def test_blockwise_nvfp4_mxfp4_compile(self, device, recipe) -> None:
-        if recipe == "nvfp4" and torch.version.hip:
-            raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
+        if recipe == "nvfp4" and torch.version.hip and not rocm_nvfp4_supported():
+            raise unittest.SkipTest("nvfp4 on ROCm requires gfx1250 and ROCm 10.0, skipping")
         if recipe == "mxfp4" and IS_SM12X:
             raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+        if "mps" in device and recipe == "mxfp4":
+            raise unittest.SkipTest("MXFP4 is not supported on MPS")
 
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 16 if recipe == "nvfp4" else 32
@@ -3233,8 +3420,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
         if rocm_mx_swizzle(A.dtype):
-            A_scale = to_blocked(A_scale, swizzle_32_8=True)
-            B_scale = to_blocked(B_scale, swizzle_32_8=True)
+            A_scale = mx_scale_swizzle(A_scale, A.dtype, BLOCK_SIZE)
+            B_scale = mx_scale_swizzle(B_scale, B.dtype, BLOCK_SIZE)
 
         C_ref = A_ref @ B_ref.t()
 
@@ -3267,6 +3454,8 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         mat_dtype = torch.float4_e2m1fn_x2 if fp4 else torch.float8_e4m3fn
 
         def scale_numel(rows, k, swizzle):
+            if swizzle == SwizzleType.SWIZZLE_128:
+                return rows * round_up(ceil_div(k, 32), 4)
             if swizzle == SwizzleType.SWIZZLE_32_8:
                 return round_up(rows, 32) * round_up(ceil_div(k, 32), 8)
             stored_k = k // 2 if fp4 else k
@@ -3292,23 +3481,38 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
                 out_dtype=torch.bfloat16, use_fast_accum=False,
             )
 
-        with self.subTest(swizzle="NO_SWIZZLE", mkn=(32, 64, 32)):
-            with self.assertRaisesRegex(ValueError, "K must be a multiple of 128 for NO_SWIZZLE"):
-                ones_mm(32, 64, 32, SwizzleType.NO_SWIZZLE)
-        with self.subTest(swizzle="NO_SWIZZLE", mkn=(16, 128, 16)):
-            got = ones_mm(16, 128, 16, SwizzleType.NO_SWIZZLE)
-            self.assertEqual(got, torch.full((16, 16), 128, device=device, dtype=torch.bfloat16))
+        if evaluate_gfx_arch_within(["gfx1250"]):
+            # Rejected in check_mx_swizzle, before the K alignment check.
+            with self.subTest(swizzle="NO_SWIZZLE", mkn=(16, 128, 16)):
+                with self.assertRaisesRegex(
+                    NotImplementedError,
+                    "gfx1250 MX block scaling requires SWIZZLE_128",
+                ):
+                    ones_mm(16, 128, 16, SwizzleType.NO_SWIZZLE)
+        else:
+            with self.subTest(swizzle="NO_SWIZZLE", mkn=(32, 64, 32)):
+                with self.assertRaisesRegex(ValueError, "K must be a multiple of 128 for NO_SWIZZLE"):
+                    ones_mm(32, 64, 32, SwizzleType.NO_SWIZZLE)
+            with self.subTest(swizzle="NO_SWIZZLE", mkn=(16, 128, 16)):
+                got = ones_mm(16, 128, 16, SwizzleType.NO_SWIZZLE)
+                self.assertEqual(got, torch.full((16, 16), 128, device=device, dtype=torch.bfloat16))
 
         if not rocm_mx_swizzle(mat_dtype):
             return
-        with self.subTest(swizzle="SWIZZLE_32_8", mkn=(32, 16, 32)):
-            with self.assertRaisesRegex(ValueError, "K must be a multiple of 32 for SWIZZLE_32_8"):
-                ones_mm(32, 16, 32, SwizzleType.SWIZZLE_32_8)
-        with self.subTest(swizzle="SWIZZLE_32_8", mkn=(8, 32, 16)):
+        swizzle = SwizzleType.SWIZZLE_128 if evaluate_gfx_arch_within(["gfx1250"]) else SwizzleType.SWIZZLE_32_8
+        swizzle_name = "SWIZZLE_128" if swizzle == SwizzleType.SWIZZLE_128 else "SWIZZLE_32_8"
+        with self.subTest(swizzle=swizzle_name, mkn=(32, 16, 32)):
+            with self.assertRaisesRegex(ValueError, f"K must be a multiple of 32 for (gfx1250 MX FP4 )?{swizzle_name}"):
+                ones_mm(32, 16, 32, swizzle)
+        with self.subTest(swizzle=swizzle_name, mkn=(8, 32, 16)):
             # N stays a multiple of 16: _scaled_mm_v2 requires that of mat2
             # regardless of swizzle. M is not.
-            got = ones_mm(8, 32, 16, SwizzleType.SWIZZLE_32_8)
+            got = ones_mm(8, 32, 16, swizzle)
             self.assertEqual(got, torch.full((8, 16), 32, device=device, dtype=torch.bfloat16))
+        if evaluate_gfx_arch_within(["gfx1250"]) and fp4:
+            with self.subTest(swizzle="SWIZZLE_128", mkn=(3, 32, 16)):
+                with self.assertRaisesRegex(ValueError, "gfx1250 MX FP4 SWIZZLE_128"):
+                    ones_mm(3, 32, 16, SwizzleType.SWIZZLE_128)
 
 
     @onlyAccelerator
@@ -3371,7 +3575,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
         # SWIZZLE_32_4_4 has no ROCm scale mode, so it must be rejected rather
         # than silently handed to hipBLASLt as unswizzled.
-        with self.assertRaisesRegex(ValueError, "must both be NO_SWIZZLE or both be SWIZZLE_32_8"):
+        with self.assertRaisesRegex(ValueError, "must both be NO_SWIZZLE, SWIZZLE_32_8, or SWIZZLE_128"):
             scaled_mm(
                 A, B.t(),
                 A_scale, ScalingType.BlockWise1x32,
@@ -3398,6 +3602,24 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
         B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e8m0fnu)
 
+        if evaluate_gfx_arch_within(["gfx1250"]):
+            # At K=128 the gfx1250 order is the identity, so a linear buffer
+            # has the right count. A 32x8-padded buffer is the wrong size.
+            expected = M * round_up(ceil_div(K, BLOCK_SIZE), 4)
+            wrong_a = to_blocked(A_scale, swizzle_32_8=True)
+            with self.assertRaisesRegex(
+                ValueError,
+                f"SWIZZLE_128 scale_a should have {expected} elements",
+            ):
+                scaled_mm(
+                    A, B.t(),
+                    wrong_a, ScalingType.BlockWise1x32,
+                    to_mx_swizzled_gfx1250(B_scale), ScalingType.BlockWise1x32,
+                    swizzle_a=SwizzleType.SWIZZLE_128, swizzle_b=SwizzleType.SWIZZLE_128,
+                    output_dtype=torch.bfloat16,
+                )
+            return
+
         expected = round_up(M, 32) * round_up(ceil_div(K, BLOCK_SIZE), 8)
         with self.assertRaisesRegex(
             ValueError,
@@ -3418,12 +3640,14 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
     @parametrize("recipe", ["mxfp8", "mxfp4"])
     def test_rocm_v1_mx_takes_unswizzled_scales(self, device, recipe) -> None:
         # v1 `_scaled_mm` has no swizzle argument, so it takes the default
-        # scale layout on every arch and ROCm version. Deriving the layout from
-        # the arch instead would misread these scales, silently so at the
-        # shapes where both layouts have the same scale count (e.g. K=256).
-        # K=128 keeps the two counts apart (512 vs 1024) so the swizzled buffer
-        # below is rejected on size; at a colliding shape v1 cannot tell the
-        # layouts apart at all, which is why 32x8 callers must use v2.
+        # scale layout. gfx950 can read that layout. gfx1250 cannot, and v1
+        # must reject the call instead of guessing a byte order. Deriving the
+        # layout from the arch instead would misread these scales, silently so
+        # at the shapes where both layouts have the same scale count (e.g.
+        # K=256). K=128 keeps the two counts apart (512 vs 1024) so the
+        # swizzled buffer below is rejected on size; at a colliding shape v1
+        # cannot tell the layouts apart at all, which is why 32x8 callers
+        # must use v2.
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 32
         A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
@@ -3442,6 +3666,16 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         A, B = quantize(A_ref, A_scale, M), quantize(B_ref, B_scale, N)
         C_ref = A_ref @ B_ref.t()
         sqnr_target = 15.0 if recipe == "mxfp4" else 15.8
+
+        if evaluate_gfx_arch_within(["gfx1250"]):
+            # v1 hard-wires NO_SWIZZLE. gfx1250 cannot read that order.
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "gfx1250 MX block scaling requires SWIZZLE_128",
+            ):
+                scaled_mm_wrap(A, B.t(), A_scale.flatten(), B_scale.flatten(),
+                               out_dtype=torch.bfloat16, wrap_v2=False)
+            return
 
         C = scaled_mm_wrap(A, B.t(), A_scale.flatten(), B_scale.flatten(),
                            out_dtype=torch.bfloat16, wrap_v2=False)
@@ -3481,6 +3715,7 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
 
 
     @onlyAccelerator
+    @skipXPU  # XPU scaled grouped mm does not support 2d x 2d yet
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     def test_scaled_grouped_mm_v2_fullgraph(self, device) -> None:
         fp8_dtype = e4m3_type
@@ -3536,9 +3771,36 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         self.assertEqual(out.cpu(), expected, atol=0, rtol=0, equal_nan=True)
 
 
+
 class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
 
     hw_classification = HardwareClassification.CUDA
+
+    @skipIfRocm
+    @parametrize("recipe", [ScalingType.TensorWise, ScalingType.RowWise])
+    @parametrize("swizzle", [None, SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_MN_K4,
+                            [SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_MN_K4]])
+    @parametrize("grouped", [False, True])
+    def test_nonblock_swizzle(self, device, recipe, swizzle, grouped):
+        if grouped:
+            supported = (PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM if recipe == ScalingType.TensorWise
+                         else PLATFORM_SUPPORTS_FP8_GROUPED_GEMM)
+            if not supported:
+                self.skipTest("requires grouped support for this scaling recipe")
+        elif not PLATFORM_SUPPORTS_FP8:
+            self.skipTest(f8_msg)
+        shape = (2, 16, 32) if grouped else (16, 32)
+        a = torch.ones(shape, device=device, dtype=torch.float8_e4m3fn)
+        if recipe == ScalingType.TensorWise:
+            sa = sb = torch.ones(1, device=device)
+        elif grouped:
+            sa = sb = torch.ones(2, 16, device=device)
+        else:
+            sa = torch.ones(16, 1, device=device)
+            sb = sa.t()
+        op = scaled_grouped_mm if grouped else scaled_mm
+        result = op(a, a.transpose(-2, -1), sa, recipe, sb, recipe, swizzle_a=swizzle, swizzle_b=swizzle)
+        self.assertEqual(result, torch.full_like(result, 32))
 
 
     @parametrize("case,fake", [
@@ -3763,6 +4025,30 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
                 )
 
     @skipIfRocm
+    @parametrize("recipe", ["mxfp4", "nvfp4"])
+    @parametrize("side", ["a", "b"])
+    @parametrize("trailing", [False, True])
+    def test_scaled_grouped_mm_rejects_unsupported_mnk4_swizzle(self, device, recipe, side, trailing):
+        value = torch.ones(128, 128, device=device, dtype=torch.bfloat16)
+        a = _bfloat16_to_float4_e2m1fn_x2(value)
+        scaling = ScalingType.BlockWise1x32 if recipe == "mxfp4" else ScalingType.BlockWise1x16
+        dtype = torch.float8_e8m0fnu if recipe == "mxfp4" else torch.float8_e4m3fn
+        scale = torch.ones(512 if recipe == "mxfp4" else 1024, device=device, dtype=dtype).reshape(128, -1)
+        if recipe == "nvfp4":
+            scaling = [scaling, ScalingType.TensorWise]
+            scale = [scale, torch.ones(1, device=device)]
+        offs = torch.tensor([128], device=device, dtype=torch.int32)
+        if PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM:
+            result = scaled_grouped_mm(a, a.t(), scale, scaling, scale, scaling, offs=offs)
+            self.assertEqual(result, torch.full_like(result, 128))
+        swizzle = [SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_MN_K4] if trailing else SwizzleType.SWIZZLE_MN_K4
+        kwargs = {f"swizzle_{side}": swizzle}
+        with self.assertRaisesRegex(ValueError, "Invalid scaling configuration for grouped GEMM"):
+            scaled_grouped_mm(
+                a, a.t(), scale, scaling, scale, scaling, offs=offs, **kwargs,
+            )
+
+    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM, mxfp8_grouped_mm_skip_msg)
     def test_scaled_grouped_mm_mslk_rejects_padded_out(self, device):
         a = torch.ones(128, 128, device=device, dtype=torch.float8_e4m3fn)
@@ -3926,6 +4212,51 @@ class TestFP8MatmulCudaOnly(TestCase, _TestFP8MatmulMixin):
                 A = torch.nn.functional.pad(A, (0, 128) if op == "2d/2d" else (0, 0, 0, 128))
             if op in ("2d/2d", "3d/2d"):
                 B_T = torch.nn.functional.pad(B_T, (0, 128) if op == "2d/2d" else (0, 0, 0, 128))
+        return A, B_T, scale_a, scale_b, offs, expected
+
+    def scaled_grouped_gemm_cublaslt_mnk4_helper(
+        self, op, recipe, device, case="regular", out_dtype=torch.bfloat16,
+        a_dtype=torch.float8_e4m3fn, b_dtype=torch.float8_e4m3fn,
+    ):
+        ngroups = 3
+        group_m = group_n = [128] * ngroups
+        group_k = [640] * ngroups
+        block_size = 32 if recipe == ScalingType.BlockWise1x32 else 128
+        if case == "jagged_m":
+            group_m, group_n = [3, 5, 8], [16] * ngroups
+        elif case == "jagged_n":
+            align = 4 if out_dtype == torch.float32 else 8
+            group_m, group_n = [16] * ngroups, [align, align, 2 * align]
+        elif case == "partial_k":
+            group_k = [block_size + 16] * ngroups
+        elif case == "zero_group":
+            if op == "2d/2d":
+                group_k = [0, 640, 640]
+            elif op == "2d/3d":
+                group_m = [0, 128, 128]
+            else:
+                group_n = [0, 128, 128]
+        hp_groups = [[], []]
+
+        def make(is_a):
+            def make_group(group, outer, k):
+                values = torch.exp2(-(torch.arange(k, device=device) // block_size % 5).float())
+                value = values.expand(outer, k).to(a_dtype if is_a else b_dtype).contiguous()
+                rows = torch.arange(outer, device=device).unsqueeze(1)
+                kb = torch.arange(ceil_div(k, block_size), device=device).unsqueeze(0)
+                exponent = (rows + kb) % 3 if is_a else (2 * rows + kb + 1) % 3
+                scales = torch.exp2((exponent + kb // 4 + group - 4).float())
+                hp_groups[0 if is_a else 1].append(value.float() * scales.repeat_interleave(block_size, dim=1)[:, :k])
+                return value, to_mnk4(scales)
+            return make_group
+
+        (A, scale_a), (B_T, scale_b), offs, out_cat, _, _ = (
+            make_grouped_gemm_inputs(
+                op, group_m, group_n, group_k, make(True), make(False), device
+            )
+        )
+        expected_groups = [(a @ b.t()).to(out_dtype) for a, b in zip(*hp_groups)]
+        expected = combine_grouped_gemm_values(expected_groups, out_cat)
         return A, B_T, scale_a, scale_b, offs, expected
 
     @unittest.skipIf(
@@ -4153,6 +4484,396 @@ torch.cuda.synchronize()
 """)
         self.assertIn(b"scale_a is too small for the grouped block scale layout", stderr)
 
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUBLASLT_MNK4,
+        cublaslt_mnk4_skip_msg,
+    )
+    @parametrize("op,case,a_dtype,b_dtype,out_dtype,fast_accum", [
+        (op, "regular", a_dtype, b_dtype, out_dtype, fast_accum)
+        for op in ("2d/2d", "2d/3d", "3d/2d", "3d/3d")
+        for a_dtype, b_dtype in (
+            (torch.float8_e4m3fn, torch.float8_e4m3fn),
+            (torch.float8_e4m3fn, torch.float8_e5m2),
+            (torch.float8_e5m2, torch.float8_e4m3fn),
+        )
+        for out_dtype in (torch.bfloat16, torch.float16, torch.float32)
+        for fast_accum in (False, True)
+    ] + [
+        (op, case, torch.float8_e4m3fn, torch.float8_e4m3fn, torch.bfloat16, False)
+        for op, case in (
+            ("2d/3d", "jagged_m"), ("3d/2d", "jagged_n"), ("2d/2d", "partial_k"),
+            ("2d/2d", "zero_group"), ("2d/3d", "zero_group"), ("3d/2d", "zero_group"),
+        )
+    ] + [
+        ("3d/2d", "jagged_n", torch.float8_e4m3fn, torch.float8_e4m3fn, torch.float32, False),
+    ])
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    def test_scaled_grouped_gemm_cublaslt_mnk4(
+        self, op, case, a_dtype, b_dtype, recipe, out_dtype, fast_accum, device
+    ):
+        A, B_T, scale_a, scale_b, offs, expected = self.scaled_grouped_gemm_cublaslt_mnk4_helper(
+            op, recipe, device, case=case, out_dtype=out_dtype, a_dtype=a_dtype, b_dtype=b_dtype
+        )
+        C = scaled_grouped_mm_wrap(
+            A,
+            B_T.transpose(-2, -1),
+            scale_a,
+            scale_b,
+            recipe,
+            recipe,
+            offs=offs,
+            swizzle_a=SwizzleType.SWIZZLE_MN_K4,
+            swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+            use_fast_accum=fast_accum,
+            out_dtype=out_dtype,
+        )
+        self.assertEqual(C, expected)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_MNK4, cublaslt_mnk4_skip_msg)
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    def test_scaled_grouped_gemm_cublaslt_mnk4_jagged_n_alignment(self, device, recipe, out_dtype):
+        offs = [2, 8, 16] if out_dtype == torch.float32 else [4, 8, 16]
+        scale_b_elems = 80 if out_dtype == torch.float32 else 64
+        _, stderr = self.run_process_no_exception(f"""
+import torch
+from torch.nn.functional import scaled_grouped_mm, ScalingType, SwizzleType
+a = torch.ones(3, 16, 128, device={device!r}, dtype=torch.float8_e4m3fn)
+b = torch.ones(16, 128, device={device!r}, dtype=torch.float8_e4m3fn)
+sa = torch.ones(3, 64, device={device!r}, dtype=torch.float8_e8m0fnu)
+sb = torch.ones({scale_b_elems}, device={device!r}, dtype=torch.float8_e8m0fnu)
+recipe = ScalingType({recipe.value})
+scaled_grouped_mm(a, b.t(), sa, recipe, sb, recipe,
+                  offs=torch.tensor({offs}, device={device!r}, dtype=torch.int32),
+                  swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+                  output_dtype={out_dtype})
+torch.cuda.synchronize()
+""")
+        self.assertIn(b"expected output tensor dynamic dimension byte size", stderr)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_MNK4, cublaslt_mnk4_skip_msg)
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("op,side", [("2d/2d", "a"), ("2d/2d", "b"), ("2d/3d", "a"), ("3d/2d", "b")])
+    def test_scaled_grouped_gemm_cublaslt_mnk4_scale_rank(self, device, recipe, op, side):
+        a, b_t, sa, sb, offs, _ = self.scaled_grouped_gemm_cublaslt_mnk4_helper(op, recipe, device)
+        if side == "a":
+            sa = sa.reshape(-1, 2)
+        else:
+            sb = sb.reshape(-1, 2)
+        with self.assertRaisesRegex(ValueError, f"scale_{side}.*must be a 1D tensor"):
+            scaled_grouped_mm(
+                a, b_t.transpose(-2, -1), sa, recipe, sb, recipe, offs=offs,
+                swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+            )
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUBLASLT_MNK4,
+        cublaslt_mnk4_skip_msg,
+    )
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    def test_scaled_grouped_gemm_cublaslt_mnk4_jagged_scale_offsets(self, recipe, out_dtype, device):
+        m = n = 16
+        group_k = [128, 384, 640]
+        offs = torch.tensor(group_k, device=device, dtype=torch.int32).cumsum(
+            0, dtype=torch.int32
+        )
+        block_size = 32 if recipe == ScalingType.BlockWise1x32 else 128
+        a_groups, b_groups, scales_a, scales_b, expected_groups = [], [], [], [], []
+        for group, k in enumerate(group_k):
+            rows = torch.arange(m, device=device).unsqueeze(1)
+            kb = torch.arange(ceil_div(k, block_size), device=device).unsqueeze(0)
+            sa = torch.exp2(((rows + kb) % 3 + kb // 4 + group - 4).float())
+            sb = torch.exp2(((2 * rows + kb + 1) % 3 + kb // 4 + group - 4).float())
+            values = torch.exp2(-(torch.arange(k, device=device) // block_size % 5).float())
+            a = values.expand(m, k).to(torch.float8_e4m3fn).contiguous()
+            b = torch.ones((n, k), device=device, dtype=torch.float8_e4m3fn)
+            a_groups.append(a)
+            b_groups.append(b)
+            scales_a.append(to_mnk4(sa))
+            scales_b.append(to_mnk4(sb))
+            a_hp = a.float() * sa.repeat_interleave(block_size, dim=1)
+            b_hp = b.float() * sb.repeat_interleave(block_size, dim=1)
+            expected_groups.append((a_hp @ b_hp.t()).to(out_dtype))
+        A, B_T = torch.cat(a_groups, dim=1), torch.cat(b_groups, dim=1)
+        scale_a, scale_b = torch.cat(scales_a), torch.cat(scales_b)
+        C = scaled_grouped_mm_wrap(
+            A,
+            B_T.transpose(-2, -1),
+            scale_a,
+            scale_b,
+            recipe,
+            recipe,
+            offs=offs,
+            swizzle_a=SwizzleType.SWIZZLE_MN_K4,
+            swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+            out_dtype=out_dtype,
+        )
+        expected = torch.stack(expected_groups)
+        self.assertEqual(C, expected)
+
+    @skipIfRocm
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_CUBLASLT_MNK4,
+        cublaslt_mnk4_skip_msg,
+    )
+    @parametrize("recipe,block_size", [
+        (ScalingType.BlockWise1x32, 32),
+        (ScalingType.BlockWise1x128, 128),
+    ])
+    @parametrize("shape,a_dtype,b_dtype,partial_k,out_dtype", [
+        ((16, 32, 4), a_dtype, b_dtype, False, out_dtype)
+        for a_dtype, b_dtype in (
+            (torch.float8_e4m3fn, torch.float8_e4m3fn),
+            (torch.float8_e4m3fn, torch.float8_e5m2),
+            (torch.float8_e5m2, torch.float8_e4m3fn),
+        )
+        for out_dtype in (torch.bfloat16, torch.float16, torch.float32)
+    ] + [
+        (shape, torch.float8_e4m3fn, torch.float8_e4m3fn, partial_k, torch.bfloat16)
+        for shape, partial_k in (
+            ((128, 128, 5), False), ((17, 16, 7), False),
+            ((16, 32, 4), True), ((128, 128, 5), True), ((17, 16, 7), True),
+        )
+    ])
+    def test_scaled_mm_cublaslt_mnk4(self, recipe, block_size, shape, a_dtype, b_dtype, partial_k, out_dtype, device):
+        m, n, k_blocks = shape
+        k = block_size * k_blocks - (16 if partial_k else 0)
+        kb = torch.arange(k_blocks, device=device)
+        k_scales = torch.exp2((kb % 4 + kb // 4 - 3).float())
+        values = k_scales.reciprocal().square()
+        a = values.repeat_interleave(block_size)[:k].expand(m, -1).contiguous().to(a_dtype)
+        b = torch.ones((n, k), device=device, dtype=b_dtype).t()
+        row_scales = 2.0 ** (torch.arange(m, device=device) % 3)
+        col_scales = 2.0 ** ((2 * torch.arange(n, device=device) + 1) % 3)
+        scale_a = to_mnk4(row_scales[:, None] * k_scales)
+        scale_b = to_mnk4(col_scales[:, None] * k_scales)
+        args = (a, b, scale_a, recipe, scale_b, recipe)
+        kwargs = dict(swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+                      output_dtype=out_dtype)
+        expected = (k * row_scales[:, None] * col_scales).to(out_dtype)
+        # Row-major output exercises cuBLAS operand and scale-pointer swapping.
+        for fast_accum in (False, True):
+            self.assertEqual(scaled_mm(*args, **kwargs, use_fast_accum=fast_accum), expected)
+
+        bias = torch.arange(n, device=device, dtype=out_dtype)
+        if out_dtype == torch.float32:
+            with self.assertRaisesRegex(ValueError, "Bias is not supported when out_dtype is set to Float32"):
+                scaled_mm(*args, **kwargs, bias=bias)
+        else:
+            self.assertEqual(scaled_mm(*args, **kwargs, bias=bias), expected + bias)
+
+        kwargs.pop("output_dtype")
+        input = torch.full_like(expected, 8)
+        expected_addmm = expected * 2 + 32
+        self.assertEqual(scaled_addmm(input, *args, alpha=2, beta=4, **kwargs), expected_addmm)
+        self.assert_scaled_addmm_inplace(input.clone(), expected_addmm, args, alpha=2, beta=4, **kwargs)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_MNK4, cublaslt_mnk4_skip_msg)
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("grouped", [False, True])
+    def test_scaled_mm_cublaslt_mnk4_compiled(self, recipe, grouped, device):
+        if grouped:
+            a, b_t, scale_a, scale_b, offs, expected = self.scaled_grouped_gemm_cublaslt_mnk4_helper(
+                "2d/3d", recipe, device
+            )
+            op = scaled_grouped_mm
+            kwargs = {"offs": offs}
+        else:
+            block_size = 32 if recipe == ScalingType.BlockWise1x32 else 128
+            k = block_size * 5
+            kb = torch.arange(5, device=device)
+            k_scales = torch.exp2((kb % 4 + kb // 4 - 3).float())
+            values = k_scales.reciprocal().square()
+            a = values.repeat_interleave(block_size).expand(16, -1).contiguous().to(torch.float8_e4m3fn)
+            b_t = torch.ones((32, k), device=device, dtype=torch.float8_e4m3fn)
+            row_scales = 2.0 ** (torch.arange(16, device=device) % 3)
+            col_scales = 2.0 ** ((2 * torch.arange(32, device=device) + 1) % 3)
+            scale_a = to_mnk4(row_scales[:, None] * k_scales)
+            scale_b = to_mnk4(col_scales[:, None] * k_scales)
+            expected = (k * row_scales[:, None] * col_scales).to(torch.bfloat16)
+            op = scaled_mm
+            kwargs = {}
+        compiled = torch.compile(op, backend="inductor", fullgraph=True)
+        result = compiled(
+            a, b_t.transpose(-2, -1), scale_a, recipe, scale_b, recipe,
+            swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4, **kwargs,
+        )
+        self.assertEqual(result, expected)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("recipe,block_size", [(ScalingType.BlockWise1x32, 32), (ScalingType.BlockWise1x128, 128)])
+    @parametrize("shortcut", ["alpha_zero", "empty_k"])
+    @parametrize("inplace", [False, True])
+    def test_scaled_mm_cublaslt_mnk4_addmm_shortcut(self, device, recipe, block_size, shortcut, inplace):
+        k = 0 if shortcut == "empty_k" else 128
+        a = torch.ones(16, k, device=device, dtype=torch.float8_e4m3fn)
+        scale = to_mnk4(torch.ones(16, ceil_div(k, block_size), device=device))
+        input = torch.full((16, 16), 8, device=device, dtype=torch.bfloat16)
+        args = (a, a.t(), scale, recipe, scale, recipe)
+        kwargs = dict(swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+                      alpha=0 if shortcut == "alpha_zero" else 1, beta=4)
+        op = scaled_addmm_ if inplace else scaled_addmm
+        if PLATFORM_SUPPORTS_CUBLASLT_MNK4:
+            self.assertEqual(op(input, *args, **kwargs), torch.full_like(input, 32))
+        else:
+            message = "is not implemented for ROCm" if torch.version.hip else "packed MNxK4 scaling"
+            with self.assertRaisesRegex(NotImplementedError, message):
+                op(input, *args, **kwargs)
+
+    @unittest.skipIf(PLATFORM_SUPPORTS_CUBLASLT_MNK4, "requires an unsupported MNxK4 platform")
+    @parametrize("recipe,block_size", [(ScalingType.BlockWise1x32, 32), (ScalingType.BlockWise1x128, 128)])
+    @parametrize("grouped", [False, True])
+    def test_scaled_mm_cublaslt_mnk4_unsupported(self, device, recipe, block_size, grouped):
+        if not grouped and not PLATFORM_SUPPORTS_FP8:
+            self.skipTest(f8_msg)
+        a = torch.ones(16, 128, device=device, dtype=torch.float8_e4m3fn)
+        scale = to_mnk4(torch.ones(16, ceil_div(128, block_size), device=device))
+        if grouped:
+            a, scale = a.unsqueeze(0), scale.unsqueeze(0)
+        op = scaled_grouped_mm if grouped else scaled_mm
+        message = "packed MNxK4 scaling"
+        if grouped and (torch.version.hip or _get_torch_cuda_version() < (13, 4)):
+            message = "cuBLASLt scaled grouped GEMM requires CUDA >= 13.4 and a non-ROCm build"
+        if not grouped and torch.version.hip:
+            message = "packed MNxK4 scaling is not supported on ROCm"
+        with self.assertRaisesRegex(NotImplementedError, message):
+            op(a, a.transpose(-2, -1), scale, recipe, scale, recipe,
+               swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_MNK4, cublaslt_mnk4_skip_msg)
+    @parametrize("recipe,block_size", [(ScalingType.BlockWise1x32, 32), (ScalingType.BlockWise1x128, 128)])
+    def test_scaled_mm_cublaslt_mnk4_tunableop(self, device, recipe, block_size):
+        with tempfile.TemporaryDirectory() as directory:
+            stdout, stderr = self.run_process_no_exception(f"""
+import torch
+from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
+from torch.testing._internal.common_quantized import to_blocked, to_mnk4
+from torch.testing._internal.common_utils import TestCase
+
+case = TestCase()
+tunable = torch.cuda.tunable
+tunable._clear_all()
+tunable.set_filename({(directory + '/results.csv')!r})
+tunable.set_max_tuning_duration(1)
+tunable.set_max_tuning_iterations(1)
+tunable.set_rotating_buffer_size(0)
+tunable.tuning_enable(True)
+tunable.enable(True)
+k = {block_size} * 5
+kb = torch.arange(5, device={device!r})
+k_scales = torch.exp2((kb % 4 + kb // 4 - 3).float())
+values = k_scales.reciprocal().square()
+a = values.repeat_interleave({block_size}).expand(128, -1).contiguous().to(torch.float8_e4m3fn)
+b = torch.ones((128, k), device={device!r}, dtype=torch.float8_e4m3fn).t()
+row_scales = 2.0 ** (torch.arange(128, device={device!r}) % 3)
+col_scales = 2.0 ** ((2 * torch.arange(128, device={device!r}) + 1) % 3)
+sa = row_scales[:, None] * k_scales
+sb = col_scales[:, None] * k_scales
+expected = (k * row_scales[:, None] * col_scales).to(torch.bfloat16)
+for swizzle in (SwizzleType.SWIZZLE_32_4_4, SwizzleType.SWIZZLE_MN_K4):
+    if swizzle == SwizzleType.SWIZZLE_MN_K4:
+        scale_a, scale_b = to_mnk4(sa), to_mnk4(sb)
+        recipe = ScalingType({recipe.value})
+    else:
+        scale_a = to_blocked(sa.repeat_interleave({block_size} // 32, dim=1)).to(torch.float8_e8m0fnu)
+        scale_b = to_blocked(sb.repeat_interleave({block_size} // 32, dim=1)).to(torch.float8_e8m0fnu)
+        recipe = ScalingType.BlockWise1x32
+    result = scaled_mm(a, b, scale_a, recipe, scale_b, recipe, swizzle_a=swizzle, swizzle_b=swizzle)
+    case.assertEqual(result, expected)
+    keys = {{row[1] for row in tunable.get_results()}}
+    if swizzle == SwizzleType.SWIZZLE_32_4_4:
+        case.assertEqual(len(keys), 1)
+        legacy_key = next(iter(keys))
+        case.assertTrue(legacy_key.endswith("_bias_None"))
+        case.assertNotIn("_swz_", legacy_key)
+    else:
+        case.assertEqual(len(keys - {{legacy_key}}), 1)
+        case.assertTrue(next(iter(keys - {{legacy_key}})).endswith("_swz_SWIZZLE_MN_K4_SWIZZLE_MN_K4"))
+results = tunable.get_results()
+case.assertEqual(len(results), 2)
+case.assertEqual(len({{row[1] for row in results}}), 2)
+print("tunableop_keys_ok")
+""")
+            self.assertIn(b"tunableop_keys_ok", stdout, stderr.decode())
+
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUBLASLT_MNK4, cublaslt_mnk4_skip_msg)
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("case", ["output_dtype", "alignment", "layout_a", "layout_b", "layout_ab"])
+    def test_scaled_mm_cublaslt_mnk4_kernel_validation(self, recipe, case, device):
+        a = torch.ones((16, 512), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.ones_like(a).t()
+        elems = 256 if recipe == ScalingType.BlockWise1x32 else 64
+        scale_a = torch.ones(elems, device=device).to(torch.float8_e8m0fnu)
+        scale_b = scale_a.clone()
+        output_dtype = torch.bfloat16
+        if case == "output_dtype":
+            output_dtype = torch.float8_e4m3fn
+            message = "packed MNxK4 output dtype must be"
+        elif case == "alignment":
+            scale_a = torch.empty(elems + 1, device=device, dtype=scale_a.dtype)[1:]
+            message = "16-byte aligned"
+        else:
+            if case in ("layout_a", "layout_ab"):
+                a = a.t().contiguous().t()
+            if case in ("layout_b", "layout_ab"):
+                b = b.contiguous()
+            message = "packed MNxK4 scaling requires row-major"
+        with self.assertRaisesRegex(ValueError, message):
+            scaled_mm(a, b, scale_a, recipe, scale_b, recipe,
+                      swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+                      output_dtype=output_dtype)
+
+    @skipIfRocm
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("case", ["dtype", "float_scale", "numel", "noncontiguous", "alignment", "missing_swizzle", "mismatched_swizzle", "recipe"])
+    def test_scaled_grouped_gemm_cublaslt_mnk4_errors(self, recipe, case, device):
+        if case in ("numel", "noncontiguous", "alignment") and not PLATFORM_SUPPORTS_CUBLASLT_MNK4:
+            self.skipTest(cublaslt_mnk4_skip_msg)
+        a = torch.ones((2, 16, 512), device=device, dtype=torch.float8_e4m3fn)
+        b = torch.ones_like(a).transpose(-2, -1)
+        elems = 256 if recipe == ScalingType.BlockWise1x32 else 64
+        scale_a = torch.ones((2, elems), device=device).to(torch.float8_e8m0fnu)
+        scale_b = scale_a.clone()
+        swizzle_a = swizzle_b = SwizzleType.SWIZZLE_MN_K4
+        recipe_b = recipe
+        if case == "dtype":
+            scale_a = scale_a.view(torch.int32)
+            message = "Invalid scaling configuration for grouped GEMM"
+        elif case == "float_scale":
+            scale_a = scale_a.float()
+            scale_b = scale_b.float()
+            message = "Invalid scaling configuration for grouped GEMM"
+        elif case == "numel":
+            scale_a = scale_a[:, :-16].contiguous()
+            message = "must have shape"
+        elif case == "noncontiguous":
+            scale_a = torch.empty((2, elems * 2), device=device, dtype=scale_a.dtype)[:, ::2]
+            message = "blockwise scale must be a contiguous"
+        elif case == "alignment":
+            scale_a = torch.empty(2 * elems + 1, device=device, dtype=scale_a.dtype)[1:].view(2, elems)
+            message = "16-byte aligned"
+        elif case == "missing_swizzle":
+            swizzle_b = []
+            message = "packed MNxK4 requires"
+        elif case == "mismatched_swizzle":
+            swizzle_b = SwizzleType.SWIZZLE_32_4_4
+            message = "packed MNxK4 requires"
+        else:
+            recipe_b = ScalingType.TensorWise
+            message = "packed MNxK4 requires"
+        with self.assertRaisesRegex(ValueError, message):
+            scaled_grouped_mm(a, b, scale_a, recipe, scale_b, recipe_b,
+                              swizzle_a=swizzle_a, swizzle_b=swizzle_b)
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM,
         cublaslt_grouped_mm_skip_msg
@@ -4200,6 +4921,57 @@ torch.cuda.synchronize()
             scaled_grouped_mm_wrap(
                 A, B_T.transpose(-2, -1), scale_a, scale_b,
                 ScalingType.TensorWise, ScalingType.TensorWise, offs=offs,
+            )
+
+    @parametrize("recipe", [ScalingType.BlockWise1x32, ScalingType.BlockWise1x128])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_mnk4_output_dtype(self, recipe, out_dtype, device):
+        if not PLATFORM_SUPPORTS_CUBLASLT_MNK4:
+            self.skipTest(cublaslt_mnk4_skip_msg)
+        a = torch.ones(2, 16, 128, device=device, dtype=torch.float8_e4m3fn)
+        scale = torch.ones(2, 64, device=device, dtype=torch.float8_e8m0fnu)
+        result = scaled_grouped_mm(
+            a, a.transpose(-2, -1), scale, recipe, scale, recipe,
+            swizzle_a=SwizzleType.SWIZZLE_MN_K4, swizzle_b=SwizzleType.SWIZZLE_MN_K4,
+            output_dtype=out_dtype,
+        )
+        self.assertEqual(result.shape, (2, 16, 16))
+        self.assertEqual(result.dtype, out_dtype)
+        self.assertEqual(result, torch.full_like(result, 128))
+
+    @parametrize("case", ["block_block", "tensor_row", "mixed_block", "one_swizzle", "extra_swizzle",
+                          "e5m2_mnk4", "fp4_mnk4"])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_scaled_grouped_mm_invalid_recipe(self, case, out_dtype, device):
+        a = torch.empty(2, 16, 128, device=device, dtype=torch.float8_e4m3fn)
+        scale = torch.empty(2, 64, device=device, dtype=torch.float8_e8m0fnu)
+        recipe_a = recipe_b = ScalingType.BlockWise1x32
+        swizzle_a = swizzle_b = SwizzleType.SWIZZLE_MN_K4
+        message = "packed MNxK4 requires"
+        if case == "block_block":
+            recipe_a = recipe_b = ScalingType.BlockWise128x128
+            swizzle_a = swizzle_b = None
+            message = "Grouped scaling configuration requires BFloat16 output"
+        elif case == "tensor_row":
+            recipe_a, recipe_b = ScalingType.TensorWise, ScalingType.RowWise
+            swizzle_a = swizzle_b = None
+            message = "Grouped scaling configuration requires BFloat16 output"
+        elif case == "mixed_block":
+            recipe_b = ScalingType.BlockWise1x128
+            swizzle_a = swizzle_b = None
+            message = "Grouped scaling configuration requires BFloat16 output"
+        elif case == "one_swizzle":
+            swizzle_b = None
+        elif case == "extra_swizzle":
+            swizzle_b = [SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_MN_K4]
+        elif case == "e5m2_mnk4":
+            a = a.to(torch.float8_e5m2)
+        elif case == "fp4_mnk4":
+            a = torch.empty(2, 16, 64, device=device, dtype=torch.float4_e2m1fn_x2)
+        with self.assertRaisesRegex(ValueError, message):
+            scaled_grouped_mm(
+                a, a.transpose(-2, -1), scale, recipe_a, scale, recipe_b,
+                swizzle_a=swizzle_a, swizzle_b=swizzle_b, output_dtype=out_dtype,
             )
 
     @skipIfRocm
@@ -4409,6 +5181,15 @@ torch.cuda.synchronize()
         x_scale = torch.full((M, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
         y_scale = torch.full((N, K // 32), 1., dtype=torch.float8_e8m0fnu, device=device)
 
+        # K=128 makes the gfx1250 order a no-op, so these linear scales are
+        # already a valid SWIZZLE_128 buffer. gfx1250 rejects NO_SWIZZLE.
+        # gfx950 still accepts it.
+        gfx1250_swizzle = {}
+        if evaluate_gfx_arch_within(["gfx1250"]):
+            gfx1250_swizzle = {
+                "swizzle_a": SwizzleType.SWIZZLE_128,
+                "swizzle_b": SwizzleType.SWIZZLE_128,
+            }
         out = scaled_mm_wrap(
             x,
             y.t(),
@@ -4417,6 +5198,7 @@ torch.cuda.synchronize()
             scale_recipe_a=ScalingType.BlockWise1x32,
             scale_recipe_b=ScalingType.BlockWise1x32,
             out_dtype=torch.bfloat16,
+            **gfx1250_swizzle,
         )
         out_ref = (x.float() @ y.t().float()).to(torch.bfloat16)
         self.assertEqual(out, out_ref, atol=1e-2, rtol=1e-2)
@@ -4431,6 +5213,7 @@ torch.cuda.synchronize()
                 scale_recipe_a=ScalingType.BlockWise1x32,
                 scale_recipe_b=ScalingType.BlockWise1x32,
                 out_dtype=torch.bfloat16,
+                **gfx1250_swizzle,
             )
 
     @unittest.skipIf(PLATFORM_SUPPORTS_FP8 or not torch.cuda.is_available(), f8_msg)
@@ -4606,10 +5389,12 @@ torch.cuda.synchronize()
 
         global_scale = torch.full((1, ), 1., dtype=torch.float, device=device)
 
+        rocm_swizzle_count_msg = "swizzle_a/swizzle_b must match the number of scale recipes"
+
         # No swizzles passed - must fail on swizzle_a
         with self.assertRaisesRegex(
-            NotImplementedError if torch.version.hip else ValueError,
-            "NVFP4 scaling not supported on ROCM"
+            ValueError,
+            rocm_swizzle_count_msg
             if torch.version.hip
             else "swizzle_a must have 2 values, got 0",
         ):
@@ -4624,8 +5409,8 @@ torch.cuda.synchronize()
 
         # Not enough swizzles passed - must fail on swizzle_a
         with self.assertRaisesRegex(
-            NotImplementedError if torch.version.hip else ValueError,
-            "NVFP4 scaling not supported on ROCM"
+            ValueError,
+            rocm_swizzle_count_msg
             if torch.version.hip
             else "swizzle_a must have 2 values, got 1",
         ):
@@ -4641,8 +5426,8 @@ torch.cuda.synchronize()
 
         # Not enough swizzles passed to b - must fail on swizzle_b
         with self.assertRaisesRegex(
-            NotImplementedError if torch.version.hip else ValueError,
-            "NVFP4 scaling not supported on ROCM"
+            ValueError,
+            rocm_swizzle_count_msg
             if torch.version.hip
             else "swizzle_b must have 2 values, got 1",
         ):
@@ -4657,9 +5442,140 @@ torch.cuda.synchronize()
                 swizzle_b=[SwizzleType.SWIZZLE_32_4_4, ],
             )
 
+        # A full swizzle list that is not SWIZZLE_128 is rejected before the
+        # size check, on every ROCm arch.
+        if torch.version.hip:
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                r"NVFP4 block scaling on ROCm requires gfx1250 with ROCm 10\.0 and SWIZZLE_128",
+            ):
+                _ = torch.nn.functional.scaled_mm(
+                    x,
+                    w.t(),
+                    [x_scale, global_scale],
+                    [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                    [w_scale, global_scale],
+                    [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                    swizzle_a=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+                    swizzle_b=[SwizzleType.SWIZZLE_32_4_4, SwizzleType.NO_SWIZZLE],
+                )
+
+
+
+    @onlyAccelerator
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @unittest.skipIf(not torch.version.hip, "The MX scale layout is fixed by arch and ROCm version only on ROCm")
+    @runOnRocmArch(MI450_ARCH)
+    @parametrize("recipe", ["mxfp8", "mxfp4"])
+    def test_rocm_gfx1250_mx_swizzle(self, device, recipe) -> None:
+        # K=256 so the permutation is not the identity. Constant scales would
+        # hide a wrong order.
+        M, K, N = 128, 256, 128
+        BLOCK_SIZE = 32
+        A_ref = torch.randn((M, K), device=device, dtype=torch.bfloat16) * 1000
+        B_ref = torch.randn((N, K), device=device, dtype=torch.bfloat16) * 1000
+        A_scale = data_to_mx_scale(A_ref, BLOCK_SIZE, recipe)
+        B_scale = data_to_mx_scale(B_ref, BLOCK_SIZE, recipe)
+
+        def quantize(ref, scale, rows):
+            blocks = scale.reshape(rows * ceil_div(K, BLOCK_SIZE), 1)
+            if recipe == "mxfp8":
+                q = (ref.reshape(-1, BLOCK_SIZE) / blocks.float()).reshape(rows, K)
+                return q.clamp(-F8E4M3_MAX_VAL, F8E4M3_MAX_VAL).to(torch.float8_e4m3fn)
+            q = (ref.reshape(-1, BLOCK_SIZE) / blocks.bfloat16()).reshape(rows, K)
+            return _bfloat16_to_float4_e2m1fn_x2(q.clamp(-FP4_MAX_VAL, FP4_MAX_VAL))
+
+        A, B = quantize(A_ref, A_scale, M), quantize(B_ref, B_scale, N)
+        C_ref = A_ref @ B_ref.t()
+        sqnr_target = 15.0 if recipe == "mxfp4" else 15.8
+
+        C = scaled_mm(
+            A, B.t(),
+            to_mx_swizzled_gfx1250(A_scale), ScalingType.BlockWise1x32,
+            to_mx_swizzled_gfx1250(B_scale), ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_128, swizzle_b=SwizzleType.SWIZZLE_128,
+            output_dtype=torch.bfloat16,
+        )
+        sqnr = compute_error(C_ref, C).item()
+        self.assertGreater(sqnr, sqnr_target, f"SWIZZLE_128 gave sqnr {sqnr}")
+
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            r"requires SWIZZLE_128 scales\. Pass swizzle_a=swizzle_b=SwizzleType\.SWIZZLE_128",
+        ):
+            scaled_mm(
+                A, B.t(),
+                A_scale, ScalingType.BlockWise1x32,
+                B_scale, ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.NO_SWIZZLE, swizzle_b=SwizzleType.NO_SWIZZLE,
+                output_dtype=torch.bfloat16,
+            )
+
+
+class TestFP8MatmulMpsOnly(TestCase):
+
+    hw_classification = HardwareClassification.MPS
+
+    @parametrize("recipe", ["mxfp8", "nvfp4"])
+    @parametrize("layout", ["dense", "padded", "unaligned"])
+    @parametrize("mnk", [(1, 7, 2048), (3, 130, 1024), (4, 64, 512), (8, 100, 256), (64, 96, 2048)],
+                 name_fn=lambda mnk: f"{mnk[0]}_{mnk[1]}_{mnk[2]}")
+    def test_blockwise_layouts(self, recipe, layout, mnk, device) -> None:
+        # MPS picks a decode kernel for M <= 4, MPP or tiles otherwise, and the native
+        # Metal 4.1 kernel for dense MXFP8; padded and unaligned operands must take or
+        # fall back to a kernel that handles them.
+        M, N, K = mnk
+        block = 16 if recipe == "nvfp4" else 32
+        packed = 2 if recipe == "nvfp4" else 1
+        dtype = torch.float4_e2m1fn_x2 if recipe == "nvfp4" else torch.float8_e4m3fn
+        scale_dtype = torch.float8_e4m3fn if recipe == "nvfp4" else torch.float8_e8m0fnu
+        pad = {"dense": 0, "padded": 32, "unaligned": 0}[layout]
+        offset = 1 if layout == "unaligned" else 0
+
+        def operand(rows):
+            codes = torch.randint(0, 256, (rows * (K // packed + pad) + offset,), dtype=torch.uint8)
+            if recipe == "mxfp8":
+                # avoid the NaN codes 0x7f and 0xff
+                codes = codes.view(torch.float8_e4m3fn).float().nan_to_num().to(torch.float8_e4m3fn).view(torch.uint8)
+            # take the views on the device too: copying a view to MPS makes it dense
+
+            def view(t):
+                return t[offset:].view(rows, K // packed + pad)[:, : K // packed].view(dtype)
+
+            return view(codes), view(codes.to(device))
+
+        def scales(rows):
+            if recipe == "nvfp4":
+                s = (torch.rand(rows, K // block) + 0.25).to(scale_dtype)
+            else:
+                s = torch.randint(118, 128, (rows, K // block), dtype=torch.uint8).view(scale_dtype)
+            return s, s.to(device)
+
+        def dequant(data, s):
+            if recipe == "nvfp4":
+                u8 = data.view(torch.uint8)
+                codes = torch.stack([u8 & 0xF, u8 >> 4], -1).flatten(-2)
+                values = _floatx_unpacked_to_f32(codes, 2, 1).double()
+            else:
+                values = data.double()
+            return (values.unflatten(-1, (-1, block)) * s.double().unsqueeze(-1)).flatten(-2)
+
+        (a, a_dev), (b, b_dev) = operand(M), operand(N)
+        (sa, sa_dev), (sb, sb_dev) = scales(M), scales(N)
+        recipe_enum = ScalingType.BlockWise1x16 if recipe == "nvfp4" else ScalingType.BlockWise1x32
+        out = torch._scaled_mm_v2(
+            a_dev, b_dev.t(), [sa_dev], [recipe_enum], [SwizzleType.NO_SWIZZLE],
+            [sb_dev], [recipe_enum], [SwizzleType.NO_SWIZZLE], None, torch.float32,
+        )
+        ref = dequant(a, sa) @ dequant(b, sb).t()
+        # float32 accumulation over K: measure the error against the output's magnitude
+        err = ((out.cpu().double() - ref).abs() / (ref.abs() + ref.abs().mean())).max().item()
+        self.assertLess(err, 1e-5)
+
 
 instantiate_device_type_tests(TestFP8MatmulDevice, globals(), allow_xpu=True, allow_mps=True)
 instantiate_device_type_tests(TestFP8MatmulCudaOnly, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestFP8MatmulMpsOnly, globals(), only_for=("mps",), allow_mps=True)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

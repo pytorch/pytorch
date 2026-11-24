@@ -26,7 +26,7 @@ basic_gnn_edgecnn,pass,0
 
 
 
-basic_gnn_gcn,pass,6
+basic_gnn_gcn,pass,4
 
 
 
@@ -110,7 +110,7 @@ drq,pass,0
 
 
 
-fastNLP_Bert,pass,4
+fastNLP_Bert,pass,2
 
 
 
@@ -245,7 +245,7 @@ soft_actor_critic,pass,0
 
 
 
-speech_transformer,pass,10
+speech_transformer,pass,3
 
 
 
@@ -261,7 +261,7 @@ torchrec_dlrm,eager_fail_to_run,0
 
 
 
-tts_angular,pass,5
+tts_angular,pass,4
 
 
 
@@ -269,7 +269,7 @@ vgg16,eager_two_runs_differ,0
 
 
 
-vision_maskrcnn,fail_to_run,15
+vision_maskrcnn,fail_to_run,13
 
 
 

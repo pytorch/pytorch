@@ -21,6 +21,7 @@ from torch._inductor.virtualized import V
 from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defined]
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
+    evaluate_gfx_arch_within,
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
@@ -33,7 +34,11 @@ from torch.testing._internal.common_device_type import (
     preserves_device_selection,
     skipCUDAIf,
 )
-from torch.testing._internal.common_quantized import ceil_div, to_blocked
+from torch.testing._internal.common_quantized import (
+    ceil_div,
+    to_blocked,
+    to_mx_swizzled_gfx1250,
+)
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -2477,15 +2482,21 @@ class TestFP8Lowering(TestCase):
     def test_scaled_mm_v2_swizzle_compile(self, device, strided_scales):
         """Swizzled scales are not supported by any inductor template; the
         lowering must fall back to the ATen kernel instead of failing compile.
-        NVIDIA packs them as SWIZZLE_32_4_4. gfx950 packs them as SWIZZLE_32_8
-        once ROCm has that layout (7.14 for MX FP8)."""
+        gfx950 requests SWIZZLE_32_8. gfx1250 requests SWIZZLE_128."""
         from torch.nn.functional import SwizzleType
 
-        # SWIZZLE_32_4_4 has no ROCm scale mode. Older ROCm and non-gfx950 stay skipped.
+        # SWIZZLE_32_4_4 has no ROCm scale mode. Older ROCm and other archs stay skipped.
         use_32_8 = rocm_mx_swizzle(torch.float8_e4m3fn)
         if torch.version.hip and not use_32_8:
-            raise unittest.SkipTest("SWIZZLE_32_8 MX FP8 requires gfx950 and ROCm 7.14")
-        swizzle = SwizzleType.SWIZZLE_32_8 if use_32_8 else SwizzleType.SWIZZLE_32_4_4
+            raise unittest.SkipTest(
+                "MX FP8 block swizzle requires gfx950 or gfx1250 and ROCm 7.14"
+            )
+        if use_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
+            swizzle = SwizzleType.SWIZZLE_128
+        elif use_32_8:
+            swizzle = SwizzleType.SWIZZLE_32_8
+        else:
+            swizzle = SwizzleType.SWIZZLE_32_4_4
 
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 32
@@ -2500,8 +2511,12 @@ class TestFP8Lowering(TestCase):
         reference = (A.double() * A_scale.double().repeat_interleave(BLOCK_SIZE, 1)) @ (
             B.double() * B_scale.double().repeat_interleave(BLOCK_SIZE, 1)
         ).t()
-        A_scale = to_blocked(A_scale, swizzle_32_8=use_32_8)
-        B_scale = to_blocked(B_scale, swizzle_32_8=use_32_8)
+        if use_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
+            A_scale = to_mx_swizzled_gfx1250(A_scale)
+            B_scale = to_mx_swizzled_gfx1250(B_scale)
+        else:
+            A_scale = to_blocked(A_scale, swizzle_32_8=use_32_8)
+            B_scale = to_blocked(B_scale, swizzle_32_8=use_32_8)
 
         def fn(A, B, A_scale, B_scale):
             return scaled_mm(
@@ -2545,6 +2560,10 @@ class TestFP8Lowering(TestCase):
         # using a smaller K would size the MX 1x32 scales for fewer K-blocks
         # than the data has (XPU rejects this; CUDA only masks it via the
         # to_blocked() zero-padding below).
+        if torch.version.hip and evaluate_gfx_arch_within(["gfx1250"]):
+            raise unittest.SkipTest(
+                "gfx1250 MX scaling requires SWIZZLE_128, which v1 _scaled_mm cannot express"
+            )
         M, K, N = 128, 128, 128
         BLOCK_SIZE = 32
         dtype = torch.bfloat16
@@ -2777,7 +2796,7 @@ class TestCvtE8M0Rceil(TestCase):
 
     def test_pattern_match(self):
         """Test that the log2+ceil pattern gets matched and replaced."""
-        _misc_patterns_init()
+        _misc_patterns_init("cuda")
 
         E8M0_BIAS = 127
 
@@ -2817,7 +2836,7 @@ class TestCvtE8M0Rceil(TestCase):
         so ceil(log2(x)) would incorrectly return e instead of e+1.
         The PTX/bit-manipulation replacement must always return the correct value.
         """
-        _misc_patterns_init()
+        _misc_patterns_init("cuda")
         E8M0_BIAS = 127
 
         def fn(inp):
@@ -2859,7 +2878,7 @@ class TestE8M0Log2PatternBitManip(TestCase):
 
     def test_pattern_fires_and_is_correct(self):
         """The log2+ceil pattern should be matched and produce correct uint8."""
-        _misc_patterns_init()
+        _misc_patterns_init("cuda")
         E8M0_BIAS = 127
 
         def fn(inp):

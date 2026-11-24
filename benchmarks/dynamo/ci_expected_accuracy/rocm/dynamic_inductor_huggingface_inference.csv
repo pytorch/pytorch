@@ -6,7 +6,7 @@ AlbertForMaskedLM,pass,0
 
 
 
-AllenaiLongformerBase,pass,4
+AllenaiLongformerBase,pass,1
 
 
 
@@ -30,7 +30,7 @@ DistilBertForMaskedLM,pass,0
 
 
 
-DistillGPT2,pass,3
+DistillGPT2,pass,1
 
 
 
