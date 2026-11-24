@@ -12393,6 +12393,19 @@ class TestNNDeviceType(NNTestCase):
         torch.accelerator.synchronize()
         self.assertEqual(grad_input[-1, 0, 0, 0], -1)
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @parametrize_test("shape", [(8, 5, 128, 128), (2, 5, 512, 512)])
+    def test_nll_loss2d_deterministic(self, device, dtype, shape):
+        n, c, h, w = shape
+        x = torch.randn(shape, device=device, dtype=dtype)
+        t = torch.randint(0, c, (n, h, w), device=device)
+        for reduction in ("mean", "sum"):
+            with DeterministicGuard(True):
+                ref = F.nll_loss(x, t, reduction=reduction)
+                for _ in range(5):
+                    self.assertEqual(F.nll_loss(x, t, reduction=reduction), ref, atol=0, rtol=0)
+
     def _nll_loss_helper(self, input_size, reduction, expected, device, dtype):
         input = torch.rand(input_size, requires_grad=True, device=device, dtype=dtype)
         num_channels = input_size[1]

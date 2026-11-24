@@ -3,7 +3,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/core/TensorAccessor.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -82,8 +81,8 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
 template <typename scalar_t, typename accscalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void nll_loss2d_forward_kernel(
-  scalar_t* output,
-  scalar_t* total_weight,
+  accscalar_t* partial_output,
+  accscalar_t* partial_weight,
   const scalar_t* input,
   const int64_t* target,
   const scalar_t* weight,
@@ -121,18 +120,40 @@ __global__ void nll_loss2d_forward_kernel(
   auto input_sum_ = cuda_utils::BlockReduceSum(input_sum, input_sum_smem);
 
   if (threadIdx.x == 0) {
-    gpuAtomicAdd(total_weight, static_cast<scalar_t>(acc_weight_));
-    gpuAtomicAdd(output, static_cast<scalar_t>(input_sum_));
+    partial_weight[blockIdx.x] = acc_weight_;
+    partial_output[blockIdx.x] = input_sum_;
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, typename accscalar_t, typename index_t>
 C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
-__global__ void nll_loss2d_forward_size_average_kernel(
+__global__ void nll_loss2d_forward_reduce_partials_kernel(
   scalar_t* output,
-  const scalar_t* total_weight
+  scalar_t* total_weight,
+  const accscalar_t* partial_output,
+  const accscalar_t* partial_weight,
+  index_t num_partials,
+  bool size_average
 ) {
-  *output /= *total_weight;
+  accscalar_t weight_sum = 0;
+  accscalar_t output_sum = 0;
+
+  for (index_t i = threadIdx.x; i < num_partials; i += blockDim.x) {
+    weight_sum += partial_weight[i];
+    output_sum += partial_output[i];
+  }
+
+  __shared__ accscalar_t weight_smem[CUDA_NUM_THREADS];
+  __shared__ accscalar_t output_smem[CUDA_NUM_THREADS];
+
+  const auto weight_sum_ = cuda_utils::BlockReduceSum(weight_sum, weight_smem);
+  const auto output_sum_ = cuda_utils::BlockReduceSum(output_sum, output_smem);
+
+  if (threadIdx.x == 0) {
+    *total_weight = static_cast<scalar_t>(weight_sum_);
+    const accscalar_t result = size_average ? output_sum_ / weight_sum_ : output_sum_;
+    *output = static_cast<scalar_t>(result);
+  }
 }
 
 template <typename scalar_t>
@@ -243,12 +264,6 @@ void nll_loss2d_forward_out_cuda_template(
     const std::optional<Tensor>& weight_opt,
     int64_t reduction,
     int64_t ignore_index) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage in 'sum' or 'mean' reductions.
-  if (reduction != at::Reduction::None) {
-    at::globalContext().alertNotDeterministic("nll_loss2d_forward_out_cuda_template");
-  }
-
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
@@ -314,9 +329,6 @@ void nll_loss2d_forward_out_cuda_template(
   auto weight_ = optional_contiguous(weight);
   auto target_ = target.contiguous();
 
-  output.zero_();
-  total_weight.zero_();
-
   auto batch_size = target.size(0);
   int64_t map_nelem = target.numel() / batch_size;
   int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
@@ -330,6 +342,10 @@ void nll_loss2d_forward_out_cuda_template(
       "nll_loss2d_forward_kernel",
       [&] {
         using accscalar_t = acc_type<scalar_t, true>;
+        const auto partial_options = input.options().dtype(c10::CppTypeToScalarType<accscalar_t>::value);
+
+        auto partial_weight = at::empty({total_blocks}, partial_options);
+        auto partial_output = at::empty({total_blocks}, partial_options);
     AT_DISPATCH_INDEX_TYPES(
         at::native::canUse32BitIndexMath(input_, INT_MAX) ? ScalarType::Int : ScalarType::Long,
         "nll_loss2d_forward_launcher", [&] {
@@ -338,8 +354,8 @@ void nll_loss2d_forward_out_cuda_template(
                   CUDA_NUM_THREADS,
                   0,
                   at::cuda::getCurrentCUDAStream()>>>(
-                    output.mutable_data_ptr<scalar_t>(),
-                    total_weight.mutable_data_ptr<scalar_t>(),
+                    partial_output.mutable_data_ptr<accscalar_t>(),
+                    partial_weight.mutable_data_ptr<accscalar_t>(),
                     input_.const_data_ptr<scalar_t>(),
                     target_.const_data_ptr<int64_t>(),
                     optional_data<scalar_t>(weight_),
@@ -348,14 +364,15 @@ void nll_loss2d_forward_out_cuda_template(
                     blocks_per_sample,
                     ignore_index);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
-            // Divide by total_weight
-            if (reduction == at::Reduction::Mean) {
-              nll_loss2d_forward_size_average_kernel<scalar_t>
-                  <<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-                      output.mutable_data_ptr<scalar_t>(),
-                      total_weight.const_data_ptr<scalar_t>());
-              C10_CUDA_KERNEL_LAUNCH_CHECK();
-            }
+            nll_loss2d_forward_reduce_partials_kernel<scalar_t, accscalar_t, index_t>
+              <<<1, CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+                  output.mutable_data_ptr<scalar_t>(),
+                  total_weight.mutable_data_ptr<scalar_t>(),
+                  partial_output.const_data_ptr<accscalar_t>(),
+                  partial_weight.const_data_ptr<accscalar_t>(),
+                  total_blocks,
+                  reduction == at::Reduction::Mean);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
       });
 }
