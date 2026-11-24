@@ -2425,9 +2425,13 @@ class TritonTemplateKernel(TritonKernel):
                                 self.prologue_fused_inputs_preserve_zero |= (
                                     prologue_node.get_buffer_names()
                                 )
-                        prologue_node.codegen(
-                            self.split_and_set_ranges(prologue_node.get_ranges())
-                        )
+                        # Masked lanes of a prologue load reach the template's tl.dot,
+                        # and zero-preserving prologues are not re-masked, so the load
+                        # itself must fill them with zeros.
+                        with patch.object(self, "_load_other", 0):
+                            prologue_node.codegen(
+                                self.split_and_set_ranges(prologue_node.get_ranges())
+                            )
                     self.cse.invalidate(OrderedSet())
 
     def _finalize_partial_render(
@@ -4461,6 +4465,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "kpack",
                 "matrix_instr_nonkdim",
                 "waves_per_eu",
+                "NUM_XCCS",
             ]
         )
     )

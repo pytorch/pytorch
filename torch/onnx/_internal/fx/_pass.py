@@ -186,7 +186,7 @@ class Transform(abc.ABC):
     module: torch.fx.GraphModule
     """The module to be transformed."""
 
-    fake_mode: fake_tensor.FakeTensorMode | None
+    fake_mode: fake_tensor.FakeTensorMode | fake_tensor.CppFakeTensorMode | None
     """The existing fake mode detected from `self.module`."""
 
     def __init__(
@@ -201,19 +201,21 @@ class Transform(abc.ABC):
         self.module = module
         self.fake_mode = self._detect_fake_mode()
 
-    def _detect_fake_mode(self) -> fake_tensor.FakeTensorMode | None:
+    def _detect_fake_mode(
+        self,
+    ) -> fake_tensor.FakeTensorMode | fake_tensor.CppFakeTensorMode | None:
         """Detect fake mode from the graph.
 
         Scan through all nodes in graph and their meta['val'] to detect fake mode.
         """
         fake_tensors = [node.meta.get("val") for node in self.module.graph.nodes]
         with unset_fake_temporarily():
-            return torch._guards.require_python_fake_mode(
-                torch._dynamo.utils.detect_fake_mode(fake_tensors)
-            )
+            return torch._dynamo.utils.detect_fake_mode(fake_tensors)
 
     def _maybe_fakefy_args(
-        self, fake_mode: fake_tensor.FakeTensorMode | None, *args: Any
+        self,
+        fake_mode: fake_tensor.FakeTensorMode | fake_tensor.CppFakeTensorMode | None,
+        *args: Any,
     ) -> tuple[Any, ...]:
         if fake_mode is None:
             return args
