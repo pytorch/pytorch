@@ -8655,9 +8655,14 @@ def meta_upsample_inter_area2d(input, output_size, scales_h=None, scales_w=None)
         input.numel() != 0 or all(size > 0 for size in input.shape[1:]),
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.shape}",
     )
-    return input.new_empty(full_output_size).to(
-        memory_format=utils.suggest_memory_format(input)
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    memory_format = (
+        utils.upsample_output_memory_format(input)
+        if guard_or_false(input.size(1) == 3)
+        else utils.suggest_memory_format(input)
     )
+    return input.new_empty(full_output_size).to(memory_format=memory_format)
 
 
 # From aten/src/ATen/native/cuda/AmpKernels.cu

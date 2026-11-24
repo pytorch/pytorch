@@ -9920,9 +9920,13 @@ class TestNNDeviceType(NNTestCase):
             device, antialias, align_corners, mode, memory_format
         )
 
-    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos"])
+    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos", "inter-area"])
     @parametrize_test("antialias", [True, False])
     @parametrize_test("dtype", [torch.uint8, torch.float32])
+    @decorateIf(
+        unittest.skip("inter-area is CPU only"),
+        lambda p: p["mode"] == "inter-area" and torch.device(p["device"]).type != "cpu",
+    )
     @decorateIf(
         unittest.skip("antialias is only supported for bilinear, bicubic and lanczos"),
         lambda p: p["antialias"] and p["mode"] not in ("bilinear", "bicubic", "lanczos"),
@@ -9946,7 +9950,7 @@ class TestNNDeviceType(NNTestCase):
             out = F.interpolate(x, size=size, mode=mode, antialias=antialias)
             expected = F.interpolate(x_ref, size=size, mode=mode, antialias=antialias)
             self.assertEqual(out, expected)
-            if dtype == torch.uint8 and torch.device(device).type == "cpu" and mode in ("bilinear", "bicubic", "lanczos"):
+            if dtype == torch.uint8 and torch.device(device).type == "cpu" and mode in ("bilinear", "bicubic", "lanczos", "inter-area"):
                 # x is recognized as channels-last, for the uint8 AVX2 / NEON kernels.
                 self.assertEqual(out.stride(), expected.stride())
             else:

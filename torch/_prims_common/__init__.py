@@ -2063,8 +2063,8 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
 
 
 def upsample_output_memory_format(input: TensorLikeType) -> torch.memory_format:
-    # Mirrors at::native::upsample::output_memory_format (bilinear, bicubic and lanczos): for a
-    # uint8 CPU input, suggest_memory_format() also requires the stride of a size-1 batch dimension
+    # Mirrors at::native::upsample::output_memory_format. For a uint8 CPU
+    # input, suggest_memory_format() also requires the stride of a size-1 batch dimension
     # to fit the layout, so e.g. `hwc.permute(2, 0, 1)[None]` is reported as contiguous; retry with a
     # batch stride that fits any layout.
     from torch._subclasses.fake_tensor import maybe_get_fake_device
