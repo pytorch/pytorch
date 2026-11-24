@@ -4635,7 +4635,7 @@ def upsample_linear1d(
     [aten.upsample_bilinear2d.default, aten.upsample_bilinear2d.out]
 )
 @aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True)
 def upsample_bilinear2d(
     input: Tensor,
     output_size: list[int],
@@ -4820,7 +4820,7 @@ def _upsample_linear(
     result = vs[0]
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
+    memory_format = utils.upsample_output_memory_format(input)
 
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
     if input.device.type == "cuda" and n_channels < 16:
@@ -5527,7 +5527,7 @@ def matmul(tensor1, tensor2, *, is_out=False):
 
 @register_decomposition([aten.upsample_bicubic2d.default, aten.upsample_bicubic2d.out])
 @aten.upsample_bicubic2d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True)
 @pw_cast_for_opmath
 def upsample_bicubic2d_default(
     input: Tensor,
@@ -5611,7 +5611,7 @@ def upsample_bicubic2d_default(
         result = _sum_tensors(c1 * c2 for (c1, c2) in zip(src_y, weights_y))
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(input)
+    memory_format = utils.upsample_output_memory_format(input)
     result = result.contiguous(memory_format=memory_format)
     return result
 
