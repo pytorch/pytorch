@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_list.py b/test/cpython/v3_13/test_list.py
-index 23ef902aa0b..48e94062a45 100644
+index 23ef902aa0be34f6f15e41badfd5ebdeb22fe5d0..1d807e9308969ff5d5918d75e9425b2f0b14ae5e 100644
 --- a/test/cpython/v3_13/test_list.py
 +++ b/test/cpython/v3_13/test_list.py
 @@ -1,6 +1,60 @@
@@ -17,7 +17,7 @@ index 23ef902aa0b..48e94062a45 100644
 +import torch._dynamo.test_case
 +import unittest
 +from torch._dynamo.test_case import CPythonTestCase
-+from torch.testing._internal.common_utils import run_tests
++from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 +
 +__TestCase = CPythonTestCase
 +
@@ -69,6 +69,7 @@ index 23ef902aa0b..48e94062a45 100644
              # earlier due to a newlib bug.  See the following mailing list
              # thread for the details:
 -
+-            #     http://sources.redhat.com/ml/newlib/2002/msg00369.html
              self.assertRaises(MemoryError, list, range(sys.maxsize // 2))
  
          # This code used to segfault in Py2.4a3

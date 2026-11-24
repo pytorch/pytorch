@@ -68,7 +68,7 @@ backendPreprocessFunctions() {
 } // namespace
 
 bool hasBackendPreprocessFunction(const std::string& name) {
-  return backendPreprocessFunctions().count(name);
+  return backendPreprocessFunctions().contains(name);
 }
 
 void registerBackendPreprocessFunction(
@@ -197,7 +197,7 @@ Module codegen_backend_module(
   // Whereas this information is not serialized as part of the lowered
   // module, we still need to provide a valid instance of the
   // BackendDebugInfo class when the lowered module is deserialized.
-  // Since the deserialized modules does not need this information,
+  // Since the deserialized modules do not need this information,
   // we create a "dummy" instance with no extra code dependencies (to avoid
   // overhead) when the backend is created in __setstate__.
   c10::intrusive_ptr<torch::CustomClassHolder> backend_debug_info_class;

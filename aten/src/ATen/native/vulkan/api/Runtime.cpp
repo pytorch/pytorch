@@ -4,6 +4,7 @@
 
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Runtime.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -205,7 +206,7 @@ uint32_t select_first(const std::vector<Runtime::DeviceMapping>& devices) {
   }
 
   // Select the first adapter that has compute capability
-  for (size_t i = 0; i < devices.size(); ++i) {
+  for (const auto i : c10::irange(devices.size())) {
     if (devices[i].first.num_compute_queues > 0) {
       return i;
     }

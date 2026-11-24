@@ -12,8 +12,11 @@ import operator_benchmark as op_bench
 import torch
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import (
+    evaluate_gfx_arch_within,
+    mx_scale_swizzle,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
+    rocm_mx_swizzle,
     SM90OrLater,
 )
 from torch.torch_version import TorchVersion
@@ -293,8 +296,8 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         self.inputs = {
             "x": x_lp,
             "y": y_lp.t(),  # mat_b is (K, N)
-            "scale_a": x_scales.reciprocal(),
-            "scale_b": y_scales.reciprocal(),
+            "scale_a": x_scales,
+            "scale_b": y_scales,
         }
         self._set_scaled_mm_call_config(
             scale_recipe_a=scaling_type_a,
@@ -361,7 +364,7 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     def _init_mx_blockwise(
         self, M: int, N: int, K: int, device: str, *, mx_format: str
     ) -> None:
-        # MX uses BlockWise1x32 with swizzled scales on CUDA, NO_SWIZZLE on HIP.
+        # MX uses BlockWise1x32. CUDA and gfx950/gfx1250 pre-swizzle the scales.
         if device != "cuda":
             raise RuntimeError(f"MX scaling requires CUDA device, got: {device}")
 
@@ -370,7 +373,7 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         #
         # NOTE: we intentionally import from torch.testing._internal to reuse the exact
         # reference implementation used by test/test_scaled_matmul_cuda.py.
-        from torch.testing._internal.common_quantized import to_blocked, to_mxfp
+        from torch.testing._internal.common_quantized import to_mxfp
 
         x_hp = torch.randn(
             M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
@@ -386,15 +389,20 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             y_hp.contiguous(), block_size=self._MX_BLOCK_SIZE, format=mx_format
         )
 
-        scale_a = to_blocked(scale_a)
-        scale_b = to_blocked(scale_b)
+        swizzle_32_8 = rocm_mx_swizzle(x_lp.dtype)
+        scale_a = mx_scale_swizzle(scale_a, x_lp.dtype)
+        scale_b = mx_scale_swizzle(scale_b, y_lp.dtype)
 
-        # HIP requires NO_SWIZZLE, CUDA uses SWIZZLE_32_4_4
-        swizzle_type = (
-            SwizzleType.NO_SWIZZLE
-            if torch.version.hip is not None
-            else SwizzleType.SWIZZLE_32_4_4
-        )
+        # gfx950 requests SWIZZLE_32_8. gfx1250 requests SWIZZLE_128.
+        # Other ROCm archs stay unswizzled.
+        if torch.version.hip is None:
+            swizzle_type = SwizzleType.SWIZZLE_32_4_4
+        elif swizzle_32_8 and evaluate_gfx_arch_within(["gfx1250"]):
+            swizzle_type = SwizzleType.SWIZZLE_128
+        else:
+            swizzle_type = (
+                SwizzleType.SWIZZLE_32_8 if swizzle_32_8 else SwizzleType.NO_SWIZZLE
+            )
 
         self.inputs = {
             "x": x_lp,

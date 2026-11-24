@@ -68,17 +68,20 @@ if(USE_CUDA)
     # alternative to making NCCL a public dependency of libtorch, we make it
     # a private dependency of the tests as well.
     c10d_add_test(
-      ProcessGroupNCCLTest.cpp
-      LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
-    target_compile_definitions(ProcessGroupNCCLTest PRIVATE USE_CUDA USE_NCCL)
-    c10d_add_test(
-      ProcessGroupNCCLErrorsTest.cpp
-      LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
-    target_compile_definitions(ProcessGroupNCCLErrorsTest PRIVATE USE_CUDA USE_NCCL)
-    c10d_add_test(
       NCCLDevCommManagerTest.cpp
       LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
     target_compile_definitions(NCCLDevCommManagerTest PRIVATE USE_CUDA USE_NCCL)
+    # Links torch_cuda directly: the symmetric memory NCCL backend lives there,
+    # not in torch_cpu.
+    c10d_add_test(
+      NCCLSymmetricMemoryCftTest.cpp
+      LINK_LIBRARIES torch_cpu torch_cuda c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(NCCLSymmetricMemoryCftTest PRIVATE USE_CUDA USE_NCCL)
+    # .cu because it drives the device-side ncclCft put from a real kernel.
+    c10d_add_test(
+      NCCLSymmetricMemoryCftDeviceTest.cu
+      LINK_LIBRARIES torch_cpu torch_cuda c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(NCCLSymmetricMemoryCftDeviceTest PRIVATE USE_CUDA USE_NCCL)
     if(INSTALL_TEST)
       install(TARGETS c10d_cuda_test DESTINATION lib)
     endif()
@@ -102,11 +105,9 @@ elseif(USE_ROCM)
   endif()
   if(USE_NCCL AND USE_C10D_NCCL)
     c10d_add_test(
-      hip/ProcessGroupNCCLTest.cpp
+      hip/NCCLDevCommManagerTest.cpp
       LINK_LIBRARIES torch_cpu c10d_hip_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
-    c10d_add_test(
-      hip/ProcessGroupNCCLErrorsTest.cpp
-      LINK_LIBRARIES torch_cpu c10d_hip_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(NCCLDevCommManagerTest PRIVATE USE_ROCM USE_NCCL)
     if(INSTALL_TEST)
       install(TARGETS c10d_hip_test DESTINATION lib)
     endif()
@@ -126,7 +127,7 @@ else()
 endif()
 
 if(USE_MPI AND USE_C10D_MPI)
-  add_definitions(-DMPIEXEC=${MPIEXEC})
+  add_compile_definitions(MPIEXEC=${MPIEXEC})
   # MPI is a private dependency of libtorch, but the tests include some
   # private headers of libtorch, which in turn include MPI. As a hacky
   # alternative to making MPI a public dependency of libtorch, we make it

@@ -90,7 +90,7 @@ Tensor q_batch_norm1d_impl(
   Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   float* alpha_data = alpha.mutable_data_ptr<float>();
-  float* beta_data = beta.data_ptr<float>();
+  float* beta_data = beta.mutable_data_ptr<float>();
 
   const float* mean_data = mean.template const_data_ptr<float>();
   const float* var_data = var.template const_data_ptr<float>();
@@ -199,7 +199,7 @@ Tensor q_batch_norm2d_impl(
   Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   float* alpha_data = alpha.mutable_data_ptr<float>();
-  float* beta_data = beta.data_ptr<float>();
+  float* beta_data = beta.mutable_data_ptr<float>();
 
   const float* mean_data = mean.template const_data_ptr<float>();
   const float* var_data = var.template const_data_ptr<float>();
@@ -295,7 +295,7 @@ Tensor q_batch_norm3d_impl(
   Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   float* alpha_data = alpha.mutable_data_ptr<float>();
-  float* beta_data = beta.data_ptr<float>();
+  float* beta_data = beta.mutable_data_ptr<float>();
 
   const float* mean_data = mean.template const_data_ptr<float>();
   const float* var_data = var.template const_data_ptr<float>();
@@ -419,7 +419,7 @@ Tensor int8_batch_norm2d_cpu_impl(
   Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   float* alpha_data = alpha.mutable_data_ptr<float>();
-  float* beta_data = beta.data_ptr<float>();
+  float* beta_data = beta.mutable_data_ptr<float>();
 
   const float* mean_data = mean.template const_data_ptr<float>();
   const float* var_data = var.template const_data_ptr<float>();

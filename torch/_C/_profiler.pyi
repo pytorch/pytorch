@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Literal, TypeAlias
+from typing_extensions import deprecated
 
 from torch._C import device, dtype, layout
 
@@ -57,12 +58,9 @@ class _EventType(Enum):
 class _ExperimentalConfig:
     def __init__(
         self,
-        profiler_metrics: list[str] = ...,
-        profiler_measure_per_kernel: bool = ...,
         verbose: bool = ...,
         performance_events: list[str] = ...,
         enable_cuda_sync_events: bool = ...,
-        adjust_profiler_step: bool = ...,
         disable_external_correlation: bool = ...,
         profile_all_threads: bool = ...,
         capture_overload_names: bool = ...,
@@ -73,9 +71,6 @@ class _ExperimentalConfig:
         trace_only: bool = ...,
     ) -> None: ...
     trace_only: bool
-    # Deprecated no-ops; retained only so the Python layer can detect and warn.
-    profiler_metrics: list[str]
-    profiler_measure_per_kernel: bool
 
 class ProfilerConfig:
     def __init__(
@@ -159,8 +154,13 @@ Input: TypeAlias = _TensorMetadata | list[_TensorMetadata] | Scalar | None
 class _ExtraFields_TorchOp:
     name: str
     sequence_number: int
-    allow_tf32_cublas: bool
-
+    @property
+    @deprecated(
+        "allow_tf32_cublas is deprecated as of PyTorch 2.16 and will be removed "
+        "in 2.18. Read torch.backends.cuda.matmul.fp32_precision instead.",
+        category=None,
+    )
+    def allow_tf32_cublas(self) -> bool: ...
     @property
     def inputs(self) -> list[Input]: ...
     @property
@@ -242,16 +242,16 @@ def _set_record_concrete_inputs_enabled_val(val: bool) -> None: ...
 def _set_fwd_bwd_enabled_val(val: bool) -> None: ...
 def _set_cuda_sync_enabled_val(val: bool) -> None: ...
 
-# Approximate-clock helpers used by the experimental CUPTI monitor.
+# Approximate-clock helpers used by Cuspy (experimental).
 class _ApproximateClockToUnixTimeConverter:
     def __init__(self) -> None: ...
     def to_unix_ns(self, t: int) -> int: ...
 
 def _get_approximate_time() -> int: ...
 
-# GIL-free CUPTI monitor buffer pool (torch/csrc/profiler/cupti/monitor_native).
-# Exposed as the torch._C._profiler._cupti_monitor submodule.
-class _CuptiMonitorModule:
+# GIL-free Cuspy buffer pool (torch/csrc/profiler/cuspy/cuspy_native).
+# Exposed as the torch._C._profiler._cuspy submodule.
+class _CuspyModule:
     @staticmethod
     def approximate_time_callback_address() -> int: ...
     @staticmethod
@@ -329,9 +329,10 @@ class _CuptiMonitorModule:
         render: tuple | None = None,
         counters: tuple | None = None,
         compression_level: int = 1,
+        metadata: list[tuple[str, str]] = ...,
     ) -> bytes: ...
 
-_cupti_monitor: _CuptiMonitorModule
+_cuspy: _CuspyModule
 
 class CapturedTraceback: ...
 

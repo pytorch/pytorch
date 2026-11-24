@@ -17,6 +17,9 @@ the import case.
 #define AOTI_API __attribute__((__visibility__("default")))
 #endif
 
+inline constexpr int64_t AOTI_STREAM_AFFINITY_DISABLED = -2;
+inline constexpr int64_t AOTI_STREAM_AFFINITY_UNBOUND = -1;
+
 extern "C" {
 struct AOTInductorModelOpaque;
 using AOTInductorModelHandle = AOTInductorModelOpaque*;
@@ -118,6 +121,23 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithExternalConstants(
     const AOTInductorConstantMapEntry* constant_entries,
     size_t num_constant_entries);
 
+// Enables or disables stable device-stream-to-model assignment. This may only
+// be reconfigured while all model instances are idle. A null stream handle
+// continues to use the default model-pool scheduling policy.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerSetUseStreamAffinity(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_stream_affinity);
+
+// Returns the model index currently bound to a stream,
+// AOTI_STREAM_AFFINITY_UNBOUND when no binding exists, or
+// AOTI_STREAM_AFFINITY_DISABLED when affinity is disabled. This is intended for
+// diagnostics and testing of affinity policies.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerGetStreamAffinityModelIndexForTesting(
+    AOTInductorModelContainerHandle container_handle,
+    AOTInductorStreamHandle stream_handle,
+    int64_t* model_index);
+
 // Deletes the AOTInductor model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle);
@@ -138,6 +158,34 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRun(
 
 // Single-threaded variant of previous.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerRunSingleThreaded(
+    AOTInductorModelContainerHandle container_handle,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
+    size_t num_inputs,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
+    size_t num_outputs,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle);
+
+// Like AOTInductorModelContainerRun, but runs the model as CUDA graphs that
+// it captures lazily, while serving calls. On each model instance, a new
+// input layout (shapes and strides) runs eagerly first, is captured on its
+// next call from a thread that has finished an eager call of that layout on
+// that instance, and is replayed after that, up to
+// AOTI_RUNTIME_CUDA_GRAPH_MAX_GRAPHS graphs (default 8); past that, new
+// layouts run eagerly. A failed capture fails the call. Replayed outputs are
+// copies; eager calls return the model's own outputs. Once a graph is
+// captured, the container's active constants can't change. That check
+// doesn't cover an active update racing the first capture, so don't update
+// the active constants while calls run. The stream must not be capturing.
+// Requires a CUDA model compiled with aot_inductor.cudagraphs=True, which
+// ROCm doesn't support yet, see
+// https://github.com/ROCm/rocm-systems/issues/12677, and PyTorch's native
+// CUDA caching allocator: under backend:cudaMallocAsync every capture fails.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerRunWithLazyCudaGraphs(
     AOTInductorModelContainerHandle container_handle,
     AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
                                      // are stolen; the array itself is borrowed
@@ -223,8 +271,11 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerExtractConstantsMapEntries(
     size_t* num_entries,
     bool use_inactive);
 
-// Setup the constant buffer in model container with provided ConstantMap.
-// The ConstantMap is user managed, and the user would retain ownership.
+// Setup the constant buffer in model container with a user-managed ConstantMap.
+// The caller retains ownership of the provided handles. The container retains
+// shallow handles to the same tensor storage without copying its data until an
+// entry is replaced or the container is deleted.
+// Fails on the active buffer once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateUserManagedConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
@@ -234,6 +285,7 @@ AOTInductorModelContainerUpdateUserManagedConstantBuffer(
 
 // Same as AOTInductorModelContainerUpdateUserManagedConstantBuffer,
 // but no std::unordered_map crosses DLL boundaries for cross-compilation.
+// Fails on the active buffer once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
     AOTInductorModelContainerHandle container_handle,
@@ -245,6 +297,7 @@ AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
 // Setup the constant buffer in model container with provided ConstantMap
 // use_inactive should be set as true if the inactive buffer is to be updated.
 // validate_full_update checks if all constants are included in the ConstantMap
+// Fails on the active buffer once CUDA graphs were captured.
 //
 // DEPRECATED: V1 API; see AOTInductorModelContainerUpdateConstantBufferPairs.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
@@ -254,6 +307,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     bool validate_full_update);
 
 // C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBuffer.
+// Fails on the active buffer once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
     AOTInductorModelContainerHandle container_handle,
     const AOTInductorConstantMapEntry* pairs,
@@ -264,6 +318,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferPairs(
 // Same as AOTInductorModelContainerUpdateConstantBuffer, but the caller is
 // allowed to pass CPU tensors even when the model lives on a non-CPU device.
 // CPU tensors are silently copied to the model's device.
+// Fails on the active buffer once CUDA graphs were captured.
 //
 // DEPRECATED: V1 API; see
 // AOTInductorModelContainerUpdateConstantBufferFromCpuPairs.
@@ -274,6 +329,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerUpdateConstantBufferFromCpu(
     bool validate_full_update);
 
 // C-ABI-safe variant of AOTInductorModelContainerUpdateConstantBufferFromCpu.
+// Fails on the active buffer once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateConstantBufferFromCpuPairs(
     AOTInductorModelContainerHandle container_handle,
@@ -303,6 +359,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerFreeInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle);
 
 // Run constant folding on constant buffer.
+// Fails on the active buffer once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
     AOTInductorModelContainerHandle container_handle,
     bool use_inactive,
@@ -310,6 +367,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
     AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Swap the constant buffer being used to the inactive one.
+// Fails once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
     AOTInductorModelContainerHandle container_handle);
 
@@ -364,7 +422,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelRun(
     AtenTensorHandle* output_handles);
 
 // Replace AOTInductorModel's constant map. Note it doesn't handle concurrency
-// so be sure to handle ordering if AOTInductorModelRun is ran concurrently.
+// so be sure to handle ordering if AOTInductorModelRun is run concurrently.
 AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
     AOTInductorModelHandle model_handle,
     AOTInductorConstantMapHandle constant_map_handle);
@@ -389,6 +447,7 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerDidCallLoadConstants(
     bool* did_call_load_constants);
 
 // Load weights from a single blob in weight_blob_ptr
+// Fails once CUDA graphs were captured.
 AOTI_API AOTIRuntimeError AOTInductorModelUpdateConstantsFromBlob(
     AOTInductorModelContainerHandle container_handle,
     const uint8_t* weight_blob_ptr);
@@ -407,7 +466,12 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerGetCallSpec(
     const char** out_spec);
 
 // Enables or disables pinned async H2D copies for constant loading and updates.
-// Call before creating a model/container to affect embedded constant loading.
+// Eligible initial loads are coalesced into staging windows even when the CPU
+// copy thread count is one. Coalescing zero-fills the inter-constant alignment
+// padding in the device blob, which the per-range path left uninitialized. Call
+// before creating a model/container to affect embedded constant loading.
+// Without this call, AOTI_COPY_USE_PINNED_ASYNC decides, and when it is unset
+// the copies are on for ROCm and off for CUDA.
 AOTI_API AOTIRuntimeError
 AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
 
@@ -415,6 +479,13 @@ AOTInductorSetUsePinnedAsyncConstantsCopy(bool enabled);
 // AOTI_COPY_STAGE_BUFFER_BYTES or the runtime default.
 AOTI_API AOTIRuntimeError
 AOTInductorSetPinnedAsyncConstantsCopyStageBufferBytes(size_t bytes);
+
+// Sets the total number of CPU threads used to fill pinned staging buffers,
+// including the caller. Pass 0 to use AOTI_COPY_STAGE_CPU_THREADS or the
+// runtime default. Clamped to 16 and to the machine's core count. Setting this
+// to 1 disables worker threads but eligible initial loads remain coalesced.
+AOTI_API AOTIRuntimeError
+AOTInductorSetPinnedAsyncConstantsCopyCpuThreads(size_t threads);
 
 // Retrieves the error message from the last failed AOTI runtime call on the
 // current thread. The returned pointer is valid until the next AOTI runtime

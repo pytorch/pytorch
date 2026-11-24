@@ -1,17 +1,20 @@
 #include <c10/util/safe_conv.h>
 
-#include <sstream>
 #include <stdexcept>
+
+#include <sstream>
 #include <utility>
 
 namespace c10::detail {
 
 [[noreturn]] void report_narrowing_overflow(const char* name) {
   std::ostringstream oss;
-  oss << "value cannot be safely converted without overflow";
-  if (name != nullptr) {
-    oss << ": " << name;
+  if (name == nullptr) {
+    oss << "value cannot be safely converted without overflow";
+  } else {
+    oss << "value cannot be converted to type " << name << " without overflow";
   }
+  // @allow-raw-throw: preserve the checked-conversion exception contract.
   throw std::runtime_error(std::move(oss).str());
 }
 

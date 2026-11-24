@@ -1,36 +1,16 @@
-"""CuTeDSL override registrations for ``aten::sum`` (inner-tree reduction).
+"""Register CUDA inner-tree overrides for ``aten::sum`` and ``aten::prod``.
 
-CuTeDSL port of the Triton-style inner-tree reduction sum kernel that
-otherwise lives in ``aten/src/ATen/native/cuda/ReduceSumProdKernel.cu``
-(``try_inner_tree_reduction`` + the inner-tree kernels). This override
-runs only when ``PYTORCH_SUM_INNER_TREE`` is set to a truthy value, which
-is the feature-rollout gate for this operator -- it is *not* gated by the
-global ``TORCH_DISABLE_NATIVE_JIT`` kill switch alone (that is handled by
-``cutedsl_utils`` at registration time).
+``PYTORCH_SUM_INNER_TREE`` controls rollout; ``cutedsl_utils`` applies the global
+native-JIT kill switch during registration. Direct and ``out=`` overloads are
+registered separately because structured delegation occurs below the dispatcher.
 
-We register two ATen dispatcher entries on ``CUDA``:
+Eligibility mirrors the former ``try_inner_tree_reduction``: TensorIterator must
+coalesce the input to one contiguous reduced dimension and at most one outer
+dimension. Unsupported geometry, dtype conversion, and integer or complex inputs
+fall through to ATen.
 
-* ``sum.dim_IntList`` -- functional/method ``x.sum(dim=...)``.
-* ``sum.IntList_out`` -- the structured ``.out`` target.
-
-``sum.dim_IntList`` is ``structured_delegate: sum.IntList_out``, so its
-delegation to the ``.out`` kernel happens *below* the dispatcher; overriding
-``.out`` alone would not intercept ``x.sum(dim=1)``. Both are separate
-dispatcher entries and are registered explicitly (the same reason
-``scatter_add_`` is registered separately from ``scatter_add.out``).
-
-Eligibility mirrors ``try_inner_tree_reduction`` (ReduceSumProdKernel.cu):
-build the reduction ``TensorIterator`` over ``(out, self)`` and accept only
-the coalesced geometry the kernels know how to run -- a single contiguous
-reduced (fastest) dimension whose non-reduced dims collapse to at most one
-outer-strided dimension. Anything else (multi-dim reduction, non-contiguous
-reduced dim, dtype-casting sum, integer/complex dtypes, non-collapsing outer
-layout) falls through to aten.
-
-Dispatch note: this CuTeDSL override is the only inner-tree path -- the ATen
-CUDA backend has no inner-tree kernel of its own. When this predicate accepts,
-the CuTeDSL kernel runs; when it rejects (or ``PYTORCH_SUM_INNER_TREE`` is
-unset), the call falls through to the unchanged ATen reduction.
+Accepted calls canonicalize to ``(M, N)``. The ordered adapter uses the shared
+fixed-DAG kernel with dynamic input and output row strides.
 """
 
 from __future__ import annotations
@@ -42,6 +22,11 @@ from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._tensor_iterator import reduce_op, TensorIterator
 
 from ... import cutedsl_utils as cu
+
+
+# TODO: Move this rollout gate to a shared PyTorch config once eager native-op
+# config ownership is established.
+_INNER_TREE_ENABLED = os.getenv("PYTORCH_SUM_INNER_TREE", "") not in ("", "0")
 
 
 # Reduction input dtypes the kernel handles. fp32/fp64 are the bitwise-
@@ -71,12 +56,6 @@ def _int32_indexing_safe(self: torch.Tensor, d: int) -> bool:
     vec_size = max(1, 16 // self.element_size())
     num_batches_ub = -(-n // (32 * vec_size))
     return n <= _INT32_MAX and m <= _INT32_MAX and m * num_batches_ub <= _INT32_MAX
-
-
-def _inner_tree_enabled() -> bool:
-    # The CUDA gate is `use_inner_tree_reduction()`; the CuTeDSL predicate
-    # requires the explicit feature flag (an empty/"0" value is off).
-    return os.getenv("PYTORCH_SUM_INNER_TREE", "") not in ("", "0")
 
 
 def _normalize_dim(dim: int, ndim: int) -> int:
@@ -121,14 +100,10 @@ def _out_keepdim_view(
 def _eligibility(
     self: torch.Tensor, d: int, out: torch.Tensor
 ) -> TensorIterator | None:
-    """Return the reduction ``TensorIterator`` if ``(self, d, out)`` fits the
-    kernel's expected geometry, else ``None``. ``d`` is already normalized
-    and ``out`` is a keepdim-shaped output (broadcast-aligned with ``self``).
+    """Return the iterator if its operands canonicalize to ``(M, N)`` / ``(M,)``.
 
-    Mirrors ``try_inner_tree_reduction``: build the reduction iterator, then
-    require a single coalesced reduced (fastest) dimension with element
-    stride 1 on the input, and at most one non-reduced (outer) dimension so
-    the operands canonicalize to a single ``(M, N)`` view.
+    ``d`` is normalized and ``out`` is keepdim-shaped. TensorIterator stores
+    dimensions fastest-first and omits size-one dimensions.
     """
     try:
         it = reduce_op(out, self)
@@ -140,14 +115,23 @@ def _eligibility(
     if it.ndim == 0 or it.ndim > 2:
         return None
 
+    m = out.numel()
+    n = self.numel() // m
+    expected_shape = tuple(size for size in (n, m) if size != 1)
+    if not expected_shape:
+        expected_shape = (1,)
+    if tuple(it.shape) != expected_shape:
+        return None
+
     input_index = it.ntensors - 1  # operands are (out, self); input is last
     es_in = it.element_strides(input_index)
-    # Input must be contiguous on the reduced (fastest, dim-0) axis.
+    # For N == 1, dim 0 is the row axis; retain the compact-row restriction.
     if es_in[0] != 1:
         return None
-    # Reduction must be on the fastest dim: either the whole tensor is the
-    # reduction (ndim == 1) or the reduced-dim stride is the smallest.
-    if it.ndim == 2 and not (es_in[0] < es_in[1]):
+    if n > 1 and m > 1 and not (es_in[0] < es_in[1]):
+        return None
+    row_dim = 0 if n == 1 else 1
+    if m > 1 and it.element_strides(0)[row_dim] == 0:
         return None
     return it
 
@@ -159,9 +143,10 @@ def _geometry(self: torch.Tensor, out: torch.Tensor, it: TensorIterator):
     between rows of the canonical ``(M, N)`` / ``(M,)`` views."""
     m = out.numel()
     n = self.numel() // m if m else 0
-    if it.ndim == 2:
-        in_row_stride = it.element_strides(it.ntensors - 1)[1]
-        out_row_stride = it.element_strides(0)[1]
+    if m > 1:
+        row_dim = 0 if n == 1 else 1
+        in_row_stride = it.element_strides(it.ntensors - 1)[row_dim]
+        out_row_stride = it.element_strides(0)[row_dim]
     else:
         in_row_stride = n
         out_row_stride = 1
@@ -171,8 +156,6 @@ def _geometry(self: torch.Tensor, out: torch.Tensor, it: TensorIterator):
 def _base_cond_ok(self: torch.Tensor, dim, dtype) -> int | None:
     """Shared front gate. Returns the normalized reduced dim if the call is a
     candidate, else ``None``."""
-    if not _inner_tree_enabled():
-        return None
     if not self.is_cuda or is_fake_tensor(self):
         return None
     # dtype-casting sum (an explicit out/result dtype) is out of scope.
@@ -211,45 +194,77 @@ def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
     return _eligibility(self, d, out_kd) is not None
 
 
-def _kernel():
-    from .inner_tree_kernel import inner_tree_sum_into
+def _sum_into():
+    from .ordered import sum_into
 
-    return inner_tree_sum_into
+    return sum_into
 
 
-def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor) -> None:
-    """Run the kernel writing the reduction of ``self`` along ``d`` into the
-    keepdim-shaped ``out_kd``. Caller has validated eligibility."""
+def _prod_into():
+    from .ordered import prod_into
+
+    return prod_into
+
+
+def _run(self: torch.Tensor, d: int, out_kd: torch.Tensor, reduce_into) -> None:
+    """Run ``reduce_into`` writing the reduction of ``self`` along ``d`` into
+    the keepdim-shaped ``out_kd``. Caller has validated eligibility."""
     it = _eligibility(self, d, out_kd)
     if it is None:
-        raise RuntimeError("sum cutedsl: cond approved but iter rebuild failed")
+        raise RuntimeError("cutedsl reduce: cond approved but iter rebuild failed")
     m, n, in_rs, out_rs = _geometry(self, out_kd, it)
     if m == 0 or n == 0:
         return
     in_2d = self.as_strided((m, n), (in_rs, 1))
     out_1d = out_kd.as_strided((m,), (out_rs,))
-    _kernel()(out_1d, in_2d)
+    reduce_into()(out_1d, in_2d)
 
 
-def _impl(self, dim, keepdim=False, *, dtype=None):
-    d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
-    out_kd = torch.empty(
-        _keepdim_out_shape(self, d), dtype=self.dtype, device=self.device
-    )
-    _run(self, d, out_kd)
-    return out_kd if keepdim else out_kd.squeeze(d)
+def _make_impl(reduce_into):
+    def _impl(self, dim, keepdim=False, *, dtype=None):
+        d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
+        out_kd = torch.empty(
+            _keepdim_out_shape(self, d), dtype=self.dtype, device=self.device
+        )
+        _run(self, d, out_kd, reduce_into)
+        return out_kd if keepdim else out_kd.squeeze(d)
+
+    return _impl
 
 
-def _out_impl(self, dim, keepdim=False, *, dtype=None, out):
-    d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
-    out_kd = _out_keepdim_view(self, d, keepdim, out)
-    assert out_kd is not None  # noqa: S101  # _out_cond guarantees non-None
-    _run(self, d, out_kd)
-    return out
+def _make_out_impl(reduce_into):
+    def _out_impl(self, dim, keepdim=False, *, dtype=None, out):
+        d = _normalize_dim(dim[0] if not isinstance(dim, int) else dim, self.ndim)
+        out_kd = _out_keepdim_view(self, d, keepdim, out)
+        if out_kd is None:
+            # _out_cond guarantees a reduced-shape out; raise explicitly rather
+            # than assert so the invariant survives `python -O`.
+            raise AssertionError("_out_cond guaranteed a reduced-shape out")
+        _run(self, d, out_kd, reduce_into)
+        return out
+
+    return _out_impl
 
 
 def register_to_dispatch() -> None:
-    cu.register_op_override("aten", "sum.dim_IntList", "CUDA", cond=_cond, impl=_impl)
+    if not _INNER_TREE_ENABLED:
+        return
+
+    # Eligibility (_cond/_out_cond) is reduction-agnostic; only the kernel
+    # entry differs between sum and prod.
     cu.register_op_override(
-        "aten", "sum.IntList_out", "CUDA", cond=_out_cond, impl=_out_impl
+        "aten", "sum.dim_IntList", "CUDA", cond=_cond, impl=_make_impl(_sum_into)
+    )
+    cu.register_op_override(
+        "aten",
+        "sum.IntList_out",
+        "CUDA",
+        cond=_out_cond,
+        impl=_make_out_impl(_sum_into),
+    )
+    cu.register_op_override(
+        "aten", "prod.dim_int", "CUDA", cond=_cond, impl=_make_impl(_prod_into)
+    )
+    cu.register_op_override(
+        "aten", "prod.int_out", "CUDA", cond=_out_cond, impl=_make_out_impl(_prod_into)
     )

@@ -301,17 +301,15 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
       cudaMallocManaged(&uvm_assertions_ptr, sizeof(DeviceAssertionsData)));
 
 #if CUDART_VERSION >= 13000 && !defined(USE_ROCM)
-  cudaMemLocation cpuDevice;
-  cpuDevice.type = cudaMemLocationTypeDevice;
-  cpuDevice.id = cudaCpuDeviceId;
-#ifdef USE_ROCM
-  // hipify replaces cudaMemAdvise -> hipMemAdvise, but we want v2
-#define hipMemAdvise hipMemAdvise_v2
-#endif
+  // The CPU is addressed via cudaMemLocationTypeHost; a device location with
+  // id == cudaCpuDeviceId is rejected with cudaErrorInvalidValue, since ids are
+  // only validated as device ordinals. The id field is ignored for host
+  // locations.
+  cudaMemLocation cpuDevice{};
+  cpuDevice.type = cudaMemLocationTypeHost;
 #else
-  // might be a ROCm bug that using hipMemAdvise_v2 fails if
-  // hipMemLocationTypeDevice + hipCpuDeviceId, but using the v1 API sets
-  // hipMemLocationTypeHost + hipCpuDeviceId and passes
+  // hipMemAdvise_v2 with hipMemLocationTypeDevice + hipCpuDeviceId fails on
+  // ROCm; the v1 int API maps to Host semantics and works.
   const auto cpuDevice = cudaCpuDeviceId;
 #endif
 
