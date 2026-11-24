@@ -5,6 +5,7 @@ from ._api import (
     Notification,
     PeerId,
     RemoteBuffer,
+    Storage,
     Transport,
     Work,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "Notification",
     "PeerId",
     "RemoteBuffer",
+    "Storage",
     "Transport",
     "Work",
     "available_transports",

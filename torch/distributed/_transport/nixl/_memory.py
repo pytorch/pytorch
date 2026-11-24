@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, replace
 from typing import Any, Literal, Self, TYPE_CHECKING
 
@@ -71,7 +72,14 @@ class _StorageRegistration:
     device_id: int
     length: int
     token: bytes
+    owned_fd: int | None = None
     active: bool = True
+
+    def release(self) -> None:
+        self.active = False
+        if self.owned_fd is not None:
+            os.close(self.owned_fd)
+            self.owned_fd = None
 
 
 class NIXLStorage:
@@ -83,8 +91,11 @@ class NIXLStorage:
         self._transport = transport
         self._registration = registration
 
-    def to_remote_buffer(self) -> NIXLRemoteBuffer:
+    def to_remote_buffer(self, *, timeout: float | None = None) -> NIXLRemoteBuffer:
         """Return a descriptor for transfers by the registering transport only."""
+        return self._transport._call(self._remote_buffer, timeout)
+
+    def _remote_buffer(self) -> NIXLRemoteBuffer:
         registration = self._registration
         if not registration.active:
             raise RuntimeError("storage has been unregistered")

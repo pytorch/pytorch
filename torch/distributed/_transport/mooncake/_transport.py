@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import fcntl
 import logging
 import os
+import secrets
 import socket
+import stat
 import time
+import uuid
 from concurrent.futures import Future as _ThreadFuture, ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
@@ -21,16 +25,19 @@ from .._api import (
     Notification,
     PeerId,
     RemoteBuffer,
+    Storage,
     Transport,
     Work,
 )
 from .._work import _FutureWork, _validate_timeout, wait_all
 from ._memory import (
     _Registration,
+    _StorageRegistration,
     MooncakeMemory,
     MooncakeMemoryView,
     MooncakeMutableMemoryView,
     MooncakeRemoteBuffer,
+    MooncakeStorage,
 )
 from ._work import _live_transports, _MooncakeWork
 
@@ -57,6 +64,12 @@ def _load_backend() -> Any:
         ) from error
 
 
+def _env_enabled(name: str) -> bool:
+    # Matches Mooncake's isTransferEngineEnvEnabled.
+    value = os.environ.get(name)
+    return value is not None and value not in ("0", "false", "off", "no")
+
+
 def _format_host(host: str) -> str:
     host = host.strip("[]")
     if ":" not in host:
@@ -69,14 +82,19 @@ def _format_host(host: str) -> str:
 class MooncakeTransport(Transport):
     """One-sided tensor transport backed by Mooncake's Transfer Engine.
 
-    Uses Mooncake's P2P metadata exchange: ``bind`` returns the endpoint's
-    ``host:rpc_port`` and ``connect`` records a peer endpoint without an
-    external metadata server. An endpoint may connect to several peers;
-    reconnecting with the same ``bind()`` bytes is a no-op. Peers are addressed
-    by endpoint and their registered segments are reached directly, so remote
-    descriptors carry no opaque metadata blob. Mooncake is an optional
-    dependency, imported only when selected. Transfers require registered views;
-    raw tensors are rejected rather than allocated or registered implicitly.
+    By default uses Mooncake's P2P metadata exchange: ``bind`` returns the
+    endpoint's ``host:rpc_port`` and ``connect`` records a peer endpoint without
+    an external metadata server. With a ``metadata_server`` such as
+    ``etcd://localhost:2379``, ``redis://localhost:6379`` or
+    ``http://localhost:8080/metadata``, Mooncake publishes the endpoint's
+    segment under ``segment_name`` (default: a unique name) and peers resolve it
+    there; ``bind`` returns that name, which is also the peer id. An endpoint
+    may connect to several peers; reconnecting with the same ``bind()`` bytes is
+    a no-op. Peers are addressed by endpoint and their registered segments are
+    reached directly, so remote descriptors carry no opaque metadata blob.
+    Mooncake is an optional dependency, imported only when selected. Transfers
+    require registered views; raw tensors are rejected rather than allocated or
+    registered implicitly.
 
     There is no per-peer disconnect; ``close`` releases all peers. A failed
     transfer fails only its Work. A timed-out transfer also pins its local
@@ -99,10 +117,19 @@ class MooncakeTransport(Transport):
     notify. A transfer's notification is sent the same way after the transfer
     succeeds: in Mooncake 0.3.14 a notify attached to a nonempty RDMA transfer
     can be lost. Mooncake cannot signal arriving notifies either, so
-    ``wait_notifications`` polls for them with backoff. Peer ids are
-    ``host:rpc_port`` endpoints. Mooncake keeps at most 1024 undrained notifies
+    ``wait_notifications`` polls for them with backoff. Peer ids are ``bind``
+    endpoints. Mooncake keeps at most 1024 undrained notifies
     on some paths, silently dropping the oldest after the sender saw success,
-    so receivers must drain them regularly.
+    so receivers must drain them regularly. Notifications are unsupported with
+    Mooncake's TENT engine (``MC_USE_TENT=1``).
+
+    With a metadata server, Mooncake picks the address it publishes (see
+    ``MC_TCP_BIND_ADDRESS`` and ``MOONCAKE_LOCAL_HOSTNAME``) and ``host`` is
+    unused.
+
+    With TENT, :meth:`register_storage` registers local files, which Mooncake
+    reads and writes with ``O_DIRECT`` io_uring by default, so file offsets and
+    sizes must meet the file system's direct I/O alignment.
     """
 
     def __init__(
@@ -113,6 +140,7 @@ class MooncakeTransport(Transport):
         protocol: str = "rdma",
         device_name: str = "",
         metadata_server: str = "P2PHANDSHAKE",
+        segment_name: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         super().__init__(device)
@@ -123,22 +151,42 @@ class MooncakeTransport(Transport):
             raise ValueError("host and protocol cannot be empty")
         _validate_timeout(timeout)
         host = _format_host(host)
+        self._p2p = metadata_server == "P2PHANDSHAKE"
+        if self._p2p and segment_name is not None:
+            raise ValueError("segment_name requires a metadata_server")
+        if segment_name is None:
+            segment_name = f"{socket.gethostname()}/{uuid.uuid4().hex}"
+        if not segment_name or segment_name.startswith("file://"):
+            raise ValueError("invalid segment_name")
+        local_name = host if self._p2p else segment_name
         backend = _load_backend()
         engine = backend.TransferEngine()
-        if engine.initialize(host, metadata_server, protocol, device_name) != 0:
+        if engine.initialize(local_name, metadata_server, protocol, device_name) != 0:
             raise RuntimeError("Mooncake transport initialization failed")
         self._backend = backend
         self._engine: Any = engine
-        self._endpoint = f"{host}:{engine.get_rpc_port()}"
+        # With a metadata server, Mooncake names the segment local_name verbatim.
+        self._endpoint = (
+            f"{host}:{engine.get_rpc_port()}" if self._p2p else segment_name
+        )
+        # Mooncake reads these when the engine is constructed.
+        self._tent = _env_enabled("MC_USE_TENT") or _env_enabled("MC_USE_TEV1")
         self._protocol = protocol
         self._timeout = timeout
         self._default_timeout = timeout
         self._peers: set[str] = set()
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
+        self._storage: dict[int, _StorageRegistration] = {}
+        # TENT caches a file handle per /proc/self/fd/N target for the engine's
+        # lifetime, so storage fds stay open until close to keep N unique.
+        self._storage_fds: list[int] = []
         # In-flight transfers; each entry is pruned by a done callback when its
         # transfer settles (see _submit), so a completed work is never revisited.
         self._pending: dict[int, _MooncakeWork] = {}
-        self._batches: dict[int, tuple[_ThreadFuture[None], _Registration]] = {}
+        self._batches: dict[
+            int,
+            tuple[_ThreadFuture[None], _Registration, _StorageRegistration | None],
+        ] = {}
         self._poll_cv = Condition()
         self._poller: Thread | None = None
         self._poller_stopped = False
@@ -199,7 +247,11 @@ class MooncakeTransport(Transport):
         except UnicodeDecodeError:
             endpoint = ""
         host, _, port = endpoint.rpartition(":")
-        if not host or not port.isdigit():
+        if (
+            not endpoint
+            or endpoint.startswith("file://")
+            or (self._p2p and (not host or not port.isdigit()))
+        ):
             raise ValueError("peer_url is not a Mooncake bind() endpoint")
         # Mooncake handshakes lazily on the first transfer, hence record the endpoint
         self._peers.add(endpoint)
@@ -213,7 +265,9 @@ class MooncakeTransport(Transport):
         return self._endpoint
 
     def max_notification_size(self) -> int:
-        return _MAX_NOTIFICATION_SIZE
+        # Notifies ride zero-length transfers to remote address 0, which TENT
+        # rejects since it lies in no registered buffer.
+        return 0 if self._tent else _MAX_NOTIFICATION_SIZE
 
     def send_notification(
         self, peer: PeerId, payload: bytes, *, timeout: float | None = None
@@ -284,6 +338,8 @@ class MooncakeTransport(Transport):
 
     def wait_notifications(self, *, timeout: float | None = None) -> list[Notification]:
         _validate_timeout(timeout)
+        if self._tent:
+            raise NotImplementedError("transport does not support notifications")
         timeout = self._timeout if timeout is None else timeout
         deadline = time.monotonic() + timeout
         delay = 1e-6
@@ -354,11 +410,71 @@ class MooncakeTransport(Transport):
         _live_transports.add(self)
         return MooncakeMemory(self, registration)
 
+    def register_storage(
+        self,
+        memory_type: str,
+        location: int | str,
+        length: int,
+        *,
+        timeout: float | None = None,
+    ) -> MooncakeStorage:
+        """Register the first ``length`` bytes of a local file.
+
+        Only ``"FILE"`` is supported, with a path or a file descriptor open for
+        reading and writing, and requires the TENT engine (``MC_USE_TENT=1``).
+        The file must hold at least ``length`` bytes. The transport holds its
+        own file descriptors until it is closed, including after unregistering.
+        See :meth:`Transport.register_storage`.
+        """
+        return self._call(
+            lambda: self._register_storage(memory_type, location, length), timeout
+        )
+
+    def _register_storage(
+        self, memory_type: str, location: int | str, length: int
+    ) -> MooncakeStorage:
+        if not self._tent:
+            raise NotImplementedError("Mooncake storage requires MC_USE_TENT=1")
+        if memory_type != "FILE":
+            raise ValueError("Mooncake storage supports only FILE")
+        if type(length) is not int:
+            raise TypeError("length must be an int")
+        if length <= 0:
+            raise ValueError("cannot register empty storage")
+        if type(location) is int:
+            if fcntl.fcntl(location, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDWR:
+                raise ValueError("FILE storage requires a read-write file descriptor")
+            fd = fcntl.fcntl(location, fcntl.F_DUPFD_CLOEXEC, 0)
+        elif isinstance(location, str) and location:
+            fd = os.open(location, os.O_RDWR | os.O_CLOEXEC)
+        else:
+            raise TypeError("FILE storage requires a path or file descriptor")
+        info = os.fstat(fd)
+        error = None
+        if not stat.S_ISREG(info.st_mode):
+            error = "FILE storage must be a regular file"
+        elif info.st_size < length:
+            error = f"file holds {info.st_size} bytes, less than {length}"
+        if error is not None:
+            os.close(fd)
+            raise ValueError(error)
+        self._storage_fds.append(fd)
+        # A random id keeps peers from forging descriptors for local storage.
+        storage_id = secrets.randbits(63)
+        while storage_id in self._storage:
+            storage_id = secrets.randbits(63)
+        registration = _StorageRegistration(f"/proc/self/fd/{fd}", length, storage_id)
+        self._storage[storage_id] = registration
+        return MooncakeStorage(self, registration)
+
     def unregister_memory(
-        self, memory: Memory, *, timeout: float | None = None
+        self, memory: Memory | Storage, *, timeout: float | None = None
     ) -> None:
         with self._locked(timeout):
             engine = self._ensure_open()
+            if isinstance(memory, MooncakeStorage) and memory._transport is self:
+                self._unregister_storage(memory._registration)
+                return
             if not isinstance(memory, MooncakeMemory) or memory._transport is not self:
                 raise TypeError("memory was not registered by this transport")
             registration = memory._registration
@@ -391,6 +507,40 @@ class MooncakeTransport(Transport):
             if not self._registrations:
                 _live_transports.discard(self)
 
+    def _unregister_storage(self, registration: _StorageRegistration) -> None:
+        # Caller holds _operation_lock.
+        if not registration.active:
+            return
+        if any(
+            self._storage_of(work._buffers[1]) is registration
+            for work in self._pending.values()
+            if not work.is_completed()
+        ):
+            raise RuntimeError(
+                "storage has pending transfers; wait before unregistering"
+            )
+        if registration.pinned:
+            raise RuntimeError(
+                "storage is pinned after a timed-out transfer; Mooncake may still "
+                "be accessing it"
+            )
+        registration.active = False
+        del self._storage[registration.storage_id]
+
+    def _storage_of(self, remote_buffer: RemoteBuffer) -> _StorageRegistration | None:
+        if not self._is_storage(remote_buffer):
+            return None
+        remote_buffer = cast(MooncakeRemoteBuffer, remote_buffer)
+        if remote_buffer.endpoint != self._endpoint:
+            return None
+        return self._storage.get(remote_buffer.device_id)
+
+    def _is_storage(self, remote_buffer: RemoteBuffer) -> bool:
+        return (
+            isinstance(remote_buffer, MooncakeRemoteBuffer)
+            and remote_buffer.memory_type == "FILE"
+        )
+
     def _remote_buffer(self, registration: _Registration) -> MooncakeRemoteBuffer:
         registration.ensure_active()
         return MooncakeRemoteBuffer(
@@ -411,7 +561,20 @@ class MooncakeTransport(Transport):
             raise TypeError("local_buffer was not registered by this transport")
         if not isinstance(remote_buffer, MooncakeRemoteBuffer):
             raise TypeError("remote_buffer was not registered by a Mooncake transport")
-        if remote_buffer.endpoint not in self._peers:
+        if self._is_storage(remote_buffer):
+            storage = self._storage_of(remote_buffer)
+            if storage is None:
+                raise ValueError("storage was not registered by this transport")
+            if remote_buffer.address < 0 or (
+                remote_buffer.address + local_buffer.size() > storage.length
+            ):
+                raise ValueError("local view does not fit in the registered storage")
+            if storage.pinned:
+                raise RuntimeError(
+                    "storage is pinned after a timed-out transfer; Mooncake may "
+                    "still be accessing it"
+                )
+        elif remote_buffer.endpoint not in self._peers:
             raise ValueError("remote buffer does not belong to a connected peer")
         if local_buffer.size() > remote_buffer.length:
             raise ValueError("local view does not fit in the remote buffer")
@@ -442,6 +605,7 @@ class MooncakeTransport(Transport):
     ) -> _MooncakeWork:
         engine = self._ensure_open()
         self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        storage = self._storage_of(remote_buffer)
         notify = None
         if notification is not None:
             self._check_notification(notification)
@@ -450,6 +614,7 @@ class MooncakeTransport(Transport):
             notify = self._notify_message(notification)
         local_buffer = cast(MooncakeMemoryView, local_buffer)
         remote_buffer = cast(MooncakeRemoteBuffer, remote_buffer)
+        target = remote_buffer.endpoint if storage is None else f"file://{storage.path}"
         registration = local_buffer._memory._registration
         size = local_buffer.size()
         if size == 0:
@@ -460,7 +625,7 @@ class MooncakeTransport(Transport):
             else self._backend.TransferOpcode.Write
         )
         batch_id = engine.batch_transfer_async(
-            remote_buffer.endpoint,
+            target,
             [registration.address + local_buffer._offset],
             [remote_buffer.address],
             [size],
@@ -481,7 +646,7 @@ class MooncakeTransport(Transport):
         future.add_done_callback(lambda _: self._prune(id(work)))
         _live_transports.add(self)
         with self._poll_cv:
-            self._batches[batch_id] = (transfer, registration)
+            self._batches[batch_id] = (transfer, registration, storage)
             if self._poller is None:
                 self._poller = Thread(target=self._poll, name="mooncake", daemon=True)
                 self._poller.start()
@@ -502,7 +667,7 @@ class MooncakeTransport(Transport):
                     return
                 batches = list(self._batches.items())
             settled = []
-            for batch_id, (future, registration) in batches:
+            for batch_id, (future, registration, storage) in batches:
                 # Every non-zero status is final: Mooncake frees the batch, so it
                 # must not be polled again. 1 and -1 mean every slice of the one
                 # request has completed or failed. -2 (TIMEOUT, with
@@ -510,7 +675,7 @@ class MooncakeTransport(Transport):
                 # flight, so the local memory stays pinned.
                 status = engine.transfer_check_status(batch_id)
                 if status != 0:
-                    settled.append((batch_id, future, registration, status))
+                    settled.append((batch_id, future, registration, storage, status))
             with self._poll_cv:
                 for batch_id, future, *_ in settled:
                     # A batch id is a BatchDesc address that Mooncake freed in
@@ -518,13 +683,15 @@ class MooncakeTransport(Transport):
                     entry = self._batches.get(batch_id)
                     if entry is not None and entry[0] is future:
                         del self._batches[batch_id]
-            for _, future, registration, status in settled:
+            for _, future, registration, storage, status in settled:
                 if status == 1:
                     future.set_result(None)
                     continue
                 message = "Mooncake transfer failed"
                 if status != -1:
                     registration.pinned = True
+                    if storage is not None:
+                        storage.pinned = True
                     message += (
                         f" with status {status}; it may still be running, so its "
                         "local memory stays pinned"
@@ -754,6 +921,12 @@ class MooncakeTransport(Transport):
                 engine.unregister_memory(registration.address)
             registration.active = False
             del self._registrations[key]
+        for storage in self._storage.values():
+            storage.active = False
+        self._storage.clear()
+        for fd in self._storage_fds:
+            os.close(fd)
+        self._storage_fds.clear()
         self._pending.clear()
         self._peers.clear()
         # Mooncake has no explicit shutdown
