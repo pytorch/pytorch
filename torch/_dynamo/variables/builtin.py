@@ -2418,6 +2418,10 @@ class BuiltinVariable(TypeVariable):
                 # exception so a surrounding except can catch it, instead of
                 # escaping the compiled region.
                 raise_observed_exception(type(exc), tx, args=list(exc.args))
+            tx.output.side_effects.track_class_built_with_trace_time_empty_cell(
+                r,
+                fn.__closure__,  # type: ignore[possibly-undefined]
+            )
             return VariableTracker.build(tx, r)
         else:
             fail(args, kwargs)

@@ -2546,12 +2546,27 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             from torch._dynamo.symbolic_convert import InstructionTranslator
 
             tx = InstructionTranslator.current_tx()
+            side_effects = tx.output.side_effects
             cells = []
 
             for cell_var in self.closure.items:  # type: ignore[attr-defined]
+                # A class body may close over a name assigned after the `class`
+                # statement (or the class's own name); CPython reads that cell
+                # only once a method runs.
+                if (
+                    allow_sourced_cells
+                    and isinstance(cell_var, variables.CellVariable)
+                    and cell_var.pre_existing_contents is None
+                    and not side_effects.has_pending_mutation_of_attr(
+                        cell_var, "cell_contents"
+                    )
+                ):
+                    cells.append(side_effects.track_trace_time_empty_cell(cell_var))
+                    continue
+
                 # Get the cell contents from side_effects or pre_existing_contents
                 # load_cell will replay the side-effects
-                cell_contents = tx.output.side_effects.load_cell(cell_var)
+                cell_contents = side_effects.load_cell(cell_var)
 
                 # Check for self-referential closure (function capturing itself for recursion)
                 # For example:

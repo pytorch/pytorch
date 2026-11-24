@@ -453,6 +453,17 @@
       ]
     }
   ],
+  "GB3122": [
+    {
+      "Gb_type": "Class with trace-time empty closure cell escaped",
+      "Context": "{const}",
+      "Explanation": "A class defined in the compiled region closes over a name assigned after the class statement. Dynamo built it with a placeholder cell that is not updated outside the trace.",
+      "Hints": [
+        "Do not return or store the class outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0028": [
     {
       "Gb_type": "Caught non-Exception value",
