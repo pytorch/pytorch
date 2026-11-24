@@ -40,7 +40,8 @@ from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, r
     download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
-    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest
+    TEST_WITH_TORCHDYNAMO, HardwareClassification, serialTest, decorateIf, skipIfCppFakeTensor, \
+    skipIfXpu
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN, \
     SM80OrLater, SM90OrLater, has_device_side_assert
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
@@ -96,7 +97,11 @@ def _graph_node_names(grad_fn):
 # CI.
 
 class TestNN(NNTestCase):
-    hw_classification = HardwareClassification.GENERIC
+    # No hw_classification: add_test() generates the module tests' *_cuda and
+    # *_xpu variants into this class, and several tests compare against CUDA
+    # when it's available, so it can't be GENERIC until those are split out.
+    # Its tests take no device parameter and the class doesn't use
+    # instantiate_device_type_tests, so it isn't ACCELERATOR either.
 
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -2060,6 +2065,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(RuntimeError, lambda: F.pad(inputs, (1,)))
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_mask(self):
         N, L, D = 10, 12, 14
 
@@ -2076,6 +2082,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         self.assertEqual(input, input_convert)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_tensor_from_mask_error(self):
         N, L, D = 10, 12, 14
 
@@ -5998,7 +6005,7 @@ class TestAddRelu(TestCase):
 
 dynamo_wrapper_skips = {}
 dynamo_wrapper_skips["xpu"] = {
-    # intel/torch-xpu-ops/issues/5401
+    # https://github.com/intel/torch-xpu-ops/issues/5401
     'test_Hardshrink_no_batch_dim_xpu',
     'test_Softshrink_no_batch_dim_xpu',
     'test_Conv1d_zero_batch_xpu_fp32',
@@ -6031,7 +6038,7 @@ def add_test(test, decorator=None, tf32_decorator=None):
     if not hasattr(test, 'test_cpu') or test.test_cpu:
         add(test_name, lambda self, test=test: test(self))
 
-    if torch.accelerator.is_available():
+    if torch.accelerator.is_available() and test.should_test_accelerator:
         device_type = torch.accelerator.current_accelerator(True).type
 
         # Only add XPU test in addition to CUDA test in this PR
@@ -6474,6 +6481,7 @@ class TestNNDeviceType(NNTestCase):
         expected_grad = torch.sigmoid(-x.detach().abs()) * scale
         self.assertEqual(grad, expected_grad)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5508")
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
         grid = torch.empty(1, 1, 1, 2, device=device)
@@ -7427,7 +7435,7 @@ class TestNNDeviceType(NNTestCase):
         # Extremely large kernel_size (would overflow int)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7456,7 +7464,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large stride (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: stride"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7476,7 +7484,7 @@ class TestNNDeviceType(NNTestCase):
 
         # Extremely large padding (would overflow int)
         with self.assertRaisesRegex(
-            RuntimeError, r"value cannot be safely converted without overflow: padding"
+            RuntimeError, r"value cannot be converted to type int without overflow"
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7488,7 +7496,7 @@ class TestNNDeviceType(NNTestCase):
         # Combined invalid parameters
         with self.assertRaisesRegex(
             RuntimeError,
-            r"value cannot be safely converted without overflow: kernel_size",
+            r"value cannot be converted to type int without overflow",
         ):
             torch.nn.functional.avg_pool2d(
                 x,
@@ -7808,6 +7816,23 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.bfloat16, torch.float16)
+    @parametrize_test("width", [11, 12, 16, 24, 244, 384, 1536])
+    def test_LayerNorm_constant_input_is_exactly_zero(self, device, dtype, width):
+        # Regression test for the Welford combine in the GPU kernel: when both
+        # partial means agree, the combined mean must not move, so a constant
+        # row normalizes to exactly zero. Widths divisible by 4 take the
+        # vectorized path; 11 takes the scalar one.
+        X = torch.ones(4, width, dtype=dtype, device=device)
+        Y, mean, _ = torch.ops.aten.native_layer_norm(X, (width,), None, None, 1e-5)
+        self.assertEqual(mean, torch.ones_like(mean), rtol=0, atol=0)
+        self.assertEqual(Y, torch.zeros_like(Y), rtol=0, atol=0)
+        gamma = torch.ones(width, dtype=dtype, device=device)
+        beta = torch.zeros(width, dtype=dtype, device=device)
+        Y_affine = F.layer_norm(X, (width,), gamma, beta, 1e-5)
+        self.assertEqual(Y_affine, torch.zeros_like(Y_affine), rtol=0, atol=0)
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16)
     def test_rmsnorm_numeric(self, device, dtype):
@@ -7832,6 +7857,46 @@ class TestNNDeviceType(NNTestCase):
         Y_ref = rms_norm_reference_fn(X, shape, w, 0.5)
 
         self.assertEqual(Y_ref, Y)
+
+    # Shapes reach each MPS layer_norm backward path the OpInfo samples miss: rows split into chunks (2, 20001), rows
+    # too long for registers (2, 4097), one threadgroup per row with wide weight and bias grad tiles split across rows
+    # (100, 256), and tall 32x32 weight and bias grad tiles with a column tail (300, 33). Every dtype accumulates in
+    # float32, so float16 against a float32 CPU reference covers the kernels.
+    @onlyAccelerator
+    @parametrize_test("shape", [(2, 20001), (2, 4097), (100, 256), (300, 33)])
+    def test_layer_norm_backward_shapes(self, device, shape):
+        if torch.device(device).type == "xpu" and shape[-1] >= 8192:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/6310")
+        normalized_shape = shape[-1:]
+        args = [torch.randn(s, dtype=torch.half) for s in (shape, normalized_shape, normalized_shape)]
+        grad = torch.randn(shape, dtype=torch.half)
+
+        def grads(device, dtype):
+            inputs = [t.to(device, dtype).requires_grad_() for t in args]
+            out = F.layer_norm(inputs[0], normalized_shape, inputs[1], inputs[2])
+            return torch.autograd.grad(out, inputs, grad.to(device, dtype))
+
+        for actual, expected in zip(grads(device, torch.half), grads("cpu", torch.float)):
+            self.assertEqual(actual.cpu().float(), expected, atol=2e-3 * expected.abs().max().item(), rtol=0)
+
+    # Shapes reach each MPS weight_norm backward path: for dim=0 rows packed into a simdgroup, one threadgroup per row,
+    # rows too long for registers and rows split into chunks, and for the last dim narrow, wide and tall column tiles.
+    # As above, float16 against a float32 CPU reference.
+    @onlyAccelerator
+    @parametrize_test("shape", [(1000, 4), (64, 3, 3, 3), (300, 129), (128, 768), (2, 4097), (2, 20001)])
+    @parametrize_test("last_dim", [False, True])
+    def test_weight_norm_backward_shapes(self, device, shape, last_dim):
+        dim = len(shape) - 1 if last_dim else 0
+        v, grad_w = torch.randn(shape, dtype=torch.half), torch.randn(shape, dtype=torch.half)
+        g = torch.randn([s if d == dim else 1 for d, s in enumerate(shape)], dtype=torch.half)
+
+        def grads(device, dtype):
+            v_dev, g_dev = v.to(device, dtype), g.to(device, dtype)
+            _, norms = torch._weight_norm_interface(v_dev, g_dev, dim)
+            return torch.ops.aten._weight_norm_interface_backward(grad_w.to(device, dtype), v_dev, g_dev, norms, dim)
+
+        for actual, expected in zip(grads(device, torch.half), grads("cpu", torch.float)):
+            self.assertEqual(actual.cpu().float(), expected, atol=2e-3 * expected.abs().max().item(), rtol=0)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -8176,6 +8241,7 @@ class TestNNDeviceType(NNTestCase):
                 _test_module_empty_input(self, mod, inp)
 
     @onlyAccelerator
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5528")
     @dtypes(torch.float, torch.half, torch.bfloat16)
     def test_groupnorm_unaligned_input(self, device, dtype):
         shape = (2, 32, 16, 16)
@@ -8390,6 +8456,7 @@ class TestNNDeviceType(NNTestCase):
                 padding=[0, 0, 0, 0, -2, -2])
 
     @onlyNativeDeviceTypes
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5508")
     def test_Pad_backward_channel_mismatch(self, device):
         # regression test for https://github.com/pytorch/pytorch/issues/142834: a
         # gradOutput whose channel dim doesn't match the input used to segfault in
@@ -8511,6 +8578,11 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # Double not supported
     @expectedFailureMeta  # RuntimeError: cannot reshape tensor of 0 elements into shape [1, 0, -1]
     @onlyNativeDeviceTypes
+    # expectedFailureMeta already skips Dynamo; expose that skip before sharding.
+    @decorateIf(
+        unittest.skip("test doesn't currently work with dynamo"),
+        lambda p: TEST_WITH_TORCHDYNAMO and torch.device(p["device"]).type == "cpu",
+    )
     def test_TransformerEncoderLayer_empty(self, device):
         for training in (True, False):
             for batch_first, input_shape in [(True, (0, 10, 512)),
@@ -8523,17 +8595,22 @@ class TestNNDeviceType(NNTestCase):
                     with torch.no_grad():
                         _test_module_empty_input(self, encoder_layer, input, check_size=False, inference=True)
                     if batch_first and not TEST_WITH_CROSSREF:
-                        with torch.no_grad():
-                            # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
-                            # 2, for that matter) so it can't hit the fast path, nor can we give a
-                            # result.
-                            with self.assertRaisesRegex(
-                                    AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
-                                nt = torch.nested.nested_tensor([], device=device)
+                        @skipIfCppFakeTensor("no nested tensor support")
+                        def _test_nested():
+                            with torch.no_grad():
+                                # A NestedTensor with no tensors inside it doesn't have dim 3 (or dim
+                                # 2, for that matter) so it can't hit the fast path, nor can we give a
+                                # result.
+                                with self.assertRaisesRegex(
+                                        AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
+                                    nt = torch.nested.nested_tensor([], device=device)
+                                    _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
+
+                                nt = torch.nested.nested_tensor([torch.rand(0, 512, device=device, dtype=torch.double)], device=device)
                                 _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
 
-                            nt = torch.nested.nested_tensor([torch.rand(0, 512, device=device, dtype=torch.double)], device=device)
-                            _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
+                        with self.subTest(nested_tensor=True):
+                            _test_nested()
                 else:
                     _test_module_empty_input(self, encoder_layer, input, check_size=False)
 
@@ -8586,6 +8663,8 @@ class TestNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
+        if torch.device(device).type == "xpu" and dtype == torch.complex64:
+            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5515")
         for mod, inp in [
                 (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device, dtype=dtype)),
                 (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
@@ -9823,10 +9902,55 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @expectedFailureMPS  # double device type
     @onlyNativeDeviceTypes
+    @decorateIf(
+        unittest.skip('Lanczos mode is only supported on CPU'),
+        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cuda',
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode requires antialias=True'),
+        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cpu' and not p['antialias'],
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode does not support align_corners=True'),
+        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type == 'cpu' and p['antialias'] and p['align_corners'],
+    )
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6206")
     def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
         self._test_upsamplingBiMode2d(
             device, antialias, align_corners, mode, memory_format
         )
+
+    @parametrize_test("mode", ["nearest", "nearest-exact", "bilinear", "bicubic", "lanczos"])
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("dtype", [torch.uint8, torch.float32])
+    @decorateIf(
+        unittest.skip("antialias is only supported for bilinear, bicubic and lanczos"),
+        lambda p: p["antialias"] and p["mode"] not in ("bilinear", "bicubic", "lanczos"),
+    )
+    @decorateIf(
+        unittest.skip("lanczos requires antialias=True and is CPU only"),
+        lambda p: p["mode"] == "lanczos" and (not p["antialias"] or torch.device(p["device"]).type != "cpu"),
+    )
+    @decorateIf(
+        unittest.skip("no uint8 kernel for this mode on this device"),
+        lambda p: p["dtype"] == torch.uint8 and torch.device(p["device"]).type != "cpu"
+        and p["mode"] not in ("nearest", "nearest-exact")
+        and not (torch.device(p["device"]).type == "mps" and p["mode"] == "bilinear" and not p["antialias"]),
+    )
+    def test_upsampling2d_channels_last_view_with_size1_batch(self, device, mode, antialias, dtype):
+        # Channels-last contiguous, but the size-1 batch dim has stride 3 rather than H * W * C.
+        x = torch.randint(0, 256, (31, 47, 3), dtype=torch.uint8, device=device).to(dtype).permute(2, 0, 1)[None]
+        self.assertTrue(x.is_contiguous(memory_format=torch.channels_last))
+        x_ref = torch.empty_like(x, memory_format=torch.channels_last).copy_(x)
+        for size in [(20, 30), (62, 94)]:
+            out = F.interpolate(x, size=size, mode=mode, antialias=antialias)
+            expected = F.interpolate(x_ref, size=size, mode=mode, antialias=antialias)
+            self.assertEqual(out, expected)
+            if dtype == torch.uint8 and torch.device(device).type == "cpu" and mode in ("bilinear", "bicubic", "lanczos"):
+                # x is recognized as channels-last, for the uint8 AVX2 / NEON kernels.
+                self.assertEqual(out.stride(), expected.stride())
+            else:
+                self.assertTrue(out.is_contiguous())
 
     @onlyCUDA
     @skipIfRocm
@@ -10055,6 +10179,18 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("non_contig", [False, "sliced", "restrided"])
     @parametrize_test("batch_size", [1, 5])
     @skipIfMPS
+    @decorateIf(
+        unittest.skip('CUDA implementation is not yet supporting uint8'),
+        lambda p: torch.device(p['device']).type == 'cuda',
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode requires antialias=True'),
+        lambda p: p['mode'] == 'lanczos' and (not p['antialias']),
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode does not support align_corners=True'),
+        lambda p: p['mode'] == 'lanczos' and p['align_corners'],
+    )
     def test_upsamplingBiMode2d_consistency(
         self,
         device,
@@ -10069,8 +10205,8 @@ class TestNNDeviceType(NNTestCase):
         batch_size,
     ):
         # Check output value consistency between resized_input_uint8 and resized input_float
-        if torch.device(device).type == "cuda":
-            raise SkipTest("CUDA implementation is not yet supporting uint8")
+        if torch.device(device).type in ["cuda", "xpu"]:
+            raise SkipTest("CUDA/XPU implementation is not yet supporting uint8")
 
         if mode == "lanczos":
             if not antialias:
@@ -10109,11 +10245,11 @@ class TestNNDeviceType(NNTestCase):
         if non_contig is False:
             self.assertTrue(input_ui8.is_contiguous(memory_format=memory_format))
 
-        # FIXME if-clause shows the current behaviour which is definitely unexpected.
-        # Ideally we want to fix it such that both the ui8 and f32 outputs are also channels_last
-        # See for more details: https://github.com/pytorch/pytorch/pull/100373
         if batch_size == 1 and check_as_unsqueezed_3d_tensor and memory_format == torch.channels_last:
-            self.assertTrue(output_ui8.is_contiguous())
+            # Channels-last inputs whose size-1 batch dim has a non-standard stride are only recognized
+            # as channels-last for uint8 on CPU.
+            self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format) if torch.device(device).type == "cpu"
+                            else output_ui8.is_contiguous())
             self.assertTrue(output_f32.is_contiguous())
         else:
             self.assertTrue(output_ui8.is_contiguous(memory_format=memory_format))
@@ -10139,11 +10275,15 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("input_size, output_size", [(399, 437), (403, 377)])
+    @decorateIf(
+        unittest.skip('CUDA implementation is not yet supporting uint8'),
+        lambda p: torch.device(p['device']).type == 'cuda',
+    )
     def test_upsamplingBiLinear2d_consistency_interp_size_bug(self, device, memory_format, align_corners, input_size, output_size):
         # Non-regression test for https://github.com/pytorch/pytorch/pull/101403
 
-        if torch.device(device).type == "cuda":
-            raise SkipTest("CUDA implementation is not yet supporting uint8")
+        if torch.device(device).type in ["cuda", "xpu"]:
+            raise SkipTest("CUDA/XPU implementation is not yet supporting uint8")
 
         mode = "bilinear"
         input_ui8 = torch.randint(0, 256, size=(1, 3, input_size, input_size), dtype=torch.uint8, device=device)
@@ -10190,6 +10330,94 @@ class TestNNDeviceType(NNTestCase):
         ], device=device, dtype=t_in.dtype).reshape(1, 3, 2, 2)
         t_out = F.interpolate(t_in, size=(2, 2), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
+
+    @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])
+    @parametrize_test("antialias", [True, False])
+    @parametrize_test("num_channels", [1, 3, 5])
+    @dtypes(torch.float32, torch.uint8)
+    @onlyNativeDeviceTypes
+    @decorateIf(
+        unittest.skip('Lanczos mode is only supported on CPU'),
+        lambda p: p['mode'] == 'lanczos' and torch.device(p['device']).type != 'cpu',
+    )
+    @decorateIf(
+        unittest.skip('Lanczos mode requires antialias=True'),
+        lambda p: p['mode'] == 'lanczos' and not p['antialias'],
+    )
+    @decorateIf(
+        unittest.skip('uint8 is only supported on CPU'),
+        lambda p: p['dtype'] == torch.uint8 and torch.device(p['device']).type != 'cpu',
+    )
+    def test_upsamplingBiMode2d_singleton_spatial_dim(
+        self, device, dtype, memory_format, mode, antialias, num_channels
+    ):
+        # Regression test for https://github.com/pytorch/pytorch/issues/200568
+        # When the output width is 1 the CPU separable kernel used the indices
+        # and weights of the first output row for every output row, so all rows
+        # were identical. The same happened in channels_last with
+        # num_channels == 1. The separable kernel is used for antialias=True,
+        # and for uint8 whenever the AVX2/NEON uint8 kernels do not apply
+        # (e.g. num_channels > 4 on AVX2, so num_channels == 5 reaches it on
+        # x86 CI). The other configurations check the non-separable kernels.
+        # The single output pixel cases also cover the AVX2 uint8 kernel, which
+        # mixed up its packed and unpacked layouts when the output spatial dims
+        # are all 1 (contiguous and channels_last are indistinguishable then).
+        kwargs = dict(mode=mode, align_corners=False, antialias=antialias)
+
+        def to_mf(t):
+            return t.contiguous(memory_format=memory_format)
+
+        def reference(x, out_size):
+            # Resize one spatial dim at a time, like the separable CPU kernel does,
+            # but duplicate the singleton spatial dim first so that the
+            # interpolated dim is never the innermost loop of the kernel.
+            ih, iw = x.shape[-2:]
+            oh, ow = out_size
+            if ow != iw:
+                rep_h = 2 if ih == 1 else 1
+                x = F.interpolate(to_mf(x.repeat(1, 1, rep_h, 1)), size=(ih * rep_h, ow), **kwargs)
+                x = x[:, :, :ih, :]
+            if oh != ih:
+                rep_w = 2 if ow == 1 else 1
+                x = F.interpolate(to_mf(x.repeat(1, 1, 1, rep_w)), size=(oh, ow * rep_w), **kwargs)
+                x = x[:, :, :, :ow]
+            return x
+
+        if dtype == torch.uint8:
+            tol = dict(atol=1, rtol=0)
+        else:
+            tol = dict(atol=1e-5, rtol=1e-5)
+
+        torch.manual_seed(0)
+        # (input_h, input_w, output_h, output_w)
+        for in_h, in_w, out_h, out_w in [
+            (2, 1, 4, 1),  # output width 1, upsample height (the reported case)
+            (5, 1, 3, 1),  # output width 1, downsample height
+            (1, 1, 3, 1),  # single input pixel column
+            (3, 1, 1, 1),  # single output pixel, vertical pass only
+            (1, 3, 1, 1),  # single output pixel, horizontal pass only
+            (1, 5, 1, 3),  # output height 1, horizontal pass only
+            (4, 3, 2, 1),  # two passes, width 1 intermediate for the vertical pass
+            (3, 4, 1, 2),  # two passes, output height 1
+        ]:
+            if dtype == torch.uint8:
+                # keep away from 0 and 255 so that bicubic/lanczos overshoot does not clip
+                in_t = torch.randint(30, 220, (2, num_channels, in_h, in_w), dtype=dtype, device=device)
+            else:
+                in_t = torch.rand(2, num_channels, in_h, in_w, dtype=dtype, device=device)
+            in_t = to_mf(in_t)
+
+            out_t = F.interpolate(in_t, size=(out_h, out_w), **kwargs)
+            expected = reference(in_t, (out_h, out_w))
+            self.assertEqual(out_t, expected, **tol, msg=f"size=({in_h}, {in_w}) -> ({out_h}, {out_w})")
+
+        if mode == "bilinear" and dtype == torch.float32:
+            # Explicit values for the reported case
+            in_t = torch.tensor([0., 1.], device=device).reshape(1, 1, 2, 1)
+            out_t = F.interpolate(to_mf(in_t.expand(1, num_channels, 2, 1)), size=(4, 1), **kwargs)
+            expected = torch.tensor([0., 0.25, 0.75, 1.], device=device).reshape(1, 1, 4, 1)
+            self.assertEqual(out_t, expected.expand(1, num_channels, 4, 1))
 
     @onlyAccelerator
     def test_upsamplingBicubic2d_many_channels(self, device):
@@ -11124,6 +11352,24 @@ class TestNNDeviceType(NNTestCase):
         else:
             self.assertEqual(out1, out2)
 
+    @onlyAccelerator
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
+    @parametrize_test("batch_size,hidden_size", [(1, 7), (5, 513)])
+    def test_LSTM_batch_and_hidden_sizes(self, device, dtype, batch_size, hidden_size):
+        lstm_cpu = nn.LSTM(11, hidden_size, num_layers=2, bidirectional=True, dtype=dtype)
+        lstm = deepcopy(lstm_cpu).to(device)
+        x_cpu = torch.randn(3, batch_size, 11, dtype=dtype, requires_grad=True)
+        x = x_cpu.detach().to(device).requires_grad_()
+        out_cpu, (h_cpu, c_cpu) = lstm_cpu(x_cpu)
+        out, (h, c) = lstm(x)
+        self.assertEqual(out, out_cpu, atol=1e-4, rtol=1e-4)
+        (out_cpu.sum() + (h_cpu * c_cpu).sum()).backward()
+        (out.sum() + (h * c).sum()).backward()
+        self.assertEqual(x.grad, x_cpu.grad, atol=1e-4, rtol=1e-4)
+        for param, param_cpu in zip(lstm.parameters(), lstm_cpu.parameters()):
+            self.assertEqual(param.grad, param_cpu.grad, atol=1e-4, rtol=1e-4)
+
     @skipMeta  # GRU cell reuses output which was resized
     @expectedFailureMPS  # TypeError: the MPS framework doesn't support float64
     @dtypes(torch.double)
@@ -11194,6 +11440,7 @@ class TestNNDeviceType(NNTestCase):
     @skipIfRocmVersionLessThan((7, 14))
     @skipMPS  # MPS has no CUDA-style grid-y launch limit
     @onlyAccelerator
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5567")
     def test_upsamplingNearest2d_launch_fail(self, device):
         m = nn.Upsample(scale_factor=2)
         # launch grid_y == 2**16 (larger than maximum y-dimension limit 65535)
@@ -11356,6 +11603,7 @@ class TestNNDeviceType(NNTestCase):
             torch.__future__.set_overwrite_module_params_on_conversion(False)
 
     @onlyAccelerator
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4462")
     @dtypes(torch.half, torch.float)
     def test_softmax(self, device, dtype):
         input = torch.rand(32, 100, device=device, dtype=dtype, requires_grad=True)
@@ -11907,6 +12155,140 @@ class TestNNDeviceType(NNTestCase):
                 self.assertTrue(bool(d_input.isfinite().all()))
                 self.assertEqual(d_input, reference[0])
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_grid_sample_expanded_axis_beyond_int_range(self, device, dtype):
+        # A size-1 input expanded along one spatial axis to 2**31 + 1 elements
+        # stores one value but selects the 64-bit kernels. Such axes are not
+        # otherwise supported on CUDA: the coordinate helpers take int sizes.
+        # The bounds checks must use the same int sizes, so that a grid
+        # coordinate of -2 on that axis, which is outside the input, still reads
+        # zero padding (and has a zero gradient), as on CPU.
+        big = 2**31 + 1
+        bw2d = torch.ops.aten.grid_sampler_2d_backward.default
+        bw3d = torch.ops.aten.grid_sampler_3d_backward.default
+        for dims, axis in ((2, 0), (2, 1), (3, 0), (3, 1), (3, 2)):
+            spatial = [1] * dims
+            spatial[axis] = big
+            # Grid coordinates are ordered (x, y[, z]): the last spatial axis first.
+            point = [0.] * dims
+            point[dims - 1 - axis] = -2.
+            grid_cpu = torch.tensor(point, dtype=dtype).reshape((1,) * (dims + 1) + (dims,))
+            inp_cpu = torch.ones((1, 1) + (1,) * dims, dtype=dtype).expand(1, 1, *spatial)
+            inp = torch.ones((1, 1) + (1,) * dims, device=device, dtype=dtype).expand(1, 1, *spatial)
+            grad_output_cpu = torch.ones((1, 1) + (1,) * dims, dtype=dtype)
+            modes = (0, 1, 2) if dims == 2 else (0, 1)
+            fw = torch.grid_sampler_2d if dims == 2 else torch.grid_sampler_3d
+            bw = bw2d if dims == 2 else bw3d
+            for mode in modes:
+                with self.subTest(dims=dims, axis=axis, mode=mode):
+                    expected = fw(inp_cpu, grid_cpu, mode, 0, True)
+                    self.assertEqual(expected.item(), 0)
+                    actual = fw(inp, grid_cpu.to(device), mode, 0, True)
+                    self.assertEqual(actual.cpu(), expected)
+                    tail = (mode, 0, True, [False, True])
+                    expected_grid = bw(grad_output_cpu, inp_cpu, grid_cpu, *tail)[1]
+                    actual_grid = bw(grad_output_cpu.to(device), inp, grid_cpu.to(device), *tail)[1]
+                    self.assertEqual(actual_grid.cpu(), expected_grid)
+
+    @onlyCUDA
+    @largeTensorTest(lambda self, device, mode, input_requires_grad:
+                     (20 if input_requires_grad else 10) * 1024**3, device="cuda")
+    # Nearest grid-gradient-only calls are left out: their grid gradient is
+    # zero and the kernel reads no input, so no large offset is exercised.
+    @parametrize_test("mode,input_requires_grad", [(0, False), (0, True), (1, True)])
+    def test_grid_sample_3d_large_spatial_offset(self, device, mode, input_requires_grad):
+        # The last depth slab of this input starts at 2**31 elements, so the 3D
+        # kernels index in 64 bits and the spatial offsets of input-gradient
+        # scatters must not be computed in 32 bits. Forward and grid-gradient
+        # reads index the input directly in the kernel's index type; the
+        # bilinear grid-gradient-only case, with its forward check, is a
+        # control. The 8 GiB input is held once without grad_input and twice
+        # with it.
+        depth, height, width = 32769, 256, 256
+        inp = torch.zeros((1, 1, depth, height, width), device=device, dtype=torch.float32)
+        self.assertEqual((depth - 1) * inp.stride(2), 2**31)
+        reference = torch.zeros(1, 1, 5, 5, 5, dtype=torch.float32)
+        # Make the far-slab grid gradient nonzero, so dropped or incorrectly
+        # addressed input reads cannot accidentally pass.
+        for (z, y, x), value in (((0, 0, 0), 1.), ((-1, 0, 0), 3.), ((-1, 0, 1), 5.)):
+            reference[0, 0, z, y, x] = value
+            inp[0, 0, z, y, x] = value
+        grad_output = torch.tensor([[[[[1., 2.]]]]], dtype=torch.float32)
+        grid = torch.tensor([[[[[-1., -1., -1.], [-1., -1., 1.]]]]], dtype=torch.float32)
+        if mode == 0 and not input_requires_grad:
+            expected_out = torch.grid_sampler_3d(reference, grid, mode, 0, True)
+            self.assertNotEqual(expected_out[0, 0, 0, 0, 1].item(), 0)
+            actual_out = torch.grid_sampler_3d(inp, grid.to(device), mode, 0, True)
+            self.assertEqual(actual_out.cpu(), expected_out)
+        bw = torch.ops.aten.grid_sampler_3d_backward.default
+        tail = (mode, 0, True, [input_requires_grad, True])
+        expected = bw(grad_output, reference, grid, *tail)
+        if mode == 0:
+            self.assertNotEqual(expected[1][0, 0, 0, 1, 0].item(), 0)
+        actual = bw(grad_output.to(device), inp, grid.to(device), *tail)
+        if input_requires_grad:
+            self.assertEqual(actual[0][0, :, 0, 0, 0].cpu(), expected[0][0, :, 0, 0, 0])
+            self.assertEqual(actual[0][0, :, -1, 0, 0].cpu(), expected[0][0, :, -1, 0, 0])
+            self.assertEqual(actual[0].sum().cpu(), expected[0].sum())
+        else:
+            self.assertIsNone(actual[0])
+        expected[1][..., 0] *= (width - 1) / 4
+        expected[1][..., 1] *= (height - 1) / 4
+        expected[1][..., 2] *= (depth - 1) / 4
+        self.assertEqual(actual[1].cpu(), expected[1])
+
+    @onlyCUDA
+    @largeTensorTest(lambda self, device, mode, input_requires_grad:
+                     (20 if input_requires_grad else 10) * 1024**3, device="cuda")
+    # Nearest grid-gradient-only calls are left out: their grid gradient is
+    # zero and the kernel reads no input, so no large offset is exercised.
+    @parametrize_test("mode,input_requires_grad",
+                      [(0, False), (0, True), (1, True), (2, False), (2, True)])
+    def test_grid_sample_2d_large_spatial_offset(self, device, mode, input_requires_grad):
+        # The last row of this channels-last input starts at 2**31 elements, so
+        # the 2D kernels index in 64 bits and the spatial offsets of bicubic
+        # forward reads, input-gradient scatters and bicubic grid-gradient reads
+        # must not be computed in 32 bits. The bilinear grid-gradient-only case
+        # reads the input directly in the kernel's index type and is a control.
+        # The 8 GiB input is held once without grad_input and twice with it.
+        height, width = 32769, 65536
+        inp = torch.empty((1, 1, height, width), device=device, dtype=torch.float32,
+                          memory_format=torch.channels_last).zero_()
+        self.assertEqual((height - 1) * inp.stride(2), 2**31)
+        reference = torch.zeros(1, 1, 5, 5, dtype=torch.float32)
+        reference[0, :, 0, 0] = torch.tensor([1.])
+        reference[0, :, -1, 0] = torch.tensor([3.])
+        # Make the far-row bicubic grid gradient nonzero, so dropped or
+        # incorrectly addressed input reads cannot accidentally pass.
+        reference[0, :, -1, 1] = torch.tensor([5.])
+        inp[0, :, 0, 0] = reference[0, :, 0, 0].to(device)
+        inp[0, :, -1, 0] = reference[0, :, -1, 0].to(device)
+        inp[0, :, -1, 1] = reference[0, :, -1, 1].to(device)
+        grad_output = torch.tensor([[[[1., 2.]]]], dtype=torch.float32)
+        grid = torch.tensor([[[[-1., -1.], [-1., 1.]]]], dtype=torch.float32)
+        if mode == 2 and not input_requires_grad:
+            # Bicubic forward reads the far row through the same helper.
+            expected_out = torch.grid_sampler_2d(reference, grid, mode, 0, True)
+            self.assertNotEqual(expected_out[0, 0, 0, 1].item(), 0)
+            actual_out = torch.grid_sampler_2d(inp, grid.to(device), mode, 0, True)
+            self.assertEqual(actual_out.cpu(), expected_out)
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        tail = (mode, 0, True, [input_requires_grad, True])
+        expected = bw(grad_output, reference, grid, *tail)
+        if mode == 2:
+            self.assertNotEqual(expected[1][0, 0, 1, 0].item(), 0)
+        actual = bw(grad_output.to(device), inp, grid.to(device), *tail)
+        if input_requires_grad:
+            self.assertEqual(actual[0][0, :, 0, 0].cpu(), expected[0][0, :, 0, 0])
+            self.assertEqual(actual[0][0, :, -1, 0].cpu(), expected[0][0, :, -1, 0])
+            self.assertEqual(actual[0].sum().cpu(), expected[0].sum())
+        else:
+            self.assertIsNone(actual[0])
+        expected[1][..., 0] *= (width - 1) / 4
+        expected[1][..., 1] *= (height - 1) / 4
+        self.assertEqual(actual[1].cpu(), expected[1])
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float, torch.half, torch.bfloat16)
@@ -12012,6 +12394,10 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     @tf32_on_and_off(0.005)
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
+    @decorateIf(
+        unittest.skip("TorchDynamo fails here for unknown reasons"),
+        lambda p: TEST_WITH_TORCHDYNAMO and torch.device(p["device"]).type == "cpu",
+    )
     def test_variable_sequence(self, device, dtype):
         def pad(var, length):
             if var.size(0) == length:
@@ -12195,6 +12581,7 @@ class TestNNDeviceType(NNTestCase):
                 F.nll_loss(x, t, weight=weight)
 
     @onlyAccelerator
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5565")
     def test_nll_loss_1d_input_backward(self, device):
         # For 1D (no batch dim) input aten.nll_loss_backward uses only target[0].
         # The MPS Metal kernel used to dispatch target.numel() threads, reading
@@ -12262,6 +12649,7 @@ class TestNNDeviceType(NNTestCase):
     # Ref: https://github.com/pytorch/pytorch/issues/190139
     @onlyAccelerator
     @largeTensorTest("5GB")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/4723")
     def test_nll_loss2d_backward_large_sample_offset(self, device):
         batch_size = 2**16 + 1
         num_classes = 2**15
@@ -13218,18 +13606,13 @@ class TestNNDeviceType(NNTestCase):
                                                        reduction=reduction, margin=margin, swap=swap)
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(
                 a, p, n), (anchor, positive, negative)))
-            traced_loss_op = torch.jit.trace(loss_op, (anchor, positive, negative))
-            self.assertTrue(gradcheck(lambda a, p, n: traced_loss_op(
-                a, p, n), (anchor, positive, negative)))
 
             # Test forward parity
             functional = F.triplet_margin_with_distance_loss(anchor, positive, negative,
                                                              distance_function=distance_fn,
                                                              reduction=reduction, margin=margin, swap=swap)
             modular = loss_op(anchor, positive, negative)
-            traced = traced_loss_op(anchor, positive, negative)
             self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
-            self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
 
     @dtypes(torch.cfloat, torch.cdouble, torch.float)
     def test_to_complex(self, device, dtype):
@@ -13330,6 +13713,7 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.double, torch.float, torch.half)
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5510")
     def test_transformerencoderlayer(self, device, dtype):
         # this is a deterministic test for TransformerEncoderLayer
         d_model = 4
@@ -13340,7 +13724,7 @@ class TestNNDeviceType(NNTestCase):
 
         atol = 1e-5
         rtol = 1e-7
-        if "cuda" in device:
+        if torch.device(device).type == "cuda":
             atol = 1e-3
             rtol = 1e-2
 
@@ -13462,49 +13846,54 @@ class TestNNDeviceType(NNTestCase):
             # currently, which won't be used if training.
             if (batch_first and not training and
                     ('cuda' in str(device) or 'cpu' in str(device)) and not TEST_WITH_CROSSREF):
-                encoder_input[0][-1] = torch.zeros_like(encoder_input[0][1])
-                mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
-                mask[0][-1] = True
+                @skipIfCppFakeTensor("no nested tensor support")
+                def _test_nested():
+                    encoder_input[0][-1] = torch.zeros_like(encoder_input[0][1])
+                    mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
+                    mask[0][-1] = True
 
-                nt = torch.nested.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
-                result = model(nt)
-                ref_output = torch.tensor(
-                    [
+                    nt = torch.nested.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
+                    result = model(nt)
+                    ref_output = torch.tensor(
                         [
-                            [2.4268184, 0.02042419, -0.603311, -0.08476824],
-                            [2.423306, 0.01889652, -0.6057701, -0.08519465],
-                            [2.431538, 0.02078694, -0.5999354, -0.08746159],
-                            [2.4348664, 0.02212971, -0.5975677, -0.08733892],
-                            [2.423133, 0.02097577, -0.60594773, -0.08113337],
+                            [
+                                [2.4268184, 0.02042419, -0.603311, -0.08476824],
+                                [2.423306, 0.01889652, -0.6057701, -0.08519465],
+                                [2.431538, 0.02078694, -0.5999354, -0.08746159],
+                                [2.4348664, 0.02212971, -0.5975677, -0.08733892],
+                                [2.423133, 0.02097577, -0.60594773, -0.08113337],
+                            ],
+                            [
+                                [2.4279876, 0.02121329, -0.60249615, -0.08410317],
+                                [2.4138637, 0.02221113, -0.6124869, -0.07249016],
+                                [2.4251041, 0.01974815, -0.6045152, -0.08483928],
+                                [2.4335563, 0.0218913, -0.59850943, -0.08683228],
+                                [2.4229012, 0.02418739, -0.6061784, -0.07492948],
+                            ],
                         ],
-                        [
-                            [2.4279876, 0.02121329, -0.60249615, -0.08410317],
-                            [2.4138637, 0.02221113, -0.6124869, -0.07249016],
-                            [2.4251041, 0.01974815, -0.6045152, -0.08483928],
-                            [2.4335563, 0.0218913, -0.59850943, -0.08683228],
-                            [2.4229012, 0.02418739, -0.6061784, -0.07492948],
-                        ],
-                    ],
-                    device=device, dtype=dtype
-                )
-                result = result.to_padded_tensor(0)
-                ref_output[0][-1] = torch.zeros_like(
-                    ref_output[0][-1], device=device, dtype=dtype
-                )
-                result[0][-1] = torch.zeros_like(
-                    result[0][-1], device=device, dtype=dtype
-                )
-                self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-                if 'cuda' in device:
-                    if dtype == torch.float:
-                        atol = 2e-4
-                        rtol = 4e-3
+                        device=device, dtype=dtype
+                    )
+                    result = result.to_padded_tensor(0)
+                    ref_output[0][-1] = torch.zeros_like(
+                        ref_output[0][-1], device=device, dtype=dtype
+                    )
+                    result[0][-1] = torch.zeros_like(
+                        result[0][-1], device=device, dtype=dtype
+                    )
+                    self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
+                    if 'cuda' in device:
+                        if dtype == torch.float:
+                            atol = 2e-4
+                            rtol = 4e-3
+                        else:
+                            atol = 7e-4
+                            rtol = 2e-2
+                        torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
                     else:
-                        atol = 7e-4
-                        rtol = 2e-2
-                    torch.testing.assert_close(result, ref_output, atol=atol, rtol=rtol)
-                else:
-                    torch.testing.assert_close(result, ref_output)
+                        torch.testing.assert_close(result, ref_output)
+
+                with self.subTest(nested_tensor=True):
+                    _test_nested()
 
 
         for batch_first in (True, False):
@@ -13600,6 +13989,14 @@ class TestNNDeviceType(NNTestCase):
                 _test(activation=activation, batch_first=batch_first, training=training)
 
     @parametrize_test('foreach', (False, True))
+    @decorateIf(
+        unittest.skip('foreach not supported on XLA'),
+        lambda p: torch.device(p['device']).type == 'xla' and p['foreach'],
+    )
+    @decorateIf(
+        unittest.skip('foreach not supported on MPS'),
+        lambda p: torch.device(p['device']).type == 'mps' and p['foreach'],
+    )
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
             raise SkipTest('foreach not supported on XLA')
@@ -13653,6 +14050,14 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
+    @decorateIf(
+        unittest.skip('foreach not supported on XLA'),
+        lambda p: torch.device(p['device']).type == 'xla' and p['foreach'],
+    )
+    @decorateIf(
+        unittest.skip('foreach not supported on MPS'),
+        lambda p: torch.device(p['device']).type == 'mps' and p['foreach'],
+    )
     def test_clip_grad_norm(self, norm_type, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
             raise SkipTest('foreach not supported on XLA')
@@ -13764,6 +14169,7 @@ class TestNNDeviceType(NNTestCase):
     @skipMPS
     @onlyAccelerator
     @largeTensorTest("30GB")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5566")
     def test_spatial_softmax_backward_64bit_indexing(self, device):
         # Softmax over a non-last dim (inner_size != 1) routes the backward to
         # cunn_SpatialSoftMaxBackward, a separate kernel from the inner_size==1
@@ -14410,6 +14816,10 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("bias", [False, True])
     @dtypes(torch.float32)
+    @decorateIf(
+        unittest.skip('input-grad ULP worst case exceeds tolerance on ROCm 7.14+ (bias=False, float32)'),
+        lambda p: TEST_WITH_ROCM and getRocmVersion() >= (7, 14) and (not p['bias']) and (p['dtype'] == torch.float32),
+    )
     def test_linear_cross_entropy_loss_default(self, device, dtype, bias):
         if (
             TEST_WITH_ROCM
@@ -14426,6 +14836,10 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("prob_target", [False, True])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
     @parametrize_test("bias", [False, True])
+    @decorateIf(
+        unittest.skip('MPS does not support fp64'),
+        lambda p: 'mps' in p['device'],
+    )
     def test_linear_cross_entropy_chunked_gradcheck(
         self, device, acc_policy, bias, prob_target
     ):
@@ -14544,6 +14958,10 @@ class TestNNDeviceType(NNTestCase):
         )
         self.assertEqual(expected, actual)
 
+    @decorateIf(
+        unittest.skip('MPS does not support fp64'),
+        lambda p: 'mps' in p['device'],
+    )
     def test_linear_cross_entropy_linear_bias_gradcheck(self, device):
         """``torch.autograd.gradcheck`` against ``linear_bias`` on the
         reference path. Also indirectly covered by OpInfo's
@@ -14657,6 +15075,10 @@ class TestNNDeviceType(NNTestCase):
 
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_none_reduction_chunked(
         self, device, dtype, bias
     ):
@@ -14851,6 +15273,14 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @decorateIf(
+        unittest.skip('times out on ROCm 10'),
+        lambda p: TEST_WITH_ROCM and (torch.version.rocm or '0').split('.')[0] == '10' and (not p['bias']) and (p['dtype'] == torch.float16) and (p['acc_policy'] == 'compact'),
+    )
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_loss_with_acc_dtype(self, device, dtype, acc_policy, bias):
         if (
             TEST_WITH_ROCM
@@ -14870,6 +15300,14 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @decorateIf(
+        unittest.skip('times out on ROCm 10'),
+        lambda p: TEST_WITH_ROCM and (torch.version.rocm or '0').split('.')[0] == '10' and (not p['bias']) and (p['dtype'] == torch.bfloat16) and (p['acc_policy'] == 'auto'),
+    )
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_loss_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
@@ -14908,6 +15346,10 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_loss_prob_target_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
@@ -14938,6 +15380,10 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("bias", [False, True])
     @parametrize_test("dtype", [torch.float16, torch.bfloat16])
     @parametrize_test("acc_policy", ["accurate", "compact", "auto"])
+    @decorateIf(
+        unittest.skip('bf16 requires SM80+ on CUDA'),
+        lambda p: p['dtype'] == torch.bfloat16 and 'cuda' in p['device'] and (not SM80OrLater),
+    )
     def test_linear_cross_entropy_loss_prob_target_none_reduction_with_acc_dtype(
         self, device, dtype, acc_policy, bias
     ):
@@ -15096,6 +15542,10 @@ class TestNNDeviceType(NNTestCase):
         )
 
     @parametrize_test("reduction", ["sum", "mean"])
+    @decorateIf(
+        unittest.skip('MPS does not support fp64'),
+        lambda p: 'mps' in p['device'],
+    )
     def test_linear_cross_entropy_chunk_size_invariance(self, device, reduction):
         """Chunked op output is invariant w.r.t. ``batch_chunk_size``,
         within floating-point rounding.
@@ -15585,7 +16035,7 @@ class TestNNDeviceType(NNTestCase):
     @set_default_dtype(torch.double)
     @parametrize_test("requires_grad", [True, False])
     @parametrize_test("apply_dp", [
-        subtest(True, decorators=[unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator"), onlyAccelerator]),
+        subtest(True, decorators=[unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator"), onlyAccelerator, skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")]),
         False,
     ])
     def test_spectral_norm(self, device, apply_dp, requires_grad):
@@ -15809,6 +16259,38 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(res_cpu, res_device, exact_dtype=False)
         self.assertEqual(grad_cpu, grad_device)
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    def test_CTCLoss_max_threads_launch_bounds(self, device, dtype):
+        # Exercises maximum thread block sizes (768 for double, 1024 for float)
+        # in native CTC loss kernels when 2 * target_length + 1 > max_threads / 2.
+        target_length = 300
+        input_length = 600
+        vocab_size = 5
+        batch_size = 2
+
+        for target_dtype in [torch.int, torch.long]:
+            log_probs = (
+                torch.randn(input_length, batch_size, vocab_size, dtype=dtype, device=device)
+                .log_softmax(2)
+                .requires_grad_()
+            )
+            targets = torch.randint(
+                low=1, high=vocab_size, size=(batch_size, target_length), dtype=target_dtype, device=device
+            )
+            input_lengths = torch.full((batch_size,), input_length, dtype=target_dtype)
+            target_lengths = torch.full((batch_size,), target_length, dtype=target_dtype)
+
+            with torch.backends.cudnn.flags(enabled=False):
+                loss = torch.nn.functional.ctc_loss(
+                    log_probs, targets, input_lengths, target_lengths,
+                    reduction='sum', zero_infinity=True
+                )
+                grad, = torch.autograd.grad(loss, log_probs, torch.ones_like(loss))
+
+            self.assertFalse(torch.isnan(loss).any())
+            self.assertFalse(torch.isnan(grad).any())
+
     @onlyAccelerator
     def test_CTCLoss_critical_target_len(self, device):
         # cudnn has an unexpected problem with target length 256, see issue #53505
@@ -15824,6 +16306,52 @@ class TestNNDeviceType(NNTestCase):
             res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
+
+    @onlyCUDA
+    @dtypes(torch.float, torch.double)
+    @parametrize_test("case", [
+        subtest(((40, 5, 4), [5, 8, 16, 12, 12], [40] * 5, False, False, False), name="small_path"),
+        subtest(((300, 5, 257), [127] * 5, [300, 300, 300, 300, 297], False, False, True), name="long_targets_large_alphabet"),
+        subtest(((300, 5, 4), [127] * 5, [300, 300, 300, 300, 297], False, False, True), name="long_targets_small_alphabet"),
+        subtest(((240, 5, 1000), [5, 8, 16, 12, 12], [240, 240, 240, 240, 237], True, False, False), name="large_alphabet"),
+        subtest(((240, 3, 4), [0, 0, 0], [240, 120, 0], False, False, False), name="empty_targets"),
+        subtest(((240, 5, 36), [0, 0, 64, 0, 1], [240, 120, 200, 0, 0], True, False, False), name="boundaries"),
+        subtest(((240, 6, 36), [0, 0, 64, 0, 260, 1], [240, 120, 200, 0, 240, 0], True, True, False), name="boundaries_zero_infinity"),
+    ])
+    def test_CTCLoss_deterministic(self, device, dtype, case):
+        shape, target_lengths, input_lengths, concatenated, zero_infinity, repeated_labels = case
+        time, batch, classes = shape
+        log_probs = torch.randn(batch, time, classes, device=device, dtype=dtype)
+        log_probs = log_probs.log_softmax(2).transpose(0, 1).detach().requires_grad_()
+        target_size = 2 * max(target_lengths)
+        targets = torch.randint(0, classes - 1, (batch, target_size), device=device, dtype=torch.long)[:, ::2]
+        targets.add_(targets >= 3)
+        if repeated_labels:
+            split = max(target_lengths) // 2
+            targets[:, :split] = 0
+            targets[:, split:] = 1
+        if concatenated:
+            targets = torch.cat([target[:length] for target, length in zip(targets, target_lengths)]).int()
+        grad_out = torch.randn(batch * 2, device=device, dtype=dtype)[::2]
+        with cudnn.flags(enabled=False), DeterministicGuard(False):
+            reference_loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                        blank=3, reduction='none', zero_infinity=zero_infinity)
+            reference_grad, = torch.autograd.grad(reference_loss, log_probs, grad_out)
+        with cudnn.flags(enabled=False), DeterministicGuard(True):
+            loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                              blank=3, reduction='none', zero_infinity=zero_infinity)
+            grad, = torch.autograd.grad(loss, log_probs, grad_out)
+            self.assertEqual(loss, reference_loss, atol=0, rtol=0)
+            # Collect and large-path kernels sum in different orders; observed max diff ~6e-4 (float), ~2e-12 (double).
+            reference_atol = 1e-3 if dtype == torch.float else 1e-11
+            self.assertEqual(grad, reference_grad, atol=reference_atol, rtol=0)
+
+            for _ in range(3):
+                repeated_loss = F.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                           blank=3, reduction='none', zero_infinity=zero_infinity)
+                repeated_grad, = torch.autograd.grad(repeated_loss, log_probs, grad_out)
+                self.assertEqual(loss, repeated_loss, atol=0, rtol=0)
+                self.assertEqual(grad, repeated_grad, atol=0, rtol=0)
 
     def test_CTCLoss_zero_lengths(self, device):
         N = 3
@@ -15901,6 +16429,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(m(inp)[0].cpu(), out_expected[0], atol=1e-4, rtol=5e-3)
 
     @skipMPS
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5509")
     def test_RNN_input_size_zero(self, device):
         for module in (nn.RNN, nn.LSTM, nn.GRU):
             input = torch.zeros((5, 0, 3), device=device)
@@ -15929,6 +16458,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")
     def test_data_parallel_with_empty_parameter_shapes(self, device):
         class MyModule(nn.Module):
             def __init__(self):
@@ -15953,6 +16483,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")
     def test_broadcast_double_backwards(self, device):
         tensors = (torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
                    torch.randn(4, 4, device=device, requires_grad=True, dtype=torch.double),
@@ -15963,6 +16494,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")
     def test_broadcast_not_requiring_grad(self, device):
         variables = [
             torch.randn(1, 2, device=device, requires_grad=True),
@@ -15978,6 +16510,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @unittest.skipUnless(TEST_MULTIACCELERATOR, "Requires multi-accelerator")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2228")
     def test_broadcast_no_grad(self, device):
         x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device=device)
         with torch.no_grad():
@@ -16426,6 +16959,14 @@ class TestNNDeviceType(NNTestCase):
         ],
         name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
     )
+    @decorateIf(
+        unittest.skip('Failed on CUDA'),
+        lambda p: torch.version.cuda and p['mode'] == 'train' and p['mixed'] and (p['dtype'] == torch.bfloat16) and ((p['memory_format'], p['ref_backend']) in (('NCHW', 'cpu'), ('NHWC', 'NCHW'))),
+    )
+    @decorateIf(
+        unittest.skip('Failed on CUDA'),
+        lambda p: torch.version.cuda and p['mode'] == 'train' and p['mixed'] and (p['dims'] == 3) and (p['dtype'] == torch.half) and ((p['memory_format'], p['ref_backend']) == ('NCHW', 'native')),
+    )
     def test_batchnorm(self, device, dims, mode, memory_format, ref_backend, mixed, dtype):
         # skip conditions are expressed via the test parameters instead of
         # self._testMethodName because instantiated names carry device/dtype suffixes
@@ -16436,6 +16977,10 @@ class TestNNDeviceType(NNTestCase):
 
             if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
                 self.skipTest("Failed on CUDA")
+
+        if torch.device(device).type == "xpu":
+            if mode == "train" and mixed and dtype == torch.bfloat16 and fmt_ref in (("NCHW", "cpu"), ("NHWC", "NCHW")):
+                self.skipTest("https://github.com/intel/torch-xpu-ops/issues/5564")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
@@ -17370,8 +17915,8 @@ class TestNNCUDA(NNTestCase):
     def test_linear_cross_entropy_options_auto_defaults_acc_dtype_cuda(self, device):
         """acc_dtype auto resolution on real CUDA hardware: fp32 once the SM
         generation supports it, the input dtype otherwise. Needs actual
-        hardware to query ``get_device_capability``, so this piece can't be
-        GENERIC like the rest of ``test_..._auto_defaults`` (see TestNN).
+        hardware to query ``get_device_capability``, so this piece lives here
+        rather than with the rest of ``test_..._auto_defaults`` in TestNN.
         """
         opts = nn.LinearCrossEntropyOptions()
         major = torch.cuda.get_device_capability(device)[0]
@@ -17411,6 +17956,7 @@ class TestNNCUDA(NNTestCase):
                 torch.ones(1, device=device),
             )
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5527")
     @dtypes(torch.float, torch.half, torch.bfloat16)
     def test_groupnorm_nhwc_cuda(self, device, dtype):
         for shape, groups, memory_format in [
@@ -17728,6 +18274,7 @@ if __name__ == '__main__':
         self.assertTrue(has_device_side_assert(stderr),
                         lambda msg: f"{msg}\nExpected device assert error in stderr, got: {stderr}")
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5529")
     @parametrize_test("op,normalized_shape,has_weight", [
         subtest(("layer_norm", [64], False), name="layer_norm_1d_no_weight"),
         subtest(("layer_norm", [8, 16], True), name="layer_norm_multidim"),
@@ -18439,7 +18986,7 @@ instantiate_parametrized_tests(TestFusedRMSNormOverrideNumerics)
 
 instantiate_device_type_tests(TestNNCPU, globals(), only_for="cpu")
 instantiate_device_type_tests(TestNNCUDA, globals(), only_for="cuda")
-instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(TestNNDeviceType, globals(), allow_mps=True, allow_xpu=True)
 instantiate_parametrized_tests(TestNN)
 
 # pytest-xdist workers import this file instead of running it as __main__.

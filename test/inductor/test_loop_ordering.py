@@ -2211,7 +2211,7 @@ class TestTiling(TestCase):
         f_c = torch.compile(f, dynamic=dynamic)
         out, code = run_and_get_code(f_c, *inps)
 
-        FileCheck().check_dag("znumel").check_dag("ynumel").check_dag("xnumel").run(
+        FileCheck().check_dag("z0_numel").check_dag("ynumel").check_dag("xnumel").run(
             code[0]
         )
         self.assertEqual(out, f(*inps))
