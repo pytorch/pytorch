@@ -157,7 +157,6 @@
   "test/distributed/tensor/test_dtensor_compile.py",
   "test/distributed/tensor/test_dtensor_dispatch_overhead.py",
   "test/distributed/tensor/test_dtensor_export.py",
-  "test/distributed/tensor/test_dtensor_logging.py",
   "test/distributed/tensor/test_dtensor_ops.py",
   "test/distributed/tensor/test_dtensor_testbase.py",
   "test/distributed/tensor/test_dynamic.py",

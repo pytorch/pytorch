@@ -8,17 +8,19 @@ from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
-    requires_accelerator,
+    HardwareClassification,
     run_tests,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
-@requires_accelerator
 class TestDTensorLogging(TestCase):
     """Test DTensor logging."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
 
     def tearDown(self):
         super().tearDown()
@@ -32,10 +34,10 @@ class TestDTensorLogging(TestCase):
         dist.init_process_group(
             backend="fake", rank=0, world_size=self.world_size, store=store
         )
-        self.device_type = torch.accelerator.current_accelerator().type
 
-    def test_sharding_prop_cache_logging(self):
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+    def test_sharding_prop_cache_logging(self, device):
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
 
         log_records = []
         handler = logging.Handler()
@@ -65,10 +67,10 @@ class TestDTensorLogging(TestCase):
         self.assertExpectedInline(
             log_string(),
             f"""\
-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{self.device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))
+sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))
 sharding_prop HIT (C++ fast path): aten::add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0))), 4822678189205111) -> Spec(f32[4, 4](S(0)))
-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on DeviceMesh((2,), '{self.device_type}', stride=(1,))) -> Spec(f32[4, 4](R))
-sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on DeviceMesh((2,), '{self.device_type}', stride=(1,))) -> Spec(f32[8, 4](S(0)))""",
+sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[4, 4](R)), Spec(f32[4, 4](R))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](R))
+sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(f32[8, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[8, 4](S(0)))""",
         )
 
         # Test Python LRU cache, directly with ShardingPropagator
@@ -93,13 +95,14 @@ sharding_prop MISS (C++ fast path): aten.add.Tensor(Spec(f32[8, 4](S(0))), Spec(
         self.assertExpectedInline(
             log_string(),
             f"""\
-sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{self.device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))
-sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{self.device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))""",
+sharding_prop python cache MISS: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))
+sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[4, 4](S(0)))) on DeviceMesh((2,), '{device_type}', stride=(1,))) -> Spec(f32[4, 4](S(0)))""",
         )
 
-    def test_logging_level_change_resets_cpp_cache(self):
+    def test_logging_level_change_resets_cpp_cache(self, device):
         """setLevel on the dispatch logger resets the C++ cached logging flag."""
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        device_type = torch.device(device).type
+        mesh = DeviceMesh(device_type, list(range(self.world_size)))
         dispatch_logger = logging.getLogger("torch.distributed.tensor._dispatch")
 
         log_records: list[logging.LogRecord] = []
@@ -125,6 +128,9 @@ sharding_prop python cache HIT: aten.add.Tensor(Spec(f32[4, 4](S(0))), Spec(f32[
         self.assertEqual(len(log_records), 2)
         self.assertIn("MISS", log_records[0].getMessage())
         self.assertIn("HIT", log_records[1].getMessage())
+
+
+instantiate_device_type_tests(TestDTensorLogging, globals(), allow_xpu=True)
 
 
 if __name__ == "__main__":
