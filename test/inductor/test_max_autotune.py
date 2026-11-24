@@ -2810,9 +2810,11 @@ class TestMaxAutotune(TestCase):
         #   is replayed on the new kernel, which rebuilds the store-output allowed
         #   inputs from its own indices, and the scheduling-time render receives
         #   the indices through kernel_options.
+        # make_key also takes index_dtype, which generate_and_load derives itself.
         self.assertEqual(
             generate_and_load_args
-            - {"generate_with_caching", "prefix_inputs_fusion_indices"},
+            - {"generate_with_caching", "prefix_inputs_fusion_indices"}
+            | {"index_dtype"},
             make_key_args,
         )
         self.assertEqual(len(generate_and_load_args), 22)
@@ -2908,7 +2910,7 @@ class TestMaxAutotune(TestCase):
                         'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
                         'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
-                        'hint_override':None,'emulate_precision_casts':False,
+                        'index_dtype':'tl.int32','hint_override':None,'emulate_precision_casts':False,
                         'triton_meta':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
@@ -2952,7 +2954,7 @@ class TestMaxAutotune(TestCase):
                     'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                     'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
                     'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
-                    'hint_override':None,'emulate_precision_casts':False,
+                    'index_dtype':'tl.int32','hint_override':None,'emulate_precision_casts':False,
                     'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -3145,6 +3147,7 @@ class TestMaxAutotune(TestCase):
                 num_consumer_groups=0,
                 num_buffers_warp_spec=0,
                 kwargs={},
+                index_dtype="tl.int32",
             )
 
         # Identical layouts but different aliasing must not collide.
@@ -3191,6 +3194,40 @@ class TestMaxAutotune(TestCase):
 
             self.assertEqual(aliased, torch.bmm(x, x), atol=0.1, rtol=0.05)
             self.assertEqual(distinct, torch.bmm(a, b), atol=0.1, rtol=0.05)
+
+    @unittest.skipUnless(HAS_GPU, "requires GPU")
+    @config.patch(
+        {
+            "test_configs.max_mm_configs": 4,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_template_cache_keyed_on_index_dtype(self):
+        # Symbolic layouts give an int32 and an int64 compile the same key; the
+        # class-level TritonTemplate.test_cache patch turns that reuse into an error.
+
+        def f(a, b):
+            return a @ b
+
+        with fresh_cache():
+            a = torch.randn(64, 32, device=GPU_TYPE)
+            b = torch.randn(32, 16, device=GPU_TYPE)
+            torch._dynamo.mark_dynamic(a, 0)
+            compiled = torch.compile(f, mode="max-autotune-no-cudagraphs")
+            self.assertEqual(compiled(a, b), a @ b, atol=0.05, rtol=0.05)
+
+            # Recompile as if the size hint needed int64 indexing.
+            reset()
+            with (
+                config.patch(fx_graph_cache=False),
+                mock.patch(
+                    "torch._inductor.codegen.simd.SIMDScheduling.can_use_32bit_indexing",
+                    return_value=False,
+                ),
+            ):
+                torch._dynamo.mark_dynamic(a, 0)
+                compiled = torch.compile(f, mode="max-autotune-no-cudagraphs")
+                self.assertEqual(compiled(a, b), a @ b, atol=0.05, rtol=0.05)
 
     @fresh_cache()
     @unittest.skipIf(
