@@ -192,8 +192,6 @@ def fp8e4m3fn_to_float32(x):
 # two more bits, such as float64 into float32, x then rounds once into the
 # narrower dtypes.
 
-_INT_TYPES: tl.constexpr = tl.constexpr({8: tl.int8, 16: tl.int16, 32: tl.int32})
-
 
 @triton.jit
 def round_toward(x, DTYPE: tl.constexpr, MODE: tl.constexpr, SATURATION: tl.constexpr):
@@ -208,16 +206,29 @@ def round_toward(x, DTYPE: tl.constexpr, MODE: tl.constexpr, SATURATION: tl.cons
     are false, so NaN is left alone.
     """
     rounded = x.to(DTYPE, fp_downcast_rounding="rtne")
-    if MODE == "to_nearest_even":
+    if MODE == "to_nearest_even" and DTYPE.primitive_bitwidth > 8:
         return rounded
     back = tl.abs(rounded.to(x.dtype))
-    bits = rounded.to(_INT_TYPES[DTYPE.primitive_bitwidth], bitcast=True)
+    idtype: tl.constexpr = tl.core.get_int_dtype(DTYPE.primitive_bitwidth, signed=True)
+    bits = rounded.to(idtype, bitcast=True)
     if SATURATION > 0:
         up = tl.where((back < tl.abs(x)) & (back != SATURATION), 1, 0)
     else:
         up = tl.where(back < tl.abs(x), 1, 0)
     down = tl.where(back > tl.abs(x), -1, 0)
-    if MODE == "toward_zero":
+    if MODE == "to_nearest_even":
+        # Before sm_89, Triton converts float32 to float8_e5m2 through float16
+        # rounded toward zero, so its result is only faithful: take the nearer
+        # of x rounded toward zero and the next value away from zero, even on
+        # ties.
+        lo = bits + down.to(bits.dtype)
+        lo_mag = tl.abs(lo.to(DTYPE, bitcast=True).to(x.dtype))
+        hi_mag = tl.abs((lo + 1).to(DTYPE, bitcast=True).to(x.dtype))
+        below = tl.abs(x) - lo_mag
+        above = hi_mag - tl.abs(x)
+        tie_up = (above == below) & ((lo & 1) == 1)
+        step = tl.where((below > 0) & ((above < below) | tie_up), 1, 0) + down
+    elif MODE == "toward_zero":
         step = down
     elif MODE == "toward_positive":
         step = tl.where(x < 0, down, up)
@@ -225,7 +236,12 @@ def round_toward(x, DTYPE: tl.constexpr, MODE: tl.constexpr, SATURATION: tl.cons
         step = tl.where(x < 0, up, down)
     else:
         step = tl.where((bits & 1) == 0, up + down, 0)
-    return (bits + step.to(bits.dtype)).to(DTYPE, bitcast=True)
+    result = bits + step.to(bits.dtype)
+    if DTYPE.primitive_bitwidth == 8:
+        # Before sm_89, Triton's float8_e5m2 conversion can turn NaN into -0
+        # (the mantissa of the canonical NaN, 0x7FFF, carries into the sign).
+        result = tl.where(x != x, result | 0x7F, result)
+    return result.to(DTYPE, bitcast=True)
 
 
 @triton.jit

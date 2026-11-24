@@ -1605,7 +1605,7 @@ class TritonOverrides(OpOverrides):
                     V.kernel.compute,
                     f'triton_helpers.round_toward({x}, tl.float32, "to_odd", 0.0)',
                     dtype=torch.float32,
-                    shape=x.shape,
+                    shape=x.shape if isinstance(x, CSEVariable) else None,
                 )
             else:
                 x = ops.to_dtype_rounded(x, torch.float32, torch.float64, rounding)
@@ -1668,7 +1668,10 @@ class TritonOverrides(OpOverrides):
             V.kernel.min_elem_per_thread = max(
                 V.kernel.min_elem_per_thread, 4 if dtype == torch.float8_e5m2 else 2
             )
-        if rounding != "to_nearest_even":
+        if rounding != "to_nearest_even" or dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+        ):
             # Like eager, float8_e4m3fn saturates.
             saturation = 448.0 if dtype == torch.float8_e4m3fn else 0.0
             return f'triton_helpers.round_toward({x}, {triton_type(dtype)}, "{rounding}", {saturation})'

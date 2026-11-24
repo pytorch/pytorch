@@ -5154,8 +5154,9 @@ Here are the ways to call ``to``:
 
     Args:
         {memory_format}
+
         round (str, optional): if given, the direction in which to round
-            values that :attr:`dtype` cannot represent; see the note below.
+        values that :attr:`dtype` cannot represent; see the note below.
 
 .. note::
 
@@ -5179,8 +5180,9 @@ Here are the ways to call ``to``:
 
     Args:
         {memory_format}
+
         round (str, optional): if given, the direction in which to round
-            values that :attr:`dtype` cannot represent; see the note below.
+        values that :attr:`dtype` cannot represent; see the note below.
 
 .. method:: to(other, non_blocking=False, copy=False, *, memory_format=torch.preserve_format, round=None) -> Tensor
    :noindex:
@@ -5197,9 +5199,10 @@ Here are the ways to call ``to``:
 
     Args:
         {memory_format}
+
         round (str, optional): if given, the direction in which to round
-            values that the dtype of :attr:`other` cannot represent; see the
-            note below.
+        values that the dtype of :attr:`other` cannot represent; see the
+        note below.
 
 .. note::
 

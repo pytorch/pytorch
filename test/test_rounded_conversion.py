@@ -628,8 +628,8 @@ class TestRoundedConversion(TestCase):
         # Every float32 input, comparing the accelerator (which uses hardware
         # instructions where available, and NVIDIA's emulations of some of
         # them, e.g. for e8m0 before sm_100) with the CPU's software conversion.
-        # On ROCm, the float16 destination uses HIP's intrinsics (and bfloat16
-        # with ROCm 7.2+), and the others the software conversion.
+        # On ROCm, the float16 destination uses HIP's intrinsics, and the
+        # others the software conversion.
         chunk = 1 << 28
         for start in range(-(1 << 31), 1 << 31, chunk):
             x = torch.arange(chunk, dtype=torch.int32).add_(start).view(torch.float32)

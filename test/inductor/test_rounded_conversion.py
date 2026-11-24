@@ -175,6 +175,10 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
         # neighbors of the midpoints between dst's values.
         if not is_triton_fp8_dtype_supported(dst, device):
             self.skipTest(f"Triton does not support {dst} here")
+        cuda = torch.device(device).type == "cuda" and torch.version.hip is None
+        if dst == torch.float8_e5m2 and cuda and _cuda_capability() < 89:
+            # As from float32: Triton's conversion rounds ties away from zero.
+            self.skipTest("Triton's float8_e5m2 conversion needs sm_89")
         int_dtype = torch.int16 if dst.itemsize == 2 else torch.uint8
         bits = torch.arange(1 << (8 * dst.itemsize), dtype=torch.int32)
         values = bits.to(int_dtype).view(dst).double()
@@ -238,6 +242,8 @@ class TestRoundedConversionInductor(_RoundedConversionTestMixin, TestCase):
             q_dtype = torch.float8_e4m3fn
         else:
             q_dtype = torch.float8_e5m2
+        if not _lowered(device, q_dtype):
+            self.skipTest(f"{q_dtype} falls back to eager here")
 
         def fn(x, y):
             scale = x.abs().amax(dim=-1, keepdim=True) / 448
@@ -510,7 +516,7 @@ class TestRoundedConversionInductorCUDAOnly(_RoundedConversionTestMixin, TestCas
 
     def test_scan_combine_fn(self):
         # Scans lift their combine function into a separate Triton function,
-        # so the float64 conversion, routed through to_dtype_rounded, must not
+        # so the float64 conversion (to odd, then Triton's conversion) must not
         # write to the kernel. (round= cannot appear there: combine functions
         # may only use ops tagged pointwise.) This combine function is
         # associative, as the rounding is monotonic and idempotent.
