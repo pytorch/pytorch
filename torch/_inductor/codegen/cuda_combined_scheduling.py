@@ -37,7 +37,8 @@ if TYPE_CHECKING:
 
     from torch.utils._ordered_set import OrderedSet
 
-    from .common import BackendFeature
+    from .common import BackendFeature, Kernel
+    from .multi_kernel import MultiKernel
 
     _IntLike: TypeAlias = int | Expr
 
@@ -258,7 +259,9 @@ class CUDACombinedScheduling(BaseScheduling):
     def codegen_staged_reduction(self, node):
         return self._triton_scheduling.codegen_staged_reduction(node)
 
-    def codegen_node(self, node: FusedSchedulerNode | SchedulerNode) -> None:
+    def codegen_node(
+        self, node: FusedSchedulerNode | SchedulerNode
+    ) -> Kernel[Any] | MultiKernel | None:
         return self._triton_scheduling.codegen_node(node)
 
     def codegen_sync(self) -> None:

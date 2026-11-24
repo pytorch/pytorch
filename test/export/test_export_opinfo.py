@@ -15,7 +15,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     ops,
     skipOps,
-    skipXPUIf,
     xfail,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -176,7 +175,10 @@ selected_op_db = [op for op in op_db if op.name in selected_ops]
 def _get_env_by_device(device):
     device_type = torch.device(device).type
     if device_type == "cuda":
-        return {"CUDA_VISIBLE_DEVICES": ""}
+        env = {**os.environ, "CUDA_VISIBLE_DEVICES": ""}
+        env.pop("HIP_VISIBLE_DEVICES", None)
+        env.pop("ROCR_VISIBLE_DEVICES", None)
+        return env
     elif device_type == "xpu":
         return {**os.environ, "ONEAPI_DEVICE_SELECTOR": "*:cpu", "ZE_AFFINITY_MASK": ""}
     raise AssertionError(
@@ -191,7 +193,6 @@ class TestExportOnFakeDevice(TestCase):
     # We set device-specific env variable to simulate a CPU machine with gpu build
     # Running this on all ops in op_db is too slow, so we only run on a selected subset
     @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5157")
     @unittest.skipIf(
         IS_WINDOWS,
         "Subprocess with simulated CPU machine imports op_db which triggers "
