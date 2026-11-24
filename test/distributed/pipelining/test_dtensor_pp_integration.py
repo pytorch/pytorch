@@ -156,11 +156,11 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
     world_size = 4
 
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return backend
 
-    @classmethod
-    def device_type(cls) -> str:
+    @property
+    def device_type(self) -> str:
         return device_type
 
     @property
@@ -168,8 +168,7 @@ class DTensorPPIntegrationBase(MultiProcContinuousTest):
         return torch.device(device_type, self.rank)
 
     def init_pg(self) -> None:
-        if device_type == "cuda":
-            torch.cuda.set_device(self.device)
+        torch.accelerator.set_device_index(self.device.index)
 
     def _make_mesh(self) -> DeviceMesh:
         return init_device_mesh(device_type, (2, 2), mesh_dim_names=("pp", "tp"))

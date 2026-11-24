@@ -1,3 +1,4 @@
+#include <ATen/native/CPUBlas.h>
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
@@ -14,6 +15,7 @@
 #include <ATen/ops/from_blob.h>
 #endif // AT_PER_OPERATOR_HEADERS
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <torch/csrc/PyObjectConversion.h>
 #include <torch/csrc/shim_conversion_utils.h>
@@ -342,7 +344,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
 
     // read the output from the end of the stack and wrap that back into
     // IValue from StableIValue
-    for (size_t idx = 0; idx < num_returns; idx++) {
+    for (const auto idx : c10::irange(num_returns)) {
       const c10::TypePtr& ret_type = schema.returns()[idx].real_type();
       torch::jit::push(
           stack, to_ivalue(ret_type, ministack[idx], extension_build_version_));
@@ -679,11 +681,49 @@ torch_has_storage(AtenTensorHandle tensor, bool* ret_has_storage) {
   });
 }
 
-// PyObject <-> Tensor conversions. These are the only stable shims that need
-// functionality from libtorch_python; they reach it through a vtable that
-// libtorch_python registers at load time (torch::detail::PyObjectConversion*).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_conj(AtenTensorHandle tensor, bool* ret_is_conj) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_conj = t->is_conj();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_neg = t->is_neg();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_is_inference = t->is_inference();
+  });
+}
+
+// Python interop conversions. These are the only stable
+// shims that need functionality from libtorch_python; they reach it through a
+// vtable that libtorch_python registers at load time
+// (torch::detail::PyObjectConversion*).
 // If libtorch_python is not loaded the call raises a clear error. PyObject*
 // crosses the ABI as an opaque void* so this stays free of Python.h.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_tensor_pyobject(void* py_obj, bool* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    *ret = torch::detail::getPyObjectConversionImpl().is_tensor_pyobject(
+        static_cast<PyObject*>(py_obj));
+  });
+}
+
 AOTI_TORCH_EXPORT AOTITorchError
 torch_tensor_from_pyobject(void* py_obj, AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -708,6 +748,73 @@ torch_tensor_to_pyobject(AtenTensorHandle ath, void* py_type, void** ret) {
     *ret = torch::detail::getPyObjectConversionImpl().tensor_to_pyobject(
         *torch::aot_inductor::tensor_handle_to_tensor_pointer(ath),
         static_cast<PyObject*>(py_type));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_dtype_from_pyobject(void* py_obj, int32_t* ret_dtype) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret_dtype != nullptr, "ret_dtype must not be null");
+    // The dtype code crossing the ABI is the c10::ScalarType enum value, the
+    // same encoding as aoti_torch_dtype_*().
+    *ret_dtype = static_cast<int32_t>(
+        torch::detail::getPyObjectConversionImpl().dtype_from_pyobject(
+            static_cast<PyObject*>(py_obj)));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_dtype_to_pyobject(int32_t dtype, void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    TORCH_CHECK(
+        dtype >= 0 && dtype < static_cast<int32_t>(c10::ScalarType::NumOptions),
+        "torch_dtype_to_pyobject: invalid dtype code ",
+        dtype);
+    *ret = torch::detail::getPyObjectConversionImpl().dtype_to_pyobject(
+        static_cast<c10::ScalarType>(dtype));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_device_from_pyobject(
+    void* py_obj,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(py_obj != nullptr, "py_obj must not be null");
+    TORCH_CHECK(ret_device_type != nullptr, "ret_device_type must not be null");
+    TORCH_CHECK(
+        ret_device_index != nullptr, "ret_device_index must not be null");
+    // device_type uses the same encoding as aoti_torch_device_type_*().
+    const at::Device device =
+        torch::detail::getPyObjectConversionImpl().device_from_pyobject(
+            static_cast<PyObject*>(py_obj));
+    *ret_device_type = static_cast<int32_t>(device.type());
+    *ret_device_index = static_cast<int32_t>(device.index());
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
+    int32_t device_type,
+    int32_t device_index,
+    void** ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(ret != nullptr, "ret must not be null");
+    TORCH_CHECK(
+        device_type >= 0 && device_type < c10::COMPILE_TIME_MAX_DEVICE_TYPES,
+        "torch_device_to_pyobject: invalid device type ",
+        device_type);
+    TORCH_CHECK(
+        device_index >= -1 &&
+            device_index <= std::numeric_limits<c10::DeviceIndex>::max(),
+        "torch_device_to_pyobject: device index ",
+        device_index,
+        " is out of range");
+    *ret = torch::detail::getPyObjectConversionImpl().device_to_pyobject(
+        at::Device(
+            static_cast<c10::DeviceType>(device_type),
+            static_cast<c10::DeviceIndex>(device_index)));
   });
 }
 
@@ -803,7 +910,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_library_def_with_tags(
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<at::Tag> tag_vec;
     tag_vec.reserve(num_tags);
-    for (int32_t i = 0; i < num_tags; i++) {
+    for (const auto i : c10::irange(num_tags)) {
       tag_vec.push_back(static_cast<at::Tag>(tags[i]));
     }
     reinterpret_cast<torch::Library*>(self)->def(
@@ -892,4 +999,165 @@ AOTI_TORCH_EXPORT const char* torch_exception_get_what_without_backtrace() {
   return torch::csrc::shim::details ::
       get_torch_exception_what_without_backtrace()
           .c_str();
+}
+
+AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled() {
+  return c10::WarningUtils::get_warnAlways();
+}
+
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_no_transpose() {
+  return static_cast<int32_t>(at::native::TransposeType::NoTranspose);
+}
+
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_transpose() {
+  return static_cast<int32_t>(at::native::TransposeType::Transpose);
+}
+
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_conj_transpose() {
+  return static_cast<int32_t>(at::native::TransposeType::ConjTranspose);
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    int32_t dtype_a,
+    int32_t dtype_b,
+    int32_t dtype_c,
+    bool add_C,
+    const void* A,
+    const void* B,
+    void* C,
+    bool is_vnni) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto a_type = static_cast<c10::ScalarType>(dtype_a);
+    const auto b_type = static_cast<c10::ScalarType>(dtype_b);
+    const auto c_type = static_cast<c10::ScalarType>(dtype_c);
+    const auto call_brgemm = [&](auto* a_ptr, auto* b_ptr, auto* c_ptr) {
+      at::native::cpublas::brgemm(
+          M, N, K, ld_a, ld_b, ld_c, add_C, a_ptr, b_ptr, c_ptr, is_vnni);
+    };
+
+    if (a_type == c10::ScalarType::Half && b_type == c10::ScalarType::Half &&
+        c_type == c10::ScalarType::Float) {
+      call_brgemm(
+          static_cast<const at::Half*>(A),
+          static_cast<const at::Half*>(B),
+          static_cast<float*>(C));
+    } else if (
+        a_type == c10::ScalarType::BFloat16 &&
+        b_type == c10::ScalarType::BFloat16 &&
+        c_type == c10::ScalarType::Float) {
+      call_brgemm(
+          static_cast<const at::BFloat16*>(A),
+          static_cast<const at::BFloat16*>(B),
+          static_cast<float*>(C));
+    } else if (
+        a_type == c10::ScalarType::Float && b_type == c10::ScalarType::Float &&
+        c_type == c10::ScalarType::Float) {
+      call_brgemm(
+          static_cast<const float*>(A),
+          static_cast<const float*>(B),
+          static_cast<float*>(C));
+    } else if (
+        a_type == c10::ScalarType::Byte && b_type == c10::ScalarType::Byte &&
+        c_type == c10::ScalarType::Int) {
+      call_brgemm(
+          static_cast<const unsigned char*>(A),
+          static_cast<const unsigned char*>(B),
+          static_cast<int32_t*>(C));
+    } else if (
+        a_type == c10::ScalarType::Byte && b_type == c10::ScalarType::Char &&
+        c_type == c10::ScalarType::Int) {
+      call_brgemm(
+          static_cast<const unsigned char*>(A),
+          static_cast<const signed char*>(B),
+          static_cast<int32_t*>(C));
+    } else if (
+        a_type == c10::ScalarType::Char && b_type == c10::ScalarType::Char &&
+        c_type == c10::ScalarType::Int) {
+      call_brgemm(
+          static_cast<const signed char*>(A),
+          static_cast<const signed char*>(B),
+          static_cast<int32_t*>(C));
+    } else if (
+        a_type == c10::ScalarType::Float8_e4m3fn &&
+        b_type == c10::ScalarType::Float8_e4m3fn &&
+        c_type == c10::ScalarType::Float) {
+      call_brgemm(
+          static_cast<const at::Float8_e4m3fn*>(A),
+          static_cast<const at::Float8_e4m3fn*>(B),
+          static_cast<float*>(C));
+    } else if (
+        a_type == c10::ScalarType::Float8_e5m2 &&
+        b_type == c10::ScalarType::Float8_e5m2 &&
+        c_type == c10::ScalarType::Float) {
+      call_brgemm(
+          static_cast<const at::Float8_e5m2*>(A),
+          static_cast<const at::Float8_e5m2*>(B),
+          static_cast<float*>(C));
+    } else {
+      TORCH_CHECK(
+          false,
+          "Unsupported cpublas::brgemm dtype combination: ",
+          a_type,
+          ", ",
+          b_type,
+          " -> ",
+          c_type);
+    }
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(bool is_vnni) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { at::native::cpublas::brgemm_release(is_vnni); });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_float64(
+    int32_t device_type,
+    int32_t dtype,
+    int32_t transa,
+    int32_t transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    double alpha,
+    const void* a,
+    int64_t lda,
+    const void* b,
+    int64_t ldb,
+    double beta,
+    void* c,
+    int64_t ldc) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const c10::Scalar alpha_scalar(alpha);
+    const c10::Scalar beta_scalar(beta);
+    at::native::cpublas::gemm_no_downcast_stub(
+        static_cast<c10::DeviceType>(device_type),
+        static_cast<c10::ScalarType>(dtype),
+        static_cast<at::native::TransposeType>(transa),
+        static_cast<at::native::TransposeType>(transb),
+        m,
+        n,
+        k,
+        alpha_scalar,
+        a,
+        lda,
+        b,
+        ldb,
+        beta_scalar,
+        c,
+        ldc);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_could_pack(int32_t dtype, bool* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret = at::native::cpublas::could_pack(static_cast<c10::ScalarType>(dtype));
+  });
 }

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import functools
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, cast, Literal, NoReturn, overload, TYPE_CHECKING
 from typing_extensions import deprecated
 
@@ -14,12 +15,19 @@ from torch.distributed._composable import contract
 
 from ._fsdp_api import (
     AllGather,
+    AllReduce,
     DataParallelMeshDims,
     MixedPrecisionPolicy,
     OffloadPolicy,
     ReduceScatter,
 )
-from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
+from ._fsdp_collectives import _default_reduce_scatter_input_fn, DefaultAllReduce
+from ._fsdp_common import (
+    _dynamo_disable,
+    DDPMeshInfo,
+    FSDPMeshInfo,
+    ShardPlacementFnResult,
+)
 from ._fsdp_init import (
     _apply_to_module,
     _get_device_from_mesh,
@@ -40,6 +48,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
+    from ._all_gather_layout import AllGatherLayout
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -221,15 +230,23 @@ def fully_shard(
               ``fully_shard``.
             - :class:`Shard`: Shard the parameter on the specified dimension
               using the mesh passed to ``fully_shard``.
-            - :class:`ShardPlacementResult`: Specify both the shard placement
-              and a custom :class:`FSDPMeshInfo`. This allows different
+            - ``ShardPlacementResult``: Specify both the shard placement
+              (``placement``) and a custom ``FSDPMeshInfo`` (``mesh_info``).
+              Both are currently private types. This allows different
               parameters to be sharded across different process groups, enabling
               use cases like Mixture of Experts where expert params use a
               different mesh than regular params.
 
-            If sharding on a nonzero dim, we currently require even sharding,
-            i.e. the tensor dim size on that dim must be divisible by the FSDP
-            shard mesh size.
+            Any dim may be sharded unevenly, as ``torch.chunk`` splits it, so later
+            ranks may hold fewer or no rows. On a nonzero dim, all-gather
+            extensions of such parameters need the 5-argument
+            ``fsdp_pre_all_gather``, must pad their inputs on those ranks, and
+            must drop the padding in ``fsdp_post_all_gather`` (see
+            :class:`~torch.distributed.fsdp.experimental.AllGatherInput`).
+            Inputs left unpadded raise on those ranks only, while the others
+            wait in the all-gather.
+            :func:`~torch.distributed.fsdp.experimental.reduce_scatter_input_fn_with_native_copy`
+            does not support such parameters.
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
@@ -314,17 +331,24 @@ def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
-_enable_fsdp_module_new_init: bool = True
+_fsdp_module_new_init_disabled: ContextVar[bool] = ContextVar(
+    "_fsdp_module_new_init_disabled", default=False
+)
 
 
 @contextmanager
 def disable_fsdp_module_new_init() -> Iterator[None]:
-    global _enable_fsdp_module_new_init
-    prev, _enable_fsdp_module_new_init = _enable_fsdp_module_new_init, False
+    """Make ``FSDPModule.__new__`` return an uninitialized instance of the
+    wrapper class itself, for rebuilding a module from saved state.
+
+    Do not call an FSDP class inside this context: Python would run the original
+    ``__init__`` on that instance, returning a wrapper with no FSDP state.
+    """
+    token = _fsdp_module_new_init_disabled.set(True)
     try:
         yield
     finally:
-        _enable_fsdp_module_new_init = prev
+        _fsdp_module_new_init_disabled.reset(token)
 
 
 class FSDPModule:
@@ -337,11 +361,16 @@ class FSDPModule:
         """
         Override ``__new__`` to remove the FSDP class and directly construct
         the original class for cases like indexing into a container module.
+        Under ``disable_fsdp_module_new_init``, return an uninitialized
+        instance of ``cls`` itself, so a module rebuilt from guard state keeps
+        the wrapper type its guards match.
         """
         orig_cls = cls.__mro__[cls._orig_cls_mro_index]
+        if _fsdp_module_new_init_disabled.get():
+            # pyrefly: ignore [no-matching-overload]
+            return orig_cls.__new__(cls)
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        if _enable_fsdp_module_new_init:
-            self.__init__(*args, **kwargs)
+        self.__init__(*args, **kwargs)
         return self
 
     def reshard(self) -> None:
@@ -756,6 +785,13 @@ class FSDPModule:
         to have better control over the communication and memory usage.
         See `Comm` and `ReduceScatter` for details.
 
+        This only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`,
+        which packs the comm's input into the output that the comm allocated; a
+        custom layout carries its own comm instead (see
+        :meth:`set_all_gather_layout`). The comm can be replaced at any time,
+        since it owns no outputs.
+
         Args:
             comm (AllGather): Custom all-gather communication.
         """
@@ -767,6 +803,8 @@ class FSDPModule:
                 "The custom comm would be ambiguous across groups with different meshes."
             )
         for fsdp_param_group in state._fsdp_param_groups:
+            layout = fsdp_param_group._all_gather_layout
+            fsdp_param_group._check_layout_comm(layout, type(comm))
             fsdp_param_group._all_gather_comm = comm
 
     def set_custom_reduce_scatter(self, comm: ReduceScatter) -> None:
@@ -787,6 +825,39 @@ class FSDPModule:
             )
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group._reduce_scatter_comm = comm
+
+    def set_custom_all_reduce(self, comm: AllReduce) -> None:
+        """Override HSDP or ``replicate_with_fsdp`` all-reduce communication.
+
+        See ``AllReduce`` for the in-place reduction and stream contract. The
+        primitive runs on FSDP's internal all-reduce stream, which is distinct
+        from the compute stream. FSDP handles gradient scaling, accumulation,
+        and buffer lifetime, and runs the optional all-reduce hook afterward.
+        ``set_requires_all_reduce(False)`` suppresses this collective.
+
+        This applies to this module's parameter group, not child FSDP modules.
+
+        .. warning::
+            This API is experimental and may change without backward
+            compatibility.
+
+        Args:
+            comm (Optional[AllReduce]): Custom all-reduce communication.
+                ``None`` restores ``DefaultAllReduce``.
+        """
+        state = self._get_fsdp_state()
+        if not state._fsdp_param_groups:
+            return
+        if len(state._fsdp_param_groups) > 1:
+            raise ValueError(
+                "set_custom_all_reduce is not supported with multiple param groups"
+            )
+        for fsdp_param_group in state._fsdp_param_groups:
+            if not isinstance(fsdp_param_group.mesh_info, DDPMeshInfo):
+                raise ValueError("set_custom_all_reduce requires a replication mesh")
+            fsdp_param_group._all_reduce_comm = (
+                DefaultAllReduce() if comm is None else comm
+            )
 
     def set_all_reduce_hook(
         self,
@@ -876,6 +947,95 @@ class FSDPModule:
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
+
+    def set_all_gather_layout(
+        self, layout: AllGatherLayout, /, *, recurse: bool = True
+    ) -> None:
+        r"""Set the layout that packs and finalizes a parameter group's all-gather.
+
+        .. warning::
+            This API is experimental. The layout contract and supported FSDP
+            internals may change without backward compatibility.
+
+        The layout packs the group's all-gather inputs before the collective and
+        turns the collective output into the parameters' all-gather outputs
+        after it completes. This is the only way to install a layout.
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`
+        packs rank-major input into the collective output and copies the output
+        with its ``output_fn``, e.g.
+        ``DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)`` for the
+        native copy. It is the only layout that works with the comms that
+        :meth:`set_custom_all_gather`, :meth:`set_symm_mem_for_comm` and
+        :meth:`set_allocate_memory_from_process_group_for_comm` install, which
+        expect that copy-in. A custom layout, e.g. one whose collective writes
+        parameter-contiguous output, packs its own input and carries its own
+        all-gather as its ``comm``, which FSDP passes each call's layout
+        metadata; without a ``comm``, it runs FSDP's default all-gather. A
+        layout that keeps no per-call state can serve any number of modules. Set
+        custom layouts before the first unshard: layouts change only between
+        iterations, while no all-gather is pending and parameters are resharded,
+        and never after parameters adopt outputs from a custom layout, since
+        only the layout that created those outputs can refill them. FSDP checks
+        every group before changing any.
+
+        Args:
+            layout (AllGatherLayout): Layout to install; pass
+                ``DefaultAllGatherLayout()`` to restore the default.
+            recurse (bool): Whether to also set the layout for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        # Check every group before installing on any, so that a failed check leaves
+        # all groups on their old layout instead of a mix of old and new
+        groups = []
+        for module in modules:
+            if not isinstance(module, FSDPModule):
+                continue
+            for fsdp_param_group in module._get_fsdp_state()._fsdp_param_groups:
+                comm_type = type(fsdp_param_group._all_gather_comm)
+                fsdp_param_group._check_layout_comm(layout, comm_type)
+                if layout is not fsdp_param_group._all_gather_layout:
+                    fsdp_param_group._check_all_gather_replaceable()
+                groups.append(fsdp_param_group)
+        for fsdp_param_group in groups:
+            fsdp_param_group._all_gather_layout = layout
+
+    def set_reduce_scatter_input_fn(
+        self, fn: Callable | None, /, *, recurse: bool = True
+    ) -> None:
+        r"""Set the function that prepares reduce-scatter inputs.
+
+        .. warning::
+            This API is experimental. The callback signature and supported FSDP
+            internals may change without backward compatibility.
+
+        ``copy_in = fn(unsharded_grads, shard_dims=shard_dims,
+        world_size=world_size)`` runs before FSDP allocates the reduce-scatter
+        input and may replace entries of ``unsharded_grads``, e.g. with
+        reordered copies.
+        ``copy_in(reduce_scatter_input)`` then fills that flat buffer so that,
+        viewed as ``(world_size, -1)``, row ``r`` holds each gradient's padded
+        shard ``r`` in order, cast from any gradient dtype to the buffer's. Both
+        run under ``torch.no_grad()`` on the current stream, also when
+        ``world_size`` is 1. FSDP frees ``copy_in`` and the gradients afterward,
+        so keep neither. See :mod:`torch.distributed.fsdp.experimental` for a
+        native implementation.
+
+        Args:
+            fn (Optional[Callable]): Function returning the copy-in function, or
+                ``None`` to restore the default.
+            recurse (bool): Whether to also set the function for all nested FSDP
+                modules. Defaults to ``True``.
+        """
+        fn = _default_reduce_scatter_input_fn if fn is None else fn
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group._prepare_reduce_scatter_inputs = fn
 
     def set_reduce_scatter_unused_params(
         self, reduce_scatter_unused_params: bool, *, recurse: bool = True
@@ -1020,7 +1180,9 @@ class FSDPModule:
         This cannot be used together with :meth:`set_custom_all_gather` or
         :meth:`set_custom_reduce_scatter` as those APIs allow for
         finer-grained control over each communication, and this method cannot
-        determine their staging buffer allocation strategy.
+        determine their staging buffer allocation strategy. ProcessGroup
+        allocation only works with the default all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             enable (bool): Whether to turn on ProcessGroup allocation.
@@ -1053,7 +1215,9 @@ class FSDPModule:
         Collectives](https://docs.pytorch.org/docs/2.11/symmetric_memory.html#copy-engine-collectives).
 
         This cannot be used together with :meth:`set_custom_all_gather` or
-        :meth:`set_custom_reduce_scatter`.
+        :meth:`set_custom_reduce_scatter`, and only works with the default
+        all-gather layout,
+        :class:`~torch.distributed.fsdp.experimental.DefaultAllGatherLayout`.
 
         Args:
             backend (str): The symmetric memory backend to use. Defaults to
@@ -1062,6 +1226,79 @@ class FSDPModule:
         state = self._get_fsdp_state()
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.set_symm_mem(backend)
+
+    def set_unshard_in_current_stream(
+        self, unshard_in_current_stream: bool, *, recurse: bool = True
+    ) -> None:
+        """
+        Sets whether FSDP issues its pre-forward and pre-backward all-gathers
+        on the current stream instead of on its separate all-gather streams.
+        The current stream is the one that is current when FSDP issues the
+        unshard, normally the one the module's forward and backward run on, so
+        the all-gather buffers share that stream's memory. Defaults to
+        ``False``.
+
+        Setting this to ``True`` avoids inter-stream memory fragmentation: the
+        CUDA caching allocator does not reuse memory freed on one stream for
+        allocations on another. In return, the copy-in and dtype cast before
+        each all-gather run on the current stream and do not overlap with
+        compute.
+
+        With this set, FSDP's own unshards run like your own :meth:`unshard`
+        calls, on the current stream: the pre-forward and pre-backward unshard
+        like ``unshard(async_op=False)``, and a prefetch like
+        ``unshard(async_op=True)``.
+
+        An all-gather issued on the current stream overlaps with compute only
+        if it is issued ahead of time. In forward, configure explicit
+        prefetching with :meth:`set_modules_to_forward_prefetch` or call
+        :meth:`unshard` with ``async_op=True``; otherwise each module's
+        all-gather is exposed. Backward prefetching needs no configuration.
+
+        Args:
+            unshard_in_current_stream (bool): Whether to issue the all-gathers
+                on the current stream.
+            recurse (bool): Whether to set for all FSDP submodules or just the
+                passed-in module.
+        """
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
+            if isinstance(module, FSDPModule):
+                state = module._get_fsdp_state()
+                for fsdp_param_group in state._fsdp_param_groups:
+                    fsdp_param_group.unshard_async_op = unshard_in_current_stream
+
+    def get_all_gather_copy_in_stream(self) -> torch.Stream:
+        """
+        Returns the stream FSDP issues its all-gather copy-ins on. A copy-in
+        copies the parameter shards into the all-gather input; under
+        :class:`CPUOffloadPolicy`, it first copies them host-to-device.
+
+        Waiting on this stream orders work after the copy-ins issued so far.
+        For example, FSDP issues the previous module's prefetch in each
+        pre-backward hook, so other host-to-device copies issued after that
+        hook can wait on this stream to load after FSDP's parameter shards
+        instead of sharing the bandwidth with them.
+
+        FSDP uses this stream for its pre-forward and pre-backward unshards
+        and their prefetches. With :meth:`set_unshard_in_current_stream`, or
+        with a single rank, those copy-ins run on the current stream instead,
+        and this stream carries none of them.
+
+        The stream is shared by the FSDP modules under one root, and created
+        at lazy initialization, in the root module's first forward.
+
+        Raises:
+            RuntimeError: If called before lazy initialization.
+        """
+        state = self._get_fsdp_state()
+        if state._is_root is None:
+            raise RuntimeError(
+                "The all-gather copy-in stream is created at lazy initialization. "
+                "Call this after the root FSDP module's first forward."
+            )
+        return state._comm_ctx.all_gather_copy_in_stream
 
     def _set_unshard_async_op(self, async_op: bool):
         """
