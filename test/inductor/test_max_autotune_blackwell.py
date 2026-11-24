@@ -204,6 +204,34 @@ class TestMaxAutotuneBlackwell(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    @parametrize("autotune_at_compile_time", (False, True))
+    def test_blackwell_mm_persistent_tma_cpp_wrapper(
+        self, autotune_at_compile_time: bool
+    ):
+        # The template source includes triton_gemm_helpers, whose helper has a
+        # """docstring"""; the C++ wrapper embeds kernel sources in r"""...""".
+        a = torch.randn(256, 384, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(384, 128, device=GPU_TYPE, dtype=torch.float16)
+        with config.patch(
+            {
+                "cpp_wrapper": True,
+                "triton.autotune_at_compile_time": autotune_at_compile_time,
+                "max_autotune": True,
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            actual, code = run_and_get_code(torch.compile(torch.mm), a, b)
+
+        FileCheck().check("triton_tem_fused_mm").check("_subtile_accumulator").run(
+            code[0]
+        )
+        torch.testing.assert_close(actual, torch.mm(a, b), atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     @largeTensorTest("20 GB", device=GPU_TYPE)
     def test_blackwell_mm_tma_store_large_output_int64_indexing(self):
         """An output past 2^31 elements makes the kernel index in int64; the
