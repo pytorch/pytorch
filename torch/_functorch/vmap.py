@@ -403,7 +403,12 @@ def _concat_chunked_outputs(
         chunk = flat_output_chunks[idx]
         if chunk is None:
             raise AssertionError(f"chunk at index {idx} must not be None")
-        flat_output.append(torch.cat(chunk, dim=out_dim))
+        if out_dim is None:
+            # No batch dimension to concatenate along: every chunk computes
+            # the same (batch-independent) output, so take the first chunk.
+            flat_output.append(chunk[0])
+        else:
+            flat_output.append(torch.cat(chunk, dim=out_dim))
         # release tensors
         flat_output_chunks[idx] = None
 
