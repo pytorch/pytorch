@@ -8,9 +8,47 @@ mode applies. The code and its docstrings describe how each stage works. This
 file keeps only what the code cannot show: goals, accepted tradeoffs, the
 reasons behind some rules, and operating notes.
 
-![Auto PR Triage decision flow](overview.svg)
+```mermaid
+%%{init: {"htmlLabels": false, "flowchart": {"htmlLabels": false}}}%%
+flowchart TD
+    ready["Ready PR targeting main<br/>no prior Auto PR Triage outcome"] --> own("Ownership analysis<br/>CODEOWNERS, semantic owners, bypass intake")
+    own --> intake(Intake)
+    intake -- "fails policy" --> missing["Missing actionable issue<br/>“triaged”, “bot-triaged”, “missing actionable issue”"]
+    intake -- "fails policy, on a workflow rerun<br/>or with a too uncertain bypass claim" --> open["Kept open<br/>no labels"]
+    intake -- "fails policy, LLM failed" --> incomplete["Incomplete<br/>“bot-triage-error”"]
+    intake -- "passes policy" --> plan(Planning)
+    plan -- "owner other than the author,<br/>an owner or handoff reviewer assigned" --> triaged["Triaged<br/>“triaged”, “bot-triaged”, reviewers requested or already assigned"]
+    plan -- "owner other than the author,<br/>no owner or handoff reviewer assigned" --> open
+    plan -- "no owner other than the author,<br/>handoff reviewer engaged" --> triaged
+    plan -- "no owner other than the author,<br/>no handoff reviewer" --> open
+    plan -- "LLM failed, a team owner has no reviewer, or<br/>reviewer state is unreadable with an owner" --> incomplete
+    open --> manual(Manual triage) --> triaged
+    incomplete --> manual
+    classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
+    classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
+    classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
+    class ready,missing,open,triaged,incomplete state
+    class own,intake,plan aiproc
+    class manual humanproc
+```
 
-The editable source is [`overview.mmd`](overview.mmd).
+Rectangles are states. Rounded boxes are processes: blue for automated ones
+and orange for human ones. When several edges apply, Incomplete wins over the
+other outcomes, and Kept open wins over Missing actionable issue.
+
+- **Runs** when a PR is opened, reopened or marked ready for review, or when
+  `bot-retriage` is added.
+- **Passes policy**: it closes a same-repository issue marked `actionable`, the
+  author has triage+ permission, a triage+ maintainer took deliberate action on
+  it, it says "Supported by @login" for a triage+ maintainer, it says "Part of
+  #N" for an `actionable` issue, or a team's bypass intake criteria matched.
+- **Owners** are CODEOWNERS matches plus LLM-suggested semantic owners. A team
+  owner ID is resolved through `.github/auto-pr-triage/team_members.json`. A
+  roster member already covering the PR (codepath owner, submitted or pending
+  reviewer) satisfies it; otherwise a member is picked at random, seeded by
+  the PR.
+- **Handoff reviewer**: see "An assigned owner other than the author is
+  enough to triage" below.
 
 ## Goals and non-goals
 
@@ -29,7 +67,7 @@ The design aims to:
 It does not aim to:
 
 - judge whether a pull request is correct, useful, or ready to merge;
-- eliminate human triage when ownership is missing or uncertain;
+- eliminate human triage when no owner is found or nobody can be assigned;
 - provide a transactional view of GitHub state or automatically reconcile every
   change that occurs after analysis;
 - guarantee perfect semantic assignments or a perfectly even reviewer load; or
@@ -102,9 +140,22 @@ uncoordinated race-closing reads to apply.
 - **Deployments are passive timeline events.** GitHub attributes a deployment
   to whoever triggered the workflow run, including this workflow's own
   environment-gated job, so it says nothing about deliberate maintainer action.
-- **Codepath and semantic owners are not handoff reviewers.** A path match can
-  come from an incidental edit and says nothing about an uncovered concern. A
-  team whose bypass intake matched does count, because it asked for these PRs.
+- **An assigned owner other than the author is enough to triage.** Once a
+  codepath or semantic owner other than the author is found and an owner or
+  handoff reviewer other than the author is assigned (requested by the run,
+  or already pending or reviewing), the PR is triaged even if some concerns
+  have no owner; the assigned reviewers pull in others for them, and the
+  run's step summary lists them. This accepts that a path match can come from
+  an incidental edit, leaving the main concern to a reviewer who has to
+  redirect it. Owners alone are not enough: if GitHub never sent the
+  CODEOWNERS request and no other owner or handoff reviewer is assigned, the
+  PR is kept open for a human, since a triaged PR is not looked at again.
+  Unrelated review activity, such as a bot's review, does not count. When no
+  owner other than the author is found, the PR is triaged only if a handoff
+  reviewer other than the author is engaged: a verified supporter, a
+  maintainer who labeled an `actionable` issue the PR closes or is "Part of",
+  or a triage+ reviewer whom another triage+ maintainer, not the author,
+  requested.
 - **Every pull request is triaged; no label authorizes a run.** Opening,
   reopening, or marking a pull request ready starts a run, so anyone who opens
   a pull request can start one. Each run makes at most one LLM call and its
@@ -122,9 +173,13 @@ or over GitHub's size limit, an owner can no longer exist or lack repository
 access, or GitHub's processing can be delayed. So the explanation reports what
 the reviewer state showed for each codepath owner (a pending request, a review,
 neither, or unreadable state), and "neither" flags a request that GitHub may
-not have sent or that someone removed. Like GitHub, the parser skips
-`CODEOWNERS` lines it cannot read, such as an email owner, and the ownership
-input step logs each skipped line; a skipped line's owners get no provenance.
+not have sent or that someone removed. For the same reason planning triages a
+PR only once an owner or handoff reviewer is assigned. Unreadable reviewer
+state never triages a PR with owners: the plan is incomplete, or fails outright
+when there are supporters or actionable labelers to filter. Like GitHub, the
+parser skips `CODEOWNERS` lines it cannot read, such as an email owner, and the
+ownership input step logs each skipped line; a skipped line's owners get no
+provenance.
 
 ## Operating notes
 
@@ -146,6 +201,9 @@ input step logs each skipped line; a skipped line's owners get no provenance.
   its plan may be stale. A rerun never marks a PR as missing an actionable
   issue: only the first attempt of a run can, and a rerun leaves an unadmitted
   PR for a human.
+- **PRs left by the removed `routed_untriaged` decision** have no outcome
+  label and nothing reruns them automatically. Add `bot-retriage` to apply
+  the current rules.
 - **Opting out.** A PR labeled `no automated triage` is left as is: a run that
   starts while the label is present is a no-op and the PR stays in the manual
   triage queue. Adding the label mid-run does not cancel that run. To triage

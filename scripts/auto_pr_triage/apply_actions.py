@@ -230,11 +230,6 @@ def main() -> int:
         print(f"{target} did not qualify for an apply action; kept open.")
     elif outcome.status == "incomplete":
         print(f"Applied incomplete Auto PR Triage to {target}: {counts}.")
-    elif outcome.status == "routed_untriaged":
-        print(
-            f"Applied partial Auto PR Triage to {target}: {counts}; "
-            "left untriaged for human routing."
-        )
     else:
         print(f"Applied Auto PR Triage to {target}: {counts}.")
     return 0
