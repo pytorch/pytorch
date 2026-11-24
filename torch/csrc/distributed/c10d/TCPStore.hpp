@@ -186,13 +186,15 @@ class TORCH_API TCPStore : public Store {
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
-  std::optional<std::string> tlsCert_;
-  std::optional<std::string> tlsKey_;
-  std::optional<std::string> tlsCa_;
-  std::optional<std::string> tlsPsk_;
-  std::optional<std::string> tlsPeerCertOid_;
-  std::optional<std::string> tlsPeerCertValue_;
-  std::optional<std::string> tlsPeerCertPrefix_;
+  struct ResolvedTLSOptions {
+    std::optional<std::string> cert;
+    std::optional<std::string> key;
+    std::optional<std::string> ca;
+    std::optional<std::string> psk;
+    std::optional<std::string> peerCertOid;
+    std::optional<std::string> peerCertValue;
+    std::optional<std::string> peerCertPrefix;
+  } tls_;
 };
 
 } // namespace c10d
