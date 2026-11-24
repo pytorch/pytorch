@@ -4793,6 +4793,7 @@ class TestPrecompileCapture(TestCase):
 _GOLDEN_MODULE = """
 import collections
 import types
+from itertools import count
 
 import torch
 
@@ -4958,6 +4959,26 @@ def falls_back_around_a_helper(model, x, opaque_layers=0):
     for _ in range(opaque_layers):
         y = opaque(y)
     return tagged_helper(y) + int(torch.compiler.is_compiling())
+
+
+def range_iterator_across_a_break(model, x):
+    steps = iter(range(1, 4))
+    y = model(x)
+    torch._dynamo.graph_break()
+    return y + next(steps)
+
+
+def count_across_a_break(model, x):
+    steps = count(1)
+    y = model(x)
+    torch._dynamo.graph_break()
+    return y + next(steps)
+
+
+def calls_range_iterator_across_a_break(model, x):
+    # Under nested_graph_breaks=False the callee is a frame the entry cannot
+    # reach, so the artifact is installed.
+    return range_iterator_across_a_break(model, x) + 1
 """
 
 _GOLDEN_LOADER = """
@@ -5053,6 +5074,13 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
         return out.stdout
+
+    def _capture_and_serve(self, fn_name, mode="standalone"):
+        fn = getattr(self.mod, fn_name)
+        with self._capture(fn, backend="eager") as cap:
+            y = cap(self.model, self.x2)
+        self.assertEqual(y, fn(self.model, self.x2))
+        self._serve_in_fresh_process([((self.x2,), {}, y)], mode=mode)
 
     def test_capture_takes_pathlike_paths(self):
         import pathlib
@@ -5206,6 +5234,21 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(
             [((self.x2,), {}, y2), ((self.x3,), {"scale": 0.5}, y3)]
         )
+
+    @skipIfCrossRef
+    @parametrize(
+        "fn_name,mode",
+        [
+            ("range_iterator_across_a_break", "standalone"),
+            ("count_across_a_break", "standalone"),
+            ("calls_range_iterator_across_a_break", "installed"),
+        ],
+    )
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_iterator_rebuilt_at_a_graph_break_is_served(self, fn_name, mode):
+        # Rebuilding the iterator calls a builtin or a module attribute, loaded
+        # through a global the serving process has to bind as well.
+        self._capture_and_serve(fn_name, mode)
 
     @skipIfCrossRef
     def test_a_frame_of_the_scripts_main_module_is_served_installed(self):
