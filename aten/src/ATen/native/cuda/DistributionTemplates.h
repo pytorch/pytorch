@@ -83,7 +83,11 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
         transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
       }
     }
+#if !defined(USE_ROCM)
+    // No shared memory and no cross-thread reads in this loop, so the barrier
+    // only holds up the next Philox draw.
     __syncthreads();
+#endif
   }
 }
 
