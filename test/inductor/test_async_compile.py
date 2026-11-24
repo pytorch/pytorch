@@ -2398,5 +2398,6 @@ class TestCuteDSLSubprocessGroupedGemm(TestCase):
 
         torch.testing.assert_close(c_eager, c_compiled)
 
+
 if __name__ == "__main__":
     run_tests()
