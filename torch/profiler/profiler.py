@@ -144,21 +144,23 @@ class CuspyConfig(_ProfilerExtensionConfig):
     CPU activity is currently required because Cuspy merges its trace with the
     CPU trace.
 
+    .. versionchanged:: 2.16
+        Graph event-node spans use ``enable_cuda_sync_events``; the separate
+        ``enable_event_node_ids`` option has been removed.
+
     Args:
         enable_cuda_sync_events (bool, optional): Collect CUDA synchronization
-            activities.
+            activities and graph event-record node spans. Graph-event spans and
+            annotations require CUDA driver support for 13.5; older drivers omit them.
         enable_environment_counters (bool, optional): Collect GPU environment
             counters.
         enable_graph_dependencies (bool, optional): Record CUDA graph
             dependency edges.
-        enable_event_node_ids (bool, optional): Associate CUDA events with CUDA
-            graph event-record nodes.
     """
 
     enable_cuda_sync_events: bool = False
     enable_environment_counters: bool = False
     enable_graph_dependencies: bool = False
-    enable_event_node_ids: bool = False
 
     def _to_config_entries(self) -> dict[str, str]:
         return {}
@@ -444,9 +446,6 @@ class _KinetoProfile:
                     enable_graph_dependencies=bool(
                         self._custom_profiler_config.get("enable_graph_dependencies")
                     ),
-                    enable_event_node_ids=bool(
-                        self._custom_profiler_config.get("enable_event_node_ids")
-                    ),
                 )
             if ProfilerActivity.CPU not in self.activities:
                 raise ValueError("Cuspy currently requires CPU activity")
@@ -461,12 +460,6 @@ class _KinetoProfile:
                 from torch.profiler._cuspy._graph_deps import _GraphDependencyRecorder
 
                 _GraphDependencyRecorder().arm()
-            # Same early-arm rationale for the CUDA_EVENT -> graph event-record node bridge:
-            # the recorder reads each graph's event nodes at its one-time instantiate().
-            if self._cuspy_config.enable_event_node_ids:
-                from torch.profiler._cuspy._event_nodes import _EventNodeRecorder
-
-                _EventNodeRecorder().arm()
         elif "cuspy_async_export" in self._custom_profiler_config:
             raise ValueError(
                 "cuspy_async_export is only supported with the cuspy backend"
@@ -560,10 +553,6 @@ class _KinetoProfile:
                 # Node->node CUDA-graph dependency arrows are opt-in (extra work at graph
                 # instantiate + arrow rendering); off unless the config requests them.
                 enable_graph_dependencies=self._cuspy_config.enable_graph_dependencies,
-                # Join CUDA_EVENT records (graph event-record nodes, e.g. NCCL under
-                # NCCL_GRAPH_MIXING_SUPPORT) back to their graph_node_id. Opt-in: pulls in the
-                # CUDA_EVENT record kind.
-                enable_event_node_ids=self._cuspy_config.enable_event_node_ids,
                 # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
                 pftrace_compression_level=int(
                     self._custom_profiler_config.get("pftrace_compression_level", 1)
@@ -839,6 +828,25 @@ class _KinetoProfile:
         if self.profiler is None:
             return
         self.profiler.toggle_collection_dynamic(enable, activities)
+
+    def _toggle_stack_collection(self, enable: bool) -> None:
+        """Toggle Python stack collection (``with_stack``) in the current profiling session.
+
+        .. warning::
+            This is a private, experimental API. It may change or be removed
+            without notice.
+
+        CPU op and device activity collection are unaffected. Frames still open when
+        collection stops end at that point. Only stopping (``enable=False``) is
+        supported so far.
+        """
+        _warn_once(
+            "profile._toggle_stack_collection() is a private, experimental API and "
+            "may change or be removed without notice."
+        )
+        if self.profiler is None:
+            return
+        torch._C._autograd._toggle_python_collection_dynamic(enable)
 
     def key_averages(
         self,

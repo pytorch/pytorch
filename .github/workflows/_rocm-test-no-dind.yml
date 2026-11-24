@@ -119,6 +119,8 @@ jobs:
           exit 1
 
   test:
+    env:
+      CPP_FAKETENSOR: ${{ matrix.fake_tensor == 'cpp' && '1' || '0' }}
     # Keep the production guard from _rocm-test.yml.
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
     needs: resolve-image
