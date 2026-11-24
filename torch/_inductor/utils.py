@@ -5029,6 +5029,32 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
         V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
         return True
 
+    shape_env = V.graph.sizevars.shape_env
+    if shape_env.frozen:
+        # Dispatch guards were already emitted, so a hint-based choice can't be
+        # guarded any more: only use int32 when e is statically known to fit.
+        frozen_ranges = shape_env.var_to_range_at_freeze
+        if frozen_ranges is None:
+            return V.graph.sizevars.statically_known_true(e <= int_max)
+        # Facts added after the freeze (e.g. while lowering a lazily compiled
+        # backward) still refine the ShapeEnv, but they are never enforced at
+        # runtime (Note [Backwards runtime asserts]), so only use the guards and
+        # ranges that existed at the freeze.
+        from torch.utils._sympy.value_ranges import ValueRanges
+
+        e = sympy.sympify(e)
+        symbols = e.free_symbols | shape_env.replace(e).free_symbols
+        ranges = tuple(
+            (s, frozen_ranges.get(s, ValueRanges.unknown_int()))
+            for s in sorted(symbols, key=str)
+        )
+        result = shape_env._maybe_evaluate_static(
+            sympy.Le(e, int_max),
+            axioms=shape_env.axioms_at_freeze,
+            var_to_range=ranges,  # type: ignore[arg-type]
+        )
+        return result == sympy.true
+
     # Allow for unhinted e as long as we can still statically prove
     # (e.g., via ValueRanges) that it is still in bounds
     if V.graph.sizevars.statically_known_true(e <= int_max):
@@ -5037,24 +5063,9 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     if config.avoid_32bit_indexing_guards:
         return False
 
-    # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
-    # in case the hinted value is < 2**32, but the allowed range is larger.
-    # However, to prevent possible perf regressions on pre-existing AOTI models
-    # which don't set an upper bound on the valid range, we'll skip the check.
-    # To recap:
-    # - If using AOTI:
-    #   - If allowed range has no upper bound, then check the hint to determine
-    #       whether this fits in int32
-    #   - If allowed range does have an upper bound, then obey the upper bound
-    #       (check whether upper bound < int32_max) without checking the hint.
-
+    # AOTI has no Dynamo dispatch that can enforce a new hint-based guard.
     if V.aot_compilation:
-        # check whether value has an upper bound (1e20 is > INT64_MAX, assume
-        # there is no upper bound if it can be larger than 1e20)
-        if V.graph.sizevars.statically_known_true(e < 1e20):
-            # if so, then assume int_max < upper bound < inf
-            # so this could potentially have int64 values
-            return False
+        return False
 
     # Otherwise, the hint MUST exist and be in range
     return has_guarding_hint(e) and guarding_hint_or_throw(e) <= int_max
