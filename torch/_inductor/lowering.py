@@ -6844,6 +6844,12 @@ def _adaptive_avg_pool2d_backward(grad_output, x):
     w_window_size = V.graph.sizevars.guard_int(w_window_size)
     grad_loader = grad_output.make_loader()
 
+    def round_to_input_dtype(value):
+        if dtype == torch.float16:
+            value = ops.to_dtype(value, dtype, use_compute_types=False)
+            value = ops.to_dtype(value, dtype)
+        return value
+
     def fn(idx):
         *prefix, h, w = idx
         # Invert the forward bounds to find pooled indices covering this pixel.
@@ -6886,11 +6892,17 @@ def _adaptive_avg_pool2d_backward(grad_output, x):
                     - _adaptive_pooling_start_index(pooled_w_expr, pooled_width, width),
                     torch.int64,
                 )
-                contribution = ops.truediv(ops.truediv(grad_value, region_h), region_w)
+                # Eager rounds each division and accumulation to the input dtype.
+                contribution = round_to_input_dtype(
+                    ops.truediv(grad_value, round_to_input_dtype(region_h))
+                )
+                contribution = round_to_input_dtype(
+                    ops.truediv(contribution, round_to_input_dtype(region_w))
+                )
                 if gradient is None:
                     gradient = contribution
                 else:
-                    gradient = ops.add(gradient, contribution)
+                    gradient = round_to_input_dtype(ops.add(gradient, contribution))
 
         if gradient is None:
             raise AssertionError("expected: gradient is not None")
