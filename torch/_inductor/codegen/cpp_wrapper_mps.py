@@ -97,6 +97,11 @@ class CppWrapperMps(CppWrapperGpu):
                 new_args.append(f"aoti_torch_mps_set_arg_tensor(handle, {idx}, {arg});")
             elif arg_type in (int, sympy.core.symbol.Symbol):
                 new_args.append(f"aoti_torch_mps_set_arg_int(handle, {idx}, {arg});")
+            elif arg_type is list:
+                new_args.append(f"const int64_t int_args[] = {arg};")
+                new_args.append(
+                    f"torch_mps_set_arg_bytes(handle, {idx}, int_args, sizeof(int_args));"
+                )
             else:
                 raise NotImplementedError(
                     f"Unsupported arg type {arg_type} for arg {arg} for kernel {kernel_name}"
@@ -230,6 +235,7 @@ class CppWrapperMps(CppWrapperGpu):
     @staticmethod
     def get_device_include_path_aot(device: str) -> str:
         return (
+            "#include <torch/csrc/stable/c/shim.h>\n"
             "#include <torch/csrc/inductor/aoti_include/mps.h>\n"
             "#include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>"
         )
