@@ -6,10 +6,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.utils import counters
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_device_type import (
@@ -76,12 +78,19 @@ class DeterministicTestGeneric(TestCase):
 
             torch.testing.assert_close(eager, compiled_out)
 
+
+@instantiate_parametrized_tests
+class DeterministicTestRun2RunCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180681")
     @unittest.skipIf(IS_FBCODE, "Skipping run2run determinism test in fbcode")
     @parametrize("model_name", ["GoogleFnet", "BertForMaskedLM", "DistillGPT2"])
     @parametrize("training_or_inference", ["training", "inference"])
     @parametrize("precision", ["float32", "bfloat16", "float16", "amp"])
-    def test_run2run_determinism(self, model_name, training_or_inference, precision):
+    def test_run2run_determinism(
+        self, device, model_name, training_or_inference, precision
+    ):
         """
         Test run2run determinism for a few huggingface models.
 
@@ -103,6 +112,7 @@ class DeterministicTestGeneric(TestCase):
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
+                + f" --devices {device}"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
             )
@@ -119,6 +129,7 @@ class DeterministicTestGeneric(TestCase):
 
             cmd = (
                 f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --inductor"
+                + f" --devices {device}"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
             )
@@ -158,6 +169,14 @@ class DeterministicTestGeneric(TestCase):
         torch.compile(lambda x: x + 1, backend=backend)(torch.randn(4))
         self.assertFalse(torch.are_deterministic_algorithms_enabled())
         self.assertFalse(inductor_config.deterministic)
+
+
+instantiate_device_type_tests(
+    DeterministicTestRun2RunCUDA,
+    globals(),
+    only_for=("cuda",),
+    allow_xpu=True,
+)
 
 
 @unittest.skipIf(not HAS_TRITON, "requires triton")
@@ -238,6 +257,48 @@ class DeterministicTestAccelerator(TestCase):
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] == 0)
             else:
                 self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
+
+    @parametrize("fp_fusion", [True, False])
+    @parametrize("deterministic", [False, True])
+    def test_fp_fusion(self, device, deterministic, fp_fusion):
+        from torch._inductor.utils import run_and_get_code
+
+        with inductor_config.patch(
+            {"deterministic": deterministic, "triton.enable_fp_fusion": fp_fusion}
+        ):
+            x = torch.randn(16, device=device)
+            _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2 + 1), x)
+        # Deterministic mode alone keeps FMA contraction.
+        self.assertIn(f"'enable_fp_fusion': {fp_fusion}", code)
+
+    @inductor_config.patch({"deterministic": True, "triton.enable_fp_fusion": False})
+    def test_pointwise_config_numerics(self, device):
+        # XBLOCK=128 and XBLOCK=256 contract different products into an FMA here.
+        def fn(x, buf):
+            return x / x.shape[0] * 0.01 + buf * 0.99
+
+        x = torch.randn(16384, device=device)
+        buf = torch.randn(16384, device=device)
+        xblocks, outs = [], []
+        # Force opposite timing winners (smallest vs largest XBLOCK).
+        for prefer_small in (True, False):
+            seen = set()
+
+            def bench(self, launcher, *args, **kwargs):
+                xblock = launcher.config.kwargs["XBLOCK"]
+                seen.add(xblock)
+                return float(xblock) if prefer_small else 1.0 / xblock
+
+            torch._dynamo.reset()
+            with (
+                fresh_cache(),
+                unittest.mock.patch.object(CachingAutotuner, "bench", bench),
+            ):
+                outs.append(torch.compile(fn, dynamic=True)(x, buf))
+            xblocks.append(min(seen) if prefer_small else max(seen))
+
+        self.assertNotEqual(xblocks[0], xblocks[1])
+        self.assertEqual(outs[0].view(torch.int32), outs[1].view(torch.int32))
 
     @inductor_config.patch(batch_invariant=True)
     def test_persistent_reduction_batch_invariance(self, device):
