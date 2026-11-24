@@ -203,7 +203,7 @@ with NIXLTransport(
     plugin="OBJ",
     backend_options={
         "bucket": "checkpoints",
-        "endpoint_override": "https://s3.example.com",
+        "endpoint_override": "https://s3.example.com",  # @lint-ignore
         "region": "us-east-1",
     },
 ) as transport:
