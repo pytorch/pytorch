@@ -292,6 +292,92 @@ class TestSubgraphChoice(TestCase):
         self.assertEqual(actual, a @ b, atol=0, rtol=0)
         self.assertEqual("_split_triton_" in "\n".join(codes), a_row_major)
 
+    @unittest.skipUnless(
+        has_datacenter_blackwell_tma_device(),
+        "the Triton partial BMM needs datacenter Blackwell",
+    )
+    @parametrize("case", ("fused", "per_n_tile", "multi_use", "reshaped"))
+    def test_decompose_k_triton_fuses_producer(self, case):
+        # "fused": a pointwise producer of B is read once per M tile (one
+        # here), so recomputing it in the partial BMM's descriptor loads beats
+        # materializing it; the decompose-K choice then inlines and the
+        # producer fuses. "per_n_tile": with N=1024 a producer of A is
+        # recomputed per N tile and is left unfused. "multi_use": the producer
+        # is also an output, so it must be materialized anyway and is left
+        # unfused. "reshaped": the producer is 3-D and reshaped into B, so its
+        # loads are not affine in B's (row, col) and it is left unfused.
+        k = 131072
+        n = 1024 if case == "per_n_tile" else 128
+        a = _exact_inputs(k, 128, dtype=torch.bfloat16).T
+        y = _exact_inputs(k, n, dtype=torch.bfloat16)
+        e = torch.randn(k, n, device=GPU_TYPE)
+        x = torch.randn(k, 128, device=GPU_TYPE)
+
+        def fn(a, x, y, e):
+            if case == "per_n_tile":
+                return torch.sigmoid(x).to(torch.bfloat16).T @ y
+            if case == "reshaped":
+                y3, e3 = y.view(k // 64, 64, n), e.view(k // 64, 64, n)
+                b3 = (y3.float() * torch.sigmoid(e3)).to(torch.bfloat16)
+                return a @ b3.permute(1, 0, 2).reshape(k, n)
+            b = (y.float() * torch.sigmoid(e)).to(torch.bfloat16)
+            if case == "multi_use":
+                return a @ b, b
+            return a @ b
+
+        from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate
+
+        credits = []
+        generate = DecomposeKSubgraphTemplate.generate
+
+        def record_credit(self, *args, **kwargs):
+            choice = generate(self, *args, **kwargs)
+            if kwargs.get("bmm_backend") == "triton":
+                credits.append(choice.fusion_credit_ms)
+            return choice
+
+        with (
+            mock.patch.object(DecomposeKSubgraphTemplate, "generate", record_credit),
+            config.patch(
+                {
+                    "max_autotune_gemm": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "compile_threads": 1,
+                    "prologue_fusion": True,
+                    "triton.decompose_k_prologue_fusion_credit": True,
+                    "benchmark_template_fusion": False,
+                    "triton.enable_template_tma_store": True,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.num_decompose_k_splits": 4,
+                    "triton.decompose_k_bmm_backends": "TRITON",
+                    "triton.disallow_failing_autotune_kernels_TESTING_ONLY": True,
+                }
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(fn, fullgraph=True), a, x, y, e
+            )
+        if case == "per_n_tile":
+            expected = torch.sigmoid(x).T @ y.float()
+        elif case == "reshaped":
+            b3 = (
+                y.view(k // 64, 64, n).float() * torch.sigmoid(e.view(k // 64, 64, n))
+            ).to(torch.bfloat16)
+            expected = a.float() @ b3.permute(1, 0, 2).reshape(k, n).float()
+        else:
+            b = (y.float() * torch.sigmoid(e)).to(torch.bfloat16)
+            expected = a.float() @ b.float()
+            if case == "multi_use":
+                self.assertEqual(actual[1], b)
+                actual = actual[0]
+        rel = (actual.float() - expected).norm() / expected.norm()
+        self.assertLess(rel.item(), 1e-2)
+        source = "\n".join(codes)
+        self.assertEqual("prologue_descriptor0.load" in source, case == "fused")
+        # Only a fusable producer earns the decompose-K choice a credit.
+        self.assertTrue(credits)
+        self.assertEqual(any(c > 0 for c in credits), case == "fused")
+
     def test_subgraph_freeze_layout(self):
         from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate
         from torch._inductor.kernel.mm_common import mm_args

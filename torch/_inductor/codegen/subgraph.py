@@ -117,6 +117,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.decomposition_kwargs: dict[str, Any] = {}
         # Config patches to apply during kernel codegen (e.g., coordinate_descent_tuning)
         self.config_patches: dict[str, Any] = {}
+        # Inline the winning subgraph as IR nodes instead of an opaque
+        # SubgraphBuffer, so its inner templates take part in fusion.
+        self.inline_after_autotune = False
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
         # Cache benchmark request for async autotuning
@@ -330,6 +333,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def output_node(self) -> ir.TensorBox:
         if self.gm is None:
             raise AssertionError("expected self.gm to be set")
+        if self.inline_after_autotune:
+            return inline_subgraph_to_ir_nodes(self.gm, self.input_nodes, self.name)
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,
