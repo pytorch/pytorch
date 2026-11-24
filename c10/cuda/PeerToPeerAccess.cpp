@@ -171,15 +171,15 @@ bool isFabricSupported(c10::DeviceIndex dev) {
       hipDeviceAttributeHandleTypeFabricSupported,
       static_cast<int>(dev));
   if (err != hipSuccess) {
-    (void)hipGetLastError();
+    C10_CUDA_CLEAR_ERROR();
     LOG(INFO)
         << "status " << hipGetErrorString(err)
-        << " Could not query FABRIC handle support, falling back to fd handle exchange\n";
+        << " Could not query FABRIC handle support, falling back to fd handle exchange";
     return false;
   }
   if (!fabric_supported) {
     LOG(INFO)
-        << "FABRIC handles are not supported, falling back to fd handle exchange\n";
+        << "FABRIC handles are not supported, falling back to fd handle exchange";
     return false;
   }
 
@@ -198,10 +198,10 @@ bool isFabricSupported(c10::DeviceIndex dev) {
   err = hipMemGetAllocationGranularity(
       &granularity, &prop, hipMemAllocationGranularityRecommended);
   if (err != hipSuccess) {
-    (void)hipGetLastError();
+    C10_CUDA_CLEAR_ERROR();
     LOG(INFO)
         << "status " << hipGetErrorString(err)
-        << " Could not get FABRIC allocation granularity, falling back to fd handle exchange\n";
+        << " Could not get FABRIC allocation granularity, falling back to fd handle exchange";
     return false;
   }
 
@@ -209,10 +209,10 @@ bool isFabricSupported(c10::DeviceIndex dev) {
   hipMemGenericAllocationHandle_t handle{};
   err = hipMemCreate(&handle, granularity, &prop, 0);
   if (err != hipSuccess) {
-    (void)hipGetLastError();
+    C10_CUDA_CLEAR_ERROR();
     LOG(INFO)
         << "status " << hipGetErrorString(err)
-        << " Could not allocate memory with FABRIC handle, falling back to fd handle exchange\n";
+        << " Could not allocate memory with FABRIC handle, falling back to fd handle exchange";
     return false;
   }
 
@@ -221,10 +221,10 @@ bool isFabricSupported(c10::DeviceIndex dev) {
   err = hipMemExportToShareableHandle(
       &shared_handle, handle, hipMemHandleTypeFabric, 0);
   if (err != hipSuccess) {
-    (void)hipGetLastError();
+    C10_CUDA_CLEAR_ERROR();
     LOG(INFO)
         << "status " << hipGetErrorString(err)
-        << " Could not export FABRIC handle, falling back to fd handle exchange\n";
+        << " Could not export FABRIC handle, falling back to fd handle exchange";
     (void)hipMemRelease(handle);
     return false;
   }
@@ -234,17 +234,17 @@ bool isFabricSupported(c10::DeviceIndex dev) {
   err = hipMemImportFromShareableHandle(
       &import_handle, &shared_handle, hipMemHandleTypeFabric);
   if (err != hipSuccess) {
-    (void)hipGetLastError();
+    C10_CUDA_CLEAR_ERROR();
     LOG(INFO)
         << "status " << hipGetErrorString(err)
-        << " Could not import FABRIC handle, falling back to fd handle exchange\n";
+        << " Could not import FABRIC handle, falling back to fd handle exchange";
     (void)hipMemRelease(handle);
     return false;
   }
 
   (void)hipMemRelease(import_handle);
   (void)hipMemRelease(handle);
-  LOG(INFO) << "using fabric to exchange memory handles\n";
+  LOG(INFO) << "using fabric to exchange memory handles";
   return true;
 }
 

@@ -46,7 +46,7 @@ from torch._inductor.autotune_process import (
     use_pipelined_autotuning,
 )
 from torch._inductor.codegen.common import WorkspaceArg
-from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import (
     get_registered_heuristic_class,
@@ -2100,6 +2100,30 @@ class TestMaxAutotune(TestCase):
             if not same(expect, actual, tol=1e-2):
                 raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
+    @config.patch(
+        force_shape_pad=True,
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON,ATEN",
+    )
+    def test_addmm_layout_conflict_extern_fallback(self):
+        """
+        Padding K freezes A at its original row stride, which conflicts with the
+        layout the template expects, so the scheduler falls back to the fastest
+        extern choice. addmm has two extern choices, and only the fastest one
+        has a timing.
+        """
+        M, K, N = 256, 1778, 640
+        a = torch.randn(M * 1792, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, K), (1792, 1)
+        )
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+        bias = torch.randn(N, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, N), (0, 1)
+        )
+
+        out = torch.compile(torch.addmm)(bias, a, b)
+        torch.testing.assert_close(out, torch.addmm(bias, a, b), atol=5e-2, rtol=1e-2)
+
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -3228,8 +3252,11 @@ class TestMaxAutotune(TestCase):
         autotune_fallback_to_aten=False,
     )
     @unittest.skipIf(
-        GPU_TYPE != "cuda" or not is_datacenter_blackwell_arch(),
-        "TF32 decompose_k threshold applies to datacenter Blackwell",
+        not HAS_GPU
+        or GPU_TYPE != "cuda"
+        or torch.version.hip
+        or get_cuda_arch() != "100",
+        "TF32 decompose_k threshold applies to B200 (SM 10.0) only",
     )
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"

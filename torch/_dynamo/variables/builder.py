@@ -24,6 +24,7 @@ import contextlib
 import contextvars
 import copy
 import dataclasses
+import datetime
 import enum
 import functools
 import gc
@@ -139,7 +140,6 @@ from ..source import (
     ChainedSource,
     ConstDictKeySource,
     ConvertIntSource,
-    CurrentStreamSource,
     DictGetItemSource,
     DictSubclassGetItemSource,
     DynamicScalarSource,
@@ -1302,6 +1302,9 @@ class VariableBuilder:
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
             CustomClassObjectVariable,
+            UserFunctionVariable,
+            SkipFunctionVariable,
+            PolyfilledFunctionVariable,
         }
 
     def get_source(self) -> Source:
@@ -1969,7 +1972,7 @@ class VariableBuilder:
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            if isinstance(self.source, CurrentStreamSource):
+            if self.source == self.tx.symbolic_stream_state.current_stream_source:
                 # Reuse the index pre-allocated in SymbolicStreamState.__init__
                 index = CURRENT_STREAM_INDEX
             else:
@@ -2838,7 +2841,8 @@ class VariableBuilder:
             and type(value) not in common_constant_types
         ):
             self.install_guards(GuardBuilder.CONSTANT_SUBCLASS_MATCH)
-            result = UserDefinedConstantVariable(value, source=self.source)
+            vt_cls = UserDefinedConstantVariable.cls_for(type(value))
+            result = vt_cls(value, source=self.source)
         elif is_generic_ctx_manager_cls(type(value)):
             # A generic context manager built inside the compiled region (via
             # SideEffects.get_variable_cls) must wrap the same way when it is
@@ -4738,7 +4742,7 @@ def handle_traced_output(
         return EventVariable(proxy, example_value, None, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
         set_example_value(proxy.node, example_value)
-        return ConstantVariable(example_value, **options)
+        return ConstantVariable.create(example_value, **options)
     elif (
         example_value is not None
         and isinstance(example_value, torch.Event)
@@ -6006,7 +6010,15 @@ class SourcelessBuilder:
         elif isinstance(value, torch.fx.graph_module.GraphModule):
             return SourcelessGraphModuleVariable(value)
         elif isinstance(
-            value, (importlib.machinery.ModuleSpec, torch.utils._pytree.TreeSpec)
+            value,
+            (
+                importlib.machinery.ModuleSpec,
+                torch.utils._pytree.TreeSpec,
+                datetime.date,
+                datetime.time,
+                datetime.timedelta,
+                datetime.tzinfo,
+            ),
         ):
             return UserDefinedObjectVariable(value)
         elif isinstance(value, (re.Pattern, re.Match)):
@@ -6100,7 +6112,7 @@ class SourcelessBuilder:
             type, Callable[[InstructionTranslatorBase, Any], VariableTracker]
         ] = {}
         for t in common_constant_types:
-            handlers[t] = lambda tx, value: ConstantVariable(value)
+            handlers[t] = lambda tx, value: ConstantVariable.create(value)
         handlers[set] = lambda tx, value: SetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
