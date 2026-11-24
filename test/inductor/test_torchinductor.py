@@ -88,7 +88,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     SM90OrLater,
@@ -24223,7 +24223,7 @@ if RUN_GPU:
             ).run(code[0])
 
         @unittest.skipIf(
-            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)),
+            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8_GROUPED_GEMM)),
             "no scaled_grouped_mm support",
         )
         def test_respect_scaled_grouped_mm_layout_tag(self):
