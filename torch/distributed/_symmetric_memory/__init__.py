@@ -622,7 +622,7 @@ class _ScaleMode(Enum):
 # scales equals swizzling the concatenated rows, and each rank's slice of the
 # scale is a valid swizzled scale for its rows. Otherwise every rank pads its own
 # tail tile, and neither holds.
-_MX_ROW_TILE = 128
+_MX_SWIZZLE_32_4_4_ROW_TILE = 128
 
 
 def _is_mx_compatible_scaling(
@@ -673,11 +673,12 @@ def _check_mxfp8_operand(
             "dims reorder the flattened rows, which the swizzled scale can't follow"
         )
     rows, k = math.prod(A.shape[:-1]), A.shape[-1]
-    if rows % (num_chunks * _MX_ROW_TILE) != 0:
+    tile = _MX_SWIZZLE_32_4_4_ROW_TILE
+    if rows % (num_chunks * tile) != 0:
         split = f" split over {num_chunks} ranks" if num_chunks > 1 else ""
         raise ValueError(
-            f"MXFP8 requires each rank's rows to be a multiple of {_MX_ROW_TILE}, "
-            f"since the swizzled scale pads them to {_MX_ROW_TILE}-row tiles "
+            f"MXFP8 requires each rank's rows to be a multiple of {tile}, "
+            f"since the swizzled scale pads them to {tile}-row tiles "
             f"(got {rows} rows{split})"
         )
     expected = rows * (((k + 31) // 32 + 3) // 4 * 4)
@@ -809,7 +810,7 @@ def _fused_all_gather_matmul_impl(
         if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
             A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
         else:
-            # Gathered as an opaque flat buffer; see _MX_ROW_TILE.
+            # Gathered as an opaque flat buffer; see _MX_SWIZZLE_32_4_4_ROW_TILE.
             A_scale_shard = A_scale.flatten()
         A_scale_flat = A_scale_shard.new_empty(
             A_scale_shard.shape[0] * group.size(),
@@ -1868,8 +1869,8 @@ def _fused_scaled_matmul_reduce_scatter_impl(
             t if t.data_ptr() % 16 == 0 else t.clone() for t in A_scale_shards
         ]
     elif scaling_type_a == ScalingType.BlockWise1x32:
-        # Each rank's slice of the swizzled scale is the scale of its rows; see
-        # _MX_ROW_TILE.
+        # Each rank's slice of the swizzled scale is the scale of its rows;
+        # see _MX_SWIZZLE_32_4_4_ROW_TILE.
         _check_mxfp8_operand(A, A_scale, scatter_dim_after_maybe_reshape, group.size())
         A_scale_shards = list(A_scale.flatten().chunk(group.size()))
     else:
