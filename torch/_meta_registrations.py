@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import wraps
 from typing import TypeVar
@@ -12,7 +12,9 @@ from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
+    decomposition_table,
     global_decomposition_table,
+    is_torch_decomp_decomposition,
     meta_table,
 )
 from torch._ops import OpOverload
@@ -2752,7 +2754,7 @@ def _compute_reduction_shape(self, dims, keepdim):
 # when running meta kernels. Here, access the "fake device" of FakeTensor if it
 # exists so meta kernels which have diverge per device will be more
 # accurate when run with FakeTensors
-def device_hint(tensor) -> "str":
+def device_hint(tensor, default: str = "cuda") -> "str":
     fake_device = torch._subclasses.fake_tensor.maybe_get_fake_device(tensor)
     if fake_device is not None:
         return fake_device.type
@@ -2763,7 +2765,12 @@ def device_hint(tensor) -> "str":
     ):
         return tensor.device.type
     else:
-        return "cuda"  # default to cuda
+        return default
+
+
+def current_accelerator_hint() -> str:
+    acc = torch.accelerator.current_accelerator()
+    return acc.type if acc is not None else "cuda"
 
 
 def calc_conv_nd_return_shape(
@@ -6572,8 +6579,9 @@ def meta__scaled_dot_product_flash_attention(
     # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
     # See [Note] BC breaking change to flash seed/offset
-    if torch.version.hip and torch.cuda.is_available() or device_hint(query) == "xpu":
-        # Maintain old path on AMD
+    device = device_hint(query, default=current_accelerator_hint())
+    if (torch.version.hip and torch.cuda.is_available()) or device == "xpu":
+        # Maintain old path on AMD and XPU
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
@@ -7082,8 +7090,9 @@ def meta__flash_attention_forward(
     # See Note [Seed and Offset]
     # See [Note] BC breaking change to flash seed/offset
     seed, offset = None, None
-    if torch.version.hip and torch.cuda.is_available():
-        # Maintain old path on AMD
+    device = device_hint(query, default=current_accelerator_hint())
+    if (torch.version.hip and torch.cuda.is_available()) or device == "xpu":
+        # Maintain old path on AMD and XPU
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
@@ -8554,10 +8563,14 @@ def meta_histc(input, bins=100, min=0, max=0):
 @register_meta(
     [
         aten._upsample_bilinear2d_aa.default,
+        aten._upsample_bilinear2d_aa.out,
         aten._upsample_bicubic2d_aa.default,
+        aten._upsample_bicubic2d_aa.out,
         aten._upsample_lanczos2d_aa.default,
+        aten._upsample_lanczos2d_aa.out,
     ]
 )
+@out_wrapper(exact_dtype=True, preserve_memory_format=True)
 def meta_upsample_bimode2d_aa(
     input,
     output_size,
@@ -8573,7 +8586,7 @@ def meta_upsample_bimode2d_aa(
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     return input.new_empty(full_output_size).to(
-        memory_format=utils.suggest_memory_format(input)
+        memory_format=utils.upsample_output_memory_format(input)
     )
 
 
@@ -8923,13 +8936,11 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
 
     out_dtype = out_dtype or mat1.dtype
 
-    if torch.version.cuda or device_hint(mat1) == "mps":
+    # Match grouped_mm_output_is_tma_padded in C++, which pads on CPU-only builds too.
+    if not torch.version.hip and device_hint(mat1) != "xpu":
         alignment = 16 // out_dtype.itemsize
         size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
-        if mat1_is_2d == mat2_is_2d:
-            out_stride = [out_size[1] * size_padded, size_padded, 1]
-        else:
-            out_stride = [size_padded, 1]
+        out_stride = make_contiguous_strides_for([*out_size[:-1], size_padded])
         out = torch.empty_strided(
             out_size, out_stride, dtype=out_dtype, device=mat1.device
         )
@@ -9176,7 +9187,7 @@ def _meta_grouped_mm_common(
 
 
 @register_meta(aten._grouped_mm)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -9251,22 +9262,43 @@ def meta_scaled_grouped_mm_v2(
         _out_dtype in (torch.bfloat16, torch.float16, torch.float32),
         lambda: "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm",
     )
-    from torch.nn.functional import ScalingType
+    from torch.nn.functional import ScalingType, SwizzleType
 
     rowwise = scale_recipe_a == scale_recipe_b == [ScalingType.RowWise.value]
     tensorwise = [ScalingType.TensorWise.value]
-    block_recipes = (
-        ScalingType.BlockWise1x128.value,
-        ScalingType.BlockWise128x128.value,
+    vec32 = ScalingType.BlockWise1x32.value
+    vec128 = ScalingType.BlockWise1x128.value
+    block128 = ScalingType.BlockWise128x128.value
+    mnk4 = SwizzleType.SWIZZLE_MN_K4.value
+    has_mnk4 = (
+        (scale_recipe_a != tensorwise or scale_recipe_b != tensorwise)
+        and not rowwise
+        and (mnk4 in swizzle_a or mnk4 in swizzle_b)
+    )
+    fp8_types = (torch.float8_e4m3fn, torch.float8_e5m2)
+    torch._check_value(
+        not has_mnk4
+        or (
+            scale_recipe_a == scale_recipe_b
+            and scale_recipe_a in ([vec32], [vec128])
+            and swizzle_a == swizzle_b == [mnk4]
+            and mat_a.dtype in fp8_types
+            and mat_b.dtype in fp8_types
+            and torch.float8_e4m3fn in (mat_a.dtype, mat_b.dtype)
+        ),
+        lambda: "Invalid scaling configuration for grouped GEMM: packed MNxK4 requires matching "
+        "BlockWise1x32 or BlockWise1x128 recipes, SWIZZLE_MN_K4 on both inputs, and a valid float8 input pair",
     )
     fp32_block = (
         len(scale_recipe_a) == len(scale_recipe_b) == 1
-        and scale_recipe_a[0] in block_recipes
-        and scale_recipe_b[0] in block_recipes
-        and ScalingType.BlockWise1x128.value in (scale_recipe_a[0], scale_recipe_b[0])
+        and scale_recipe_a[0] in (vec128, block128)
+        and scale_recipe_b[0] in (vec128, block128)
+        and vec128 in (scale_recipe_a[0], scale_recipe_b[0])
     )
-    bf16_only = not fp32_block and (
-        scale_recipe_a != tensorwise or scale_recipe_b != tensorwise
+    bf16_only = (
+        not fp32_block
+        and not has_mnk4
+        and (scale_recipe_a != tensorwise or scale_recipe_b != tensorwise)
     )
     message = "Grouped scaling configuration requires BFloat16 output"
     if rowwise:
@@ -9712,4 +9744,35 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
+def cpp_meta_supports_symint(op: OpOverload) -> bool:
+    # Whether FakeTensorMode prefers op's C++ Meta kernel to its decomposition.
+    return torch.Tag.view_copy in op.tags or op in cpp_meta_supports_symint_ops
+
+
+def _register_static_shape_decomps(ops: Iterable[torch._ops.OperatorBase]) -> None:
+    # Meta membership and sparse inputs are checked at dispatch time.
+    for op in ops:
+        if (
+            isinstance(op, OpOverload)
+            and is_torch_decomp_decomposition(op)
+            and not cpp_meta_supports_symint(op)
+        ):
+            schema = op._schema
+            torch._C._fake_dispatch_register_static_shape_decomp(
+                schema.name, schema.overload_name
+            )
+
+
+def _register_cpp_meta_supports_symint_ops() -> None:
+    for op in cpp_meta_supports_symint_ops:
+        schema = op._schema
+        torch._C._fake_dispatch_register_cpp_meta_supports_symint(
+            schema.name, schema.overload_name
+        )
+
+
 activate_meta()
+# Initial decorators run before their function names are bound in the module.
+_register_static_shape_decomps(decomposition_table)
+torch._decomp._static_shape_decomps_initialized = True
+_register_cpp_meta_supports_symint_ops()
