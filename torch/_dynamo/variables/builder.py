@@ -2389,7 +2389,9 @@ class VariableBuilder:
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MemberDescriptorType):
             return MemberDescriptorVariable(value)
-        elif type(value) is property:
+        elif isinstance(value, property):
+            if not PropertyVariable.is_supported_type(type(value)):
+                return self.wrap_user_defined(value)
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = PropertyVariable(value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
@@ -6029,6 +6031,10 @@ class SourcelessBuilder:
             # source-backed reconstruction; model them as ordinary user objects so
             # raw __dict__ descriptor reads can follow their Python attributes.
             return UserDefinedObjectVariable(value)
+        elif isinstance(value, property) and PropertyVariable.is_supported_type(
+            type(value)
+        ):
+            return PropertyVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             try:
                 return ConstantVariable.create(str(value))

@@ -99,6 +99,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+from .descriptors import PropertyVariable
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
@@ -2126,6 +2127,7 @@ class BuiltinVariable(TypeVariable):
         tuple: TupleVariable,
         set: SetVariable,
         frozenset: FrozensetVariable,
+        property: PropertyVariable,
     }
 
     def tp_new_impl(
@@ -3177,6 +3179,16 @@ class BuiltinVariable(TypeVariable):
         self, tx: "InstructionTranslatorBase", func: VariableTracker
     ) -> VariableTracker:
         return variables.StaticMethodVariable.create(func)
+
+    def call_property(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        result = self.tp_new_impl(tx, [self, *args], kwargs)
+        result.tp_init_impl(tx, list(args), kwargs)
+        return result
 
     def call_next(
         self,
