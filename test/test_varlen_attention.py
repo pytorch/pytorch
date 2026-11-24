@@ -1516,7 +1516,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support num_splits or block_table")
+    @unittest.skipIf(TEST_WITH_ROCM, "Tests the CUDA FA2 kernels")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("window_size", [(-1, -1), (-1, 0)])
     @parametrize("paged", [False, True])
@@ -1636,7 +1636,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support num_splits or block_table")
+    @unittest.skipIf(TEST_WITH_ROCM, "Tests the CUDA FA2 kernels")
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("num_kv_heads", [8, 2])
     @parametrize("paged", [False, True])
@@ -1715,7 +1715,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm does not support num_splits or block_table")
+    @unittest.skipIf(TEST_WITH_ROCM, "Tests the CUDA FA2 kernels")
     def test_fa2_paged_split_kv_writes_only_out(self, device):
         """Split-KV's combine kernel writes max_seqlen_q rows per sequence whatever
         cu_seqlens_q says. A paged call whose one sequence is shorter than max_seqlen_q
@@ -1723,9 +1723,11 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         torch.manual_seed(42)
         num_heads, head_dim, page_size, num_pages = 4, 64, 256, 4
         q_len, max_q, kv_len = 1, 4, num_pages * page_size
+        # A finite sentinel: rows written from uninitialized split buffers can be NaN.
+        sentinel = 3.0
         buffer = torch.full(
             (max_q, num_heads, head_dim),
-            float("nan"),
+            sentinel,
             device=device,
             dtype=torch.bfloat16,
         )
@@ -1740,24 +1742,26 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             dtype=torch.bfloat16,
         )
         v = torch.randn_like(k)
+        args = (
+            q,
+            k,
+            v,
+            make_cu_seq([q_len], device),
+            make_cu_seq([kv_len], device),
+            max_q,
+            kv_len,
+        )
+        paged_kwargs = {
+            "seqused_k": torch.tensor([kv_len], device=device, dtype=torch.int32),
+            "block_table": torch.arange(
+                num_pages, device=device, dtype=torch.int32
+            ).view(1, num_pages),
+        }
         with _use_backend("fa2"), torch.no_grad():
-            varlen_attn_out(
-                out,
-                q,
-                k,
-                v,
-                make_cu_seq([q_len], device),
-                make_cu_seq([kv_len], device),
-                max_q,
-                kv_len,
-                num_splits=2,
-                seqused_k=torch.tensor([kv_len], device=device, dtype=torch.int32),
-                block_table=torch.arange(
-                    num_pages, device=device, dtype=torch.int32
-                ).view(1, num_pages),
-            )
-        self.assertFalse(out.isnan().any())
-        self.assertTrue(buffer[q_len:].isnan().all())
+            varlen_attn_out(out, *args, num_splits=2, **paged_kwargs)
+            expected = varlen_attn(*args, num_splits=1, **paged_kwargs)
+        self.assertEqual(out, expected)
+        self.assertTrue((buffer[q_len:] == sentinel).all())
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

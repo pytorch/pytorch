@@ -815,6 +815,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         // at batch_idx * o_batch_stride, and a varlen q has no batch stride. Several sequences
         // would land on the first one's rows (#194167), and a sequence shorter than max_seqlen_q
         // would write past out. Split only the packed path or one sequence of max_seqlen_q tokens.
+        // TODO: paged MHA decode with several sequences now runs one split; taking the packed
+        // path with ngroups == 1 would let it split correctly.
         const bool can_split = seqlenq_ngroups_swapped || (batch_size == 1 && q.size(0) == max_seqlen_q);
         std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
