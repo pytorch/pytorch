@@ -1014,22 +1014,18 @@ print("RETRIED")
             tensor = torch.zeros(1024, device="cuda")
             torch.cuda.empty_cache()
             total_memory = torch.cuda.get_device_properties(0).total_memory
-            fraction = 0.5
-            if CUDA_DEVICE_IS_INTEGRATED:
-                fraction = 128 * 1024**2 / total_memory
+            # Keep the limit small so the test does not depend on how much of
+            # the device other processes are holding.
+            budget = 128 * 1024**2 if CUDA_DEVICE_IS_INTEGRATED else 1024**3
+            fraction = (torch.cuda.memory_reserved() + budget) / total_memory
             torch.cuda.set_per_process_memory_fraction(fraction, 0)
 
             # Test that an allocation just below the limit is allowed.
-            if CUDA_DEVICE_IS_INTEGRATED:
-                application = (
-                    int(total_memory * fraction)
-                    - torch.cuda.max_memory_reserved()
-                    - 4 * 1024**2
-                )
-            else:
-                application = (
-                    int(total_memory * 0.499) - torch.cuda.max_memory_reserved()
-                )
+            application = (
+                int(total_memory * fraction)
+                - torch.cuda.max_memory_reserved()
+                - 4 * 1024**2
+            )
             tmp_tensor = torch.empty(application, dtype=torch.int8, device="cuda")
             del tmp_tensor
             torch.cuda.empty_cache()
