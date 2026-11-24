@@ -655,6 +655,17 @@ __device__ __forceinline__ void store_dwords_partial(const T (&x)[ITEMS], T* p, 
   }
 }
 
+// Element loads of partial tiles hold 4-byte rows of 65 to 255 elements below stock speed on
+// gfx950, so there they take vector loads where they can. Elsewhere, and for other sizes, the extra
+// path makes some rows slower.
+#if defined(__gfx950__)
+template <typename T>
+constexpr bool kVecPartialTile = sizeof(T) == 4;
+#else
+template <typename T>
+constexpr bool kVecPartialTile = false;
+#endif
+
 // Loads the ITEMS elements at p + col. kFull: the tile is whole, so every lane's elements are in
 // [0, end). Otherwise elements at or past end are fill, and every lane runs the same branch-free
 // loads, clamped to [0, end): lanes that take different load paths each wait for their own loads,
@@ -679,6 +690,30 @@ __device__ __forceinline__ void load_items(T (&x)[ITEMS], const T* p, uint64_t c
       load_dwords<false>(x, p + (col < end ? col : end - 1), n, fill);
     }
   } else {
+    if constexpr (!kFull && kVecPartialTile<T>) {
+      if (vec_ok) {
+        // Lanes whose ITEMS elements are all in [0, end) take the vector loads of a whole tile;
+        // the others load the row start in the same instructions, then only the lane that
+        // straddles end loads its elements one at a time.
+        const bool whole = col + ITEMS <= end;
+        const uint64_t at = whole ? col : 0;
+#pragma unroll
+        for (int i = 0; i < ITEMS / VEC; ++i) {
+          const auto t = *reinterpret_cast<const GVec<T, VEC>*>(p + at + i * VEC);
+#pragma unroll
+          for (int j = 0; j < VEC; ++j) {
+            x[i * VEC + j] = t.v[j];
+          }
+        }
+        if (!whole) {
+#pragma unroll
+          for (int j = 0; j < ITEMS; ++j) {
+            x[j] = col + j < end ? p[col + j] : fill;
+          }
+        }
+        return;
+      }
+    }
     // Also whole tiles without vector alignment: element loads of the same addresses as the vector
     // loads would be merged with them at element alignment.
 #pragma unroll
