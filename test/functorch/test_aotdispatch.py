@@ -12556,6 +12556,34 @@ Expected a .* tangent but got a plain Tensor.""",
         self.assertEqual(len(packed), n_eager)
         self.assertEqual(res, ref, atol=0, rtol=0)
 
+    def test_saved_tensors_hooks_guard_on_input_made_to_require_grad(self):
+        # `buf[0] = w` makes buf require grad; no other node has a grad_fn and
+        # neither input has one before the op.
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        cnt = CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=cnt)
+        def fn(buf, w):
+            buf[0] = w
+
+        def run(hooks):
+            w = torch.ones(4, requires_grad=True)
+            buf = torch.zeros(4, 4)
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                fn(buf, w)
+            (buf * 2).sum().backward()
+            return w.grad
+
+        run(
+            saved_tensors_hooks_to_gm(
+                lambda x: x * 1, lambda x: x * 1, "pack_hash", "unpack_hash"
+            )
+        )
+        res = run((lambda x: x, lambda x: x))
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(res, torch.full((4,), 2.0), atol=0, rtol=0)
+
 
 class TestAOTModuleSimplifiedDevice(AOTTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
