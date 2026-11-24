@@ -5969,6 +5969,65 @@ def _can_fuse_atomic_add_template_epilogue(
     ) and _is_atomic_add_mutation_epilogue(epilogue_node)
 
 
+def _prologue_reads_in_operand_dims(
+    prologue_node: BaseSchedulerNode,
+    template_buf: ir.TemplateBuffer,
+    operand_name: str,
+) -> tuple[dict[sympy.Symbol, sympy.Expr], list[tuple[str, sympy.Expr]]] | None:
+    """The producer's source reads, indexed by the dims of the template's view
+    of the operand it writes, as load_prologue_descriptor sees them.
+
+    The template reads the element at offset + sum(stride_i * dim_i) of the
+    producer's buffer, and the producer writes the element at
+    sum(s_j * var_j), so var_j = (position // s_j) % size_j. Returns
+    ({dim: range}, [(source, index)]), or None when the producer is not a
+    single-body node with an affine write or the template doesn't read it.
+    """
+    from torch.utils._sympy.functions import ModularIndexing
+
+    view = next((n for n in template_buf.inputs if n.get_name() == operand_name), None)
+    if view is None or not isinstance(prologue_node, SchedulerNode):
+        return None
+    # Unnormalized, so every dep shares the body's loop variables.
+    rw = dependencies.extract_read_writes(
+        prologue_node._body, *prologue_node._sizes, normalize=False
+    )
+    writes = [
+        dep
+        for dep in rw.writes
+        if isinstance(dep, MemoryDep) and dep.name == operand_name
+    ]
+    if len(writes) != 1:
+        return None
+    write = writes[0]
+    if (
+        not is_affine_indexing(write.index)
+        or write.index.subs(dict.fromkeys(write.var_names, 0)) != 0
+    ):
+        return None
+    layout = view.get_layout()
+    dims = [
+        sympy.Symbol(f"operand_dim{i}", integer=True, nonnegative=True)
+        for i in range(len(layout.size))
+    ]
+    position = layout.offset + sympy_dot(layout.stride, dims)
+    var_exprs = {
+        var: ModularIndexing(position, write.index.coeff(var), size)
+        for var, size in zip(write.var_names, write.size)
+    }
+    ranges = dict(zip(dims, layout.size))
+    sizevars = V.graph.sizevars
+    reads = [
+        (
+            dep.name,
+            sizevars.simplify_with_ranges(sympy_subs(dep.index, var_exprs), ranges),
+        )
+        for dep in rw.reads
+        if isinstance(dep, MemoryDep) and dep.name != operand_name
+    ]
+    return ranges, reads
+
+
 def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     """Check per-template flag, fall back to global config."""
     tb = template_node.get_template_node()
@@ -10660,6 +10719,158 @@ class Scheduler:
             )
         return False
 
+    def _descriptor_prologue_profitable(
+        self,
+        prologue_node: BaseSchedulerNode,
+        template_buf: ir.TemplateBuffer,
+        operand_name: str,
+        read_bytes: int,
+        write_bytes: int,
+        why: WhyNoFuse,
+    ) -> bool:
+        """Cost model for a producer the template reads through TMA descriptors.
+
+        Rejects the fusion when a source would not load through a descriptor
+        (so the template would gather it), when the source tiles would not fit
+        in shared memory next to the compiled kernel's, or when it is slower
+        than materializing the operand:
+
+        Unfused, the producer reads its sources and writes the operand, and the
+        template is bound by its MMAs or by reading its operands. Fused, the
+        template reads the sources instead and recomputes the producer once per
+        output tile that reads an operand tile (reuse). The producer's work runs
+        in the warps that feed the MMAs, so it adds to the MMA time, while the
+        source reads overlap both. Source re-reads hit L2 when the sources of
+        the operand tiles one wave of persistent CTAs touches fit in half of
+        it; otherwise every re-read goes to DRAM.
+        """
+        from .utils import (
+            _TMA_SUPPORTED_DTYPES,
+            get_device_tflops,
+            get_gpu_dram_gbps,
+            get_gpu_shared_memory,
+            get_num_sms,
+            TMA_ALIGNMENT,
+        )
+
+        record = template_buf.load_input_reuse[operand_name]
+        sizevars = V.graph.sizevars
+        operand = V.graph.get_buffer(operand_name)
+        operand_numel = sizevars.optimization_hint(
+            sympy_product(operand.get_size()), fallback=0
+        )
+        produced = prologue_node.get_buffer_names()
+
+        # The template loads the operand through its own view of the producer's
+        # buffer, so load_prologue_descriptor sees each source index rewritten
+        # in the operand's dims (e.g. behind a reshape it is no longer affine).
+        operand_reads = _prologue_reads_in_operand_dims(
+            prologue_node, template_buf, operand_name
+        )
+        if operand_reads is None:
+            why(
+                "descriptor prologue fusion: producer of %s has no affine write",
+                operand_name,
+            )
+            return False
+        ranges, reads = operand_reads
+        syms = list(ranges)
+
+        # Mirror load_prologue_descriptor: an affine index with positive
+        # aligned strides and a contiguous dim, a TMA dtype, aligned base.
+        source_tile_bytes = 0
+        for name, index in reads:
+            if name in produced:
+                continue
+            dtype = V.graph.get_dtype(name)
+            coeffs = [index.coeff(sym) for sym in syms]
+            tiled = [c for c in coeffs if not sizevars.statically_known_equals(c, 0)]
+            offset = index.subs(dict.fromkeys(syms, 0))
+            tma_ok = (
+                dtype in _TMA_SUPPORTED_DTYPES
+                and name not in V.graph.unaligned_buffers
+                and is_affine_indexing(index)
+                and all(
+                    sym in ranges
+                    or symbol_is_type(sym, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+                    for sym in index.free_symbols
+                )
+                and all(sizevars.statically_known_gt(c, 0) for c in tiled)
+                and (
+                    not tiled
+                    or any(sizevars.statically_known_equals(c, 1) for c in tiled)
+                )
+                and all(
+                    sizevars.statically_known_multiple_of(
+                        e * dtype.itemsize, TMA_ALIGNMENT
+                    )
+                    for e in [offset, *(c for c in tiled if c != 1)]
+                )
+            )
+            if not tma_ok:
+                why(
+                    "descriptor prologue fusion: source %s would not load via TMA",
+                    name,
+                )
+                return False
+            if len(tiled) == len(syms):
+                source_tile_bytes += record.tile_elems * dtype.itemsize
+
+        shared = getattr(template_buf, "n_shared", None)
+        if shared is not None:
+            # Each pipeline stage holds the source tiles instead of the
+            # operand tile.
+            extra = record.num_stages * (
+                source_tile_bytes - record.tile_elems * operand.get_dtype().itemsize
+            )
+            if shared + extra > get_gpu_shared_memory():
+                why(
+                    "descriptor prologue fusion: sources need %d more bytes of shared memory",
+                    extra,
+                )
+                return False
+
+        device = template_buf.get_device_or_error()
+        props = torch.cuda.get_device_properties(device)
+        dram_bw = get_gpu_dram_gbps() * 1e9
+        num_sms = get_num_sms()
+        out_numel = sizevars.optimization_hint(
+            sympy_product(template_buf.get_size()), fallback=0
+        )
+        tflops = get_device_tflops(operand.get_dtype(), device)
+        mma_s = 2 * out_numel * record.k / (tflops * 1e12) if tflops > 0 else 0.0
+        wave_tiles = math.ceil(num_sms / record.reuse)
+        working_set = read_bytes * min(1.0, wave_tiles / max(record.tiles, 1))
+        source_reads = (
+            read_bytes
+            if working_set <= props.L2_cache_size / 2
+            else read_bytes * record.reuse
+        )
+        transform_s = (
+            operand_numel
+            * record.reuse
+            / (
+                num_sms
+                * props.clock_rate
+                * 1e3
+                * config.triton.prologue_transform_elems_per_cycle
+            )
+        )
+        unfused_s = (read_bytes + write_bytes) / dram_bw + max(
+            mma_s, write_bytes / dram_bw
+        )
+        fused_s = max(source_reads / dram_bw, mma_s + transform_s)
+        if fused_s >= unfused_s:
+            why(
+                "descriptor prologue fusion not profitable: fused %.1f us (reuse %d) "
+                ">= unfused %.1f us",
+                fused_s * 1e6,
+                record.reuse,
+                unfused_s * 1e6,
+            )
+            return False
+        return True
+
     def check_prologue_fusion_heuristics_fusable(
         self,
         prologue_node: BaseSchedulerNode,
@@ -10675,6 +10886,28 @@ class Scheduler:
 
         read_bytes = prologue_node.get_read_buffer_sizes()
         write_bytes = prologue_node.get_write_buffer_sizes()
+
+        template_buf = template_node.get_template_node_or_throw()
+        load_input_reuse = getattr(template_buf, "load_input_reuse", {})
+        reuse_inputs = [
+            name
+            for name in prologue_node.get_buffer_names()
+            if name in load_input_reuse
+        ]
+        if reuse_inputs:
+            if len(reuse_inputs) != 1:
+                why(
+                    "descriptor prologue fusion: producer writes several template inputs"
+                )
+                return False
+            return self._descriptor_prologue_profitable(
+                prologue_node,
+                template_buf,
+                reuse_inputs[0],
+                read_bytes,
+                write_bytes,
+                why,
+            )
 
         # Initially, only do fusions which will result in fewer memory accesses inside of the template to avoid
         # potential bad cache behavior and shared memory use.
