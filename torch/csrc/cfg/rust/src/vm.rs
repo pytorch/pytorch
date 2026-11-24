@@ -4810,6 +4810,13 @@ impl Compiled {
             self.met_mode();
             return self.exec_op(regs, fallback);
         }
+        // Nor while a class of tensors reads its attributes with a
+        // `__getattribute__` of somebody's: the interpreter calls it for
+        // the method or the getter that the instruction takes off its
+        // tensor, and a site made of such a run would leave it out.
+        if matches!(fallback, Op::CallMethod { .. } | Op::LoadAttr(..)) && !graph::reads_are_plain() {
+            return self.exec_op(regs, fallback);
+        }
         let misses = slot.misses.fetch_add(1, Ordering::Relaxed);
         if n < self.options.max_site_variants && misses < MAX_CAPTURE_ATTEMPTS as u64 * 4 {
             let (result, site, _, _, _) = self.capture_exec(regs, fallback, slot.kind, api);
@@ -4986,6 +4993,21 @@ impl Compiled {
     #[inline(always)]
     unsafe fn reads_quietly(api: Option<&TcfgApi>) -> bool {
         api.is_some_and(|api| !modes_on(api)) && graph::sizes_are_own()
+    }
+
+    /// What a read of a size gives (`Op::TensorSize`, `Op::TensorDim`) where
+    /// its operand is still what the guard at the entry of the block was
+    /// for: a tensor the C API knows, with the dimension. None where it is
+    /// not: the class of an argument can be assigned between the entry of
+    /// the block and the read.
+    #[inline(always)]
+    unsafe fn read_size(op: &Op, regs: &[Obj], api: Option<&TcfgApi>) -> Option<i64> {
+        let mut info = TcfgTensorInfo::empty();
+        match (op, api) {
+            (Op::TensorSize { t, dim }, Some(api)) if (api.tensor_info)(reg(regs, *t), &mut info) != 0 => info.size(*dim),
+            (Op::TensorDim(t), Some(api)) if (api.tensor_info)(reg(regs, *t), &mut info) != 0 => Some(info.ndim as i64),
+            _ => None,
+        }
     }
 
     /// Runs the instructions that a read of a size in a specialized block
@@ -7016,8 +7038,15 @@ impl Compiled {
         };
         // A read of a size where the interpreter would run Python code is
         // no instruction of a path: the block loop runs what it stands for.
-        if matches!(inst.op, Op::TensorSize { .. } | Op::TensorDim(_)) && !Self::reads_quietly(Some(api)) {
-            return Taken::Ends("a read of a size runs Python code".to_string());
+        if matches!(inst.op, Op::TensorSize { .. } | Op::TensorDim(_)) {
+            if !Self::reads_quietly(Some(api)) {
+                return Taken::Ends("a read of a size runs Python code".to_string());
+            }
+            // Nor is one whose operand is no longer the tensor that the
+            // guard at the entry of the block was for.
+            if Self::read_size(&inst.op, regs, Some(api)).is_none() {
+                return Taken::Ends("a read of a size of what is no longer the tensor it was at the entry of the block".to_string());
+            }
         }
         if let Op::Yield(v) = &inst.op {
             // The code of a generator that `tuple` or `list` goes over:
@@ -11199,16 +11228,25 @@ impl Compiled {
                                 Ok(null_mut())
                             }
                             Op::CaughtLasti => Ok(frames.top().lasti()),
-                            // A read of a size where the interpreter would
-                            // run Python code: the instructions it stands
-                            // for run.
-                            Op::TensorSize { .. } | Op::TensorDim(_) if !Self::reads_quietly(api) && *code_ref.origins.get_unchecked(pc) != NONE => {
-                                let last = *code_ref.origins.get_unchecked(pc) as usize;
-                                match self.read_again(cur, last, regs, frames) {
-                                    Ok(obj) => Ok(obj),
-                                    Err(bc) => {
-                                        self.fail(frames, bc);
-                                        raised!('blocks, cur);
+                            // A read of a size asks for itself: where the
+                            // interpreter would run Python code there, or
+                            // the operand is no longer the tensor that the
+                            // guard at the entry of the block was for, the
+                            // instructions it stands for run.
+                            Op::TensorSize { .. } | Op::TensorDim(_) if *code_ref.origins.get_unchecked(pc) != NONE => {
+                                frames.top().at(inst.bc & OFFSET_MASK);
+                                let read = if Self::reads_quietly(api) { Self::read_size(&inst.op, regs, api) } else { None };
+                                match read {
+                                    Some(size) => checked(ffi::PyLong_FromLongLong(size)),
+                                    None => {
+                                        let last = *code_ref.origins.get_unchecked(pc) as usize;
+                                        match self.read_again(cur, last, regs, frames) {
+                                            Ok(obj) => Ok(obj),
+                                            Err(bc) => {
+                                                self.fail(frames, bc);
+                                                raised!('blocks, cur);
+                                            }
+                                        }
                                     }
                                 }
                             }

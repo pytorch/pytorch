@@ -107,18 +107,109 @@ fn version(obj: &Bound<'_, PyAny>) -> u64 {
     info(obj).map_or(capi::TCFG_NO_VERSION, |found| found.version)
 }
 
+/// Where the values of a tensor are. Another place behind the call says
+/// that the tensor was given other data (`t.data = ...`), which moves no
+/// version.
+fn memory(obj: &Bound<'_, PyAny>) -> usize {
+    info(obj).map_or(0, |found| found.data as usize)
+}
+
 fn requires_grad(obj: &Bound<'_, PyAny>) -> bool {
     info(obj).is_some_and(|found| found.requires_grad != 0)
 }
 
-/// What a tensor is a view of, if it is one.
+/// What a tensor is a view of, if it is one: asked of the getter of the
+/// class under every tensor, not by name on the tensor.
 fn base_of<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Option<Bound<'py, PyAny>>> {
-    let base = obj.getattr("_base")?;
+    let base = unsafe { crate::graph::base_of(obj.as_ptr()) };
+    if base.is_null() {
+        return Err(PyRuntimeError::new_err("torch.vm: what a tensor is a view of cannot be read"));
+    }
+    let base = unsafe { Bound::from_owned_ptr(obj.py(), base) };
     Ok(if base.is_none() { None } else { Some(base) })
+}
+
+/// The node of autograd that made a tensor, if one did: asked of the
+/// getter of the class under every tensor, not by name on the tensor.
+fn node_of<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let node = unsafe { crate::graph::node_of(obj.as_ptr()) };
+    if node.is_null() {
+        return Err(PyRuntimeError::new_err("torch.vm: the node that made a tensor cannot be read"));
+    }
+    let node = unsafe { Bound::from_owned_ptr(obj.py(), node) };
+    Ok(if node.is_none() { None } else { Some(node) })
 }
 
 fn key(obj: &Bound<'_, PyAny>) -> usize {
     obj.as_ptr() as usize
+}
+
+/// `detach`, `requires_grad_` and `clone` of the class under every
+/// tensor, found once: what is on a class of tensors under those names is
+/// not asked.
+fn tensor_methods(py: Python<'_>) -> PyResult<&'static (Py<PyAny>, Py<PyAny>, Py<PyAny>)> {
+    static METHODS: Once<(Py<PyAny>, Py<PyAny>, Py<PyAny>)> = Once::new();
+    if METHODS.get().is_none() {
+        let class = pyffi::of_module(py, c"torch._C", c"TensorBase")?;
+        METHODS.set((class.getattr("detach")?.unbind(), class.getattr("requires_grad_")?.unbind(), class.getattr("clone")?.unbind()));
+    }
+    Ok(METHODS.get().expect("kept"))
+}
+
+/// A copy of a tensor, made by the method of the class under every
+/// tensor.
+fn copy<'py>(tensor: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    tensor_methods(tensor.py())?.2.bind(tensor.py()).call1((tensor,))
+}
+
+/// Another tensor in the memory of a tensor, with its version and without
+/// its history: it holds the memory, not the tensor.
+fn alias<'py>(tensor: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    tensor_methods(tensor.py())?.0.bind(tensor.py()).call1((tensor,))
+}
+
+/// An alias of a tensor that is a leaf of its own: where the forward runs
+/// once more on the tape, the gradient at it is the contribution to the
+/// gradient of the tensor.
+fn leaf<'py>(tensor: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    tensor_methods(tensor.py())?.1.bind(tensor.py()).call1((alias(tensor)?,))
+}
+
+/// A tensor in the memory of a tensor, with its version, that has its
+/// history and holds neither the tensor nor its Python object
+/// (`torch.vm._handle.GraphInput`): it is no view of the tensor, and its
+/// node hands a gradient on to the node that made the tensor.
+fn handle<'py>(tensor: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    static MAKE: Once<Py<PyAny>> = Once::new();
+    let py = tensor.py();
+    if MAKE.get().is_none() {
+        MAKE.set(pyffi::of_module(py, c"torch.vm._handle", c"GraphInput")?.getattr("apply")?.unbind());
+    }
+    served(5);
+    MAKE.get().expect("kept").bind(py).call1((tensor,))
+}
+
+/// Whether the backward that runs on this thread retains the graph: asked
+/// of the autograd engine. A backward that does not is followed by the
+/// release of every node it ran.
+fn retains(py: Python<'_>) -> PyResult<bool> {
+    static ASK: Once<Py<PyAny>> = Once::new();
+    if ASK.get().is_none() {
+        ASK.set(torch(py)?.getattr("_C")?.getattr("_autograd")?.getattr("_get_current_graph_task_keep_graph")?.unbind());
+    }
+    ASK.get().expect("kept").bind(py).call0()?.extract()
+}
+
+/// How many backwards the backward graph of a form served, how many ran
+/// the forward once more on the tape (without and with `create_graph`),
+/// how many calls of a form kept eager's tape for an input whose storage
+/// is watched, how many aliases of inputs the nodes were given, and how
+/// many of those came with a tensor that has the history of the input.
+static SERVED: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
+const SERVED_NAMES: [&str; 6] = ["graph", "again", "create_graph", "watched", "aliases", "histories"];
+
+fn served(which: usize) {
+    SERVED[which].fetch_add(1, Ordering::Relaxed);
 }
 
 /// Whether a value is a device or a dtype.
@@ -595,6 +686,10 @@ struct Graph {
     /// back: the tensor, and the dimension for a size.
     exits: Vec<(Operand, Option<i64>)>,
     values: usize,
+    /// For a part of a form that is cut: whether the results of that form
+    /// were looked at together for a second backward (`returns_twice`),
+    /// so that the part is not looked at by itself.
+    checked: bool,
 }
 
 fn operand(described: &Bound<'_, PyAny>) -> PyResult<Operand> {
@@ -906,7 +1001,7 @@ impl Graph {
             let dim = if kind == "size" { Some(exit.get_item(2)?.extract()?) } else { None };
             exits.push((operand(&exit.get_item(1)?)?, dim));
         }
-        let mut graph = Graph { inputs, steps, outputs, held, exits, values: 0 };
+        let mut graph = Graph { inputs, steps, outputs, held, exits, values: 0, checked: false };
         graph.count();
         Ok(graph)
     }
@@ -914,7 +1009,7 @@ impl Graph {
     /// Operations of a joint graph as a graph of their own: it takes the
     /// values `takes` and gives the values `gives`, of which `held` says
     /// which something can hold behind the form.
-    fn kernels(ops: &Bound<'_, PyList>, takes: Vec<Value>, gives: Vec<Value>, held: Vec<bool>) -> PyResult<Graph> {
+    fn kernels(ops: &Bound<'_, PyList>, takes: Vec<Value>, gives: Vec<Value>, held: Vec<bool>, checked: bool) -> PyResult<Graph> {
         let mut steps = Vec::new();
         for op in ops.iter() {
             let mut kwargs = Vec::new();
@@ -925,7 +1020,7 @@ impl Graph {
             let kind = Kind::Kernel(op.get_item(0)?.unbind(), operands(&op.get_item(1)?)?, kwargs, places, op.get_item(4)?.extract()?);
             steps.push(Step { kind, value: None });
         }
-        let mut graph = Graph { inputs: takes, steps, outputs: gives, held, exits: Vec::new(), values: 0 };
+        let mut graph = Graph { inputs: takes, steps, outputs: gives, held, exits: Vec::new(), values: 0, checked };
         graph.count();
         Ok(graph)
     }
@@ -1037,10 +1132,16 @@ struct Nodes<'py> {
 
 impl<'py> Nodes<'py> {
     fn new(feeds: &[Bound<'py, PyAny>], roots: Vec<Bound<'py, PyAny>>) -> Result<Nodes<'py>, Stop> {
+        Nodes::over(feeds.iter().map(Node::of_tensor).collect::<PyResult<_>>()?, roots)
+    }
+
+    /// With, per input, the node its gradient goes to and which of that
+    /// node's inputs it is, in place of the input.
+    fn over(leads: Vec<Option<(Node<'py>, u32)>>, roots: Vec<Bound<'py, PyAny>>) -> Result<Nodes<'py>, Stop> {
         let mut edges: HashMap<(usize, u32), u32> = HashMap::new();
         let mut starts = Vec::new();
-        for (at, feed) in feeds.iter().enumerate() {
-            if let Some((node, input)) = Node::of_tensor(feed)? {
+        for (at, lead) in leads.into_iter().enumerate() {
+            if let Some((node, input)) = lead {
                 edges.entry((node.key(), input)).or_insert(at as u32);
                 starts.push(node);
             }
@@ -1318,8 +1419,25 @@ struct Shape {
     found: Vec<(usize, bool)>,
 }
 
+/// An input that a node of eager's holds for as long as it has what it
+/// saved: the node saved the input itself, or a view of it that the graph
+/// made, and a view holds what it is a view of.
+#[derive(Clone, PartialEq)]
+struct Keeps {
+    /// The node, as the nodes run at a backward.
+    node: u32,
+    /// Where the node is among them in the order in which a graph that
+    /// ends lets go of its nodes.
+    ends: u32,
+    feed: u32,
+    view: bool,
+}
+
 struct Taken {
     joint: Joint,
+    /// What eager's nodes keep of the inputs, in the order in which the
+    /// nodes run and each lets go of what it saved.
+    keeps: Vec<Keeps>,
     /// Which steps of the form's graph ran kernels.
     ran: Vec<bool>,
     /// Per value of the form's graph that is behind the kernels: what it is.
@@ -1328,6 +1446,9 @@ struct Taken {
     shape: Shape,
     /// Where the form is cut in two, in place of a backward.
     cut: Option<usize>,
+    /// For a form that is cut: whether its results were looked at
+    /// together for a second backward (`Graph::checked` of its parts).
+    checked: bool,
     /// The values of the results that something can hold behind the form.
     held: Vec<Value>,
     /// The autocast the forward ran under.
@@ -1340,7 +1461,8 @@ impl Taken {
             return Some(why);
         }
         let marks = self.marks.len() == other.marks.len() && self.marks.iter().zip(&other.marks).all(|(a, b)| a.0 == b.0 && a.1.same(&b.1));
-        if !marks || self.ran != other.ran || self.targets != other.targets || self.shape != other.shape || self.cut != other.cut || !self.cast.same(&other.cast) {
+        let same = self.ran == other.ran && self.targets == other.targets && self.shape == other.shape && self.cut == other.cut && self.keeps == other.keeps;
+        if !marks || !same || !self.cast.same(&other.cast) {
             return Some("two runs give the graph's tensors as other values".to_string());
         }
         None
@@ -1353,6 +1475,111 @@ struct Event<'py> {
     view: bool,
     args: Bound<'py, PyTuple>,
     out: Bound<'py, PyAny>,
+}
+
+/// The input that a tensor of a run is a view of, where view operations
+/// of the graph alone made it of that input.
+fn viewed<'py>(events: &[Event<'py>], made: &HashMap<usize, usize>, feeds: &[Bound<'py, PyAny>], tensor: &Bound<'py, PyAny>) -> Option<usize> {
+    let mut tensor = tensor.clone();
+    for _ in 0..=events.len() {
+        let event = &events[*made.get(&key(&tensor))?];
+        if !event.view {
+            return None;
+        }
+        tensor = event.args.get_item(0).ok().filter(is_tensor)?;
+        if let Some(feed) = feeds.iter().position(|feed| feed.is(&tensor)) {
+            return Some(feed);
+        }
+    }
+    None
+}
+
+/// Where each node is in the order in which a graph that ends lets go of
+/// its nodes, the roots ending in their order: a node lets go of what it
+/// saved, then of the nodes that its edges alone still hold, the one
+/// behind its last edge first (`deleteNode` of autograd). `numbers` says
+/// which node of `order` a key is.
+fn ends(nodes: &Nodes<'_>, numbers: &HashMap<usize, u32>) -> Vec<u32> {
+    let inside = |lead: &Option<(usize, u32)>| lead.and_then(|(key, _)| numbers.get(&key).copied());
+    let mut held = vec![0u32; nodes.order.len()];
+    for to in nodes.next.iter().flatten().filter_map(inside) {
+        held[to as usize] += 1;
+    }
+    let seats: Vec<u32> = nodes.seats.iter().filter_map(|(key, _)| numbers.get(key).copied()).collect();
+    for seat in &seats {
+        held[*seat as usize] += 1;
+    }
+    let mut places = vec![u32::MAX; nodes.order.len()];
+    let mut place = 0;
+    for seat in seats {
+        held[seat as usize] -= 1;
+        let mut stack = if held[seat as usize] == 0 { vec![seat] } else { Vec::new() };
+        while let Some(node) = stack.pop() {
+            places[node as usize] = place;
+            place += 1;
+            for to in nodes.next[node as usize].iter().filter_map(inside) {
+                held[to as usize] -= 1;
+                if held[to as usize] == 0 {
+                    stack.push(to);
+                }
+            }
+        }
+    }
+    places
+}
+
+/// What a node of eager's saved, by the names it keeps it under: the
+/// tensors of each.
+fn saved<'py>(node: &Node<'py>) -> PyResult<Vec<(String, Vec<Bound<'py, PyAny>>)>> {
+    let mut all = Vec::new();
+    for name in crate::asks::saved_names(&node.obj)? {
+        let Ok(held) = node.obj.getattr(name.as_str()) else {
+            continue;
+        };
+        let mut found = Vec::new();
+        tensors_in(&held, &mut found);
+        all.push((name, found));
+    }
+    Ok(all)
+}
+
+/// Why a graph through which eager goes backward a second time keeps
+/// eager's tape.
+fn twice((first, second): (String, Option<String>)) -> String {
+    let which = match second {
+        None => format!("a second backward for a result of this graph (a result of {first})"),
+        Some(second) => format!("a backward for one result of this graph behind one for another (results of {first} and {second})"),
+    };
+    format!("{which} returns in eager mode where the first did not retain the graph (no node that saved a tensor runs in both), and the node of a graph is released as one")
+}
+
+/// Two roots (or one, twice) whose backwards share no node that saved a
+/// tensor: eager goes backward for the second behind a backward for the
+/// first that did not retain the graph, since a node raises only for
+/// what it saved and has let go of. `saves` says which nodes saved one.
+/// Returns the names of the nodes of the two; of the one, for one twice.
+fn returns_twice(nodes: &Nodes<'_>, numbers: &HashMap<usize, u32>, saves: &[bool]) -> Option<(String, Option<String>)> {
+    let inside = |lead: &Option<(usize, u32)>| lead.and_then(|(key, _)| numbers.get(&key).copied());
+    let mut reached: Vec<Vec<bool>> = Vec::new();
+    for (key, _) in &nodes.seats {
+        let mut seen = vec![false; nodes.order.len()];
+        let mut stack: Vec<u32> = numbers.get(key).copied().into_iter().collect();
+        while let Some(node) = stack.pop() {
+            if !std::mem::replace(&mut seen[node as usize], true) {
+                stack.extend(nodes.next[node as usize].iter().filter_map(inside));
+            }
+        }
+        reached.push(seen);
+    }
+    for first in 0..reached.len() {
+        for second in first..reached.len() {
+            if !(0..saves.len()).any(|node| saves[node] && reached[first][node] && reached[second][node]) {
+                let name = |root: usize| numbers.get(&nodes.seats[root].0).map_or(String::new(), |node| nodes.order[*node as usize].name.clone());
+                return Some((name(first), (first != second).then(|| name(second))));
+            }
+        }
+    }
+    None
 }
 
 /// Runs the graph of a form on the tape, one step after the other, and
@@ -1495,10 +1722,35 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
     let (shape, roots, readers) = match shaped(py, &joint, feeds, &results, &reached, events) {
         Ok(found) => found,
         Err(Stop::Cut(at)) if at > 0 => {
+            // The parts of a form that is cut have a node each, released
+            // apart. Whether eager goes backward a second time is a
+            // question of the form's own results and of all of eager's
+            // nodes for them: it is asked here, of the whole form, and
+            // its parts are not asked again. Where the nodes cannot be
+            // gone through as a whole, each part is asked by itself.
+            let mut checked = graph.checked;
+            if !checked {
+                let graded: Vec<Bound<'py, PyAny>> = results.iter().filter(|result| requires_grad(result)).cloned().collect();
+                match Nodes::new(feeds, graded) {
+                    Ok(nodes) => {
+                        let numbers: HashMap<usize, u32> = nodes.order.iter().enumerate().map(|(at, node)| (node.key(), at as u32)).collect();
+                        let mut saves = Vec::new();
+                        for node in &nodes.order {
+                            saves.push(saved(node)?.iter().any(|(_, found)| !found.is_empty()));
+                        }
+                        if let Some(pair) = returns_twice(&nodes, &numbers, &saves) {
+                            return refused(twice(pair));
+                        }
+                        checked = true;
+                    }
+                    Err(Stop::Raised(error)) => return Err(Stop::Raised(error)),
+                    Err(_) => {}
+                }
+            }
             joint_says(py, joint.results(results.clone(), vec![false; results.len()]))?;
             joint.finish();
             let shape = Shape { roots: Vec::new(), views: Vec::new(), outer: Vec::new(), sources: Vec::new(), found: Vec::new() };
-            return Ok(Taken { joint, ran, marks, targets: Vec::new(), shape, cut: Some(at), held, cast: Cast::now(py)? });
+            return Ok(Taken { joint, keeps: Vec::new(), ran, marks, targets: Vec::new(), shape, cut: Some(at), checked, held, cast: Cast::now(py)? });
         }
         Err(stop) => return Err(stop),
     };
@@ -1596,21 +1848,51 @@ fn taken<'py>(py: Python<'py>, graph: &Graph, feeds: &[Bound<'py, PyAny>], value
         }
     }
     // What each node kept of the forward, in the order it looks at it when
-    // it runs: by the names it keeps it under.
+    // it runs: by the names it keeps it under, which is also the order in
+    // which it lets go of it. Of the inputs it holds those it kept, and
+    // those it kept a view of.
+    let mut made: HashMap<usize, usize> = HashMap::new();
+    for (at, event) in events.iter().enumerate() {
+        let mut given = Vec::new();
+        tensors_in(&event.out, &mut given);
+        made.extend(given.iter().map(|tensor| (key(tensor), at)));
+    }
+    let ends = ends(&nodes, &numbers);
+    let mut keeps: Vec<Keeps> = Vec::new();
+    let mut saves = vec![false; nodes.order.len()];
     for (number, node) in nodes.order.iter().enumerate() {
         let mut kept: Vec<Value> = Vec::new();
-        for name in crate::asks::saved_names(&node.obj)? {
-            let Ok(held) = node.obj.getattr(name.as_str()) else {
-                continue;
-            };
-            let mut found = Vec::new();
-            tensors_in(&held, &mut found);
+        for (_, found) in saved(node)? {
+            saves[number] |= !found.is_empty();
             kept.extend(found.iter().filter_map(|tensor| joint.value(tensor)));
+            for tensor in &found {
+                let own = feeds.iter().position(|feed| feed.is(tensor));
+                let Some(feed) = own.or_else(|| viewed(events, &made, feeds, tensor)) else {
+                    continue;
+                };
+                let keep = Keeps { node: number as u32, ends: ends[number], feed: feed as u32, view: own.is_none() };
+                if !keeps.contains(&keep) {
+                    keeps.push(keep);
+                }
+            }
         }
         joint.kept_by(number as u32, kept);
     }
+    if crate::graph::debug() {
+        let kept: Vec<String> = keeps.iter().map(|keep| format!("{}{} by {} (node {}, ends {})", if keep.view { "a view of " } else { "" }, keep.feed, nodes.order[keep.node as usize].name, keep.node, keep.ends as i32)).collect();
+        eprintln!("torch.vm graph: what eager's nodes keep of the inputs: [{}]", kept.join(", "));
+    }
+    // Behind a backward that did not retain the graph, eager goes backward
+    // again where no node that runs has let go of something it saved. The
+    // node of a graph is released as one, and raises at every backward
+    // behind that: a graph through which eager would go keeps eager's tape.
+    if !graph.checked {
+        if let Some(pair) = returns_twice(&nodes, &numbers, &saves) {
+            return refused(twice(pair));
+        }
+    }
     joint.finish();
-    Ok(Taken { joint, ran, marks, targets: nodes.targets.clone(), shape, cut: None, held, cast })
+    Ok(Taken { joint, keeps, ran, marks, targets: nodes.targets.clone(), shape, cut: None, checked: graph.checked, held, cast })
 }
 
 /// The roots, and how the results are made of them: for a result that is a
@@ -1645,7 +1927,7 @@ fn shaped<'py>(
         }
         let Some(base) = base_of(result)? else {
             if !roots.iter().any(|root| root.is(result)) {
-                if result.getattr("grad_fn")?.is_none() {
+                if node_of(result)?.is_none() {
                     return refused("a result is a leaf that was made in the graph");
                 }
                 roots.push(result.clone());
@@ -1683,7 +1965,7 @@ fn shaped<'py>(
                 let which = match roots.iter().position(|root| root.is(&tensor)) {
                     Some(which) => which,
                     None => {
-                        if tensor.getattr("grad_fn")?.is_none() {
+                        if node_of(&tensor)?.is_none() {
                             return refused("a result is a leaf that was made in the graph");
                         }
                         roots.push(tensor.clone());
@@ -1848,6 +2130,19 @@ struct Plan {
     /// each with whether the node that looks at it first is the one that
     /// gave it.
     looked: Mutex<HashMap<(u32, Vec<bool>, Vec<bool>), Arc<Vec<(Value, bool)>>>>,
+    /// Per such backward: which of eager's nodes run in it; None where
+    /// that is not known, which is taken as all of them.
+    runs: Mutex<HashMap<(u32, Vec<bool>, Vec<bool>), Option<Arc<Vec<bool>>>>>,
+    /// What eager's nodes keep of the inputs (`Taken::keeps`), and per
+    /// input: which of these are for it, whether a node keeps the input
+    /// itself, whether one keeps a view of it, and whether a gradient
+    /// goes to it.
+    keeps: Vec<Keeps>,
+    keepers: Vec<Vec<u32>>,
+    kept: Vec<(bool, bool)>,
+    target: Vec<bool>,
+    /// Per input: whether it is among what the forward keeps (`saved`).
+    in_saved: Vec<bool>,
     /// Whether the forward can run again: it draws no random numbers and
     /// writes to no tensor from outside.
     again: bool,
@@ -1885,11 +2180,21 @@ fn runner<'py>(py: Python<'py>, export: &Option<Py<PyAny>>, ops: &Bound<'py, PyA
 
 impl Plan {
     fn new<'py>(py: Python<'py>, graph: Arc<Graph>, taken: Taken, export: Option<Py<PyAny>>, feeds: &[Bound<'py, PyAny>]) -> Result<Plan, Stop> {
-        let Taken { joint, ran, marks, targets, shape, cast, .. } = taken;
+        let Taken { joint, keeps, ran, marks, targets, shape, cast, .. } = taken;
+        let mut keepers: Vec<Vec<u32>> = vec![Vec::new(); feeds.len()];
+        let mut kept = vec![(false, false); feeds.len()];
+        for (at, keep) in keeps.iter().enumerate() {
+            keepers[keep.feed as usize].push(at as u32);
+            let (own, view) = &mut kept[keep.feed as usize];
+            *own |= !keep.view;
+            *view |= keep.view;
+        }
+        let target: Vec<bool> = (0..feeds.len() as u32).map(|feed| targets.contains(&feed)).collect();
         let described = joint.describe(py)?;
         let part = |name: &str| described.get_item(name)?.ok_or_else(|| PyRuntimeError::new_err("torch.vm: the joint graph does not say what it should"));
         let inputs: u32 = part("inputs")?.extract()?;
         let saved: Vec<Value> = part("saved")?.extract()?;
+        let in_saved: Vec<bool> = (0..feeds.len() as u32).map(|feed| saved.contains(&feed)).collect();
         let checked: Vec<(Value, Option<String>, u32)> = part("checked")?.extract()?;
         let results: Vec<Value> = part("results")?.extract()?;
         let mut named: HashMap<Value, Named> = HashMap::new();
@@ -1926,7 +2231,7 @@ impl Plan {
         }
         // The operations behind the node: each takes a root, an input, or
         // what another of them gave.
-        let outer = Graph::kernels(&joint.described_forward(py, &shape.outer)?, Vec::new(), Vec::new(), Vec::new())?.steps;
+        let outer = Graph::kernels(&joint.described_forward(py, &shape.outer)?, Vec::new(), Vec::new(), Vec::new(), false)?.steps;
         let mut known: HashSet<Value> = shape.sources.iter().map(|(value, _, _)| *value).collect();
         for step in &outer {
             if !step.reads().iter().all(|value| known.contains(value)) {
@@ -1951,6 +2256,12 @@ impl Plan {
             watched,
             operands,
             looked: Mutex::new(HashMap::new()),
+            runs: Mutex::new(HashMap::new()),
+            keeps,
+            keepers,
+            kept,
+            target,
+            in_saved,
             again,
             outer,
             behind,
@@ -2014,6 +2325,21 @@ impl Plan {
         found
     }
 
+    /// Which of eager's nodes run when a backward for these roots and
+    /// these contributions (none: all of them) runs; None where that is
+    /// not known.
+    fn ran(&self, way: u32, pattern: &[bool], needed: &[bool]) -> Option<Arc<Vec<bool>>> {
+        let key = (way, pattern.to_vec(), needed.to_vec());
+        if let Some(known) = self.runs.lock().unwrap().get(&key) {
+            return known.clone();
+        }
+        let mut whole = pattern.to_vec();
+        whole.resize(self.joint.results_len(), false);
+        let found = self.joint.runs(&whole, way, (!needed.is_empty()).then_some(needed)).map(Arc::new);
+        self.runs.lock().unwrap().insert(key, found.clone());
+        found
+    }
+
     /// The roots, of the results of another run on the tape.
     fn roots_of<'py>(&self, results: &[Bound<'py, PyAny>]) -> PyResult<Vec<Bound<'py, PyAny>>> {
         let mut roots = Vec::new();
@@ -2025,15 +2351,95 @@ impl Plan {
     }
 }
 
+/// What the node of a call has of an input of the graph. It holds the
+/// input itself only where eager's nodes hold it, and for as long as they
+/// do: what only the input holds ends where eager ends it.
+enum Fed {
+    /// What is no tensor.
+    Plain(Py<PyAny>),
+    /// A leaf that requires a gradient and that a gradient goes to: what
+    /// adds its gradient up holds it for as long as the graph lives.
+    Leaf(Py<PyAny>),
+    /// An input that nodes of eager's keep (`Plan::keeps`), until those
+    /// nodes have run in a backward that does not retain the graph; with
+    /// the flag it is itself a view, which a kept view of it does not hold.
+    Kept(Py<PyAny>, bool),
+    /// Any other tensor: another tensor in the same memory, and what
+    /// stands for the history of the input.
+    Alias(Py<PyAny>, History),
+    /// Nothing: let go of, or never needed.
+    Gone,
+}
+
+/// What stands for the history of an input that the node of a graph
+/// holds an alias of.
+enum History {
+    /// Nothing: no gradient goes to the input.
+    None,
+    /// A tensor in the memory of the input that has its history (`handle`):
+    /// what a backward that is differentiated again goes through. Only for
+    /// an input that no node of eager's keeps: a node that keeps an input
+    /// names it, and its own node, where it was written to in place.
+    Has(Py<PyAny>),
+    /// The same tensor is another input of the graph, which the node holds
+    /// itself (a leaf, or what a node of eager's keeps): that one.
+    Same(usize),
+    /// The nodes of the tape that the node keeps: they saved the input
+    /// itself. The alias is let go of with that tape.
+    Taped,
+}
+
+impl History {
+    fn clone_ref(&self, py: Python<'_>) -> History {
+        match self {
+            History::None => History::None,
+            History::Has(with) => History::Has(with.clone_ref(py)),
+            History::Same(other) => History::Same(*other),
+            History::Taped => History::Taped,
+        }
+    }
+}
+
+impl Fed {
+    fn clone_ref(&self, py: Python<'_>) -> Fed {
+        match self {
+            Fed::Plain(held) => Fed::Plain(held.clone_ref(py)),
+            Fed::Leaf(held) => Fed::Leaf(held.clone_ref(py)),
+            Fed::Kept(held, view) => Fed::Kept(held.clone_ref(py), *view),
+            Fed::Alias(held, with) => Fed::Alias(held.clone_ref(py), with.clone_ref(py)),
+            Fed::Gone => Fed::Gone,
+        }
+    }
+}
+
+/// The tape that a backward with `create_graph` ran the forward on once
+/// more: its roots, and per input that a gradient goes to the node it
+/// goes to there and which of that node's inputs it is.
+struct Taped {
+    roots: Vec<Py<PyAny>>,
+    leads: Vec<Option<(Py<PyAny>, u32)>>,
+}
+
 /// What one call of a proven form keeps for its backward. The node of the
 /// call holds it.
 struct Kept {
     plan: Arc<Plan>,
-    feeds: Vec<Py<PyAny>>,
+    feeds: Mutex<Vec<Fed>>,
     fed: Vec<u64>,
+    /// Where the values of each input were at the call.
+    memory: Vec<usize>,
     /// What the forward kept, with the version each tensor was at; let go
     /// when a backward that does not retain the graph has run.
     saved: Mutex<Vec<(Py<PyAny>, u64)>>,
+    /// Behind a backward that does not retain the graph, until the release
+    /// that follows it: which of eager's nodes it ran (`Plan::ran`; None
+    /// inside: all of them). That release lets go of what those nodes
+    /// kept; a release that no such backward went in front of is the
+    /// graph's end.
+    ran: Mutex<Option<Option<Arc<Vec<bool>>>>>,
+    /// Once a backward with `create_graph` has run: its tape, whose nodes
+    /// hold the inputs as eager's hold them.
+    tape: Mutex<Option<Taped>>,
     /// The roots that are checked for writes (`Plan::watched`), each for
     /// as long as it lives: the node must not hold what holds the node.
     roots: Vec<Py<PyWeakrefReference>>,
@@ -2077,10 +2483,18 @@ impl Kept {
         self.saved.lock().unwrap().iter().map(|(tensor, at)| (tensor.bind(py).clone(), *at)).collect()
     }
 
+    /// An input of the call, if the node holds it.
+    fn input<'py>(&self, py: Python<'py>, at: usize) -> Option<Bound<'py, PyAny>> {
+        match self.feeds.lock().unwrap().get(at)? {
+            Fed::Leaf(held) | Fed::Kept(held, _) => Some(held.bind(py).clone()),
+            _ => None,
+        }
+    }
+
     /// The tensor a caller has of a value that is checked, if it lives.
     fn live<'py>(&self, py: Python<'py>, named: &Named) -> Option<Bound<'py, PyAny>> {
         match named.held {
-            Held::Feed(at) => Some(self.feeds[at].bind(py).clone()),
+            Held::Feed(at) => self.input(py, at),
             Held::Root(root) => {
                 let at = self.plan.watched.iter().position(|watched| *watched == root)?;
                 self.roots[at].bind(py).upgrade()
@@ -2123,7 +2537,7 @@ impl Kept {
             // in place, which eager does not go on from.
             let detached = match named.held {
                 Held::Root(_) => self.live(py, named).is_some_and(|live| !requires_grad(&live)),
-                Held::Feed(feed) => self.grown.contains(&feed) && !requires_grad(self.feeds[feed].bind(py)),
+                Held::Feed(feed) => self.grown.contains(&feed) && self.input(py, feed).is_some_and(|live| !requires_grad(&live)),
                 Held::Result | Held::View => false,
             };
             if !*gave && detached {
@@ -2196,7 +2610,56 @@ impl Kept {
         for (slot, grad) in back.slots.iter().zip(ran) {
             out[*slot as usize] = Some(grad);
         }
+        served(0);
+        let ran = if retains(py)? { None } else { Some(self.plan.ran(way, &pattern, needed)) };
+        *self.ran.lock().unwrap() = ran;
         Ok(out)
+    }
+
+    /// The tensors to run the forward with once more, and whether each is
+    /// at the version it was fed at. An input the node holds is itself.
+    /// An alias stands for an input that no gradient goes to. Where one
+    /// goes to it, a backward that is not differentiated again gets a
+    /// leaf in its place (the gradient at the leaf is the contribution);
+    /// one that is goes through the history of the input, which the
+    /// tensor that was made for it has, unless the tape of an earlier
+    /// such backward is there to go through (`taped`: the versions alone
+    /// are asked for). With them, what was done to an input since the
+    /// call, if something was: a write in place, or other data.
+    fn inputs<'py>(&self, py: Python<'py>, twice: bool, taped: bool) -> PyResult<(Vec<Bound<'py, PyAny>>, Option<&'static str>)> {
+        let held: Vec<Fed> = self.feeds.lock().unwrap().iter().map(|fed| fed.clone_ref(py)).collect();
+        let mut changed: Option<&'static str> = None;
+        let mut feeds: Vec<Bound<'py, PyAny>> = Vec::new();
+        // The same input twice is the same tensor twice.
+        let mut leaves: HashMap<usize, Bound<'py, PyAny>> = HashMap::new();
+        for ((fed, expected), place) in held.iter().zip(&self.fed).zip(&self.memory) {
+            let feed = match fed {
+                Fed::Plain(held) | Fed::Leaf(held) | Fed::Kept(held, _) | Fed::Alias(held, History::None) => held.bind(py).clone(),
+                Fed::Alias(held, _) if taped => held.bind(py).clone(),
+                Fed::Alias(_, History::Same(other)) => match held.get(*other) {
+                    Some(Fed::Leaf(same) | Fed::Kept(same, _)) => same.bind(py).clone(),
+                    _ => return Err(PyRuntimeError::new_err("torch.vm: a backward of a graph runs behind the release of what it kept")),
+                },
+                Fed::Alias(_, History::Has(with)) if twice => with.bind(py).clone(),
+                Fed::Alias(_, History::Taped) if twice => return Err(PyRuntimeError::new_err("torch.vm: the tape of a backward of this graph is gone before an input that it stood for")),
+                Fed::Alias(held, _) => match leaves.get(&(held.as_ptr() as usize)) {
+                    Some(known) => known.clone(),
+                    None => {
+                        let made = leaf(held.bind(py))?;
+                        leaves.insert(held.as_ptr() as usize, made.clone());
+                        made
+                    }
+                },
+                Fed::Gone => return Err(PyRuntimeError::new_err("torch.vm: a backward of a graph runs behind the release of what it kept")),
+            };
+            if version(&feed) != *expected {
+                changed = changed.or(Some("was written to in place"));
+            } else if memory(&feed) != *place {
+                changed = changed.or(Some("was given other data (`.data = ...`)"));
+            }
+            feeds.push(feed);
+        }
+        Ok((feeds, changed))
     }
 
     /// A backward the backward graph does not serve: one that is to be
@@ -2212,25 +2675,47 @@ impl Kept {
                  so it cannot be run again on the tape; torch.vm.passes.Graphs(backward=False) keeps eager's tape for it"
             )));
         }
-        let feeds: Vec<Bound<'py, PyAny>> = self.feeds.iter().map(|feed| feed.bind(py).clone()).collect();
-        if feeds.iter().zip(&self.fed).any(|(feed, expected)| version(feed) != *expected) {
-            return Err(PyRuntimeError::new_err(format!("torch.vm: an input of this graph was written to in place before a backward that {asked}")));
-        }
-        let graph = &self.plan.graph;
-        let values = {
-            // As the forward ran: with gradients, under its autocast.
-            let _mode = GradMode::set(py, true)?;
-            let _cast = self.plan.cast.set(py, false)?;
-            graph.run(py, &feeds)?
-        };
-        let mut results = Vec::new();
-        for value in &graph.outputs {
-            if let Some(held) = &values[*value as usize] {
-                tensors_in(held.bind(py), &mut results);
+        // A backward that is differentiated again goes through the tape
+        // that the first such backward of this call ran, as eager's go
+        // through the one tape of the call: its nodes say themselves what
+        // they no longer have.
+        let taped: Option<(Vec<Bound<'py, PyAny>>, Vec<Option<(Bound<'py, PyAny>, u32)>>)> = match (&*self.tape.lock().unwrap(), twice) {
+            (Some(tape), true) => {
+                let lead = |lead: &Option<(Py<PyAny>, u32)>| lead.as_ref().map(|(node, input)| (node.bind(py).clone(), *input));
+                Some((tape.roots.iter().map(|root| root.bind(py).clone()).collect(), tape.leads.iter().map(lead).collect()))
             }
+            _ => None,
+        };
+        let fresh = taped.is_none();
+        let (feeds, changed) = self.inputs(py, twice, !fresh)?;
+        if let Some(how) = changed {
+            // The forward cannot run again from the values of the call.
+            return Err(PyRuntimeError::new_err(format!("torch.vm: an input of this graph {how} before a backward that {asked}")));
         }
         let wrong = || PyRuntimeError::new_err("torch.vm: the graph did not run again on the tape as it was taken down");
-        let nodes = match Nodes::new(&feeds, self.plan.roots_of(&results)?) {
+        let made = match taped {
+            Some((roots, leads)) => {
+                let leads: PyResult<Vec<Option<(Node<'py>, u32)>>> = leads.into_iter().map(|lead| lead.map(|(node, input)| Ok((Node::of(node)?, input))).transpose()).collect();
+                Nodes::over(leads?, roots)
+            }
+            None => {
+                let graph = &self.plan.graph;
+                let values = {
+                    // As the forward ran: with gradients, under its autocast.
+                    let _mode = GradMode::set(py, true)?;
+                    let _cast = self.plan.cast.set(py, false)?;
+                    graph.run(py, &feeds)?
+                };
+                let mut results = Vec::new();
+                for value in &graph.outputs {
+                    if let Some(held) = &values[*value as usize] {
+                        tensors_in(held.bind(py), &mut results);
+                    }
+                }
+                Nodes::new(&feeds, self.plan.roots_of(&results)?)
+            }
+        };
+        let nodes = match made {
             Ok(nodes) => nodes,
             Err(Stop::Raised(error)) => return Err(error),
             Err(_) => return Err(wrong()),
@@ -2243,11 +2728,159 @@ impl Kept {
                 for (slot, grad) in gives {
                     out[slot as usize] = Some(grad);
                 }
+                served(if twice { 2 } else { 1 });
+                let ran = if retains(py)? { None } else { Some(None) };
+                *self.ran.lock().unwrap() = ran;
+                if twice && fresh {
+                    self.taped(py, &nodes, &feeds)?;
+                }
                 Ok(out)
             }
             Err(Stop::Raised(error)) => Err(error),
             Err(_) => Err(wrong()),
         }
+    }
+
+    /// Keeps the tape that a backward with `create_graph` ran: the nodes
+    /// of that tape are eager's, hold the inputs that eager's nodes keep
+    /// and let go of them where a backward runs through them without
+    /// retaining the graph. So the node holds the tape by its roots, and
+    /// of each such input an alias in the place of the input, unless the
+    /// storage is watched.
+    fn taped<'py>(&self, py: Python<'py>, nodes: &Nodes<'py>, feeds: &[Bound<'py, PyAny>]) -> PyResult<()> {
+        let mut leads = Vec::new();
+        for (at, feed) in feeds.iter().enumerate() {
+            let goes = self.plan.target.get(at).copied().unwrap_or(false);
+            leads.push(if goes { Node::of_tensor(feed)?.map(|(node, input)| (node.obj.unbind(), input)) } else { None });
+        }
+        let roots = nodes.roots.iter().map(|root| root.clone().unbind()).collect();
+        let kept: Vec<(usize, Py<PyAny>)> = {
+            let held = self.feeds.lock().unwrap();
+            held.iter().enumerate().filter_map(|(at, fed)| if let Fed::Kept(held, _) = fed { Some((at, held.clone_ref(py))) } else { None }).collect()
+        };
+        let mut swaps: Vec<(usize, Py<PyAny>, Fed)> = Vec::new();
+        for (at, input) in kept {
+            let bound = input.bind(py);
+            if !unsafe { crate::graph::storage_ends_quietly(bound.as_ptr()) } {
+                continue;
+            }
+            let goes = requires_grad(bound) && self.plan.target.get(at).copied().unwrap_or(false);
+            // The nodes of the tape saved this input: they have its history.
+            let with = if goes { History::Taped } else { History::None };
+            let other = alias(bound)?.unbind();
+            served(4);
+            swaps.push((at, input, Fed::Alias(other, with)));
+        }
+        // Of what the forward kept: such an input itself, and a view of one
+        // (what a program makes of an input by a view operation is a view
+        // of it, and holds it), each for an alias of it.
+        let mut others: Vec<(Py<PyAny>, Py<PyAny>)> = Vec::new();
+        for (tensor, _) in self.held(py) {
+            if let Some((_, _, Fed::Alias(other, _))) = swaps.iter().find(|(_, input, _)| input.bind(py).is(&tensor)) {
+                others.push((tensor.unbind(), other.clone_ref(py)));
+            } else if base_of(&tensor)?.is_some_and(|base| swaps.iter().any(|(_, input, _)| input.bind(py).is(&base))) {
+                let other = alias(&tensor)?.unbind();
+                others.push((tensor.unbind(), other));
+            }
+        }
+        // What was there ends behind the locks, and the tape holds it.
+        let mut before: Vec<Py<PyAny>> = Vec::new();
+        {
+            let mut saved = self.saved.lock().unwrap();
+            for (tensor, _) in saved.iter_mut() {
+                if let Some((_, other)) = others.iter().find(|(known, _)| known.is(&*tensor)) {
+                    before.push(std::mem::replace(tensor, other.clone_ref(py)));
+                }
+            }
+        }
+        drop(others);
+        let mut gone: Vec<Fed> = Vec::new();
+        {
+            let mut held = self.feeds.lock().unwrap();
+            for (at, _, fed) in swaps.iter() {
+                gone.push(std::mem::replace(&mut held[*at], fed.clone_ref(py)));
+            }
+        }
+        let earlier = self.tape.lock().unwrap().replace(Taped { roots, leads });
+        drop(earlier);
+        drop(before);
+        drop(gone);
+        drop(swaps);
+        Ok(())
+    }
+
+    /// The autograd engine releases the node. Behind a backward that did
+    /// not retain the graph: what the nodes that ran in it kept is let go
+    /// of, as eager's nodes let go of what they saved, the inputs in the
+    /// order in which those nodes ran and each let go; no backward of this
+    /// call follows. With no such backward in front of it the graph ends:
+    /// all of it is let go of, the inputs in the order in which a graph
+    /// that ends lets go of its nodes.
+    fn released(&self) {
+        let saved = std::mem::take(&mut *self.saved.lock().unwrap());
+        let tape = self.tape.lock().unwrap().take();
+        let ran = self.ran.lock().unwrap().take();
+        let plan = &self.plan;
+        let mut goes: Vec<((u32, u32), Fed)> = Vec::new();
+        let mut rest: Vec<Fed> = Vec::new();
+        {
+            let mut held = self.feeds.lock().unwrap();
+            for (at, fed) in held.iter_mut().enumerate() {
+                match fed {
+                    Fed::Kept(_, view) => {
+                        let view = *view;
+                        let keepers = plan.keepers[at].iter().copied().filter(|keep| !plan.keeps[*keep as usize].view || !view);
+                        let last = match &ran {
+                            // The last of the nodes that keep it, if all of them ran.
+                            Some(ran) => {
+                                let run = |keep: u32| ran.as_ref().map_or(true, |ran| ran.get(plan.keeps[keep as usize].node as usize).copied().unwrap_or(true));
+                                keepers.clone().all(run).then(|| (keepers.max().unwrap_or(0), 0))
+                            }
+                            None => Some(keepers.map(|keep| (plan.keeps[keep as usize].ends, keep)).max().unwrap_or((0, 0))),
+                        };
+                        if let Some(last) = last {
+                            goes.push((last, std::mem::replace(fed, Fed::Gone)));
+                        }
+                    }
+                    Fed::Alias(..) => rest.push(std::mem::replace(fed, Fed::Gone)),
+                    Fed::Plain(_) | Fed::Leaf(_) | Fed::Gone => {}
+                }
+            }
+        }
+        // The inputs are in what the forward kept as well: that goes first.
+        drop(saved);
+        drop(tape);
+        drop(rest);
+        goes.sort_by_key(|(last, _)| *last);
+        for (_, fed) in goes {
+            drop(fed);
+        }
+    }
+
+    /// The node ends: what it still holds of the inputs that eager's nodes
+    /// keep is let go of in the order in which a graph that ends lets go
+    /// of its nodes, each of what it saved.
+    fn ended(self) {
+        let Kept { plan, feeds, saved, tape, .. } = self;
+        drop(saved);
+        drop(tape);
+        let mut goes: Vec<((u32, u32), Fed)> = Vec::new();
+        let mut rest: Vec<Fed> = Vec::new();
+        for (at, fed) in feeds.into_inner().unwrap().into_iter().enumerate() {
+            match fed {
+                Fed::Kept(_, view) => {
+                    let keepers = plan.keepers[at].iter().copied().filter(|keep| !plan.keeps[*keep as usize].view || !view);
+                    let last = keepers.map(|keep| (plan.keeps[keep as usize].ends, keep)).max().unwrap_or((0, 0));
+                    goes.push((last, fed));
+                }
+                other => rest.push(other),
+            }
+        }
+        goes.sort_by_key(|(last, _)| *last);
+        for (_, fed) in goes {
+            drop(fed);
+        }
+        drop(rest);
     }
 }
 
@@ -2292,20 +2925,134 @@ unsafe extern "C" fn node_backward(state: *mut c_void, grads: *const Obj, n_grad
 /// count of it: a tensor dies without the GIL under a call that has it.
 unsafe extern "C" fn node_release(state: *mut c_void, dropped: i32) {
     Python::attach(|_py| {
+        // Let go of behind the locks: the end of a tensor can run code.
         if dropped != 0 {
-            drop(Box::from_raw(state as *mut Kept));
+            let kept = *Box::from_raw(state as *mut Kept);
+            kept.ended();
         } else {
-            // Let go of behind the lock: the end of a tensor can run code.
-            let saved = std::mem::take(&mut *(*(state as *const Kept)).saved.lock().unwrap());
-            drop(saved);
+            (*(state as *const Kept)).released();
         }
     });
 }
 
 impl Plan {
+    /// What the node of a call holds of each input (`Fed`). Eager's nodes
+    /// hold an input in two ways: what adds up the gradient of a leaf
+    /// holds the leaf, through the edge that the gradient goes along; and
+    /// a node holds what it saved, itself or as what a saved view is a
+    /// view of, until a backward that does not retain the graph has run
+    /// it. The node of the graph holds the input in those cases. In every
+    /// other it holds nothing of it, or, where it needs its values (for
+    /// what the forward keeps, for running the forward again), an alias:
+    /// the values without the object, so that the object and what only it
+    /// holds end where eager ends them. An alias keeps the storage, which
+    /// eager would have let go of with the input: where something is told
+    /// when the storage ends, or its memory is not torch's own, there is
+    /// no alias to be had without being seen, and None says that this call
+    /// keeps eager's tape.
+    fn holds<'py>(&self, py: Python<'py>, feeds: &[Bound<'py, PyAny>]) -> PyResult<Option<Vec<Fed>>> {
+        if feeds.len() != self.target.len() {
+            return Err(PyTypeError::new_err(format!("a graph of {} inputs is called with {}", self.target.len(), feeds.len())));
+        }
+        let mut held: Vec<Fed> = Vec::with_capacity(feeds.len());
+        // The same input twice has one alias.
+        let mut aliased: HashMap<usize, usize> = HashMap::new();
+        // The aliases, each with whether a gradient goes to its input, and
+        // those that are the alias of an earlier input over again.
+        let mut pending: Vec<(usize, bool)> = Vec::new();
+        let mut twins: Vec<(usize, usize)> = Vec::new();
+        for (at, feed) in feeds.iter().enumerate() {
+            let Some(found) = info(feed) else {
+                held.push(Fed::Plain(feed.clone().unbind()));
+                continue;
+            };
+            let goes = found.requires_grad != 0 && self.target[at];
+            if goes && unsafe { crate::graph::is_leaf(feed.as_ptr()) } {
+                held.push(Fed::Leaf(feed.clone().unbind()));
+                continue;
+            }
+            let (own, views) = self.kept[at];
+            // A kept view holds what it is a view of: the input, unless
+            // the input is a view itself.
+            let view = views && unsafe { crate::graph::is_view(feed.as_ptr()) };
+            if own || (views && !view) {
+                held.push(Fed::Kept(feed.clone().unbind(), view));
+                continue;
+            }
+            // The values of an input are needed for what the forward keeps
+            // of it and for running the forward again: a graph that cannot
+            // run again needs nothing of an input that the forward does
+            // not keep.
+            if !self.again && !self.in_saved[at] {
+                held.push(Fed::Gone);
+                continue;
+            }
+            if let Some(same) = aliased.get(&key(feed)) {
+                twins.push((held.len(), *same));
+                held.push(held[*same].clone_ref(py));
+                continue;
+            }
+            if !unsafe { crate::graph::storage_ends_quietly(feed.as_ptr()) } {
+                return Ok(None);
+            }
+            aliased.insert(key(feed), held.len());
+            pending.push((held.len(), goes));
+            held.push(Fed::Alias(alias(feed)?.unbind(), History::None));
+            served(4);
+        }
+        if !pending.is_empty() {
+            // What stands for the history of each. The same tensor can be
+            // another input that the node holds itself (a leaf, or what a
+            // node of eager's keeps): the history is there. Else, where a
+            // gradient goes to the input, a tensor is made that has it.
+            let itself: HashMap<usize, usize> = held
+                .iter()
+                .enumerate()
+                .filter_map(|(at, fed)| match fed {
+                    Fed::Leaf(own) | Fed::Kept(own, _) => Some((own.as_ptr() as usize, at)),
+                    _ => None,
+                })
+                .collect();
+            for (at, goes) in pending {
+                let with = match itself.get(&key(&feeds[at])) {
+                    Some(other) => History::Same(*other),
+                    None if goes => History::Has(handle(&feeds[at])?.unbind()),
+                    None => History::None,
+                };
+                if let Fed::Alias(_, history) = &mut held[at] {
+                    *history = with;
+                }
+            }
+            for (at, first) in twins {
+                let with = match &held[first] {
+                    Fed::Alias(_, with) => with.clone_ref(py),
+                    _ => History::None,
+                };
+                if let Fed::Alias(_, history) = &mut held[at] {
+                    *history = with;
+                }
+            }
+        }
+        Ok(Some(held))
+    }
+
     /// One call of the form: the forward below the autograd keys, the node,
     /// the views behind it, and what the form gives.
     fn call<'py>(self: &Arc<Plan>, py: Python<'py>, feeds: &[Bound<'py, PyAny>]) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        // What the node is to hold of the inputs is found in front of the
+        // forward: a call for which it cannot hold what it needs without
+        // being seen keeps eager's tape.
+        let held = if self.shape.roots.is_empty() {
+            Vec::new()
+        } else {
+            match self.holds(py, feeds)? {
+                Some(held) => held,
+                None => {
+                    served(3);
+                    return self.graph.given(py, &self.graph.run(py, feeds)?);
+                }
+            }
+        };
         let made = self.forward.run(py, feeds)?;
         let tensor = |value: Value| -> PyResult<Bound<'py, PyAny>> {
             if value < self.inputs {
@@ -2317,29 +3064,37 @@ impl Plan {
         for value in &self.shape.roots {
             let root = tensor(*value)?;
             // A root is no view; what a pass made of the forward may give one.
-            roots.push(if base_of(&root)?.is_some() { root.call_method0("clone")? } else { root });
+            roots.push(if base_of(&root)?.is_some() { copy(&root)? } else { root });
         }
         if !roots.is_empty() {
             let mut saved = Vec::new();
             for value in &self.saved {
-                let kept = tensor(*value)?;
+                // Of an input that the node holds an alias of, the alias
+                // is what is kept.
+                let kept = match held.get(*value as usize) {
+                    Some(Fed::Alias(other, _)) if *value < self.inputs => other.bind(py).clone(),
+                    _ => tensor(*value)?,
+                };
                 // What is kept of a root is kept without its node, as eager
                 // keeps what a node saves of its own result: the node holds
                 // what is kept.
-                let kept = if roots.iter().any(|root| root.is(&kept)) { kept.call_method0("detach")? } else { kept };
+                let kept = if roots.iter().any(|root| root.is(&kept)) { alias(&kept)? } else { kept };
                 let at = version(&kept);
                 saved.push((kept.unbind(), at));
             }
             let weak: Vec<Py<PyWeakrefReference>> = self.watched.iter().map(|at| PyWeakrefReference::new(&roots[*at]).map(Bound::unbind)).collect::<PyResult<_>>()?;
             let made = |feed: &usize| -> bool {
                 let feed = &feeds[*feed];
-                requires_grad(feed) && !feed.getattr("is_leaf").and_then(|leaf| leaf.is_truthy()).unwrap_or(true)
+                requires_grad(feed) && !unsafe { crate::graph::is_leaf(feed.as_ptr()) }
             };
             let kept = Kept {
                 plan: self.clone(),
-                feeds: feeds.iter().map(|feed| feed.clone().unbind()).collect(),
+                feeds: Mutex::new(held),
                 fed: feeds.iter().map(version).collect(),
+                memory: feeds.iter().map(memory).collect(),
                 saved: Mutex::new(saved),
+                ran: Mutex::new(None),
+                tape: Mutex::new(None),
                 roots: weak,
                 grown: self.operands.iter().copied().filter(made).collect(),
             };
@@ -2401,7 +3156,7 @@ struct Parts {
 
 impl Parts {
     fn new(py: Python<'_>, graph: Arc<Graph>, taken: Taken, export: &Option<Py<PyAny>>) -> PyResult<Parts> {
-        let Taken { joint, ran, marks, cut, held, .. } = taken;
+        let Taken { joint, ran, marks, cut, held, checked, .. } = taken;
         let cut = cut.expect("a form that is cut");
         let (behind, _) = graph.behind(&ran);
         let mut later: Vec<Value> = Vec::new();
@@ -2426,7 +3181,7 @@ impl Parts {
             let mut gives: Vec<Value> = made.iter().copied().filter(|value| later.contains(value) || after.contains(value)).collect();
             gives.sort_unstable();
             let reached = gives.iter().map(|value| held.contains(value)).collect();
-            let part = Graph::kernels(&joint.described_forward(py, &chosen)?, takes.clone(), gives.clone(), reached)?;
+            let part = Graph::kernels(&joint.described_forward(py, &chosen)?, takes.clone(), gives.clone(), reached, checked)?;
             parts.push((Form::new(py, Arc::new(part), export), takes, gives));
         }
         Ok(Parts { graph, parts, inputs, values: joint.values(), behind, marks })
@@ -2540,6 +3295,9 @@ impl Form {
             };
             match taken {
                 Err(why) => {
+                    if crate::graph::debug() {
+                        eprintln!("torch.vm graph: a form of {} steps keeps eager's tape: {why}", self.graph.steps.len());
+                    }
                     // What was taken down before ends behind the lock.
                     let learned = std::mem::replace(&mut *state, State::Refused(why));
                     drop(state);
@@ -2576,6 +3334,9 @@ impl Form {
                 }
             }
         };
+        if let (true, State::Refused(why)) = (crate::graph::debug(), &next) {
+            eprintln!("torch.vm graph: a form of {} steps keeps eager's tape: {why}", self.graph.steps.len());
+        }
         let learned = std::mem::replace(&mut *self.state.lock().unwrap(), next);
         drop(learned);
         Ok(given)
@@ -2631,6 +3392,24 @@ pub unsafe fn staged(description: Obj) -> Result<crate::pyffi::PyObj, String> {
         Ok(form) => Ok(crate::pyffi::PyObj::from_owned(form.into_ptr())),
         Err(error) => Err(format!("the engine's backward: {}", crate::graph::message(error.value(py).as_ptr()))),
     }
+}
+
+/// How the backwards of the graphs were served since this was last asked
+/// with `reset`: `graph`, by the backward graph of a form; `again` and
+/// `create_graph`, by the forward run once more on the tape, without and
+/// with a gradient that is differentiated again; `watched`, the calls of a
+/// form that kept eager's tape because the storage of an input that the
+/// node would have held an alias of is watched; `aliases`, the aliases of
+/// inputs that nodes were given; `histories`, those of them that came with
+/// a tensor that has the history of the input.
+#[pyfunction]
+#[pyo3(signature = (reset=false))]
+pub fn backward_served(py: Python<'_>, reset: bool) -> PyResult<Bound<'_, PyDict>> {
+    let found = PyDict::new(py);
+    for (name, count) in SERVED_NAMES.iter().zip(&SERVED) {
+        found.set_item(*name, if reset { count.swap(0, Ordering::Relaxed) } else { count.load(Ordering::Relaxed) })?;
+    }
+    Ok(found)
 }
 
 /// What every staged form that is alive runs on, how often it was called

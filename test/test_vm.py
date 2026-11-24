@@ -4618,6 +4618,23 @@ def trial_adds(n, x):
     return total, x
 
 
+def trial_scaled_adds(n, x):
+    # trial_adds with an operation in front whose node saves a tensor: a
+    # graph of additions alone goes backward twice in eager mode, and with a
+    # gradient keeps eager's tape for that.
+    total = 0
+    for i in range(n):
+        total += i * i % 7
+    x = x * 1.0
+    for _ in range(TRIAL_ADDS):
+        x = x + 1.0
+    return total, x
+
+
+def trial_scaled_caller(n, x):
+    return next(map(trial_scaled_adds, (n,), (x,)))
+
+
 def trial_caller(n, x):
     # Through a builtin, so that the graph is the callee's own and the
     # callee is what is measured with it.
@@ -4925,7 +4942,16 @@ class TestVmDemotion(TestCase):
             self.assertEqual(total, expected[0])
             self.assertEqual(y, expected[1], atol=0, rtol=0)
             looks = compiled.stats()["second_looks"]
-            seen.append((len(runs), looks.get("trial_adds")))
+            seen.append(
+                (
+                    len(runs),
+                    looks.get(
+                        "trial_scaled_adds"
+                        if fn is trial_scaled_caller
+                        else "trial_adds"
+                    ),
+                )
+            )
         if grad:
             (got,) = torch.autograd.grad(y.sum(), x)
             self.assertEqual(got, torch.ones(30000), atol=0, rtol=0)
@@ -4972,7 +4998,9 @@ class TestVmDemotion(TestCase):
         def seconds(run):
             return 0.02 * (run <= 19)
 
-        compiled, seen = self.trial(trial_caller, seconds, 220, grad)
+        compiled, seen = self.trial(
+            trial_scaled_caller if grad else trial_caller, seconds, 220, grad
+        )
         looks = [look for _, look in seen]
         order = sorted(set(looks), key=looks.index)
         self.assertEqual(order, [None, "to come", "under way", "won"])
@@ -4983,7 +5011,9 @@ class TestVmDemotion(TestCase):
         self.assertEqual(len(set(waited)), 1)
         stats = compiled.stats()
         left = (stats["demoted_callees"], stats["second_looks"])
-        self.assertEqual(left, ([], {"trial_adds": "won"}))
+        self.assertEqual(
+            left, ([], {"trial_scaled_adds" if grad else "trial_adds": "won"})
+        )
         self.assertFalse(stats["measuring"])
         self.assertEqual(seen[-1][0] - seen[-41][0], 40)
 
@@ -13293,6 +13323,249 @@ def vm_under_said(compiled):
     }
 
 
+VM_KLASS_LOG = []
+VM_KLASS_TO = [torch.Tensor]
+
+
+def vm_klass_true(name, tensor, *at):
+    """What the class under every tensor gives for a read of a size."""
+    found = getattr(torch._C.TensorBase, name)
+    return found(tensor, *at) if name in ("size", "dim") else found.__get__(tensor)
+
+
+class VmKlassLogs(torch.Tensor):
+    """Says when its sizes are read, and gives them."""
+
+    @property
+    def shape(self):
+        VM_KLASS_LOG.append("shape")
+        return vm_klass_true("shape", self)
+
+    @property
+    def ndim(self):
+        VM_KLASS_LOG.append("ndim")
+        return vm_klass_true("ndim", self)
+
+    def size(self, *at):
+        VM_KLASS_LOG.append("size")
+        return vm_klass_true("size", self, *at)
+
+    def dim(self):
+        VM_KLASS_LOG.append("dim")
+        return vm_klass_true("dim", self)
+
+
+class VmKlassLies(torch.Tensor):
+    """Gives other sizes than it has."""
+
+    @property
+    def shape(self):
+        true = vm_klass_true("shape", self)
+        return torch.Size([2 * true[0], *true[1:]])
+
+    @property
+    def ndim(self):
+        return vm_klass_true("ndim", self) + 1
+
+    def size(self, *at):
+        return 2 * vm_klass_true("size", self, *at)
+
+    def dim(self):
+        return vm_klass_true("dim", self) + 1
+
+
+class VmKlassPlain(torch.Tensor):
+    pass
+
+
+def vm_klass_becomes(t):
+    t.__class__ = VM_KLASS_TO[0]
+    return 0
+
+
+def vm_klass_back(t):
+    t.__class__ = torch.Tensor
+    return 0
+
+
+def vm_klass_case_shape(x):
+    a = x.shape[0]
+    vm_klass_becomes(x)
+    b = x.shape[0]
+    vm_klass_back(x)
+    h = (x * 2).sin() + 1
+    return (h * (a + 10 * b)).sum()
+
+
+def vm_klass_case_ndim(x):
+    a = x.ndim
+    vm_klass_becomes(x)
+    b = x.ndim
+    vm_klass_back(x)
+    h = (x * 2).sin() + 1
+    return (h * (a + 10 * b)).sum()
+
+
+def vm_klass_case_dim(x):
+    a = x.dim()
+    vm_klass_becomes(x)
+    b = x.dim()
+    vm_klass_back(x)
+    h = (x * 2).sin() + 1
+    return (h * (a + 10 * b)).sum()
+
+
+def vm_klass_case_size(x):
+    a = x.size(0)
+    vm_klass_becomes(x)
+    b = x.size(0)
+    vm_klass_back(x)
+    h = (x * 2).sin() + 1
+    return (h * (a + 10 * b)).sum()
+
+
+def vm_klass_case_in_some_calls(x):
+    a = x.shape[0]
+    if x[0, 0] >= 3:
+        vm_klass_becomes(x)
+    b = x.shape[0]
+    vm_klass_back(x)
+    h = (x * 2).sin() + 1
+    return (h * (a + 10 * b)).sum()
+
+
+def vm_klass_case_in_a_loop(x):
+    total = 0
+    for at in range(3):
+        total += x.shape[0] * (at + 1)
+        if at == 1:
+            vm_klass_becomes(x)
+    vm_klass_back(x)
+    return ((x * 2).sin() * total).sum()
+
+
+def vm_klass_case_inside_an_expression(x):
+    n = x.shape[0] + 10 * (vm_klass_becomes(x) + x.shape[0]) + 100 * x.ndim
+    vm_klass_back(x)
+    return ((x * 2).sin() * n).sum()
+
+
+VM_KLASS_CASES = (
+    vm_klass_case_shape,
+    vm_klass_case_ndim,
+    vm_klass_case_dim,
+    vm_klass_case_size,
+    vm_klass_case_in_some_calls,
+    vm_klass_case_in_a_loop,
+    vm_klass_case_inside_an_expression,
+)
+
+
+VM_SPY_LOG = []
+
+
+def vm_spy_logs(self, name):
+    """A `__getattribute__` for `torch.Tensor` that says what is read."""
+    VM_SPY_LOG.append(name)
+    return object.__getattribute__(self, name)
+
+
+def vm_spy_lies(self, name):
+    """One that gives other sizes than the tensor has."""
+    VM_SPY_LOG.append(name)
+    found = object.__getattribute__(self, name)
+    if name == "shape" and len(found):
+        return torch.Size([2 * found[0], *found[1:]])
+    if name == "ndim":
+        return found + 1
+    return found
+
+
+def vm_spy_case_sizes(x):
+    h = (x * 2).sin() + 1
+    return (h * (h.shape[0] + 10 * h.ndim + 100 * x.shape[0])).sum()
+
+
+def vm_spy_case_methods(x):
+    h = x.sin().mul(2).add(1)
+    return h.sum() + x.cos().mean()
+
+
+def vm_spy_case_getter(x):
+    return (x.T * 2).sum() + x.mT.mean()
+
+
+def vm_spy_case_in_a_loop(x):
+    total = x.sum()
+    for _ in range(3):
+        total = total + x.sin().sum() * x.shape[0]
+    return total
+
+
+def vm_spy_case_in_a_callee(x):
+    return vm_spy_case_methods(x) + vm_spy_case_sizes(x)
+
+
+VM_SPY_CASES = (
+    vm_spy_case_sizes,
+    vm_spy_case_methods,
+    vm_spy_case_getter,
+    vm_spy_case_in_a_loop,
+    vm_spy_case_in_a_callee,
+)
+
+
+class VmNamedLikeADtype:
+    """A class of the user's with the name of a class of torch: its
+    objects compare and show themselves with code of its own."""
+
+    def __init__(self, log, value):
+        self.log, self.value = log, value
+
+    def __eq__(self, other):
+        self.log.append("eq")
+        return isinstance(other, VmNamedLikeADtype) and self.value == other.value
+
+    def __hash__(self):
+        self.log.append("hash")
+        return hash(self.value)
+
+    def __repr__(self):
+        self.log.append("repr")
+        return f"named({self.value})"
+
+
+VmNamedLikeADtype.__name__ = "torch.dtype"
+VmNamedLikeADtype.__qualname__ = "torch.dtype"
+
+
+VM_NAMED_LOG = []
+VM_NAMED_ONE = VmNamedLikeADtype(VM_NAMED_LOG, 1)
+VM_NAMED_OTHER = VmNamedLikeADtype(VM_NAMED_LOG, 2)
+
+
+def vm_named_case_compared(x, kind):
+    h = (x * 2).sin() + 1
+    if kind == VM_NAMED_ONE:
+        h = h * 3
+    return (h.cos() * 2).sum()
+
+
+def vm_named_case_compared_twice(x, kind):
+    h = (x * 2).sin() + 1
+    if kind == VM_NAMED_ONE or kind == VM_NAMED_OTHER:  # noqa: SIM109
+        h = h * 3
+    return (h.cos() * 2).sum()
+
+
+def vm_named_case_of_torch(x, kind):
+    # With a dtype of torch the comparison is part of the graph.
+    h = (x * 2).sin() + 1
+    if kind == torch.float32:
+        h = h * 3
+    return (h.cos() * 2).sum()
+
+
 def vm_asks_case_shape_item(x):
     h = (x * 2).sin() + 1
     return (h * h.shape[0] + h.shape[-1]).sum()
@@ -20195,6 +20468,201 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                         msg=f"{msg}: every other call",
                     )
 
+    def test_a_read_of_a_size_of_a_tensor_whose_class_was_assigned_runs_as_it_is_written(
+        self, device
+    ):
+        # The read of a size that a specialized block makes itself rests on
+        # what the block asked at its entry: the operand is a tensor of
+        # `Tensor` or `Parameter`. The class of an argument can be assigned
+        # behind that, by the function or by what it calls, in front of
+        # the read. The read asks for itself: where its operand is no
+        # longer such a tensor, the instructions it stands for run, and
+        # call what the new class has under the name.
+        # (The read raised SystemError.)
+        def keep(gm, input_types):
+            return gm
+
+        def calls(fn, graded):
+            rows = []
+            for at in range(8):
+                del VM_KLASS_LOG[:]
+                x = (
+                    torch.arange(6.0, device=device).reshape(2, 3) + at
+                ).requires_grad_(graded)
+                try:
+                    out = fn(x)
+                    grad = torch.autograd.grad(out, x)[0].tolist() if graded else None
+                    rows.append(
+                        (out.tolist(), grad, type(x).__name__, list(VM_KLASS_LOG))
+                    )
+                except Exception as error:
+                    rows.append((type(error).__name__, str(error)))
+                    x.__class__ = torch.Tensor
+            return rows
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES, False),
+            ("no call inlined", without(P.Inline), False),
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        for to in (VmKlassLogs, VmKlassLies, VmKlassPlain):
+            VM_KLASS_TO[0] = to
+            for fn in VM_KLASS_CASES:
+                for way, passes, graded in ways:
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__}, the class becomes {to.__name__}, {way}"
+                    expected = calls(fn, graded)
+                    self.assertEqual(calls(compiled, graded), expected, msg=msg)
+                    # Eager's calls return, and with a class that lies its
+                    # second read is the lie.
+                    self.assertTrue(all(len(row) == 4 for row in expected), msg=msg)
+            self.assertEqual(calls(vm_klass_case_shape, False)[0][0] != 0, True)
+        VM_KLASS_TO[0] = VmKlassLies
+        lied = calls(vm_klass_case_shape, False)
+        VM_KLASS_TO[0] = VmKlassPlain
+        self.assertTrue(lied != calls(vm_klass_case_shape, False))
+
+    def test_a_getattribute_on_the_tensor_class_is_called_at_every_read_of_a_tensor(
+        self, device
+    ):
+        # A `__getattribute__` that somebody puts on `torch.Tensor` is
+        # called by the interpreter at every read of an attribute of a
+        # tensor, whatever the name: a size, a method that is called, a
+        # getter that runs a kernel. What stands for such a read asks at
+        # every run that the tensor classes read their attributes as
+        # `object` does: the read of a size runs the instructions it
+        # stands for, a call site of a method or a getter is neither used
+        # nor made, and no graph is entered. With the `__getattribute__`
+        # taken off again the function is what it was.
+        # (It was not called at a read of a size or at a call site, and
+        # with a pass the engine's own reads called it.)
+        def keep(gm, input_types):
+            return gm
+
+        def calls(fn, spy, graded):
+            rows = []
+            try:
+                for at in range(10):
+                    size = 2 + 3 * (at % 2)
+                    x = (
+                        (
+                            torch.arange(float(size * 3), device=device).reshape(
+                                size, 3
+                            )
+                            + at
+                        )
+                        / 7
+                    ).requires_grad_(graded)
+                    if at == 4:
+                        torch.Tensor.__getattribute__ = spy
+                    if at == 8:
+                        del torch.Tensor.__getattribute__
+                    del VM_SPY_LOG[:]
+                    out = fn(x)
+                    seen = list(VM_SPY_LOG)
+                    grad = torch.autograd.grad(out, x)[0] if graded else None
+                    rows.append(
+                        (
+                            out.detach().tolist(),
+                            None if grad is None else grad.tolist(),
+                            seen,
+                        )
+                    )
+            finally:
+                if "__getattribute__" in torch.Tensor.__dict__:
+                    del torch.Tensor.__getattribute__
+            return rows
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES, False),
+            ("no call inlined", without(P.Inline), False),
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        for spy in (vm_spy_logs, vm_spy_lies):
+            for fn in VM_SPY_CASES:
+                for way, passes, graded in ways:
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    msg = f"{fn.__name__}, {spy.__name__}, {way}"
+                    expected = calls(fn, spy, graded)
+                    self.assertEqual(calls(compiled, spy, graded), expected, msg=msg)
+                    # Eager calls it in the calls 4 to 7, and in no other.
+                    called = [bool(row[2]) for row in expected]
+                    self.assertEqual(
+                        called, [False] * 4 + [True] * 4 + [False] * 2, msg=msg
+                    )
+                    if way == "the default passes":
+                        # Behind it the call sites and the reads are used again.
+                        stats = compiled.stats()
+                        before = stats["site_hits"] + sum(
+                            block["specialized_executions"] for block in stats["blocks"]
+                        )
+                        compiled(torch.ones(2, 3, device=device))
+                        stats = compiled.stats()
+                        after = stats["site_hits"] + sum(
+                            block["specialized_executions"] for block in stats["blocks"]
+                        )
+                        self.assertGreater(after, before, msg=msg)
+
+    def test_a_class_named_like_a_class_of_torch_is_no_class_of_torch(self, device):
+        # A dtype, a device, a layout and a memory format compare in C by
+        # what they stand for, so a comparison with one is part of a path
+        # and a form checks one by value. That is so for the classes of
+        # torch themselves, not for a class that has the name of one: its
+        # objects compare with code of their own, which runs where the
+        # function runs it and nowhere else.
+        # (The class was known by its name: with a pass the `__eq__` of
+        # such an object ran twice in a call.)
+        def keep(gm, input_types):
+            return gm
+
+        def calls(fn, kinds, graded):
+            rows = []
+            for at in range(9):
+                del VM_NAMED_LOG[:]
+                x = (
+                    (torch.arange(6.0, device=device).reshape(2, 3) + at) / 7
+                ).requires_grad_(graded)
+                out = fn(x, kinds[at % 3 == 0])
+                seen = list(VM_NAMED_LOG)
+                grad = torch.autograd.grad(out, x)[0].tolist() if graded else None
+                rows.append((out.tolist(), grad, seen))
+            return rows
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES, False),
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+        )
+        named = (VM_NAMED_ONE, VM_NAMED_OTHER)
+        self.assertEqual(type(VM_NAMED_ONE).__name__, "torch.dtype")
+        for fn, kinds in (
+            (vm_named_case_compared, named),
+            (vm_named_case_compared_twice, named),
+            (vm_named_case_of_torch, (torch.float32, torch.float64)),
+        ):
+            for way, passes, graded in ways:
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                msg = f"{fn.__name__}, {way}"
+                expected = calls(fn, kinds, graded)
+                self.assertEqual(calls(compiled, kinds, graded), expected, msg=msg)
+                # The `__eq__` of the user's class runs once per comparison.
+                self.assertEqual(
+                    all(row[2] for row in expected), kinds is named, msg=msg
+                )
+                if way == "a pass":
+                    # A comparison with a dtype of torch is part of the one
+                    # graph; one with the user's object is an instruction.
+                    ops = [graph.get("ops") for graph in torch.vm.regions(compiled)]
+                    self.assertEqual(ops == [7], kinds is not named, msg=msg)
+
     def test_what_is_put_on_the_tensor_class_is_called_wherever_a_pass_stands_for_a_read(
         self, device
     ):
@@ -21635,6 +22103,13 @@ def back_kept_apart(x, w, b):
     return (x @ w).tanh(), (b * 2).sum()
 
 
+def back_kept_beside(x, w, b):
+    # back_kept_apart with one product for both results: they share a node
+    # that saved a tensor, so the graph has the engine's backward.
+    m = x @ w
+    return m.tanh(), (b * 2).sum() + m.exp().sum()
+
+
 def back_apart(x, w, b):
     return (x @ w).tanh().sum(), (b * 2).sum()
 
@@ -21765,8 +22240,11 @@ def back_reader_keeps(x, a):
 
 
 def back_node_keeps(x, a):
-    h = (x @ a).tanh()
-    return h, (x @ a).exp().sum() + a.sum()
+    # One product for both results: with nodes apart eager would go backward
+    # for the one behind the other, and the graph would keep eager's tape.
+    m = x @ a
+    h = m.tanh()
+    return h, m.exp().sum() + a.sum()
 
 
 def back_view_kept(x, a):
@@ -21866,6 +22344,561 @@ class BackConvNetLean(BackConvNet):
 
 
 BACK_CONV_NETS = (BackConvNet, BackConvNetLean)
+
+
+def back_keeps_tape(first, second=None):
+    """What `regions()` says of a graph that keeps eager's tape because
+    eager goes backward through it a second time: for two results, with the
+    nodes of the two; for one result twice, with its node."""
+    if second is None:
+        which = f"a second backward for a result of this graph (a result of {first})"
+    else:
+        which = f"a backward for one result of this graph behind one for another (results of {first} and {second})"
+    return f"eager's tape: {which} returns in eager mode where the first did not retain the graph (no node that saved a tensor runs in both), and the node of a graph is released as one"
+
+
+class FedLoud:
+    """Says under its name when it ends."""
+
+    def __init__(self, log, name="ended"):
+        self.log = log
+        self.name = name
+
+    def __del__(self):
+        self.log.append(self.name)
+
+
+def fed_adds(t, w):
+    # No node of autograd keeps an operand of an addition.
+    return ((t + w[0]).sin() * 2 + 1).cos().tanh().sum()
+
+
+def fed_squares(t, w):
+    # The node of the product keeps `t`, if `t` requires a gradient.
+    return ((t * t + w[0]).sin() * 2 + 1).cos().tanh().sum()
+
+
+def fed_scales(t, w):
+    # The node of the product keeps `t` for the gradient of `w`.
+    return ((t * w[0]).sin() * 2 + 1).cos().tanh().sum()
+
+
+def fed_both(t, w):
+    return ((t + w[0]).sin() * t + 1).cos().tanh().sum()
+
+
+def fed_views(t, w):
+    # What `addmm` keeps of `t` is a view that the graph made of it.
+    return torch.addmm(w[0], t.view(-1, 2), w[:2]).tanh().sum()
+
+
+def fed_views_alike(t, w):
+    # The same with a view of the sizes of `t`.
+    return torch.addmm(w[0], t.view(-1, 4), w).tanh().sum()
+
+
+def fed_reduces(t, w):
+    # What the node of `sin` keeps is smaller than `t`.
+    return ((t.sum(0) + w[0]).sin() * 2 + 1).cos().tanh().sum()
+
+
+def fed_widens(t, w):
+    # What the node of `sin` keeps is larger than `t`, and made of it by
+    # operations that a backward could run again.
+    return ((t.expand(5, 3, 4) + w[0]).sin() * 2 + 1).cos().tanh().sum()
+
+
+def fed_draws(t, w):
+    # A graph that draws cannot run again on the tape.
+    return (
+        (torch.nn.functional.dropout((t + w[0]).sin(), 0.5, True) * 2 + 1)
+        .cos()
+        .tanh()
+        .sum()
+    )
+
+
+def fed_twice(t, w):
+    return ((t + w[0]).sin() * 2 + 1).cos().tanh().sum() + (t + t).tanh().sum()
+
+
+def fed_two(a, b, w):
+    # Eager's nodes run latest first at a backward, and a graph that ends
+    # lets go of them from its last edge: the node that keeps `a` comes
+    # first in the one order and last in the other.
+    x = b * b
+    y = a * a
+    return (y.sin() + x.cos() + w).tanh().sum()
+
+
+def fed_two_shared(a, b, w):
+    # One node keeps `a` and `b`, and a later one keeps `a` again.
+    h = a * b
+    return ((h.sin() * a).cos() + w).tanh().sum()
+
+
+def fed_hidden(t, w):
+    # A result that the graph also reads: the form is cut in two.
+    h = (t + w[0]).tanh()
+    return h, (h * t).sum()
+
+
+def fed_saves_nothing(t, w):
+    # No node of these saves a tensor: eager goes backward through them
+    # as often as it is asked.
+    return (((t + w) - 3 + w).neg()).sum()
+
+
+def fed_two_apart(t, w):
+    # Two results whose nodes are apart, each with nodes that saved tensors.
+    return (t * w).sin().tanh().sum(), (t + w).cos().tanh().sum()
+
+
+def fed_two_over_nothing_saved(t, w):
+    # Two results that share nodes, none of which saved a tensor.
+    h = (t + w) - 3
+    return (h + w).neg().sum(), (h - w).neg().mean()
+
+
+def fed_two_over_what_was_saved(t, w):
+    # Two results that share a node which saved a tensor: behind a backward
+    # for the one that did not retain the graph, eager raises for the other.
+    h = (t * w).tanh()
+    return h.sin().sum(), h.cos().sum()
+
+
+def fed_backward_twice(run, t, w, retain):
+    out = run(t, w)
+    out.backward(retain_graph=retain)
+    first = w.grad.clone()
+    out.backward()
+    return out.detach().clone(), first, w.grad.clone()
+
+
+def fed_backward_each(run, t, w, retain):
+    a, b = run(t, w)
+    a.backward(retain_graph=retain)
+    first = w.grad.clone()
+    b.backward()
+    return a.detach().clone(), b.detach().clone(), first, w.grad.clone()
+
+
+def fed_backward_each_the_other_way(run, t, w, retain):
+    a, b = run(t, w)
+    b.backward(retain_graph=retain)
+    first = w.grad.clone()
+    a.backward()
+    return a.detach().clone(), b.detach().clone(), first, w.grad.clone()
+
+
+def fed_source(device, at, graded=True):
+    return torch.full((3, 4), 0.125 * (at + 1), device=device, requires_grad=graded)
+
+
+def fed_no_leaf(log, device, at):
+    src = fed_source(device, at)
+    t = src * 1.5
+    t.held = FedLoud(log)
+    return src, t
+
+
+def fed_view(log, device, at):
+    src = fed_source(device, at)
+    t = (src * 1.5)[1:]
+    t.held = FedLoud(log)
+    return src, t
+
+
+def fed_view_of_what_is_let_go(log, device, at):
+    # What ends is on the tensor that the input is a view of.
+    src = fed_source(device, at)
+    base = src * 1.5
+    base.held = FedLoud(log)
+    return src, base[1:]
+
+
+def fed_leaf(log, device, at):
+    t = fed_source(device, at)
+    t.held = FedLoud(log)
+    return None, t
+
+
+def fed_view_that_is_a_leaf(log, device, at):
+    t = fed_source(device, at, False)[1:].requires_grad_()
+    t.held = FedLoud(log)
+    return None, t
+
+
+def fed_detached(log, device, at):
+    t = (fed_source(device, at) * 1.5).detach()
+    t.held = FedLoud(log)
+    return None, t
+
+
+def fed_grads(src, w):
+    return tuple(
+        None if p is None or p.grad is None else p.grad.clone() for p in (src, w)
+    )
+
+
+def fed_plain(run, made, seen, w):
+    src, t = made()
+    out = run(t, w)
+    del t
+    seen("the input let go of")
+    out.backward()
+    seen("the backward", out.detach().clone(), *fed_grads(src, w))
+    del out
+    seen("the result let go of")
+
+
+def fed_retained(run, made, seen, w):
+    src, t = made()
+    out = run(t, w)
+    del t
+    seen("the input let go of")
+    out.backward(retain_graph=True)
+    seen("a backward that retains", *fed_grads(src, w))
+    out.backward()
+    seen("a second backward", *fed_grads(src, w))
+    del out
+    seen("the result let go of")
+
+
+def fed_second(run, made, seen, w):
+    src, t = made()
+    out = run(t, w)
+    del t
+    out.backward()
+    seen("the backward", *fed_grads(src, w))
+    try:
+        out.backward()
+        seen("a second backward", *fed_grads(src, w))
+    except RuntimeError as error:
+        seen("a second backward raises", str(error)[:60])
+    del out
+    seen("the result let go of")
+
+
+def fed_dropped(run, made, seen, w):
+    src, t = made()
+    out = run(t, w)
+    del t
+    seen("the input let go of")
+    del out
+    seen("the result let go of")
+
+
+def fed_not_kept(run, made, seen, w):
+    src, t = made()
+    run(t, w)
+    seen("the result not kept")
+    del t
+    seen("the input let go of")
+
+
+def fed_for_some(run, made, seen, w):
+    # A backward for `w` alone: the nodes that lead only to the input do
+    # not run, and keep what they kept until the graph ends.
+    src, t = made()
+    out = run(t, w)
+    del t
+    (g,) = torch.autograd.grad(out, [w])
+    seen("a backward for one input", g)
+    del out
+    seen("the result let go of")
+
+
+def fed_written(run, made, seen, w):
+    # The input is written to in place between the call and the backward.
+    src, t = made()
+    out = run(t, w)
+    with torch.no_grad():
+        t.add_(1.0)
+    del t
+    seen("written and let go of")
+    try:
+        out.backward()
+        seen("the backward", *fed_grads(src, w))
+    except RuntimeError as error:
+        seen("the backward raises", str(error)[:60])
+    del out
+    seen("the result let go of")
+
+
+def fed_differentiated(run, made, seen, w):
+    # The input lives until the gradient has been differentiated again.
+    src, t = made()
+    out = run(t, w)
+    (g,) = torch.autograd.grad(out, w, create_graph=True)
+    seen("a gradient to differentiate", g.detach().clone(), g.requires_grad)
+    g.sum().backward()
+    seen("the backward of the gradient")
+    del t
+    seen("the input let go of")
+    del g, out
+    seen("the result let go of")
+    return fed_grads(src, w)
+
+
+def fed_differentiated_behind(run, made, seen, w):
+    # The input is let go of in front of it.
+    src, t = made()
+    out = run(t, w)
+    del t
+    seen("the input let go of")
+    (g,) = torch.autograd.grad(out, w, create_graph=True)
+    seen("a gradient to differentiate", g.detach().clone(), g.requires_grad)
+    g.sum().backward()
+    seen("the backward of the gradient")
+    del g
+    seen("the gradient let go of")
+    del out
+    seen("the result let go of")
+    return fed_grads(src, w)
+
+
+def fed_differentiated_twice(run, made, seen, w):
+    # Two gradients to differentiate, the first let go of unused; the
+    # backward of the second releases what the nodes of the call kept, and
+    # a third raises as eager's nodes do then.
+    src, t = made()
+    out = run(t, w)
+    del t
+    (first,) = torch.autograd.grad(out, w, create_graph=True)
+    del first
+    seen("the first gradient let go of")
+    (g,) = torch.autograd.grad(out, w, create_graph=True)
+    g.sum().backward()
+    seen("the backward of the second")
+    try:
+        torch.autograd.grad(out, w, create_graph=True)
+        seen("a third")
+    except RuntimeError as error:
+        seen("a third raises", str(error)[:60])
+    del g, out
+    seen("the result let go of")
+    return fed_grads(src, w)
+
+
+def fed_under_another_autocast(run, made, seen, w):
+    # A backward under an autocast that the forward did not run under is
+    # none that was taken down: the forward runs once more on the tape.
+    src, t = made()
+    out = run(t, w)
+    del t
+    seen("the input let go of")
+    with torch.autocast(w.device.type, dtype=torch.bfloat16):
+        out.backward()
+    seen("the backward", *fed_grads(src, w))
+    del out
+    seen("the result let go of")
+
+
+FED_WAYS = (
+    ("a backward", fed_plain),
+    ("a backward that retains, and a second", fed_retained),
+    ("a second backward behind one that does not retain", fed_second),
+    ("no backward", fed_dropped),
+    ("the result not kept", fed_not_kept),
+    ("a backward for one input", fed_for_some),
+    ("written to in place", fed_written),
+)
+FED_CASES = (
+    (fed_adds, fed_no_leaf),
+    (fed_adds, fed_view),
+    (fed_adds, fed_view_of_what_is_let_go),
+    (fed_adds, fed_leaf),
+    (fed_adds, fed_view_that_is_a_leaf),
+    (fed_adds, fed_detached),
+    (fed_squares, fed_no_leaf),
+    (fed_squares, fed_view),
+    (fed_squares, fed_view_of_what_is_let_go),
+    (fed_squares, fed_leaf),
+    (fed_scales, fed_no_leaf),
+    (fed_scales, fed_detached),
+    (fed_both, fed_no_leaf),
+    (fed_both, fed_view),
+    (fed_views, fed_no_leaf),
+    (fed_views, fed_view),
+    (fed_views, fed_view_of_what_is_let_go),
+    (fed_views, fed_detached),
+    (fed_views_alike, fed_no_leaf),
+    (fed_views_alike, fed_view),
+    (fed_views_alike, fed_view_of_what_is_let_go),
+    (fed_twice, fed_no_leaf),
+)
+
+
+def fed_keeps_its_result(t, w):
+    # The node of `tanh` keeps its own result, which is the result of
+    # the graph.
+    return ((t + w[0]).sin() * w[0]).sum().tanh()
+
+
+class FedPut:
+    """Puts a function that counts its calls on a class, in front of what
+    the class has under a name, and takes it off again."""
+
+    def __init__(self, cls, name):
+        self.cls, self.name, self.calls, self.is_on = cls, name, 0, False
+        self.own = cls.__dict__.get(name)
+        self.under = getattr(cls, name)
+
+    def on(self):
+        under = self.under
+        if callable(under):
+
+            def call(obj, *args, **kwargs):
+                self.calls += 1
+                return under(obj, *args, **kwargs)
+
+            setattr(self.cls, self.name, call)
+        else:
+
+            def get(obj):
+                self.calls += 1
+                return under.__get__(obj, type(obj))
+
+            setattr(self.cls, self.name, property(get))
+        self.is_on = True
+
+    def off(self):
+        if self.is_on:
+            if self.own is None:
+                delattr(self.cls, self.name)
+            else:
+                setattr(self.cls, self.name, self.own)
+        self.is_on = False
+
+
+def pen_same(t):
+    return t
+
+
+def pen_term(x, w):
+    # The graph starts behind a call into Python, with a tensor that the
+    # function made: a term of a sum, which no node keeps.
+    h = x * 2.0
+    h = next(map(pen_same, (h,)))
+    return ((h + w).tanh() * w).sum()
+
+
+def pen_factor(x, w):
+    # The same as a factor of a product, which the node of the product
+    # keeps.
+    h = x * 2.0
+    h = next(map(pen_same, (h,)))
+    return ((h * w).tanh() + h).sum()
+
+
+def pen_both(x, w):
+    h = (x * w).tanh()
+    k = next(map(pen_same, (h,)))
+    return (k + x).sum() + (k * 2).sum()
+
+
+def pen_doubles(x):
+    return x * 2.0
+
+
+def pen_in_a_callee(x, w):
+    h = next(map(pen_same, (pen_doubles(x),)))
+    return ((h + w).tanh() * w).sum()
+
+
+def pen_in_front_of_a_loop(x, w):
+    h = next(map(pen_same, (x * 2.0,)))
+    total = (h + w).tanh().sum()
+    for scale in (1.0, 2.0, 3.0):
+        total = total + ((h + scale) * w).tanh().sum()
+    return total
+
+
+def pen_handed(t, w):
+    # The input is the caller's.
+    return ((t + w).tanh() * w).sum()
+
+
+def pen_kept(t, w):
+    return ((t * w).tanh() + t).sum()
+
+
+def pen_two_kept_last(a, b, w):
+    # The node of the product keeps `b`; no node keeps `a`.
+    return (a + b * w).tanh().sum()
+
+
+def pen_two_kept_first(a, b, w):
+    return (a * w + b).tanh().sum()
+
+
+def pen_two_loose(a, b, w):
+    return ((a + b + w).tanh() * w).sum()
+
+
+def pen_leaves(device, at):
+    torch.manual_seed(at)
+    x = torch.randn(3, 4, device=device, requires_grad=True)
+    return x, torch.randn(3, 4, device=device, requires_grad=True)
+
+
+def pen_penalty(run, device, at, temporary=False):
+    """A gradient penalty through `run`: the result and the gradient that
+    is differentiated again, and what the backward of the penalty leaves
+    on the leaves."""
+    x, w = pen_leaves(device, at)
+    out = run(x * 2.0, w) if temporary else run(x, w)
+    (g,) = torch.autograd.grad(out, x, create_graph=True)
+    (g.pow(2).sum() + out).backward()
+    return (out.detach().clone(), g.detach().clone()), (x.grad.clone(), w.grad.clone())
+
+
+class PenFunctions(torch.overrides.TorchFunctionMode):
+    def __init__(self, log):
+        super().__init__()
+        self.log = log
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        self.log.append(getattr(func, "__name__", str(func)))
+        return func(*args, **(kwargs or {}))
+
+
+class PenKernels(torch.utils._python_dispatch.TorchDispatchMode):
+    def __init__(self, log):
+        super().__init__()
+        self.log = log
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.log.append(str(func))
+        return func(*args, **(kwargs or {}))
+
+
+def fed_calls(run, make, way, device, w, calls=10):
+    """What the steps of `way` see in each of `calls` calls: at each step
+    what has ended so far, and what the step gives. The input is made
+    inside the step, so that nothing here holds it."""
+    found = []
+    for at in range(calls):
+        log, steps = [], []
+
+        def made(at=at, log=log):
+            # What a graph draws is the same for the same seed.
+            torch.manual_seed(at)
+            return make(log, device, at)
+
+        def seen(step, *more, log=log, steps=steps):
+            steps.append((step, tuple(log), *more))
+
+        w.grad = None
+        try:
+            left = way(run, made, seen, w)
+        except Exception as error:
+            left = (type(error).__name__, str(error))
+        steps.append(("everything let go of", tuple(log), left))
+        found.append(steps)
+    return found
+
 
 # What `backward_forms()` says of a form with one node, and of one that is
 # cut where it reads a result of its own: the form and its two parts.
@@ -22115,6 +23148,993 @@ class TestVmGraphBackward(TestCase):
 
         got, expected = self.both(back_pair, device, use)
         self.alike(got, expected)
+
+    def fed_both_ways(self, fn, make, way, device, passes=(), states=ONE_NODE):
+        """What the steps of `way` see with `fn` compiled and in eager
+        mode, call by call. The compiled calls are checked to have run
+        with the node of the graph."""
+        torch.manual_seed(0)
+        w = torch.randn(4, 4, device=device, requires_grad=True)
+        other = w.detach().clone().requires_grad_()
+        compiled = self.staged(fn, passes)
+        got = fed_calls(compiled, make, way, device, w)
+        self.assertEqual(self.states(), states)
+        return got, fed_calls(fn, make, way, device, other)
+
+    def test_what_only_an_input_of_a_graph_holds_ends_where_eager_ends_it(self, device):
+        # Eager's nodes hold an input of a graph in two ways. What adds
+        # up the gradient of a leaf holds the leaf, for as long as the
+        # graph lives. And a node holds what it saved, itself or as what
+        # a saved view is a view of, until a backward that does not retain
+        # the graph has run the node, or the graph ends. Nothing else
+        # holds an input: an operand of an addition that the caller lets
+        # go of ends there, with all that only it holds. The node of a
+        # graph holds an input where eager's nodes hold it and for as long
+        # as they do, and wherever else it needs the values of an input it
+        # holds another tensor in the same memory.
+        # (The node held every input until the result ended.)
+        def keep(gm, input_types):
+            return gm
+
+        for fn, make in FED_CASES:
+            for name, way in FED_WAYS:
+                # Each with the engine's two graphs, and with what a pass
+                # over graphs made of them for the plain backward.
+                for passes in ((), (keep,)) if way is fed_plain else ((),):
+                    with self.subTest(
+                        fn=fn.__name__,
+                        input=make.__name__,
+                        way=name,
+                        passes=len(passes),
+                    ):
+                        got, expected = self.fed_both_ways(
+                            fn, make, way, device, passes
+                        )
+                        self.alike(got, expected)
+        # What was compared is what the test means: an operand of an
+        # addition ends with the caller's reference, a kept one with the
+        # backward, a leaf with the result.
+        ends = {}
+        for fn, make in (
+            (fed_adds, fed_no_leaf),
+            (fed_squares, fed_no_leaf),
+            (fed_adds, fed_leaf),
+            (fed_views, fed_no_leaf),
+            (fed_views, fed_view),
+        ):
+            _, expected = self.fed_both_ways(fn, make, fed_plain, device)
+            ends[fn, make] = [step[0] for step in expected[-1] if step[1]][0]  # noqa: RUF015
+        self.assertEqual(ends[fed_adds, fed_no_leaf], "the input let go of")
+        self.assertEqual(ends[fed_squares, fed_no_leaf], "the backward")
+        self.assertEqual(ends[fed_adds, fed_leaf], "the result let go of")
+        self.assertEqual(ends[fed_views, fed_no_leaf], "the backward")
+        self.assertEqual(ends[fed_views, fed_view], "the input let go of")
+
+    def test_the_inputs_that_nodes_keep_end_in_the_order_of_eagers_nodes(self, device):
+        # At a backward eager's nodes run latest first and each lets go
+        # of what it saved when it has run; a graph that ends without one
+        # lets go of its nodes from the result on, the node behind its
+        # last edge first. The two orders are not the same, and the node
+        # of a graph lets go of the inputs in the one or in the other.
+        # (In the calls in which a form is still taken down the graph is
+        # eager's own, and the engine has looked at its nodes: autograd
+        # lets go of the nodes of a graph that Python has looked at in
+        # another order. There what ends is compared, not its order.)
+        def calls(run, backward):
+            found = []
+            torch.manual_seed(0)
+            w = torch.randn(3, 4, device=device, requires_grad=True)
+            for at in range(10):
+                log = []
+                src = fed_source(device, at)
+                a, b = src * 1.5, src * 2.5
+                a.held, b.held = FedLoud(log, "a"), FedLoud(log, "b")
+                w.grad = None
+                out = run(a, b, w)
+                with_node = type(out.grad_fn).__name__ == "GraphBackward"
+                del a, b
+                steps = [tuple(log)]
+                if backward:
+                    out.backward()
+                    steps.append((tuple(log), src.grad.clone(), w.grad.clone()))
+                del out
+                steps.append(tuple(log))
+                found.append((with_node, steps))
+            return found
+
+        def unordered(steps):
+            return [
+                tuple(sorted(step))
+                if not step or isinstance(step[0], str)
+                else (tuple(sorted(step[0])), *step[1:])
+                for step in steps
+            ]
+
+        for fn in (fed_two, fed_two_shared):
+            orders = []
+            for backward in (True, False):
+                compiled = self.staged(fn)
+                got, expected = calls(compiled, backward), calls(fn, backward)
+                self.assertEqual(self.states(), ONE_NODE)
+                self.assertGreater(sum(with_node for with_node, _ in got), 2)
+                for (with_node, mine), (_, eagers) in zip(got, expected):
+                    if with_node:
+                        self.alike(mine, eagers)
+                    else:
+                        self.alike(unordered(mine), unordered(eagers))
+                orders.append(expected[-1][1][-1])
+            if fn is fed_two:
+                self.assertEqual(orders, [("a", "b"), ("b", "a")])
+
+    def test_a_gradient_to_differentiate_and_the_inputs_of_a_graph(self, device):
+        # A backward with `create_graph` runs the forward once more on the
+        # tape and calls eager's nodes for it. The node of the graph keeps
+        # that tape: its nodes hold what eager's nodes of the call hold,
+        # and let go of it where the backward of the gradient runs through
+        # them; a later such backward goes through the same tape, and
+        # finds what was released there released, as in eager mode.
+        def close(got, expected):
+            # What a second backward leaves is eager's value, not always
+            # its bits: the last entry of a call.
+            self.assertEqual(len(got), len(expected))
+            for mine, eagers in zip(got, expected):
+                self.alike(mine[:-1], eagers[:-1])
+                self.assertEqual(mine[-1][:2], eagers[-1][:2])
+                for ours, theirs in zip(mine[-1][2], eagers[-1][2]):
+                    self.assertEqual(ours, theirs, rtol=1e-5, atol=1e-6)
+
+        runtime = torch.vm._load_runtime()
+        kept = (
+            (fed_squares, fed_no_leaf),
+            (fed_both, fed_view),
+            (fed_views, fed_no_leaf),
+            (fed_scales, fed_detached),
+            (fed_adds, fed_leaf),
+        )
+        loose = (
+            (fed_adds, fed_no_leaf),
+            (fed_adds, fed_view),
+            (fed_twice, fed_no_leaf),
+        )
+        # With the input alive, whatever keeps it.
+        for fn, make in (*kept, *loose):
+            with self.subTest(fn=fn.__name__, input=make.__name__, way="alive"):
+                got, expected = self.fed_both_ways(fn, make, fed_differentiated, device)
+                close(got, expected)
+        # With the input let go of: as eager where its nodes keep it, or
+        # no gradient goes to it.
+        for fn, make in (*kept, (fed_adds, fed_detached)):
+            for way in (fed_differentiated_behind, fed_differentiated_twice):
+                with self.subTest(
+                    fn=fn.__name__, input=make.__name__, way=way.__name__
+                ):
+                    runtime.backward_served(True)
+                    got, expected = self.fed_both_ways(fn, make, way, device)
+                    close(got, expected)
+                    served = runtime.backward_served()
+                    self.assertGreater(served["create_graph"], 0)
+        # An input that no node keeps, that a gradient goes to and that
+        # the caller let go of: the node holds a tensor in its memory that
+        # has its history, and the gradient goes through that, as eager's
+        # goes through the history that its nodes hold by their edges.
+        for fn, make in loose:
+            for way in (fed_differentiated_behind, fed_differentiated_twice):
+                with self.subTest(
+                    fn=fn.__name__, input=make.__name__, way=way.__name__
+                ):
+                    runtime.backward_served(True)
+                    got, expected = self.fed_both_ways(fn, make, way, device)
+                    close(got, expected)
+                    served = runtime.backward_served()
+                    self.assertGreater(served["create_graph"], 0)
+                    self.assertGreater(served["histories"], 0)
+
+    def test_an_input_whose_storage_is_watched_keeps_eagers_tape(self, device):
+        # Where the node of a graph holds another tensor in the memory of
+        # an input, the memory lives for as long as the node needs it.
+        # Something that is told when the storage ends would be told
+        # late: such a call keeps eager's tape, whose nodes hold what
+        # eager's hold.
+        runtime = torch.vm._load_runtime()
+        told = []
+
+        def watched(make, how):
+            def made(log, device, at):
+                src, t = make(log, device, at)
+                if how == "a weak reference":
+                    told.append(
+                        weakref.ref(
+                            t.untyped_storage(), lambda _: log.append("storage")
+                        )
+                    )
+                elif how == "a finalizer":
+                    weakref.finalize(t.untyped_storage(), log.append, "storage")
+                else:
+                    t.untyped_storage().held = FedLoud(log, "storage")
+                return src, t
+
+            return made
+
+        cases = (
+            (fed_adds, fed_no_leaf, True),
+            (fed_adds, fed_detached, True),
+            (fed_squares, fed_no_leaf, False),
+            (fed_adds, fed_leaf, False),
+        )
+        for fn, make, on_tape in cases:
+            # How many of the calls run with the node of the graph.
+            runtime.backward_served(True)
+            self.fed_both_ways(fn, make, fed_plain, device)
+            with_node = runtime.backward_served()["graph"]
+            self.assertGreater(with_node, 2)
+            for how in ("a weak reference", "a finalizer", "an attribute"):
+                for name, way in FED_WAYS[:4]:
+                    with self.subTest(
+                        how=how, fn=fn.__name__, input=make.__name__, way=name
+                    ):
+                        del told[:]
+                        runtime.backward_served(True)
+                        got, expected = self.fed_both_ways(
+                            fn, watched(make, how), way, device
+                        )
+                        self.alike(got, expected)
+                        self.assertIn("storage", expected[-1][-1][1])
+                        served = runtime.backward_served()
+                        self.assertEqual(served["watched"], with_node if on_tape else 0)
+                        self.assertEqual(served["aliases"], 0)
+                        if on_tape:
+                            self.assertEqual(served["graph"], 0)
+
+    def test_what_a_graph_keeps_of_an_input_is_what_eagers_nodes_keep(self, device):
+        # What the forward keeps for the backward is chosen by size, among
+        # what a backward can compute again. An input is no part of that
+        # choice: an operation that takes memory the caller can get at is
+        # never run again, so the forward keeps of an input what a
+        # backward reads, as eager does, and nothing in its place.
+        # Written to in place between the call and the backward, an input
+        # that no node keeps changes no gradient and raises nothing; one
+        # that a node keeps raises what eager raises.
+        runtime = torch.vm._load_runtime()
+        for fn in (fed_reduces, fed_widens, fed_adds, fed_squares, fed_views):
+            for name, way in (FED_WAYS[0], FED_WAYS[6]):
+                with self.subTest(fn=fn.__name__, way=name):
+                    runtime.backward_served(True)
+                    got, expected = self.fed_both_ways(fn, fed_no_leaf, way, device)
+                    self.alike(got, expected)
+                    served = runtime.backward_served()
+                    self.assertEqual(served["again"], 0)
+                    kept = fn in (fed_squares, fed_views)
+                    if way is fed_plain:
+                        self.assertGreater(served["graph"], 2)
+                    if kept:
+                        self.assertEqual(served["aliases"], 0)
+                    else:
+                        self.assertEqual(served["aliases"], served["graph"])
+                    if way is fed_written:
+                        raised = [
+                            step[0]
+                            for step in expected[-1]
+                            if step[0] == "the backward raises"
+                        ]
+                        self.assertEqual(len(raised), 1 if kept else 0)
+
+    def test_a_graph_that_cannot_run_again_holds_of_an_input_what_its_forward_keeps(
+        self, device
+    ):
+        # The node needs the values of an input for what the forward keeps
+        # of it and for running the forward once more on the tape. A graph
+        # that draws random numbers, or writes to a tensor from outside,
+        # cannot run again: its node holds nothing of an input that no
+        # node of eager's keeps, and no other tensor in its memory.
+        runtime = torch.vm._load_runtime()
+        for make in (fed_no_leaf, fed_view, fed_detached, fed_leaf):
+            for name, way in FED_WAYS[:5]:
+                with self.subTest(input=make.__name__, way=name):
+                    runtime.backward_served(True)
+                    got, expected = self.fed_both_ways(fed_draws, make, way, device)
+                    self.alike(got, expected)
+                    served = runtime.backward_served()
+                    self.assertEqual(served["aliases"], 0)
+                    self.assertEqual(served["watched"], 0)
+                    if way in (fed_plain, fed_retained, fed_second):
+                        self.assertGreater(served["graph"], 2)
+
+    def test_a_backward_that_was_not_taken_down_and_an_input_let_go_of(self, device):
+        # A backward that the backward graph does not serve runs the
+        # forward once more on the tape. Where the node holds another
+        # tensor in the place of an input that a gradient goes to, the
+        # forward runs from a leaf in that memory, and the gradient at the
+        # leaf is what the node hands on.
+        runtime = torch.vm._load_runtime()
+        for fn, make in (
+            (fed_adds, fed_no_leaf),
+            (fed_adds, fed_view),
+            (fed_squares, fed_no_leaf),
+            (fed_views, fed_view),
+            (fed_twice, fed_no_leaf),
+            (fed_adds, fed_detached),
+        ):
+            with self.subTest(fn=fn.__name__, input=make.__name__):
+                runtime.backward_served(True)
+                got, expected = self.fed_both_ways(
+                    fn, make, fed_under_another_autocast, device
+                )
+                self.alike(got, expected)
+                served = runtime.backward_served()
+                self.assertGreater(served["again"], 2)
+                self.assertEqual(served["graph"], 0)
+
+    def test_a_graph_in_parts_and_the_same_input_twice_hold_what_eager_holds(
+        self, device
+    ):
+        def hidden(run, made, seen, w):
+            src, t = made()
+            h, loss = run(t, w)
+            del t
+            seen("the input let go of")
+            loss.backward(retain_graph=True)
+            seen("the backward of the loss", *fed_grads(src, w))
+            del loss
+            seen("the loss let go of")
+            h.sum().backward()
+            seen("the backward of the other result", *fed_grads(src, w))
+            del h
+            seen("the other result let go of")
+
+        for make in (fed_no_leaf, fed_view, fed_leaf, fed_detached):
+            with self.subTest(input=make.__name__):
+                got, expected = self.fed_both_ways(
+                    fed_hidden, make, hidden, device, states=TWO_NODES
+                )
+                self.alike(got, expected)
+
+        def same_twice(a, b):
+            return ((a + b).sin() * 2 + 1).cos().tanh().sum()
+
+        def twice(run, made, seen, w):
+            src, t = made()
+            out = run(t, t)
+            del t
+            seen("the input let go of")
+            with torch.autocast(w.device.type, dtype=torch.bfloat16):
+                out.backward(retain_graph=True)
+            seen("a backward on the tape", *fed_grads(src, w))
+            out.backward()
+            seen("the backward", *fed_grads(src, w))
+            del out
+            seen("the result let go of")
+
+        got, expected = self.fed_both_ways(same_twice, fed_no_leaf, twice, device)
+        self.alike(got, expected)
+
+    def test_what_is_put_on_a_class_under_a_name_that_the_engine_asks_of_a_tensor_is_not_called_for_it(
+        self, device
+    ):
+        # Where a graph has gradients the engine asks of a tensor, for
+        # itself: its storage and whether that can be resized, what it is
+        # a view of, the node of autograd that made it, whether it is a
+        # leaf; and it keeps a result without its history. It asks the
+        # getter or the method of the class under every tensor and every
+        # storage, never the name on the tensor. A function that somebody
+        # put on `torch.Tensor` or on `torch.UntypedStorage` under such a
+        # name is called where the program reads the name, as in eager
+        # mode, and never for the engine: not in the calls that take the
+        # graph down again behind the change of the class, and not in
+        # those that the node of the graph serves.
+        runtime = torch.vm._load_runtime()
+        names = (
+            (torch.Tensor, "untyped_storage"),
+            (torch.UntypedStorage, "resizable"),
+            (torch.Tensor, "_base"),
+            (torch.Tensor, "grad_fn"),
+            (torch.Tensor, "is_leaf"),
+            (torch.Tensor, "detach"),
+        )
+
+        def no_gradient(run, at):
+            t = torch.full((3, 4), 0.125 * (at + 1), device=device)
+            return (run(t, torch.full((4, 4), 0.25, device=device)).item(),)
+
+        def backward(run, at):
+            src = fed_source(device, at)
+            w = torch.full((4, 4), 0.25, device=device, requires_grad=True)
+            out = run(src * 1.5, w)
+            out.backward()
+            return out.item(), src.grad, w.grad
+
+        def differentiated(run, at):
+            src = fed_source(device, at)
+            w = torch.full((4, 4), 0.25, device=device, requires_grad=True)
+            t = src * 1.5
+            out = run(t, w)
+            (g,) = torch.autograd.grad(out, t, create_graph=True)
+            g.sum().backward()
+            return out.item(), g.sum().item(), src.grad, w.grad
+
+        def keep(gm, input_types):
+            return gm
+
+        ways = (
+            ("a graph", (), no_gradient, (fed_adds,)),
+            ("a pass", (keep,), no_gradient, (fed_adds,)),
+            (
+                "a gradient and a backward",
+                (),
+                backward,
+                (fed_adds, fed_squares, fed_keeps_its_result),
+            ),
+            (
+                "a gradient to differentiate",
+                (),
+                differentiated,
+                (fed_adds, fed_squares, fed_keeps_its_result),
+            ),
+        )
+
+        def calls(run, use, cls, name, counted):
+            # The function is on the class from the seventh call to the
+            # fourteenth of 16: the values of each call, how often the
+            # function ran in each, and how many backwards the node of
+            # the graph served while it was there.
+            put, values, counts, served = FedPut(cls, name), [], [], 0
+            try:
+                for at in range(16):
+                    torch.manual_seed(at)
+                    if at == 6:
+                        put.on()
+                        runtime.backward_served(True)
+                    if at == 14:
+                        served = runtime.backward_served()
+                        put.off()
+                    before = put.calls
+                    values.append(use(run, at))
+                    counts.append(put.calls - before)
+            finally:
+                put.off()
+            return (
+                values,
+                counts,
+                served["graph"] + served["create_graph"] if counted else 0,
+            )
+
+        for cls, name in names:
+            for way, passes, use, fns in ways:
+                for fn in fns:
+                    with self.subTest(
+                        name=f"{cls.__name__}.{name}", way=way, fn=fn.__name__
+                    ):
+                        compiled = self.staged(fn, passes)
+                        got, ran, served = calls(
+                            compiled, use, cls, name, use is not no_gradient
+                        )
+                        states = self.states()
+                        expected, in_eager, _ = calls(fn, use, cls, name, False)
+                        self.alike(got, expected)
+                        self.assertEqual(ran, in_eager)
+                        if use is not no_gradient:
+                            # The node of the graph served while the
+                            # function was on the class.
+                            self.assertIn("the engine's backward", states)
+                            self.assertGreaterEqual(served, 2)
+
+    def pen_alike(self, got, expected):
+        """The result and the gradient that is differentiated again are
+        eager's bit for bit; what the backward of the penalty leaves on
+        the leaves is eager's value (the gradients that meet there are
+        not always added in eager's order)."""
+        self.alike(got[0], expected[0])
+        self.assertEqual(len(got[1]), len(expected[1]))
+        for mine, eagers in zip(got[1], expected[1]):
+            self.assertEqual(mine, eagers, rtol=1e-5, atol=1e-6)
+
+    def test_a_gradient_to_differentiate_goes_through_an_input_that_nobody_holds(
+        self, device
+    ):
+        # A gradient penalty is a gradient with `create_graph=True` and a
+        # backward of what is made of it. It goes through the history of
+        # every input of a graph that the gradient reaches, and eager's
+        # nodes hold that history by their edges, not the input: nobody
+        # needs to hold the input. Most graphs of a function start behind
+        # a call into Python, with a tensor that the function made and
+        # that no caller ever sees; an argument can be an expression, or
+        # a variable that the caller binds again. For an input that none
+        # of eager's nodes keeps, the node of a graph holds a tensor in
+        # the memory of the input that has its history and is no view of
+        # it: the gradient goes through that.
+        runtime = torch.vm._load_runtime()
+
+        def keep(gm, input_types):
+            return gm
+
+        ways = (
+            ("a graph", (*DEFAULT, P.Graphs()), {}),
+            ("a graph that is not measured", (*DEFAULT, P.Graphs()), {"demote": False}),
+            ("eager's tape", (*DEFAULT, P.Graphs(backward=False)), {"demote": False}),
+            ("a pass", (*DEFAULT, P.Graphs(), keep), {"demote": False}),
+        )
+        shapes = (
+            (pen_term, False, True),
+            (pen_factor, False, False),
+            (pen_both, False, False),
+            (pen_in_a_callee, False, True),
+            (pen_in_front_of_a_loop, False, True),
+            (pen_handed, True, True),
+            (pen_kept, True, False),
+        )
+        for fn, temporary, loose in shapes:
+            expected = [pen_penalty(fn, device, at, temporary) for at in range(12)]
+            for way, passes, more in ways:
+                with self.subTest(fn=fn.__name__, way=way):
+                    compiled = torch.vm(fn, passes=passes, fallback=False, **more)
+                    runtime.backward_served(True)
+                    got = [
+                        pen_penalty(compiled, device, at, temporary) for at in range(12)
+                    ]
+                    served = runtime.backward_served()
+                    for mine, eagers in zip(got, expected):
+                        self.pen_alike(mine, eagers)
+                    if way == "a graph that is not measured":
+                        # The node of the graph served, and where no node
+                        # keeps the input, through its history.
+                        self.assertGreaterEqual(served["create_graph"], 3)
+                        if loose:
+                            self.assertGreaterEqual(served["histories"], 3)
+                    if way == "eager's tape":
+                        self.assertEqual(served["create_graph"], 0)
+
+    def test_the_same_tensor_as_two_inputs_of_a_graph_and_a_gradient_to_differentiate(
+        self, device
+    ):
+        # One tensor can be two inputs of a graph, and a node of eager's
+        # can keep the one and not the other. A gradient that is
+        # differentiated again goes through the history of the tensor for
+        # both: where the node of the graph holds the tensor itself for
+        # one of them, that is the history of the other as well.
+        runtime = torch.vm._load_runtime()
+
+        def twice(made_of_a_leaf):
+            def case(run, at):
+                x, w = pen_leaves(device, at)
+                t = x if made_of_a_leaf else x * 2.0
+                out = run(t, t, w)
+                del t
+                (g,) = torch.autograd.grad(out, x, create_graph=True)
+                (g.pow(2).sum() + out).backward()
+                return (out.detach().clone(), g.detach().clone()), (
+                    x.grad.clone(),
+                    w.grad.clone(),
+                )
+
+            return case
+
+        def once(run, at):
+            x, w = pen_leaves(device, at)
+            t = x * 2.0
+            out = run(t, t, w)
+            del t
+            out.backward()
+            return (out.detach().clone(), x.grad.clone(), w.grad.clone()), ()
+
+        for fn in (pen_two_kept_last, pen_two_kept_first, pen_two_loose):
+            for name, case in (
+                ("a tensor that was made", twice(False)),
+                ("a leaf", twice(True)),
+                ("a backward", once),
+            ):
+                with self.subTest(fn=fn.__name__, input=name):
+                    compiled = torch.vm(
+                        fn, passes=(*DEFAULT, P.Graphs()), fallback=False, demote=False
+                    )
+                    runtime.backward_served(True)
+                    got = [case(compiled, at) for at in range(12)]
+                    served = runtime.backward_served()
+                    for mine, eagers in zip(got, [case(fn, at) for at in range(12)]):
+                        self.pen_alike(mine, eagers)
+                    self.assertGreaterEqual(
+                        served["graph"] if case is once else served["create_graph"], 3
+                    )
+
+    def test_what_has_the_history_of_an_input_of_a_graph_is_seen_by_nobody(
+        self, device
+    ):
+        # The tensor that the node of a graph holds for the history of an
+        # input is the engine's own. It is made where a call enters a
+        # graph, so under no mode and no transform (no graph is entered
+        # under one), and it is no tensor that anybody has: a hook on the
+        # input is called when a gradient reaches the input through it,
+        # once and with eager's gradient; a gradient goes through its node
+        # in batches as through eager's nodes; a write in place to the
+        # input moves its version, as the input's.
+        runtime = torch.vm._load_runtime()
+
+        def through(fn, case, calls=10):
+            compiled = torch.vm(
+                fn, passes=(*DEFAULT, P.Graphs()), fallback=False, demote=False
+            )
+            runtime.backward_served(True)
+            got = [case(compiled, at) for at in range(calls)]
+            return got, [case(fn, at) for at in range(calls)], runtime.backward_served()
+
+        def batched(run, at):
+            x, w = pen_leaves(device, at)
+            out = run(x * 2.0, w)
+            (g,) = torch.autograd.grad(out, x, create_graph=True)
+            rows = torch.eye(12, device=device).view(12, 3, 4)
+            (h,) = torch.autograd.grad(g, x, grad_outputs=rows, is_grads_batched=True)
+            return out.detach().clone(), g.detach().clone(), h
+
+        def hessian(vectorize):
+            def case(run, at):
+                x, w = pen_leaves(device, at)
+                return torch.autograd.functional.hessian(
+                    lambda v: run(v * 2.0, w), x, vectorize=vectorize
+                )
+
+            return case
+
+        def transformed(transform):
+            def case(run, at):
+                x, w = pen_leaves(device, at)
+                return transform(lambda v: run(v * 2.0, w))(x.detach())
+
+            return case
+
+        def under(mode, around_the_call):
+            def case(run, at):
+                x, w = pen_leaves(device, at)
+                log = []
+                t = x * 2.0
+                if around_the_call:
+                    with mode(log):
+                        out = run(t, w)
+                    del t
+                    (g,) = torch.autograd.grad(out, x, create_graph=True)
+                    (g.pow(2).sum() + out).backward()
+                else:
+                    out = run(t, w)
+                    del t
+                    with mode(log):
+                        (g,) = torch.autograd.grad(out, x, create_graph=True)
+                        (g.pow(2).sum() + out).backward()
+                return (
+                    (out.detach().clone(), g.detach().clone()),
+                    (x.grad.clone(), w.grad.clone()),
+                    tuple(log),
+                )
+
+            return case
+
+        def hooked(how):
+            def case(run, at):
+                x, w = pen_leaves(device, at)
+                log = []
+                t = x * 2.0
+                out = run(t, w)
+                if how == "a hook":
+                    t.register_hook(lambda grad: log.append(grad.detach().clone()))
+                elif how == "retain_grad":
+                    t.retain_grad()
+                else:
+                    torch.autograd.graph.register_multi_grad_hook(
+                        (t,), lambda grads: log.append(grads[0].detach().clone())
+                    )
+                (g,) = torch.autograd.grad(out, x, create_graph=True)
+                first = len(log)
+                (g.pow(2).sum() + out).backward()
+                kept = (t.grad.clone(),) if how == "retain_grad" else ()
+                return (out.detach().clone(), g.detach().clone(), first, len(log)), (
+                    x.grad.clone(),
+                    w.grad.clone(),
+                    *log,
+                    *kept,
+                )
+
+            return case
+
+        def anomaly(run, at):
+            x, w = pen_leaves(device, at)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                with torch.autograd.detect_anomaly():
+                    out = run(x * 2.0, w)
+                    (g,) = torch.autograd.grad(out, x, create_graph=True)
+                    (g.pow(2).sum() + out).backward()
+            return (
+                out.detach().clone(),
+                g.detach().clone(),
+                tuple(sorted(str(one.message) for one in caught)),
+            ), (x.grad.clone(), w.grad.clone())
+
+        def written(run, at):
+            x, w = pen_leaves(device, at)
+            t = x * 2.0
+            out = run(t, w)
+            with torch.no_grad():
+                t.add_(1.0)
+            del t
+            try:
+                (g,) = torch.autograd.grad(out, x, create_graph=True)
+            except RuntimeError as error:
+                return str(error)
+            return g.detach().clone()
+
+        def saved_and_written(run, at):
+            x, w = pen_leaves(device, at)
+            t = x * 2.0
+            out = run(t, w)
+            with torch.no_grad():
+                t.mul_(2.0)
+            try:
+                out.backward()
+            except RuntimeError as error:
+                return str(error)
+            return x.grad.clone()
+
+        def saved_and_detached(run, at):
+            x, w = pen_leaves(device, at)
+            t = x * 2.0
+            out = run(t, w)
+            t.detach_()
+            try:
+                out.backward()
+            except RuntimeError as error:
+                return str(error)
+            return x.grad.clone()
+
+        def other_data(way):
+            def case(run, at):
+                x, w = pen_leaves(device, at)
+                t = x * 2.0
+                out = run(t, w)
+                t.data = torch.zeros_like(t)
+                try:
+                    if way == "a backward":
+                        out.backward()
+                        return x.grad.clone(), w.grad.clone()
+                    (g,) = torch.autograd.grad(out, x, create_graph=True)
+                except RuntimeError as error:
+                    return str(error)
+                return (g.detach().clone(),)
+
+            return case
+
+        # The tensor itself: in the memory of the input and with its
+        # version counter, no view of it, and with a node whose edge goes
+        # to the node that made the input.
+        with self.subTest(case="the tensor that is made"):
+            from torch.vm._handle import GraphInput
+
+            self.assertTrue(
+                issubclass(GraphInput, torch.autograd.function._SingleLevelFunction)
+            )
+            x, w = pen_leaves(device, 0)
+            t = x * 2.0
+            made = GraphInput.apply(t)
+            self.assertIsNone(made._base)
+            self.assertEqual(made.data_ptr(), t.data_ptr())
+            self.assertEqual(type(made.grad_fn).__name__, "GraphInputBackward")
+            self.assertIs(made.grad_fn.next_functions[0][0], t.grad_fn)
+            self.assertEqual(made._version, t._version)
+            with torch.no_grad():
+                t.add_(1.0)
+            self.assertEqual(made._version, t._version)
+            log = []
+            t.held = FedLoud(log)
+            del t
+            self.assertEqual(log, ["ended"])
+        # Batches of gradients go through the node as through eager's.
+        for name, case in (
+            ("batched", batched),
+            ("hessian, vectorized", hessian(True)),
+            ("hessian", hessian(False)),
+        ):
+            with self.subTest(case=name):
+                got, expected, served = through(pen_handed, case)
+                self.alike(got, expected)
+                self.assertGreaterEqual(served["histories"], 3)
+        # Under a transform, a torch function mode or a dispatch mode no
+        # graph is entered, so no such tensor is made: they see eager's
+        # operations, and those alone.
+        for name, case in (
+            ("torch.func.grad", transformed(torch.func.grad)),
+            ("torch.func.jacrev", transformed(torch.func.jacrev)),
+        ):
+            with self.subTest(case=name):
+                got, expected, served = through(pen_handed, case)
+                self.alike(got, expected)
+                self.assertEqual(
+                    (served["aliases"], served["histories"], served["graph"]), (0, 0, 0)
+                )
+        for name, mode in (
+            ("a torch function mode", PenFunctions),
+            ("a dispatch mode", PenKernels),
+        ):
+            with self.subTest(case=name, around="the call"):
+                got, expected, served = through(pen_handed, under(mode, True))
+                for mine, eagers in zip(got, expected):
+                    self.pen_alike(mine[:2], eagers[:2])
+                    self.assertEqual(mine[2], eagers[2])
+                self.assertEqual((served["aliases"], served["histories"]), (0, 0))
+        # A torch function mode around the gradient sees what it sees in
+        # eager mode.
+        with self.subTest(case="a torch function mode", around="the gradient"):
+            got, expected, served = through(pen_handed, under(PenFunctions, False))
+            for mine, eagers in zip(got, expected):
+                self.pen_alike(mine[:2], eagers[:2])
+                self.assertEqual(mine[2], eagers[2])
+            self.assertGreaterEqual(served["histories"], 3)
+        # What is put on the input behind the call is called as in eager
+        # mode: as often, in the same backward, with eager's gradient.
+        for how in ("a hook", "retain_grad", "a hook on several"):
+            with self.subTest(case=how):
+                got, expected, served = through(pen_handed, hooked(how))
+                for mine, eagers in zip(got, expected):
+                    self.pen_alike(mine, eagers)
+                self.assertGreaterEqual(served["create_graph"], 3)
+        # Anomaly mode: eager's tape, and the warnings of eager mode.
+        with self.subTest(case="anomaly mode"):
+            got, expected, served = through(pen_handed, anomaly)
+            for mine, eagers in zip(got, expected):
+                self.pen_alike(mine, eagers)
+            self.assertEqual((served["aliases"], served["histories"]), (0, 0))
+        # A write in place to the input between the call and the gradient
+        # is seen: where a node of eager's kept the input, eager's error
+        # with eager's text; where none did, the forward cannot run again
+        # from the values of the call, and the backward says so.
+        with self.subTest(case="a write to an input that a node keeps"):
+            got, expected, _ = through(pen_kept, written)
+            self.assertEqual(got, expected)
+            self.assertIn("modified by an inplace operation", expected[-1])
+            self.assertIn("which is output 0 of Mul", expected[-1])
+        # Other data in an input (`t.data = ...`) moves no version. What
+        # the node holds for an input that no node keeps is in the memory
+        # of the call, so the gradient is eager's, which does not read the
+        # input. An input that a node keeps is held itself, as eager's
+        # node holds it: a backward reads the new data, as eager's does;
+        # and where the forward would run once more from it, the backward
+        # says that the input has other data.
+        for way in ("a backward", "a gradient to differentiate"):
+            with self.subTest(
+                case="other data in an input that no node keeps", way=way
+            ):
+                got, expected, _ = through(pen_handed, other_data(way))
+                self.alike(got, expected)
+                self.assertIsInstance(expected[-1], tuple)
+        with self.subTest(
+            case="other data in an input that a node keeps", way="a backward"
+        ):
+            got, expected, _ = through(pen_kept, other_data("a backward"))
+            self.alike(got, expected)
+        with self.subTest(
+            case="other data in an input that a node keeps",
+            way="a gradient to differentiate",
+        ):
+            got, expected, _ = through(
+                pen_kept, other_data("a gradient to differentiate")
+            )
+            self.alike(got[:3], expected[:3])
+            self.assertEqual(
+                got[-1],
+                "torch.vm: an input of this graph was given other data (`.data = ...`) before a backward that was asked for with create_graph=True",
+            )
+            self.assertIsInstance(expected[-1], tuple)
+        # A node that keeps an input holds the input itself: what was done
+        # to it in place is named as eager names it.
+        for name, case in (
+            ("written", saved_and_written),
+            ("detached in place", saved_and_detached),
+        ):
+            with self.subTest(case="an input that a node keeps, " + name):
+                got, expected, served = through(pen_kept, case)
+                self.assertEqual(got, expected)
+                self.assertIsInstance(expected[-1], str)
+                self.assertEqual(served["histories"], 0)
+        with self.subTest(case="a write to an input that no node keeps"):
+            got, expected, _ = through(pen_handed, written)
+            self.alike(got[:3], expected[:3])
+            self.assertEqual(
+                got[-1],
+                "torch.vm: an input of this graph was written to in place before a backward that was asked for with create_graph=True",
+            )
+            self.assertIsInstance(expected[-1], torch.Tensor)
+
+    def test_a_graph_that_eager_goes_backward_through_twice_keeps_eagers_tape(
+        self, device
+    ):
+        # A node of eager's raises at a second backward only for what it
+        # saved and has let go of: behind a backward that did not retain
+        # the graph, eager goes backward again through nodes that saved no
+        # tensor, and for another result whose nodes are apart. The node
+        # of a graph is released as one. So a graph of which two results,
+        # or one result twice, share no node that saved a tensor keeps
+        # eager's tape; one whose results all share such a node has the
+        # engine's backward, and raises where eager raises.
+        # (Every second backward raised.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*DEFAULT, P.Graphs())
+        ways = (
+            ("the default passes", DEFAULT),
+            ("graphs", graphs),
+            ("a pass", (*graphs, keep)),
+            ("eager's tape", (*DEFAULT, P.Graphs(backward=False))),
+        )
+        shapes = (
+            (fed_saves_nothing, fed_backward_twice, back_keeps_tape("SumBackward0")),
+            (
+                fed_two_apart,
+                fed_backward_each,
+                back_keeps_tape("SumBackward0", "SumBackward0"),
+            ),
+            (
+                fed_two_apart,
+                fed_backward_each_the_other_way,
+                back_keeps_tape("SumBackward0", "SumBackward0"),
+            ),
+            # The first of its results goes backward twice by itself.
+            (
+                fed_two_over_nothing_saved,
+                fed_backward_each,
+                back_keeps_tape("SumBackward0"),
+            ),
+            (fed_two_over_what_was_saved, fed_backward_each, None),
+            (fed_two_over_what_was_saved, fed_backward_each_the_other_way, None),
+        )
+        runtime = torch.vm._load_runtime()
+
+        def calls(run, use, retain):
+            found = []
+            for at in range(10):
+                torch.manual_seed(at)
+                t = torch.randn(3, 4, device=device)
+                w = torch.randn(3, 4, device=device, requires_grad=True)
+                try:
+                    found.append(use(run, t, w, retain))
+                except RuntimeError as error:
+                    found.append(
+                        (
+                            type(error).__name__,
+                            str(error)[:80],
+                            None if w.grad is None else w.grad.clone(),
+                        )
+                    )
+            return found
+
+        for fn, use, reason in shapes:
+            returns = reason is not None
+            for retain in (False, True):
+                expected = calls(fn, use, retain)
+                # Eager raises for the second only where a node that saved a
+                # tensor is shared and the first did not retain the graph.
+                raised = [type(found[0]) is str for found in expected]
+                self.assertEqual(raised, [not returns and not retain] * 10)
+                for way, passes in ways:
+                    with self.subTest(
+                        fn=fn.__name__, use=use.__name__, retain=retain, way=way
+                    ):
+                        runtime.backward_forms(True)
+                        compiled = torch.vm(
+                            fn, passes=passes, fallback=False, demote=False
+                        )
+                        self.alike(calls(compiled, use, retain), expected)
+                        states = sorted(
+                            state
+                            for state, count, _, _ in runtime.backward_forms()
+                            if count
+                        )
+                        if way in ("graphs", "a pass"):
+                            # What the form runs on, as `regions()` says it.
+                            self.assertEqual(states, [reason] if returns else ONE_NODE)
+                            graphs = torch.vm.regions(compiled)
+                            self.assertIn(
+                                states[0],
+                                [
+                                    form.get("backward")
+                                    for graph in graphs
+                                    for form in graph.get("forms", ())
+                                ],
+                            )
 
     def test_create_graph_is_eagers_or_says_why_not(self, device):
         def use(fn, x, w, b):
@@ -22618,7 +24638,24 @@ class TestVmGraphBackward(TestCase):
                                 first, second = second, first
                             found.append((use(first, second), w.grad, b.grad))
                         self.alike(found[0], found[1])
-                    self.assertIn("the engine's backward", self.states())
+                    # The two results of back_apart have nodes apart: eager
+                    # goes backward for the one behind the other, so that
+                    # graph keeps eager's tape, and says so.
+                    state = (
+                        back_keeps_tape("SumBackward0", "SumBackward0")
+                        if fn is back_apart
+                        else "the engine's backward"
+                    )
+                    self.assertIn(state, self.states())
+                    graphs = torch.vm.regions(compiled)
+                    self.assertIn(
+                        state,
+                        [
+                            form.get("backward")
+                            for graph in graphs
+                            for form in graph.get("forms", ())
+                        ],
+                    )
 
     def test_a_result_that_is_only_looked_at_is_no_reason_to_cut_a_graph(self, device):
         # The graph gives the tensor so that its sizes and its type can be
@@ -22941,8 +24978,18 @@ class TestVmGraphBackward(TestCase):
                 return str(error), w.grad is None, b.grad is None
             return None
 
-        got, expected = self.both(back_kept_apart, device, use)
+        # The two results of back_kept_apart have nodes apart: eager goes
+        # backward for the one behind the other, so the graph keeps eager's
+        # tape, and what a backward that raises leaves is eager's.
+        apart = [back_keeps_tape("TanhBackward0", "SumBackward0")]
+        got, expected = self.both(back_kept_apart, device, use, states=apart)
         text = "output 0 of Tanh, is at version 1; expected version 0"
+        self.assertIn(text, expected[0][0])
+        self.assertEqual((expected[0][1], expected[0][2]), (True, False))
+        self.alike(got, expected)
+        # Where the results share a node that saved a tensor, the graph has
+        # one node, which raises before it gives anything.
+        got, expected = self.both(back_kept_beside, device, use)
         self.assertIn(text, expected[0][0])
         self.assertEqual(got[0][0], expected[0][0])
         self.assertEqual((expected[0][1], expected[0][2]), (True, False))

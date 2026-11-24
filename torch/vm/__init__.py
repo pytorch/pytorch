@@ -135,7 +135,7 @@ from typing import Any
 
 import torch
 
-from . import _shortcuts, passes
+from . import _handle, _shortcuts, passes
 from ._passes import fuse_checked, Mismatch, swap
 from ._types import (
     Aligned,

@@ -793,6 +793,23 @@ impl Joint {
         reads
     }
 
+    /// Which nodes of eager's run in a backward for the results of
+    /// `pattern` (and the contributions of `needed`): a flag per node, as
+    /// the caller counts them. None for a backward that was not taken
+    /// down.
+    pub(crate) fn runs(&self, pattern: &[bool], variant: u32, needed: Option<&[bool]>) -> Option<Vec<bool>> {
+        let known = |variant: u32| self.part(pattern, variant, true, needed);
+        let part = known(variant).or_else(|_| known(0)).ok()?;
+        let mut runs = vec![false; self.leads.len()];
+        for node in &part.nodes {
+            if runs.len() <= *node as usize {
+                runs.resize(*node as usize + 1, false);
+            }
+            runs[*node as usize] = true;
+        }
+        Some(runs)
+    }
+
     /// Whether a backward may run a forward operation again: it is one of
     /// `AGAIN`, gives one tensor, takes nothing in memory the caller can
     /// get at (`outside`: what is written there behind the forward is not

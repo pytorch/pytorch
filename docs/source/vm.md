@@ -3526,6 +3526,49 @@ gradient of every parameter of a small model is within 1e-4 of eager's at
 each of 30 steps with `AOTAutograd()` and with `Inductor()`, which is what
 the tests hold.
 
+Memory, with gradients recorded: the peak of
+`torch.cuda.max_memory_allocated`, each figure against eager mode's peak
+of the same step in its steady state. The steady state is 20 steps behind
+20 others. The last column is the peak of the calls in which the graphs of
+the step are taken down, the first two of each kind of call with gradients
+(`Graphs()` alone; the steps are those of the table above, resnet18 with
+100 classes at batch 16 of 3x224x224 and SGD with momentum, DistillGPT2 at
+batch 8 of 128 tokens):
+
+| step | eager | `Graphs()` | `Graphs(), Inductor()` | the calls that take the graphs down |
+|---|---|---|---|---|
+| resnet18, float32 | 539 MiB | 1139 MiB (2.11x) | 669 MiB (1.24x) | 1724 MiB (3.20x) |
+| resnet18 under autocast (float16), the backward behind the block | 408 MiB | 749 MiB (1.84x) | 472 MiB (1.16x) | 1416 MiB (3.47x) |
+| DistillGPT2, float32 | 2137 MiB | 2171 MiB (1.02x) | 2137 MiB (1.00x) | 2940 MiB (1.38x) |
+| DistillGPT2 under autocast | 2202 MiB | 2500 MiB (1.14x) | 2304 MiB (1.05x) | 3408 MiB (1.55x) |
+
+The forward of a graph keeps every value it computes until it ends, where
+eager mode lets go of what no node saved as it goes: a step that is one
+large graph has about twice eager's peak with `Graphs()` alone, and what a
+compiler makes of the graph has less. DistillGPT2's step is several small
+graphs, and which of them run compiled is decided by measurement in each
+process. The calls that take a graph down hold more: the run on eager's
+tape, the backward that eager's nodes are called for and the comparison
+with the autograd engine are alive at once, and under autocast the
+backward is taken down twice (as it runs behind the autocast block and
+inside it). A step that is near the memory limit in eager mode meets that
+peak in its first calls: here 1.7 GiB where a step of resnet18 needs 0.5,
+and 2.9 GiB where a step of DistillGPT2 needs 2.1. A backward with
+`create_graph=True` runs the forward once more on eager's tape, and the
+node of the graph keeps that tape until it is released: a step with a
+gradient penalty on a small model peaks at 1.09 times eager's (152 MiB for
+139).
+
+As the benchmark runner of `benchmarks/dynamo` runs a training step
+(`--training --amp`, batch 16; its forward, loss, backward and update in one
+function), the same measurement gives, for resnet18, 635 MiB with `Graphs()`
+alone and 369 MiB with `Graphs(), Inductor()` where eager mode has 305 (2.08
+and 1.21 times), 257 MiB under `torch.compile` (0.84), and 1317 MiB in the
+calls that take the graphs down (4.3 times); for DistillGPT2, 11048 MiB and
+9454 MiB where eager mode has 11181 (0.99 and 0.85), 7125 MiB under
+`torch.compile` (0.64), and 19846 MiB in the two calls that take its graphs
+down, where a step needs 11181.
+
 
 Three rows of the table are near eager's speed under `torch.vm` (0.97x to
 1.09x), each for what its graphs hold, as `regions` says it. The convnet
@@ -3635,16 +3678,16 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does, on the code five steps before
-this commit; none of the five changes a graph of these models (their graphs,
-operations, runs in a call and hits are the same on all six): one process a
-row, the median of three turns, on 16 cores under the lock for timed runs,
+which is what the dashboard's runner does, on the code six steps before this
+commit; none of the six changes a graph of these models (their graphs,
+operations, runs in a call and hits are the same on all seven): one process
+a row, the median of three turns, on 16 cores under the lock for timed runs,
 with the load average between 1.8 and 7.5 in front of a row (above 4 in
 front of three of them) and nothing else on the GPU. Taken again on this
 commit's code and on the code one step before it, model by model in one
 window, the 13 rows differ by no more than eager mode and `torch.compile`
-differ between the same two processes (`torch.vm` between 0.93 and 1.03 of
-the row of the step before, and between 0.98 and 1.01 of it against those
+differ between the same two processes (`torch.vm` between 0.95 and 1.04 of
+the row of the step before, and between 0.99 and 1.02 of it against those
 two). The graphs that run are those counted above (DistillGPT2 with the
 operations it has on a GPU; of hf_DistilBert the graph of a layer and the
 one of its feed-forward part run six times each in a call):
@@ -3668,13 +3711,13 @@ for five of the models (`python benchmarks/dynamo/torchbench.py
 --performance --inference --bfloat16 --only MODEL` with `--vm` and with
 `--backend inductor`, `timm_models.py` and `huggingface.py` for the models
 of those suites; one run each), which report the speed against eager mode,
-next to what the tool had on the runner's code. That is the code ten steps
-before this commit (the one that changed which dicts the engine looks a name
-up in): the runner's lines were taken one after the other with the load
-average between 0.8 and 2.6 in front of a line and nothing else on the GPU,
-the tool's figures of the three timm models on the same code with 3.3 to 5.1
-in front of a row, and its figures of resnet50 and DistillGPT2 one step
-before that:
+next to what the tool had on the runner's code. That is the code eleven
+steps before this commit (the one that changed which dicts the engine looks
+a name up in): the runner's lines were taken one after the other with the
+load average between 0.8 and 2.6 in front of a line and nothing else on the
+GPU, the tool's figures of the three timm models on the same code with 3.3
+to 5.1 in front of a row, and its figures of resnet50 and DistillGPT2 one
+step before that:
 
 | model | the runner with `--vm` | the tool, `torch.vm` | the runner with `--backend inductor` | the tool, `torch.compile` |
 |---|---|---|---|---|
@@ -3709,9 +3752,9 @@ same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the code five
+The rows of yolov3 and of DistillGPT2's training step are of the code six
 steps before this commit, measured with the rows of the table in the
-runner's mode (the load average 6.0 and 4.2 in front of them). Eleven steps
+runner's mode (the load average 6.0 and 4.2 in front of them). Twelve steps
 before, when a graph gave only what the code behind it reads, another job
 had yolov3 with gradients recorded at 7.67 ms (1.53 times eager's speed) in
 the process that fills the compiler's cache and at 7.73 ms (1.54) with the
@@ -3725,8 +3768,8 @@ DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of whisper-tiny
 7 and 4 where they gave 6 and 3; the graphs of the other models give what
 they gave. With gradients recorded the graph of yolov3 is cut at 28 more of
 its results, those that it also reads ("Writes"). That costs yolov3 nothing
-that two takes of the row tell apart under `torch.no_grad()` (4.31 ms five
-steps before this commit and 4.48 seven steps before it, on the same graph,
+that two takes of the row tell apart under `torch.no_grad()` (4.31 ms six
+steps before this commit and 4.48 eight steps before it, on the same graph,
 for 4.34) and about a third with gradients recorded (10.47 ms and 9.98 for
 7.67 and 7.73; 9.19 of the 10.34 ms that the tool takes apart are in what
 stands for the graph). The rows of this section with gradients recorded that
@@ -3756,7 +3799,6 @@ and the 4 of the feed-forward part, six times each in a call), and a call
 takes 3.21 ms where eager's takes 3.35: of the 3.20 ms of a call that the
 tool takes apart, 1.97 are in what stands for the graphs, 0.37 in front of
 them and 0.82 between them.
-
 ### Limits
 
 What graphs do not do at this stage:
@@ -3949,17 +3991,9 @@ What graphs do not do at this stage:
   computes are computed in it (`torch.ops.aten.sym_size.int`), but its
   inputs have the sizes of the call it was exported from. With `Inductor()`
   every export is a compilation.
-- A `__getattribute__` that a process puts on `torch.Tensor` is not called
-  where the default pass `TensorAccessors` stands for a read of
-  `x.shape[i]`, `x.ndim`, `x.dim()` or `x.size(i)`: one that answers the
-  name with something else changes what the function computes.
-- Where the class of a tensor that the function was called with is assigned
-  (`x.__class__ = Sub`) in front of a read of `x.shape[i]`, `x.ndim`,
-  `x.dim()` or `x.size(i)` in the same block of instructions, the read
-  raises a `SystemError` ("torch.vm: tensor_size ran without its guard", or
-  "tensor_dim"), where eager mode reads through the new class. For a tensor
-  that an operation of the function made, and where a branch lies between
-  the two, the read is eager's.
+- A `__getattribute__` that is on `torch.Tensor` or `torch.nn.Parameter`
+  when a function is first run is not called for the methods and getters of
+  a tensor from its second call on; one put on later is.
 - `torch.set_default_device(...)` and `with torch.device(...):` put a
   `TorchFunctionMode` on, for the whole process or for the block: a
   function that runs under a default device runs as eager mode runs it, no
@@ -4013,20 +4047,47 @@ What graphs do not do at this stage:
 - Under a `TorchDispatchMode`, a `TorchFunctionMode` or a transform of
   `torch.func` the operations of the function run, so that those see them,
   and the calls under one are not exported; under a `TorchFunctionMode` no
-  graph is looked at at all. A `TorchFunctionMode` is asked at every read
-  of a tensor's sizes as well, and may answer with something else. What a
-  default pass puts in the place of a read or a call (a read of
-  a size or of the number of dimensions for `x.shape[i]`, `x.size(i)`,
-  `x.dim()` and `x.ndim`; a kernel that is called directly) is therefore
-  valid only while the interpreter would run no Python code there, which is
-  asked at every run, where the read is: no mode is on, and `torch.Tensor`
-  and `torch.nn.Parameter` have under these names what the class under every
+  graph is looked at at all. A `TorchFunctionMode` is asked at every read of
+  a tensor's sizes as well, and may answer with something else. What a
+  default pass puts in the place of a read or a call (a read of a size or of
+  the number of dimensions for `x.shape[i]`, `x.size(i)`, `x.dim()` and
+  `x.ndim`; a kernel that is called directly) is therefore valid only while
+  the interpreter would run no Python code there, which is asked at every
+  run, where the read is: no mode is on, `torch.Tensor` and
+  `torch.nn.Parameter` have under these names what the class under every
   tensor defines (a property that a process puts on `torch.Tensor` is
   called, and no graph runs in the place of the instructions while it is
-  there). Where it is not so, the instructions that the read stands for run
-  as they are written, and the block goes on as it is specialized. The
-  question costs about 40 ns a read (69 ns for 27 in a loop of reads of
-  `x.shape[0]`).
+  there) and read their attributes as `object` does (a `__getattribute__`
+  that somebody puts on one of them behind the first run of a function is
+  called at every read of an attribute of a tensor, a method that is called
+  included: no call site of a method or of a getter is used or made while it
+  is there, and no graph runs), and the tensor is still of the class it had
+  where its block was entered (a tensor whose `__class__` was assigned since
+  is read as its new class reads). Where it is not so, the instructions that
+  the read stands for run as they are written, and the block goes on as it
+  is specialized. The question costs about 40 ns a read (69 ns for 27 in a
+  loop of reads of `x.shape[0]`).
+- A function that somebody puts on `torch.Tensor` in the place of one of
+  torch's own attributes of a tensor (`requires_grad`, `dtype`, `device`,
+  `numel`, `reshape`, `to`, ...) is called more often than in eager mode
+  in the calls in which a graph is exported or its backward is taken
+  down, the first calls and those behind the change of the class: an
+  export and the passes read a tensor as any Python program does. In the
+  calls that a graph serves it is called as often as in eager mode; and
+  what the engine asks of a tensor for itself where a graph has gradients
+  (its storage, what it is a view of, the node that made it, whether it
+  is a leaf) it asks of the class under every tensor, so that a function
+  put on `torch.Tensor` under those names is never called for it.
+- A function that somebody puts on `torch.Tensor` under the name of an
+  operator that the compiled function itself uses (`__add__`, `__mul__`) is
+  called in the first call in which it is there, and in the calls in which a
+  graph is exported or its backward is taken down, and in no other; eager
+  mode calls it at every use.
+- A property that somebody puts on `torch.nn.Module` over one of the hook
+  dicts of a module (`_forward_hooks`, `_forward_pre_hooks`,
+  `_backward_hooks`, `_backward_pre_hooks`), and a function put on
+  `torch.nn.Module` under `_call_impl`, are not called where a compiled
+  function calls a module; eager mode calls each at every call of a module.
 - With gradients recorded, a graph has a backward of its own only if eager's
   nodes for its operations give nothing when they are handed no gradient and
   the same bits when they are run twice. The cuDNN kernel that
@@ -4041,23 +4102,99 @@ What graphs do not do at this stage:
   the dict's entry once it has specialized the instruction, which then
   reads the module's dict and does not look at the class of modules. There
   is no single answer of eager mode to give.
-- With the engine's backward ("Gradients") the state behind a backward that
-  raises is not eager's. Eager raises at the node that needs the tensor that
-  was written to in place, and has by then added up the gradient of every
-  leaf whose nodes all ran before that one; the node of a graph raises
-  before it gives anything, so no input of the graph has a gradient of that
-  backward. The error and its text are eager's.
-- With gradients recorded and the engine's backward, the Python object of a
-  tensor that a graph is handed and that is no leaf lives until the node of
-  the graph's result ends, and with it what only that object holds (an
-  attribute of the tensor): the node keeps what the graph was fed. In eager
-  mode it ends where the caller lets go of the tensor, or at the backward
-  where a node had saved the tensor. A leaf lives as long in eager mode too.
+- With gradients recorded, the node of a graph is released as one: behind
+  a backward that did not retain the graph, every further backward
+  through it raises. In eager mode a node raises then only for a tensor it
+  saved and has let go of. So a graph whose results eager mode lets go
+  backward one after the other keeps eager's tape: two losses with
+  nothing saved between them (`a.backward(); b.backward()` where no
+  operation that saved a tensor is used for both), and a result none of
+  whose operations saved a tensor (additions, views, `cat`, `clone`:
+  `out.backward()` twice). `regions()` gives the reason for such a form
+  ("returns in eager mode"). That is decided for whole backwards:
+  `torch.autograd.grad` for some of the inputs of a graph and then for
+  others, where the two run only common operations that saved nothing,
+  still raises at the second where eager mode returns.
+- A backward through a graph that raises (a tensor that it needs was
+  written to in place behind the call; a second backward that eager mode
+  refuses too) raises eager's error before the node of the graph has
+  given anything. In eager mode the leaves whose nodes all ran in front
+  of the node that raises have their gradients in `.grad` by then.
+- With gradients recorded, the node of a graph holds an input of the graph
+  where eager's nodes hold it, and for as long as they do: a leaf that a
+  gradient goes to, until the graph ends; an input that a node of eager's
+  saved, itself or as what a saved view is a view of, until a backward
+  that does not retain the graph has run that node. Of every other input
+  it holds nothing, or, where it needs the values (the forward keeps them
+  for the backward, or the graph can run once more on the tape: it draws
+  nothing and writes to no tensor from outside), another tensor in the
+  same memory. So the input, and what only the input holds, end where the
+  caller lets go of them, as in eager mode. The memory under such another
+  tensor does not: a storage that only the input kept alive lives until
+  the node ends or a backward releases what the node kept, where eager
+  mode would have freed it at the caller's `del`. Where something is
+  told when the storage ends (a weak reference with a callback or a
+  `weakref.finalize` on `t.untyped_storage()`, something of its own with a
+  `__del__`), or the memory is not torch's own (a numpy array, a buffer),
+  the call keeps eager's tape; what starts to watch the storage only
+  behind the call is told when the node lets go.
+- A backward with `create_graph=True` goes through the history of every
+  input that a gradient goes to. Where no node of eager's keeps such an
+  input and it is no leaf, the node of a graph holds in its place a
+  tensor in the same memory that has that history and holds neither the
+  input nor its Python object, so that such a backward goes through
+  whether or not anybody still holds the input. The node of that tensor,
+  `GraphInputBackward`, hands a gradient on to the node that made the
+  input: it stands between the first node of the tape of such a backward
+  and the node that made the input, where eager mode has none. Who walks
+  `grad_fn.next_functions` of a gradient that was made with
+  `create_graph=True` sees it; its one line is Python, and runs in a
+  backward through such a gradient, never in a backward of the results
+  of the graph. A `TorchDispatchMode` that is on around a backward with
+  `create_graph=True` sees the kernels of the forward once more, which
+  that backward runs again on the tape.
+- With several results, what only the nodes of one result keep of an
+  input lives until the last of the results ends or a backward releases
+  it, where in eager mode it ends with that result: a graph has one node
+  for all its results.
+- In the calls in which a graph with gradients is still taken down (the
+  first two of each kind of call), the graph is eager's own and the engine
+  looks at its nodes, which gives each node its Python object. Autograd
+  lets go of the nodes of a graph that Python has looked at in another
+  order when the graph ends without a backward (walking
+  `out.grad_fn.next_functions` does the same in eager mode): where two
+  inputs are kept by different nodes, what only they hold can end in the
+  other order in those calls.
 - A backward that is to be differentiated again, or one for some results of
   a node of eager's with several, runs the graph once more on the tape: a
   graph that draws random numbers or writes to a tensor from outside raises
   for it, where eager computes it, and so does one an input of which was
-  written to in place since the call (eager kept what it needs of it).
+  written to in place since the call (eager kept what it needs of it), or
+  one of whose inputs that the node holds itself was given other data
+  (`t.data = ...`) since the call.
+- A known defect: `torch.utils.checkpoint.checkpoint(fn, ...,
+  use_reentrant=False)` around a compiled function with `Graphs()` in the
+  list raises `AssertionError: Unexpected state: target_frame.early_stop is
+  set` in the second call of the function, the call in which its path is
+  taken down, and in no other, where eager mode returns: the checkpoint
+  stops its recomputation by raising from a hook inside an operation. With
+  `use_reentrant=True`, and with the default passes alone, every call is
+  eager's.
+- A known defect: with a pass over graphs in the list, an operation of a
+  graph that raises in a later call inside a `try` of the function (an index
+  that is out of range in one call) has its exception leave the call, where
+  eager mode runs the function's `except` and returns its value.
+- A known defect: with `AOTAutograd()` in the list, a function that is
+  called through `torch.utils.checkpoint.checkpoint(fn, ...,
+  use_reentrant=False)` leaves other gradients than eager mode in some
+  calls, without an error (`[0.4698, -0.9198, 0.902]` for eager's `[-0.1134,
+  -2.1833, 0.7661]` in the second call of one function).
+- A known defect: with `Graphs()` in the list, what a saved-tensor hook
+  (`torch.autograd.graph.saved_tensors_hooks`) raises in a function that
+  stores into an object is swallowed in some calls, and the hook runs again.
+- `torch.autograd.graph.node_creation_hook` is called for the nodes that the
+  engine makes (the node of a graph, `GraphInputBackward`) and not for the
+  nodes of eager's operations.
 - While the backward of a graph is taken down and compared with the
   autograd engine, cuDNN's benchmark mode is off and its deterministic mode
   is on. The two settings are the process's: a convolution that another

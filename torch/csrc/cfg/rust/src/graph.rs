@@ -1479,10 +1479,12 @@ pub unsafe fn sequence_item(s: Obj, i: isize) -> Obj {
 }
 
 /// A dtype, a device, a layout or a memory format: objects of types that
-/// torch defines in C, which compare by what they stand for.
+/// torch defines in C, which compare by what they stand for. The class
+/// itself is asked for, not its name: a class of anybody's can be named
+/// `torch.dtype`, and compares and shows itself with code of its own.
 unsafe fn is_token(o: Obj) -> bool {
-    let name = std::ffi::CStr::from_ptr((*ffi::Py_TYPE(o)).tp_name).to_bytes();
-    [&b"torch.dtype"[..], b"torch.device", b"torch.layout", b"torch.memory_format"].contains(&name)
+    let class = ffi::Py_TYPE(o);
+    is_static(class) && torch_classes()[3..7].contains(&(class as usize))
 }
 
 /// Whether `same_value` can tell a later value from this one: what an
@@ -2163,29 +2165,16 @@ unsafe fn class_named(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Obj {
 /// for as long as a view needs it. They are looked at like what the
 /// tensor refers to, whatever their counts of references say.
 unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
-    static NAMES: pyffi::Once<(PyObj, PyObj)> = pyffi::Once::new();
     if holds_unseen(o) {
         return Err(());
     }
     if ffi::Py_TYPE(o) as Obj != class_named(c"torch", c"Tensor") {
         return Err(());
     }
-    let (storage, resizable) = NAMES.get_or_init(|| {
-        let name = |text: &std::ffi::CStr| PyObj::from_owned(ffi::PyUnicode_InternFromString(text.as_ptr()));
-        (name(c"untyped_storage"), name(c"resizable"))
-    });
-    let memory = ffi::PyObject_CallMethodNoArgs(o, storage.as_ptr());
-    // A tensor without a storage of this kind says so by raising.
-    if memory.is_null() {
-        ffi::PyErr_Clear();
+    let Some(memory) = own_storage(o) else {
         return Err(());
-    }
-    let memory = PyObj::from_owned(memory);
-    let said = ffi::PyObject_CallMethodNoArgs(memory.as_ptr(), resizable.as_ptr());
-    let own = said == ffi::Py_True();
-    xdecref(said);
-    ffi::PyErr_Clear();
-    if !own || forward_level() || !plainly_laid_out(o) {
+    };
+    if forward_level() || !plainly_laid_out(o) {
         return Err(());
     }
     // The Python object of the storage ends with the storage: it is
@@ -2204,6 +2193,51 @@ unsafe fn unseen(o: Obj) -> Result<Vec<PyObj>, ()> {
         }
     }
     Ok(held)
+}
+
+/// The Python object of the storage of a tensor, where the memory is
+/// torch's own allocation (the storage can be resized); None for memory
+/// that something else owns, and for a tensor without such a storage.
+/// Both are asked through the method of the class under every tensor and
+/// under every storage, found once: what somebody put on a class of
+/// tensors or of storages under these names is not called for the engine.
+unsafe fn own_storage(o: Obj) -> Option<PyObj> {
+    static METHODS: pyffi::Once<Option<(PyObj, PyObj)>> = pyffi::Once::new();
+    let methods = METHODS.get_or_init(|| {
+        let of = |class: &std::ffi::CStr, name: &std::ffi::CStr| {
+            let class = pyffi::in_module(pyffi::module(c"torch._C"), class);
+            let found = if class.is_null() { null_mut() } else { ffi::PyObject_GetAttrString(class, name.as_ptr()) };
+            ffi::PyErr_Clear();
+            (!found.is_null()).then(|| PyObj::from_owned(found))
+        };
+        Some((of(c"TensorBase", c"untyped_storage")?, of(c"StorageBase", c"resizable")?))
+    });
+    let (storage, resizable) = methods.as_ref()?;
+    if ffi::PyObject_TypeCheck(o, torch_classes()[2] as *mut ffi::PyTypeObject) == 0 {
+        return None;
+    }
+    let memory = ffi::PyObject_CallOneArg(storage.as_ptr(), o);
+    // A tensor without a storage of this kind says so by raising.
+    if memory.is_null() {
+        ffi::PyErr_Clear();
+        return None;
+    }
+    let memory = PyObj::from_owned(memory);
+    let said = ffi::PyObject_CallOneArg(resizable.as_ptr(), memory.as_ptr());
+    let own = said == ffi::Py_True();
+    xdecref(said);
+    ffi::PyErr_Clear();
+    own.then_some(memory)
+}
+
+/// Whether nothing is told when the storage of a tensor ends: its memory
+/// is torch's own allocation, and the Python object of the storage, which
+/// ends with it, ends quietly (`dies_quietly`: no finalizer, no weak
+/// reference that is told, nothing of its own whose end runs code). What
+/// holds another tensor on the storage for longer than the tensor lives
+/// asks this first.
+pub unsafe fn storage_ends_quietly(o: Obj) -> bool {
+    own_storage(o).is_some_and(|memory| dies(memory.as_ptr(), true))
 }
 
 /// Whether a tensor is one whose parts are all in its one storage: dense
@@ -4256,37 +4290,71 @@ unsafe fn tensor_getter(of: Obj, name: Obj) -> bool {
     }
 }
 
-/// Whether a tensor of `Tensor` or `Parameter` is a leaf: the getter of
-/// `is_leaf` of the class under every tensor, called as the lookup of
-/// `object` would call it. For those classes it reads a flag. Found once
-/// the class is there.
-unsafe fn is_leaf(of: Obj) -> bool {
-    static GETTER: pyffi::Once<(usize, usize)> = pyffi::Once::new();
-    let found = match GETTER.get() {
+/// What a getter of the class under every tensor gives for a tensor of
+/// `Tensor` or `Parameter` (a new reference; null where it cannot be
+/// asked): the getter is called as the lookup of `object` would call it,
+/// and for those classes it reads the tensor. Found once the class is
+/// there, in the cell of the name.
+unsafe fn tensor_get(getter: &pyffi::Once<(usize, usize)>, name: &std::ffi::CStr, of: Obj) -> Obj {
+    let found = match getter.get() {
         Some(found) => *found,
         None => {
             let base = torch_classes()[2] as *mut ffi::PyTypeObject;
-            let name = ffi::PyUnicode_InternFromString(c"is_leaf".as_ptr());
+            let name = ffi::PyUnicode_InternFromString(name.as_ptr());
             let descr = if base.is_null() || name.is_null() { null_mut() } else { pyffi::_PyType_Lookup(base, name) };
             ffi::PyErr_Clear();
             xdecref(name);
             if descr.is_null() || ffi::Py_TYPE(descr) != std::ptr::addr_of_mut!(ffi::PyGetSetDescr_Type) {
-                return false;
+                return null_mut();
             }
             let fields = (*(descr as *mut ffi::PyGetSetDescrObject)).d_getset;
             let Some(get) = (*fields).get else {
-                return false;
+                return null_mut();
             };
             let found = (get as usize, (*fields).closure as usize);
-            GETTER.set(found);
+            getter.set(found);
             found
         }
     };
+    if ffi::PyObject_TypeCheck(of, torch_classes()[2] as *mut ffi::PyTypeObject) == 0 {
+        return null_mut();
+    }
     let get: ffi::getter = std::mem::transmute(found.0);
     let said = get(of, found.1 as *mut std::ffi::c_void);
     ffi::PyErr_Clear();
+    said
+}
+
+/// Whether a tensor of `Tensor` or `Parameter` is a leaf (`is_leaf`, a
+/// flag).
+pub unsafe fn is_leaf(of: Obj) -> bool {
+    static GETTER: pyffi::Once<(usize, usize)> = pyffi::Once::new();
+    let said = tensor_get(&GETTER, c"is_leaf", of);
     xdecref(said);
     said == ffi::Py_True()
+}
+
+/// What a tensor is a view of (`_base`: a new reference, to None where
+/// it is no view; null where it cannot be asked).
+pub unsafe fn base_of(of: Obj) -> Obj {
+    static GETTER: pyffi::Once<(usize, usize)> = pyffi::Once::new();
+    tensor_get(&GETTER, c"_base", of)
+}
+
+/// The node of autograd that made a tensor (`grad_fn`: a new reference,
+/// to None where none did; null where it cannot be asked, as of what is
+/// no tensor).
+pub unsafe fn node_of(of: Obj) -> Obj {
+    static GETTER: pyffi::Once<(usize, usize)> = pyffi::Once::new();
+    tensor_get(&GETTER, c"grad_fn", of)
+}
+
+/// Whether a tensor of `Tensor` or `Parameter` is a view of another
+/// (`_base` gives one).
+pub unsafe fn is_view(of: Obj) -> bool {
+    let base = base_of(of);
+    xdecref(base);
+    !base.is_null() && base != ffi::Py_None()
 }
 
 /// Whether torch finds no `__torch_function__` to call for an object of
@@ -4347,40 +4415,63 @@ unsafe fn torch_classes() -> &'static [usize; 9] {
 /// anything under one of the names on `Tensor`, on `Parameter` or on that
 /// class, where the interpreter would find it and run it. (A tensor
 /// without a Python object would get one of `Tensor`.) The four names
-/// are looked up once per state of a class: its version tag is a number
-/// that no other state of this or any other class has, and the
-/// interpreter takes it away whenever the class or a class under it is
-/// assigned to.
+/// are looked up once per state of a class (`classes_hold`). And the
+/// classes read their attributes as `object` does (`reads_are_plain`): a
+/// `__getattribute__` of somebody's is called for every name.
 pub unsafe fn sizes_are_own() -> bool {
     static SEEN: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
+    let base = torch_classes()[2] as *mut ffi::PyTypeObject;
+    let defined = [std::ptr::addr_of_mut!(ffi::PyGetSetDescr_Type), std::ptr::addr_of_mut!(ffi::PyMethodDescr_Type)];
+    let named = |class: *mut ffi::PyTypeObject| {
+        [c"shape", c"ndim", c"size", c"dim"].iter().all(|name| {
+            let name = ffi::PyUnicode_InternFromString(name.as_ptr());
+            let found = if name.is_null() { null_mut() } else { pyffi::_PyType_Lookup(class, name) };
+            xdecref(name);
+            !found.is_null() && defined.contains(&ffi::Py_TYPE(found)) && (*(found as *mut ffi::PyDescrObject)).d_type == base
+        })
+    };
+    reads_are_plain() && !base.is_null() && classes_hold(&SEEN, named)
+}
+
+/// Whether `Tensor` and `Parameter` read their attributes as `object`
+/// does: nobody has put a `__getattribute__` on one of them, which the
+/// interpreter would call at every read of an attribute of a tensor,
+/// whatever the name. Asked wherever something stands for such a read: a
+/// read of a size, a read that a path keeps, a call site whose
+/// instruction takes a method or a getter off a tensor.
+pub unsafe fn reads_are_plain() -> bool {
+    static SEEN: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
+    let reads = |class: *mut ffi::PyTypeObject| pyffi::_PyType_Lookup(class, specials().getattribute.as_ptr());
+    let plain = reads(std::ptr::addr_of_mut!(ffi::PyBaseObject_Type));
+    classes_hold(&SEEN, |class| reads(class) == plain)
+}
+
+/// Whether something holds of `Tensor` and of `Parameter` that can change
+/// only where one of them, or a class under it, is assigned to: asked
+/// once per state of a class. Its version tag is a number that no other
+/// state of this or any other class has, and the interpreter takes it
+/// away whenever the class or a class under it is assigned to. `seen` has
+/// the tags it held for last.
+unsafe fn classes_hold(seen: &[AtomicU32; 2], holds: impl Fn(*mut ffi::PyTypeObject) -> bool) -> bool {
     let classes = torch_classes();
     let tag = |which: usize| {
         let class = classes[which] as *mut ffi::PyTypeObject;
         if class.is_null() { 0 } else { (*class).tp_version_tag }
     };
-    if (0..2).all(|which| tag(which) != 0 && SEEN[which].load(Ordering::Relaxed) == tag(which)) {
+    if (0..2).all(|which| tag(which) != 0 && seen[which].load(Ordering::Relaxed) == tag(which)) {
         return true;
     }
-    let base = classes[2] as *mut ffi::PyTypeObject;
-    let defined = [std::ptr::addr_of_mut!(ffi::PyGetSetDescr_Type), std::ptr::addr_of_mut!(ffi::PyMethodDescr_Type)];
-    let own = !base.is_null()
-        && classes[..2].iter().all(|class| {
-            let class = *class as *mut ffi::PyTypeObject;
-            !class.is_null()
-                && [c"shape", c"ndim", c"size", c"dim"].iter().all(|name| {
-                    let name = ffi::PyUnicode_InternFromString(name.as_ptr());
-                    let found = if name.is_null() { null_mut() } else { pyffi::_PyType_Lookup(class, name) };
-                    xdecref(name);
-                    !found.is_null() && defined.contains(&ffi::Py_TYPE(found)) && (*(found as *mut ffi::PyDescrObject)).d_type == base
-                })
-        });
+    let held = classes[..2].iter().all(|class| {
+        let class = *class as *mut ffi::PyTypeObject;
+        !class.is_null() && holds(class)
+    });
     ffi::PyErr_Clear();
     // The lookups gave each class its tag, if it had none.
-    if own && tag(0) != 0 && tag(1) != 0 {
-        SEEN[0].store(tag(0), Ordering::Relaxed);
-        SEEN[1].store(tag(1), Ordering::Relaxed);
+    if held && tag(0) != 0 && tag(1) != 0 {
+        seen[0].store(tag(0), Ordering::Relaxed);
+        seen[1].store(tag(1), Ordering::Relaxed);
     }
-    own
+    held
 }
 
 /// A tensor of one of the two classes that the kernels' own code treats
@@ -4451,13 +4542,13 @@ pub unsafe fn holds_attr(obj: Obj, name: Obj, found: &mut Obj) -> bool {
 /// call a property, a descriptor or a `__getattr__` written in Python,
 /// where the type has a lookup of its own that is not known here, and where
 /// the attribute is not there.
-pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
+pub unsafe fn quiet_attr(obj: Obj, name: Obj, _api: &TcfgApi) -> bool {
     if capi::is_unboxed(obj) {
         // A tensor without a Python object: of the class of tensors, with
-        // nothing of its own.
+        // nothing of its own, and read as that class reads.
         let class = torch_classes()[0] as Obj;
         let descr = if class.is_null() { null_mut() } else { pyffi::_PyType_Lookup(class as *mut ffi::PyTypeObject, name) };
-        return !descr.is_null() && !python_descriptor(descr, obj);
+        return !descr.is_null() && !python_descriptor(descr, obj) && reads_are_plain();
     }
     let ty = ffi::Py_TYPE(obj);
     if ffi::PyModule_CheckExact(obj) != 0 {
@@ -4488,12 +4579,13 @@ pub unsafe fn quiet_attr(obj: Obj, name: Obj, api: &TcfgApi) -> bool {
     }
     // The lookup of `object`, or that and then a `__getattr__` for what it
     // does not find: of the latter, only one that has a shortcut is known.
-    let mut info = TcfgTensorInfo::empty();
+    // A tensor is read like any other object: a `__getattribute__` that
+    // somebody put on its class is called for every name.
     let object = std::ptr::addr_of!(ffi::PyBaseObject_Type);
     let generic = (*ty).tp_getattro.map(|own| own as usize) == (*object).tp_getattro.map(|own| own as usize);
     let hooked = !generic && plain_lookup(obj);
     let shortcut = hooked && crate::shortcuts::has_getattr(ty);
-    if !(generic || hooked || (api.tensor_info)(obj, &mut info) != 0) {
+    if !(generic || hooked) {
         return false;
     }
     let descr = pyffi::_PyType_Lookup(ty, name);

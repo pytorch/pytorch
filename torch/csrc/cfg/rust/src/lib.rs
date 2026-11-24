@@ -56,5 +56,6 @@ fn _cfg_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<joint::Joint>()?;
     m.add_class::<backward::Staged>()?;
     m.add_function(wrap_pyfunction!(backward::backward_forms, m)?)?;
+    m.add_function(wrap_pyfunction!(backward::backward_served, m)?)?;
     Ok(())
 }

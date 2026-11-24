@@ -126,7 +126,10 @@ fn changed(py: Python<'_>, results: &Bound<'_, PyAny>) -> PyResult<String> {
     }
     let mut left: Vec<Bound<'_, PyAny>> = Vec::new();
     for result in results.try_iter()? {
-        let node = result?.getattr("grad_fn").ok().filter(|node| !node.is_none());
+        // Asked of the getter of the class under every tensor; what is
+        // no tensor has no node.
+        let node = unsafe { crate::graph::node_of(result?.as_ptr()) };
+        let node = if node.is_null() { None } else { Some(unsafe { Bound::from_owned_ptr(py, node) }) }.filter(|node| !node.is_none());
         left.extend(node);
     }
     let mut seen: HashSet<usize> = HashSet::new();

@@ -166,6 +166,10 @@ class Graphs(BuiltinPass):
             a forward graph and a backward graph with nothing left to
             derive. A graph that cannot be taken down (an operation of its
             backward looks at what a tensor holds, say) keeps eager's tape.
+            So does a graph through which eager mode goes backward a
+            second time behind a backward that did not retain it (two
+            results, or one result twice, that share no node which saved
+            a tensor): the one node raises at every such backward.
             A graph that gives a tensor and also computes something of it
             (a hidden state and a loss, say) is cut in front of the first
             operation that reads the tensor, into parts with a node each:
@@ -185,7 +189,8 @@ class Graphs(BuiltinPass):
 
             Where it is not eager's: the ``grad_fn`` of what a graph gives
             is a node of the graph's. A backward that raises (a tensor it
-            needs was written to in place) raises eager's error with
+            needs was written to in place, or it is a second backward
+            behind one that did not retain the graph) raises eager's error with
             eager's text, but before it has added anything to the ``.grad``
             of an input of the graph, where eager has by then added up the
             gradients of the leaves whose nodes all ran before the one
@@ -195,7 +200,17 @@ class Graphs(BuiltinPass):
             gradients that meet there are not always added in eager's
             order), and for a graph that draws random numbers or writes to
             a tensor from outside, or one an input of which was written to
-            in place since the call, such a backward raises and says so.
+            in place since the call, or one of whose inputs that the node
+            holds itself (below) was given other data (``t.data = ...``),
+            such a backward raises and says so.
+            The node of a graph holds an input for as long as eager's
+            nodes hold it (a leaf that a gradient goes to, what a node
+            saved) and of every other input the memory, not the tensor:
+            what only such an input holds ends where the caller lets go
+            of it, its storage when the node ends or a backward releases
+            it. Where a gradient goes to such an input, what the node
+            holds in its memory has the history of the input as well,
+            and a backward with ``create_graph=True`` goes through that.
 
             While a graph is taken down, twice per form, cuDNN's benchmark
             mode is off and its deterministic mode is on for the whole
