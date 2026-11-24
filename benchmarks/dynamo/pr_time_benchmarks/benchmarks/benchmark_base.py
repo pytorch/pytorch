@@ -241,6 +241,7 @@ class BenchmarkBase(ABC):
         for entry in self.results:
             print(f"{entry[0]},{entry[1]},{entry[2]}")
 
+    @config.patch(nested_graph_breaks=True)
     def collect_all(self) -> Self:
         self._prepare_once()
         self.results = []
