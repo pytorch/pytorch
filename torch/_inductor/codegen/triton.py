@@ -139,6 +139,7 @@ from .common import (
     WorkspaceZeroMode,
 )
 from .simd import (
+    apply_grid_split_kernel_kwargs,
     constant_repr,
     DerivedIterationRangesRoot,
     IterationRanges,
@@ -400,6 +401,12 @@ class TritonSymbols:
         )
 
 
+def _reduction_start_offset() -> sympy.Expr:
+    if V.kernel.split_as_grid_reduction is not None:
+        return sympy.Symbol("rsplit_start", integer=True, nonnegative=True)
+    return sympy.Integer(0)
+
+
 @dataclasses.dataclass
 class IndexingOptions:
     index_str: str
@@ -521,12 +528,17 @@ class BlockDescriptorOptions:
         # Compute the final shape, adjusting for special kernel types.
         final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
         if V.kernel.no_x_dim:
-            if range_trees[0].prefix != "x":
+            # x carries no tensor dim. It is not necessarily first: a split-as-grid
+            # kernel keeps y/z tensor dims for the dims it did not reduce.
+            x_positions = [
+                idx for idx, tree in enumerate(range_trees) if tree.prefix == "x"
+            ]
+            if len(x_positions) != 1:
                 raise AssertionError(
-                    f"expected first range tree prefix to be 'x', got "
-                    f"{range_trees[0].prefix!r}"
+                    f"expected exactly one 'x' range tree, got "
+                    f"{[tree.prefix for tree in range_trees]}"
                 )
-            final_shape.pop(0)
+            final_shape.pop(x_positions[0])
 
         # Check to see which of the final shape dimensions are included in this parameter
         # e.g. if block shape is [XBLOCK // 2, XBLOCK % 2], but the kernel shape
@@ -594,10 +606,11 @@ class BlockDescriptorOptions:
         return result
 
     def remove_roffsets(self, expr: sympy.Expr) -> sympy.Expr:
+        replacement = _reduction_start_offset()
         return sympy_subs(
             expr,
             {
-                TritonSymbols.get_block_offset_symbol(tree): sympy.S.Zero
+                TritonSymbols.get_block_offset_symbol(tree): replacement
                 for tree in V.kernel.range_trees
                 if tree.is_reduction
             },
@@ -3077,9 +3090,8 @@ class TMACompatibilityChecker:
             )
             return False
 
-        # Strict multirow reductions are forced persistent and can settle on
-        # XBLOCK=1 after the initial TMA probe. Their output store must therefore
-        # use the scalar fallback rather than a 16-byte tensor descriptor.
+        # These all settle on XBLOCK=1, so the store cannot reach TMA's 16-byte
+        # minimum and must fall back off the tensor descriptor.
         if self.for_store and (
             self.kernel.no_x_dim or self.kernel.features.has_strict_multirow_reduction()
         ):
@@ -3677,6 +3689,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.cooperative_reduction:
             self.init_cooperative_reduction()
 
+        self.init_split_as_grid_reduction()
+
         self.codegen_range_tree()
 
         if self.cooperative_reduction:
@@ -4142,6 +4156,34 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.body.writeline(
                 "rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)"
             )
+
+    def init_split_as_grid_reduction(self):
+        """Emit per-program bounds for a split-as-grid reduction."""
+        split = self.split_as_grid_reduction
+        if split is None:
+            return
+        if not V.graph.sizevars.statically_known_equals(split, self.numels["x"]):
+            raise AssertionError("grid split factor must match the x dimension")
+        reduction_trees = [t for t in self.range_trees if t.is_reduction]
+        if len(reduction_trees) != 1:
+            raise AssertionError(
+                "split_as_grid_reduction requires exactly one reduction dimension, "
+                f"got {len(reduction_trees)}"
+            )
+        if not V.graph.sizevars.statically_known_equals(
+            reduction_trees[0].numel, self.features.reduction_numel
+        ):
+            raise AssertionError("grid split extent must match the reduction tree")
+        (x_tree,) = [t for t in self.range_trees if t.prefix == "x"]
+        self.body.splice(
+            f"""\
+            rsplit_id = {self.iteration_ranges_get_pid(x_tree)}
+            rsplit_chunk = (rnumel - 1) // {split} + 1
+            rsplit_start = rsplit_chunk * rsplit_id // RBLOCK * RBLOCK
+            rsplit_end = rsplit_chunk * (rsplit_id + 1)
+            rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)
+            """,
+        )
 
     def init_cooperative_reduction_mask(self):
         rsplit_arange = "tl.arange(0, RSPLIT_NEXT_POWER_OF_2)"
@@ -7715,10 +7757,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
                     prefix = tree.prefix
-                    loop_start = "rsplit_start" if self.cooperative_reduction else "0"
-                    loop_end = (
-                        "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
+                    partitioned = (
+                        self.cooperative_reduction or self.split_as_grid_reduction
                     )
+                    loop_start = "rsplit_start" if partitioned else "0"
+                    loop_end = "rsplit_end" if partitioned else f"{prefix}numel"
                     # Conditionalize pipelining on HIP for Triton due to
                     # reports of numerical inaccuracies on older Triton
                     if torch.version.hip and get_triton_version() > (3, 2):
@@ -9577,6 +9620,7 @@ class TritonScheduling(SIMDScheduling):
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
+        apply_grid_split_kernel_kwargs(kernel_features, kernel_kwargs)
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
         return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
 
