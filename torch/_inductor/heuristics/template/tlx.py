@@ -6,7 +6,10 @@
 # Deferred rather than done at module import: the integration monkey-patches
 # TritonTemplate / TritonTemplateKernel and replaces inductor_choices_class,
 # and none of that belongs in a process that will never engage TLX.
-# virtualized._choices_default() calls maybe_install() on first use.
+# virtualized._choices_default() calls maybe_install() on first use, and
+# FxGraphHashDetails calls it (via prepare_choices_class_for_cache_key) before
+# snapshotting the config when the thread has no handler yet, so with tlx_mode
+# set it can also run on a cache hit.
 
 import functools
 
