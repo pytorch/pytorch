@@ -20,6 +20,7 @@ from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from .. import config
 from ..codecache import code_hash, get_path
 from ..scheduler import WhyNoFuse
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata, Placeholder
@@ -58,7 +59,17 @@ DTYPE_TO_METAL = {
     torch.float: "float",
     torch.half: "half",
     torch.bfloat16: "bfloat",
+    torch.float8_e4m3fn: "c10::metal::float8_e4m3fn",
+    torch.float8_e8m0fnu: "c10::metal::float8_e8m0fnu",
+    # Two packed e2m1 values that kernels only copy or bitcast, as Triton does
+    torch.float4_e2m1fn_x2: "uchar",
 }
+FP8_METAL_NAMES = {
+    torch.float8_e4m3fn: "fp8e4m3fn",
+    torch.float8_e8m0fnu: "fp8e8m0fnu",
+}
+# Reduced-precision types that are computed in float32
+LOW_PRECISION_TYPES = (torch.float16, torch.bfloat16, *FP8_METAL_NAMES)
 
 
 def value_to_metal(val: float | int | bool | str | CSEVariable) -> str:
@@ -218,7 +229,7 @@ class MetalOverrides(OpOverrides):
                 "float64 cast requested, probably from tensorify_python_scalars"
             )
             return f"static_cast<float>({x})"
-        if use_compute_types and dtype in (torch.float16, torch.bfloat16):
+        if use_compute_types and dtype in LOW_PRECISION_TYPES:
             return f"static_cast<float>(static_cast<{DTYPE_TO_METAL[dtype]}>({x}))"
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
@@ -226,7 +237,14 @@ class MetalOverrides(OpOverrides):
     def to_dtype_bitcast(
         x: CSEVariable, dtype: torch.dtype, src_dtype: torch.dtype
     ) -> str:
-        return f"as_type<{DTYPE_TO_METAL[dtype]}>(static_cast<{DTYPE_TO_METAL[src_dtype]}>({x}))"
+        # as_type rejects fp8 structs; fp8 values are held as float, so go through the encoders
+        if src_dtype in FP8_METAL_NAMES:
+            src = f"c10::metal::detail::{FP8_METAL_NAMES[src_dtype]}_from_fp32({x})"
+        else:
+            src = f"static_cast<{DTYPE_TO_METAL[src_dtype]}>({x})"
+        if dtype in FP8_METAL_NAMES:
+            return f"c10::metal::detail::{FP8_METAL_NAMES[dtype]}_to_fp32(as_type<uchar>({src}))"
+        return f"as_type<{DTYPE_TO_METAL[dtype]}>({src})"
 
     @staticmethod
     def constant(val: bool | float | int, dtype: torch.dtype) -> str:
@@ -686,11 +704,13 @@ class MetalKernel(SIMDKernel):
         index = self.prepare_indexing(index)
         dtype = V.graph.get_dtype(name)
         line = f"{var}[{self.index_to_str(index)}]"
-        if dtype in [torch.float16, torch.bfloat16]:
+        if dtype in LOW_PRECISION_TYPES:
             # TODO(NS): Figure out the right balance between optype casts
             # op_math_t for half-precision floats should be float32
             # Otherwise it can lead to a correctness issues with eager
-            line = f"static_cast<float>({line})"
+            # fp8 structs can't be static_cast from the constant address space
+            cast = "c10::metal::cast_to" if dtype in FP8_METAL_NAMES else "static_cast"
+            line = f"{cast}<float>({line})"
             dtype = torch.float32
         return self.cse.generate(self.loads, line, dtype=dtype)
 
@@ -1437,6 +1457,12 @@ class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
 
     def __init__(self, scheduler: Scheduler | None) -> None:
+        max_tiles = config.triton.max_tiles
+        if max_tiles is not None and max_tiles > 3:
+            raise RuntimeError(
+                "MPS requires torch._inductor.config.triton.max_tiles <= 3, "
+                f"got {max_tiles}"
+            )
         super().__init__(scheduler)
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:

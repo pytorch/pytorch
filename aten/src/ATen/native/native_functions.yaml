@@ -7192,6 +7192,7 @@
   dispatch:
     CUDA: _scaled_grouped_mm_cuda_v2_out
     XPU: _scaled_grouped_mm_xpu_v2_out
+    MPS: _scaled_grouped_mm_mps_v2_out
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
