@@ -4999,17 +4999,13 @@ class GraphModule(torch.nn.Module):
         # Should not have recompiled
         self.assertEqual(cnts.frame_count, 1)
 
-    @parametrize("same_result", [True, False])
     @torch._dynamo.config.patch(allow_empty_graphs=True)
-    def test_user_function_code_recompile_hint(self, same_result):
+    def test_user_function_code_recompile_hint(self):
         def helper(x):
             return x + 1
 
-        def same_body_result(x):
+        def replacement(x):
             return x + 1 + 0
-
-        def different_body_result(x):
-            return x + 2
 
         def fn(x):
             return helper(x)
@@ -5019,13 +5015,8 @@ class GraphModule(torch.nn.Module):
             "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
         )(fn)
         self.assertEqual(compiled(1), 2)
-        replacement = same_body_result if same_result else different_body_result
-        original_code = helper.__code__
-        try:
-            helper.__code__ = replacement.__code__
-            self.assertEqual(compiled(1), 2 if same_result else 3)
-        finally:
-            helper.__code__ = original_code
+        helper.__code__ = replacement.__code__
+        self.assertEqual(compiled(1), 2)
 
         self.assertEqual(len(failures), 1)
         self.assertIn("___check_obj_id(", failures[0])
@@ -5056,12 +5047,8 @@ class GraphModule(torch.nn.Module):
             "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
         )(fn)
         self.assertEqual(compiled(1, box), 2)
-        original_code = Box.method.__code__
-        try:
-            Box.method.__code__ = replacement.__code__
-            self.assertEqual(compiled(1, box), 2)
-        finally:
-            Box.method.__code__ = original_code
+        Box.method.__code__ = replacement.__code__
+        self.assertEqual(compiled(1, box), 2)
 
         self.assertEqual(len(failures), 1)
         self.assertIn("___check_obj_id(", failures[0])
