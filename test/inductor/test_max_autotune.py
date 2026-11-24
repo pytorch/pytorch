@@ -2043,10 +2043,10 @@ class TestMaxAutotune(TestCase):
     @unittest.skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
     @skipIfRocm
     @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
-    @parametrize("op,max_autotune", [("mm", True), ("bmm", True), ("bmm", False)])
+    @parametrize("op", ("mm", "bmm"))
     @config.patch({"test_configs.max_mm_configs": 1, "fx_graph_cache": False})
     @recover_orig_fp32_precision
-    def test_mm_allow_tf32_dynamic_m_bf16_no_guard(self, op, max_autotune):
+    def test_mm_allow_tf32_dynamic_m_bf16_no_guard(self, op):
         # ALLOW_TF32 only affects fp32 dots, so bf16 adds no guard even with TF32 on.
         torch._dynamo.reset()
         torch.backends.cuda.matmul.fp32_precision = "tf32"
@@ -2058,7 +2058,7 @@ class TestMaxAutotune(TestCase):
             device=GPU_TYPE,
             dtype=torch.bfloat16,
         )
-        with config.patch(max_autotune=max_autotune):
+        with config.patch(max_autotune=True):
             cnt, run = self._compile_mm_counting(fn, b, torch._dynamo.mark_dynamic)
             for m in (1024, 8, 2048):
                 run(m)
@@ -2136,6 +2136,51 @@ class TestMaxAutotune(TestCase):
         HAS_CUDA_AND_TRITON and torch.cuda.is_tf32_supported(), "requires TF32"
     )
     @skipIfRocm
+    @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
+    @parametrize("user_range", ((2, 4096), (2, None)))
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 1,
+            "fx_graph_cache": True,
+            "avoid_32bit_indexing_guards": True,
+        }
+    )
+    @torch._functorch.config.patch(enable_autograd_cache=True)
+    @recover_orig_fp32_precision
+    def test_mm_allow_tf32_user_range_skips_guarded_cache_entry(self, user_range):
+        # A plain mark_dynamic compile caches TF32 with an `M >= 16` guard. A
+        # later compile with a user min/max must not reuse it: replaying that
+        # guard would narrow the user's range and raise ConstraintViolationError.
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+        b = torch.randn(512, 512, device=GPU_TYPE)
+        lo, hi = user_range
+
+        def mark(t, dim):
+            torch._dynamo.mark_dynamic(t, dim, min=lo, max=hi)
+
+        with fresh_cache():
+            torch._dynamo.reset()
+            _, run = self._compile_mm_counting(torch.mm, b, torch._dynamo.mark_dynamic)
+            _, codes = run(1024)
+            self.assertIn("ALLOW_TF32 : tl.constexpr = True", codes[0])
+
+            torch._dynamo.reset()
+            counters.clear()
+            cnt, run = self._compile_mm_counting(torch.mm, b, mark)
+            err, codes = run(1024)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertIn("ALLOW_TF32 : tl.constexpr = False", codes[0])
+            self.assertLessEqual(err, 1e-5)
+            run(8)
+            self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipUnless(
+        HAS_CUDA_AND_TRITON and torch.cuda.is_tf32_supported(), "requires TF32"
+    )
+    @skipIfRocm
+    @unittest.skipIf(config.triton.native_matmul, "only test on template-based matmul")
     @config.patch({"max_autotune": False, "fx_graph_cache": False})
     @recover_orig_fp32_precision
     def test_mm_allow_tf32_dynamic_m_default_mode_no_guard(self):
@@ -2316,6 +2361,30 @@ class TestMaxAutotune(TestCase):
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             if not same(expect, actual, tol=1e-2):
                 raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
+
+    @config.patch(
+        force_shape_pad=True,
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON,ATEN",
+    )
+    def test_addmm_layout_conflict_extern_fallback(self):
+        """
+        Padding K freezes A at its original row stride, which conflicts with the
+        layout the template expects, so the scheduler falls back to the fastest
+        extern choice. addmm has two extern choices, and only the fastest one
+        has a timing.
+        """
+        M, K, N = 256, 1778, 640
+        a = torch.randn(M * 1792, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, K), (1792, 1)
+        )
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+        bias = torch.randn(N, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, N), (0, 1)
+        )
+
+        out = torch.compile(torch.addmm)(bias, a, b)
+        torch.testing.assert_close(out, torch.addmm(bias, a, b), atol=5e-2, rtol=1e-2)
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -4126,11 +4195,7 @@ class TestMaxAutotune(TestCase):
         ):
             result = torch.compile(mm, fullgraph=True)(x, w)
 
-        # Loads before the graph input pointer read back 0 on ROCm, so the
-        # negative case computes zeros there and cannot be compared. Same
-        # limitation as test_as_strided_past_input_extent in test_torchinductor.py.
-        if view_offset >= 0 or not TEST_WITH_ROCM:
-            torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
 
         self.assertTrue(autotune_args, "autotuning did not build benchmark inputs")
         # The fake input has to satisfy as_strided with the data pointer placed
@@ -6689,6 +6754,44 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
 
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    @config.patch({"test_configs.autotune_choice_desc_regex": "EVEN_K=False"})
+    @parametrize("prologue", ("cast", "relu_cast"))
+    def test_prologue_masked_k_load_fills_zero(self, prologue):
+        # Only configs whose BLOCK_K does not divide K=48 are admitted, so the last
+        # K step masks lanes of the fused B load. Those lanes feed tl.dot, and
+        # zero-preserving prologues are not re-masked, so the load itself must fill
+        # them with zeros.
+        M, K, N = 64, 48, 128
+
+        def foo(a, b_storage):
+            b = b_storage[:, :K].t()
+            if prologue == "relu_cast":
+                b = b.relu()
+            return a @ b.float()
+
+        a = torch.randn(M, K, device=GPU_TYPE)
+        # Pad every row of B's storage with NaN past column K.
+        b_storage = torch.full(
+            (N, 64), float("nan"), dtype=torch.float16, device=GPU_TYPE
+        )
+        b_storage[:, :K] = torch.randn(N, K, dtype=torch.float16, device=GPU_TYPE)
+
+        out, code = run_and_get_code(torch.compile(foo), a, b_storage)
+        self.assertEqual(out, foo(a, b_storage), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=None, num_deallocs=None)
+        masked_b_loads = [
+            line
+            for line in code[0].splitlines()
+            if "tl.load(" in line and "b_mask" in line
+        ]
+        self.assertTrue(masked_b_loads, "expected a masked prologue load of B")
+        for line in masked_b_loads:
+            self.assertIn("other=", line)
+
 
 def autotune_select_algorithm_wrapper_return_multi():
     def wrapper(*args, **kwargs):
@@ -7347,6 +7450,8 @@ def _tdm_fake_kernel(**overrides):
     analysis into its persistent-reduction and combo-kernel branches and then
     fails on arithmetic against Mock objects.
     """
+    from torch._inductor.codegen.simd import IterationRangesRoot
+
     kernel = mock.Mock(
         no_x_dim=False,
         persistent_reduction=False,
@@ -7355,6 +7460,19 @@ def _tdm_fake_kernel(**overrides):
         fixed_config=None,
         tma_min_block_sizes={},
     )
+    kernel.range_trees = [
+        IterationRangesRoot(
+            "xindex",
+            sympy.Integer(1024),
+            "x",
+            0,
+            kernel,
+            is_loop=False,
+            tensor_dim=0,
+            grid_dim=0,
+            has_zdim=False,
+        )
+    ]
     kernel.max_block.return_value = 1024
     kernel.index_to_str.side_effect = str
     kernel.features.strict_reduction_rblock.return_value = 0
