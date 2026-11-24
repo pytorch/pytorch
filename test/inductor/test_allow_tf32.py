@@ -21,6 +21,7 @@ from torch._inductor import config as inductor_config
 from torch._inductor.codecache import compiled_fx_graph_hash, FxGraphHashDetails
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.template.triton import (
+    _cuda_tf32_major,
     mm_allow_tf32,
     MMTemplateConfigMixin,
 )
@@ -126,6 +127,7 @@ class TestAllowTf32DynamicShapes(TestCase):
         tf32=True,
         m_range=None,
         strict_min=None,
+        warn_only=False,
         b200=False,
         n=512,
         n_range=None,
@@ -143,7 +145,7 @@ class TestAllowTf32DynamicShapes(TestCase):
                 dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
                 constraint_sizes=[
                     StrictMinMaxConstraint(
-                        warn_only=False, vr=ValueRanges(strict_min, int_oo)
+                        warn_only=warn_only, vr=ValueRanges(strict_min, int_oo)
                     ),
                     None,
                 ],
@@ -175,9 +177,10 @@ class TestAllowTf32DynamicShapes(TestCase):
             with (
                 tracing_context,
                 V.set_graph_handler(graph),
-                mock.patch("torch.cuda.is_available", return_value=True),
-                mock.patch("torch.cuda.is_tf32_supported", return_value=tf32),
-                mock.patch(f"{mm_allow_tf32.__module__}.using_b200", return_value=b200),
+                mock.patch(
+                    f"{mm_allow_tf32.__module__}._cuda_tf32_major",
+                    return_value=(10 if b200 else 9) if tf32 else None,
+                ),
                 mock.patch("torch.version.hip", None),
             ):
                 if dtype is None:
@@ -209,8 +212,6 @@ class TestAllowTf32DynamicShapes(TestCase):
             # A bounded range on one side of the threshold is already decided.
             (1024, (32, 4096), True, []),
             (8, (2, 15), False, []),
-            # Unbounded ranges (plain mark_dynamic) follow the hint and get a guard.
-            (1024, (2, int_oo), True, ["m >= 16"]),
         ],
     )
     @parametrize("b200", (False, True))
@@ -268,6 +269,58 @@ class TestAllowTf32DynamicShapes(TestCase):
         # default range), but a guard would still narrow it.
         result = self._gate(1024, strict_min=strict_min, b200=b200)
         self.assertEqual(result, (False, []))
+
+    def test_cuda_gate_warn_only_min_follows_hint(self):
+        # maybe_mark_dynamic(min=) is warn_only: produce_guards only logs when a
+        # guard narrows it, so it follows the hint like a plain dynamic dim.
+        self.assertEqual(
+            self._gate(1024, strict_min=2, warn_only=True), (True, ["m >= 16"])
+        )
+
+    def test_cuda_tf32_major_reads_gemm_device(self):
+        # The current device is TF32-capable but the GEMM's device isn't.
+        props = {
+            0: mock.Mock(major=10, gcnArchName=""),
+            1: mock.Mock(major=7, gcnArchName=""),
+        }
+        with (
+            mock.patch("torch.cuda.is_available", return_value=True),
+            mock.patch("torch.cuda.current_device", return_value=0),
+            mock.patch(
+                "torch.cuda.get_device_properties",
+                side_effect=lambda d: props[0 if d.index is None else d.index],
+            ),
+            mock.patch("torch.version.hip", None),
+        ):
+            self.assertEqual(_cuda_tf32_major(torch.device("cuda", 0)), 10)
+            self.assertIsNone(_cuda_tf32_major(torch.device("cuda", 1)))
+
+    def test_cache_key_records_strict_constraint_symbols(self):
+        # The gate skips its guard for dims under a user min/max, so those dims
+        # must change the FX graph (and AOTAutograd) cache key.
+        def details(constraint):
+            shape_env = ShapeEnv()
+            fake_mode = FakeTensorMode(shape_env=shape_env)
+            t = torch.empty(8, 4)
+            ctx = StatefulSymbolicContext(
+                dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.STATIC],
+                constraint_sizes=[constraint, None],
+                tensor_source=LocalSource("a"),
+                shape_env_to_source_to_symbol_cache={},
+            )
+            fake = fake_mode.from_tensor(
+                t, source=LocalSource("a"), symbolic_context=ctx
+            )
+            tc = TracingContext(fake_mode)
+            tc.tensor_to_context[t] = ctx
+            with tracing(tc):
+                return FxGraphHashDetails(None, [fake], {}, [])
+
+        strict = StrictMinMaxConstraint(warn_only=False, vr=ValueRanges(2, 4096))
+        warn = StrictMinMaxConstraint(warn_only=True, vr=ValueRanges(2, 4096))
+        self.assertFalse(hasattr(details(None), "strict_constraint_symbols"))
+        self.assertFalse(hasattr(details(warn), "strict_constraint_symbols"))
+        self.assertEqual(len(details(strict).strict_constraint_symbols), 1)
 
     def test_cuda_gate_no_guard_without_tf32(self):
         self.assertEqual(self._gate(1024, precision="ieee"), (False, []))
@@ -412,10 +465,11 @@ class TestAllowTf32ExtraKwargs(TestCase):
         try:
             torch.backends.cuda.matmul.fp32_precision = "tf32"
             with (
-                mock.patch(f"{mm_allow_tf32.__module__}.using_b200", return_value=b200),
+                mock.patch(
+                    f"{mm_allow_tf32.__module__}._cuda_tf32_major",
+                    return_value=10 if b200 else 9,
+                ),
                 mock.patch("torch.version.hip", hip),
-                mock.patch("torch.cuda.is_available", return_value=True),
-                mock.patch("torch.cuda.is_tf32_supported", return_value=True),
             ):
                 extra = self.mixin.get_extra_kwargs(kernel_inputs, op)
         finally:

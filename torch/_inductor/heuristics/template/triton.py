@@ -51,6 +51,7 @@ from ...utils import (
     kpack_supported,
     mfma_kdim,
     rocm_gfx_arch,
+    strict_constraint_symbols,
     tdm_descriptor_row_major,
     TMA_DESCRIPTOR_SIZE,
     tma_inner_dim,
@@ -2834,53 +2835,35 @@ def _bounded_range_spans(dim: Any, threshold: int) -> bool:
     return vr.upper not in (int_oo, sympy.oo) and vr.lower < threshold <= vr.upper
 
 
-def _strict_constraint_symbols() -> OrderedSet[sympy.Symbol]:
-    """Symbols of input dims under a user min/max (``mark_dynamic(min=, max=)``).
-
-    The shape env doesn't record which ranges came from the user (a min-only
-    ``min=2`` range equals the default), so read the constraints Dynamo kept in
-    the tracing context; produce_guards raises if a guard narrows them.
-    """
-    from torch._dynamo.source import TensorProperty, TensorPropertySource
-    from torch._guards import TracingContext
-    from torch.fx.experimental.symbolic_shapes import (
-        StatefulSymbolicContext,
-        StrictMinMaxConstraint,
-    )
-
-    syms: OrderedSet[sympy.Symbol] = OrderedSet()
-    tracing_context = TracingContext.try_get()
-    if tracing_context is None:
-        return syms
-    shape_env = V.graph.sizevars.shape_env
-    for ctx in tracing_context.tensor_to_context.values():
-        if not isinstance(ctx, StatefulSymbolicContext):
-            continue
-        for idx, constraint in enumerate(ctx.constraint_sizes or ()):
-            if not isinstance(constraint, StrictMinMaxConstraint):
-                continue
-            name = TensorPropertySource(
-                ctx.tensor_source, TensorProperty.SIZE, idx
-            ).name
-            if (sym := shape_env.source_to_var.get(name)) is not None:
-                syms.update(shape_env.replace(sym).free_symbols)
-    return syms
-
-
 def _has_strict_constraint(dims: Sequence[Any]) -> bool:
     """Whether any of dims depends on an input dim under a user min/max."""
     shape_env = V.graph.sizevars.shape_env
     free = OrderedSet(
         s for d in dims for s in shape_env.replace(sympy.sympify(d)).free_symbols
     )
-    return bool(free) and any(s in free for s in _strict_constraint_symbols())
+    return bool(free) and any(s in free for s in strict_constraint_symbols(shape_env))
+
+
+def _cuda_tf32_major(device: torch.device) -> int | None:
+    """Compute capability major of device if it supports TF32, else None.
+
+    Reads the GEMM's device; torch.cuda.is_tf32_supported() reads the current one.
+    """
+    if not torch.cuda.is_available():
+        return None
+    props = torch.cuda.get_device_properties(device)
+    if torch.version.hip:
+        supported = any(arch in props.gcnArchName for arch in ("gfx94", "gfx95"))
+    else:
+        supported = props.major >= 8
+    return props.major if supported else None
 
 
 def mm_allow_tf32(
     m: Any,
     n: Any,
     k: Any,
-    device_type: str | None,
+    device: torch.device | str | None,
     dtype: torch.dtype | None = None,
     *,
     batched: bool = False,
@@ -2889,6 +2872,9 @@ def mm_allow_tf32(
 
     ``batched`` selects the bmm/baddbmm thresholds.
     """
+    if isinstance(device, str):
+        device = torch.device(device)
+    device_type = device.type if device is not None else None
     allow_tf32 = False
     if isinstance(device_type, str):
         try:
@@ -2905,12 +2891,9 @@ def mm_allow_tf32(
         # and get a guard; unbacked dims, AOT mode (no runtime guard check),
         # dims whose bounded range spans a threshold, and dims under a user
         # min/max (a guard would narrow the user's range) need a proof.
-        fp32_tf32 = (
-            dtype == torch.float32
-            and torch.cuda.is_available()
-            and torch.cuda.is_tf32_supported()
-        )
-        if not torch.version.hip and fp32_tf32 and using_b200():
+        tf32_major = _cuda_tf32_major(device) if dtype == torch.float32 else None
+        fp32_tf32 = tf32_major is not None
+        if not torch.version.hip and tf32_major == 10:
             min_nk = 64 if batched else 16
             thresholds = [
                 (m, 16),
@@ -2940,6 +2923,25 @@ def mm_allow_tf32(
             return V.graph.sizevars.statically_known_true(size_threshold)
         return bool(V.graph.sizevars.guard_or_false(size_threshold))
     return allow_tf32
+
+
+def blackwell_tma_mma_layout_supported(
+    dtype: torch.dtype,
+    allow_tf32: bool,
+    a_row_major: bool,
+    block_m: int,
+) -> bool:
+    """Whether the Blackwell TMA GEMM templates can lower this A operand layout.
+
+    tcgen05.mma does not support transposed FP32 operands in shared memory.
+    With the layouts emitted by the Blackwell persistent-TMA mm template and
+    the decompose-K partial-BMM template, the unsupported case is a transposed
+    (column-major) A operand with TF32 enabled and BLOCK_M > 32. BLOCK_M=32
+    and either orientation of B use supported MMA layouts.
+    """
+    return not (
+        dtype == torch.float32 and allow_tf32 and not a_row_major and block_m > 32
+    )
 
 
 class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
@@ -2976,21 +2978,25 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     # kernels are unaffected.
     ascending_k: bool = False
 
-    def get_extra_kwargs(
-        self,
-        kernel_inputs: KernelInputs,
-        op_name: str,
-    ) -> dict[str, Any]:
+    def _allow_tf32(self, kernel_inputs: KernelInputs, op_name: str) -> bool:
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         m, n, k = kernel_inputs.mnk_symbolic()
         dtype = kernel_inputs.mat1mat2()[0].get_dtype()
         # Skip the gate (and its guard) when this template yields no configs.
         batched = op_name in ("bmm", "baddbmm")
-        allow_tf32 = self.should_run(kernel_inputs) and mm_allow_tf32(
-            m, n, k, kernel_inputs.device_type, dtype, batched=batched
+        return self.should_run(kernel_inputs) and mm_allow_tf32(
+            m, n, k, kernel_inputs.device(), dtype, batched=batched
         )
-        extra_kwargs = {"ALLOW_TF32": allow_tf32}
+
+    def get_extra_kwargs(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> dict[str, Any]:
+        extra_kwargs = {
+            "ALLOW_TF32": self._allow_tf32(kernel_inputs, op_name),
+        }
         # Scoped to XPU (self.ascending_k) and to the templates that reference
         # the key. The mm/addmm/... ops via mm_template are excluded because
         # triton_mm.py.jinja already renders ascending unconditionally.
@@ -3584,6 +3590,19 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
     combinations the lowering cannot support before they reach codegen.
     """
 
+    @staticmethod
+    def _supports_mma_layout(
+        dtype: torch.dtype,
+        allow_tf32: bool,
+        template_kwargs: dict[str, Any],
+    ) -> bool:
+        return blackwell_tma_mma_layout_supported(
+            dtype,
+            allow_tf32,
+            template_kwargs["A_ROW_MAJOR"],
+            template_kwargs["BLOCK_M"],
+        )
+
     def _get_template_configs_impl(
         self,
         kernel_inputs: KernelInputs,
@@ -3597,6 +3616,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             raise AssertionError("Blackwell GEMM requires MMKernelInputs")
         _, mat2 = kernel_inputs.mat1mat2()
         element_size = mat2.get_dtype().itemsize
+        allow_tf32 = self._allow_tf32(kernel_inputs, op_name)
 
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -3604,6 +3624,10 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             op_name,
             **kwargs,
         ):
+            if not self._supports_mma_layout(
+                kernel_inputs.dtype(), allow_tf32, template_kwargs
+            ):
+                continue
             use_meta_ws = template_kwargs.get("USE_META_WS", False)
             # autoWS configs come from a full sweep; drop combos the lowering
             # does not support so no invalid config reaches codegen.
