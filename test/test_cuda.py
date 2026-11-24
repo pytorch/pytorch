@@ -16585,6 +16585,59 @@ class TestCudaArchList(TestCase):
             self.assertEqual(torch.cuda.get_arch_list(), expected)
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available")
+@unittest.skipIf(TEST_WITH_ROCM, "graph allocators are not tested on ROCm")
+class TestGraphAllocators(TestCase):
+    def test_pass_through(self):
+        # on its own, the layer forwards every call to the caching allocator
+        old = torch.empty(0, device="cuda").untyped_storage()  # made before
+        x = torch.ones(1024, device="cuda")
+        base = torch.cuda.memory_allocated()
+        torch._C._cuda_beginGraphAllocatorWindow()
+        try:
+            with self.assertRaisesRegex(RuntimeError, "already open"):
+                torch._C._cuda_beginGraphAllocatorWindow()
+            self.assertEqual(torch.cuda.memory.get_allocator_backend(), "native")
+            y = x + 1
+            p = torch.cuda.caching_allocator_alloc(1024)
+            old.resize_(4096)
+            made = torch.empty(0, device="cuda").untyped_storage()  # in the window
+            self.assertEqual(torch.cuda.memory_allocated() - base, 4096 + 1024 + 4096)
+            torch.cuda.caching_allocator_delete(p)
+            del y
+            old.resize_(0)
+        finally:
+            torch._C._cuda_endGraphAllocatorWindow()
+        torch._C._cuda_endGraphAllocatorWindow()  # again: a no-op
+        made.resize_(4096)  # after the window: the caching allocator
+        self.assertEqual(torch.cuda.memory_allocated() - base, 4096)
+        made.resize_(0)
+        self.assertEqual(torch.cuda.memory_allocated() - base, 0)
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            z = x * 2
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(z.sum().item(), 2048.0)
+
+    def test_requires_native_allocator(self):
+        env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "backend:cudaMallocAsync"}
+        env.pop("PYTORCH_ALLOC_CONF", None)
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import torch; torch.empty(1, device='cuda'); "
+                "torch._C._cuda_beginGraphAllocatorWindow()",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        self.assertIn("require the native CUDA caching allocator", proc.stderr)
+
+
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaAllocator)
 instantiate_parametrized_tests(TestMemPool)

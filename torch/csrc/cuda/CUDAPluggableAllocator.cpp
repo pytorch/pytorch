@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <mutex>
+#include <optional>
 #include <utility>
 
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -404,6 +405,321 @@ void changeCurrentAllocator(
 
 void custom_raw_deleter(void* ptr) {
   current_custom_allocator->raw_delete(ptr);
+}
+
+namespace {
+
+namespace CCA = c10::cuda::CUDACachingAllocator;
+using c10::cuda::CaptureId_t;
+using c10::cuda::MempoolId_t;
+
+// A layer over the native caching allocator (inner) that forwards every call
+// to it. A graph allocator window (beginGraphAllocatorWindow) makes it the
+// current CUDA allocator until the window ends.
+class LayeredAllocator final : public CCA::CUDAAllocator {
+ public:
+  void beginWindow() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto* current = CCA::allocator.load();
+    TORCH_CHECK(
+        current != this, "a CUDA graph allocator window is already open");
+    // The layer forwards to the caching allocator, which keeps owning
+    // everything allocated so far.
+    TORCH_CHECK(
+        current->name() == "native",
+        "CUDA graph allocator windows require the native CUDA caching "
+        "allocator, but the current allocator is '",
+        current->name(),
+        "'");
+    inner_.store(current);
+    CCA::allocator.store(this);
+  }
+  // Idempotent.
+  void endWindow() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (CCA::allocator.load() == this) {
+      CCA::allocator.store(inner());
+    }
+  }
+
+  // A virtual added to CUDAAllocator (or its bases) must be forwarded here, or
+  // the layer silently gets its default.
+  using MemoryInfo = std::pair<size_t, size_t>;
+#define LAYERED_FORWARD(ret, name, params, args) \
+  ret name params override {                     \
+    return inner()->name args;                   \
+  }
+  LAYERED_FORWARD(c10::DataPtr, allocate, (size_t size), (size))
+  LAYERED_FORWARD(void*, raw_alloc, (size_t nbytes), (nbytes))
+  LAYERED_FORWARD(
+      void*,
+      raw_alloc_with_stream,
+      (size_t nbytes, cudaStream_t stream),
+      (nbytes, stream))
+  LAYERED_FORWARD(void, raw_delete, (void* ptr), (ptr))
+  LAYERED_FORWARD(
+      void,
+      recordStream,
+      (const c10::DataPtr& ptr, c10::cuda::CUDAStream stream),
+      (ptr, stream))
+  LAYERED_FORWARD(c10::DeleterFnPtr, raw_deleter, () const, ())
+  LAYERED_FORWARD(
+      void,
+      copy_data,
+      (void* dest, const void* src, std::size_t count) const,
+      (dest, src, count))
+  LAYERED_FORWARD(
+      std::optional<c10::AllocationStreamInfo>,
+      allocation_stream_info,
+      (const void* ptr) const,
+      (ptr))
+  LAYERED_FORWARD(bool, initialized, (), ())
+  LAYERED_FORWARD(void, emptyCache, (MempoolId_t mempool_id), (mempool_id))
+  LAYERED_FORWARD(
+      c10::CachingDeviceAllocator::DeviceStats,
+      getDeviceStats,
+      (c10::DeviceIndex device),
+      (device))
+  LAYERED_FORWARD(
+      void,
+      resetAccumulatedStats,
+      (c10::DeviceIndex device),
+      (device))
+  LAYERED_FORWARD(void, resetPeakStats, (c10::DeviceIndex device), (device))
+  LAYERED_FORWARD(void, init, (int device_count), (device_count))
+  LAYERED_FORWARD(
+      double,
+      getMemoryFraction,
+      (c10::DeviceIndex device),
+      (device))
+  LAYERED_FORWARD(
+      void,
+      setMemoryFraction,
+      (double fraction, c10::DeviceIndex device),
+      (fraction, device))
+  LAYERED_FORWARD(
+      std::vector<CCA::StreamSegmentSize>,
+      getExpandableSegmentSizes,
+      (c10::DeviceIndex device),
+      (device))
+  LAYERED_FORWARD(void, enable, (bool value), (value))
+  LAYERED_FORWARD(bool, isEnabled, () const, ())
+  LAYERED_FORWARD(
+      void,
+      cacheInfo,
+      (c10::DeviceIndex device, size_t* largestBlock),
+      (device, largestBlock))
+  LAYERED_FORWARD(
+      void*,
+      getBaseAllocation,
+      (void* ptr, size_t* size),
+      (ptr, size))
+  LAYERED_FORWARD(
+      CCA::SnapshotInfo,
+      snapshot,
+      (MempoolId_t mempool_id, bool include_traces),
+      (mempool_id, include_traces))
+  LAYERED_FORWARD(
+      void,
+      beginAllocateToPool,
+      (c10::DeviceIndex device,
+       MempoolId_t mempool_id,
+       std::function<bool(cudaStream_t)> filter),
+      (device, mempool_id, std::move(filter)))
+  LAYERED_FORWARD(
+      void,
+      endAllocateToPool,
+      (c10::DeviceIndex device, MempoolId_t mempool_id),
+      (device, mempool_id))
+  LAYERED_FORWARD(void, markCaptureBegin, (c10::DeviceIndex device), (device))
+  LAYERED_FORWARD(void, markCaptureEnd, (c10::DeviceIndex device), (device))
+  LAYERED_FORWARD(bool, isCaptureContext, (c10::DeviceIndex device), (device))
+  LAYERED_FORWARD(
+      void,
+      releasePool,
+      (c10::DeviceIndex device, MempoolId_t mempool_id),
+      (device, mempool_id))
+  LAYERED_FORWARD(
+      int,
+      getPoolUseCount,
+      (c10::DeviceIndex device, MempoolId_t mempool_id),
+      (device, mempool_id))
+  LAYERED_FORWARD(
+      void,
+      createOrIncrefPool,
+      (c10::DeviceIndex device,
+       MempoolId_t mempool_id,
+       std::shared_ptr<CCA::CUDAAllocator> allocator),
+      (device, mempool_id, std::move(allocator)))
+  LAYERED_FORWARD(
+      void,
+      setUseOnOOM,
+      (c10::DeviceIndex device, MempoolId_t mempool_id, bool use_on_oom),
+      (device, mempool_id, use_on_oom))
+  LAYERED_FORWARD(
+      void,
+      setNoSplit,
+      (c10::DeviceIndex device, MempoolId_t mempool_id),
+      (device, mempool_id))
+  LAYERED_FORWARD(
+      bool,
+      checkPoolLiveAllocations,
+      (c10::DeviceIndex device,
+       MempoolId_t mempool_id,
+       const std::unordered_set<void*>& expected_live_allocations),
+      (device, mempool_id, expected_live_allocations))
+  LAYERED_FORWARD(CCA::ShareableHandle, shareIpcHandle, (void* ptr), (ptr))
+  LAYERED_FORWARD(
+      std::shared_ptr<void>,
+      getIpcDevPtr,
+      (std::string handle),
+      (std::move(handle)))
+  LAYERED_FORWARD(bool, isHistoryEnabled, (), ())
+  LAYERED_FORWARD(
+      std::shared_ptr<c10::GatheredContext>,
+      getContextForPointer,
+      (const void* ptr),
+      (ptr))
+  LAYERED_FORWARD(
+      void,
+      recordHistory,
+      (bool enabled,
+       CCA::CreateContextFn context_recorder,
+       size_t alloc_trace_max_entries,
+       CCA::RecordContext when,
+       bool clearHistory,
+       const std::vector<std::string>& skip_actions),
+      (enabled,
+       std::move(context_recorder),
+       alloc_trace_max_entries,
+       when,
+       clearHistory,
+       skip_actions))
+  LAYERED_FORWARD(
+      void,
+      recordAnnotation,
+      (const std::vector<std::pair<std::string, std::string>>& md),
+      (md))
+  LAYERED_FORWARD(void, pushCompileContext, (std::string & md), (md))
+  LAYERED_FORWARD(void, popCompileContext, (), ())
+  LAYERED_FORWARD(bool, supportsUserMetadata, (), ())
+  LAYERED_FORWARD(
+      void,
+      setUserMetadata,
+      (const std::string& metadata),
+      (metadata))
+  LAYERED_FORWARD(std::string, getUserMetadata, (), ())
+  LAYERED_FORWARD(
+      void,
+      annotateMemory,
+      (const void* ptr, const std::string& metadata),
+      (ptr, metadata))
+  LAYERED_FORWARD(
+      void,
+      attachOutOfMemoryObserver,
+      (CCA::OutOfMemoryObserver observer),
+      (std::move(observer)))
+  LAYERED_FORWARD(
+      void,
+      attachOomRejectionObserver,
+      (CCA::OomRejectionObserver observer),
+      (std::move(observer)))
+  LAYERED_FORWARD(
+      void,
+      attachAllocatorTraceTracker,
+      (CCA::AllocatorTraceTracker tracker),
+      (std::move(tracker)))
+  LAYERED_FORWARD(
+      void,
+      enablePeerAccess,
+      (c10::DeviceIndex dev, c10::DeviceIndex dev_to_access),
+      (dev, dev_to_access))
+  LAYERED_FORWARD(
+      cudaError_t,
+      memcpyAsync,
+      (void* dst,
+       int dstDevice,
+       const void* src,
+       int srcDevice,
+       size_t count,
+       cudaStream_t stream,
+       bool p2p_enabled),
+      (dst, dstDevice, src, srcDevice, count, stream, p2p_enabled))
+  LAYERED_FORWARD(
+      std::shared_ptr<CCA::AllocatorState>,
+      getCheckpointState,
+      (c10::DeviceIndex device, MempoolId_t id),
+      (device, id))
+  LAYERED_FORWARD(
+      CCA::CheckpointDelta,
+      setCheckpointPoolState,
+      (c10::DeviceIndex device, std::shared_ptr<CCA::AllocatorState> pps),
+      (device, std::move(pps)))
+  LAYERED_FORWARD(
+      void,
+      restoreExpandableSegment,
+      (c10::DeviceIndex device,
+       cudaStream_t stream,
+       MempoolId_t mempool_id,
+       bool is_small,
+       size_t address,
+       size_t reserve_size,
+       size_t segment_size,
+       CCA::Expandable_Segments_Handle_Type handle_type,
+       const std::vector<std::pair<size_t, size_t>>& mapped_ranges),
+      (device,
+       stream,
+       mempool_id,
+       is_small,
+       address,
+       reserve_size,
+       segment_size,
+       handle_type,
+       mapped_ranges))
+  LAYERED_FORWARD(
+      c10::DataPtr,
+      allocateWithAddress,
+      (size_t size, void* addr),
+      (size, addr))
+  LAYERED_FORWARD(std::string, name, (), ())
+  LAYERED_FORWARD(
+      MemoryInfo,
+      getMemoryInfo,
+      (c10::DeviceIndex device),
+      (device))
+  LAYERED_FORWARD(
+      bool,
+      is_simple_data_ptr,
+      (const c10::DataPtr& data_ptr) const,
+      (data_ptr))
+#undef LAYERED_FORWARD
+
+ private:
+  CCA::CUDAAllocator* inner() const {
+    return inner_.load(std::memory_order_relaxed);
+  }
+
+  std::atomic<CCA::CUDAAllocator*> inner_{nullptr};
+  std::mutex mutex_;
+};
+
+// Current only while a graph allocator window is open (a planned capture
+// runs). Never deleted, because storages created during a window keep a raw
+// pointer to it (the resize rule dynamic_casts it, and storage ops like
+// _lazy_clone call it).
+LayeredAllocator& layered() {
+  static auto* allocator = new LayeredAllocator();
+  return *allocator;
+}
+
+} // namespace
+
+void beginGraphAllocatorWindow() {
+  layered().beginWindow();
+}
+
+void endGraphAllocatorWindow() {
+  layered().endWindow();
 }
 
 } // namespace torch::cuda::CUDAPluggableAllocator

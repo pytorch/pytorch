@@ -1451,6 +1451,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              allocator) {
         torch::cuda::CUDAPluggableAllocator::changeCurrentAllocator(allocator);
       });
+  m.def(
+      "_cuda_beginGraphAllocatorWindow",
+      &torch::cuda::CUDAPluggableAllocator::beginGraphAllocatorWindow);
+  m.def(
+      "_cuda_endGraphAllocatorWindow",
+      &torch::cuda::CUDAPluggableAllocator::endGraphAllocatorWindow);
   py::class_<
       torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator,
       c10::cuda::CUDACachingAllocator::CUDAAllocator,
