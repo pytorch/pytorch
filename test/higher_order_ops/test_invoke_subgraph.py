@@ -42,7 +42,11 @@ from torch._subclasses.functional_tensor import (
 )
 from torch.fx.graph import _BoxedCodeGen
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import (
     expectedIfCppFakeTensor,
     HardwareClassification,
@@ -53,10 +57,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu_and_triton,
-)
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 nested_compile_region = torch.compiler.nested_compile_region
@@ -3604,15 +3605,9 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(inputs[0].grad, compiled_inputs[0].grad)
 
-
-@skipIfTorchDynamo("Not a torch._dynamo test")
-@torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
-class TestInvokeSubgraphCompileCUDA(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    @requires_cuda_and_triton
-    @unittest.skipIf(not SM80OrLater, "Requires sm80 or later.")
-    def test_sdpa(self):
+    @requires_gpu_and_triton
+    @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
+    def test_sdpa(self, device):
         @nested_compile_region
         def gn(q, k, v):
             return torch.nn.functional.scaled_dot_product_attention(
@@ -3626,13 +3621,13 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
                 return gn(q, k, v)
 
         q = torch.randn(
-            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+            1, 1, 32, 32, device=device, dtype=torch.bfloat16, requires_grad=True
         )
         k = torch.randn(
-            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+            1, 1, 32, 32, device=device, dtype=torch.bfloat16, requires_grad=True
         )
         v = torch.randn(
-            1, 1, 32, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+            1, 1, 32, 32, device=device, dtype=torch.bfloat16, requires_grad=True
         )
 
         ref = fn(q, k, v)
@@ -3643,6 +3638,7 @@ class TestInvokeSubgraphCompileCUDA(TestCase):
 
         res = opt_fn(q, k, v)
         res.sum().backward()
+
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
