@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
-    skipMPS,
+    onlyMPS,
 )
 from torch.testing._internal.common_quantized import (
     _float32_to_float6_e2m3fn_x4,
@@ -51,7 +51,7 @@ CUDA_FLOAT8_DTYPES = [
     torch.float8_e8m0fnu,
     torch.float8_e5m3fnu,
 ]
-MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn]
+MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn, torch.float8_e8m0fnu]
 # torch-xpu-ops has no copy kernel for float8_e5m3fnu yet
 XPU_FLOAT8_DTYPES = [d for d in FLOAT8_DTYPES if d is not torch.float8_e5m3fnu]
 
@@ -225,22 +225,21 @@ def simulate_fp8_precision(input, variant):
     return vals * signs
 
 
-def _round_e8m0_rne(biased_exponent, lsb, g, r, s):
-    round_up = False
-
-    # apply g,r,s rounding rules for RNE rounding
-    if g == 1:
-        if (r == 1) or (s == 1):
-            round_up = True
-        else:
-            if lsb:
-                round_up = True
-
-    # round up if necessary
-    if round_up:
-        biased_exponent += 1
-
-    return biased_exponent
+def _round_e8m0(x):
+    """The power of two nearest to x >= 0, with ties going up (e8m0 has no
+    mantissa bits to be even), or NaN beyond e8m0's range. e8m0 has no zero, so
+    values below 2**-127 become 2**-127."""
+    if not math.isfinite(x):
+        return math.nan
+    if x == 0:
+        return 2.0**-127
+    m, e = math.frexp(x)  # x = m * 2**e with 0.5 <= m < 1
+    rounded = 2.0**e if m >= 0.75 else 2.0 ** (e - 1)
+    if rounded > 2.0**127:
+        return math.nan
+    if rounded < 2.0**-127:
+        return 2.0**-127
+    return rounded
 
 
 ROUND_TRIP_TEST_CASES = (
@@ -312,12 +311,11 @@ class TestFloat8Dtype(TestCase):
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
 
-    @skipMPS
-    def test_float8_e8m0fnu_rne_rounding(self, device):
+    def test_float8_e8m0fnu_rounding(self, device):
         """
         For every possible e8m0 exponent (256 options) and for every possible
-        g, r, s bits of the float32 mantissa, verify that RNE rounding is
-        correctly applied when casting from float32 to e8m0
+        g, r, s bits of the float32 mantissa, verify that casting from float32
+        to e8m0 rounds to nearest, with ties going up.
 
         Note: this code is morally similar to `test_cast_round_trip`, but
         IMO simpler to special case e8m0 here.
@@ -332,41 +330,21 @@ class TestFloat8Dtype(TestCase):
                 uint32_t_start = (biased_exponent << 23) + (grs << 20)
                 fp32_start = _int_bits_to_float(uint32_t_start)
 
-                # create an RNE rounded version of the exponent
-                if biased_exponent == 255:
-                    new_biased_exponent = biased_exponent
-                else:
-                    lsb = biased_exponent > 0
-                    g = grs >> 2
-                    r = (grs >> 1) & 0b1
-                    s = grs & 0b1
-                    new_biased_exponent = _round_e8m0_rne(biased_exponent, lsb, g, r, s)
-
-                # create an RNE rounded version of the float
-                fp32_e8m0_fp32_emulated = _int_bits_to_float(new_biased_exponent << 23)
-
-                # now, do the same in PyTorch and see if results match
                 fp32_pt_start = torch.full(
                     (1,), fp32_start, device=device, dtype=torch.float
                 )
-                fp32_pt_e8m0 = fp32_pt_start.to(torch.float8_e8m0fnu)
-                fp32_pt_e8m0_fp32 = fp32_pt_e8m0.to(torch.float)
-
-                expected = fp32_e8m0_fp32_emulated
-                if biased_exponent == 254 and grs >= 4:
-                    # special case rounding up from the largest representable float32 exponent, which
-                    # saturates to nan
-                    expected = float("nan")
-                elif biased_exponent == 255:
-                    # special case inf and nan, which becomes nan
-                    expected = float("nan")
-
-                actual = fp32_pt_e8m0_fp32.item()
+                # Compared as bits: 2^-127, the smallest e8m0 value, is a float32
+                # subnormal.
+                rounded = _round_e8m0(fp32_start)
+                expected = 0xFF if math.isnan(rounded) else math.frexp(rounded)[1] + 126
+                actual = fp32_pt_start.to(torch.float8_e8m0fnu).view(torch.uint8).item()
 
                 self.assertEqual(
                     expected,
                     actual,
                     lambda msg: f"{msg}\nexpected: {expected}, actual: {actual}",
+                    atol=0,
+                    rtol=0,
                 )
 
     @dtypes(*FLOAT8_DTYPES)
@@ -449,6 +427,29 @@ class TestFloat8Dtype(TestCase):
         x2 = torch.empty(4, 4, device=device, dtype=dtype)
         torch.cat([x1, x2])
 
+    @onlyMPS
+    @dtypes(*MPS_FLOAT8_DTYPES)
+    def test_data_movement_mps(self, dtype, device):
+        """Data movement ops move the bits, so they match the same op on uint8 codes."""
+        codes = torch.randint(0, 256, (6, 8), dtype=torch.uint8)
+        x = codes.to(device).view(dtype)
+        idx = torch.tensor([[1, 0], [7, 3], [2, 4], [0, 5], [6, 7], [4, 1]])
+
+        def check(fn):
+            self.assertEqual(fn(x).view(torch.uint8).cpu(), fn(codes), atol=0, rtol=0)
+
+        check(lambda t: torch.cat([t.t(), t.t()], dim=1))
+        check(lambda t: t.gather(1, idx.to(t.device)))
+        check(lambda t: t.clone().scatter_(1, idx.to(t.device), t[:, :2]))
+        one = torch.tensor(1.0).to(dtype).view(torch.uint8).item()
+        self.assertEqual(
+            torch.nn.functional.pad(x, (1, 2), value=1.0).view(torch.uint8).cpu(),
+            torch.nn.functional.pad(codes, (1, 2), value=one),
+            atol=0,
+            rtol=0,
+        )
+        self.assertEqual(x[2, 3].item(), codes.view(dtype)[2, 3].item(), atol=0, rtol=0)
+
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfXPU(*XPU_FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
@@ -484,6 +485,44 @@ class TestFloat4Dtype(TestCase):
 
         # can call contiguous on a dim1 slice (calls `copy_` under the hood)
         x1[:, 0:2048].contiguous()
+
+    def test_float4_e2m1fn_x2_bytes(self, device):
+        # Comparisons and copies run on the device and act on the packed bytes
+        codes = torch.randint(0, 256, (64, 32), dtype=torch.uint8)
+        other = codes.clone()
+        other[3, 5] ^= 0x10
+        x = codes.to(device).view(torch.float4_e2m1fn_x2)
+        y = other.to(device).view(torch.float4_e2m1fn_x2)
+        self.assertEqual((x == y).cpu(), codes == other)
+        self.assertEqual((x != y).cpu(), codes != other)
+        self.assertEqual((x.t() == x.t().contiguous()).cpu().all(), True)
+
+        def bits(t):
+            return t.view(torch.uint8).cpu()
+
+        self.assertEqual(bits(x[:, 0:16].contiguous()), codes[:, 0:16])
+        self.assertEqual(bits(x.t().contiguous()), codes.t())
+        self.assertEqual(bits(x[::2, 1::3].cpu()), codes[::2, 1::3])
+        self.assertEqual(
+            bits(torch.cat([x.t(), x.t()], dim=1)), torch.cat([codes.t(), codes.t()], 1)
+        )
+
+    def test_float4_e2m1fn_x2_mixed_compare_raises(self, device):
+        # Comparing float4 with another dtype needs a cast, which is not defined
+        x = torch.zeros(4, dtype=torch.uint8, device=device).view(
+            torch.float4_e2m1fn_x2
+        )
+        others = (
+            True,
+            1,
+            0.5,
+            torch.tensor(5, dtype=torch.uint8, device=device),
+            torch.tensor(1.0, device=device).to(torch.float8_e4m3fn),
+        )
+        for other in others:
+            for op in (torch.eq, torch.ne):
+                with self.assertRaisesRegex(NotImplementedError, "is not supported"):
+                    op(x, other)
 
     def test_cast_raises_on_host(self, device):
         # Casting to or from fp4x2 used to device-assert on CUDA, poisoning the
@@ -731,7 +770,9 @@ instantiate_device_type_tests(
     TestFloat8Dtype, globals(), allow_mps=True, allow_xpu=True
 )
 instantiate_device_type_tests(TestFloat8E5M3FNU, globals(), except_for="mps")
-instantiate_device_type_tests(TestFloat4Dtype, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestFloat4Dtype, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 def _e2m3_decode_lut():
