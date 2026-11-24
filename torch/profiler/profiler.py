@@ -10,8 +10,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import partial
-from typing import Any, TYPE_CHECKING, TypeVar
-from typing_extensions import deprecated, Self
+from typing import Any, Self, TYPE_CHECKING, TypeVar
+from typing_extensions import deprecated
 from warnings import warn
 
 import torch
@@ -27,7 +27,9 @@ from torch._C._profiler import (
 from torch._environment import is_fbcode
 from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
+from torch.monitor import _WaitCounter
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
+from torch.profiler._trace_compression import _get_trace_file_opener
 
 
 if TYPE_CHECKING:
@@ -142,21 +144,23 @@ class CuspyConfig(_ProfilerExtensionConfig):
     CPU activity is currently required because Cuspy merges its trace with the
     CPU trace.
 
+    .. versionchanged:: 2.16
+        Graph event-node spans use ``enable_cuda_sync_events``; the separate
+        ``enable_event_node_ids`` option has been removed.
+
     Args:
         enable_cuda_sync_events (bool, optional): Collect CUDA synchronization
-            activities.
+            activities and graph event-record node spans. Graph-event spans and
+            annotations require CUDA driver support for 13.5; older drivers omit them.
         enable_environment_counters (bool, optional): Collect GPU environment
             counters.
         enable_graph_dependencies (bool, optional): Record CUDA graph
             dependency edges.
-        enable_event_node_ids (bool, optional): Associate CUDA events with CUDA
-            graph event-record nodes.
     """
 
     enable_cuda_sync_events: bool = False
     enable_environment_counters: bool = False
     enable_graph_dependencies: bool = False
-    enable_event_node_ids: bool = False
 
     def _to_config_entries(self) -> dict[str, str]:
         return {}
@@ -300,8 +304,9 @@ class _KinetoProfile:
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
 
-            .. deprecated::
+            .. deprecated:: 2.15
                 ``with_modules`` is deprecated and will be removed in a future version.
+                Passing it with any value, including ``False``, warns.
                 It only collects data for TorchScript models, which are themselves
                 deprecated, and does nothing in eager mode. Use ``with_stack=True``,
                 which records ``nn.Module`` events for eager models.
@@ -340,7 +345,7 @@ class _KinetoProfile:
         profile_memory: bool = False,
         with_stack: bool = False,
         with_flops: bool = False,
-        with_modules: bool = False,
+        with_modules: bool | None = None,
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
@@ -356,7 +361,10 @@ class _KinetoProfile:
         self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
-        self.with_modules = with_modules
+        if with_modules is not None:
+            # stacklevel 3 skips profile.__init__, which calls this through super().
+            warn(prof._WITH_MODULES_DEPRECATION_MSG, FutureWarning, stacklevel=3)
+        self.with_modules = bool(with_modules)
         if (
             experimental_config is not None
             and experimental_config.trace_only
@@ -438,9 +446,6 @@ class _KinetoProfile:
                     enable_graph_dependencies=bool(
                         self._custom_profiler_config.get("enable_graph_dependencies")
                     ),
-                    enable_event_node_ids=bool(
-                        self._custom_profiler_config.get("enable_event_node_ids")
-                    ),
                 )
             if ProfilerActivity.CPU not in self.activities:
                 raise ValueError("Cuspy currently requires CPU activity")
@@ -455,12 +460,6 @@ class _KinetoProfile:
                 from torch.profiler._cuspy._graph_deps import _GraphDependencyRecorder
 
                 _GraphDependencyRecorder().arm()
-            # Same early-arm rationale for the CUDA_EVENT -> graph event-record node bridge:
-            # the recorder reads each graph's event nodes at its one-time instantiate().
-            if self._cuspy_config.enable_event_node_ids:
-                from torch.profiler._cuspy._event_nodes import _EventNodeRecorder
-
-                _EventNodeRecorder().arm()
         elif "cuspy_async_export" in self._custom_profiler_config:
             raise ValueError(
                 "cuspy_async_export is only supported with the cuspy backend"
@@ -510,7 +509,6 @@ class _KinetoProfile:
                 with_flops=self.with_flops,
                 profile_memory=self.profile_memory,
                 with_stack=self.with_stack,
-                with_modules=self.with_modules,
                 use_kineto=True,
                 experimental_config=self.experimental_config,
                 acc_events=self.acc_events,
@@ -519,6 +517,9 @@ class _KinetoProfile:
                 activity_filters=activity_filters or None,
                 _profiler_extensions=profiler_extensions,
             )
+            # Set after construction so the autograd profiler doesn't repeat the
+            # with_modules warning that __init__ already issued.
+            self.profiler.with_modules = self.with_modules
         if self._cuspy_config is not None:
             from torch.profiler._cuspy.observers.profiler import ProfilerObserver
 
@@ -552,10 +553,6 @@ class _KinetoProfile:
                 # Node->node CUDA-graph dependency arrows are opt-in (extra work at graph
                 # instantiate + arrow rendering); off unless the config requests them.
                 enable_graph_dependencies=self._cuspy_config.enable_graph_dependencies,
-                # Join CUDA_EVENT records (graph event-record nodes, e.g. NCCL under
-                # NCCL_GRAPH_MIXING_SUPPORT) back to their graph_node_id. Opt-in: pulls in the
-                # CUDA_EVENT record kind.
-                enable_event_node_ids=self._cuspy_config.enable_event_node_ids,
                 # gzip level for the native .pftrace encoder (0-9; 1 = fast, the default).
                 pftrace_compression_level=int(
                     self._custom_profiler_config.get("pftrace_compression_level", 1)
@@ -642,9 +639,19 @@ class _KinetoProfile:
         graph_lanes: str = "none",
         default_stream: int = 7,
     ):
-        """
+        r"""
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
+
+        Paths ending in ``.gz`` use gzip compression; paths ending in ``.zst``
+        use zstd compression and require the optional ``zstandard`` or ``pyzstd``
+        package. Other paths are uncompressed (the ``cuspy`` backend defaults to
+        gzip). Zstd is supported for Chrome JSON, not Cuspy's Perfetto format.
+
+        Raises :class:`RuntimeError` if Kineto cannot write the trace. Exports
+        that write the file from Python, such as compressed paths and
+        ``use_python_export``, raise :class:`OSError` instead, for example
+        :class:`FileNotFoundError` when the destination directory does not exist.
 
         ``cuda_graph_annotations`` bakes CUDA-graph kernel annotations into the trace:
         matching graphed work carries its annotation's fields in ``args``. Pass
@@ -670,6 +677,14 @@ class _KinetoProfile:
             raise AssertionError(
                 "Profiler must be initialized before exporting chrome trace"
             )
+        path = os.fspath(path)
+        if self._use_cuspy and path.endswith(".zst") and ".pftrace" in path:
+            raise ValueError(
+                "Zstd compression is only supported for Chrome JSON traces"
+            )
+        # Validate compression before Kineto saves and consumes the trace, so a
+        # missing zstd dependency leaves it available for a later export.
+        trace_file_opener = _get_trace_file_opener(path)
         if self._use_cuspy:
             obs = self._cuspy_profiler_observer
             if obs is None or not obs.available or self._cuspy_window_id is None:
@@ -715,11 +730,35 @@ class _KinetoProfile:
                 graph_lanes=graph_lanes,
                 default_stream=default_stream,
             )
-        elif path.endswith(".gz"):
-            with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
-                self.profiler.export_chrome_trace(fp.name, self._trace_metadata)
-                with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
-                    fout.writelines(fin)
+        elif path.endswith((".gz", ".zst")):
+            output_dir, output_name = os.path.split(path)
+            trace_name = os.path.splitext(output_name)[0]
+            # Compress next to the destination, then rename into place: a bad path fails before Kineto
+            # saves and consumes the trace, and a failed export leaves any existing file untouched.
+            partial_path = path + ".tmp"
+            try:
+                with (
+                    trace_file_opener(partial_path, "wb") as fout,
+                    tempfile.TemporaryDirectory() as tmpdir,
+                ):
+                    trace_path = os.path.join(tmpdir, trace_name)
+                    self.profiler.export_chrome_trace(trace_path, self._trace_metadata)
+                    with open(trace_path, "rb") as fin:
+                        shutil.copyfileobj(fin, fout)
+                    # Kineto can write more files next to the JSON; move them out before `tmpdir` goes away.
+                    for name in os.listdir(tmpdir):
+                        src = os.path.join(tmpdir, name)
+                        dst = os.path.join(output_dir, name)
+                        # `shutil.move` nests its source inside a destination directory.
+                        is_dir = os.path.isdir(src) or os.path.isdir(dst)
+                        if name == trace_name or is_dir:
+                            continue
+                        shutil.move(src, dst)
+                os.replace(partial_path, path)
+            except BaseException:
+                if os.path.exists(partial_path):
+                    os.remove(partial_path)
+                raise
         else:
             self.profiler.export_chrome_trace(path, self._trace_metadata)
 
@@ -789,6 +828,25 @@ class _KinetoProfile:
         if self.profiler is None:
             return
         self.profiler.toggle_collection_dynamic(enable, activities)
+
+    def _toggle_stack_collection(self, enable: bool) -> None:
+        """Toggle Python stack collection (``with_stack``) in the current profiling session.
+
+        .. warning::
+            This is a private, experimental API. It may change or be removed
+            without notice.
+
+        CPU op and device activity collection are unaffected. Frames still open when
+        collection stops end at that point. Only stopping (``enable=False``) is
+        supported so far.
+        """
+        _warn_once(
+            "profile._toggle_stack_collection() is a private, experimental API and "
+            "may change or be removed without notice."
+        )
+        if self.profiler is None:
+            return
+        torch._C._autograd._toggle_python_collection_dynamic(enable)
 
     def key_averages(
         self,
@@ -1110,8 +1168,9 @@ class profile(_KinetoProfile):
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
 
-            .. deprecated::
+            .. deprecated:: 2.15
                 ``with_modules`` is deprecated and will be removed in a future version.
+                Passing it with any value, including ``False``, warns.
                 It only collects data for TorchScript models, which are themselves
                 deprecated, and does nothing in eager mode. Use ``with_stack=True``,
                 which records ``nn.Module`` events for eager models.
@@ -1239,7 +1298,7 @@ class profile(_KinetoProfile):
         profile_memory: bool = False,
         with_stack: bool = False,
         with_flops: bool = False,
-        with_modules: bool = False,
+        with_modules: bool | None = None,
         experimental_config: _ExperimentalConfig | None = None,
         execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
@@ -1325,23 +1384,19 @@ class profile(_KinetoProfile):
             (ProfilerAction.RECORD, ProfilerAction.RECORD): [],
             (ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE): [],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
                 self.prepare_trace,
             ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
                 self.prepare_trace,
                 self.start_trace,
             ],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD_AND_SAVE): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
                 self.prepare_trace,
                 self.start_trace,
             ],
@@ -1359,12 +1414,10 @@ class profile(_KinetoProfile):
             # completed.
             (ProfilerAction.WARMUP, ProfilerAction.DEVICE_STOPPED): [
                 self.start_trace,
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.RECORD, ProfilerAction.DEVICE_STOPPED): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.DEVICE_STOPPED): [],
             (ProfilerAction.DEVICE_STOPPED, ProfilerAction.WARMUP): [
@@ -1396,10 +1449,9 @@ class profile(_KinetoProfile):
             ],
             # used for exit action
             (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
-            (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
+            (ProfilerAction.RECORD, None): [self._finalize_trace],
             (ProfilerAction.RECORD_AND_SAVE, None): [
-                self.stop_trace,
-                self._trace_ready,
+                self._finalize_trace,
             ],
             (ProfilerAction.DEVICE_STOPPED, None): [],
         }
@@ -1543,6 +1595,11 @@ class profile(_KinetoProfile):
         if self.profiler is None:
             return None
         return self.profiler.trace_id
+
+    def _finalize_trace(self) -> None:
+        with _WaitCounter("pytorch.wait_counter.profiler.trace_finalization").guard():
+            self.stop_trace()
+            self._trace_ready()
 
     def _trace_ready(self) -> None:
         if self.on_trace_ready:

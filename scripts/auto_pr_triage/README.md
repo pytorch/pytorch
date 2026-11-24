@@ -1,6 +1,6 @@
 # Auto PR Triage
 
-Auto PR Triage processes pull requests admitted by the `open source` label. Intake
+Auto PR Triage processes every pull request once it is ready for review. Intake
 decides whether a pull request takes no action, is marked as missing an
 actionable issue, or is routed to reviewers; ownership analysis combines deterministic codepath rules with
 LLM-suggested semantic owners; planning turns both into one plan, which live
@@ -69,8 +69,9 @@ uncoordinated race-closing reads to apply.
 
 ## Security model
 
-- `pull_request_target` runs only workflow and action code from the trusted
-  base commit, and the PR head is fetched as data, never checked out or run.
+- `pull_request_target` runs only workflow and action code from the default
+  branch, whatever the PR's base, and the PR head is fetched as data, never
+  checked out or run.
 - The LLM has no GitHub token and no file, shell, web, MCP, plugin, or subagent
   capability; its Bedrock session can only invoke the model.
 - The write-capable job runs only in live mode and receives only the bounded
@@ -104,10 +105,11 @@ uncoordinated race-closing reads to apply.
 - **Codepath and semantic owners are not handoff reviewers.** A path match can
   come from an incidental edit and says nothing about an uncovered concern. A
   team whose bypass intake matched does count, because it asked for these PRs.
-- **The `open source` label is the authorization, not the ready event.** A
-  ready-for-review event is normally sent by the PR author and is only a
-  wake-up signal. Once a run is admitted, removing the label does not cancel it
-  or make it a no-op.
+- **Every pull request is triaged; no label authorizes a run.** Opening,
+  reopening, or marking a pull request ready starts a run, so anyone who opens
+  a pull request can start one. Each run makes at most one LLM call and its
+  effects stay bounded, and a pull request with an outcome label is a no-op
+  that skips the LLM. Removing a label does not cancel a run that has started.
 
 ## Codepath owners come from CODEOWNERS
 
@@ -126,18 +128,20 @@ input step logs each skipped line; a skipped line's owners get no provenance.
 
 ## Operating notes
 
-- **Prerequisites.** The base branch needs the workflow and composite action,
+- **Prerequisites.** The default branch needs the workflow and composite action,
   root `CODEOWNERS`, the two files in `.github/auto-pr-triage/`, and the
-  `open source`, `actionable`, `triaged`, `bot-triaged`, `bot-triage-error`,
+  `bot-retriage`, `actionable`, `triaged`, `bot-triaged`, `bot-triage-error`,
   and `missing actionable issue` labels. The workflow does not create labels.
 - **Shadow mode leaves no outcome label,** so a later eligible event analyzes
   the PR again. Labels such as `bot-shadow-close` and `bot-shadow-triaged` from
   earlier shadow runs are not handled state.
-- **Rerunning.** Later PR activity never triggers another run. To reevaluate a
-  PR, remove its outcome labels (`triaged` and `bot-triaged`, with `missing
-  actionable issue` if present, or `bot-triage-error`), then remove and re-add
-  `open source`. Every `open source` label event starts a new run; while an
-  outcome label is present, the run is a no-op. Rerunning all jobs of an
+- **Rerunning.** Pushes and comments never trigger another run. Reopening a
+  pull request or marking it ready again does, but while an outcome label is
+  present, the run is a no-op. To reevaluate a PR, comment `@pytorchbot
+  triage`, or remove its outcome labels (`triaged` and `bot-triaged`, with
+  `missing actionable issue` if present, or `bot-triage-error`), then add (or
+  remove and re-add) `bot-retriage`. Every `bot-retriage` label event starts a
+  new run. Rerunning all jobs of an
   earlier run also works, but rerunning only the apply job is rejected because
   its plan may be stale. A rerun never marks a PR as missing an actionable
   issue: only the first attempt of a run can, and a rerun leaves an unadmitted

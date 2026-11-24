@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <torch/library.h>
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/mkldnn/Conv.h>
@@ -38,6 +39,7 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub)
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/Conv.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
@@ -192,16 +194,16 @@ static void _mkldnn_convolution_out(
     int64_t groups,
     bool is_channels_last,
     const ideep::attr_t& op_attr,
-    const ideep::prop_kind aprop_kind = ideep::prop_kind::forward) {
+    const dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward) {
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
-  const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
-  const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
-  auto algo = ideep::algorithm::convolution_direct;
+  const ideep::tensor x = itensor_from_const_tensor(input);
+  const ideep::tensor w = itensor_from_const_tensor(weight);
+  auto algo = dnnl::algorithm::convolution_direct;
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
-    ideep::convolution_forward::compute_v3(
+    const ideep::tensor b = itensor_from_const_tensor(bias);
+    mkldnn::convolution_forward_compute_v3(
         x,
         w,
         b,
@@ -217,7 +219,7 @@ static void _mkldnn_convolution_out(
         algo,
         aprop_kind);
   } else {
-    ideep::convolution_forward::compute_v3(
+    mkldnn::convolution_forward_compute_v3(
         x,
         w,
         {output_sizes.cbegin(), output_sizes.cend()},
@@ -247,7 +249,7 @@ static Tensor _mkldnn_convolution(
     torch::List<std::optional<at::Scalar>> scalars =
         torch::List<std::optional<at::Scalar>>(),
     std::optional<std::string_view> algorithm = std::nullopt,
-    const ideep::prop_kind aprop_kind = ideep::prop_kind::forward) {
+    const dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward) {
   ideep::attr_t op_attr = ideep::attr_t();
   if (attr != "none") {
     auto it = fusion_unary_attr_map().find(attr);
@@ -343,7 +345,7 @@ Tensor mkldnn_convolution_pointwise(
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   bool use_channels_last =
       weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
-  auto aprop_kind = ideep::prop_kind::forward;
+  auto aprop_kind = dnnl::prop_kind::forward;
   bool maybe_backward = GradMode::is_enabled() &&
       (input_t.requires_grad() || weight_t.requires_grad() ||
        (bias_opt.has_value() && bias_opt->defined() &&
@@ -352,7 +354,7 @@ Tensor mkldnn_convolution_pointwise(
   // forward_inference primitive with an NHWC-like layout that is slower than
   // the forward_training primitive and still has to be converted back to dense.
   if (!maybe_backward && use_channels_last) {
-    aprop_kind = ideep::prop_kind::forward_inference;
+    aprop_kind = dnnl::prop_kind::forward_inference;
   }
   return _mkldnn_convolution(
       input_t,
@@ -427,7 +429,7 @@ Tensor mkldnn_convolution_pointwise_binary(
   bool can_be_fused = groups == 1 && use_channels_last;
 
   std::string_view unary_attr_value = "none";
-  ideep::algorithm unary_alg;
+  dnnl::algorithm unary_alg;
   if (unary_attr.has_value()) {
     auto it_unary = fusion_unary_alg_map().find(unary_attr.value());
     // Now, we only support conv+binary+relu.
@@ -452,13 +454,13 @@ Tensor mkldnn_convolution_pointwise_binary(
     auto output = at::empty(
         output_sizes,
         input_t.options().memory_format(memory_format));
-    const ideep::tensor x = itensor_from_tensor(input);
-    const ideep::tensor w = itensor_from_tensor(weight);
-    const ideep::tensor z = itensor_from_tensor(other);
+    const ideep::tensor x = itensor_from_const_tensor(input);
+    const ideep::tensor w = itensor_from_const_tensor(weight);
+    const ideep::tensor z = itensor_from_const_tensor(other);
     ideep::tensor y = itensor_from_tensor(output);
-    ideep::tag format_tag = ideep::tag::nhwc;
+    dnnl::memory::format_tag format_tag = dnnl::memory::format_tag::nhwc;
     if (input_t.ndimension() == 5) {
-      format_tag = ideep::tag::ndhwc;
+      format_tag = dnnl::memory::format_tag::ndhwc;
     }
     auto other_desc = ideep::tensor::desc(
         other.sizes().vec(), get_mkldnn_dtype(other.scalar_type()), format_tag);
@@ -470,7 +472,7 @@ Tensor mkldnn_convolution_pointwise_binary(
       po.append_eltwise(unary_alg, 0.f, 0.f);
     }
     op_attr.set_post_ops(po);
-    auto aprop_kind = ideep::prop_kind::forward_inference;
+    auto aprop_kind = dnnl::prop_kind::forward_inference;
 
     if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -480,8 +482,8 @@ Tensor mkldnn_convolution_pointwise_binary(
     }
 
     if (bias.defined()) {
-      const ideep::tensor b = itensor_from_tensor(bias);
-      ideep::convolution_forward::compute_binary(
+      const ideep::tensor b = itensor_from_const_tensor(bias);
+      mkldnn::convolution_forward_compute_binary(
           x,
           z,
           w,
@@ -495,10 +497,10 @@ Tensor mkldnn_convolution_pointwise_binary(
           groups,
           /* is_channels_last */ true,
           op_attr,
-          ideep::algorithm::convolution_direct,
+          dnnl::algorithm::convolution_direct,
           aprop_kind);
     } else {
-      ideep::convolution_forward::compute_binary(
+      mkldnn::convolution_forward_compute_binary(
           x,
           z,
           w,
@@ -511,7 +513,7 @@ Tensor mkldnn_convolution_pointwise_binary(
           groups,
           /* is_channels_last */ true,
           op_attr,
-          ideep::algorithm::convolution_direct,
+          dnnl::algorithm::convolution_direct,
           aprop_kind);
     }
     return output;
@@ -615,7 +617,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
     } else {
       op_attr = ideep::attr_t::fuse_sum();
     }
-    auto aprop_kind = ideep::prop_kind::forward_inference;
+    auto aprop_kind = dnnl::prop_kind::forward_inference;
     if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
         input_t.scalar_type() == at::kFloat) {
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -741,9 +743,9 @@ Tensor _mkldnn_convolution_transpose(
   auto output_sizes = conv_input_size(input.sizes(), weight_IOHW_sizes, padding_expanded, output_padding_expanded, stride_expanded, dilation_expanded, groups);
   auto output = at::empty({0}, input.options());
 
-  const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
+  const ideep::tensor x = itensor_from_const_tensor(input);
 
-  ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
+  ideep::tensor w = itensor_from_const_tensor(weight);
   if (!weight.is_mkldnn()) {
     // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
     // while PyTorch has IOHW or IODHW, `._transpose()` switches strides (no memory copy).
@@ -764,7 +766,7 @@ Tensor _mkldnn_convolution_transpose(
   }
 
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
+    const ideep::tensor b = itensor_from_const_tensor(bias);
     ideep::convolution_transpose_forward::compute_v3(
         x,
         w,
@@ -843,8 +845,8 @@ Tensor mkldnn_convolution_backward_input(
     bool is_channels_last) {
   auto grad_input = at::empty({0}, grad_output.options());
 
-  auto grad_y = itensor_from_tensor(grad_output, /*from_const_data_ptr*/true);
-  auto w = itensor_view_from_dense(weight, /*from_const_data_ptr*/true);
+  auto grad_y = itensor_from_const_tensor(grad_output);
+  auto w = itensor_view_from_const_dense(weight);
 
   ideep::tensor grad_x;
   if (is_channels_last) {
@@ -861,7 +863,7 @@ Tensor mkldnn_convolution_backward_input(
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
-  ideep::convolution_backward_data::compute_v2(
+  mkldnn::convolution_backward_data_compute_v2(
       grad_y,
       w,
       input_size.vec(),
@@ -907,8 +909,8 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
     int64_t groups,
     bool bias_defined,
     bool is_channels_last) {
-  const ideep::tensor grad_y = itensor_from_tensor(grad_output, /*from_const_data_ptr*/true);
-  const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
+  const ideep::tensor grad_y = itensor_from_const_tensor(grad_output);
+  const ideep::tensor x = itensor_from_const_tensor(input);
 
   ideep::tensor grad_w, grad_b;
   ideep::attr_t op_attr = ideep::attr_t();
@@ -921,7 +923,7 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
   if (bias_defined) {
-    ideep::convolution_backward_weights::compute_v2(
+    mkldnn::convolution_backward_weights_compute_v2(
         x,
         grad_y,
         weight_size.vec(),
@@ -935,7 +937,7 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
         is_channels_last,
         op_attr);
   } else {
-    ideep::convolution_backward_weights::compute_v2(
+    mkldnn::convolution_backward_weights_compute_v2(
         x,
         grad_y,
         weight_size.vec(),
@@ -1060,8 +1062,8 @@ Tensor mkldnn_convolution_transpose_backward_input(
     bool is_channels_last) {
   auto grad_input = at::empty({0}, grad_output.options());
 
-  auto grad_y = itensor_from_tensor(grad_output, /*from_const_data_ptr*/true);
-  auto w = itensor_view_from_dense(weight, /*from_const_data_ptr*/true).transpose_(0, 1);
+  auto grad_y = itensor_from_const_tensor(grad_output);
+  auto w = itensor_view_from_const_dense(weight).transpose_(0, 1);
 
   ideep::tensor grad_x;
   if (is_channels_last) {
@@ -1111,8 +1113,8 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
     int64_t groups,
     bool bias_defined,
     bool is_channels_last) {
-  auto grad_y = itensor_from_tensor(grad_output, /*from_const_data_ptr*/true);
-  auto x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
+  auto grad_y = itensor_from_const_tensor(grad_output);
+  auto x = itensor_from_const_tensor(input);
 
   ideep::tensor grad_w, grad_b;
   ideep::attr_t op_attr = ideep::attr_t();

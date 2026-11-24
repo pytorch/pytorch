@@ -315,9 +315,9 @@ AOTI_TORCH_EXPORT AOTITorchError torch_mps_set_arg_bytes(
 #endif // USE_MPS
 
 // --- Python interop shims -------------------------------------------------
-// Unlike the rest of the stable ABI, these convert between a Python
-// torch.Tensor (a PyObject*, passed as an opaque void* so this header stays
-// free of Python.h) and an AtenTensorHandle. The conversion is implemented in
+// Unlike the rest of the stable ABI, these convert between Python objects
+// (PyObject*, passed as an opaque void* so this header stays free of Python.h)
+// and their libtorch equivalents. The conversion is implemented in
 // libtorch_python via a vtable it registers with libtorch, so an extension
 // still links only libtorch; if libtorch_python is not loaded at runtime the
 // call errors. The GIL must be held.
@@ -337,6 +337,123 @@ AOTI_TORCH_EXPORT AOTITorchError torch_tensor_to_pyobject(
     void** ret); // returns new reference
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_14_0
+
+/**
+ * The beginning of all shims added in 2.15.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+
+// More Python interop shims; see the Python interop section above for the
+// libtorch_python / GIL contract.
+
+// Whether py_obj is a Python torch.Tensor (or a subclass). A probe for callers
+// that want to type-check before torch_tensor_from_pyobject (which errors on
+// non-tensors).
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_tensor_pyobject(void* py_obj, bool* ret);
+
+// Read the dtype out of a Python torch.dtype object. The returned code uses
+// the same encoding as aoti_torch_dtype_*().
+AOTI_TORCH_EXPORT AOTITorchError
+torch_dtype_from_pyobject(void* py_obj, int32_t* ret_dtype);
+
+// Wrap a dtype code (aoti_torch_dtype_*() encoding) as a Python torch.dtype.
+AOTI_TORCH_EXPORT AOTITorchError torch_dtype_to_pyobject(
+    int32_t dtype,
+    void** ret); // returns new reference
+
+// Read the device type and index out of a Python torch.device object.
+// device_type uses the same encoding as aoti_torch_device_type_*(); the index
+// is -1 when the device has none.
+AOTI_TORCH_EXPORT AOTITorchError torch_device_from_pyobject(
+    void* py_obj,
+    int32_t* ret_device_type,
+    int32_t* ret_device_index);
+
+// Wrap a device type (aoti_torch_device_type_*() encoding) and index as a
+// Python torch.device. Pass -1 as device_index for a device without an index.
+AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
+    int32_t device_type,
+    int32_t device_index,
+    void** ret); // returns new reference
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+
+/**
+ * The beginning of all shims added in 2.16.0 onwards.
+ */
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+// Returns whether torch.set_warn_always(True) is in effect.
+AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
+
+// Returns whether the tensor's conjugate bit is set.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_conj(AtenTensorHandle tensor, bool* ret_is_conj);
+
+// Returns whether the tensor's negative bit is set.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
+
+// Returns whether the tensor is an inference tensor.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
+
+// Return the runtime's at::native::TransposeType encodings.
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_no_transpose();
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_transpose();
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_conj_transpose();
+
+// Calls the matching at::native::cpublas::brgemm overload. dtype_a, dtype_b,
+// and dtype_c use the runtime's c10::ScalarType values.
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    int32_t dtype_a,
+    int32_t dtype_b,
+    int32_t dtype_c,
+    bool add_C,
+    const void* A,
+    const void* B,
+    void* C,
+    bool is_vnni);
+
+// Calls at::native::cpublas::brgemm_release, which releases the BRGEMM hardware
+// context when is_vnni is true.
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(bool is_vnni);
+
+// Calls at::native::cpublas::gemm_no_downcast_stub. device_type, dtype, and
+// transa/transb use the runtime's DeviceType, ScalarType, and TransposeType
+// encodings. Only CPU has a registered kernel.
+// alpha and beta are doubles; for Half/BFloat16/Float8 inputs, c points to a
+// float output buffer.
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_float64(
+    int32_t device_type,
+    int32_t dtype,
+    int32_t transa,
+    int32_t transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    double alpha,
+    const void* a,
+    int64_t lda,
+    const void* b,
+    int64_t ldb,
+    double beta,
+    void* c,
+    int64_t ldc);
+
+// Calls at::native::cpublas::could_pack to report whether packing the given
+// ScalarType is supported and enabled on this CPU; writes the result to ret.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_could_pack(int32_t dtype, bool* ret);
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus
 } // extern "C"
