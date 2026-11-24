@@ -1785,7 +1785,9 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             varlen_attn_out(out, *args, num_splits=2, **paged_kwargs)
             expected = varlen_attn(*args, num_splits=1, **paged_kwargs)
         self.assertEqual(out, expected)
-        self.assertEqual(buffer[q_len:], torch.full_like(buffer[q_len:], sentinel))
+        self.assertEqual(
+            buffer[q_len:], torch.full_like(buffer[q_len:], sentinel), atol=0, rtol=0
+        )
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
