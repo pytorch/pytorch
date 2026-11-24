@@ -30,6 +30,9 @@ namespace {
 constexpr int kSslErrorWantRead = 2;
 constexpr int kSslErrorZeroReturn = 6;
 constexpr long kX509VOk = 0;
+constexpr int kVAsn1Utf8String = 12;
+constexpr int kMbstringUtf8 = 0x1000;
+constexpr unsigned long kBAsn1Utf8String = 0x2000;
 
 // Plaintext per SSL_write, bounding the BIO buffer, not the full response.
 constexpr size_t kWriteChunk = 1 << 20;
@@ -72,6 +75,7 @@ constexpr size_t kMinPskSize = 32;
 constexpr size_t kMaxPskSize = 256;
 
 #if defined(__linux__) && INTPTR_MAX == INT64_MAX
+constexpr int kX509VErrApplicationVerification = 50;
 constexpr int kTls12Version = 0x0303;
 constexpr int kTls13Version = 0x0304;
 // Change the version suffix if the PSK handshake ever becomes incompatible.
@@ -98,7 +102,7 @@ int verifyCertificateIdentity(int preverifyOk, void* storeCtx) {
     return 1;
   }
   // X509_V_ERR_APPLICATION_VERIFICATION. Never override a chain failure.
-  lib.X509_STORE_CTX_set_error(storeCtx, 50);
+  lib.X509_STORE_CTX_set_error(storeCtx, kX509VErrApplicationVerification);
   return 0;
 }
 
@@ -260,7 +264,7 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
         !config.peerCertOid.empty() && !config.peerCertValue.empty() &&
             !config.cert.empty() && !config.key.empty() && !config.ca.empty() &&
             config.psk.empty() && pskFile.empty(),
-        "TCPStore TLS: peer certificate OID and value require certificate mode and both identity settings");
+        "TCPStore TLS: peer certificate OID and value require certificate mode and both identity settings; explicit TLS options replace all TLS environment settings");
     TORCH_CHECK_WITH(
         DistStoreError,
         config.peerCertValue.find(',') == std::string::npos,
@@ -352,6 +356,11 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
   TORCH_CHECK_WITH(
       DistStoreError, ctx, "TCPStore TLS: SSL_CTX_new failed: ", errorString());
   auto res = std::make_shared<TLSContext>(ctx, isServer);
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1,
+      "TCPStore TLS: failed to initialize context: ",
+      errorString());
 
   auto check = [](bool ok, const char* what, const std::string& path) {
     TORCH_CHECK_WITH(
@@ -388,11 +397,7 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
     // Keep (EC)DHE, and so forward secrecy, even if openssl.cnf allows
     // PSK-only key exchange.
     ssl.SSL_CTX_clear_options(ctx, kSslOpAllowNoDheKex | kSslOpPreferNoDheKex);
-    TORCH_CHECK_WITH(
-        DistStoreError,
-        ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1,
-        "TCPStore TLS: failed to initialize PSK context: ",
-        errorString());
+
     if (isServer) {
       // Without a certificate, only PSK handshakes can succeed.
       ssl.SSL_CTX_set_psk_find_session_callback(ctx, findPskSession);
@@ -440,12 +445,12 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
     TORCH_CHECK_WITH(
         DistStoreError,
         res->peerCertOid_,
-        "TCPStore TLS: invalid peer certificate numeric OID");
+        "TCPStore TLS: invalid peer certificate numeric OID from ",
+        config.fromEnv ? "TORCH_TCPSTORE_TLS_PEER_CERT_OID"
+                       : "tls_peer_cert_oid",
+        ": ",
+        errorString());
     res->peerCertValue_ = config.peerCertValue;
-    TORCH_CHECK_WITH(
-        DistStoreError,
-        ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1,
-        "TCPStore TLS: failed to initialize certificate identity context");
   }
   ssl.SSL_CTX_set_verify(
       ctx,
@@ -467,7 +472,7 @@ bool TLSContext::verifyPeerCertificate(void* cert) const {
   void* ext = lib.X509_EXTENSION_get_data(lib.X509_get_ext(cert, index));
   const int size = lib.ASN1_STRING_length(ext);
   const unsigned char* data = lib.ASN1_STRING_get0_data(ext);
-  if (size <= 0 || !data || *data != 0x0c) {
+  if (size <= 0 || !data || *data != kVAsn1Utf8String) {
     return false;
   }
   const unsigned char* end = data + size;
@@ -481,7 +486,9 @@ bool TLSContext::verifyPeerCertificate(void* cert) const {
   // without allocating another string. d2i alone accepts invalid UTF-8.
   const auto* bytes = lib.ASN1_STRING_get0_data(value);
   const int length = lib.ASN1_STRING_length(value);
-  if (lib.ASN1_mbstring_copy(nullptr, bytes, length, 0x1000, 0x2000) != 12) {
+  if (lib.ASN1_mbstring_copy(
+          nullptr, bytes, length, kMbstringUtf8, kBAsn1Utf8String) !=
+      kVAsn1Utf8String) {
     return false;
   }
   std::string_view remaining(reinterpret_cast<const char*>(bytes), length);
@@ -543,7 +550,8 @@ void TLSSession::throwError(int ret, const char* op) {
   msg += ctx_->psk().empty()
       ? ". Check that TLS is enabled on both client and server, that each "
         "certificate is signed by a CA trusted by the peer, that its purpose "
-        "(extended key usage) allows both serverAuth and clientAuth, and that "
+        "(extended key usage) allows both serverAuth and clientAuth, that any "
+        "configured peer-certificate identity matches, and that "
         "both use the same TLS mode (certificate or PSK)."
       : ". Check that the client and server both use TLS, the same TLS mode "
         "(certificate or PSK) and the same PSK.";

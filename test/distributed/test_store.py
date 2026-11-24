@@ -879,22 +879,61 @@ class TCPStoreTLSTest(TestCase):
         self.assertEqual(server.get("identity"), b"ok")
         os.environ["TORCH_TCPSTORE_TLS_PEER_CERT_VALUE"] = "other-job"
         self.assertEqual(client.clone().get("identity"), b"ok")
+        self.assertEqual(server.clone().get("identity"), b"ok")
         # Explicit credentials override the entire environment policy.
         self.assertEqual(
             self._store(server.port, False, cert=client_cert).get("identity"), b"ok"
         )
         # The untrusted peer cannot weaken the server's policy.
         self._assert_fails_fast(
-            "TLS", port=server.port, is_master=False, cert=self.client
+            "alert handshake failure",
+            port=server.port,
+            is_master=False,
+            cert=self.client,
         )
+        wrong_cert = self._identity_cert(
+            "identity-wrong-client", "ASN1:UTF8String:job:456"
+        )
+        self._assert_fails_fast(
+            "alert handshake failure",
+            port=server.port,
+            is_master=False,
+            cert=wrong_cert,
+        )
+        self.assertEqual(server.add("alive", 1), 1)
         # A client must reject a same-CA server missing the identity too.
         plain_policy_server = self._store(cert=self.server)
         self._assert_fails_fast(
-            "TLS",
+            "application verification failure",
             port=plain_policy_server.port,
             is_master=False,
             tls=self._identity_tls(client_cert),
         )
+        self.assertEqual(plain_policy_server.add("alive", 1), 1)
+
+    def test_tls_peer_identity_clone_policy(self):
+        cert = self._identity_cert("identity-clone", "ASN1:UTF8String:job:123")
+        server = self._store(tls=self._identity_tls(cert))
+        port = server.port
+        client = self._store(port, False, tls=self._identity_tls(cert))
+        # Replace the endpoint with another trusted certificate lacking the
+        # identity. A clone that drops its policy would accept it.
+        del server
+        replacement = self._store(port, cert=self.server)
+        with self.assertRaisesRegex(DistStoreError, "application verification failure"):
+            client.clone()
+        self.assertEqual(replacement.add("alive", 1), 1)
+
+    def test_tls_peer_identity_multi_tenant(self):
+        cert = self._identity_cert("identity-tenant", "ASN1:UTF8String:job:123,job:456")
+        options = self._identity_tls(cert)
+        server = self._store(tls=options, multi_tenant=True)
+        same = self._store(server.port, tls=options, multi_tenant=True)
+        same.set("identity", "same")
+        self.assertEqual(server.get("identity"), b"same")
+        for tls in (self._tls("cert", cert), self._identity_tls(cert, "job:456")):
+            with self.assertRaisesRegex(DistStoreError, "different TLS configuration"):
+                self._store(server.port, tls=tls, multi_tenant=True)
 
     @parametrize(
         "extension",
@@ -915,11 +954,12 @@ class TCPStoreTLSTest(TestCase):
         cert = self._identity_cert("identity-mismatch", extension)
         server = self._store(cert=cert)
         self._assert_fails_fast(
-            "TLS",
+            "application verification failure",
             port=server.port,
             is_master=False,
             tls=self._identity_tls(self.client),
         )
+        self.assertEqual(server.add("alive", 1), 1)
 
     @parametrize(
         "options",

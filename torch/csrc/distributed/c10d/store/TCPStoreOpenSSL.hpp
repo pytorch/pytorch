@@ -66,6 +66,15 @@ using PskFindSessionCallback =
   _(int, SSL_write, (void*, const void*, int))                               \
   _(int, SSL_get_error, (const void*, int))                                  \
   _(int, SSL_get_ex_data_X509_STORE_CTX_idx, ())                             \
+  _(long, SSL_get_verify_result, (const void*))                              \
+  _(const void*, BIO_s_mem, ())                                              \
+  _(void*, BIO_new, (const void*))                                           \
+  _(int, BIO_read, (void*, void*, int))                                      \
+  _(int, BIO_write, (void*, const void*, int))                               \
+  _(size_t, BIO_ctrl_pending, (void*))                                       \
+  _(unsigned long, ERR_get_error, ())                                        \
+  _(void, ERR_error_string_n, (unsigned long, char*, size_t))                \
+  _(void, ERR_clear_error, ())                                               \
   _(void*, X509_STORE_CTX_get_ex_data, (const void*, int))                   \
   _(int, X509_STORE_CTX_get_error_depth, (const void*))                      \
   _(void*, X509_STORE_CTX_get_current_cert, (const void*))                   \
@@ -83,15 +92,6 @@ using PskFindSessionCallback =
     ASN1_mbstring_copy,                                                      \
     (void**, const unsigned char*, int, int, unsigned long))                 \
   _(void, ASN1_UTF8STRING_free, (void*))                                     \
-  _(long, SSL_get_verify_result, (const void*))                              \
-  _(const void*, BIO_s_mem, ())                                              \
-  _(void*, BIO_new, (const void*))                                           \
-  _(int, BIO_read, (void*, void*, int))                                      \
-  _(int, BIO_write, (void*, const void*, int))                               \
-  _(size_t, BIO_ctrl_pending, (void*))                                       \
-  _(unsigned long, ERR_get_error, ())                                        \
-  _(void, ERR_error_string_n, (unsigned long, char*, size_t))                \
-  _(void, ERR_clear_error, ())                                               \
   _(const char*, X509_verify_cert_error_string, (long))
 
 struct OpenSSL {

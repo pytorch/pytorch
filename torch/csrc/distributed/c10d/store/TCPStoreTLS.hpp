@@ -48,10 +48,9 @@ struct TLSConfig {
   }
 };
 
-// The TLS options if any is set, otherwise the TORCH_TCPSTORE_TLS_CERT,
-// TORCH_TCPSTORE_TLS_KEY, TORCH_TCPSTORE_TLS_CA and TORCH_TCPSTORE_TLS_PSK
-// environment variables. Throws if certificate mode is missing a value or is
-// combined with a PSK.
+// Explicit TLS options replace all TORCH_TCPSTORE_TLS_* environment settings.
+// Otherwise resolve CERT, KEY, CA, PSK, PSK_FILE, PEER_CERT_OID and
+// PEER_CERT_VALUE from the environment. Invalid or mixed modes fail closed.
 TLSConfig tlsConfig(const TCPStoreOptions& opts);
 
 class TLSContext {
