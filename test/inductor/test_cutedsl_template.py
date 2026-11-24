@@ -886,6 +886,15 @@ class TestCuteDSLTemplateCuda(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @unittest.skipIf(
+        # ROCm CI images install the CuTeDSL wheel (its pip marker is
+        # x86_64-Linux, not CUDA), so HAS_CUTLASS is true there while
+        # cuInit fails: cudaErrorInsufficientDriver. Only the tests that
+        # actually launch a kernel are affected; the rest of the class is
+        # mock-based and driver-free.
+        torch.version.hip is not None,
+        "CuTeDSL kernels require an NVIDIA driver",
+    )
     def test_cutedsl_add_e2e(self, device):
         """End-to-end test with CuteDSL template including code generation verification."""
         from torch._inductor.ir import TensorBox
@@ -939,6 +948,10 @@ class TestCuteDSLTemplateCuda(TestCase):
             self.assertTrue(torch.allclose(result, expected, atol=1e-5))
 
     @unittest.skipIf(not HAS_TRITON, "requires triton")
+    @unittest.skipIf(
+        torch.version.hip is not None,
+        "CuTeDSL kernels require an NVIDIA driver",
+    )
     def test_cutedsl_add_e2e_autotune(self, device):
         """E2E test with multiple CuteDSL template variants for autotuning."""
         from torch._inductor.ir import TensorBox
