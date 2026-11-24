@@ -76,6 +76,16 @@ ScalarType promoteTypes(ScalarType a, ScalarType b) {
         toString(b));
   }
 
+  if (a == ScalarType::Float4_e2m1fn_x2 || b == ScalarType::Float4_e2m1fn_x2 ||
+      a == ScalarType::Float6_e2m3fn_x4 || b == ScalarType::Float6_e2m3fn_x4) {
+    TORCH_CHECK(
+        false,
+        "Promotion for packed sub-byte float types is not supported, attempted to promote ",
+        toString(a),
+        " and ",
+        toString(b));
+  }
+
   if (isBarebonesUnsignedType(a) || isBarebonesUnsignedType(b)) {
     // There are two problems with promotion here:
     //
