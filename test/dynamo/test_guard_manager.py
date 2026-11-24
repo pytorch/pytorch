@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     set_default_dtype,
+    skipIfCppFakeTensor,
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
 )
@@ -338,6 +339,20 @@ def less_match_verbose_code_parts(expected):
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_empty_dict_identity_guard(self):
+        mapping = {}
+        root = RootGuardManager()
+        manager = root.dict_getitem_manager(
+            "mapping",
+            "mapping",
+            mapping,
+            torch._dynamo.guards.GuardManagerType.DICT_GUARD_MANAGER,
+        )
+        manager.add_id_match_guard(id(mapping), ["mapping identity"], None)
+        self.assertTrue(root.check({"mapping": mapping}))
+        self.assertFalse(root.check({"mapping": {}}))
+        self.assertFalse(root.check_verbose({"mapping": {}}).result)
 
     def test_cpp_shape_guard_missing_windows_compiler_falls_back(self):
         from torch._inductor.codecache import CppCodeCache
@@ -801,6 +816,7 @@ user_stack=None)
             "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
         )
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_tensor_match_guard_throw_restores_torch_function(self):
         # The root disables the TorchFunction TLS while its accessors run and
         # restores it on scope exit, so a C++ throw out of an accessor leaves
@@ -1180,6 +1196,82 @@ user_stack=None)
         self.assertFalse(d_a_mgr.is_tag_safe())
         self.assertTrue(guards_manager.check({"x": overlapping, "d": d}))
         self.assertFalse(guards_manager.check({"x": non_overlapping, "d": d}))
+
+    def _make_disjoint_storage_partition_guard(self, values):
+        root = RootGuardManager()
+        manager = root.framelocals_manager(("x", 0), "x", values, default_mgr_enum)
+        children = [
+            manager.tuple_getitem_manager(i, f"x[{i}]", t, default_mgr_enum)
+            for i, t in enumerate(values)
+        ]
+        label = ["disjoint storage partition"]
+        guards.install_storage_overlap_partition_guard(children, (), label, None)
+        return root
+
+    def test_disjoint_storage_partition_uses_live_metadata(self):
+        backing = torch.empty(36)
+        buffers = backing.split(4)
+        columns = torch.empty(2, 8)
+        strided = (columns[:, :4], columns[:, 4:])
+        empty_base = torch.empty(1)
+        empty = (empty_base[:0], empty_base[:0])
+        values = buffers + strided + empty
+
+        root = self._make_disjoint_storage_partition_guard(values)
+        scope = {"x": values}
+        self.assertTrue(root.check(scope))
+
+        # Rebind an existing view to overlapping bytes in the same storage.
+        view = buffers[-1]
+        view.set_(backing.untyped_storage(), 2, view.shape, view.stride())
+        self.assertFalse(root.check(scope))
+        view.set_(backing.untyped_storage(), 32, view.shape, view.stride())
+        self.assertTrue(root.check(scope))
+
+        overlapping_columns = (strided[0], columns[:, 2:6])
+        self.assertFalse(root.check({"x": buffers + overlapping_columns + empty}))
+        self.assertFalse(root.check({"x": buffers + strided + (empty[0], empty[0])}))
+        self.assertTrue(root.check(scope))
+
+        class_checks = 0
+
+        class NonTensor:
+            @property
+            def __class__(self):
+                nonlocal class_checks
+                class_checks += 1
+                return type(self)
+
+        value = NonTensor()
+        self.assertTrue(root.check({"x": values[:-1] + (value,)}))
+        self.assertEqual(class_checks, 1)
+
+    def test_disjoint_storage_partition_tiled_views(self):
+        backing = torch.empty(16, 16)
+        tiles = tuple(
+            backing[row : row + height, col : col + width]
+            for row in (0, 4, 8, 12)
+            for col, height, width in ((0, 4, 3), (4, 3, 4), (10, 3, 2))
+        )
+        root = self._make_disjoint_storage_partition_guard(tiles)
+        self.assertTrue(root.check({"x": tiles[::-1]}))
+
+        # A staggered tile still falls in disjoint columns. It must pass even
+        # when the row-band check cannot prove the tiles are disjoint.
+        staggered = tiles[:2] + (backing[1:4, 10:12],) + tiles[3:]
+        self.assertTrue(root.check({"x": staggered}))
+
+        overlapping = tiles[:2] + (backing[:3, 1:3],) + tiles[3:]
+        self.assertFalse(root.check({"x": overlapping}))
+
+        # Overlap across different starting rows needs the pairwise check.
+        crossing = tiles[:2] + (backing[2:4, 2:6],) + tiles[3:]
+        self.assertFalse(root.check({"x": crossing}))
+
+        # This view starts in one storage row and overlaps the next.
+        wrapped = backing.as_strided((1, 2), (16, 1), 15)
+        wrapping = (wrapped, backing[1:2, :1], tiles[2][:1]) + tiles[3:]
+        self.assertFalse(root.check({"x": wrapping}))
 
     def test_globals(self):
         global global_pair, Pair
@@ -2480,6 +2572,22 @@ class GuardCheckSpecTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(handler.eval_fn([4, 5, 6], expected))
         self.assertTrue(handler.eval_fn((7, 8, 9), expected))
         self.assertFalse(handler.eval_fn([1], expected))
+
+    def test_dictionary_storage_length(self):
+        class Mapping(dict):
+            def __len__(self):
+                return 99
+
+        guard = self._make_guard(GuardBuilder.SEQUENCE_LENGTH)
+        handler = self._get_handler("SEQUENCE_LENGTH")
+        value = Mapping(a=1, b=2)
+        expected = handler.get_metadata_fn(guard, value)
+        root = RootGuardManager()
+        root.add_dict_length_check_guard(expected, [], None)
+        self.assertTrue(root.check(value))
+        self.assertTrue(handler.eval_fn(value, expected))
+        self.assertFalse(root.check(Mapping(a=1)))
+        self.assertFalse(handler.eval_fn(Mapping(a=1), expected))
 
     def test_dict_contains(self):
         from torch._dynamo.guards import GuardBuilder

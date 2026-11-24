@@ -98,6 +98,14 @@ from .static_triton_launcher import (
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
 )
+from .tiling import (
+    block_to_prefix,
+    get_max_block,
+    get_max_block_prefix,
+    get_pointwise_prefixes,
+    get_yz_grid_extents,
+    get_z_prefixes,
+)
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -169,7 +177,7 @@ def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container, Generator, Hashable
+    from collections.abc import Callable, Container, Generator, Hashable, Sequence
 
     from torch._C._profiler import _RecordFunctionFast
     from torch._guards import CompileId
@@ -335,7 +343,6 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: tuple[tuple[int, int | None, int | None], ...]
     configs: list[Config] = []
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
@@ -346,16 +353,11 @@ def autotune_hints_to_configs(
                     device_props.type,
                 )
                 continue
-            if len(size_hints) == 1:
-                xyz_options = ((block_size // 4, None, None),)
-            elif len(size_hints) == 2:
-                xyz_options = ((block_size // 4, 1, None), (1, block_size // 4, None))
-            elif len(size_hints) == 3:
-                xyz_options = (
-                    (block_size // 4, 1, 1),
-                    (1, block_size // 4, 1),
-                    (1, 1, block_size // 4),
-                )
+            num_budgets = min(3, len(size_hints))
+            xyz_options = (
+                tuple(block_size // 4 if i == axis else 1 for i in range(num_budgets))
+                for axis in range(num_budgets)
+            )
             warp_size = device_props.warp_size_or_default
             configs.extend(
                 triton_config(
@@ -572,8 +574,10 @@ def disable_caching_autotuner_plugins() -> Generator[None, None, None]:
 class CachingAutotunerPlugin:
     """Base class for ``CachingAutotuner`` plugins.
 
-    Each hook returns ``DEFER`` to fall through to the next plugin / default
-    behavior, or any other value to short-circuit ``run()`` with that value.
+    Each ``pre_*`` hook returns ``DEFER`` to fall through to the next plugin /
+    default behavior, or any other value to short-circuit ``run()`` with that
+    value. ``holds_candidates`` and ``tunes_prebuilt_launchers`` are questions
+    ``torch.compiler.precompile`` asks every plugin; they return ``bool``.
     """
 
     def pre_compile(self, autotuner: CachingAutotuner) -> object:
@@ -631,6 +635,34 @@ class CachingAutotunerPlugin:
         instead.
         """
         return DEFER
+
+    def holds_candidates(self, autotuner: CachingAutotuner) -> bool:
+        """Whether the plugin emptied ``autotuner.launchers`` and is still choosing
+        among its ``compile_results`` on real launches.
+
+        ``torch.compiler.precompile`` freezes every candidate of such a kernel,
+        which it would otherwise refuse for having no single launcher, with
+        coordinate descent and combo tuning off. It asks only when every compile
+        result is static, with and without the kernel's lock held, so the answer
+        must be cheap and free of side effects. Serving finishes the tuning under
+        a plugin whose ``tunes_prebuilt_launchers`` is True, and keeps the first
+        candidate without one.
+        """
+        return False
+
+    def tunes_prebuilt_launchers(self, autotuner: CachingAutotuner) -> bool:
+        """Whether the plugin chooses among the launchers ``autotuner`` already
+        built, on real launches and without compiling.
+
+        A kernel ``torch.compiler.precompile`` froze with several candidates
+        keeps them all when it loads under such a plugin, and only the first
+        otherwise; ``holds_candidates`` is what made the capture freeze them.
+        A plugin that returns True must then resolve ``autotuner.launchers``
+        itself, in ``pre_dispatch`` or ``pre_autotune``: deferring leaves
+        ``run()`` to ``autotune_to_one_config``, which ``no_compilation()``
+        refuses.
+        """
+        return False
 
 
 def get_caching_autotuner_plugins(
@@ -2977,42 +3009,39 @@ class CachingAutotuner(KernelInterface):
             log.warning("Unexpected error building fast launcher", exc_info=True)
             return None
 
+    def _launcher_arg_names(self, cfg: Config) -> list[str]:
+        """Names of the signature args the launcher is called with, in order."""
+        if not triton_version_uses_attrs_dict():
+            return list(self.triton_meta["signature"].keys())
+
+        # constexprs are not passed in as args
+        new_signature: list[str] = []
+        from triton.runtime.interpreter import InterpretedFunction
+
+        for i, x in enumerate(self.triton_meta["signature"].keys()):
+            if isinstance(self.fn, InterpretedFunction):
+                # These are torch compiled triton kernels that definitely
+                # have block size configs. Dynamo does not currently
+                # trace user defined triton kernels when TRITON_INTERPRET=1
+                if x not in cfg.kwargs:
+                    new_signature.append(x)
+            elif i not in get_constexprs(self.fn):
+                # use constexprs rather than just configs since user
+                # defined triton kernels may not have any configs
+                new_signature.append(x)
+
+        return new_signature
+
     def _interpret_args_grid(
         self, args: tuple[Any, ...], cfg: Config
     ) -> tuple[tuple[Any, ...], tuple[int, int, int]]:
-        if triton_version_uses_attrs_dict():
-
-            def filtered_signature() -> list[str]:
-                # constexprs are not passed in as args
-                new_signature: list[str] = []
-                from triton.runtime.interpreter import InterpretedFunction
-
-                for i, x in enumerate(self.triton_meta["signature"].keys()):
-                    if isinstance(self.fn, InterpretedFunction):
-                        # These are torch compiled triton kernels that definitely
-                        # have block size configs. Dynamo does not currently
-                        # trace user defined triton kernels when TRITON_INTERPRET=1
-                        if x not in cfg.kwargs:
-                            new_signature.append(x)
-                    elif i not in get_constexprs(self.fn):
-                        # use constexprs rather than just configs since user
-                        # defined triton kernels may not have any configs
-                        new_signature.append(x)
-
-                return new_signature
-
-        else:
-
-            def filtered_signature() -> list[str]:
-                return list(self.triton_meta["signature"].keys())
-
         grid = GridExpr.from_meta(
             self.inductor_meta, cfg, mode=self.grid_mode
         ).eval_slow(
             dict(
                 zip(
                     [
-                        *filtered_signature(),
+                        *self._launcher_arg_names(cfg),
                         *self.inductor_meta.get("extra_launcher_args", ()),
                     ],
                     args,
@@ -4141,19 +4170,28 @@ def unique_configs(configs: list[Config]):
     return pruned_configs
 
 
-def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
-    for numel, label in zip((xnumel, ynumel, znumel), "XYZ"):
+def check_config(cfg, *, xnumel=None, ynumel=None, z0_numel=None, size_hints=None):
+    numels = {"x": xnumel, "y": ynumel, "z0_": z0_numel, **(size_hints or {})}
+    for prefix, numel in numels.items():
+        label = prefix.upper()
         if numel is None:
             continue
-        block = cfg[f"{label}BLOCK"]
+        block_key = f"{label}BLOCK"
+        if block_key not in cfg:
+            raise AssertionError(
+                f"Missing required block size {block_key} for tiling axis {prefix} (cfg={cfg})."
+            )
+        block = cfg[block_key]
         if numel == 1:
             if block != 1:
                 raise AssertionError(
                     f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
                     f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
                 )
-        max_block = TRITON_MAX_BLOCK[label]
-        max_block_str = f'config.triton.max_block["{label}"]'
+        max_block = get_max_block(label, TRITON_MAX_BLOCK)
+        max_block_str = (
+            f'TRITON_MAX_BLOCK["{get_max_block_prefix(prefix, TRITON_MAX_BLOCK)}"]'
+        )
         if max_block % block != 0:
             raise AssertionError(
                 f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
@@ -4168,8 +4206,8 @@ def check_max_block(cfg: dict[str, int]):
     for var, val in cfg.items():
         block_suffix = "BLOCK"
         if block_suffix in var:
-            prefix = var.removesuffix(block_suffix)
-            max_block = TRITON_MAX_BLOCK[prefix]
+            prefix = block_to_prefix(var)
+            max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
             if val > max_block:
                 raise AssertionError(
                     f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
@@ -4265,10 +4303,13 @@ def _enforce_reduction_config_block_minimums(
         return configs
 
     for cfg in configs:
-        if frozenset(("YBLOCK", "ZBLOCK", "R1_BLOCK", "R2_BLOCK")) & cfg.kwargs.keys():
+        if any(
+            key.endswith("BLOCK") and key not in ("XBLOCK", "R0_BLOCK")
+            for key in cfg.kwargs
+        ):
             raise AssertionError(
-                "min_xblock/min_rblock do not support YBLOCK, ZBLOCK, "
-                f"R1_BLOCK, or R2_BLOCK configs: {cfg}"
+                "min_xblock/min_rblock do not support YBLOCK, Z blocks, "
+                f"or reduction blocks other than R0_BLOCK: {cfg}"
             )
         has_xblock = "XBLOCK" in cfg.kwargs
         has_rblock = "R0_BLOCK" in cfg.kwargs
@@ -4309,7 +4350,7 @@ def _enforce_reduction_config_block_minimums(
             cfg.kwargs,
             xnumel=size_hints.get("x") if "XBLOCK" in cfg.kwargs else None,
             ynumel=size_hints.get("y") if "YBLOCK" in cfg.kwargs else None,
-            znumel=size_hints.get("z") if "ZBLOCK" in cfg.kwargs else None,
+            z0_numel=size_hints.get("z0_") if "Z0_BLOCK" in cfg.kwargs else None,
         )
 
     return configs
@@ -4383,6 +4424,10 @@ def triton_config(
     based on size_hints. Size_hints is a tuple of numels in each tile
     dimension and will be rounded up to the nearest power of 2.
 
+    x, y, and z are pointwise block-size budgets, ordered from inner axes outward.
+    The last supplied budget is spread over the remaining axes, innermost first.
+    When supplied, z is one budget shared across all Z axes.
+
     num_elements_per_warp is a suggestion for controlling how many warps
     the triton config should contain. e.g.: if x=16, y=8, z=4 then
     num_elements = 16*8*4 = 512. Then if we set num_elements_per_warp=128,
@@ -4395,6 +4440,16 @@ def triton_config(
     """
     # Ideally we want to read this from some device config
 
+    pointwise_size_hints = size_hints
+    prefixes = tuple(reversed(get_pointwise_prefixes(size_hints)))
+    num_budgets = 1 + (y is not None) + (z is not None)
+    if num_budgets > len(prefixes):
+        raise AssertionError("More pointwise budgets than pointwise dimensions")
+    size_hints = {p: size_hints[p] for p in prefixes[: num_budgets - 1]} | {
+        prefixes[num_budgets - 1]: math.prod(
+            pointwise_size_hints[p] for p in prefixes[num_budgets - 1 :]
+        )
+    }
     maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
@@ -4406,7 +4461,7 @@ def triton_config(
     if y:
         y = min(y, size_hints["y"])
     if z:
-        z = min(z, size_hints["z"])
+        z = min(z, size_hints["z0_"])
 
     # if we are below original block size, scale up where we can;
     # or if the calculated grid size is larger than the limit, we bump up the corresponding dimension
@@ -4425,9 +4480,9 @@ def triton_config(
         y *= 2
     while (
         z
-        and z < min(size_hints["z"], TRITON_MAX_BLOCK["Z"])
+        and z < min(size_hints["z0_"], TRITON_MAX_BLOCK["Z0_"])
         and (
-            z * maxGridSize[2] < size_hints["z"]
+            z * maxGridSize[2] < size_hints["z0_"]
             or conditional_product(x, y, z) < target
         )
     ):
@@ -4448,9 +4503,6 @@ def triton_config(
     # see https://github.com/pytorch/pytorch/pull/97950
     if conditional_product(x, y, z) >= 128 and not torch.version.hip:
         num_warps = max(num_warps, 4)
-    xnumel = size_hints["x"]
-    ynumel = size_hints.get("y")
-    znumel = size_hints.get("z")
 
     # Increase x to satisfy min_elem_per_thread requirements.
     block_size = max(
@@ -4462,13 +4514,15 @@ def triton_config(
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps, warp_size=warp_size)
     x = min(x, size_hints["x"])
 
-    cfg = {"XBLOCK": x}
-    if y:
-        cfg["YBLOCK"] = y
-    if z:
-        cfg["ZBLOCK"] = z
+    pointwise_numels = _get_nd_pointwise_numels(
+        pointwise_size_hints, [budget for budget in (x, y, z) if budget is not None]
+    )
+    # Rounded size hints can overestimate launchable legacy 3D grids.
+    if len(get_z_prefixes(pointwise_size_hints)) > 1:
+        _check_max_grid_yz(pointwise_size_hints, pointwise_numels)
+    cfg = _get_config(pointwise_numels)
     check_max_block(cfg)
-    check_config(cfg, xnumel=xnumel, ynumel=ynumel, znumel=znumel)
+    check_config(cfg, size_hints={p: pointwise_size_hints[p] for p in prefixes})
     config = Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
     if torch.version.hip:
@@ -4480,6 +4534,80 @@ def triton_config(
             config.kwargs["kpack"] = kpack
 
     return config
+
+
+def _check_max_grid_yz(size_hints: dict[str, int], numels: dict[str, int]) -> None:
+    groups = get_yz_grid_extents(size_hints, numels)
+    if not groups:
+        return
+    target = math.prod(numels.values())
+    limit = get_max_y_grid()
+
+    def grid(group: Sequence[str]) -> int:
+        return get_yz_grid_extents(size_hints, numels)[tuple(group)]
+
+    for group in groups:
+        while grid(group) > limit:
+            prefix = next(
+                (
+                    p
+                    for p in group
+                    if numels[p]
+                    < min(size_hints[p], get_max_block(p, TRITON_MAX_BLOCK))
+                ),
+                None,
+            )
+            if prefix is None:
+                axis = "Y" if group == ("y",) else "Z"
+                raise AssertionError(
+                    f"Tiling configuration exceeds the {axis} launch-grid limit: "
+                    f"extent={grid(group)}, limit={limit}, axes={group}, "
+                    f"size_hints={size_hints}, block_sizes={numels}. "
+                    "Reduce torch._inductor.config.triton.max_tiles to use fewer tiling axes."
+                )
+            numels[prefix] *= 2
+
+    for prefix in reversed(get_pointwise_prefixes(numels)):
+        while numels[prefix] > 1 and math.prod(numels.values()) > target:
+            numels[prefix] //= 2
+            if any(grid(group) > limit for group in groups):
+                numels[prefix] *= 2
+                break
+
+
+def _get_nd_pointwise_numels(
+    size_hints: dict[str, int],
+    budgets: Sequence[int],
+) -> dict[str, int]:
+    """Expand the last supplied budget over the remaining axes, inner first.
+
+    Size hints and budgets are powers of two, as in reduction-budget expansion.
+    """
+    prefixes = tuple(reversed(get_pointwise_prefixes(size_hints)))
+    if not budgets:
+        raise AssertionError("At least one pointwise budget is required")
+    if len(budgets) > len(prefixes):
+        raise AssertionError("More pointwise budgets than pointwise dimensions")
+
+    numels = {
+        prefix: min(budget, size_hints[prefix])
+        for prefix, budget in zip(prefixes, budgets[:-1])
+    }
+    expanded_prefixes = prefixes[len(budgets) - 1 :]
+    remaining = min(budgets[-1], math.prod(size_hints[p] for p in expanded_prefixes))
+    for prefix in expanded_prefixes:
+        dim = min(size_hints[prefix], remaining)
+        if prefix != expanded_prefixes[-1]:
+            dim = min(dim, get_max_block(prefix, TRITON_MAX_BLOCK))
+        if remaining % dim:
+            raise AssertionError(
+                f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
+            )
+        numels[prefix] = dim
+        remaining //= dim
+    if remaining != 1:
+        raise AssertionError(f"Pointwise budget exceeds size hints: {size_hints}")
+    return numels
 
 
 def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, int]:
@@ -4500,7 +4628,7 @@ def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, in
     rnumels = {}
     for idx in range(num_reduction_dims - 1, -1, -1):
         prefix = f"r{idx}_"
-        max_size = min(size_hints[prefix], TRITON_MAX_BLOCK[prefix.upper()])
+        max_size = min(size_hints[prefix], get_max_block(prefix, TRITON_MAX_BLOCK))
         dim = min(max_size, remaining)
         if remaining % dim != 0:
             raise AssertionError(
@@ -4702,9 +4830,10 @@ def _combo_coordesc_meta(
                 continue
             field_order.append(key)
             block_key = key.rsplit("_", 1)[0]
-            prefix = block_key.removesuffix("BLOCK").lower()
-            if (max_block := TRITON_MAX_BLOCK.get(prefix.upper())) is not None:
-                field_limits[key] = min(max_block, size_hints_i.get(prefix, max_block))
+            prefix = block_to_prefix(block_key)
+            if prefix in size_hints_i:
+                max_block = get_max_block(prefix, TRITON_MAX_BLOCK)
+                field_limits[key] = min(max_block, size_hints_i[prefix])
             if block_key in min_block_sizes:
                 field_minimums[key] = min_block_sizes[block_key]
     return field_order, field_limits, field_minimums
@@ -4859,10 +4988,10 @@ def _handle_combo_kernel_per_subkernel_blocks(
                 continue
             combined_key = f"{key}_{i}"
             group_coordesc_fields.add(combined_key)
-            prefix = key.removesuffix("BLOCK").lower()
+            prefix = block_to_prefix(key)
             if prefix in size_hints_i:
                 combo_coordesc_field_limits[combined_key] = min(
-                    TRITON_MAX_BLOCK[prefix.upper()],
+                    get_max_block(prefix, TRITON_MAX_BLOCK),
                     size_hints_i[prefix],
                 )
             if key in min_block_sizes_i:
@@ -4929,36 +5058,43 @@ def triton_config_tiled_reduction(
     waves_per_eu=None,
     *,
     warp_size: int = 32,
+    z: int | None = None,
 ):
     """
     Construct a tile reduction triton config with some adjustment
     heuristics based on size_hints. Size_hints is a tuple of numels in
     each tile dimension and will be rounded up to the nearest power of 2.
+
+    x, y, and optional z are pointwise block-size budgets.
+    The last supplied budget is spread over the remaining axes, innermost first.
+    When supplied, z is one budget shared across all Z axes.
     """
     # Convert the linear reduction numel into a multi-dimensional block.
     rnumels = _get_nd_reduction_numels(r, size_hints)
 
-    # shrink sizes to size hints
-    x = min(x, size_hints["x"])
-    y = min(y, size_hints["y"])
+    pointwise_numels = _get_nd_pointwise_numels(
+        size_hints, [budget for budget in (x, y, z) if budget is not None]
+    )
 
     def total_numel() -> int:
-        return conditional_product(x, y, *rnumels.values())
+        return conditional_product(*pointwise_numels.values(), *rnumels.values())
 
     target = total_numel()
     if conditional_product(*size_hints.values()) < target:
         target //= 8
 
     # if we are below original block size, scale up where we can
-    while x < size_hints["x"] and total_numel() < target:
-        x *= 2
+    while pointwise_numels["x"] < size_hints["x"] and total_numel() < target:
+        pointwise_numels["x"] *= 2
     for prefix in sorted(rnumels):
         while rnumels[prefix] < size_hints[prefix] and total_numel() < target:
             rnumels[prefix] *= 2
-    while y < size_hints["y"] and total_numel() < target:
-        y *= 2
+    for prefix in tuple(reversed(get_pointwise_prefixes(pointwise_numels)))[1:]:
+        while pointwise_numels[prefix] < size_hints[prefix] and total_numel() < target:
+            pointwise_numels[prefix] *= 2
 
-    cfg = _get_config({"x": x, "y": y, **rnumels})
+    _check_max_grid_yz(size_hints, pointwise_numels)
+    cfg = _get_config({**pointwise_numels, **rnumels})
     num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
     num_warps = _num_warps(
         num_warps,
@@ -4966,7 +5102,7 @@ def triton_config_tiled_reduction(
         register_intensive=register_intensive,
         warp_size=warp_size,
     )
-    check_config(cfg, xnumel=size_hints["x"], ynumel=size_hints["y"])
+    check_config(cfg, size_hints=size_hints)
     check_max_block(cfg)
     config = Config(cfg, num_warps=num_warps, num_stages=num_stages)
     if torch.version.hip:
@@ -5108,7 +5244,7 @@ def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages:
     config = {
         "XBLOCK": sizes.get("x"),
         "YBLOCK": sizes.get("y"),
-        "ZBLOCK": sizes.get("z"),
+        "Z0_BLOCK": sizes.get("z0_"),
         "R0_BLOCK": sizes.get("r"),
     }
     # Remove keys with None values (i.e., missing in sizes)
@@ -5146,7 +5282,7 @@ def _config_helper(bmm=False, persistent=False):
         if persistent:
             d.pop("r", None)
         if bmm:
-            d["z"] = 1
+            d["z0_"] = 1
         out.append((d, w, s))
 
     # Deduplicate by converting dicts to immutable frozensets
@@ -5812,11 +5948,13 @@ class GridExpr:
         meta: dict[str, Any] = {
             "XBLOCK": f"{kernel_name}_result.xblocks[0]",
             "YBLOCK": f"{kernel_name}_result.yblocks[0]",
-            "ZBLOCK": f"{kernel_name}_result.zblocks[0]",
+            "Z0_BLOCK": f"{kernel_name}_result.zblocks[0]",
             "R0_BLOCK": f"{kernel_name}_result.r0blocks[0]",
             "RSPLIT": f"{kernel_name}_result.rsplit",
             "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
         }
+        for i in range(max(0, self.inductor_meta.get("rank", 0) - 2)):
+            meta[f"Z{i}_BLOCK"] = f"{kernel_name}_result.zblocks[{i}]"
         # assertions are done based on real values, so we can skip here
         self.generate(meta, is_lazy=True)
 
@@ -5855,14 +5993,25 @@ class Grid3D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
-        self.z_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
+        self.z_grid = self.ceildiv("z0_numel", meta.get("Z0_BLOCK"))
+
+
+class GridND(Grid2D):
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
+        super().generate(meta, is_lazy)
+        self.z_grid = self.product(
+            [
+                self.ceildiv(f"z{i}_numel", meta.get(f"Z{i}_BLOCK"))
+                for i in range(self.inductor_meta["rank"] - 2)
+            ]
+        )
 
 
 class BatchMatmulGrid3D(GridExpr):
     def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
         self.z_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
-        self.x_grid = self.ceildiv("znumel", meta.get("ZBLOCK"))
+        self.x_grid = self.ceildiv("z0_numel", meta.get("Z0_BLOCK"))
 
 
 class Grid2DWithYZOverflow(GridExpr):

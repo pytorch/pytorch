@@ -7,10 +7,17 @@ import time
 import unittest
 
 from torch.profiler import profile, ProfilerActivity
-from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TemporaryFileName,
+    TestCase,
+)
 
 
 class TestPythonTracer(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @unittest.skipUnless(sys.version_info[:2] == (3, 12), "Python version mismatch")
     def test_method_with_c_function(self):
         class A:

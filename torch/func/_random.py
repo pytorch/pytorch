@@ -1,6 +1,6 @@
 """Stateless PRNG APIs.
 
-These are experimental and subject to change without notice.
+These are a prototype and subject to change without notice.
 Access via ``torch.func._random``.
 """
 
@@ -41,7 +41,8 @@ def key(
     Args:
         seed (int): The seed value for the PRNG.
         device (:class:`torch.device`, optional): The desired device for the
-            returned key. Default: ``cpu``.
+            returned key. Default: the current default device (see
+            :func:`torch.set_default_device`).
         impl (str): PRNG algorithm. Currently only ``"philox4x32-10"`` is
             supported.
 
@@ -53,6 +54,20 @@ def key(
         For the ``"philox4x32-10"`` algorithm, the key is a uint64 tensor of
         shape ``(2,)`` encoding a ``(seed, offset)`` pair. The offset determines
         the starting position in the Philox output stream.
+
+        Each Philox call on a ``(seed, offset)`` pair produces 128 random bits,
+        which yield ``E = 4`` values for dtypes of 32 bits or fewer, or ``E = 2``
+        for 64-bit dtypes. Each value of :func:`uniform`, :func:`randint`, and
+        :func:`bits` comes from its own ``128 / E`` bits, while :func:`normal`
+        derives each pair of values from each pair's worth of bits via the
+        Box-Muller transform. Element ``i`` (in row-major order) of a key's
+        output, or of each slice a batched key generates, is value ``i % E`` of
+        the call at ``(offset + i // E) % 2**64``. Thus the key
+        ``torch.tensor([seed, offset + k], dtype=torch.uint64)`` skips the
+        first ``k * E`` elements, generating a contiguous range of the output
+        starting there (e.g. a row shard of a parameter) directly. Such keys
+        share counters with :func:`split` and :func:`fold_in` children of the
+        original key, so don't both shift and derive from the same key.
 
     Example::
 
@@ -390,7 +405,8 @@ def randint_(
             the dtype's smallest value. Default: ``0``.
         high (int, optional): Upper bound (exclusive) of the range. ``None`` means
             the dtype's largest value plus one. For 32-bit dtypes,
-            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            ``high - low`` must be a power of two or less than ``2 ** 28``;
+            see the note below.
             Default: ``None``.
 
     Returns:
@@ -399,9 +415,9 @@ def randint_(
     .. note::
 
         Values are reduced into ``[low, high)`` with a modulo, which is exactly
-        uniform only when ``high - low`` is a power of two. Ranges of ``2 ** 28``
-        or more are rejected for 32-bit dtypes; use a 64-bit dtype if you need a
-        range that large. See :func:`randint` for the bias in detail.
+        uniform only when ``high - low`` is a power of two. Other ranges of
+        ``2 ** 28`` or more are rejected for 32-bit dtypes; use a 64-bit dtype if
+        you need a range that large. See :func:`randint` for the bias in detail.
 
     Example::
 
@@ -481,7 +497,8 @@ def randint(
             the dtype's smallest value. Default: ``0``.
         high (int, optional): Upper bound (exclusive) of the range. ``None`` means
             the dtype's largest value plus one. For 32-bit dtypes,
-            ``high - low`` must be less than ``2 ** 28``; see the note below.
+            ``high - low`` must be a power of two or less than ``2 ** 28``;
+            see the note below.
             Default: ``None``.
         dtype (:class:`torch.dtype`, optional): The desired dtype: any integer
             dtype other than ``torch.bool``. Default: ``torch.int32``.
