@@ -10,6 +10,10 @@ from torch._higher_order_ops import foreach_map
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     decorateIf,
     instantiate_parametrized_tests,
@@ -1716,6 +1720,32 @@ class ForeachTests(TestCase):
                 torch.compile(fn_outplace)([t[0].clone()], e),
             )
         self.assertGreaterEqual(create_foreach_nodes_calls, 2)
+
+
+class ForeachPrecisionTests(TestCase):
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_low_precision_barrier_preserves_foreach_rounding(self, device, dtype):
+        def fn(x, divisor, cancel):
+            divided = torch._foreach_div(x, divisor)
+            return torch._foreach_add(divided, cancel)
+
+        x = [torch.ones(4096, device=device, dtype=dtype) for _ in range(2)]
+        divisor = [torch.full_like(tensor, 3.0) for tensor in x]
+        cancel = [torch.full_like(tensor, -1.0 / 3.0) for tensor in x]
+        eager = fn(x, divisor, cancel)
+
+        compiled = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"emulate_precision_casts": True},
+        )(x, divisor, cancel)
+
+        torch.testing.assert_close(compiled, eager)
+
+
+instantiate_device_type_tests(
+    ForeachPrecisionTests, globals(), only_for=("cpu", "cuda")
+)
 
 
 if __name__ == "__main__":

@@ -1163,22 +1163,34 @@ def _maybe_record_pointwise_barrier(
         return
 
     last_node = next(iter(reversed(proxy_mode.tracer.graph.nodes)))
-    t = last_node.meta.get("val")
     low_pr_fp = (torch.bfloat16, torch.float16)
 
-    output_low_precision = isinstance(t, torch.Tensor) and t.dtype in low_pr_fp
+    def has_low_precision_tensor(value: object) -> bool:
+        if isinstance(value, torch.Tensor):
+            return value.dtype in low_pr_fp
+        if isinstance(value, (list, tuple)):
+            return any(has_low_precision_tensor(item) for item in value)
+        return False
 
-    if not output_low_precision:
-        for input_node in last_node.all_input_nodes:
-            val = input_node.meta.get("val") if hasattr(input_node, "meta") else None
-            if isinstance(val, torch.Tensor) and val.dtype in low_pr_fp:
-                output_low_precision = True
-                break
+    nodes_to_check = [last_node]
+    while (
+        last_node.op == "call_function"
+        and last_node.target is operator.getitem
+        and isinstance(last_node.args[0], fx.Node)
+        and isinstance(last_node.args[0].meta.get("val"), (list, tuple))
+    ):
+        last_node = last_node.args[0]
+        nodes_to_check.append(last_node)
 
-    if not output_low_precision:
-        return
-
-    last_node.meta["low_precision_pointwise_barrier"] = True
+    for node in nodes_to_check:
+        if has_low_precision_tensor(node.meta.get("val")) or (
+            node.target is not operator.getitem
+            and any(
+                has_low_precision_tensor(input_node.meta.get("val"))
+                for input_node in node.all_input_nodes
+            )
+        ):
+            node.meta["low_precision_pointwise_barrier"] = True
 
 
 def _fetch_proxies_and_all_constant_flag(

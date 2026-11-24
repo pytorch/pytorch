@@ -3,6 +3,8 @@
 
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -10,6 +12,7 @@ from torch.testing._internal.common_utils import (
 )
 import torch
 import torch._dynamo
+from torch._inductor import config as inductor_config
 import unittest
 import warnings
 import operator
@@ -896,6 +899,63 @@ class TestRealProxyTensor(TestCase):
             "torch_fn" not in n.meta for n in gm_without.graph.nodes if n.op == "call_function"
         )
         self.assertTrue(torch_fn_absent, "torch_fn metadata should be absent when mode is disabled")
+
+
+@instantiate_parametrized_tests
+class TestLowPrecisionPointwiseBarrier(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("emulate_precision_casts", [False, True])
+    def test_foreach_list_output(self, dtype, emulate_precision_casts):
+        def fn(x, divisor, cancel):
+            return torch._foreach_add(torch._foreach_div(x, divisor), cancel)
+
+        x = [torch.ones(2, dtype=dtype) for _ in range(2)]
+        divisor = [torch.full_like(tensor, 3.0) for tensor in x]
+        cancel = [torch.full_like(tensor, -1.0 / 3.0) for tensor in x]
+        with inductor_config.patch(emulate_precision_casts=emulate_precision_casts):
+            graph = make_fx(fn)(x, divisor, cancel).graph
+
+        expect_barrier = emulate_precision_casts and dtype in (
+            torch.float16,
+            torch.bfloat16,
+        )
+        for target in (aten._foreach_div.List, aten._foreach_add.List):
+            producer = next(node for node in graph.nodes if node.target is target)
+            self.assertEqual(
+                [value.dtype for value in producer.meta["val"]], [dtype] * len(x)
+            )
+            projections = [
+                node
+                for node in graph.nodes
+                if node.target is operator.getitem and node.args[0] is producer
+            ]
+            self.assertEqual(len(projections), len(x))
+            for node in (producer, projections[-1]):
+                if expect_barrier:
+                    self.assertIs(node.meta.get("low_precision_pointwise_barrier"), True)
+                else:
+                    self.assertNotIn("low_precision_pointwise_barrier", node.meta)
+
+    def test_tuple_output(self):
+        x = torch.ones(2, 3, dtype=torch.float16)
+        with inductor_config.patch(emulate_precision_casts=True):
+            graph = make_fx(lambda x: aten.max.dim(x, 0))(x).graph
+
+        producer = next(node for node in graph.nodes if node.target is aten.max.dim)
+        self.assertEqual(
+            [value.dtype for value in producer.meta["val"]],
+            [torch.float16, torch.int64],
+        )
+        indices = next(
+            node
+            for node in graph.nodes
+            if node.target is operator.getitem and node.args == (producer, 1)
+        )
+        self.assertIs(producer.meta.get("low_precision_pointwise_barrier"), True)
+        self.assertNotIn("low_precision_pointwise_barrier", indices.meta)
+
 
 class TestFakeProxyTensor(TestCase):
     hw_classification = HardwareClassification.GENERIC
