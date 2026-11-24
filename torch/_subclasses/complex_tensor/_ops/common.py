@@ -115,6 +115,28 @@ def register_complex(
     return inner(func_impl)
 
 
+# Mapping from `torch` functions to implementations, consulted in `__torch_function__`
+# (above autograd), for ops whose native backward formula doesn't work on `ComplexTensor`.
+COMPLEX_FUNCTIONS_TABLE: dict[Callable[..., Any], Callable[..., Any]] = {}
+
+
+def register_complex_function(
+    *funcs: Callable[..., Any],
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    """Decorator to register an implementation for some `torch` functions"""
+
+    def inner(impl: Callable[_P, _R]) -> Callable[_P, _R]:
+        for func in funcs:
+            if COMPLEX_FUNCTIONS_TABLE.get(func, impl) is not impl:
+                raise RuntimeError(
+                    f"Attempted to register multiple functions for {func}"
+                )
+            COMPLEX_FUNCTIONS_TABLE[func] = impl
+        return impl
+
+    return inner
+
+
 FORCE_TEST_LIST: list[OpType] = []
 
 
