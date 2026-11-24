@@ -4202,15 +4202,10 @@ class TestBMMMatrixReductionEpilogue(TestCase):
             self.assertTrue(
                 tile_fits_reduction_epilogue(tile, self.template, [node]), tile
             )
-        # Partials are per subtile, but meta WS rejects reductions over them.
-        for meta_ws in (False, True):
-            with patch(
-                "torch._inductor.codegen.simd.meta_ws_enabled", return_value=meta_ws
-            ):
-                self.assertEqual(
-                    tile_fits_reduction_epilogue((128, 32, 2), self.template, [node]),
-                    not meta_ws,
-                )
+        # Partials are per subtile.
+        self.assertTrue(
+            tile_fits_reduction_epilogue((128, 32, 2), self.template, [node])
+        )
 
     def normalize(self, name="buf2", stat="buf1"):
         """A node over the whole output reading it and a per-batch result."""

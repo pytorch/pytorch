@@ -10,9 +10,12 @@
 #include <torch/csrc/autograd/utils/error_messages.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FakeTensor.h>
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/MemoryOverlap.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
 
 #include <memory>
@@ -471,10 +474,30 @@ struct MultiOutputViewMarkerRegisterer {
 };
 MultiOutputViewMarkerRegisterer registerMultiOutputViewMarker;
 
+namespace {
+
+c10::intrusive_ptr<at::TensorImpl> shallow_copy_for_data(
+    const at::TensorBase& self,
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) {
+  if (self.is_fake() &&
+      !c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::Fake) &&
+      !c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
+    return at::impl::fake_tensor_data(
+               at::Tensor(self), version_counter, allow_tensor_metadata_change)
+        .getIntrusivePtr();
+  }
+  return self.unsafeGetTensorImpl()->shallow_copy_and_detach(
+      version_counter, allow_tensor_metadata_change);
+}
+
+} // namespace
+
 at::TensorBase VariableHooks::variable_data(const at::TensorBase& self) const {
   TORCH_CHECK(
       self.defined(), "cannot call variable_data() on undefined tensor");
-  auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
+  auto self_impl_copy = shallow_copy_for_data(
+      self,
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/false);
   self_impl_copy->set_autograd_meta(nullptr);
@@ -483,7 +506,8 @@ at::TensorBase VariableHooks::variable_data(const at::TensorBase& self) const {
 
 at::TensorBase VariableHooks::tensor_data(const at::TensorBase& self) const {
   TORCH_CHECK(self.defined(), "cannot call tensor_data() on undefined tensor");
-  auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
+  auto self_impl_copy = shallow_copy_for_data(
+      self,
       /*version_counter=*/self.unsafeGetTensorImpl()->version_counter(),
       /*allow_tensor_metadata_change=*/
       self.unsafeGetTensorImpl()->allow_tensor_metadata_change());
