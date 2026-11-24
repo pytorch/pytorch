@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -8726,6 +8727,165 @@ else:
             f(x, increment)
 
         self.assertEqual(y + increment, x)
+
+    @requires_gpu
+    @common_utils.parametrize(
+        "rewrap",
+        ["heuristics", "launch_num_warps", "special_param", "prune_configs_by"],
+    )
+    def test_triton_kernel_rewrap_keeps_autotune_hooks(self, rewrap):
+        # Dynamo rebuilds the autotuner here; without restore_value, benchmarking
+        # accumulates into `acc` more than once.
+        if rewrap == "special_param":
+
+            @triton.jit
+            def acc_kernel(
+                in_ptr,
+                acc_ptr,
+                n_elements,
+                BLOCK_SIZE: tl.constexpr,
+                num_warps: tl.constexpr,
+            ):
+                offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                acc = tl.load(acc_ptr + offsets, mask=mask)
+                tl.store(
+                    acc_ptr + offsets,
+                    acc + tl.load(in_ptr + offsets, mask=mask),
+                    mask=mask,
+                )
+
+        else:
+
+            @triton.jit
+            def acc_kernel(
+                in_ptr,
+                acc_ptr,
+                n_elements,
+                BLOCK_SIZE: tl.constexpr,
+                EVEN: tl.constexpr,
+            ):
+                offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+                mask = offsets < n_elements
+                acc = tl.load(acc_ptr + offsets, mask=mask)
+                tl.store(
+                    acc_ptr + offsets,
+                    acc + tl.load(in_ptr + offsets, mask=mask),
+                    mask=mask,
+                )
+
+        autotune_kwargs = {"restore_value": ["acc_ptr"]}
+        launch_kwargs = {}
+        if rewrap == "heuristics":
+            acc_kernel = triton.heuristics(
+                {"EVEN": lambda args: args["n_elements"] % 64 == 0}
+            )(acc_kernel)
+        elif rewrap != "special_param":
+            launch_kwargs["EVEN"] = False
+        if rewrap == "launch_num_warps":
+            launch_kwargs["num_warps"] = 4
+        elif rewrap == "prune_configs_by":
+            autotune_kwargs["prune_configs_by"] = {
+                "early_config_prune": lambda configs, named_args, **kw: configs
+            }
+        acc_kernel = triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 64}, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 128}, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 256}, num_warps=4),
+            ],
+            key=["n_elements"],
+            **autotune_kwargs,
+        )(acc_kernel)
+
+        def f(x, acc):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            acc_kernel[grid](x, acc, n_elements, **launch_kwargs)
+            return acc
+
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=True, dynamic=False)
+        for n in (1024, 1000):
+            x = torch.ones(n, device=GPU_TYPE)
+            acc = torch.zeros(n, device=GPU_TYPE)
+            compiled(x, acc)
+            self.assertEqual(acc, x, atol=0, rtol=0)
+
+    @requires_gpu
+    @common_utils.parametrize(
+        "rewrap", ["heuristics", "launch_num_warps", "prune_configs_by"]
+    )
+    @torch._inductor.config.patch(unsafe_ignore_unsupported_triton_autotune_args=True)
+    def test_triton_kernel_rewrap_keeps_user_hooks_and_do_bench(self, rewrap):
+        # Dynamo rebuilds the autotuner here; the rebuilt one must still call the
+        # user's pre_hook, post_hook and do_bench (hooks need the unsafe flag).
+        @triton.jit
+        def add_kernel(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+            EVEN: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x + 1, mask=mask)
+
+        calls = collections.Counter()
+
+        def pre_hook(kwargs, reset_only=False):
+            calls["pre_hook"] += 1
+
+        def post_hook(kwargs, exception):
+            calls["post_hook"] += 1
+
+        def do_bench(kernel_call, quantiles):
+            calls["do_bench"] += 1
+            kernel_call()
+            return [1.0, 1.0, 1.0]
+
+        autotune_kwargs = {
+            "pre_hook": pre_hook,
+            "post_hook": post_hook,
+            "do_bench": do_bench,
+        }
+        launch_kwargs = {}
+        if rewrap == "heuristics":
+            add_kernel = triton.heuristics(
+                {"EVEN": lambda args: args["n_elements"] % 64 == 0}
+            )(add_kernel)
+        else:
+            launch_kwargs["EVEN"] = False
+        if rewrap == "launch_num_warps":
+            launch_kwargs["num_warps"] = 4
+        elif rewrap == "prune_configs_by":
+            autotune_kwargs["prune_configs_by"] = {
+                "early_config_prune": lambda configs, named_args, **kw: configs
+            }
+        add_kernel = triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 64}, num_warps=4),
+                triton.Config({"BLOCK_SIZE": 128}, num_warps=4),
+            ],
+            key=["n_elements"],
+            **autotune_kwargs,
+        )(add_kernel)
+
+        def f(x, out):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, out, n_elements, **launch_kwargs)
+            return out
+
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=True, dynamic=False)
+        x = torch.randn(1024, device=GPU_TYPE)
+        out = torch.empty_like(x)
+        compiled(x, out)
+        self.assertEqual(out, x + 1)
+        self.assertGreater(calls["do_bench"], 0)
+        self.assertGreater(calls["pre_hook"], 0)
+        self.assertGreater(calls["post_hook"], 0)
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
