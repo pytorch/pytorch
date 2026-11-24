@@ -708,6 +708,24 @@ def _is_control_deps_ordering_only_use(
     return view in additional_deps and view not in pass_through
 
 
+def _has_disjoint_strides(tensor: torch.Tensor) -> bool:
+    # Each stride must step past the span of all faster dimensions.
+    dims: list[tuple[int, int | torch.SymInt]] = []
+    for size, stride in zip(tensor.shape, tensor.stride()):
+        if statically_known_true(size <= 1):
+            continue
+        if not isinstance(stride, int):
+            return False
+        dims.append((stride, size))
+
+    span: int | torch.SymInt = 1
+    for stride, size in sorted(dims, key=operator.itemgetter(0)):
+        if not statically_known_true(stride >= span):
+            return False
+        span += (size - 1) * stride
+    return True
+
+
 def reinplace_inplaceable_ops_core(
     graph: torch.fx.Graph,
     *,
@@ -1063,7 +1081,9 @@ def reinplace_inplaceable_ops_core(
             if get_node_storage(mutated_arg) is None:
                 return False
 
-            if torch._debug_has_internal_overlap(mutated_arg.meta["val"]) == 1:
+            tensor = mutated_arg.meta["val"]
+            overlap = torch._debug_has_internal_overlap(tensor)
+            if overlap == 1 or (overlap != 0 and not _has_disjoint_strides(tensor)):
                 return False
 
             # Keep aliases whose tensor contents might overlap the mutated input.
