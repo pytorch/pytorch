@@ -27,7 +27,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, cpu)
  * Build time minimum version: PyTorch 2.16.
  */
 template <typename T>
-inline std::optional<T> get_cpu_capabilities(const char* key) {
+inline std::optional<T> get_cpu_capability(const char* key) {
   bool key_exists = false;
   if constexpr (std::is_same_v<T, int64_t>) {
     int64_t value = 0;
@@ -59,8 +59,8 @@ inline std::optional<T> get_cpu_capabilities(const char* key) {
 
 /** Returns the caller-supplied fallback when the key is missing. */
 template <typename T>
-inline T get_cpu_capabilities(const char* key, std::common_type_t<T> fallback) {
-  return get_cpu_capabilities<T>(key).value_or(std::move(fallback));
+inline T get_cpu_capability(const char* key, std::common_type_t<T> fallback) {
+  return get_cpu_capability<T>(key).value_or(std::move(fallback));
 }
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0

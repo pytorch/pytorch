@@ -342,5 +342,5 @@ in the PyTorch source tree.
 
 ## CPU Capability Queries
 
-```{doxygenfunction} torch::stable::cpu::get_cpu_capabilities
+```{doxygenfunction} torch::stable::cpu::get_cpu_capability
 ```

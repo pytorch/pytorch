@@ -9,30 +9,30 @@ std::optional<int64_t> my_cpu_capability_int(
     const std::string& key,
     std::optional<int64_t> fallback) {
   if (fallback) {
-    return torch::stable::cpu::get_cpu_capabilities<int64_t>(
+    return torch::stable::cpu::get_cpu_capability<int64_t>(
         key.c_str(), *fallback);
   }
-  return torch::stable::cpu::get_cpu_capabilities<int64_t>(key.c_str());
+  return torch::stable::cpu::get_cpu_capability<int64_t>(key.c_str());
 }
 
 std::optional<bool> my_cpu_capability_bool(
     const std::string& key,
     std::optional<bool> fallback) {
   if (fallback) {
-    return torch::stable::cpu::get_cpu_capabilities<bool>(
+    return torch::stable::cpu::get_cpu_capability<bool>(
         key.c_str(), *fallback);
   }
-  return torch::stable::cpu::get_cpu_capabilities<bool>(key.c_str());
+  return torch::stable::cpu::get_cpu_capability<bool>(key.c_str());
 }
 
 std::optional<std::string> my_cpu_capability_string(
     const std::string& key,
     std::optional<std::string> fallback) {
   if (fallback) {
-    return torch::stable::cpu::get_cpu_capabilities<std::string>(
+    return torch::stable::cpu::get_cpu_capability<std::string>(
         key.c_str(), *fallback);
   }
-  return torch::stable::cpu::get_cpu_capabilities<std::string>(key.c_str());
+  return torch::stable::cpu::get_cpu_capability<std::string>(key.c_str());
 }
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
