@@ -54,7 +54,7 @@ class CupyAsTensorTest(MultiProcContinuousTest):
     hw_classification = HardwareClassification.CUDA
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return "gloo"
 
     def _init_device(self, device_type) -> None:

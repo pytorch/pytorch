@@ -3,6 +3,7 @@ import math
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
+from itertools import pairwise
 from unittest.mock import patch
 
 import torch
@@ -1507,6 +1508,141 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             )
             self.assertEqual(out_buf, out)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @setSdpaBackendsToDefaultFinally
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize(
+        "q_len,k_len,window_size",
+        [
+            (1, 64, (8, 0)),  # pytorch/pytorch#203417 reproducer
+            (16, 64, (32, 0)),
+            (16, 64, (8, 4)),
+            (16, 64, (-1, 0)),  # already bottom-right aligned
+            # seqlen_q > seqlen_k + 1, where FA2's normalization changes the
+            # mask; with a left bound the first rows see no key.
+            (64, 16, (8, 48)),  # right >= max_seqlen_k becomes max_seqlen_k
+            (64, 16, (8, -1)),  # unbounded right becomes max_seqlen_k
+            (64, 16, (-1, 20)),  # right >= max_seqlen_k is dropped: no mask
+        ],
+    )
+    def test_numeric_window_bottom_right(
+        self, device, dtype, q_len, k_len, window_size
+    ):
+        # Numeric sliding windows follow flash-attention 2 (the CUDA build): both
+        # edges are anchored at each sequence's bottom-right diagonal,
+        # j - i = seqlen_k - seqlen_q, after FA2's host-side normalization in
+        # flash_api.cpp. Rows whose window holds no key give zeros.
+        # Covers the dense (_flash_attention_forward without cu_seqlens) and the
+        # varlen path; the varlen batch mixes two different seqlen_k - seqlen_q.
+        if TEST_WITH_ROCM:
+            # CK does not support these windows; pin AOTriton.
+            torch.backends.cuda.preferred_rocm_fa_library("aotriton")
+        torch.manual_seed(0)
+        H, D = 2, 64
+        left, right = window_size
+
+        def fa2_window(max_k):
+            # A side >= max_seqlen_k is unbounded (-1); a lone unbounded side is
+            # then replaced by max_seqlen_k. (-1, 0) is causal, which this
+            # replacement reproduces as well.
+            wl = -1 if left >= max_k else left
+            wr = -1 if right >= max_k else right
+            if wl < 0 and wr < 0:
+                return None
+            return (max_k if wl < 0 else wl, max_k if wr < 0 else wr)
+
+        def ref_attn(q, k, v, max_k):
+            # q: (sq, H, D), k/v: (sk, H, D), computed in fp32
+            sq, sk = q.shape[0], k.shape[0]
+            i = torch.arange(sq, device=q.device)[:, None]
+            j = torch.arange(sk, device=q.device)[None, :]
+            d = sk - sq
+            mask = torch.ones(sq, sk, dtype=torch.bool, device=q.device)
+            window = fa2_window(max_k)
+            if window is not None:
+                wl, wr = window
+                mask &= (j >= i + d - wl) & (j <= i + d + wr)
+            qf, kf, vf = (t.float().transpose(0, 1) for t in (q, k, v))
+            with sdpa_kernel(SDPBackend.MATH):
+                out = F.scaled_dot_product_attention(qf, kf, vf, attn_mask=mask)
+            return out.transpose(0, 1)
+
+        # The expected masks follow FA2's host-side window normalization, so do
+        # not parametrize this test over the other CUDA backends.
+        with _use_backend("fa2"):
+            # Dense
+            q = torch.randn(1, q_len, H, D, device=device, dtype=dtype)
+            k = torch.randn(1, k_len, H, D, device=device, dtype=dtype)
+            v = torch.randn(1, k_len, H, D, device=device, dtype=dtype)
+            out = torch.ops.aten._flash_attention_forward(
+                q,
+                k,
+                v,
+                None,
+                None,
+                q_len,
+                k_len,
+                0.0,
+                False,
+                False,
+                window_size_left=left if left >= 0 else None,
+                window_size_right=right if right >= 0 else None,
+            )[0]
+            self.assertEqual(
+                out[0].float(),
+                ref_attn(q[0], k[0], v[0], k_len),
+                atol=2e-2,
+                rtol=2e-2,
+            )
+
+            # Varlen, forward and backward
+            q_lens = [q_len, max(q_len // 2, 1)]
+            k_lens = [k_len, k_len - 8 if k_len > 8 else k_len]
+            cu_q = torch.tensor(
+                [0, q_lens[0], sum(q_lens)], device=device, dtype=torch.int32
+            )
+            cu_k = torch.tensor(
+                [0, k_lens[0], sum(k_lens)], device=device, dtype=torch.int32
+            )
+            qv = torch.randn(
+                sum(q_lens), H, D, device=device, dtype=dtype, requires_grad=True
+            )
+            kv = torch.randn(
+                sum(k_lens), H, D, device=device, dtype=dtype, requires_grad=True
+            )
+            vv = torch.randn(
+                sum(k_lens), H, D, device=device, dtype=dtype, requires_grad=True
+            )
+            out = varlen_attn(
+                qv,
+                kv,
+                vv,
+                cu_q,
+                cu_k,
+                max(q_lens),
+                max(k_lens),
+                window_size=window_size,
+            )
+            grad = torch.randn_like(out)
+            out.backward(grad)
+
+            qr, kr, vr = (
+                t.detach().float().clone().requires_grad_() for t in (qv, kv, vv)
+            )
+            refs = []
+            for b in range(2):
+                qs = slice(int(cu_q[b]), int(cu_q[b + 1]))
+                ks = slice(int(cu_k[b]), int(cu_k[b + 1]))
+                refs.append(ref_attn(qr[qs], kr[ks], vr[ks], max(k_lens)))
+            ref = torch.cat(refs, dim=0)
+            ref.backward(grad.float())
+            self.assertEqual(out.float(), ref, atol=2e-2, rtol=2e-2)
+            self.assertEqual(qv.grad.float(), qr.grad, atol=3e-2, rtol=3e-2)
+            self.assertEqual(kv.grad.float(), kr.grad, atol=3e-2, rtol=3e-2)
+            self.assertEqual(vv.grad.float(), vr.grad, atol=3e-2, rtol=3e-2)
+
 
 class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
     # cuDNN is the only varlen backend with dedicated aten ops
@@ -1531,6 +1667,74 @@ class TestVarlenAttentionCuDNN(_VarlenVsSdpaMixin, NNTestCase):
             enable_gqa=False,
             _should_use_cudnn=_should_use_cudnn,
         )
+
+    @skipIfRocm
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("is_causal", [False, True])
+    @parametrize("enable_gqa", [False, True])
+    @parametrize("layout", ["fused_qkv", "padded_head_major"])
+    @_skip_cudnn_varlen_unsupported
+    def test_cudnn_varlen_backward_query_layout(
+        self, device, dtype, is_causal, enable_gqa, layout
+    ):
+        _check_cudnn_varlen_supported(device)
+        torch.manual_seed(42)
+        total, num_heads, head_dim = 512, 8, 128
+        num_kv_heads = 2 if enable_gqa else num_heads
+        if layout == "fused_qkv":
+            head_sizes = (num_heads, num_kv_heads, num_kv_heads)
+            qkv = torch.randn(
+                total, sum(head_sizes), head_dim, device=device, dtype=dtype
+            )
+            q, k, v = qkv.split(head_sizes, dim=1)
+        else:
+            # Padding changes Q's token stride; dQ stays dense and head-major.
+            q = torch.randn(num_heads, total, 2 * head_dim, device=device, dtype=dtype)
+            q = q[..., :head_dim].transpose(0, 1)
+            k, v = (
+                torch.randn(total, num_kv_heads, head_dim, device=device, dtype=dtype)
+                for _ in range(2)
+            )
+        q, k, v = (t.requires_grad_() for t in (q, k, v))
+        boundaries = [0, 193, 352, total]
+        cu_seq = torch.tensor(boundaries, device=device, dtype=torch.int32)
+        max_len = max(b - a for a, b in pairwise(boundaries))
+        grad_out = torch.randn(total, num_heads, head_dim, device=device, dtype=dtype)
+
+        with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+            out = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                window_size=(-1, 0) if is_causal else (-1, -1),
+                enable_gqa=enable_gqa,
+            )
+            grads = torch.autograd.grad(out, (q, k, v), grad_out)
+
+        q_ref, k_ref, v_ref = (t.detach().float().requires_grad_() for t in (q, k, v))
+        with sdpa_kernel(SDPBackend.MATH):
+            out_ref = torch.cat(
+                [
+                    F.scaled_dot_product_attention(
+                        q_ref[start:end].transpose(0, 1),
+                        k_ref[start:end].transpose(0, 1),
+                        v_ref[start:end].transpose(0, 1),
+                        is_causal=is_causal,
+                        enable_gqa=enable_gqa,
+                    ).transpose(0, 1)
+                    for start, end in pairwise(boundaries)
+                ]
+            )
+        grads_ref = torch.autograd.grad(
+            out_ref, (q_ref, k_ref, v_ref), grad_out.float()
+        )
+        self.assertEqual(out.float(), out_ref, atol=2e-2, rtol=2e-2)
+        for actual, expected in zip(grads, grads_ref):
+            self.assertEqual(actual.float(), expected, atol=3e-2, rtol=3e-2)
 
     @skipIfRocm
     @unittest.skipIf(
