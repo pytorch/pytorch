@@ -119,9 +119,6 @@ class _Missing:
     def __repr__(self) -> str:
         return f"_Missing({self._reason})"
 
-    def __str__(self) -> str:
-        return f"_Missing({self._reason})"
-
     # Sometimes _Missing object is used as the callable with functools.partial,
     # so we add a dummy __call__ here to bypass TypeError from partial().
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -1131,9 +1128,7 @@ class PrecompileCacheEntry:
 
 
 def _hash_source(source: str) -> str:
-    sha256_hash = hashlib.sha256()
-    sha256_hash.update(source.encode())
-    return sha256_hash.hexdigest()
+    return hashlib.sha256(source.encode()).hexdigest()
 
 
 def _get_sourcelines(
@@ -1778,12 +1773,8 @@ class CompilePackage:
     def source_id_from_fn(fn: Callable[..., Any]) -> str:
         from .eval_frame import innermost_fn
 
-        innermost_fn_ = innermost_fn(fn)
-
-        sha256_hash = hashlib.sha256()
-        sha256_hash.update(innermost_fn_.__qualname__.encode())
-        sha256_hash.update(str(innermost_fn_.__code__.co_firstlineno).encode())
-        return sha256_hash.hexdigest()
+        inner = innermost_fn(fn)
+        return _hash_source(f"{inner.__qualname__}{inner.__code__.co_firstlineno}")
 
 
 _Backends = dict[_BackendId, Any]
