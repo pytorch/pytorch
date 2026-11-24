@@ -26,7 +26,9 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     LazyVal,
     parametrize,
     run_tests,
@@ -278,6 +280,102 @@ class StrictNumericsCompileTest(TestCase):
         self.assertIn("libdevice.exp", code)
         self.assertIn("libdevice.rcp_rn", code)
         self.assertNotIn("tl.sigmoid", code)
+
+    @ops(
+        [op for op in op_db if op.name == "nn.functional.relu"],
+        allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32, torch.float64),
+    )
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    @parametrize("upcast", (False, True))
+    def test_relu_shared_predicate(self, device, dtype, op, numerics, upcast):
+        if IS_FBCODE and upcast and dtype in (torch.float16, torch.bfloat16):
+            # The generated where(x < 0, 0, x) is correct, but fbcode's Triton
+            # 3.8 returns +0.0 for relu(-0.0) after the fp32 upcast; OSS Triton
+            # 3.9 does not. Remove once fbcode moves to Triton 3.9.
+            self.skipTest("fbcode Triton 3.8 drops the sign of relu(-0.0) when upcast")
+        if dtype in (torch.float16, torch.bfloat16):
+            x = _exhaustive_16bit(dtype, device)
+        elif dtype == torch.float32:
+            x = _sampled_fp32(NUM_BITPATTERN_SAMPLES, device)
+        else:
+            bits = torch.tensor(
+                [
+                    0,
+                    1,
+                    0x0010000000000000,
+                    0x3FF0000000000000,
+                    0x7FEFFFFFFFFFFFFF,
+                    0x7FF0000000000000,
+                    0x7FF0000000000001,
+                    0x7FF8123456789ABC,
+                    0x7FFFFFFFFFFFFFFF,
+                ],
+                dtype=torch.int64,
+                device=device,
+            )
+            x = torch.cat((bits, bits | torch.iinfo(torch.int64).min)).view(dtype)
+
+        def fn(x):
+            return op.op(x), x < 0
+
+        (result, negative), codes = run_and_get_code(
+            torch.compile(
+                fn,
+                fullgraph=True,
+                options={
+                    "numerics": numerics,
+                    "triton.codegen_upcast_to_fp32": upcast,
+                },
+            ),
+            x,
+        )
+        expected, expected_negative = fn(x)
+        int_dtype = _BIT_VIEW[dtype]
+        self.assertEqual(result.view(int_dtype), expected.view(int_dtype))
+        self.assertEqual(negative, expected_negative)
+        self.assertIn("tl.where", "\n".join(codes))
+
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("numerics", ("strict_pointwise", "strict"))
+    def test_softshrink_strict_symbolic_lambd(self, device, dtype, numerics):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        bits = _BIT_VIEW[dtype]
+
+        def fn(x, lambd):
+            return torch.nn.functional.softshrink(x, lambd)
+
+        counter = CompileCounterWithBackend("inductor")
+        with config.patch({"numerics": numerics, "force_disable_caches": True}):
+            compiled = torch.compile(fn, fullgraph=True, backend=counter)
+            # The first value is specialized; later values reuse one graph (f32).
+            for lambd in (0.5, 0.1, 0.3):
+                # lambd is not representable, so its rounding is observable.
+                bound = torch.tensor([lambd, -lambd], dtype=dtype, device=device)
+                x = torch.cat(
+                    (
+                        bound,
+                        torch.nextafter(bound, bound * 2),
+                        torch.nextafter(bound, bound * 0),
+                        torch.tensor(
+                            [0.0, -0.0, 0.05, -0.05, float("nan")],
+                            dtype=dtype,
+                            device=device,
+                        ),
+                    )
+                ).requires_grad_(True)
+                grad_output = torch.full_like(x, -0.0)
+                grad_output[::2] = 1.5
+                expected = fn(x, lambd)
+                expected_grad = torch.autograd.grad(expected, x, grad_output)[0]
+                result = compiled(x, lambd)
+                result_grad = torch.autograd.grad(result, x, grad_output)[0]
+                self.assertEqual(result.view(bits), expected.view(bits))
+                self.assertEqual(result_grad.view(bits), expected_grad.view(bits))
+        if dtype == torch.float32:
+            # Half-precision inputs round lambd with scalar_tensor, which
+            # tensorify cannot handle, so lambd is specialized there.
+            self.assertEqual(counter.frame_count, 2)
 
     @parametrize("numerics", ("strict_pointwise", "strict"))
     def test_compile_options_enable_eager_division(self, device, numerics):
@@ -912,13 +1010,7 @@ POINTWISE_XFAIL = frozenset(
         ("nn_functional_relu6", "bfloat16"),
         ("nn_functional_relu6", "float16"),
         ("nn_functional_relu6", "float32"),
-        ("nn_functional_relu", "bfloat16"),
-        ("nn_functional_relu", "float16"),
-        ("nn_functional_relu", "float32"),
         ("nn_functional_softplus", "float32"),
-        ("nn_functional_softshrink", "bfloat16"),
-        ("nn_functional_softshrink", "float16"),
-        ("nn_functional_softshrink", "float32"),
         ("remainder", "bfloat16"),
         ("remainder", "float16"),
         ("remainder", "float32"),
@@ -999,9 +1091,6 @@ BACKWARD_XFAIL = frozenset(
         ("addcdiv", "bfloat16"),
         ("addcdiv", "float16"),
         ("addcdiv", "float32"),
-        ("double", "bfloat16"),
-        ("double", "float16"),
-        ("float_power", "bfloat16"),
         ("float_power", "float16"),
         ("float_power", "float32"),
         ("hypot", "float16"),
@@ -1030,9 +1119,6 @@ BACKWARD_XFAIL = frozenset(
         ("nn_functional_mish", "float32"),
         ("nn_functional_silu", "float16"),
         ("nn_functional_silu", "float32"),
-        ("nn_functional_softshrink", "bfloat16"),
-        ("nn_functional_softshrink", "float16"),
-        ("nn_functional_softshrink", "float32"),
         ("nn_functional_tanhshrink", "bfloat16"),
         ("nn_functional_tanhshrink", "float16"),
         ("nn_functional_tanhshrink", "float32"),
@@ -1357,6 +1443,10 @@ class PointwiseStrictNumericsTest(TestCase):
                 f"on (source, index, shape, kwargs, kind): {mismatches}.",
             )
 
+    @decorateIf(
+        unittest.skip("uncompilable op under fullgraph"),
+        lambda p: p["op"].name in COMPILE_UNSUPPORTED,
+    )
     @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
@@ -1364,6 +1454,10 @@ class PointwiseStrictNumericsTest(TestCase):
             mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
         )
 
+    @decorateIf(
+        unittest.skip("uncompilable op under fullgraph"),
+        lambda p: p["op"].name in COMPILE_UNSUPPORTED,
+    )
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
     def test_pointwise_nonfloat(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
@@ -1474,6 +1568,10 @@ class PointwiseStrictNumericsTest(TestCase):
             self._require_kernel(tested, "no differentiable sample")
         return mismatches
 
+    @decorateIf(
+        unittest.skip("uncompilable op under fullgraph"),
+        lambda p: p["op"].name in COMPILE_UNSUPPORTED,
+    )
     @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL)
     def test_pointwise_backward(self, device, dtype, op):
         mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)

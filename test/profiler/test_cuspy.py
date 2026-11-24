@@ -18,10 +18,11 @@ import textwrap
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._C._profiler import _ExperimentalConfig
+from torch._utils import try_import
 from torch.profiler import profile, ProfilerActivity, record_function
 from torch.profiler._cuspy.observers.observation_window import WindowFinalizerMixin
 from torch.testing._internal.common_cuda import (
@@ -29,11 +30,13 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_CUDA_GRAPH_TOOLS_ID,
     TEST_CUPTI as TEST_CUPTI_PYTHON,
-    TEST_CUPTI_V13_3,
+    TEST_CUPTI_V13_5,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TemporaryFileName,
@@ -41,28 +44,12 @@ from torch.testing._internal.common_utils import (
 )
 
 
-def setUpModule():
-    # Priming leaves libkineto holding the single process-wide CUPTI subscriber, so a
-    # later cuspy session can't subscribe (MULTIPLE_SUBSCRIBERS). Release it
-    # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
-    # safe; libkineto re-subscribes on its next profile, so kineto tests are
-    # unaffected. See pylibcupti().finalize.
-    if initialize_kineto_with_cuda() and TEST_CUPTI_V13_3:
-        from torch.profiler._cuspy.cupti_python import pylibcupti
-
-        try:
-            pylibcupti().finalize()
-        except Exception:
-            pass
-
-
 def _isolated(test_fn):
     """Run a cuspy test in a fresh subprocess. Cuspy needs the single
     process-wide CUPTI subscriber, but libkineto grabs it for the process lifetime once
-    any kineto-CUDA profile runs (setUpModule's prime, or another test in a full run),
-    and decoded-record native state can leak between tests. Re-running the test alone in
-    a child gives it a clean process: setUpModule's finalize releases the child's own
-    prime, so Cuspy subscribes, with no cross-test interference."""
+    any kineto-CUDA profile runs, and decoded-record native state can leak between
+    tests. Re-running the test alone in a child gives it a clean process, so Cuspy
+    subscribes, with no cross-test interference."""
 
     @functools.wraps(test_fn)
     def wrapper(self):
@@ -86,19 +73,84 @@ def _isolated(test_fn):
     return wrapper
 
 
-def _fresh_event_node_recorder(test):
-    """The ``_EventNodeRecorder`` singleton, reset first (and again at teardown) so the test
-    starts from an unarmed recorder with an empty map and leaves none behind."""
-    from torch.profiler._cuspy._event_nodes import _EventNodeRecorder, _reset_for_test
-
-    _reset_for_test()
-    test.addCleanup(_reset_for_test)
-    return _EventNodeRecorder()
+# A minimal protobuf scanner for asserting on .pftrace output (the perfetto python lib is not
+# installed). Field numbers come from perfetto.h.
 
 
+def _pb_varint(b, i):
+    """Decode the varint at ``b[i]`` (7 bits per byte, LSB group first, high bit set on every
+    byte but the last); return ``(value, offset past it)``."""
+    s = r = 0
+    while True:
+        x = b[i]
+        i += 1
+        r |= (x & 0x7F) << s
+        if not x & 0x80:
+            return r, i
+        s += 7
+
+
+def _pb_fields(b):
+    """Split one message into ``[(field_no, wire_type, value)]``. Varints (wt 0) are decoded;
+    length-delimited fields (wt 2: strings, bytes, nested messages) are returned as raw bytes
+    for the caller to decode or recurse into; fixed32/fixed64 (wt 5/1) are skipped."""
+    i = 0
+    o = []
+    while i < len(b):
+        k, i = _pb_varint(b, i)
+        fn, wt = k >> 3, k & 7
+        if wt == 0:
+            v, i = _pb_varint(b, i)
+            o.append((fn, 0, v))
+        elif wt == 2:
+            n, i = _pb_varint(b, i)
+            o.append((fn, 2, b[i : i + n]))
+            i += n
+        elif wt == 5:
+            i += 4
+        elif wt == 1:
+            i += 8
+    return o
+
+
+def _pftrace_packets(path):
+    """The TracePackets (Trace field 1) of a gzipped .pftrace."""
+    with gzip.open(path, "rb") as f:
+        raw = f.read()
+    return [v for fn, _wt, v in _pb_fields(raw) if fn == 1]
+
+
+def _pftrace_render_stage_extra(packets):
+    """``{event_id: {name: value}}`` of each GpuRenderStageEvent's extra_data (TracePacket
+    field 53; event_id=1, extra_data=6; ExtraData.name=1, value=2)."""
+    per_stage: dict[int, dict[str, str]] = {}
+    for pkt in packets:
+        for fn, _wt, v in _pb_fields(pkt):
+            if fn != 53:
+                continue
+            event_id = 0
+            pairs: dict[str, str] = {}
+            for sfn, _swt, sv in _pb_fields(v):
+                if sfn == 1:
+                    event_id = sv
+                elif sfn == 6:
+                    ef = {
+                        efn: bytes(ev).decode()
+                        for efn, ewt, ev in _pb_fields(sv)
+                        if ewt == 2
+                    }
+                    if 1 in ef:
+                        pairs[ef[1]] = ef.get(2)
+            per_stage[event_id] = pairs
+    return per_stage
+
+
+@instantiate_parametrized_tests
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-class TestCuspyRecords(TestCase):
-    """Pure Cuspy + metadata unit tests (no CUDA)."""
+class TestCuspyRecordsCUDA(TestCase):
+    """Pure Cuspy + metadata unit tests (no GPU)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
@@ -107,7 +159,7 @@ class TestCuspyRecords(TestCase):
         cuspy_core._reset_for_test()
         self.addCleanup(cuspy_core._reset_for_test)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_normalize_activities(self):
         # A registration request resolves to (kinds, per-kind field selection): a
         # bare kind iterable means "all fields"; a field map selects fields, with
@@ -181,11 +233,11 @@ class TestCuspyRecords(TestCase):
         self.assertTrue(cfg["use_approx_timestamps"])
         self.assertTrue(cfg["configured"])
 
-        # First-come-first-serve: a second configure() is ignored.
+        # Before collection starts, later calls can supply parsed arguments.
         cuspy_core.configure(buffer_size=4096)
-        self.assertEqual(cuspy_core.get_config()["buffer_size"], 2048)
+        self.assertEqual(cuspy_core.get_config()["buffer_size"], 4096)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_singleton_snapshots_config(self):
         # Cuspy() is the process-wide singleton: it returns the one instance,
         # built once from the configure() settings.
@@ -209,11 +261,11 @@ class TestCuspyRecords(TestCase):
         self.assertEqual(m.background_flush_period_s, -1.0)
         self.assertEqual(m.background_drain_period_s, -1.0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_use_approx_timestamps_config(self):
         # use_approx_timestamps is a configure() setting the singleton snapshots: OFF by
         # default (the per-subscriber callback only times device records correctly when
-        # Cuspy is the first CUPTI consumer), opt-in on. Constructing loads libcupti (>= 13.3).
+        # Cuspy is the first CUPTI consumer), opt-in on. Constructing loads libcupti (>= 13.5).
         from torch.profiler._cuspy import core as cuspy_core
         from torch.profiler._cuspy.core import Cuspy
 
@@ -222,7 +274,7 @@ class TestCuspyRecords(TestCase):
         cuspy_core.configure(use_approx_timestamps=True)
         self.assertTrue(Cuspy()._timestamp_callback_enabled)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_external_correlation_not_started(self):
         # External-correlation push/pop are no-ops until Cuspy is started (no
         # subscriber yet), returning None rather than touching CUPTI's global stack.
@@ -233,7 +285,7 @@ class TestCuspyRecords(TestCase):
         self.assertIsNone(m.push_external_correlation_id())
         self.assertIsNone(m.pop_external_correlation_id())
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_kernel_latency_timestamps_track_the_field_union(self):
         # The per-subscriber latency-timestamp attribute is only wanted while some
         # observer selects the QUEUED kernel field. It used to latch on and never
@@ -291,7 +343,7 @@ class TestCuspyRecords(TestCase):
         self.assertEqual(m.current_external_id(), 0)
         self.assertEqual(m.note_external_pop(), 0)  # empty -> 0
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_external_id_chain_and_gc(self):
         # The push-time active-id chain: with one kind CUPTI tags a kernel with only
         # the innermost id, so Cuspy snapshots the full active stack per id and
@@ -320,7 +372,7 @@ class TestCuspyRecords(TestCase):
         self.assertNotIn(2, m._id_chains)
         self.assertIn(1, m._id_chains)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_drain_polls_pm_consumers(self):
         # Regression: PM-sampling frames must be pulled on the drain path. flush() and
         # the background drain loop both funnel through _drain_and_dispatch, so the PM
@@ -484,79 +536,12 @@ class TestCuspyRecords(TestCase):
             json.loads(both["kernel"]["metadata"][0]), {"func": "ReduceScatter"}
         )
 
-    def test_recorder_keeps_node_id_order_and_refuses_opaque_bodies(self):
-        # The recorder takes event nodes in the order get_graph_data() returns them (node-id
-        # == node-creation order) with no DAG-derived sorting: sync id follows node id, not
-        # execution order, so ordering by dependency depth mislabels nodes on any fork/join
-        # graph. Graphs with child/conditional bodies are refused outright -- get_graph_data()
-        # does not descend into them, so their event nodes are invisible here. Pure host-side.
-        def node(ntype, tid, deps):
-            return {"node_type": ntype, "tools_id": tid, "dependencies": deps}
-
-        class FakeGraph:
-            def __init__(self, nodes):
-                self._nodes = nodes
-                self._recorded_exec_ids: set[int] = set()
-
-            def get_graph_data(self):
-                return {"nodes": self._nodes, "exec_graph_id": 7}
-
-        # Fork/join: the deeper branch's event node is created FIRST (lower node id) but sits
-        # at greater dependency depth. Node-id order must win.
-        deep_first = [
-            node("kernel", (7 << 32) | 0, []),
-            node("kernel", (7 << 32) | 1, [0]),
-            node("kernel", (7 << 32) | 2, [1]),
-            node("event_record", (7 << 32) | 3, [2]),  # deep branch, created first
-            node("event_record", (7 << 32) | 4, [0]),  # shallow branch, created second
-        ]
-        r = _fresh_event_node_recorder(self)
-        r._on_instantiate(FakeGraph(deep_first))
-        self.assertEqual(
-            r.graph_event_nodes[7], [(7 << 32) | 3, (7 << 32) | 4]
-        )  # NOT depth order, which would invert these
-
-        # No event nodes -> nothing tracked at all.
-        r2 = _fresh_event_node_recorder(self)
-        r2._on_instantiate(FakeGraph([node("kernel", (7 << 32) | 0, [])]))
-        self.assertNotIn(7, r2.graph_event_nodes)
-
-        # Opaque bodies -> refuse, even though a top-level event node is present.
-        for opaque in ("child_graph", "conditional"):
-            r3 = _fresh_event_node_recorder(self)
-            r3._on_instantiate(
-                FakeGraph(
-                    [
-                        node("event_record", (7 << 32) | 0, []),
-                        node(opaque, (7 << 32) | 1, [0]),
-                    ]
-                )
-            )
-            self.assertNotIn(7, r3.graph_event_nodes, opaque)
-
-    def test_event_node_recorder_purge(self):
-        # The recorder holds each graph's ordered event nodes; purge drops a destroyed graph.
-        r = _fresh_event_node_recorder(self)
-        r.graph_event_nodes = {7: [11, 13], 8: None}
-        r.purge_exec_ids({7})
-        self.assertNotIn(7, r.graph_event_nodes)
-        self.assertIn(8, r.graph_event_nodes)
-
-    def test_graph_recorders_are_singletons(self):
-        # Both instantiate-hook recorders are process-wide singletons (like Cuspy): a
-        # later construction hands back the one instance WITHOUT re-initializing it, which is
-        # what lets an observer created mid-run (at prepare_trace) share the map a recorder
-        # armed before warm-up capture has been filling.
-        from torch.profiler._cuspy._event_nodes import _EventNodeRecorder
+    def test_graph_dependency_recorder_is_singleton(self):
+        # An observer created mid-run shares the dependency map recorded during capture.
         from torch.profiler._cuspy._graph_deps import (
             _GraphDependencyRecorder,
             _reset_for_test,
         )
-
-        r = _fresh_event_node_recorder(self)
-        r.graph_event_nodes[7] = [11]
-        self.assertIs(_EventNodeRecorder(), r)
-        self.assertEqual(_EventNodeRecorder().graph_event_nodes[7], [11])
 
         _reset_for_test()
         self.addCleanup(_reset_for_test)
@@ -564,37 +549,6 @@ class TestCuspyRecords(TestCase):
         d.deps[9] = [8]
         self.assertIs(_GraphDependencyRecorder(), d)
         self.assertEqual(_GraphDependencyRecorder().deps[9], [8])
-
-    def test_resolve_window(self):
-        # The window orchestration: keys each launch by correlation id -> exec graph id (from a
-        # graphed work record's graph_node_id), orders that launch's event records by sync id,
-        # and resolves each record to its node POSITIONALLY. Pure (no numpy/CUDA).
-        from torch.profiler._cuspy._event_nodes import resolve_window
-
-        exec_id = 7
-        n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
-        r = _fresh_event_node_recorder(self)
-        r.graph_event_nodes = {exec_id: [n0, n1]}
-
-        corr_exec_pairs = [
-            (900, (exec_id << 32) | 55)
-        ]  # a graphed kernel in launch 900
-        # Two event records for launch 900, delivered out of sync-id order.
-        event_rows = [(900, 2), (900, 1)]
-        resolved = resolve_window(r, corr_exec_pairs, event_rows)
-        self.assertEqual(resolved, [n1, n0])  # sync 2 -> node1, sync 1 -> node0
-
-        # A recycled CUDA event object would give both records the same event_id; positional
-        # resolution keys on sync-id order, not the object, so the two records still map to
-        # distinct nodes instead of collapsing onto the first.
-        second = resolve_window(r, corr_exec_pairs, [(900, 10), (900, 20)])
-        self.assertEqual(second, [n0, n1])
-
-        # A launch whose event-record count does not match the graph's stays unresolved.
-        self.assertEqual(resolve_window(r, corr_exec_pairs, [(900, 1)]), [None])
-
-        # Event records with no matching graphed work record (unknown launch) stay unresolved.
-        self.assertEqual(resolve_window(r, [], [(0, 0)]), [None])
 
     def test_add_graph_event_node_spans(self):
         # The window-bucketed event-node span frame keeps only rows resolved to a graph node
@@ -605,11 +559,13 @@ class TestCuspyRecords(TestCase):
         from torch.profiler._cuspy.observers.profiler import _add_graph_event_node_spans
 
         node = (7 << 32) | 11
+        source = (3 << 32) | 11
         cols = {
             "cuda_event": {
                 "event_id": np.array([5, 6, 7], dtype=np.int64),
                 # row 1 resolved+in-window; row 2 unresolved; row 3 resolved but out of window
                 "graph_node_id": np.array([node, 0, node], dtype=np.int64),
+                "source_graph_node_id": np.array([source, 0, source], dtype=np.int64),
                 "start_ns": np.array([1500, 1500, 9999], dtype=np.int64),
                 "end_ns": np.array([1500, 1500, 9999], dtype=np.int64),
                 "device_id": np.array([0, 0, 0], dtype=np.int64),
@@ -624,6 +580,7 @@ class TestCuspyRecords(TestCase):
         self.assertEqual(
             gen["graph_node_id"].tolist(), [node]
         )  # only the first row survives
+        self.assertEqual(gen["source_graph_node_id"].tolist(), [source])
         self.assertEqual(gen["graph_id"].tolist(), [7])
         self.assertEqual(gen["start_ns"].tolist(), [1500])
         self.assertEqual(gen["stream_id"].tolist(), [7])
@@ -632,6 +589,7 @@ class TestCuspyRecords(TestCase):
         cols2 = {
             "cuda_event": {
                 "graph_node_id": np.array([0], dtype=np.int64),
+                "source_graph_node_id": np.array([0], dtype=np.int64),
                 "start_ns": np.array([1500], dtype=np.int64),
                 "end_ns": np.array([1500], dtype=np.int64),
                 "device_id": np.array([0], dtype=np.int64),
@@ -663,6 +621,7 @@ class TestCuspyRecords(TestCase):
                 "cuda_event": {
                     "event_id": np.array([5], dtype=np.int64),
                     "graph_node_id": np.array([node], dtype=np.int64),
+                    "source_graph_node_id": np.array([0], dtype=np.int64),
                     "start_ns": np.array([1500], dtype=np.int64),
                     "end_ns": np.array([1500], dtype=np.int64),
                     "device_id": np.array([0], dtype=np.int64),
@@ -689,45 +648,72 @@ class TestCuspyRecords(TestCase):
         _add_graph_event_node_spans(plain, 1000, 2000)
         self.assertNotIn("logical_lane", plain["graph_event_node"])
 
-    def test_attach_event_node_ids_uses_installed_resolver(self):
-        # The annotation column must come from the installed resolver (the same one the GPU-op
-        # column builders use), not a direct read of torch.cuda._graph_annotations -- an
-        # installed resolver may merge a node's annotation list into one dict, and only a dict
-        # gets spread into the exported event's args.
+    @parametrize("graph_fields", [True, False])
+    def test_cuda_event_columns_uses_installed_resolver(self, graph_fields):
         import numpy as np
 
-        from torch.profiler._cuspy.observers.profiler import _attach_event_node_ids
+        from torch.profiler._cuspy.observers.profiler import (
+            _add_graph_event_node_spans,
+            _cuda_event_columns,
+        )
+        from torch.profiler._cuspy.records import CudaEvent
 
-        exec_id = 7
-        n0 = (exec_id << 32) | 11
-        r = _fresh_event_node_recorder(self)
-        r.graph_event_nodes = {exec_id: [n0]}
-
-        columns = {
-            "kernel": {
-                "correlation_id": np.array([900], dtype=np.int64),
-                "graph_node_id": np.array([(exec_id << 32) | 55], dtype=np.int64),
-            },
-            "cuda_event": {
-                "event_id": np.array([5], dtype=np.int64),
-                "correlation_id": np.array([900], dtype=np.int64),
-                "cuda_event_sync_id": np.array([1], dtype=np.int64),
-            },
+        n0, n1, n2 = [(7 << 32) | i for i in (11, 13, 15)]
+        s0, s1, s2 = [(3 << 32) | i for i in (11, 13, 15)]
+        graph_nodes = [n1, n0, n1, n2] if graph_fields else [0] * 4
+        source_nodes = [s1, s0, 0, s2] if graph_fields else [0] * 4
+        # Reused event/sync IDs and out-of-order timestamps must not reorder or merge rows.
+        raw = {
+            CudaEvent.EVENT_ID.id: np.array([5, 5, 5, 6], dtype=np.uint32),
+            CudaEvent.CUDA_EVENT_SYNC_ID.id: np.array([2, 1, 2, 1], dtype=np.uint32),
+            CudaEvent.CORRELATION_ID.id: np.array(
+                [900, 900, 901, 901], dtype=np.uint32
+            ),
+            CudaEvent.DEVICE_ID.id: np.array([0, 0, 0, 0], dtype=np.uint32),
+            CudaEvent.CONTEXT_ID.id: np.array([1, 1, 1, 1], dtype=np.uint32),
+            CudaEvent.STREAM_ID.id: np.array([7, 8, 7, 8], dtype=np.uint32),
+            CudaEvent.DEVICE_TIMESTAMP.id: np.array(
+                [1800, 1500, 1700, 1600], dtype=np.uint64
+            ),
+            CudaEvent.GRAPH_NODE_ID.id: np.array(graph_nodes, dtype=np.uint64),
+            CudaEvent.SOURCE_GRAPH_NODE_ID.id: np.array(source_nodes, dtype=np.uint64),
         }
-        seen: list[int] = []
+        capture = {"roofline_id": "capture", "stream": 61}
+        executable = {"roofline_id": "exec", "stream": 62}
+        registry = {s1: capture, n0: executable, n1: executable}
+        resolver = MagicMock(side_effect=registry.get)
+        ce = _cuda_event_columns(raw, lambda ts: ts.astype(np.int64) - 100, resolver)
 
-        def resolver(g):
-            seen.append(g)
-            return {"roofline_id": "fsdp.all_gather_collective", "stream": 61}
-
-        _attach_event_node_ids(columns, r, resolver)
-        ce = columns["cuda_event"]
-        self.assertEqual(ce["graph_node_id"].tolist(), [n0])
-        self.assertEqual(seen, [n0])
+        self.assertEqual(ce["graph_node_id"].tolist(), graph_nodes)
+        self.assertEqual(ce["source_graph_node_id"].tolist(), source_nodes)
+        for name, field in (
+            ("event_id", CudaEvent.EVENT_ID),
+            ("cuda_event_sync_id", CudaEvent.CUDA_EVENT_SYNC_ID),
+            ("correlation_id", CudaEvent.CORRELATION_ID),
+            ("device_id", CudaEvent.DEVICE_ID),
+            ("context_id", CudaEvent.CONTEXT_ID),
+            ("stream_id", CudaEvent.STREAM_ID),
+        ):
+            self.assertEqual(ce[name].tolist(), raw[field.id].tolist())
+            self.assertEqual(ce[name].dtype, np.dtype(np.int64))
+        self.assertEqual(ce["start_ns"].tolist(), [1700, 1400, 1600, 1500])
+        self.assertEqual(ce["end_ns"].tolist(), ce["start_ns"].tolist())
         self.assertEqual(
             ce["annotation"].tolist(),
-            [{"roofline_id": "fsdp.all_gather_collective", "stream": 61}],
+            [capture, executable, executable, None] if graph_fields else [None] * 4,
         )
+        self.assertEqual(
+            [c.args[0] for c in resolver.call_args_list],
+            [s1, s0, n0, n1, s2, n2] if graph_fields else [],
+        )
+        columns = {"cuda_event": ce}
+        _add_graph_event_node_spans(columns, 1000, 2000)
+        if graph_fields:
+            spans = columns["graph_event_node"]
+            self.assertEqual(spans["graph_node_id"].tolist(), graph_nodes)
+            self.assertEqual(spans["source_graph_node_id"].tolist(), source_nodes)
+        else:
+            self.assertNotIn("graph_event_node", columns)
 
     def test_graph_event_node_rendered_and_arrowed(self):
         # A resolved graph event-record node renders as an "EventRecord" point span under cat
@@ -804,48 +790,6 @@ class TestCuspyRecords(TestCase):
             if e.get("cat") == _FLOW_CATEGORY and e.get("ph") == "f"
         }
         self.assertIn(2500 / 1000.0, finish_ts)
-
-    def test_attach_event_node_ids(self):
-        # End-to-end host-side: given a window's kernel + cuda_event columns, learn the
-        # mapping (records ordered by sync id, launch keyed by correlation id -> exec graph id
-        # from the kernel's graph_node_id) and attach graph_node_id + annotation to the
-        # cuda_event frame.
-        import numpy as np
-
-        from torch.profiler._cuspy.observers.profiler import _attach_event_node_ids
-
-        exec_id = 7
-        n0, n1 = (exec_id << 32) | 11, (exec_id << 32) | 13
-        r = _fresh_event_node_recorder(self)
-        r.graph_event_nodes = {exec_id: [n0, n1]}
-
-        columns = {
-            "kernel": {
-                "correlation_id": np.array([900], dtype=np.int64),
-                "graph_node_id": np.array([(exec_id << 32) | 55], dtype=np.int64),
-            },
-            # Records delivered out of execution order: sorting by sync id recovers it.
-            "cuda_event": {
-                "event_id": np.array([6, 5], dtype=np.int64),
-                "correlation_id": np.array([900, 900], dtype=np.int64),
-                "cuda_event_sync_id": np.array([2, 1], dtype=np.int64),
-            },
-        }
-        _attach_event_node_ids(columns, r)
-        ce = columns["cuda_event"]
-        # Rows arrive out of execution order; resolution is POSITIONAL by sync id, so the
-        # sync-1 row (event_id 5) takes the first ordered node n0 and the sync-2 row
-        # (event_id 6) takes n1 -- realigned to the input order [6, 5] -> [n1, n0].
-        # There is deliberately no event_id -> node lookup to assert against: a producer
-        # recycles one cudaEvent_t across nodes, so event_id is stable but not unique to a
-        # node, and keying on it would collapse every recycled record onto one node.
-        self.assertEqual(ce["graph_node_id"].tolist(), [n1, n0])
-        self.assertEqual(ce["annotation"].tolist(), [None, None])
-
-        # No recorder -> no-op (bridge disabled).
-        plain = {"cuda_event": {"event_id": np.array([1], dtype=np.int64)}}
-        _attach_event_node_ids(plain, None)
-        self.assertNotIn("graph_node_id", plain["cuda_event"])
 
     def test_window_graph_deps_collapses_event_nodes(self):
         # A dependency arrow must span a kernel -> event_record -> wait_event -> kernel chain
@@ -1783,8 +1727,7 @@ class TestCuspyRecords(TestCase):
                 "channel": i64(0, 0),
                 "channel_type": i64(0, 0),
             },
-            # memcpy + memset on stream 9, non-overlapping (so the render-stage per-lane
-            # end-clamp is a no-op and durations stay exact for the compare).
+            # memcpy + memset on stream 9, non-overlapping.
             "gpu_memcpy": {
                 "start_ns": i64(5000),
                 "end_ns": i64(6000),
@@ -1877,6 +1820,7 @@ class TestCuspyRecords(TestCase):
                 render,
                 counters,
                 compression,
+                metadata,
             ):
                 captured["tracks"] = tracks
                 captured["name_table"] = name_table
@@ -2072,6 +2016,7 @@ class TestCuspyRecords(TestCase):
                 render,
                 counters,
                 compression,
+                metadata,
             ):
                 captured["render"] = render
                 return b""
@@ -2168,6 +2113,7 @@ class TestCuspyRecords(TestCase):
             render,
             counters,
             compression,
+            metadata,
         ):
             captured["base_ns"] = base_ns_arg
             captured["name_table"] = name_table
@@ -2258,35 +2204,6 @@ class TestCuspyRecords(TestCase):
         }
         window = {"columns": columns, "user_annotations": {}}
 
-        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
-            s = r = 0
-            while True:
-                x = b[i]
-                i += 1
-                r |= (x & 0x7F) << s
-                if not x & 0x80:
-                    return r, i
-                s += 7
-
-        def flds(b):  # scan a message into [(field_no, wire_type, value)]
-            i = 0
-            o = []
-            while i < len(b):
-                k, i = rv(b, i)
-                fn, wt = k >> 3, k & 7
-                if wt == 0:
-                    v, i = rv(b, i)
-                    o.append((fn, 0, v))
-                elif wt == 2:
-                    n, i = rv(b, i)
-                    o.append((fn, 2, b[i : i + n]))
-                    i += n
-                elif wt == 5:
-                    i += 4
-                elif wt == 1:
-                    i += 8
-            return o
-
         with tempfile.TemporaryDirectory() as d:
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
@@ -2295,34 +2212,113 @@ class TestCuspyRecords(TestCase):
                 )
             out_path = os.path.join(d, "out.pftrace")
             merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
-            with gzip.open(out_path, "rb") as f:
-                raw = f.read()
+            packets = _pftrace_packets(out_path)
 
-        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
-
-        # Collect the extra_data (field 6) name/value pairs across all GPU render stages.
-        extra = {}
-        for pkt in packets:
-            for fn, _wt, v in flds(pkt):
-                if fn != 53:
-                    continue
-                for sfn, _swt, sv in flds(v):
-                    if sfn != 6:
-                        continue
-                    name = value = None
-                    for efn, _ewt, ev in flds(sv):
-                        if efn == 1:
-                            name = bytes(ev).decode()
-                        elif efn == 2:
-                            value = bytes(ev).decode()
-                    if name is not None:
-                        extra[name] = value
+        # The extra_data name/value pairs across all GPU render stages.
+        extra = {
+            k: v
+            for pairs in _pftrace_render_stage_extra(packets).values()
+            for k, v in pairs.items()
+        }
 
         # Each descriptor field is spread as its own extra_data entry: JSON strings keep
         # their raw value, numbers are stringified via dump().
         self.assertEqual(extra["Process Group Name"], "0")
         self.assertEqual(extra["dtype"], "bf16")
         self.assertEqual(extra["In msg nelems"], "1024")
+
+    def test_pftrace_keeps_overlap_and_chrome_metadata(self):
+        # The .pftrace export keeps what the chrome export of the same window carries: GPU
+        # render stages that overlap on a lane keep their exact CUPTI durations (not cut at the
+        # next op's start), and the chrome JSON's top-level fields are written as
+        # ChromeMetadata (name + json_value). Runs the REAL native encoder, gunzips, decodes
+        # the protobuf. No CUDA. Field numbers (perfetto.h): TracePacket.chrome_events=5,
+        # gpu_render_stage_event=53; ChromeEventBundle.metadata=2; ChromeMetadata.name=1,
+        # json_value=5; GpuRenderStageEvent.event_id=1, duration=2.
+        import tempfile
+
+        import numpy as np
+
+        from torch.profiler._cuspy.trace import merge_trace_window_into_chrome_trace
+
+        def i64(*vals):
+            return np.array(vals, dtype=np.int64)
+
+        # Two eager kernels on one (gpu, stream) lane: A [1000, 3000) overlaps B [2000, 2500).
+        columns = {
+            "kernel": {
+                "start_ns": i64(1000, 2000),
+                "end_ns": i64(3000, 2500),
+                "device_id": i64(0, 0),
+                "context_id": i64(1, 1),
+                "stream_id": i64(7, 7),
+                "correlation_id": i64(50, 51),
+                "graph_id": i64(0, 0),
+                "graph_node_id": i64(0, 0),
+                "name": np.array(["k_a", "k_b"], dtype=object),
+                "annotation": np.array([None, None], dtype=object),
+                "metadata": np.array([None, None], dtype=object),
+                "grid_x": i64(1, 1),
+                "grid_y": i64(1, 1),
+                "grid_z": i64(1, 1),
+                "block_x": i64(32, 32),
+                "block_y": i64(1, 1),
+                "block_z": i64(1, 1),
+                "registers_per_thread": i64(0, 0),
+                "static_shared_memory": i64(0, 0),
+                "dynamic_shared_memory": i64(0, 0),
+                "priority": i64(0, 0),
+                "queued": i64(0, 0),
+                "channel": i64(0, 0),
+                "channel_type": i64(0, 0),
+            },
+        }
+        window = {"columns": columns, "user_annotations": {}}
+        distributed_info = {"backend": "nccl", "rank": 3, "world_size": 8}
+
+        with tempfile.TemporaryDirectory() as d:
+            cpu_path = os.path.join(d, "cpu.json")
+            with open(cpu_path, "wb") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "baseTimeNanoseconds": 0,
+                            "distributedInfo": distributed_info,
+                            "traceName": "cpu.json",
+                            "traceEvents": [],
+                        }
+                    ).encode()
+                )
+            out_path = os.path.join(d, "out.pftrace")
+            merge_trace_window_into_chrome_trace(
+                cpu_path, out_path, window, trace_name="my_trace"
+            )
+            packets = _pftrace_packets(out_path)
+
+        dur_by_event: dict[int, int] = {}
+        chrome_md: dict[str, str] = {}
+        for pkt in packets:
+            for fn, _wt, v in _pb_fields(pkt):
+                if fn == 53:
+                    stage = {sfn: sv for sfn, swt, sv in _pb_fields(v) if swt == 0}
+                    dur_by_event[stage[1]] = stage[2]
+                elif fn == 5:
+                    for bfn, _bwt, bv in _pb_fields(v):
+                        if bfn == 2:
+                            md = {
+                                mfn: bytes(mv).decode()
+                                for mfn, _mwt, mv in _pb_fields(bv)
+                            }
+                            chrome_md[md[1]] = md[5]
+
+        # Row order is stable: row 0 (A) == event_id 1, row 1 (B) == event_id 2.
+        self.assertEqual(dur_by_event, {1: 2000, 2: 500})
+
+        self.assertEqual(json.loads(chrome_md["distributedInfo"]), distributed_info)
+        self.assertEqual(json.loads(chrome_md["baseTimeNanoseconds"]), 0)
+        self.assertNotIn("traceEvents", chrome_md)
+        # The export's traceName (as chrome sets it), not the CPU input's own.
+        self.assertEqual(json.loads(chrome_md["traceName"]), "my_trace")
 
     def test_pftrace_render_stage_spreads_graph_annotation(self):
         # A graph-node annotation (mark_kernels region -- e.g. a collective's process-group
@@ -2379,35 +2375,6 @@ class TestCuspyRecords(TestCase):
         }
         window = {"columns": columns, "user_annotations": {}}
 
-        def rv(b, i):
-            s = r = 0
-            while True:
-                x = b[i]
-                i += 1
-                r |= (x & 0x7F) << s
-                if not x & 0x80:
-                    return r, i
-                s += 7
-
-        def flds(b):
-            i = 0
-            o = []
-            while i < len(b):
-                k, i = rv(b, i)
-                fn, wt = k >> 3, k & 7
-                if wt == 0:
-                    v, i = rv(b, i)
-                    o.append((fn, 0, v))
-                elif wt == 2:
-                    n, i = rv(b, i)
-                    o.append((fn, 2, b[i : i + n]))
-                    i += n
-                elif wt == 5:
-                    i += 4
-                elif wt == 1:
-                    i += 8
-            return o
-
         with tempfile.TemporaryDirectory() as d:
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
@@ -2416,32 +2383,7 @@ class TestCuspyRecords(TestCase):
                 )
             out_path = os.path.join(d, "out.pftrace")
             merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
-            with gzip.open(out_path, "rb") as f:
-                raw = f.read()
-
-        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
-
-        # Per render stage (keyed by event_id), collect its extra_data pairs.
-        per_stage: dict[int, dict] = {}
-        for pkt in packets:
-            for fn, _wt, v in flds(pkt):
-                if fn != 53:
-                    continue
-                event_id = 0
-                pairs: dict = {}
-                for sfn, _swt, sv in flds(v):
-                    if sfn == 1:
-                        event_id = sv
-                    elif sfn == 6:
-                        name = value = None
-                        for efn, _ewt, ev in flds(sv):
-                            if efn == 1:
-                                name = bytes(ev).decode()
-                            elif efn == 2:
-                                value = bytes(ev).decode()
-                        if name is not None:
-                            pairs[name] = value
-                per_stage[event_id] = pairs
+            per_stage = _pftrace_render_stage_extra(_pftrace_packets(out_path))
 
         # Row order (from _render_stage_cols) is stable: row 0 == event_id 1, row 1 == 2.
         # Row 0: annotation-only -> its fields spread (numbers stringified).
@@ -2533,35 +2475,6 @@ class TestCuspyRecords(TestCase):
             "graph_deps": {gnid_b: [gnid_a]},  # B depends on A
         }
 
-        def rv(b, i):  # read a varint at offset i, return (value, next_offset)
-            s = r = 0
-            while True:
-                x = b[i]
-                i += 1
-                r |= (x & 0x7F) << s
-                if not x & 0x80:
-                    return r, i
-                s += 7
-
-        def flds(b):  # scan a message into [(field_no, wire_type, value)]
-            i = 0
-            o = []
-            while i < len(b):
-                k, i = rv(b, i)
-                fn, wt = k >> 3, k & 7
-                if wt == 0:
-                    v, i = rv(b, i)
-                    o.append((fn, 0, v))
-                elif wt == 2:
-                    n, i = rv(b, i)
-                    o.append((fn, 2, b[i : i + n]))
-                    i += n
-                elif wt == 5:
-                    i += 4
-                elif wt == 1:
-                    i += 8
-            return o
-
         with tempfile.TemporaryDirectory() as d:
             cpu_path = os.path.join(d, "cpu.json")
             with open(cpu_path, "wb") as f:
@@ -2572,20 +2485,17 @@ class TestCuspyRecords(TestCase):
                 )
             out_path = os.path.join(d, "out.pftrace")
             merge_trace_window_into_chrome_trace(cpu_path, out_path, window)
-            with gzip.open(out_path, "rb") as f:
-                raw = f.read()
-
-        packets = [v for fn, _wt, v in flds(raw) if fn == 1]
+            packets = _pftrace_packets(out_path)
 
         # Collect the GPU render stages (field 53) as (event_id, [event_wait_ids]).
         render_stages = []
         for pkt in packets:
-            for fn, _wt, v in flds(pkt):
+            for fn, _wt, v in _pb_fields(pkt):
                 if fn != 53:
                     continue
                 event_id = 0
                 waits = []
-                for sfn, _swt, sv in flds(v):
+                for sfn, _swt, sv in _pb_fields(v):
                     if sfn == 1:
                         event_id = sv
                     elif sfn == 18:
@@ -2607,20 +2517,265 @@ class TestCuspyRecords(TestCase):
         # at field 1). Node B is not linked from the launch; it is reached via its wait arrow.
         submission_id_sets = []
         for pkt in packets:
-            for fn, _wt, v in flds(pkt):
+            for fn, _wt, v in _pb_fields(pkt):
                 if fn != 11:
                     continue
-                for sfn, _swt, sv in flds(v):
+                for sfn, _swt, sv in _pb_fields(v):
                     if sfn == 3000:
-                        ids = [gv for gfn, _gwt, gv in flds(sv) if gfn == 1]
+                        ids = [gv for gfn, _gwt, gv in _pb_fields(sv) if gfn == 1]
                         submission_id_sets.append(set(ids))
         self.assertEqual(len(submission_id_sets), 1)
         self.assertEqual(submission_id_sets[0], {node_a_event_id})
 
 
+@unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+@instantiate_parametrized_tests
+class TestCuspyHes(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def setUp(self):
+        from torch.profiler._cuspy import core
+
+        core._reset_for_test()
+        self.cupti = MagicMock()
+        self.cupti.get_version.return_value = 130500
+        self.cupti.subscribe.return_value = 1234
+        self.native = MagicMock()
+        self.native.buffer_request_callback_address.return_value = 1
+        self.native.buffer_complete_callback_address.return_value = 2
+        self.native.approximate_time_callback_address.return_value = 3
+        self.cupti.arm_approx_timestamp_callback.return_value = True
+        self.driver = MagicMock()
+        self.driver.CUresult.CUDA_SUCCESS = 0
+        self.driver.cuInit.return_value = (0,)
+        for p in (
+            patch.object(core.cupti_python, "pylibcupti", return_value=self.cupti),
+            patch.object(core, "_cuspy_native", self.native),
+            patch.object(core, "_has_active_cuda_context", return_value=False),
+            patch.object(torch.cuda, "is_initialized", return_value=False),
+            patch.object(torch.version, "cuda", "13.5"),
+            patch.dict(sys.modules, {"cuda.bindings": MagicMock(driver=self.driver)}),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+        self.cuspy = core.Cuspy()
+        for p in (
+            patch.object(self.cuspy._clock, "calibrate"),
+            patch.object(self.cuspy, "flush"),
+            patch.object(self.cuspy, "_drain_and_dispatch"),
+            patch.object(self.cuspy, "_drain_and_dispatch_loop"),
+        ):
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(core._reset_for_test)
+        self.addCleanup(self.cuspy.stop)
+
+    def test_hes_configuration_and_repeated_windows(self):
+        from torch.profiler._cuspy import core
+
+        order = MagicMock()
+        for method, name in (
+            (self.cupti.subscribe, "subscribe"),
+            (self.cupti.activity_enable_hes, "hes"),
+            (self.driver.cuInit, "init"),
+        ):
+            order.attach_mock(method, name)
+        core.enable_hes_early()
+        self.assertEqual([c[0] for c in order.mock_calls], ["subscribe", "hes", "init"])
+        self.assertTrue(self.cupti.subscribe.call_args.kwargs["allow_multiple"])
+        self.cupti.arm_user_defined_records.assert_not_called()
+        self.native.configure_buffers.assert_not_called()
+        core.configure(buffer_size=8192, background_flush_period_s=0.5)
+        core.configure(background_drain_period_s=0.25)
+        for _ in range(2):
+            observer = self.cuspy.register([], lambda _columns: None)
+            self.assertEqual(self.native.configure_buffers.call_args.args, (8192,))
+            self.assertEqual(
+                self.native.configure_decoder.call_args.args[4:6], (True, 500_000_000)
+            )
+            self.assertEqual(self.cuspy.background_drain_period_s, 0.25)
+            core.configure(buffer_size=8192)
+            with self.assertRaisesRegex(RuntimeError, "configuration cannot change"):
+                core.configure(buffer_size=4096)
+            self.cuspy.unregister(observer)
+            self.assertEqual(self.cuspy._subscriber, 1234)
+        self.cupti.subscribe.assert_called_once()
+        self.cupti.unsubscribe.assert_not_called()
+        core.release_hes()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(core.has_live_subscription())
+        self.cupti.finalize.assert_not_called()
+
+    @parametrize("failure", ["subscribe", "udr"])
+    def test_failed_registration_allows_configuration_and_retry(self, failure):
+        from torch.profiler._cuspy import core, cupti_python
+
+        if failure == "subscribe":
+            core.configure(use_approx_timestamps=True)
+            self.cupti.subscribe.side_effect = [
+                cupti_python.CuptiError("subscribe failed"),
+                1234,
+            ]
+        else:
+            core.enable_hes_early()
+            wrapper = object.__new__(cupti_python._PyLibCupti)
+            wrapper._lib = MagicMock()
+            wrapper._lib.cuptiActivitySetAttribute_v2.return_value = 0
+            wrapper._lib.cuptiActivityRegisterCallbacks_v2.side_effect = [1, 0]
+            self.cupti.arm_user_defined_records.side_effect = (
+                wrapper.arm_user_defined_records
+            )
+        with self.assertRaises((RuntimeError, cupti_python.CuptiError)):
+            self.cuspy.register([], lambda _columns: None)
+        self.assertFalse(self.cuspy._config_frozen)
+        self.assertEqual(self.cuspy._observers, [])
+        core.configure(buffer_size=8192, use_approx_timestamps=False)
+        observer = self.cuspy.register([], lambda _columns: None)
+        self.assertEqual(self.cuspy.buffer_size, 8192)
+        self.assertTrue(self.cuspy._started)
+        self.cuspy.unregister(observer)
+        core.release_hes()
+        self.assertFalse(core.has_live_subscription())
+
+    @parametrize("before_hes", [False, True])
+    def test_approx_requires_exclusive_subscription(self, before_hes):
+        from torch.profiler._cuspy import core
+
+        if before_hes:
+            core.configure(use_approx_timestamps=True)
+            core.enable_hes_early()
+            self.assertFalse(self.cupti.subscribe.call_args.kwargs["allow_multiple"])
+        else:
+            core.enable_hes_early()
+            original = core.get_config()
+            with self.assertRaisesRegex(
+                RuntimeError, "requires exclusive CUPTI ownership"
+            ):
+                core.configure(buffer_size=8192, use_approx_timestamps=True)
+            self.assertEqual(core.get_config(), original)
+            self.cupti.unsubscribe.assert_not_called()
+        core.configure(buffer_size=8192)
+        self.assertEqual(self.cuspy.buffer_size, 8192)
+        core.release_hes()
+
+    @parametrize("failure", ["hes", "driver"])
+    def test_failed_early_hes_releases_subscription(self, failure):
+        from torch.profiler._cuspy import core
+
+        operation = (
+            self.cupti.activity_enable_hes if failure == "hes" else self.driver.cuInit
+        )
+        operation.side_effect = RuntimeError("initialization failed")
+        with self.assertRaisesRegex(RuntimeError, "initialization failed"):
+            core.enable_hes_early()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(core.is_hes_enabled())
+        core.configure(buffer_size=8192)
+        self.assertEqual(self.cuspy.buffer_size, 8192)
+
+    @parametrize("consumer", ["observer", "callback"])
+    def test_release_requires_closed_consumers(self, consumer):
+        from torch.profiler._cuspy import core
+
+        core.enable_hes_early()
+        if consumer == "observer":
+            observer = self.cuspy.register([], lambda _columns: None)
+
+            def close() -> None:
+                self.cuspy.unregister(observer)
+        else:
+            handler = self.cuspy.register_callback_handler(0, 0, lambda *args: None)
+
+            def close() -> None:
+                self.cuspy.unregister_callback_handler(handler)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "closing all Cuspy activity observers"
+        ):
+            core.release_hes()
+        self.cupti.unsubscribe.assert_not_called()
+        close()
+        core.release_hes()
+        core.release_hes()
+        self.cupti.unsubscribe.assert_called_once_with(1234)
+        self.assertFalse(core.has_live_subscription())
+
+    def test_release_retries_failed_unsubscribe(self):
+        from torch.profiler._cuspy import core, cupti_python
+
+        core.enable_hes_early()
+        self.cupti.unsubscribe.side_effect = [
+            cupti_python.CuptiError("unsubscribe failed"),
+            None,
+        ]
+        with self.assertRaisesRegex(cupti_python.CuptiError, "unsubscribe failed"):
+            core.release_hes()
+        self.assertTrue(core.is_hes_enabled())
+        core.release_hes()
+        self.assertEqual(self.cupti.unsubscribe.call_count, 2)
+        self.assertFalse(core.has_live_subscription())
+
+    def test_failed_clock_change_leaves_configuration_unchanged(self):
+        from torch.profiler._cuspy import core, cupti_python
+
+        core.configure(use_approx_timestamps=True)
+        core.enable_hes_early()
+        before = core.get_config()
+        self.cupti.disarm_approx_timestamp_callback.return_value = False
+        with self.assertRaises(cupti_python.CuptiError):
+            core.configure(buffer_size=8192, use_approx_timestamps=False)
+        self.assertEqual(core.get_config(), before)
+
+    def test_configuration_waits_for_activity_setup(self):
+        from torch.profiler._cuspy import core
+
+        entered, resume, configured = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        errors = []
+
+        def arm(*args):
+            entered.set()
+            with self.assertRaisesRegex(RuntimeError, "configuration cannot change"):
+                core.configure(buffer_size=8192)
+            if not resume.wait(5):
+                raise RuntimeError("setup did not resume")
+
+        def configure():
+            try:
+                core.configure(buffer_size=8192)
+            except RuntimeError as error:
+                errors.append(error)
+            finally:
+                configured.set()
+
+        self.cupti.arm_user_defined_records.side_effect = arm
+        setup = threading.Thread(target=self.cuspy.register_callbacks)
+        writer = threading.Thread(target=configure)
+        setup.start()
+        try:
+            self.assertTrue(entered.wait(5))
+            writer.start()
+            self.assertFalse(configured.wait(0.1))
+        finally:
+            resume.set()
+            setup.join(5)
+            if writer.ident is not None:
+                writer.join(5)
+        self.assertFalse(setup.is_alive())
+        self.assertFalse(writer.is_alive())
+        self.assertEqual(len(errors), 1)
+        self.assertIn("configuration cannot change", str(errors[0]))
+        self.assertNotEqual(self.cuspy.buffer_size, 8192)
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA required")
 class TestCuspyCUDA(TestCase):
     """Collection through Cuspy directly (not via torch.profiler.profile)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
@@ -2629,7 +2784,7 @@ class TestCuspyCUDA(TestCase):
         cuspy_core._reset_for_test()
         self.addCleanup(cuspy_core._reset_for_test)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_fence_enables_sync_transiently(self):
         # flush(sync=True) fences at a SYNCHRONIZATION sync point, enabled only for
         # the fence (even when no observer requested it) and disabled again after.
@@ -2653,150 +2808,122 @@ class TestCuspyCUDA(TestCase):
         self.assertLess(time.time() - start, 2.0)
         self.assertNotIn(sync, cuspy._enabled)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipIf(
         not TEST_CUDA_GRAPH_TOOLS_ID,
         "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
     )
-    def test_event_node_recorder_arm_before_capture(self):
-        # End-to-end usage, and the ordering contract it depends on: the recorder learns a
-        # graph's ordered event-record nodes from a graph-INSTANTIATE hook, so it has to be
-        # armed before the graph is captured. Arming afterwards is too late -- that graph's
-        # instantiate already fired, it is never recorded, and every CUDA_EVENT record from
-        # its launches then resolves to None (resolve_window refuses to guess).
-        def capture_graph_with_event_node():
-            x = torch.randn(8, 8, device="cuda")
-            # external=True is what makes capture emit an event-record NODE. A default
-            # (internal) event is folded into a plain cross-stream dependency edge and
-            # produces no node at all, so the bridge would have nothing to resolve. This
-            # is the same external form NCCL uses under NCCL_GRAPH_MIXING_SUPPORT=1.
-            ev = torch.cuda.Event(external=True)
-            # Warm up off the default stream before capture (allocator + kernels).
-            s = torch.cuda.Stream()
-            s.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(s):
-                for _ in range(3):
-                    (x @ x).relu()
-            torch.cuda.current_stream().wait_stream(s)
+    @_isolated
+    def test_cuda_event_native_graph_fields(self):
+        from collections import Counter
 
-            # keep_graph=True keeps the template alive so get_graph_data() can read it
-            # after capture; it also defers instantiate(), which is what fires the hook.
-            g = torch.cuda.CUDAGraph(keep_graph=True)
-            with torch.cuda.graph(g):
-                y = x @ x
-                ev.record()
-                y.relu()
-            g.instantiate()
-            return g
+        import numpy as np
 
-        r = _fresh_event_node_recorder(self)
+        from cuda.bindings import runtime
+        from cupti.cupti import ActivityKind
 
-        # Captured while unarmed: the hook never ran, so this graph is absent.
-        before = capture_graph_with_event_node()
-        before_exec_id = before.get_graph_data()["exec_graph_id"]
-        self.assertNotIn(before_exec_id, r.graph_event_nodes)
+        from torch.cuda._utils import _check_cuda_bindings
+        from torch.profiler._cuspy.core import Cuspy
+        from torch.profiler._cuspy.records import CudaEvent
 
-        r.arm()
-        self.assertIsNotNone(r._handle)
-        r.arm()  # idempotent: a second arm must not stack a duplicate hook
-
-        after = capture_graph_with_event_node()
-        data = after.get_graph_data()
-        # Assert rather than skip: if capture stops emitting event-record nodes this test
-        # must fail loudly, not quietly pass while covering nothing.
-        self.assertTrue(
-            any(n["node_type"] == "event_record" for n in data["nodes"]),
-            "external event did not produce an event_record node",
-        )
-
-        exec_id = data["exec_graph_id"]
-        self.assertIn(exec_id, r.graph_event_nodes)
-        ordered = r.graph_event_nodes[exec_id]
-        # Totally ordered -> a list of tools_ids; each carries the exec graph id up top.
-        self.assertIsNotNone(ordered)
-        self.assertTrue(ordered)
-        for tools_id in ordered:
-            self.assertEqual(tools_id >> 32, exec_id)
-
-        # The earlier graph is still absent -- arming does not retroactively record it.
-        self.assertNotIn(before_exec_id, r.graph_event_nodes)
-
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH_TOOLS_ID,
-        "requires cudaGraphNodeGetToolsId (cuda-bindings >= 13.1 and CUDA driver >= 13.1)",
-    )
-    def test_event_nodes_on_concurrent_branches_use_node_id_order(self):
-        # The serial-chain case above is the one where every candidate ordering agrees. This
-        # is the case that separates them: two event nodes on CONCURRENT branches of differing
-        # depth. The recorder must report them in node-id (creation) order, which is what
-        # cuda_event_sync_id follows -- ordering by dependency depth inverts them here, and
-        # does so silently because the two depths are distinct.
-        x = torch.randn(8, 8, device="cuda")
-        s_deep, s_shallow = torch.cuda.Stream(), torch.cuda.Stream()
-        warm = torch.cuda.Stream()
-        warm.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(warm):
+        driver_version = _check_cuda_bindings(runtime.cudaDriverGetVersion())
+        x = torch.ones(8, 8, device="cuda")
+        deep, shallow = torch.cuda.Stream(), torch.cuda.Stream()
+        reused, other = torch.cuda.Event(external=True), torch.cuda.Event(external=True)
+        deep.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(deep):
             for _ in range(3):
-                (x @ x).relu()
-        torch.cuda.current_stream().wait_stream(warm)
+                (x * 2).relu()
+        torch.cuda.current_stream().wait_stream(deep)
 
-        ev_deep = torch.cuda.Event(external=True)
-        ev_shallow = torch.cuda.Event(external=True)
-        r = _fresh_event_node_recorder(self)
-        r.arm()
-
+        # Capture and instantiate before creating the CUPTI subscriber; no hooks are needed.
         g = torch.cuda.CUDAGraph(keep_graph=True)
         with torch.cuda.graph(g):
-            y = x @ x
-            s_deep.wait_stream(torch.cuda.current_stream())
-            s_shallow.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(s_deep):  # longer branch, event created FIRST
+            y = x + 1
+            deep.wait_stream(torch.cuda.current_stream())
+            shallow.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(deep):
                 a = (y * 2).relu()
-                a = (a @ a).relu()
-                ev_deep.record()
-            with torch.cuda.stream(s_shallow):  # shorter branch, event created SECOND
-                b = y + 1
-                ev_shallow.record()
-            torch.cuda.current_stream().wait_stream(s_deep)
-            torch.cuda.current_stream().wait_stream(s_shallow)
-            (a + b).sum()
+                reused.record()
+                a = a + 1
+                reused.record()
+            with torch.cuda.stream(shallow):
+                b = y + 2
+                other.record()
+            torch.cuda.current_stream().wait_stream(deep)
+            torch.cuda.current_stream().wait_stream(shallow)
+            a + b
         g.instantiate()
-
         data = g.get_graph_data()
-        nodes = data["nodes"]
-        ev_nodes = [n for n in nodes if n["node_type"] == "event_record"]
-        self.assertEqual(len(ev_nodes), 2, "expected one event node per branch")
+        event_nodes = [n for n in data["nodes"] if n["node_type"] == "event_record"]
+        self.assertEqual(len(event_nodes), 3)
+        self.assertEqual(
+            sorted(Counter(n["event_ptr"] for n in event_nodes).values()), [1, 2]
+        )
 
-        # get_graph_data() returns nodes in increasing node id -- the invariant the recorder
-        # relies on to skip sorting entirely.
-        ids = [n["tools_id"] for n in nodes]
-        self.assertEqual(ids, sorted(ids))
+        raw = g.raw_cuda_graph()
+        _, count = _check_cuda_bindings(runtime.cudaGraphGetNodes(raw, numNodes=0))
+        nodes, count = _check_cuda_bindings(
+            runtime.cudaGraphGetNodes(raw, numNodes=count)
+        )
+        source_ids = {}
+        for node in nodes[:count]:
+            source_id = _check_cuda_bindings(runtime.cudaGraphNodeGetToolsId(node))
+            source_ids[source_id & 0xFFFFFFFF] = source_id
+        graph_fields = (
+            CudaEvent.GRAPH_NODE_ID,
+            CudaEvent.GRAPH_ID,
+            CudaEvent.SOURCE_GRAPH_ID,
+            CudaEvent.SOURCE_GRAPH_NODE_ID,
+        )
+        expected = []
+        for node in event_nodes:
+            exec_node_id = node["tools_id"]
+            source_node_id = source_ids[node["node_id"]]
+            expected.append(
+                (
+                    exec_node_id,
+                    data["exec_graph_id"],
+                    source_node_id >> 32,
+                    source_node_id,
+                )
+            )
 
-        recorded = r.graph_event_nodes[data["exec_graph_id"]]
-        self.assertEqual(recorded, [n["tools_id"] for n in ev_nodes])
-        self.assertEqual(recorded, sorted(recorded))
+        kind = ActivityKind.CUDA_EVENT
+        fields = {*graph_fields, CudaEvent.EVENT_ID, CudaEvent.DEVICE_TIMESTAMP}
+        batches = []
 
-        # And the branches really are at different dependency depths, so a depth sort would
-        # have produced a different (wrong) order here rather than coincidentally agreeing.
-        by_index = {n["tools_id"]: i for i, n in enumerate(nodes)}
-        depth: dict[int, int] = {}
+        def collect(cols):
+            self.assertEqual(set(cols), {kind})
+            batches.append(cols[kind])
 
-        def node_depth(i):
-            if i in depth:
-                return depth[i]
-            deps = nodes[i]["dependencies"]
-            depth[i] = 0 if not deps else 1 + max(node_depth(j) for j in deps)
-            return depth[i]
+        cuspy = Cuspy()
+        self.assertFalse(cuspy._started)
+        self.assertIsNone(cuspy._subscriber)
+        observer = cuspy.register({kind: fields}, collect)
+        self.addCleanup(cuspy.unregister, observer)
+        replays = 3
+        for _ in range(replays):
+            g.replay()
+        torch.cuda.synchronize()
+        # g, reused, and other must remain alive until CUPTI has flushed their records.
+        cuspy.flush(sync=True)
 
-        d = [node_depth(by_index[t]) for t in recorded]
-        self.assertNotEqual(d[0], d[1], "branches should differ in depth")
-        if d[0] > d[1]:
-            self.assertNotEqual(
-                recorded, [t for _, t in sorted(zip(d, recorded))]
-            )  # depth order != node-id order
+        self.assertTrue(batches, "CUDA_EVENT collection returned no records")
+        columns = {
+            field: np.concatenate([batch[field.id] for batch in batches])
+            for field in fields
+        }
+        self.assertEqual(len(columns[CudaEvent.EVENT_ID]), replays * len(event_nodes))
+        actual = list(zip(*(columns[field].tolist() for field in graph_fields)))
+        if driver_version >= 13050:
+            self.assertCountEqual(actual, expected * replays)
+            self.assertTrue((columns[CudaEvent.DEVICE_TIMESTAMP] > 0).all())
+        else:
+            # CUPTI remains 13.5; an older driver/compat leaves all four graph fields zero.
+            self.assertEqual(actual, [(0, 0, 0, 0)] * (replays * len(event_nodes)))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_v2_columnar_collection(self):
         # End-to-end columnar collection: Cuspy turns on a per-activity field
         # selection, decodes each buffer against CUPTI's captured layout, and hands
@@ -2854,7 +2981,7 @@ class TestCuspyCUDA(TestCase):
             self.assertTrue(all(int(e) - int(s) >= 0 for s, e in zip(start, end)))
         self.assertTrue(any(len(n) > 0 for c in columns for n in c[int(Kernel.NAME)]))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_worker_loop_self_flush_delivers_without_caller_flush(self):
         # worker_loop() with a flush period set (self_flush): the native decode thread
         # drives cuptiActivityFlushAll on its cadence and decodes the completed buffers
@@ -2912,7 +3039,7 @@ class TestCuspyCUDA(TestCase):
         self.assertGreater(cuspy.stats()["buffers_completed"], 0)
         self.assertGreater(total, 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_worker_loop_no_self_flush_waits_for_caller_flush(self):
         # worker_loop() with no flush period (self_flush off): the decode thread blocks on
         # get_completed() and never self-flushes, so with a normal buffer nothing is
@@ -2962,7 +3089,7 @@ class TestCuspyCUDA(TestCase):
         self.assertGreater(cuspy.stats()["buffers_completed"], 0)
         self.assertGreater(after, 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_approx_timestamp_callback_engages_under_udr(self):
         # use_approx hands CUPTI a per-subscriber timestamp callback so records ride the
         # profiler's approx clock. Runs in a child that subscribes before any CUDA context
@@ -3004,7 +3131,7 @@ class TestCuspyCUDA(TestCase):
         )
         self.assertIn("OK", p.stdout)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_approx_timestamp_callback_engages_with_existing_context(self):
         # With a CUDA context already established, use_approx must still re-time DEVICE records
         # onto the approx clock. Reset the singleton so use_approx (snapshotted at construction)
@@ -3060,7 +3187,7 @@ class TestCuspyCUDA(TestCase):
             max(starts), 1e17, f"device records off the approx clock: {max(starts)}"
         )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_noisy_apis_suppressed_at_collection(self):
         # disable_noisy_runtime_apis / disable_noisy_driver_apis (run inside activity_enable)
         # should keep the pure-noise cbids out of the records. Assert 0 records for them while
@@ -3145,7 +3272,7 @@ class TestCuspyCUDA(TestCase):
                 leaked_dr, {}, f"noisy driver cbids not suppressed: {leaked_dr}"
             )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_singleton_flush_accessible(self):
         # A user can reach the process-wide Cuspy singleton through Cuspy()
         # and flush it: Cuspy() constructs/returns the one instance, and
@@ -3189,7 +3316,7 @@ class TestCuspyCUDA(TestCase):
         total = sum(len(c[int(Kernel.START)]) for c in columns)
         self.assertGreater(total, 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_multiple_observers(self):
         # Cuspy is the multiplexer: it enables the union of fields on its one
         # subscriber, then hands each observer only the columns it selected. Two
@@ -3252,7 +3379,7 @@ class TestCuspyCUDA(TestCase):
         self.assertGreater(a_count, 0)
         self.assertEqual(a_count, b_count)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_small_buffer_chain_no_deadlock(self):
         # A tiny buffer maximizes buffer-completion churn: the decode worker runs
         # constantly and the foreground + background (20ms) flushes drain, dispatch,
@@ -3341,10 +3468,12 @@ def _graph_node_created_key():
 # setUp imports Cuspy, which hard-imports the build-generated _cupti_stubs, so the
 # whole class has to be gated -- a method-level gate would still let setUp error out where
 # the stubs were not generated (see TEST_CUPTI in common_cuda).
-@unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
-class TestCuspyCallbackRegistry(TestCase):
+@unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
+class TestCuspyCallbackRegistryCUDA(TestCase):
     """Cuspy's shared *subscriber-callback* registry -- a separate axis from activity
     records: handlers fire synchronously on the application thread inside the CUDA call."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         from torch.profiler._cuspy import core as cuspy_core
@@ -3525,6 +3654,8 @@ class TestWindowFinalizer(TestCase):
     """Cover-and-finalize loop of WindowFinalizerMixin -- pure Python, no CUDA/CUPTI.
     A fake user supplies a settable native clock and a synthetic record buffer."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     class _Fake(WindowFinalizerMixin):
         def __init__(self) -> None:
             self._clock = 0
@@ -3607,11 +3738,23 @@ class TestWindowFinalizer(TestCase):
         self.assertIsNone(w._poll_thread)
 
 
+class TestCuspyTraceExport(TestCase):
+    def test_cuspy_zstd_perfetto_rejected(self):
+        prof = profile(activities=[ProfilerActivity.CPU])
+        prof.profiler = MagicMock()
+        prof._use_cuspy = True
+        with self.assertRaisesRegex(ValueError, "only supported for Chrome JSON"):
+            prof.export_chrome_trace("trace.pftrace.zst")
+        prof.profiler.export_chrome_trace.assert_not_called()
+
+
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not TEST_CUDA, "CUDA is required")
-class TestCuspyProfiler(TestCase):
+class TestCuspyProfilerCUDA(TestCase):
     """Cuspy driven through ``torch.profiler.profile`` (trace shape, op/kernel
     parity, record_shapes, sync/async export, multithread thread-assignment, ...)."""
+
+    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         # Cuspy is a process-wide singleton; drop it so each test builds a fresh one.
@@ -3624,7 +3767,7 @@ class TestCuspyProfiler(TestCase):
         cuspy_core._reset_for_test()
         self.addCleanup(cuspy_core._reset_for_test)
 
-    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipUnless(
         SM100OrLater, "hardware event sampling requires GB200+ (sm_100)"
     )
@@ -3637,10 +3780,38 @@ class TestCuspyProfiler(TestCase):
                 "-c",
                 """
 import torch
+from cupti.cupti import ActivityKind
 from torch.profiler._cuspy import core as cuspy_core
+from torch.profiler._cuspy.records import Kernel
 
 cuspy_core.enable_hes_early()
-assert cuspy_core.is_hes_enabled()
+if not cuspy_core.is_hes_enabled():
+    raise AssertionError("HES was not enabled")
+cuspy_core.configure(buffer_size=2 * 1024 * 1024)
+collector = cuspy_core.Cuspy()
+if collector.buffer_size != 2 * 1024 * 1024:
+    raise AssertionError("buffer configuration after early HES was ignored")
+subscriber = collector._subscriber
+if subscriber is None:
+    raise AssertionError("early HES did not retain its subscriber")
+cuspy_core.enable_hes_early()
+for _ in range(2):
+    seen = []
+    kind = ActivityKind.CONCURRENT_KERNEL
+    observer = collector.register(
+        {kind: {Kernel.END}},
+        lambda cols: seen.append(cols[kind]) if kind in cols else None,
+    )
+    torch.randn(256, 256, device="cuda").sum().item()
+    collector.flush(sync=True)
+    collector.unregister(observer)
+    if not any(len(fields[Kernel.END.id]) for fields in seen):
+        raise AssertionError("HES + UDR produced no kernel records")
+    if collector._subscriber != subscriber:
+        raise AssertionError("HES subscriber changed between collection sessions")
+cuspy_core.release_hes()
+if cuspy_core.has_live_subscription():
+    raise AssertionError("release_hes retained the HES subscriber")
 """,
             ],
             text=True,
@@ -3669,7 +3840,7 @@ cuspy_core.enable_hes_early()
             p.stderr,
         )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_collection_smoke(self):
         from torch.profiler._cuspy import core as cuspy_core
@@ -3703,7 +3874,7 @@ cuspy_core.enable_hes_early()
         # must survive that: CUPTI can still own buffers it never returned.
         self.assertGreater(torch._C._profiler._cuspy.allocated_buffers(), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_graph_host_node_collected_on_device(self):
         # End-to-end: a CUDA-graph host node (a CPU callback run as a graph node) is collected
@@ -3779,7 +3950,7 @@ cuspy_core.enable_hes_early()
         self.assertEqual(host[0]["name"], "HostNode: free")
         self.assertEqual(host[0]["args"]["host fn"], "free")
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_collection_repeated_lifecycle(self):
         from torch.profiler._cuspy import core as cuspy_core
@@ -3803,7 +3974,7 @@ cuspy_core.enable_hes_early()
 
             self.assertGreater(len(start), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_multithread_runtime_thread_assignment(self):
         x1 = torch.randn(256, 256, device="cuda")
@@ -3882,7 +4053,7 @@ cuspy_core.enable_hes_early()
         self.assertGreater(len(launch_tids), 0)
         self.assertTrue(set(launch_tids).issubset(set(worker_tids)))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_runtime_thread_without_record_function(self):
         # Regression: CPU-side CUPTI records (cuda_runtime/cuda_driver) must land on the
@@ -3939,7 +4110,7 @@ cuspy_core.enable_hes_early()
         # phantom CUPTI-threadId lane).
         self.assertTrue(runtime_tids.issubset(cpu_tids))
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_trace_has_expected_events(self):
         cfg = _ExperimentalConfig(
@@ -3997,6 +4168,7 @@ cuspy_core.enable_hes_early()
         self.assertIn("cuspy_region", user_names)
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @_isolated
     def test_cuspy_observer_registration_failure_is_graceful(self):
         from torch.profiler._cuspy import core as cuspy_core
 
@@ -4021,7 +4193,33 @@ cuspy_core.enable_hes_early()
         self.assertIn(str(error), logs.output[0])
 
     @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
+    @_isolated
+    def test_cuspy_zstd_export(self):
+        import tempfile
+
+        zstd = try_import("pyzstd") or try_import("zstandard")
+        if zstd is None:
+            self.skipTest("requires zstandard or pyzstd")
+
+        cfg = _ExperimentalConfig(custom_profiler_config='{"backend":"cuspy"}')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "trace.json.zst")
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                experimental_config=cfg,
+            ) as prof:
+                a = torch.randn(128, 128, device="cuda")
+                (a @ a).relu().sum().item()
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(path)
+            self.assertFalse(os.path.exists(path + ".gz"))
+            with zstd.open(path, "rt", encoding="utf-8") as f:
+                trace = json.load(f)
+            self.assertTrue(any(e.get("cat") == "kernel" for e in trace["traceEvents"]))
+
+    @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_sync_export_default(self):
         # Default: the cuspy backend exports synchronously -- the merged file is
@@ -4046,7 +4244,7 @@ cuspy_core.enable_hes_early()
             )
             prof.wait_for_exports()  # no-op in sync mode
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_async_export_defers(self):
         # cuspy_async_export=true hands the export off: a background poll thread
@@ -4082,7 +4280,7 @@ cuspy_core.enable_hes_early()
                 ),
             )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @_isolated
     def test_cuspy_record_shapes(self):
         cfg = _ExperimentalConfig(
@@ -4119,7 +4317,7 @@ cuspy_core.enable_hes_early()
         self.assertEqual(shaped_cpu_ops(record_shapes=False), [])
         self.assertGreater(len(shaped_cpu_ops(record_shapes=True)), 0)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_matches_stock_op_and_kernel_names(self):
         # Run in a FRESH process. This test needs a stock (Kineto) CUDA baseline and
         # then a cuspy session, so it must start from a process that hasn't
@@ -4196,7 +4394,7 @@ cuspy_core.enable_hes_early()
         )
         self.assertIn("OK", p.stdout)
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     def test_cuspy_kineto_parity(self):
         # In a FRESH process (clean CUPTI), profile a couple of representative models
         # under stock (Kineto) and then the cuspy backend, eager AND graphed,
@@ -4226,9 +4424,12 @@ cuspy_core.enable_hes_early()
                 try:
                     cuspy_core.enable_hes_early()
                 except CuptiError as e:
-                    # HES is unsupported on this platform (cuptiActivityEnableHWTrace
-                    # -> CUPTI_ERROR_NOT_SUPPORTED): skip the HES leg of the parity check.
-                    if "CUPTI_ERROR_NOT_SUPPORTED" not in str(e):
+                    # Skip only an explicit unsupported-platform result from the
+                    # subscriber-scoped ENABLE_HES attribute; preserve other errors.
+                    if (
+                        "cuptiActivitySetAttribute_v2(ENABLE_HES) failed with "
+                        "CUPTI_ERROR_NOT_SUPPORTED"
+                    ) not in str(e):
                         raise
                     print("SKIP_HES"); raise SystemExit(0)
                 if not cuspy_core.is_hes_enabled():
@@ -4405,7 +4606,7 @@ cuspy_core.enable_hes_early()
                 "Cuspy kernel metadata differs with HES enabled vs disabled",
             )
 
-    @unittest.skipIf(not TEST_CUPTI_V13_3, "requires libcupti >= 13.3")
+    @unittest.skipIf(not TEST_CUPTI_V13_5, "requires CUDA >= 13.5 + libcupti >= 13.5")
     @unittest.skipUnless(
         SM100OrLater,
         "cuda_driver (cuLaunchKernelEx) activity is only emitted by the cuBLAS "
@@ -4493,6 +4694,8 @@ class TestCuspyNative(TestCase):
     """Cuspy's native buffer-pool / v2-record-layout callbacks driven directly
     via ctypes -- pure C++, no CUDA/cupti-python."""
 
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfTorchDynamo("native ctypes/CUPTI probe; nothing to compile")
     def test_cuspy_buffer_pool_reuse(self):
         # Cuspy's buffer pool is pure C++ (no CUDA/cupti-python), so
@@ -4566,6 +4769,21 @@ class TestCuspyNative(TestCase):
         ptr_c, _ = do_request()
         self.assertNotEqual(ptr_c, ptr_b)
         self.assertEqual(pyprof._cuspy.allocated_buffers(), 2)
+
+        # After configure_buffers() with a new size, pooled buffers of the old size are
+        # freed rather than handed to CUPTI as the new size (CUPTI fills a buffer up to
+        # the reported size). 64 MiB is above glibc's largest mmap threshold, so the new
+        # buffer cannot land at either old address.
+        for ptr in (ptr_b, ptr_c):
+            do_complete(ptr)
+            pyprof._cuspy.get_completed()
+            pyprof._cuspy.return_buffer(ptr)
+        new_size = 64 * 1024 * 1024
+        pyprof._cuspy.configure_buffers(new_size)
+        ptr_d, size_d = do_request()
+        self.assertEqual(size_d, new_size)
+        self.assertNotIn(ptr_d, (ptr_b, ptr_c))
+        self.assertEqual(pyprof._cuspy.allocated_buffers(), 1)
 
     def test_cuspy_not_imported_without_active_session(self):
         # The optional Cuspy import chain (observers.profiler -> Cuspy ->
@@ -4718,11 +4936,13 @@ class TestCuspyNative(TestCase):
 
 
 @unittest.skipIf(not TEST_CUPTI_PYTHON, "requires cupti-python")
-class TestCuspyClock(TestCase):
+class TestCuspyClockCUDA(TestCase):
     """Clock-alignment math for the cuspy -- record timestamps -> unix-epoch ns on
     kineto's axis. Drives the production _SynchronizedClock directly (its calibrate() reads
     the native clock through an injected callable), so no CUDA / live CUPTI session is needed;
     a lambda returning CLOCK_REALTIME stands in for cuptiGetTimestamp."""
+
+    hw_classification = HardwareClassification.CUDA
 
     @staticmethod
     def _realtime():

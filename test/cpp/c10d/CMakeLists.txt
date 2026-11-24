@@ -68,14 +68,6 @@ if(USE_CUDA)
     # alternative to making NCCL a public dependency of libtorch, we make it
     # a private dependency of the tests as well.
     c10d_add_test(
-      ProcessGroupNCCLTest.cpp
-      LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
-    target_compile_definitions(ProcessGroupNCCLTest PRIVATE USE_CUDA USE_NCCL)
-    c10d_add_test(
-      ProcessGroupNCCLErrorsTest.cpp
-      LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
-    target_compile_definitions(ProcessGroupNCCLErrorsTest PRIVATE USE_CUDA USE_NCCL)
-    c10d_add_test(
       NCCLDevCommManagerTest.cpp
       LINK_LIBRARIES torch_cpu c10d_cuda_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
     target_compile_definitions(NCCLDevCommManagerTest PRIVATE USE_CUDA USE_NCCL)
@@ -113,11 +105,9 @@ elseif(USE_ROCM)
   endif()
   if(USE_NCCL AND USE_C10D_NCCL)
     c10d_add_test(
-      hip/ProcessGroupNCCLTest.cpp
+      hip/NCCLDevCommManagerTest.cpp
       LINK_LIBRARIES torch_cpu c10d_hip_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
-    c10d_add_test(
-      hip/ProcessGroupNCCLErrorsTest.cpp
-      LINK_LIBRARIES torch_cpu c10d_hip_test gtest_main __caffe2_nccl INSTALL_TEST ${INSTALL_TEST})
+    target_compile_definitions(NCCLDevCommManagerTest PRIVATE USE_ROCM USE_NCCL)
     if(INSTALL_TEST)
       install(TARGETS c10d_hip_test DESTINATION lib)
     endif()

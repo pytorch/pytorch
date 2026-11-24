@@ -464,8 +464,8 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce(
 }
 
 c10::intrusive_ptr<Work> ProcessGroupMPI::allreduce_coalesced(
-    std::vector<at::Tensor>& tensors,
-    const AllreduceCoalescedOptions& opts) {
+    std::vector<at::Tensor>& /*tensors*/,
+    const AllreduceCoalescedOptions& /*opts*/) {
   TORCH_CHECK(false, "allreduce_coalesced is currently not supported with MPI");
 }
 
@@ -503,7 +503,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce(
 c10::intrusive_ptr<Work> ProcessGroupMPI::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
-    const AllgatherOptions& opts) {
+    const AllgatherOptions& /*opts*/) {
   checkSingleTensor(inputTensors);
   if (outputTensors.size() != 1) {
     TORCH_CHECK(
@@ -762,7 +762,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::all_to_all_single(
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
-    const AllToAllOptions& opts) {
+    const AllToAllOptions& /*opts*/) {
   checkSingleTensorHelper(inputTensor);
   checkSingleTensorHelper(outputTensor);
 
@@ -843,7 +843,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::all_to_all_single(
 c10::intrusive_ptr<Work> ProcessGroupMPI::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
-    const AllToAllOptions& opts) {
+    const AllToAllOptions& /*opts*/) {
   TORCH_CHECK(
       inputTensors.size() == static_cast<size_t>(size_),
       "Number of input tensors are not equal to group size");
@@ -988,9 +988,10 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::recvAnysource(
       std::optional<std::vector<at::Tensor>>(tensors));
 }
 
-c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(
+    const BarrierOptions& /*opts*/) {
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
-      [this](std::unique_ptr<WorkEntry>& entry) {
+      [this](std::unique_ptr<WorkEntry>& /*entry*/) {
         std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
         MPI_CHECK(MPI_Barrier(pgComm_));
       };
@@ -1002,7 +1003,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::barrier(const BarrierOptions& opts) {
 c10::intrusive_ptr<Work> ProcessGroupMPI::all_gather_single(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
-    const AllgatherOptions& opts) {
+    const AllgatherOptions& /*opts*/) {
   TORCH_CHECK(
       outputTensor.numel() == inputTensor.numel() * size_,
       "All gather: output tensor size must be equal to input tensor size times the world size");
