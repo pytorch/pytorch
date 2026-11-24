@@ -721,9 +721,9 @@ class PyCodegen:
         name = re.sub(r"^.*[.]", "", mod.__name__)
         if global_scope.get(name, None) is mod:
             return self.create_load_global(name, add=True)
-        prefix = f"___module_{name}"
-        global_name = self.tx.output.install_global_by_id(prefix, mod)
-        return self.create_load_global(global_name, add=True)
+        # An import alias, which a saved package binds again when it is loaded.
+        alias = self.tx.import_source(mod.__name__, mod).global_name
+        return self.create_load_global(alias, add=True)
 
     def mark_source_temp(self, source: Source) -> None:
         """

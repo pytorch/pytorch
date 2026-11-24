@@ -319,6 +319,29 @@ exec("def scale(x):\n    return x * factor\n", PKG_HANDLER_SCOPE)
 PKG_HANDLERS = [PKG_HANDLER_SCOPE["scale"]]
 PKG_HANDLER_SET = {PKG_HANDLER_SCOPE["scale"]}
 
+# Graph breaks whose bytecode loads names Dynamo binds in the module while
+# tracing. The module lives in a file so that re-importing it gives a scope
+# with none of them, as a process that only loads the package has.
+PKG_GRAPH_BREAK_MODULE = """
+from itertools import count
+
+import torch
+
+
+def range_iterator(x):
+    steps = iter(range(1, 4))
+    y = x.sin()
+    torch._dynamo.graph_break()
+    return y + next(steps)
+
+
+def itertools_count(x):
+    steps = count(1)
+    y = x.sin()
+    torch._dynamo.graph_break()
+    return y + next(steps)
+"""
+
 
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
@@ -1722,6 +1745,39 @@ def fn(x):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles)
+
+    def _serve_from_a_fresh_import(self, fn_name):
+        ctx = DiskDynamoStore()
+        module_name = "torch.test_package_graph_break_helper"
+        self.addCleanup(sys.modules.pop, module_name, None)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            helper_path = os.path.join(tmp_dir, "package_graph_break_helper.py")
+            with open(helper_path, "w") as f:
+                f.write(PKG_GRAPH_BREAK_MODULE)
+            fn = getattr(import_from_path(module_name, helper_path), fn_name)
+            x = torch.randn(3)
+            expected = fn(x)
+            package = CompilePackage(fn)
+            compiled_fn = torch._dynamo.optimize("eager", package=package)(fn)
+            self.assertEqual(compiled_fn(x), expected)
+            for backend_id, backend in package.cached_backends.items():
+                ctx.record_eager_backend(backend_id, backend)
+            ctx.save_package(package, self.path())
+
+            torch._dynamo.reset()
+            # A fresh import, as the loading process would see the module.
+            fn = getattr(import_from_path(module_name, helper_path), fn_name)
+            with torch.compiler.set_stance("fail_on_recompile"):
+                package, backends = ctx.load_package(fn, self.path())
+                compiled_fn = torch._dynamo.optimize(package=package)(fn)
+                package.install(backends)
+                self.assertEqual(compiled_fn(x), expected)
+
+    @parametrize("fn_name", ("range_iterator", "itertools_count"))
+    def test_an_iterator_rebuilt_at_a_graph_break_is_served(self, fn_name):
+        # Rebuilding the iterator calls a builtin or a module attribute, loaded
+        # through a global the loading process has to bind as well.
+        self._serve_from_a_fresh_import(fn_name)
 
     def test_file_change(self):
         ctx = DiskDynamoStore()
