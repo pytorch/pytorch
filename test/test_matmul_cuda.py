@@ -1490,6 +1490,24 @@ class TestMatmulCuda(InductorTestCase):
                 self.assertFalse(has_ck_kernel(large_kernels, CK_EQUAL_K_HINT))
                 self.assertTrue(uses_hipblaslt(large_kernels))
 
+    @skipCUDAIfNotRocm
+    @skipXPU
+    def test_grouped_gemm_ck_tile_bf16_rounding(self):
+        if not isRocmArchAnyOf(MI300_ARCH + MI350_ARCH):
+            raise unittest.SkipTest("ck_tile grouped gemm is only dispatched on gfx942 and gfx950")
+        # Truncating float to bf16 stays within the default bf16 tolerance, so check the direction of the rounding
+        # error instead: truncation always rounds toward zero, round-to-nearest only about half the time.
+        G, M, N, K = 4, 64, 128, 256
+        a = torch.randn(G * M, K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(G, N, K, device="cuda", dtype=torch.bfloat16)
+        offs = torch.arange(1, G + 1, device="cuda", dtype=torch.int32) * M
+        with rocm_group_gemm_ck_env("1", var="ROCM_ALLOW_GROUP_GEMM_CK_TILE"):
+            out = F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=torch.bfloat16)
+        ref = torch.cat([a[g * M:(g + 1) * M].double() @ b[g].double().t() for g in range(G)])
+        diff = out.double() != ref
+        toward_zero = (out.double().abs() < ref.abs())[diff].float().mean().item()
+        self.assertLess(toward_zero, 0.6)  # round-to-nearest gives about 0.5, truncation about 1.0
+
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
