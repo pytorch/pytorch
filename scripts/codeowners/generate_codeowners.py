@@ -5,7 +5,7 @@
 #   "pyyaml==6.0.2",
 # ]
 # ///
-"""Generate CODEOWNERS from OWNERSHIP.yaml.
+"""Generate CODEOWNERS and the label_parents rules of .github/label_to_label.yml from OWNERSHIP.yaml.
 
 usage: generate_codeowners.py [--check | --lintrunner]
 """
@@ -22,8 +22,18 @@ import yaml
 
 SECTION_MARKER = "# Grouped review-surface definitions:"
 LINTER_CODE = "CODEOWNERS_GENERATED"
-TOP_LEVEL_KEYS = {"planned_labels", "sections", "section_notes", "ownership"}
+TOP_LEVEL_KEYS = {
+    "planned_labels",
+    "label_parents",
+    "sections",
+    "section_notes",
+    "ownership",
+}
 GROUP_KEYS = {"name", "labels", "owners", "section", "paths"}
+GITHUB_LABELS = "tools/linter/adapters/pytorch_labels.json"
+LABEL_RULES = ".github/label_to_label.yml"
+LABEL_RULES_BEGIN = "# BEGIN label_parents rules, generated from OWNERSHIP.yaml by scripts/codeowners/generate_codeowners.py"
+LABEL_RULES_END = "# END label_parents rules"
 
 
 @dataclass(frozen=True)
@@ -49,6 +59,8 @@ class LabelGroup:
 @dataclass(frozen=True)
 class OwnershipFile:
     planned_labels: tuple[str, ...]
+    # Child label -> parent label; the label bot adds the parent to issues.
+    label_parents: dict[str, str]
     sections: tuple[str, ...]
     section_notes: dict[str, tuple[str, ...]]
     groups: tuple[LabelGroup, ...]
@@ -112,6 +124,34 @@ def parse_group(entry, *, sections: tuple[str, ...]) -> LabelGroup:
     )
 
 
+def parse_label_parents(
+    value, *, github_labels: set[str], planned_labels: tuple[str, ...]
+) -> dict[str, str]:
+    parents = mapping(value, where="label_parents")
+    for child, parent in parents.items():
+        if not all(isinstance(label, str) and label for label in (child, parent)):
+            raise ValueError(
+                f"label_parents: expected 'label: parent', got {child!r}: {parent!r}"
+            )
+        if child not in github_labels and child not in planned_labels:
+            raise ValueError(
+                f"label_parents: {child!r} is not in {GITHUB_LABELS}; add labels not "
+                "yet on GitHub to planned_labels"
+            )
+        # The bot adding a missing label would create it on GitHub.
+        if parent not in github_labels:
+            raise ValueError(
+                f"label_parents: parent {parent!r} is not in {GITHUB_LABELS}"
+            )
+        seen, ancestor = {child}, parent
+        while ancestor in parents:
+            if ancestor in seen:
+                raise ValueError(f"label_parents: cycle through {ancestor!r}")
+            seen.add(ancestor)
+            ancestor = parents[ancestor]
+    return parents
+
+
 def check_consistency(ownership: OwnershipFile) -> None:
     """Cross-entry rules: unique names and label sets."""
     names = [group.name for group in ownership.groups]
@@ -129,7 +169,7 @@ def check_consistency(ownership: OwnershipFile) -> None:
             label_sets[key] = group.name
 
 
-def load_ownership(path: Path) -> OwnershipFile:
+def load_ownership(path: Path, github_labels: set[str]) -> OwnershipFile:
     """Load and validate OWNERSHIP.yaml; every problem is a ValueError."""
     try:
         document = yaml.safe_load(path.read_text())
@@ -154,8 +194,14 @@ def load_ownership(path: Path) -> OwnershipFile:
         )
     if not isinstance(document["ownership"], list):
         raise ValueError("ownership must be a list")
+    planned_labels = string_list(document["planned_labels"], where="planned_labels")
     ownership = OwnershipFile(
-        planned_labels=string_list(document["planned_labels"], where="planned_labels"),
+        planned_labels=planned_labels,
+        label_parents=parse_label_parents(
+            document["label_parents"],
+            github_labels=github_labels,
+            planned_labels=planned_labels,
+        ),
         sections=sections,
         section_notes=section_notes,
         groups=tuple(
@@ -215,8 +261,8 @@ def render_header(ownership: OwnershipFile) -> list[str]:
         '#   as a set) appears on exactly one "# label:" line. When a list extends a',
         "#   sibling's, the shared labels come first and the distinguishing label last.",
         "# - A label line leaves out an oncall label when one of its module labels",
-        "#   implies it; .github/label_to_label.yml records which modules imply which",
-        "#   oncall.",
+        "#   implies it; label_parents in OWNERSHIP.yaml records which labels imply",
+        "#   which.",
         *planned,
         "#",
         "# For module labels => owners mapping, please see https://github.com/pytorch/pytorch/issues/24422.",
@@ -322,6 +368,27 @@ def render_codeowners(ownership: OwnershipFile) -> str:
     return "\n".join(lines) + "\n"
 
 
+def splice_label_rules(current: str, ownership: OwnershipFile) -> str:
+    """Replace the generated block of label_to_label.yml with one rule per parent."""
+    children: dict[str, list[str]] = {}
+    for child, parent in ownership.label_parents.items():
+        children.setdefault(parent, []).append(child)
+    rules = []
+    for parent, labels in children.items():
+        rules += ["- any:", *(f"  - {json.dumps(label)}" for label in labels)]
+        rules += ["  then:", f"  - {json.dumps(parent)}"]
+    lines = current.splitlines()
+    begins = [i for i, line in enumerate(lines) if line == LABEL_RULES_BEGIN]
+    ends = [i for i, line in enumerate(lines) if line == LABEL_RULES_END]
+    if len(begins) != 1 or len(ends) != 1 or begins[0] > ends[0]:
+        raise ValueError(
+            f"{LABEL_RULES} needs one line {LABEL_RULES_BEGIN!r} followed by one line "
+            f"{LABEL_RULES_END!r}"
+        )
+    begin, end = begins[0], ends[0]
+    return "\n".join([*lines[: begin + 1], *rules, *lines[end:]]) + "\n"
+
+
 def emit_lint_error(
     *, path: str, description: str, original: str | None, replacement: str | None
 ) -> None:
@@ -344,7 +411,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
-        "--check", action="store_true", help="fail if CODEOWNERS is stale"
+        "--check", action="store_true", help="fail if a generated file is stale"
     )
     mode.add_argument("--lintrunner", action="store_true")
     args = parser.parse_args()
@@ -357,7 +424,14 @@ def main() -> int:
         ).stdout.strip()
     )
     try:
-        generated = render_codeowners(load_ownership(repo / "OWNERSHIP.yaml"))
+        github_labels = set(json.loads((repo / GITHUB_LABELS).read_text()))
+        ownership = load_ownership(repo / "OWNERSHIP.yaml", github_labels)
+        outputs = ("CODEOWNERS", LABEL_RULES)
+        current = {name: (repo / name).read_text() for name in outputs}
+        generated = {
+            "CODEOWNERS": render_codeowners(ownership),
+            LABEL_RULES: splice_label_rules(current[LABEL_RULES], ownership),
+        }
     except ValueError as error:
         if args.lintrunner:
             emit_lint_error(
@@ -369,32 +443,32 @@ def main() -> int:
             return 0
         print(f"error: OWNERSHIP.yaml is invalid: {error}", file=sys.stderr)
         return 1
-    codeowners = repo / "CODEOWNERS"
-    current = codeowners.read_text()
+    stale = [name for name in generated if current[name] != generated[name]]
     if args.lintrunner:
-        if current != generated:
+        for name in stale:
             emit_lint_error(
-                path="CODEOWNERS",
+                path=name,
                 description=(
-                    "CODEOWNERS is generated from OWNERSHIP.yaml, so direct edits to "
-                    "CODEOWNERS are discarded. Make the change in OWNERSHIP.yaml, then "
-                    "run `spin fixlint` or "
+                    f"{name} is generated from OWNERSHIP.yaml, so direct edits to its "
+                    "generated part are discarded. Make the change in OWNERSHIP.yaml, "
+                    "then run `spin fixlint` or "
                     "`python scripts/codeowners/generate_codeowners.py` to regenerate it."
                 ),
-                original=current,
-                replacement=generated,
+                original=current[name],
+                replacement=generated[name],
             )
         return 0
     if args.check:
-        if current != generated:
+        if stale:
             print(
-                "CODEOWNERS is out of date. Direct edits to CODEOWNERS are discarded: "
-                "make the change in OWNERSHIP.yaml, then run "
+                f"Out of date: {', '.join(stale)}. Direct edits to generated content "
+                "are discarded: make the change in OWNERSHIP.yaml, then run "
                 "scripts/codeowners/generate_codeowners.py"
             )
             return 1
         return 0
-    codeowners.write_text(generated)
+    for name in stale:
+        (repo / name).write_text(generated[name])
     return 0
 
 
