@@ -464,6 +464,16 @@ class TestTorchDeviceType(TestCase):
         s = t.storage()
         self._check_storage_meta(s, s_check)
 
+    def test_storage_repr(self, device):
+        t = torch.ones(4, device=device)
+        untyped = f"[torch.storage.UntypedStorage(device={t.device}) of size 16]"
+        typed = f"[torch.storage.TypedStorage(dtype=torch.float32, device={t.device}) of size 4]"
+        # Printing must not read the data: on CUDA that would sync once per element.
+        with CudaSyncGuard("error") if t.is_cuda else contextlib.nullcontext():
+            for s, expected in ((t.untyped_storage(), untyped), (t.storage(), typed)):
+                self.assertEqual(repr(s), expected)
+                self.assertEqual(str(s), expected)
+
     @onlyAccelerator
     def test_module_share_memory(self, device):
         # Test fix for issue #80733
@@ -1361,6 +1371,48 @@ class TestTorchDeviceType(TestCase):
                 else:
                     max_val = torch.iinfo(dtype).max
                 self.assertTrue(res.eq(max_val).all())
+
+    @onlyCUDA
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    def test_nondeterministic_alert_sparse_mm(self, device):
+        # cuSPARSE has deterministic algorithms for these; hipSPARSE does not,
+        # so ROCm alerts instead. See Note [Enabling Deterministic Operations]
+        should_alert = TEST_WITH_ROCM
+        dense = torch.randn(4, 3, device=device)
+        vec = torch.randn(4, device=device)
+        coo = torch.eye(4, device=device).to_sparse_coo()
+        csr = torch.eye(4, device=device).to_sparse_csr()
+
+        self.check_nondeterministic_alert(
+            lambda: torch.mm(coo, dense),
+            'addmm_out_sparse_dense_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.mm(csr, dense),
+            'addmm_out_sparse_compressed_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.mv(csr, vec),
+            'addmv_out_sparse_compressed_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.addmm(dense, coo, dense),
+            'addmm_out_sparse_dense_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.addmm(dense, csr, dense),
+            'addmm_out_sparse_compressed_cuda',
+            should_alert)
+        self.check_nondeterministic_alert(
+            lambda: torch.addmv(vec, csr, vec),
+            'addmv_out_sparse_compressed_cuda',
+            should_alert)
+        csr_batched = torch.sparse_csr_tensor(
+            csr.crow_indices(), csr.col_indices(), csr.values(), (2, 4, 4), check_invariants=False)
+        self.check_nondeterministic_alert(
+            lambda: torch.bmm(csr_batched, dense.expand(2, 4, 3).contiguous()),
+            'addmm_out_sparse_compressed_cuda',
+            should_alert)
 
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
@@ -6178,7 +6230,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(found_inf, 1.0)
 
     @onlyNativeDeviceTypes
-    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5375")
     def test_grad_scaling_state_dict(self, device):
         device = torch.device(device)
         GradScaler = partial(torch.GradScaler, device=device.type)
@@ -6192,10 +6243,8 @@ class TestTorchDeviceType(TestCase):
             if lazy_init_scale:
                 # Dummy scale() call to ensure the scale tensor is lazily initialized.
                 s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device=device))
-                if "cuda" == device.type:
-                    self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
-                else:
-                    self.assertTrue(isinstance(s1._scale, torch.FloatTensor))
+                self.assertEqual(s1._scale.dtype, torch.float32)
+                self.assertEqual(s1._scale.device, device)
 
             s1.load_state_dict(s0.state_dict())
 

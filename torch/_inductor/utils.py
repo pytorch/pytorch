@@ -668,6 +668,62 @@ class GraphPartitionMap:
     constant_names: list[str]
 
 
+class GraphPartitionMode(enum.Enum):
+    """Whether, and why, a compile is split into partition functions."""
+
+    # One callable: graph_partition is off, unsupported (cpp_wrapper, fx_wrapper,
+    # AOT) or unwanted (subgraph bodies, benchmark-only lowerings).
+    NONE = "none"
+    # config.graph_partition=True.
+    FROM_CONFIG = "from_config"
+
+
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionPlan:
+    """How one compile is split into partitions, and what the partitions are for.
+
+    Decided once before lowering; GraphLowering and CompiledFxGraph carry it
+    instead of reading config.graph_partition. ConstructorMoverPass,
+    the cpp_wrapper/fx_wrapper setup and compile_fx's override_cudagraphs
+    handling still read the config itself, and the scheduler's
+    partition-minimizing reorder requires both it and config.triton.cudagraphs,
+    preserving that optimization's opt-in.
+    """
+
+    mode: GraphPartitionMode = GraphPartitionMode.NONE
+    # The partitions are for CUDA Graphs or a customized partition wrapper: the
+    # scheduler splits off ops that cannot be captured, call() leaves the input
+    # alignment and NaN asserts to the partition functions, and post_compile
+    # captures the partitions instead of the whole graph.
+    cudagraphs_per_partition: bool = False
+
+    def __post_init__(self) -> None:
+        if self.cudagraphs_per_partition and not self.uses_graph_partition:
+            raise ValueError("cudagraphs_per_partition=True requires partitioning")
+
+    @property
+    def uses_graph_partition(self) -> bool:
+        """Whether codegen emits partition functions and a Runner."""
+        return self.mode is not GraphPartitionMode.NONE
+
+    @staticmethod
+    def no_partition() -> GraphPartitionPlan:
+        """One callable whatever config.graph_partition says: subgraph bodies
+        and benchmark-only lowerings."""
+        return GraphPartitionPlan()
+
+    @staticmethod
+    def from_config() -> GraphPartitionPlan:
+        """The plan config.graph_partition and config.triton.cudagraphs imply."""
+        if not config.graph_partition:
+            return GraphPartitionPlan.no_partition()
+        return GraphPartitionPlan(
+            GraphPartitionMode.FROM_CONFIG,
+            cudagraphs_per_partition=config.triton.cudagraphs
+            or _unstable_customized_partition_wrapper.wrapper is not None,
+        )
+
+
 def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
     """
     Returns benchmark results by examining torch profiler events.
@@ -1761,16 +1817,18 @@ def is_affine_indexing(index: sympy.Expr) -> bool:
         return False
 
 
-# The three view kinds are decided alike on GPUs today but differ in what
-# avoiding them costs: nothing for view_linear, a copy for view_copy, a
-# possibly unfused intermediate for view; keeping them apart also makes
-# decision logs readable.
+# The view kinds differ in what avoiding them costs: nothing for view_linear,
+# a copy for view_copy, a kernel and a pass of its own for view_pass, and an
+# intermediate that a kernel upstream stores or several users share for view.
 ModularIndexingUse = Literal[
     "view",  # dim-merging view of unrealized compute whose inlined loads need it
+    "view_pass",  # the same, where realizing the compute adds a pass over it
     "view_linear",  # dim-merging view whose inlined loads are affine anyway
     "view_copy",  # dim-merging view of a realized buffer or a load/cast of one
     "reduction",  # flat split of a multi-dim reduction whose loads need it
-    "reduction_linear",  # flat split over dims that are row-major contiguous
+    # flat split over dims that are row-major contiguous, or of a reduction
+    # over the same ranges and a common buffer as an earlier one that kept it
+    "reduction_linear",
     "repeat",
     "roll",
     "slice_scatter",  # strided slice_scatter
@@ -5451,13 +5509,6 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     )
 
 
-def is_using_cudagraph_partition() -> bool:
-    return (
-        torch._inductor.config.triton.cudagraphs
-        or _unstable_customized_partition_wrapper.wrapper is not None
-    ) and torch._inductor.config.graph_partition
-
-
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 
@@ -5893,6 +5944,13 @@ def load_template(name: str, template_dir: Path) -> str:
         # template is malformed, which is easy to misdiagnose when it surfaces
         # deep inside kernel lowering.
         raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
+
+
+def get_cpp_wrapper_header_device(device: str) -> str:
+    """PrivateUse1 backends register an arbitrary device name, but the runtime
+    headers are shipped under the generic privateuse1 name."""
+    privateuse1 = torch._C._get_privateuse1_backend_name()
+    return "privateuse1" if device == privateuse1 else device
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:

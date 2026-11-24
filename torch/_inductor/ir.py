@@ -94,6 +94,7 @@ from . import config, dependencies
 from .codegen.common import (
     BackendFeature,
     CodegenSymbol,
+    get_aten_c_shim_ops,
     get_scheduling_for_device,
     index_prevent_reordering,
     Kernel,
@@ -2342,18 +2343,18 @@ class Reduction(Loops):
         return None if pos == len(reduction_sizes) - 1 else pos
 
     @classmethod
-    def _flat_reduction_is_affine(
+    def _flat_reduction_reads(
         cls,
         inner_fns: Sequence[Callable[..., Any]],
         ranges: Sequence[_IntLike],
         reduction_ranges: Sequence[_IntLike],
         input_node: IRNode | None,
-    ) -> bool:
+    ) -> tuple[bool, list[str]]:
         """
         Whether inner_fns load with affine indices through the flattened
-        reduction index: the reduced dims are row-major contiguous in every
+        reduction index (the reduced dims are row-major contiguous in every
         operand, so the flat split leaves at most the modulus of its masked
-        tail in the kernel.
+        tail in the kernel), and the buffers they read.
         """
         numel = sympy_product(reduction_ranges)
         dense = cls.check_for_split_dense_dim_reindexing(numel, input_node)
@@ -2367,11 +2368,9 @@ class Reduction(Loops):
             rw = dependencies.extract_read_writes(flat, ranges, [numel])
         var_ranges = rw.var_ranges or {}
         simplify = V.graph.sizevars.simplify_with_ranges
-        return all(
-            is_affine_indexing(simplify(dep.index, var_ranges))
-            for dep in rw.reads
-            if isinstance(dep, dependencies.MemoryDep)
-        )
+        reads = [dep for dep in rw.reads if isinstance(dep, dependencies.MemoryDep)]
+        affine = all(is_affine_indexing(simplify(d.index, var_ranges)) for d in reads)
+        return affine, list(dict.fromkeys(dep.name for dep in reads))
 
     @classmethod
     def _split_reduction_ranges(
@@ -2393,7 +2392,8 @@ class Reduction(Loops):
         innermost. Returns None when the flat split stays: the backend keeps
         it, a range is symbolic, there is one reduction dim, whose flat split
         is affine as it is, or the backend keeps it for reduced dims that are
-        row-major contiguous in every operand.
+        row-major contiguous in every operand. Reductions over the same ranges
+        that read a common buffer take the decision of the first one lowered.
         """
         use_modular_indexing = functools.partial(
             V.choices.use_modular_indexing,
@@ -2408,12 +2408,20 @@ class Reduction(Loops):
         sizes = [int(r) for r in reduction_ranges]
         if sum(s != 1 for s in sizes) <= 1:
             return None
-        if use_modular_indexing(
-            kind="reduction_linear"
-        ) and cls._flat_reduction_is_affine(
-            inner_fns, ranges, reduction_ranges, input_node
-        ):
-            return None
+        if use_modular_indexing(kind="reduction_linear"):
+            args = (inner_fns, ranges, reduction_ranges, input_node)
+            keeps_flat, reads = cls._flat_reduction_reads(*args)
+            # Reductions over the same ranges that read a common buffer split
+            # alike, so that their first stages still fuse with each other and
+            # join one mix-order kernel: the first one lowered decides.
+            shape = (device, tuple(ranges), tuple(reduction_ranges))
+            decided = V.graph.reductions_keeping_flat_split
+            earlier = [decided[shape, r] for r in reads if (shape, r) in decided]
+            keeps_flat = earlier[0] if earlier else keeps_flat
+            for name in reads:
+                decided[shape, name] = keeps_flat
+            if keeps_flat:
+                return None
         perm = None
         dense = cls._dense_reduction_dim(sizes, input_node)
         if dense is not None:
@@ -4419,8 +4427,10 @@ class View(GenericView):
         far fewer elements than the view (labels or position tables broadcast
         over the merged dims, whose index arithmetic is negligible next to the
         affine traffic), "view_copy" when realizing x only copies an existing
-        buffer (x is realized, or a load/cast of one), and "view" for fresh
-        compute whose inlined loads need ModularIndexing.
+        buffer (x is realized, or a load/cast of one), and, for fresh compute
+        whose inlined loads need ModularIndexing, "view" when realizing x
+        costs no extra pass (_realized_view_fuses) and "view_pass" when it
+        does.
         """
         if is_storage_and_layout(x):
             return "view_copy"
@@ -4488,7 +4498,51 @@ class View(GenericView):
             and inner.inner_fn_opcount().used_ops <= cls._COPY_LIKE_OPS
         ):
             return "view_copy"
-        return "view"
+        return "view" if cls._realized_view_fuses(x, new_size) else "view_pass"
+
+    @staticmethod
+    def _realized_view_fuses(x: IRNode, new_size: Sequence[Expr]) -> bool:
+        """
+        Whether realizing x, the fresh compute under a dim-merging view of
+        new_size, is expected to cost no pass of its own. Realizing cuts the
+        kernel at the view. The cut is free when x reads its large inputs in
+        row-major order, so that it shares their loop order, and either the
+        view has several users (those of the FX node being lowered: x is
+        computed once instead of once per user) or x reads the result of a
+        reduction that iterates over as many elements as x has (that
+        reduction's kernel can store x). Otherwise the realized buffer needs
+        its own kernel, a transposing one when x permutes its inputs, and its
+        users read it in one more pass.
+        """
+        node = V.graph.current_node
+        fuses = node is not None and len(node.users) > 1
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            rw = dependencies.extract_read_writes(x.make_loader(), x.get_size())
+        var_ranges = rw.var_ranges or {}
+        sizevars = V.graph.sizevars
+        hint = sizevars.optimization_hint
+        numel = sympy_product(new_size)
+        reads_large_input = False
+        for dep in rw.reads:
+            buf = V.graph.try_get_buffer(dep.name)
+            if not isinstance(dep, dependencies.MemoryDep) or buf is None:
+                continue
+            if isinstance(buf, ComputedBuffer) and isinstance(buf.data, Reduction):
+                loops = [*buf.data.ranges, *buf.data.reduction_ranges]
+                if sizevars.statically_known_equals(sympy_product(loops), numel):
+                    fuses = True
+            if 4 * hint(buf.get_numel()) < hint(numel):
+                continue  # a table or per-row operand broadcast over the view
+            index = sizevars.simplify_with_ranges(dep.index, var_ranges)
+            if dep.is_indirect() or not is_affine_indexing(index):
+                return False
+            strides = sizevars.stride_vars(index, list(var_ranges))
+            # a stride without a hint (unbacked) cannot be ordered
+            hints = [abs(hint(s, fallback=0)) for s in strides if s != 0]
+            if 0 in hints or hints != sorted(hints, reverse=True):
+                return False
+            reads_large_input = True
+        return fuses and reads_large_input
 
     @staticmethod
     def _view_symbols(new_size: Sequence[_IntLike]) -> list[sympy.Symbol]:
@@ -7908,9 +7962,9 @@ class ExternKernel(InputsKernel):
                 # variant so new AOTI artifacts match the current op schema. The
                 # unversioned shim is retained solely for BC with existing
                 # already-compiled artifacts.
-                from torchgen.aoti.fallback_ops import inductor_fallback_ops
-
-                version_info = inductor_fallback_ops.get(f"aten.{kernel.__name__}", {})
+                version_info = get_aten_c_shim_ops(self.get_device()).get(
+                    f"aten.{kernel.__name__}", {}
+                )
                 latest_version = max(
                     (int(v[1:]) for v in version_info if v.startswith("v")),
                     default=1,
@@ -8137,12 +8191,12 @@ class ExternKernel(InputsKernel):
             if not isinstance(example_output, (list, tuple))
             else example_output
         )
-        # When graph_partition is enabled, skip - partitioning handles sparse outputs
+        # Skip when partitioning splits off cudagraph-unsafe ops: it handles sparse outputs
         for t in example_out_li:
             if (
                 isinstance(t, torch.Tensor)
                 and t.is_sparse
-                and not config.graph_partition
+                and not V.graph.partition_plan.cudagraphs_per_partition
             ):
                 msg = "sparsity not handled. Please file issue for sparse inference weights."
                 if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
@@ -8748,10 +8802,10 @@ class ExternKernel(InputsKernel):
             return
         op_name = self.get_op_name()
         name = self.get_assert_name()
-        size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
-        stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
         dtype = self.get_dtype() if self.should_assert_dtype(op_name) else None
-        wrapper.write_assert_size_stride(name, size, stride, op_name, dtype)
+        wrapper.write_assert_size_stride(
+            name, self.get_size(), self.get_stride(), op_name, dtype
+        )
 
     def codegen_alignment_asserts(self, wrapper: PythonWrapperCodegen) -> None:
         # Preserve the existing Python-wrapper behavior for inplace-view
@@ -10088,28 +10142,8 @@ class AssertScalar(ExternKernel):
         # "u0 == 0" in the runtime asserts, if you subsequently try to
         # simplify(u0 == 0), you will get True (because we've already runtime assert'ed
         # that it's true).  But we're code generating the actual runtime assert here!!
-        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)))
-        if V.graph.fx_wrapper:
-            # TODO fix
-            pass
-        elif V.graph.cpp_wrapper:
-            symbol_str = f"std::to_string({symbol})"
-            sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
-                self.scalar, simplify=False
-            )
-            # TODO: when we start compiling in C++20, annotate with [[unlikely]].
-            wrapper.writeline(
-                f'if (!({sizevar})) {{ throw std::runtime_error("Expected {self.msg} but received " + {symbol_str}); }}'
-            )
-        else:
-            sizevar = V.graph.wrapper_code.codegen_python_sizevar(
-                self.scalar, simplify=False
-            )
-            wrapper.writeline(f"if not ({sizevar}):")
-            wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
-            # No one should ever use this buffer, but for uniformity
-            # define the variable and assign it None
-            wrapper.writeline(f"{self.get_name()} = None")
+        symbol = next(iter(self.get_free_symbol_uses(unbacked_only=False)), None)
+        wrapper.codegen_scalar_assert(self.scalar, self.msg, self.get_name(), symbol)
 
 
 @ir_dataclass(frozen=False)
@@ -10561,16 +10595,18 @@ class FallbackKernel(ExternKernelAlloc):
             if not isinstance(kernel, torch._ops.OpOverload):
                 raise AssertionError(type(kernel))
             if V.graph.cpp_wrapper:
-                from torchgen.aoti.fallback_ops import inductor_fallback_ops
-
-                if str(kernel) not in inductor_fallback_ops:
-                    # C shim v2 is torchgen-ed, which should cover all aten ops.
-                    # If you do hit a missed op, please update fallback_ops.py.
-                    log.warning(
-                        "%s is missing a c-shim implementation, using proxy executor as fallback",
-                        kernel,
-                    )
+                device = self.get_device()
+                if self._uses_aot_proxy_executor(kernel, device):
                     self.use_runtime_dispatch = True
+                    from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
+                    if get_aten_c_shim_ops(device) is inductor_fallback_ops:
+                        # C shim v2 is torchgen-ed, which should cover all aten ops.
+                        # If you do hit a missed op, please update fallback_ops.py.
+                        log.warning(
+                            "%s is missing a c-shim implementation, using proxy executor as fallback",
+                            kernel,
+                        )
         elif kernel.namespace == "_quantized":
             # Internal Quantized Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
@@ -10693,8 +10729,10 @@ class FallbackKernel(ExternKernelAlloc):
                     )
 
     @staticmethod
-    def _uses_aot_proxy_executor(kernel: torch._ops.OpOverload) -> bool:
-        # Mirror FallbackKernel.codegen's c-shim availability check: an op with no c-shim
+    def _uses_aot_proxy_executor(
+        kernel: torch._ops.OpOverload, device: torch.device | None
+    ) -> bool:
+        # Share codegen's c-shim availability check: an op with no c-shim
         # is dispatched through the AOT ProxyExecutor, whose only runtime channels are an
         # int64[] and an AtenTensorHandle[]. That is the path where a Python scalar bound
         # to a Tensor-typed schema arg cannot be serialized (fill_args has no channel for
@@ -10703,9 +10741,7 @@ class FallbackKernel(ExternKernelAlloc):
         if not V.graph.cpp_wrapper:
             return False
         if kernel.namespace == "aten":
-            from torchgen.aoti.fallback_ops import inductor_fallback_ops
-
-            return str(kernel) not in inductor_fallback_ops
+            return str(kernel) not in get_aten_c_shim_ops(device)
         if kernel.namespace == "_quantized":
             return False
         return kernel not in config.aot_inductor.custom_ops_to_c_shims
@@ -10781,14 +10817,7 @@ class FallbackKernel(ExternKernelAlloc):
         # Returns the rewritten (args, kwargs) plus whether anything was materialized;
         # the caller needs to know because process_kernel feeds graph constants back in
         # as *real* tensors (see the V.graph.constants branch there).
-        if not isinstance(kernel, torch._ops.OpOverload):
-            return args, kwargs, False
-        # Materialize for anything codegen() will send to the proxy executor: no C-shim,
-        # or a scalar the C-shim's double ABI cannot represent.
-        if not (
-            cls._uses_aot_proxy_executor(kernel)
-            or cls._cshim_scalar_abi_forces_proxy(kernel, args, kwargs)
-        ):
+        if not V.graph.cpp_wrapper or not isinstance(kernel, torch._ops.OpOverload):
             return args, kwargs, False
 
         tensor_dtypes: list[torch.dtype] = []
@@ -10811,6 +10840,12 @@ class FallbackKernel(ExternKernelAlloc):
                     device = None
         if device is None:
             device = torch.device("cpu")
+
+        if not (
+            cls._uses_aot_proxy_executor(kernel, device)
+            or cls._cshim_scalar_abi_forces_proxy(kernel, args, kwargs)
+        ):
+            return args, kwargs, False
 
         def scalar_dtype(value: int | float | complex) -> torch.dtype:
             if tensor_dtypes:

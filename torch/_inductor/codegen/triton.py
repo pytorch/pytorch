@@ -75,7 +75,10 @@ from ..runtime.tiling import (
     block_to_prefix,
     get_axis_prefix,
     get_max_block,
+    get_pointwise_prefixes,
+    get_z_prefixes,
     is_reduction_prefix,
+    is_z_prefix,
 )
 from ..scheduler import (
     BaseSchedulerNode,
@@ -144,7 +147,6 @@ from .simd import (
     PartialAccumulate,
     SIMDKernel,
     SIMDScheduling,
-    TRITON_MAX_TENSOR_DIMS,
 )
 from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
@@ -178,6 +180,8 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
+
+TRITON_MAX_TENSOR_DESCRIPTOR_DIMS = 5
 
 
 def get_triton_reduction_function(reduction_type):
@@ -929,23 +933,24 @@ def triton_reshape(
 # inconsistent with Python semantics (and consistent with C semantics).  We
 # must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
-    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+    def _print_rounding_to_int(self, expr: sympy.Expr, rounding: str) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        # pyrefly: ignore [missing-attribute]
+        value = self._print(expr.args[0])
+        return f"triton_helpers.rounding_to_int({value}, {V.kernel.index_dtype}, '{rounding}')"
+
+    def _print_TruncToInt(self, expr: sympy.Expr) -> str:
+        return self._print_rounding_to_int(expr, "trunc")
 
     def _print_TruncToFloat(self, expr: sympy.Expr) -> str:
         if len(expr.args) != 1:
             raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
         # pyrefly: ignore [missing-attribute]
         value = self._print(expr.args[0])
-        # Adding +0.0 preserves large floating results while canonicalizing
-        # libdevice.trunc(-0.0) back to Python's +0.0 materialization behavior.
-        # pyrefly: ignore [missing-attribute]
-        return f"(libdevice.trunc({value}) + tl.zeros_like({value}))"
+        return (
+            f"triton_helpers.trunc_to_float({value}, {self._get_scalar_float_type()})"
+        )
 
     @staticmethod
     def _get_scalar_float_type() -> str:
@@ -1013,32 +1018,16 @@ class TritonPrinter(PythonPrinter):  # noqa: docstring_linter
     # NB: sympy.floor/ceiling produce integers, so we have to do the
     # conversion to index dtype
     def _print_floor(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return self._print_rounding_to_int(expr, "floor")
 
     def _print_FloorToInt(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        return (
-            # pyrefly: ignore [missing-attribute]
-            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return self._print_rounding_to_int(expr, "floor")
 
     def _print_ceiling(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        # pyrefly: ignore [missing-attribute]
-        return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return self._print_rounding_to_int(expr, "ceil")
 
     def _print_CeilToInt(self, expr: sympy.Expr) -> str:
-        if len(expr.args) != 1:
-            raise AssertionError(f"expected 1 arg, got {len(expr.args)}")
-        # pyrefly: ignore [missing-attribute]
-        return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return self._print_rounding_to_int(expr, "ceil")
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
         # pyrefly: ignore [missing-attribute]
@@ -3591,6 +3580,12 @@ ARG_REDUCTION_TYPES = (
 PLAIN_REDUCTION_TYPES = ("sum", "prod", "max", "min", "xor_sum")
 
 
+def _max_autotune_reduction() -> bool:
+    if config.max_autotune_reduction is not None:
+        return config.max_autotune_reduction
+    return config.max_autotune_pointwise
+
+
 class TritonKernel(SIMDKernel[TritonCSEVariable]):
     """A class to represent a triton kernel and helpers to generate
     triton kernel programmatically
@@ -4557,7 +4552,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     stride_sorter_cls=stride_sorter_cls,
                 )
                 if isinstance(options, TensorDescriptorOptions):
-                    if len(options.params.block_shape) > TRITON_MAX_TENSOR_DIMS:
+                    if (
+                        len(options.params.block_shape)
+                        > TRITON_MAX_TENSOR_DESCRIPTOR_DIMS
+                    ):
                         return None
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
@@ -5501,7 +5499,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             ep = ""
 
-        if (has_tmpmask or has_rindex) and indexing.has_mask():
+        if (
+            has_tmpmask or has_rindex or self._load_other is not None
+        ) and indexing.has_mask():
             if self._load_other:
                 other = f", other={constant_repr(self._load_other)}"
             elif uses_uint8_storage:
@@ -8026,6 +8026,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "incremental_autotune": config.incremental_autotune,
             "max_autotune": config.max_autotune,
             "max_autotune_pointwise": config.max_autotune_pointwise,
+            "max_autotune_reduction": _max_autotune_reduction(),
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
@@ -8389,10 +8390,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     V.graph.get_current_device_or_throw()
                 ),
                 "constants": {},
-                "native_matmul": (
-                    torch._inductor.config.triton.native_matmul
-                    and ("tl.dot" in str(self.body) or "tl.dot" in str(self.compute))
-                ),
+                "native_matmul": self.is_native_matmul,
                 **self.triton_meta_common(),
             },
         )
@@ -8409,6 +8407,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         inductor_meta = {
             "grid_type": self._get_grid_type().__name__,
+            "rank": len(get_pointwise_prefixes(self.numels)),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
@@ -8656,6 +8655,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if self.is_native_matmul:
                 return triton_heuristics.BatchMatmulGrid3D
             return triton_heuristics.Grid3D
+        elif n > 3:
+            return triton_heuristics.GridND
         raise ValueError(f"Unsupported number of dimensions: {n}")
 
     def add_numel_to_call_args(self, name, call_args, arg_types):
@@ -8699,15 +8700,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         for arg, arg_signature in zip(call_args, arg_signatures):
             if isinstance(arg_signature, TensorArg):
                 tensor_name = f"{self.kernel_name}: {arg}"
-                if V.graph.cpp_wrapper:
-                    wrapper.writeline(
-                        f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{tensor_name}", {arg}));'
-                    )
-                else:
-                    line = f"assert not {arg}.isnan().any().item(), {f'{tensor_name} contains NaN'!r}"
-                    wrapper.writeline(line)
-                    line = f"assert not {arg}.isinf().any().item(), {f'{tensor_name} contains Inf'!r}"
-                    wrapper.writeline(line)
+                wrapper.codegen_nan_assert(arg, tensor_name)
 
     def create_cse_var(self, *args, **kwargs) -> TritonCSEVariable:
         return TritonCSEVariable(*args, **kwargs)
@@ -8754,11 +8747,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return f"tl.full({size}, {value}, {index_dtype})"
 
     def iteration_ranges_get_pid(self, entry: IterationRangesRoot) -> str:
+        z_prefixes = get_z_prefixes(self.numels)
+        if len(z_prefixes) > 1 and is_z_prefix(entry.prefix):
+            pid = "tl.program_id(2)"
+            for prefix in z_prefixes[:-1]:
+                blocks = f"tl.cdiv({prefix}numel, {prefix.upper()}BLOCK)"
+                if prefix == entry.prefix:
+                    return f"({pid} % {blocks}).to({self.index_dtype})"
+                pid = f"({pid} // {blocks})"
+            return f"{pid}.to({self.index_dtype})"
         if entry.grid_dim is None:
             raise AssertionError("entry.grid_dim must not be None")
         key = f"tl.program_id({entry.grid_dim})"
         # y_grid has a limit, so express it in terms of y and z in case of overflow.
-        # z grid is only exercised when max_tiles == 3 (off by default).
+        # Overflow can use the Z launch axis only when no logical Z tile uses it.
         if self.needs_yz_grid_overflow(entry):
             # For ynumel larger than max_ygrid, we need to use zdim.
             # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
