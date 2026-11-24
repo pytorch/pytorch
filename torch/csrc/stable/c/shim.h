@@ -409,6 +409,13 @@ AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_bool(
     bool* ret_value,
     bool* ret_key_exists);
 
+#ifdef USE_CUDA
+// With setup=false, skips configuring the handle's stream, workspace, and
+// math mode. With setup=true, uses the same setup as the original shim.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_current_cuda_blas_handle_v2(bool setup, void** ret_handle);
+#endif // USE_CUDA
+
 // Returns whether torch.set_warn_always(True) is in effect.
 AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
 
