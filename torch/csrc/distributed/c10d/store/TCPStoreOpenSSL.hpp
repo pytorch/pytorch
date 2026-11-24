@@ -46,6 +46,7 @@ using PskFindSessionCallback =
     (void*, PskFindSessionCallback))                                         \
   _(int, SSL_CTX_set_ex_data, (void*, int, void*))                           \
   _(void*, SSL_CTX_get_ex_data, (const void*, int))                          \
+  _(void*, SSL_CTX_get0_certificate, (const void*))                          \
   _(void*, SSL_get_SSL_CTX, (const void*))                                   \
   _(const void*, SSL_CIPHER_find, (void*, const unsigned char*))             \
   _(void*, SSL_SESSION_new, ())                                              \
@@ -65,6 +66,7 @@ using PskFindSessionCallback =
   _(int, SSL_peek, (void*, void*, int))                                      \
   _(int, SSL_write, (void*, const void*, int))                               \
   _(int, SSL_get_error, (const void*, int))                                  \
+  _(int, SSL_get_ex_data_X509_STORE_CTX_idx, ())                             \
   _(long, SSL_get_verify_result, (const void*))                              \
   _(const void*, BIO_s_mem, ())                                              \
   _(void*, BIO_new, (const void*))                                           \
@@ -74,6 +76,23 @@ using PskFindSessionCallback =
   _(unsigned long, ERR_get_error, ())                                        \
   _(void, ERR_error_string_n, (unsigned long, char*, size_t))                \
   _(void, ERR_clear_error, ())                                               \
+  _(void*, X509_STORE_CTX_get_ex_data, (const void*, int))                   \
+  _(int, X509_STORE_CTX_get_error_depth, (const void*))                      \
+  _(void*, X509_STORE_CTX_get_current_cert, (const void*))                   \
+  _(void, X509_STORE_CTX_set_error, (void*, int))                            \
+  _(void*, OBJ_txt2obj, (const char*, int))                                  \
+  _(void, ASN1_OBJECT_free, (void*))                                         \
+  _(int, X509_get_ext_by_OBJ, (const void*, const void*, int))               \
+  _(void*, X509_get_ext, (const void*, int))                                 \
+  _(void*, X509_EXTENSION_get_data, (void*))                                 \
+  _(int, ASN1_STRING_length, (const void*))                                  \
+  _(const unsigned char*, ASN1_STRING_get0_data, (const void*))              \
+  _(void*, d2i_ASN1_UTF8STRING, (void**, const unsigned char**, long))       \
+  _(int, i2d_ASN1_UTF8STRING, (const void*, unsigned char**))                \
+  _(int,                                                                     \
+    ASN1_mbstring_copy,                                                      \
+    (void**, const unsigned char*, int, int, unsigned long))                 \
+  _(void, ASN1_UTF8STRING_free, (void*))                                     \
   _(const char*, X509_verify_cert_error_string, (long))
 
 struct OpenSSL {

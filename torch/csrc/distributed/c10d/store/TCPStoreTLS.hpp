@@ -28,12 +28,21 @@ constexpr std::array<uint8_t, 7> kTLSProtocolVersionAlert =
 // Larger than any pid so it cannot match a ping nonce.
 constexpr uint32_t tlsRequiredMagicNumber = 0x7F4C5352;
 
+struct TLSPeerCertConfig {
+  std::string oid;
+  std::string value;
+  std::string prefix;
+
+  bool operator==(const TLSPeerCertConfig&) const = default;
+};
+
 struct TLSConfig {
   std::string cert;
   std::string key;
   std::string ca;
   std::string psk; // Secret key value, never a filename or diagnostic argument.
   bool fromEnv = false;
+  TLSPeerCertConfig peerCert;
 
   bool enabled() const {
     return !cert.empty() || !key.empty() || !ca.empty() || !psk.empty();
@@ -41,14 +50,15 @@ struct TLSConfig {
 
   bool sameSettings(const TLSConfig& other) const {
     return cert == other.cert && key == other.key && ca == other.ca &&
-        psk == other.psk;
+        psk == other.psk && peerCert == other.peerCert;
   }
 };
 
-// The TLS options if any is set, otherwise the TORCH_TCPSTORE_TLS_CERT,
-// TORCH_TCPSTORE_TLS_KEY, TORCH_TCPSTORE_TLS_CA and TORCH_TCPSTORE_TLS_PSK
-// environment variables. Throws if certificate mode is missing a value or is
-// combined with a PSK.
+// Explicit TLS options replace TORCH_TCPSTORE_TLS_* environment settings,
+// except TORCH_TCPSTORE_TLS_REQUIRE.
+// Otherwise resolve CERT, KEY, CA, PSK, PSK_FILE, PEER_CERT_OID,
+// PEER_CERT_VALUE and PEER_CERT_PREFIX from the environment. Invalid or mixed
+// modes fail closed.
 TLSConfig tlsConfig(const TCPStoreOptions& opts);
 
 class TLSContext {
@@ -76,10 +86,16 @@ class TLSContext {
     return psk_;
   }
 
+  // Called from OpenSSL after normal chain verification of the leaf.
+  bool verifyPeerCertificate(void* cert) const;
+
  private:
   void* ctx_;
   bool isServer_;
   std::string psk_;
+  void* peerCertOid_ = nullptr;
+  std::string peerCertValue_;
+  std::string peerCertPrefix_;
 };
 
 // A TLS connection over memory buffers. Ciphertext received from the peer is

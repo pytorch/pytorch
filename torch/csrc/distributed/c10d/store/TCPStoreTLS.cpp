@@ -30,6 +30,9 @@ namespace {
 constexpr int kSslErrorWantRead = 2;
 constexpr int kSslErrorZeroReturn = 6;
 constexpr long kX509VOk = 0;
+constexpr int kVAsn1Utf8String = 12;
+constexpr int kMbstringUtf8 = 0x1000;
+constexpr unsigned long kBAsn1Utf8String = 0x2000;
 
 // Plaintext per SSL_write, bounding the BIO buffer, not the full response.
 constexpr size_t kWriteChunk = 1 << 20;
@@ -72,11 +75,36 @@ constexpr size_t kMinPskSize = 32;
 constexpr size_t kMaxPskSize = 256;
 
 #if defined(__linux__) && INTPTR_MAX == INT64_MAX
+constexpr int kX509VErrApplicationVerification = 50;
 constexpr int kTls12Version = 0x0303;
 constexpr int kTls13Version = 0x0304;
 // Change the version suffix if the PSK handshake ever becomes incompatible.
 constexpr std::string_view kPskIdentity = "torch.distributed.TCPStore.psk.v1";
 constexpr std::array<unsigned char, 2> kTlsAes128GcmSha256 = {0x13, 0x01};
+
+int verifyCertificateIdentity(int preverifyOk, void* storeCtx) {
+  if (!preverifyOk) {
+    return 0;
+  }
+  const auto& lib = openssl();
+  if (lib.X509_STORE_CTX_get_error_depth(storeCtx) != 0) {
+    return 1;
+  }
+  void* ssl = lib.X509_STORE_CTX_get_ex_data(
+      storeCtx, lib.SSL_get_ex_data_X509_STORE_CTX_idx());
+  const auto* ctx = ssl
+      ? static_cast<const TLSContext*>(
+            lib.SSL_CTX_get_ex_data(lib.SSL_get_SSL_CTX(ssl), 0))
+      : nullptr;
+  if (ctx &&
+      ctx->verifyPeerCertificate(
+          lib.X509_STORE_CTX_get_current_cert(storeCtx))) {
+    return 1;
+  }
+  // X509_V_ERR_APPLICATION_VERIFICATION. Never override a chain failure.
+  lib.X509_STORE_CTX_set_error(storeCtx, kX509VErrApplicationVerification);
+  return 0;
+}
 
 int rejectCertificate(int /*preverifyOk*/, void* /*storeCtx*/) {
   return 0;
@@ -207,13 +235,18 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
   TLSConfig config;
   std::string pskFile;
   if (opts.tlsCert || opts.tlsKey || opts.tlsCa || opts.tlsPsk ||
-      opts.tlsPskFile) {
+      opts.tlsPskFile || opts.tlsPeerCertOid || opts.tlsPeerCertValue ||
+      opts.tlsPeerCertPrefix) {
     config = {
         value(opts.tlsCert, "tls_cert"),
         value(opts.tlsKey, "tls_key"),
         value(opts.tlsCa, "tls_ca"),
         value(opts.tlsPsk, "tls_psk")};
     pskFile = value(opts.tlsPskFile, "tls_psk_file");
+    config.peerCert.oid = value(opts.tlsPeerCertOid, "tls_peer_cert_oid");
+    config.peerCert.value = value(opts.tlsPeerCertValue, "tls_peer_cert_value");
+    config.peerCert.prefix =
+        value(opts.tlsPeerCertPrefix, "tls_peer_cert_prefix");
   } else {
     auto env = [&](const char* name) {
       return value(c10::utils::get_env(name), name);
@@ -225,6 +258,29 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
         env("TORCH_TCPSTORE_TLS_PSK"),
         /*fromEnv=*/true};
     pskFile = env("TORCH_TCPSTORE_TLS_PSK_FILE");
+    config.peerCert.oid = env("TORCH_TCPSTORE_TLS_PEER_CERT_OID");
+    config.peerCert.value = env("TORCH_TCPSTORE_TLS_PEER_CERT_VALUE");
+    config.peerCert.prefix = env("TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX");
+  }
+  if (!config.peerCert.oid.empty() || !config.peerCert.value.empty() ||
+      !config.peerCert.prefix.empty()) {
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        !config.peerCert.oid.empty() &&
+            (config.peerCert.value.empty() != config.peerCert.prefix.empty()) &&
+            !config.cert.empty() && !config.key.empty() && !config.ca.empty() &&
+            config.psk.empty() && pskFile.empty(),
+        "TCPStore TLS: peer certificate policy requires certificate mode, an OID, and exactly one value or prefix; explicit TLS options replace TLS environment settings except TORCH_TCPSTORE_TLS_REQUIRE",
+        config.fromEnv ? " (from TORCH_TCPSTORE_TLS_* environment variables)"
+                       : " (from TCPStore options)");
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        config.peerCert.value.find(',') == std::string::npos &&
+            config.peerCert.prefix.find(',') == std::string::npos,
+        "TCPStore TLS: peer certificate value or prefix must be a single identity (no comma)",
+        config.fromEnv
+            ? " (TORCH_TCPSTORE_TLS_PEER_CERT_VALUE or TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX)"
+            : " (tls_peer_cert_value or tls_peer_cert_prefix)");
   }
   if (!config.enabled() && pskFile.empty()) {
     TORCH_CHECK_WITH(
@@ -286,6 +342,78 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
   return config;
 }
 
+namespace {
+using Asn1String = std::unique_ptr<void, void (*)(void*)>;
+
+Asn1String readIdentityExtension(void* cert, const void* oid) {
+  const auto& lib = openssl();
+  if (!cert || !oid) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  const int index = lib.X509_get_ext_by_OBJ(cert, oid, -1);
+  if (index < 0 || lib.X509_get_ext_by_OBJ(cert, oid, index) >= 0) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  void* ext = lib.X509_EXTENSION_get_data(lib.X509_get_ext(cert, index));
+  const int size = lib.ASN1_STRING_length(ext);
+  const unsigned char* data = lib.ASN1_STRING_get0_data(ext);
+  if (size <= 0 || !data || *data != kVAsn1Utf8String) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  const unsigned char* end = data + size;
+  void* value = lib.d2i_ASN1_UTF8STRING(nullptr, &data, size);
+  Asn1String result(value, lib.ASN1_UTF8STRING_free);
+  if (!value || data != end ||
+      lib.i2d_ASN1_UTF8STRING(value, nullptr) != size) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  // MBSTRING_UTF8 and B_ASN1_UTF8STRING: validate every code point,
+  // without allocating another string. d2i alone accepts invalid UTF-8.
+  const auto* bytes = lib.ASN1_STRING_get0_data(value);
+  const int length = lib.ASN1_STRING_length(value);
+  if (lib.ASN1_mbstring_copy(
+          nullptr, bytes, length, kMbstringUtf8, kBAsn1Utf8String) !=
+      kVAsn1Utf8String) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  return result;
+}
+
+std::optional<std::string_view> uniqueIdentity(
+    void* value,
+    std::string_view selector,
+    bool prefix) {
+  if (!value) {
+    return std::nullopt;
+  }
+  const auto& lib = openssl();
+  std::string_view remaining(
+      reinterpret_cast<const char*>(lib.ASN1_STRING_get0_data(value)),
+      lib.ASN1_STRING_length(value));
+  if (remaining.find('\0') != std::string_view::npos) {
+    return std::nullopt;
+  }
+  std::optional<std::string_view> found;
+  while (true) {
+    const auto comma = remaining.find(',');
+    const auto token = remaining.substr(0, comma);
+    if (prefix && token == selector) {
+      return std::nullopt;
+    }
+    if (prefix ? token.starts_with(selector) : token == selector) {
+      if (found) {
+        return std::nullopt;
+      }
+      found = token;
+    }
+    if (comma == std::string_view::npos) {
+      return found;
+    }
+    remaining.remove_prefix(comma + 1);
+  }
+}
+} // namespace
+
 std::shared_ptr<TLSContext> TLSContext::fromConfig(
     const TLSConfig& config,
     bool isServer) {
@@ -312,6 +440,11 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
   TORCH_CHECK_WITH(
       DistStoreError, ctx, "TCPStore TLS: SSL_CTX_new failed: ", errorString());
   auto res = std::make_shared<TLSContext>(ctx, isServer);
+  TORCH_CHECK_WITH(
+      DistStoreError,
+      ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1,
+      "TCPStore TLS: failed to initialize context: ",
+      errorString());
 
   auto check = [](bool ok, const char* what, const std::string& path) {
     TORCH_CHECK_WITH(
@@ -348,11 +481,7 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
     // Keep (EC)DHE, and so forward secrecy, even if openssl.cnf allows
     // PSK-only key exchange.
     ssl.SSL_CTX_clear_options(ctx, kSslOpAllowNoDheKex | kSslOpPreferNoDheKex);
-    TORCH_CHECK_WITH(
-        DistStoreError,
-        ssl.SSL_CTX_set_ex_data(ctx, 0, res.get()) == 1,
-        "TCPStore TLS: failed to initialize PSK context: ",
-        errorString());
+
     if (isServer) {
       // Without a certificate, only PSK handshakes can succeed.
       ssl.SSL_CTX_set_psk_find_session_callback(ctx, findPskSession);
@@ -395,13 +524,51 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
       ssl.SSL_CTX_load_verify_locations(ctx, ca.c_str(), nullptr) == 1,
       "CA",
       ca);
+  if (!config.peerCert.oid.empty()) {
+    res->peerCertOid_ = ssl.OBJ_txt2obj(config.peerCert.oid.c_str(), 1);
+    TORCH_CHECK_WITH(
+        DistStoreError,
+        res->peerCertOid_,
+        "TCPStore TLS: invalid peer certificate numeric OID from ",
+        config.fromEnv ? "TORCH_TCPSTORE_TLS_PEER_CERT_OID"
+                       : "tls_peer_cert_oid",
+        ": ",
+        errorString());
+    res->peerCertPrefix_ = config.peerCert.prefix;
+    res->peerCertValue_ = config.peerCert.value;
+    if (!config.peerCert.prefix.empty()) {
+      auto extension = readIdentityExtension(
+          ssl.SSL_CTX_get0_certificate(ctx), res->peerCertOid_);
+      auto identity =
+          uniqueIdentity(extension.get(), config.peerCert.prefix, true);
+      TORCH_CHECK_WITH(
+          DistStoreError,
+          identity,
+          "TCPStore TLS: local certificate must contain exactly one identity matching ",
+          config.fromEnv ? "TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX"
+                         : "tls_peer_cert_prefix");
+      res->peerCertValue_ = *identity;
+    }
+  }
   ssl.SSL_CTX_set_verify(
-      ctx, kSslVerifyPeer | kSslVerifyFailIfNoPeerCert, nullptr);
+      ctx,
+      kSslVerifyPeer | kSslVerifyFailIfNoPeerCert,
+      res->peerCertOid_ ? verifyCertificateIdentity : nullptr);
   return res;
 #endif
 }
 
+bool TLSContext::verifyPeerCertificate(void* cert) const {
+  auto extension = readIdentityExtension(cert, peerCertOid_);
+  const auto identity = uniqueIdentity(
+      extension.get(),
+      peerCertPrefix_.empty() ? peerCertValue_ : peerCertPrefix_,
+      !peerCertPrefix_.empty());
+  return identity && *identity == peerCertValue_;
+}
+
 TLSContext::~TLSContext() {
+  openssl().ASN1_OBJECT_free(peerCertOid_);
   openssl().SSL_CTX_free(ctx_);
 }
 
@@ -444,7 +611,8 @@ void TLSSession::throwError(int ret, const char* op) {
   msg += ctx_->psk().empty()
       ? ". Check that TLS is enabled on both client and server, that each "
         "certificate is signed by a CA trusted by the peer, that its purpose "
-        "(extended key usage) allows both serverAuth and clientAuth, and that "
+        "(extended key usage) allows both serverAuth and clientAuth, that any "
+        "configured peer-certificate identity matches, and that "
         "both use the same TLS mode (certificate or PSK)."
       : ". Check that the client and server both use TLS, the same TLS mode "
         "(certificate or PSK) and the same PSK.";

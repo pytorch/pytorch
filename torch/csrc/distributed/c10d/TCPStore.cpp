@@ -309,15 +309,24 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   if (!tls.enabled()) {
     // Preserve disabled TLS during server setup and cloning, even if env
     // changes.
-    tlsCert_ = "";
+    tls_.cert = "";
   }
   if (!tls.cert.empty()) {
-    tlsCert_ = tls.cert;
-    tlsKey_ = tls.key;
-    tlsCa_ = tls.ca;
+    tls_.cert = tls.cert;
+    tls_.key = tls.key;
+    tls_.ca = tls.ca;
+    if (!tls.peerCert.oid.empty()) {
+      tls_.peerCertOid = tls.peerCert.oid;
+      if (!tls.peerCert.value.empty()) {
+        tls_.peerCertValue = tls.peerCert.value;
+      }
+      if (!tls.peerCert.prefix.empty()) {
+        tls_.peerCertPrefix = tls.peerCert.prefix;
+      }
+    }
   }
   if (!tls.psk.empty()) {
-    tlsPsk_ = tls.psk;
+    tls_.psk = tls.psk;
   }
 
   Socket::initialize();
@@ -327,11 +336,14 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   if (opts.isServer) {
     try {
       TCPStoreOptions serverOpts = opts;
-      serverOpts.tlsCert = tlsCert_;
-      serverOpts.tlsKey = tlsKey_;
-      serverOpts.tlsCa = tlsCa_;
-      serverOpts.tlsPsk = tlsPsk_;
+      serverOpts.tlsCert = tls_.cert;
+      serverOpts.tlsKey = tls_.key;
+      serverOpts.tlsCa = tls_.ca;
+      serverOpts.tlsPsk = tls_.psk;
       serverOpts.tlsPskFile.reset();
+      serverOpts.tlsPeerCertOid = tls_.peerCertOid;
+      serverOpts.tlsPeerCertValue = tls_.peerCertValue;
+      serverOpts.tlsPeerCertPrefix = tls_.peerCertPrefix;
       server_ = detail::TCPServer::start(serverOpts);
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());
@@ -430,10 +442,13 @@ c10::intrusive_ptr<Store> TCPStore::clone() {
   opts.isServer = false;
   opts.waitWorkers = false;
   opts.timeout = timeout_;
-  opts.tlsCert = tlsCert_;
-  opts.tlsKey = tlsKey_;
-  opts.tlsCa = tlsCa_;
-  opts.tlsPsk = tlsPsk_;
+  opts.tlsCert = tls_.cert;
+  opts.tlsKey = tls_.key;
+  opts.tlsCa = tls_.ca;
+  opts.tlsPsk = tls_.psk;
+  opts.tlsPeerCertOid = tls_.peerCertOid;
+  opts.tlsPeerCertValue = tls_.peerCertValue;
+  opts.tlsPeerCertPrefix = tls_.peerCertPrefix;
 
   return c10::make_intrusive<TCPStore>(addr_.host, opts);
 }
