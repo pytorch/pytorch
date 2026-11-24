@@ -2649,14 +2649,17 @@ def view_to_reshape(gm):
     """
 
     def _view_to_reshape_graph(graph):
-        for nd in graph.find_nodes(
-            op="call_function", target=torch.ops.aten.view.default
-        ):
+        nodes = graph.find_nodes(op="call_function", target=torch.ops.aten.view.default)
+        for nd in nodes:
             nd.target = torch.ops.aten.reshape.default
+        return len(nodes) > 0
 
     def _recursive_view_to_reshape(graph):
         apply_pass_to_subgraphs(_recursive_view_to_reshape, graph)
-        _view_to_reshape_graph(graph)
+        # Subgraphs (e.g. of invoke_subgraph) are run through their generated
+        # code during FakeTensorProp, so regenerate it after changing nodes.
+        if _view_to_reshape_graph(graph) and graph.owning_module is not None:
+            graph.owning_module.recompile()
 
     _recursive_view_to_reshape(gm.graph)
 

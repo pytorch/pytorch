@@ -11044,7 +11044,7 @@ class MultiOutput(ExternKernel):
         return [
             inp.get_name()
             for inp in self.inputs
-            if isinstance(inp, FallbackKernel)
+            if isinstance(inp, (FallbackKernel, InvokeSubgraph))
             and len(inp.get_inputs_that_alias_output()) > 0
         ]
 
@@ -11592,7 +11592,11 @@ class InvokeSubgraph(ExternKernel):
     outputs: Sequence[IRNode] | None = None
 
     def __init__(
-        self, subgraph: Subgraph, operands: Sequence[IRNode], layout: MultiOutputLayout
+        self,
+        subgraph: Subgraph,
+        operands: Sequence[IRNode],
+        layout: MultiOutputLayout,
+        alias_names: Sequence[str] = (),
     ) -> None:
         super().__init__(
             name=None,
@@ -11600,11 +11604,17 @@ class InvokeSubgraph(ExternKernel):
             inputs=operands,
         )
         self.subgraph = subgraph
+        # Names of operands that some subgraph output is (a view of). The
+        # partitioner can return a subgraph input as a saved activation.
+        self.alias_names = list(alias_names)
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
     def get_subgraphs(self) -> list[Subgraph]:
         return [self.subgraph] if self.subgraph else []
+
+    def get_inputs_that_alias_output(self) -> Sequence[str]:
+        return self.alias_names
 
     @classmethod
     def create(
@@ -11704,10 +11714,28 @@ class InvokeSubgraph(ExternKernel):
             device = next(filter(None, (out.get_device() for out in outputs)), None)
         if device is None:
             raise AssertionError("Expected device is not None")
+        # An output that is a subgraph input (or a view of one) aliases the
+        # corresponding operand. Record it so the outer scheduler keeps that
+        # operand alive and does not reuse its storage while the output lives.
+        input_names = subgraph.graph.graph_input_names
+        alias_names: OrderedSet[str] = OrderedSet()
+        for output in outputs:
+            if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+                continue
+            try:
+                name = output.get_name()
+            except NotImplementedError:
+                continue
+            if name in input_names:
+                operand = operands[input_names.index(name)]
+                if not isinstance(operand, ShapeAsConstantBuffer):
+                    alias_names.add(operand.get_name())
+
         invoke_subgraph = InvokeSubgraph(
             subgraph=subgraph,
             operands=operands,
             layout=MultiOutputLayout(device=device),
+            alias_names=list(alias_names),
         )
 
         def create_output(
