@@ -665,7 +665,7 @@ def fold_row_aligned(
     # at different indices can split differently between edges and vectors, fold in a
     # different order and round apart.
     prefix = Int32((-Int64(r) * Int64(mX.stride[0])) & Int64(vec - 1))
-    prefix = n if prefix > n else prefix  # noqa: FURB136 -- no DSL builtin min
+    prefix = cutlass.min(prefix, n)
     groups = (n - prefix) // Int32(vec)
     tail = prefix + groups * Int32(vec)
     # Both edges are under vec long. Lane i folds prefix element i and tail element i;
