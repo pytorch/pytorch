@@ -1,5 +1,6 @@
 #pragma once
 #include <ATen/TensorGeometry.h>
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/flat_hash_map.h>
@@ -32,47 +33,47 @@ struct TORCH_API PyCompilerInterface {
 
   // Invokes py_compiler.bind_function
   virtual std::string bind_function(
-      PyObject* py_compiler,
-      const std::string& fn_name,
+      PyObject* /*py_compiler*/,
+      const std::string& /*fn_name*/,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      functional_apply_t fn,
+      functional_apply_t /*fn*/,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      std::vector<at::TypePtr> packed_args_schema,
-      bool is_custom_function = false,
-      bool is_traceable = true) const {
+      std::vector<at::TypePtr> /*packed_args_schema*/,
+      bool /*is_custom_function*/ = false,
+      bool /*is_traceable*/ = true) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 
   // Invokes py_compiler.method_name(fn_name, inputs, packed_args,
   // output_metadata)
   virtual variable_list call_function(
-      PyObject* py_compiler,
-      const char* method_name,
-      const std::string& fn_name,
-      const variable_list& inputs,
-      const ivalue_list& packed_args,
-      const c10::IValue& output_metadata) const {
+      PyObject* /*py_compiler*/,
+      const char* /*method_name*/,
+      const std::string& /*fn_name*/,
+      const variable_list& /*inputs*/,
+      const ivalue_list& /*packed_args*/,
+      const c10::IValue& /*output_metadata*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_prologue(
-      PyObject* py_compiler,
-      const variable_list& inputs,
-      const at::TensorGeometry& base,
-      const at::TensorGeometry& view) const {
+      PyObject* /*py_compiler*/,
+      const variable_list& /*inputs*/,
+      const at::TensorGeometry& /*base*/,
+      const at::TensorGeometry& /*view*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual variable_list call_copy_slices_epilogue(
-      PyObject* py_compiler,
-      const std::vector<bool>& needs_input_grad,
-      const at::Tensor& result,
-      const variable_list& res,
-      const at::Tensor& grad_slice) const {
+      PyObject* /*py_compiler*/,
+      const std::vector<bool>& /*needs_input_grad*/,
+      const at::Tensor& /*result*/,
+      const variable_list& /*res*/,
+      const at::Tensor& /*grad_slice*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual at::Tensor call_unpack(
-      PyObject* py_compiler,
-      std::optional<size_t> hook_id,
-      size_t hook_input_id) const {
+      PyObject* /*py_compiler*/,
+      std::optional<size_t> /*hook_id*/,
+      size_t /*hook_input_id*/) const {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
   virtual at::Tensor call_accumulate_grad(
@@ -234,7 +235,8 @@ struct TensorArgs {
       it = _args.emplace(impl, TensorArg(_next_id++)).first;
       inputs.emplace_back(tensor);
       if (active_node_call_idx.has_value()) {
-        input_origins.emplace_back(active_node_call_idx.value());
+        input_origins.emplace_back(
+            static_cast<uint32_t>(active_node_call_idx.value()));
       }
     }
     return it->second;
@@ -305,7 +307,8 @@ struct LiftedIValueArgs {
   void add(const at::IValue* iv) {
     args.emplace_back(iv);
     if (active_node_call_idx.has_value()) {
-      args_origins.emplace_back(active_node_call_idx.value());
+      args_origins.emplace_back(
+          static_cast<uint32_t>(active_node_call_idx.value()));
     }
   }
 
@@ -329,7 +332,8 @@ struct AutogradCompilerCall {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
     if (active_node_call_idx.has_value()) {
-      size_input_origins.emplace_back(active_node_call_idx.value());
+      size_input_origins.emplace_back(
+          static_cast<uint32_t>(active_node_call_idx.value()));
     }
   }
 
@@ -462,12 +466,8 @@ class CompiledNodeArgs {
   void collect(const ska::flat_hash_map<std::string, V>& m) {
     collect_size(m.size());
 
-    std::vector<std::string> keys;
-    keys.reserve(m.size());
-    std::transform(
-        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
-          return entry.first;
-        });
+    std::vector<std::string> keys =
+        c10::fmap(m, [](const auto& entry) { return entry.first; });
     std::sort(keys.begin(), keys.end());
     for (const auto& k : keys) {
       collect(k);
@@ -666,7 +666,7 @@ class CompiledNodeArgs {
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.tensor_pre_hooks.emplace_back(fn_id, index);
+    _node_call.tensor_pre_hooks.emplace_back(static_cast<int>(fn_id), index);
   }
 
   void add_cpp_single_tensor_pre_hook(
@@ -683,25 +683,26 @@ class CompiledNodeArgs {
 
     auto hook_id = _compiler.emplace_cpp_tensor_pre_hook(std::move(wrapper));
     collect_size(hook_id);
-    _node_call.cpp_tensor_pre_hooks.emplace_back(hook_id, idx);
+    _node_call.cpp_tensor_pre_hooks.emplace_back(
+        static_cast<int>(hook_id), static_cast<int>(idx));
   }
 
   void add_pre_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.pre_hooks.emplace_back(fn_id);
+    _node_call.pre_hooks.emplace_back(static_cast<int>(fn_id));
   }
 
   void add_post_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.post_hooks.emplace_back(fn_id);
+    _node_call.post_hooks.emplace_back(static_cast<int>(fn_id));
   }
 
   void add_post_acc_grad_hook(c10::SafePyObject&& obj) {
     auto fn_id = _compiler.emplace_hook(std::move(obj));
     collect_size(fn_id);
-    _node_call.post_acc_grad_hooks.emplace_back(fn_id);
+    _node_call.post_acc_grad_hooks.emplace_back(static_cast<int>(fn_id));
   }
 
   // Need to template the size_t to silence internal 32-bit build errors due to
@@ -713,7 +714,7 @@ class CompiledNodeArgs {
     constexpr uint8_t encode_as_u64 = std::numeric_limits<uint8_t>::max();
     constexpr uint8_t encode_as_u32 = encode_as_u64 - 1;
     constexpr uint8_t encode_as_u16 = encode_as_u64 - 2;
-    if (C10_UNLIKELY(s >= encode_as_u16)) {
+    if (s >= encode_as_u16) [[unlikely]] {
       // first write a byte indicating the path we followed, then the data
       if (s <= std::numeric_limits<uint16_t>::max()) {
         // 3 bytes
@@ -756,8 +757,8 @@ class CompiledNodeArgs {
  private:
   template <typename T>
   void specialize_on_bytes(const T& t) {
-    while (C10_UNLIKELY(
-        _specialization_key_size + sizeof(T) > _specialization_key_storage)) {
+    while (_specialization_key_size + sizeof(T) > _specialization_key_storage)
+        [[unlikely]] {
       _specialization_key_storage *= 2;
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       _specialization_key = (uint8_t*)std::realloc(
@@ -965,12 +966,8 @@ class SwapSavedVariables {
 
   template <typename V>
   void before(ska::flat_hash_map<std::string, V>& m) {
-    std::vector<std::string> keys;
-    keys.reserve(m.size());
-    std::transform(
-        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
-          return entry.first;
-        });
+    std::vector<std::string> keys =
+        c10::fmap(m, [](const auto& entry) { return entry.first; });
     std::sort(keys.begin(), keys.end());
     for (auto& k : keys) {
       before(m.at(k));

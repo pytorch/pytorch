@@ -1,11 +1,3 @@
-if(INTERN_BUILD_MOBILE)
-  list(APPEND Caffe2_CPU_SRCS
-    "${CMAKE_CURRENT_SOURCE_DIR}/embedding_lookup_idx.cc"
-  )
-  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
-  return()
-endif()
-
 # ---[ CPU files.
 file(GLOB common_srcs CONFIGURE_DEPENDS *.cc)
 file(GLOB avx_srcs CONFIGURE_DEPENDS *_avx.cc)
@@ -29,9 +21,9 @@ if(CXX_AVX2_FOUND)
 
   if(MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     target_compile_options(Caffe2_perfkernels_avx2
-        PRIVATE "/arch:AVX2"
-        PRIVATE "/D__FMA__"
-        PRIVATE "/D__F16C__")
+        PRIVATE "/arch:AVX2")
+    target_compile_definitions(Caffe2_perfkernels_avx2
+        PRIVATE "__FMA__" "__F16C__")
   else()
     target_compile_options(Caffe2_perfkernels_avx2
         PRIVATE "-mavx2"

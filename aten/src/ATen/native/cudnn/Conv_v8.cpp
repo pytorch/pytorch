@@ -4,15 +4,12 @@
 
 #if AT_CUDNN_ENABLED()
 
-#include <ATen/cudnn/cudnn-wrapper.h>
-
 #include <c10/macros/Macros.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <cudnn_frontend.h>
 C10_DIAGNOSTIC_POP()
 
-#include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
@@ -759,11 +756,17 @@ bool plan_errata_exception(
   }
 }
 
+uint64_t get_benchmark_limit() {
+  const auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
+  return benchmark_limit ? benchmark_limit : 10000;
+}
+
 void generate_and_filter_plans(
     const cudnnHandle_t handle,
     cudnn_frontend::OperationGraph& opGraph,
     cudnn_frontend::EngineConfigGenerator& generator,
     const Tensor& x,
+    const uint64_t benchmark_limit,
     cudnn_frontend::executionPlans_t& valid_plans,
     at::DataPtr& workspace_ptr) {
   auto initial_predicate_function =
@@ -772,23 +775,23 @@ void generate_and_filter_plans(
   };
   auto plans =
       generator.cudnnGetPlan(handle, opGraph, initial_predicate_function);
-  int64_t max_block_size = get_available_workspace();
+  const int64_t max_block_size = get_available_workspace();
   int64_t max_workspace_size = 0;
-  std::for_each(
-      plans.begin(), plans.end(), [&](cudnn_frontend::ExecutionPlan& plan) {
-        int64_t curr_workspace_size = plan.getWorkspaceSize();
-        if (curr_workspace_size <= max_block_size) {
-          if (curr_workspace_size > max_workspace_size) {
-            max_workspace_size = plan.getWorkspaceSize();
-          }
-          valid_plans.emplace_back(std::move(plan));
-        }
-      });
+  uint64_t num_plans = 0;
+  // Size the workspace for the first benchmark_limit plans that fit.
+  for (const auto& plan : plans) {
+    const int64_t curr_workspace_size = plan.getWorkspaceSize();
+    if (curr_workspace_size <= max_block_size) {
+      max_workspace_size = std::max(max_workspace_size, curr_workspace_size);
+      if (++num_plans == benchmark_limit) {
+        break;
+      }
+    }
+  }
   TORCH_CHECK_WITH(
       OutOfMemoryError,
       max_workspace_size < 1_TiB,
       "Not enough memory for workspace!");
-  bool remove_invalid = false;
   while (max_workspace_size) {
     try {
       workspace_ptr =
@@ -797,17 +800,13 @@ void generate_and_filter_plans(
     } catch (c10::OutOfMemoryError&) {
       max_workspace_size /= 2;
       std::ignore = cudaGetLastError(); // clear CUDA error
-      remove_invalid = true;
     }
   }
-  if (remove_invalid) {
-    cudnn_frontend::executionPlans_t new_valid_plans;
-    for (auto& plan : valid_plans) {
-      if (plan.getWorkspaceSize() <= max_workspace_size) {
-        new_valid_plans.emplace_back(std::move(plan));
-      }
+  // Later plans can still run if allocation or warmup fails for earlier plans.
+  for (auto& plan : plans) {
+    if (plan.getWorkspaceSize() <= max_workspace_size) {
+      valid_plans.emplace_back(std::move(plan));
     }
-    valid_plans = std::move(new_valid_plans);
   }
 }
 
@@ -843,8 +842,15 @@ auto get_plans_from_find(
   cudnn_frontend::executionPlans_t valid_plans;
   c10::DeviceGuard g(x.options().device());
   at::DataPtr workspace_ptr;
+  const auto benchmark_limit = get_benchmark_limit();
   generate_and_filter_plans(
-      handle, opGraph, generator, x, valid_plans, workspace_ptr);
+      handle,
+      opGraph,
+      generator,
+      x,
+      benchmark_limit,
+      valid_plans,
+      workspace_ptr);
   auto variantPack =
       cudnn_frontend::VariantPackBuilder()
           .setDataPointers(3, data_ptrs)
@@ -852,8 +858,6 @@ auto get_plans_from_find(
           .setWorkspacePointer(workspace_ptr ? workspace_ptr.get() : nullptr)
           .build();
 
-  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
-  benchmark_limit = benchmark_limit ? benchmark_limit : 10000;
   auto plans = cudnn_frontend::time_sorted_plan<
       cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
       handle, std::move(valid_plans), variantPack, benchmark_limit);
@@ -899,8 +903,15 @@ auto get_plans_from_find_fused(
   cudnn_frontend::executionPlans_t valid_plans;
   c10::DeviceGuard g(x.options().device());
   at::DataPtr workspace_ptr;
+  const auto benchmark_limit = get_benchmark_limit();
   generate_and_filter_plans(
-      handle, opGraph, generator, x, valid_plans, workspace_ptr);
+      handle,
+      opGraph,
+      generator,
+      x,
+      benchmark_limit,
+      valid_plans,
+      workspace_ptr);
   auto variantPack =
       cudnn_frontend::VariantPackBuilder()
           .setDataPointers(5, data_ptrs)
@@ -908,8 +919,6 @@ auto get_plans_from_find_fused(
           .setWorkspacePointer(workspace_ptr ? workspace_ptr.get() : nullptr)
           .build();
 
-  auto benchmark_limit = at::globalContext().benchmarkLimitCuDNN();
-  benchmark_limit = benchmark_limit ? benchmark_limit : 10000;
   auto plans = cudnn_frontend::time_sorted_plan<
       cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(
       handle, std::move(valid_plans), variantPack, benchmark_limit);

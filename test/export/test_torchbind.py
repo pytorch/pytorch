@@ -1,7 +1,10 @@
 # Owner(s): ["oncall: export"]
 # ruff: noqa: F841
 
+import contextlib
 import copy
+import unittest
+from types import SimpleNamespace
 
 import torch
 import torch.utils._pytree as pytree
@@ -10,21 +13,25 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._higher_order_ops.wrap import wrap
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
+    IS_MACOS,
     parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import requires_triton
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def _assertEqualSkipScriptObject(test_case, exp, actual):
@@ -57,7 +64,10 @@ def _assertEqualScriptObject(
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestExportTorchbind(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -202,9 +212,16 @@ def forward(self, token, obj_attr, x, n):
     return (getitem, add)""",
         )
 
-    def test_method_schema(self):
+    @parametrize("propagate_real_tensors", [False, True])
+    @parametrize("active", [False, True])
+    def test_method_schema(self, propagate_real_tensors, active):
+        if not active and not torch._dynamo.config.use_cpp_fake_tensor:
+            self.skipTest("Python TorchBind dispatch requires an active fake mode")
         tq = _empty_tensor_queue()
-        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        with torch._functorch.config.patch(
+            fake_tensor_propagate_real_tensors=propagate_real_tensors
+        ):
+            fake_mode = FakeTensorMode()
         fake_obj = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, tq)
         self.assertExpectedInline(
             str(fake_obj.push.schema),
@@ -214,6 +231,49 @@ def forward(self, token, obj_attr, x, n):
             str(fake_obj.pop.schema),
             """pop(__torch__.torch.classes._TorchScriptTesting._TensorQueue _0) -> Tensor _0""",
         )
+        with fake_mode:
+            x = torch.ones(2, 3)
+            torch.ops._TorchScriptTesting.queue_push(fake_obj, x)
+            self.assertEqual(torch.ops._TorchScriptTesting.queue_size(fake_obj), 1)
+            self.assertIs(torch.ops._TorchScriptTesting.queue_pop(fake_obj), x)
+
+        foo = torch.classes._TorchScriptTesting._Foo(2, 3)
+        fake_foo = torch._library.fake_class_registry.maybe_to_fake_obj(fake_mode, foo)
+        with fake_mode if active else contextlib.nullcontext():
+            out = torch.ops._TorchScriptTesting.takes_foo(fake_foo, x)
+            self.assertIs(
+                torch._guards.active_fake_mode(), fake_mode if active else None
+            )
+        self.assertIs(torch._subclasses.fake_tensor.maybe_get_fake_mode(out), fake_mode)
+        self.assertEqual(
+            (out.shape, out.stride(), out.device), (x.shape, x.stride(), x.device)
+        )
+        if propagate_real_tensors:
+            self.assertEqual(
+                torch._subclasses.fake_tensor.maybe_get_real_tensor(out),
+                torch.full((2, 3), 5.0),
+            )
+
+        def profile_kernel(func, mode, foo, x):
+            self.assertIsNone(torch._guards.active_fake_mode())
+            with mode:
+                return x.new_empty(7)
+
+        profile = SimpleNamespace(
+            data={torch.ops._TorchScriptTesting.takes_foo.default},
+            generic_fake_kernel=profile_kernel,
+        )
+        with (
+            fake_mode if active else contextlib.nullcontext(),
+            torch._dynamo.config.patch(_custom_ops_profile=profile),
+        ):
+            self.assertEqual(
+                torch.ops._TorchScriptTesting.takes_foo(fake_foo, x).shape, (7,)
+            )
+            self.assertIs(
+                torch._guards.active_fake_mode(), fake_mode if active else None
+            )
+        self.assertIsNone(torch._guards.active_fake_mode())
 
     @parametrize("pre_dispatch", [True, False])
     def test_attribute(self, pre_dispatch):
@@ -1121,7 +1181,10 @@ graph():
         self.assertEqual(foo.add(1), 7)
 
 
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestCompileTorchbind(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -1568,8 +1631,37 @@ def forward(self, token, obj, x):
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
         )
 
-    @requires_cuda_and_triton
-    @parametrize("device", ["cpu", "cuda"])
+
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
+class TestCompileTorchbindDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        init_torchbind_implementations()
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
+        class FakeTensorQueue:
+            def __init__(self, queue):
+                self.queue = queue
+
+            @classmethod
+            def __obj_unflatten__(cls, flattened_ctx):
+                return cls(**dict(flattened_ctx))
+
+            def push(self, x):
+                self.queue.append(x)
+
+            def pop(self):
+                return self.queue.pop(0)
+
+            def size(self):
+                return len(self.queue)
+
+    def tearDown(self):
+        torch._dynamo.reset()
+
+    @requires_triton()
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_torchbind_op_with_autocast(self, backend, device):
         def f(tq, x):
@@ -1586,8 +1678,6 @@ def forward(self, token, obj, x):
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
         )
 
-    @requires_cuda_and_triton
-    @parametrize("device", ["cpu", "cuda"])
     def test_export_obj_torchbind_op_with_autocast(self, device):
         class Mod(torch.nn.Module):
             def forward(self, x, tq):
@@ -1608,7 +1698,10 @@ def forward(self, token, obj, x):
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
+@unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
 class TestRegisterFakeClass(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         init_torchbind_implementations()
@@ -1660,6 +1753,7 @@ class TestRegisterFakeClass(TestCase):
 
 instantiate_parametrized_tests(TestExportTorchbind)
 instantiate_parametrized_tests(TestCompileTorchbind)
+instantiate_device_type_tests(TestCompileTorchbindDevice, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

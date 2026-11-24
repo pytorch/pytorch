@@ -382,7 +382,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             gradients are not reduced across ranks. This argument unifies with
             the existing ``ignored_modules`` argument, and we may deprecate
             ``ignored_modules`` soon. For backward compatibility, we keep both
-            ``ignored_states`` and `ignored_modules``, but FSDP only allows one
+            ``ignored_states`` and ``ignored_modules``, but FSDP only allows one
             of them to be specified as not ``None``.
         device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an alternative to
             process_group. When device_mesh is passed, FSDP will use the underlying process
@@ -632,6 +632,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> StateDictSettings:
         """Set the ``state_dict_type`` of all the descendant FSDP modules of the target module.
 
+        .. warning:: This API is deprecated. Use
+            :func:`torch.distributed.checkpoint.state_dict.get_state_dict` and
+            :func:`torch.distributed.checkpoint.state_dict.set_state_dict` instead.
+
         Also takes (optional) configuration for the model's and optimizer's state dict.
         The target module does not have to be a FSDP module. If the target
         module is a FSDP module, its ``state_dict_type`` will also be changed.
@@ -797,6 +801,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> Generator:
         """Set the ``state_dict_type`` of all the descendant FSDP modules of the target module.
 
+        .. warning:: This API is deprecated. Use
+            :func:`torch.distributed.checkpoint.state_dict.get_state_dict` and
+            :func:`torch.distributed.checkpoint.state_dict.set_state_dict` instead.
+
         This context manager has the same functions as :meth:`set_state_dict_type`. Read the document of
         :meth:`set_state_dict_type` for the detail.
 
@@ -904,6 +912,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``rank0_only=True``.
 
         Args:
+            module (torch.nn.Module): FSDP module or a module containing FSDP
+                modules.
             recurse (bool, Optional): recursively summon all params for nested
                 FSDP instances (default: True).
             writeback (bool, Optional): if ``False``, modifications to params are
@@ -1383,6 +1393,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> dict[str, Any]:
         """Return the full optimizer state-dict.
 
+        .. warning:: This API is deprecated and may be removed. Use
+            :meth:`optim_state_dict` instead.
+
         Consolidates the full optimizer state on rank 0 and returns it
         as a :class:`dict` following the convention of
         :meth:`torch.optim.Optimizer.state_dict`, i.e. with keys ``"state"``
@@ -1452,6 +1465,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> dict[str, Any]:
         """Return the optimizer state-dict in its sharded form.
 
+        .. warning:: This API is deprecated and may be removed. Use
+            :meth:`optim_state_dict` instead.
+
         The API is similar to :meth:`full_optim_state_dict` but this API chunks
         all non-zero-dimension states to :class:`ShardedTensor` to save memory.
         This API should only be used when the model ``state_dict`` is derived
@@ -1486,6 +1502,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         optim: torch.optim.Optimizer | None = None,
     ) -> dict[str, Any]:
         """Shard a full optimizer state-dict.
+
+        .. warning:: This API is deprecated and may be removed. Use
+            :meth:`optim_state_dict_to_load` instead.
 
         Remaps the state in ``full_optim_state_dict`` to flattened parameters instead of unflattened
         parameters and restricts to only this rank's part of the optimizer state.
@@ -1560,6 +1579,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ) -> dict[str, Any]:
         """Flatten a sharded optimizer state-dict.
 
+        .. warning:: This API is deprecated and may be removed. Use
+            :meth:`optim_state_dict_to_load` instead.
+
         The API is similar to :meth:`shard_full_optim_state_dict`. The only
         difference is that the input ``sharded_optim_state_dict`` should be
         returned from :meth:`sharded_optim_state_dict`. Therefore, there will
@@ -1600,6 +1622,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         group: Any | None = None,
     ) -> dict[str, Any]:
         """Scatter the full optimizer state dict from rank 0 to all other ranks.
+
+        .. warning:: This API is deprecated and may be removed. Use
+            :meth:`optim_state_dict_to_load` instead.
 
         Returns the sharded optimizer state dict on each rank.
         The return value is the same as :meth:`shard_full_optim_state_dict`, and on rank

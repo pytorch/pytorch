@@ -25,7 +25,7 @@ from torch.testing._internal.common_nn import (
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
     freeze_rng_state, skipIfMPS, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
-    skipIfTorchDynamo, skipIfXpu)
+    skipIfTorchDynamo, skipIfXpu, isRocmArchAnyOf, MI200_ARCH)
 from types import ModuleType
 import operator
 
@@ -102,8 +102,21 @@ class modules(_TestParametrizer):
                                'context; use it with instantiate_device_type_tests() instead of '
                                'instantiate_parametrized_tests()')
 
-        for module_info in self.module_info_list:
-            dtypes = set(module_info.supported_dtypes(device_cls.device_type))
+        if not self.module_info_list:
+            raise ValueError(
+                f"{test.__name__}: An empty module_info_list was passed to @modules. "
+                "Note that this may result from reuse of a generator."
+            )
+
+        # Order matters: module_allowlist filters first, then module_overrides adds
+        # decorators. This ensures module_overrides only applies to modules that
+        # passed the module_allowlist filter.
+        module_info_list = device_cls._apply_module_allowlist(self.module_info_list)
+        module_info_list = device_cls._apply_module_overrides(module_info_list)
+
+        device_type = device_cls._resolved_device_type()
+        for module_info in module_info_list:
+            dtypes = set(module_info.supported_dtypes(device_type))
             if self.allowed_dtypes is not None:
                 dtypes = dtypes.intersection(self.allowed_dtypes)
 
@@ -130,7 +143,7 @@ class modules(_TestParametrizer):
                         test_wrapper = skipIfTorchDynamo("Policy: we don't run ModuleInfo tests w/ Dynamo")(test_wrapper)
 
                     decorator_fn = partial(module_info.get_decorators, generic_cls.__name__,
-                                           test.__name__, device_cls.device_type, dtype)
+                                           test.__name__, device_type, dtype)
 
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
@@ -556,7 +569,7 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     Currently it only supports modules which return a single Tensor as output.
     You can bind the following kwargs.
     Kwargs:
-        batch_first[bool] : If True, all the Tensors in `args` while be unsqueezed at dim `0` .
+        batch_first[bool] : If True, all the Tensors in `args` will be unsqueezed at dim `0` .
                         and output will be squeezed at dim `0` else dim `1` for both.
         kwargs_to_batchify[dict] : Dictionary specifying the name of the argument and dimension to unsqueeze.
                                Useful if there are few arguments whose batch dimension are different
@@ -4156,16 +4169,11 @@ _macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_
 module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool1d,
-               skips=(
-                   # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d,
                skips=(
-                   # Fails on MPS backend if input/output sizes are not divisible
-                   DecorateInfo(skipMPS),
                    # Fails on backward check if output size is 1x1
                    DecorateInfo(
                        unittest.expectedFailure,
@@ -4178,9 +4186,7 @@ module_db: list[ModuleInfo] = [
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool3d,
                skips=(
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.AdaptiveMaxPool1d,
                module_inputs_func=module_inputs_torch_nn_AdaptiveMaxPool1d,
@@ -4321,6 +4327,8 @@ module_db: list[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
+                   DecorateInfo(skipIfXpu, 'TestModule', 'test_cpu_gpu_parity',
+                                dtypes=(torch.chalf,), device_type='xpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -4370,6 +4378,10 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                    DecorateInfo(precisionOverride({torch.complex64: 1e-04}), 'TestModule', 'test_cpu_gpu_parity'),
                    DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.CosineEmbeddingLoss,
                module_inputs_func=module_inputs_torch_nn_CosineEmbeddingLoss,
@@ -4460,6 +4472,10 @@ module_db: list[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.LazyConvTranspose1d,
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=True, transposed=True),
@@ -4505,6 +4521,10 @@ module_db: list[ModuleInfo] = [
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(
+                       toleranceOverride({torch.float32: tol(atol=2e-5, rtol=1e-5)}),
+                       "TestModule", "test_non_contiguous_tensors", device_type="xpu"
+                   ),
                )),
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear,
@@ -4591,10 +4611,7 @@ module_db: list[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_MSELoss,
                skips=(
                    # No channels_last support for loss functions.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # See #119108: tolerance issue
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
-                                device_type='mps', dtypes=[torch.float16]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.MarginRankingLoss,
                module_inputs_func=module_inputs_torch_nn_MarginRankingLoss,
@@ -4718,8 +4735,20 @@ module_db: list[ModuleInfo] = [
                                 "test_non_contiguous_tensors", dtypes=[torch.float16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-2, rtol=5e-2)}), "TestModule",
                                 "test_non_contiguous_tensors", dtypes=[torch.bfloat16]),
+                   # The MI200 entries below keep the arch query behind
+                   # TEST_WITH_ROCM: isRocmArchAnyOf raises on a ROCm build
+                   # with no visible GPU, and the first entry's lambda also
+                   # runs while instantiating the non-cuda device classes.
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=4e-2, rtol=3e-1)}), "TestModule",
-                                "test_cpu_gpu_parity", dtypes=[torch.float16]),
+                                "test_cpu_gpu_parity", dtypes=[torch.float16],
+                                active_if=lambda _: not (TEST_WITH_ROCM and isRocmArchAnyOf(MI200_ARCH))),
+                   # MI200 fp16 backward GEMMs use the bf16-intermediate alt
+                   # implementation (fp16_on_mi200 in numerical_accuracy.md);
+                   # cancellation over bf16-granularity intermediates gives a
+                   # measured single-element cpu/gpu diff of 0.125 (rel 0.5).
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-1, rtol=5e-1)}), "TestModule",
+                                "test_cpu_gpu_parity", dtypes=[torch.float16], device_type='cuda',
+                                active_if=lambda _: TEST_WITH_ROCM and isRocmArchAnyOf(MI200_ARCH)),
                    # Insufficient accuracy, likely related to an issue with cross_entropy
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity",
                                 dtypes=[torch.bfloat16], device_type='cuda'),
@@ -4735,6 +4764,10 @@ module_db: list[ModuleInfo] = [
                                 "test_forward", dtypes=[torch.bfloat16]),
                    DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
                                 "test_save_load", device_type="cuda", dtypes=[torch.bfloat16]),
+                   # nll_loss2d_forward_xpu is nondeterministic (bf16 atomicAdd
+                   # across batch blocks); matches the CUDA override above.
+                   DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=2e-1, rtol=5e-2)}), "TestModule",
+                                "test_save_load", device_type="xpu", dtypes=[torch.bfloat16]),
                ),
                skips=(
                    # The chunked reduction='none' backward recomputes grads
@@ -4896,7 +4929,8 @@ module_db: list[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
                decorators=[
-                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-1, rtol=1e-3)}),
+                   # M1-M4 fp16 linear rounds strided and contiguous inputs differently
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-1, rtol=1e-3)}),
                                 'TestModule', 'test_non_contiguous_tensors',
                                 device_type='mps')],
                skips=(
@@ -4939,10 +4973,6 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.PReLU,
                module_inputs_func=module_inputs_torch_nn_PReLU,
-               skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),)
                ),
     ModuleInfo(torch.nn.RNNCell,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU_Cell, is_rnn=True),
@@ -5020,29 +5050,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Tanh,
                module_inputs_func=module_inputs_torch_nn_Tanh,
-               skips=None if _macos15_or_newer else (
-                   # Fails on backward check on MPS
-                   # See https://github.com/pytorch/pytorch/issues/107214
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
-                   ),)
                ),
     ModuleInfo(torch.nn.Tanhshrink,
                module_inputs_func=module_inputs_torch_nn_Tanhshrink,
-               skips=None if _macos15_or_newer else (
-                   # Fails on backward check on MPS
-                   # See https://github.com/pytorch/pytorch/issues/107214
-                   DecorateInfo(
-                       unittest.expectedFailure,
-                       'TestModule',
-                       'test_memory_format',
-                       active_if=operator.itemgetter('training'),
-                       device_type='mps',
-                   ),)
                ),
     ModuleInfo(torch.nn.Threshold,
                module_inputs_func=module_inputs_torch_nn_Threshold,
@@ -5138,15 +5148,9 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ZeroPad2d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad2d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ZeroPad3d,
                module_inputs_func=module_inputs_torch_nn_ZeroPad3d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.CircularPad1d,
                module_inputs_func=module_inputs_torch_nn_CircularPad1d,
@@ -5168,14 +5172,8 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ConstantPad2d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad2d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ConstantPad3d,
                module_inputs_func=module_inputs_torch_nn_ConstantPad3d,
-               skips=(
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='mps'),)
                )
 ]

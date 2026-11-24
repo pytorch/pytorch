@@ -14,8 +14,21 @@ import unittest
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from types import FunctionType, ModuleType
-from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
+from graphlib import CycleError, TopologicalSorter
+from types import FunctionType, ModuleType, UnionType
+from typing import (
+    Any,
+    Generic,
+    get_args,
+    get_origin,
+    get_type_hints,
+    Literal,
+    NoReturn,
+    Optional,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import deprecated
 
 from torch._utils_internal import justknobs_check
@@ -38,7 +51,7 @@ _UNSET_SENTINEL = object()
 
 @dataclass(kw_only=True)
 class _Config(Generic[T]):
-    """Represents a config with richer behaviour than just a default value.
+    r"""Represents a config with richer behaviour than just a default value.
     ::
         i.e.
         foo = Config(justknob="//foo:bar", default=False)
@@ -48,6 +61,7 @@ class _Config(Generic[T]):
 
     Precedence Order:
         alias: If set, the directly use the value of the alias.
+        implies: An active implication overrides the target's ordinary value.
         env_name_force: If set, this environment variable has precedence over
             everything after this.
             If multiple env variables are given, the precedence order is from
@@ -71,9 +85,16 @@ class _Config(Generic[T]):
         default: is the value to default this knob to in OSS.
         alias: The alias config to read instead.
         env_name_force: The environment variable, or list of, to read that is a FORCE
-            environment variable. I.e. it overrides everything except for alias.
+            environment variable. It overrides ordinary values, but not implications.
         env_name_default: The environment variable, or list of, to read that changes the
             default behaviour. I.e. user overrides take preference.
+        implies: Maps source values to forced values for other settings in this
+            module, using dotted names for nested targets. Sources and targets
+            must have bool, int, str, None, or corresponding Literal/union types.
+            Aliases, cycles, and conflicting active implications are rejected.
+            Assignments update stored values without overriding active implications.
+            Use ``config.patch`` for temporary changes that restore stored values.
+            ``mock.patch.object`` is unsupported on targets with active implications.
     """
 
     default: T | object
@@ -82,6 +103,7 @@ class _Config(Generic[T]):
     env_name_force: list[str] | None = None
     value_type: type | None = None
     alias: str | None = None
+    implies: dict[Any, dict[str, Any]] | None = None
     # Deprecation support
     deprecated: bool = False
     deprecation_message: str | None = None
@@ -93,6 +115,8 @@ class _Config(Generic[T]):
         self.env_name_force = _Config.string_or_list_of_string_to_list(
             self.env_name_force
         )
+        if self.implies is not None and not isinstance(self.implies, dict):
+            raise TypeError("implies must be a dictionary")
 
         if self.alias is not None:
             if (
@@ -100,10 +124,11 @@ class _Config(Generic[T]):
                 or self.justknob is not None
                 or self.env_name_default is not None
                 or self.env_name_force is not None
+                or self.implies is not None
             ):
                 raise AssertionError(
                     "if alias is set, none of {default, justknob, \
-                        env_name_default and env_name_force} can be set"
+                        env_name_default, env_name_force and implies} can be set"
                 )
 
     @staticmethod
@@ -135,6 +160,8 @@ if TYPE_CHECKING:
         # Deprecation support
         deprecated: bool = False,
         deprecation_message: str | None = None,
+        *,
+        implies: dict[Any, dict[str, Any]] | None = None,
     ) -> T: ...
 
 else:
@@ -149,6 +176,8 @@ else:
         # Deprecation support
         deprecated: bool = False,
         deprecation_message: str | None = None,
+        *,
+        implies: dict[Any, dict[str, Any]] | None = None,
     ) -> _Config[T]:
         return _Config(
             default=default,
@@ -160,6 +189,7 @@ else:
             # Deprecation support
             deprecated=deprecated,
             deprecation_message=deprecation_message,
+            implies=implies,
         )
 
 
@@ -196,7 +226,9 @@ def install_config_module(module: ModuleType) -> None:
     ) -> None:
         """Walk the module structure and move everything to module._config"""
         type_hints = inspect.get_annotations(source)
-        for key, value in list(source.__dict__.items()):
+        namespace = dict(vars(source))
+        namespaces[prefix] = namespace
+        for key, value in namespace.items():
             if (
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
@@ -244,13 +276,28 @@ def install_config_module(module: ModuleType) -> None:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
     config: dict[str, _ConfigEntry] = {}
+    namespaces: dict[str, dict[str, Any]] = {}
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
     visit(module, module, "")
     module._config = config  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
-    module.__class__ = ConfigModuleInstance
+    if any(entry.implies for entry in config.values()):
+
+        class ImplicationConfigModuleInstance(_ImplicationConfigModule):
+            _bypass_keys = ConfigModuleInstance._bypass_keys
+
+        implications, sources = _install_implications(config, namespaces)
+        module._implications = implications  # type: ignore[attr-defined]
+        module._implication_sources = sources  # type: ignore[attr-defined]
+        module._implication_dynamic_sources = {  # type: ignore[attr-defined]
+            name for name in sources if config[name].justknob is not None
+        }
+        module._implication_hash = repr(sorted(implications.items())).encode()  # type: ignore[attr-defined]
+        module.__class__ = ImplicationConfigModuleInstance
+    else:
+        module.__class__ = ConfigModuleInstance
     module._hash_dirty_var = ContextVar(f"{module.__name__}._hash_dirty", default=True)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
     module._hash_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
         f"{module.__name__}._hash_cache", default=None
@@ -305,6 +352,7 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> set[str
 
 
 _GetDictCacheKey = tuple[tuple[str, ...], tuple[str, ...], bool]
+_ResolvedConfigChanges = tuple[list[tuple[ModuleType, str, Any]], set["ConfigModule"]]
 
 
 @dataclass
@@ -334,6 +382,7 @@ class _ConfigEntry:
     # upstream bug - python/cpython#126886
     hide: bool = False
     alias: str | None = None
+    implies: dict[Any, dict[str, Any]] | None = None
     # Deprecation support
     deprecated: bool = False
     deprecation_message: str | None = None
@@ -346,6 +395,7 @@ class _ConfigEntry:
         )
         self.justknob = config.justknob
         self.alias = config.alias
+        self.implies = config.implies
         # Deprecation fields
         self.deprecated = config.deprecated
         self.deprecation_message = config.deprecation_message
@@ -381,6 +431,84 @@ class _ConfigEntry:
                 raise AssertionError(
                     f"envvar configs only support (optional) booleans or strings, {self.value_type} is neither"
                 )
+
+
+def _matches_implication_type(value: object, value_type: Any) -> bool:
+    if type(value) not in (bool, int, str, type(None)):
+        return False
+    origin = get_origin(value_type)
+    if origin is Literal:
+        return any(type(value) is type(v) and value == v for v in get_args(value_type))
+    if origin in (Union, UnionType):
+        return any(_matches_implication_type(value, t) for t in get_args(value_type))
+    return type(value) is value_type
+
+
+def _validate_implication_source(name: str, value: object) -> None:
+    if type(value) not in (bool, int, str, type(None)):
+        raise TypeError(
+            f"implication source {name} requires a plain bool, int, str, or None; got {type(value).__name__}"
+        )
+
+
+def _install_implications(
+    config: dict[str, _ConfigEntry],
+    namespaces: dict[str, dict[str, Any]],
+) -> tuple[dict[str, tuple[tuple[str, Any, Any], ...]], set[str]]:
+    def resolve_type(name: str) -> Any:
+        entry = config[name]
+        if isinstance(entry.value_type, str):
+            annotations = ModuleType("_config_annotations")
+            annotations.__annotations__ = {"value": entry.value_type}
+            prefix = name[: name.rfind(".") + 1]
+            entry.value_type = get_type_hints(
+                annotations, namespaces[""], namespaces[prefix]
+            )["value"]
+        return entry.value_type
+
+    implications: dict[str, list[tuple[str, Any, Any]]] = {}
+    edges: dict[str, set[str]] = {}
+    for source, entry in config.items():
+        if not entry.implies:
+            continue
+        _validate_implication_source(source, entry.default)
+        for value in (entry.env_value_default, entry.env_value_force):
+            if value is not _UNSET_SENTINEL:
+                _validate_implication_source(source, value)
+        edges[source] = set()
+        for condition, targets in entry.implies.items():
+            if not _matches_implication_type(condition, resolve_type(source)):
+                raise TypeError(
+                    f"invalid implication condition {condition!r} for {source}: expected {entry.value_type}"
+                )
+            if not isinstance(targets, dict):
+                raise TypeError(
+                    f"implication targets for {source}={condition!r} must be a dictionary"
+                )
+            for target, value in targets.items():
+                if not isinstance(target, str):
+                    raise TypeError("implication targets must be dotted config names")
+                if target not in config:
+                    raise ValueError(
+                        f"implication target {target!r} does not exist in this config module"
+                    )
+                target_entry = config[target]
+                if target_entry.alias is not None:
+                    raise ValueError(f"implication target {target} cannot be an alias")
+                if not _matches_implication_type(value, resolve_type(target)):
+                    raise TypeError(
+                        f"invalid implied value {value!r} for {target}: expected {target_entry.value_type}"
+                    )
+                edges[source].add(target)
+                implications.setdefault(target, []).append((source, condition, value))
+
+    try:
+        TopologicalSorter(edges).prepare()
+    except CycleError as exc:
+        raise ValueError(f"config implication cycle: {exc.args[1]}") from exc
+    return {
+        key: tuple(sorted(rules, key=repr)) for key, rules in implications.items()
+    }, set(edges)
 
 
 class ConfigModule(ModuleType):
@@ -431,14 +559,16 @@ class ConfigModule(ModuleType):
             if config.alias is not None:
                 self._set_alias_val(config, value)
             else:
+                if name == "_custom_ops_profile":
+                    self._enable_cpp_fake_custom_op_profiles(value)
                 config.user_override.set(value)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(name)
-                # Avoid a redundant instance-__dict__ write: hide defaults to False on
-                # the class and is only ever set True by __delattr__ (the mock.patch
-                # workaround), so only clear it when it is actually set.
-                if config.hide:
-                    config.hide = False
+            # Avoid a redundant instance-__dict__ write: hide defaults to False on
+            # the class and is only ever set True by __delattr__ (the mock.patch
+            # workaround), so only clear it when it is actually set.
+            if config.hide:
+                config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -494,6 +624,9 @@ class ConfigModule(ModuleType):
         if alias is None:
             return None
         module_name, constant_name = alias.rsplit(".", 1)
+        # Nested configs of this module, e.g. "<module>.cutlass.foo", are flat keys.
+        if module_name.startswith(f"{self.__name__}."):
+            return self, alias.removeprefix(f"{self.__name__}.")
         try:
             module = importlib.import_module(module_name)
         except ImportError as e:
@@ -517,7 +650,152 @@ class ConfigModule(ModuleType):
         module, constant_name = data
         setattr(module, constant_name, val)
 
+    def _resolve_patch_changes(self, changes: dict[str, Any]) -> _ResolvedConfigChanges:
+        targets = []
+        modules = {self}
+        for key, value in changes.items():
+            module: ModuleType = self
+            seen: set[tuple[ModuleType, str]] = set()
+            while isinstance(module, ConfigModule):
+                if (module, key) in seen:
+                    raise ValueError(f"config alias cycle at {module.__name__}.{key}")
+                seen.add((module, key))
+                if key not in module._config:
+                    raise AttributeError(f"{module.__name__}.{key} does not exist")
+                modules.add(module)
+                entry = module._config[key]
+                module._warn_if_deprecated(key, entry)
+                alias = module._get_alias_module_and_name(entry)
+                if alias is None:
+                    break
+                module, key = alias
+            targets.append((module, key, value))
+        return targets, modules
+
+    def _set_raw_values(
+        self,
+        changes: dict[str, Any],
+        *,
+        prior: dict[tuple[ModuleType, str], tuple[Any, bool]] | None = None,
+    ) -> Callable[[], None]:
+        targets: list[tuple[ModuleType, str, Any]] = []
+        modules = {self}
+        changed: dict[_ImplicationConfigModule, set[str]] = {}
+        external_undo: list[tuple[ModuleType, str, Any]] = []
+
+        def invalidate() -> None:
+            for module in modules:
+                module._hash_dirty_var.set(True)
+            for module, key, _ in targets:
+                if isinstance(module, ConfigModule):
+                    module._mark_get_dict_dirty(key)
+            for module, key in prior or ():
+                if isinstance(module, ConfigModule):
+                    module._mark_get_dict_dirty(key)
+
+        def validate() -> None:
+            for module, keys in changed.items():
+                module._validate_active_implications(keys)
+
+        def restore_hide(entry: _ConfigEntry, hide: bool) -> None:
+            if entry.hide != hide:
+                entry.hide = hide
+
+        def restore_external() -> None:
+            with contextlib.ExitStack() as stack:
+                for module, key, value in reversed(external_undo):
+                    stack.callback(setattr, module, key, value)
+
+        try:
+            with contextlib.ExitStack() as rollback:
+                raw_rollback = contextlib.ExitStack()
+                # Final token resets undo default materialization by external setters.
+                rollback.callback(raw_rollback.close)
+                rollback.callback(restore_external)
+                rollback.callback(invalidate)
+                for (module, key), (value, hide) in (prior or {}).items():
+                    if isinstance(module, ConfigModule):
+                        modules.add(module)
+                        entry = module._config[key]
+                        rollback.callback(entry.user_override.set, value)
+                        rollback.callback(restore_hide, entry, hide)
+                        raw_rollback.callback(entry.user_override.set, value)
+                        raw_rollback.callback(restore_hide, entry, hide)
+                    else:
+                        external_undo.append((module, key, value))
+                for name, value in changes.items():
+                    resolved, touched = self._resolve_patch_changes({name: value})
+                    targets.extend(resolved)
+                    modules.update(touched)
+                    module, key, value = resolved[0]
+                    if isinstance(module, _ImplicationConfigModule):
+                        changed.setdefault(module, set()).add(key)
+                        if key in module._implication_sources:
+                            _validate_implication_source(key, value)
+                    if isinstance(module, ConfigModule):
+                        entry = module._config[key]
+                        # Snapshot before later alias imports can change this value.
+                        prior_value = entry.user_override.get()
+                        token = entry.user_override.set(prior_value)
+                        rollback.callback(entry.user_override.set, prior_value)
+                        rollback.callback(restore_hide, entry, entry.hide)
+                        raw_rollback.callback(entry.user_override.reset, token)
+                        raw_rollback.callback(restore_hide, entry, entry.hide)
+                external_prior = {}
+                for module, key, _ in targets:
+                    if isinstance(module, ConfigModule):
+                        continue
+                    target = (module, key)
+                    if target not in external_prior and (
+                        prior is None or target not in prior
+                    ):
+                        external_prior[target] = getattr(module, key)
+                for module, key, value in targets:
+                    if isinstance(module, ConfigModule):
+                        entry = module._config[key]
+                        if key == "_custom_ops_profile":
+                            module._enable_cpp_fake_custom_op_profiles(value)
+                        entry.user_override.set(value)
+                        if entry.hide:
+                            entry.hide = False
+                invalidate()
+                validate()
+                for module, key, value in targets:
+                    if isinstance(module, ConfigModule):
+                        continue
+                    if (module, key) in external_prior:
+                        external_undo.append(
+                            (module, key, external_prior.pop((module, key)))
+                        )
+                    invalidate()
+                    setattr(module, key, value)
+                if external_undo:
+                    validate()
+                undo = rollback.pop_all()
+        finally:
+            invalidate()
+
+        def revert() -> None:
+            try:
+                undo.close()
+            finally:
+                invalidate()
+            validate()
+
+        return revert
+
     _GET_DICT_DIRTY_KEYS_CAP = 16
+
+    def _enable_cpp_fake_custom_op_profiles(self, value: Any) -> None:
+        if (
+            value is not None
+            and value is not _UNSET_SENTINEL
+            and self.__name__ == "torch._dynamo.config"
+        ):
+            import torch
+
+            # Notify before publishing. Never reset: another context may use it.
+            torch._C._enable_fake_tensor_custom_op_profiles()
 
     def _mark_get_dict_dirty(self, name: str) -> None:
         dirty = self._get_dict_dirty_keys_var.get()
@@ -669,6 +947,14 @@ class ConfigModule(ModuleType):
         config = self._get_dict(
             ignored_prefixes=prefixes, readonly_values=readonly_values
         )
+        source_values = (
+            {key: config[key] for key in self._implication_sources if key in config}
+            if isinstance(self, _ImplicationConfigModule)
+            else None
+        )
+        serializer = getattr(self, "_cache_config_serializer", None)
+        if serializer is not None:
+            serializer(config)
         factory_keys = getattr(self, "_cache_config_factory_keys", [])
         if factory_keys:
             for key in factory_keys:
@@ -682,6 +968,8 @@ class ConfigModule(ModuleType):
                             f"implement uuid(). Implement uuid() for cache key "
                             f"participation."
                         )
+        if isinstance(self, _ImplicationConfigModule):
+            self._validate_serialized_sources(config, source_values)
         return config
 
     def codegen_config(self) -> str:
@@ -691,22 +979,6 @@ class ConfigModule(ModuleType):
 
         # additional imports required
         imports = set()
-
-        def get_module_name(func: Callable, add_dot: bool) -> str:
-            module_name = func.__module__
-            if module_name == "builtins":
-                module_name = ""
-            if add_dot and module_name != "":
-                module_name += "."
-            return module_name
-
-        def add_import(func: Callable) -> None:
-            module_name = get_module_name(func, False)
-            if module_name:
-                imports.add(module_name)
-
-        def list_of_callables_to_string(v: list | set) -> list[str]:
-            return [f"{get_module_name(item, True)}{item.__name__}" for item in v]
 
         def importable_callable(v: Any) -> bool:
             # functools.partial has no attributes below but is a callable
@@ -796,14 +1068,24 @@ class ConfigModule(ModuleType):
             if isinstance(v, functools.partial):
                 return get_partial_line(mod, k, v)
             elif importable_callable(v):
-                add_import(v)
-                return f"{mod}.{k} = {get_module_name(v, True)}{v.__name__}"
+                ref = importable_ref(v)
+                if ref is None:
+                    return f"# WARNING: {mod}.{k} omitted (callable cannot be re-imported), repro may not reproduce"
+                func_ref, import_name = ref
+                if import_name:
+                    imports.add(import_name)
+                return f"{mod}.{k} = {func_ref}"
             elif isinstance(v, (list, set)) and all(
                 importable_callable(item) for item in v
             ):
-                for item in v:
-                    add_import(item)
-                v_list = list_of_callables_to_string(v)
+                refs = [importable_ref(item) for item in v]
+                if any(ref is None for ref in refs):
+                    return f"# WARNING: {mod}.{k} entirely omitted (an element cannot be re-imported), repro may not reproduce"
+                v_list = []
+                for func_ref, import_name in refs:  # type: ignore[misc]
+                    if import_name:
+                        imports.add(import_name)
+                    v_list.append(func_ref)
                 if isinstance(v, list):
                     return f"{mod}.{k} = {v_list}"
                 else:
@@ -813,11 +1095,21 @@ class ConfigModule(ModuleType):
 
         lines = []
         mod = self.__name__
-        for k, v in self._get_dict(
+        values = self._get_dict(
             ignored_keys=getattr(self, "_save_config_ignore", []),
             skip_default=True,
             readonly_values=True,
-        ).items():
+        )
+        if isinstance(self, _ImplicationConfigModule):
+            self._validate_serialized_sources(values, skip_default=True)
+            raw_values = {
+                k: values.pop(k)
+                for k in tuple(values)
+                if k in self._implication_sources or k in self._implications
+            }
+            if raw_values:
+                lines.append(f"{mod}.load_config({raw_values!r})")
+        for k, v in values.items():
             lines.append(get_config_line(mod, k, v))
         for import_name in imports:
             lines.insert(0, f"import {import_name}")
@@ -867,9 +1159,24 @@ class ConfigModule(ModuleType):
             config = pickle.loads(maybe_pickled_config)
         else:
             config = maybe_pickled_config
-        for k, v in config.items():
+        applied = False
+        for index, (k, v) in enumerate(config.items()):
             if k in self._config:
-                setattr(self, k, v)
+                if not applied and (
+                    isinstance(self, _ImplicationConfigModule) or self._config[k].alias
+                ):
+                    # Preserve ordinary alias import order until implications need a batch.
+                    _, modules = self._resolve_patch_changes({k: v})
+                    if any(isinstance(m, _ImplicationConfigModule) for m in modules):
+                        changes = {
+                            key: value
+                            for key, value in list(config.items())[index:]
+                            if key in self._config
+                        }
+                        self._set_raw_values(changes)
+                        applied = True
+                if not applied:
+                    setattr(self, k, v)
             else:
                 from torch._dynamo.utils import warn_once
 
@@ -877,6 +1184,21 @@ class ConfigModule(ModuleType):
 
     def get_config_copy(self) -> dict[str, Any]:
         return self._get_dict()
+
+    def _save_user_overrides(self) -> dict[str, Any]:
+        saved = {}
+        for k, e in self._config.items():
+            v = e.user_override.get()
+            if not isinstance(v, _IMMUTABLE_CONFIG_TYPES) and v is not _UNSET_SENTINEL:
+                v = copy.deepcopy(v)
+            saved[k] = v
+        return saved
+
+    def _restore_user_overrides(self, saved: dict[str, Any]) -> None:
+        self._hash_dirty_var.set(True)
+        self._get_dict_dirty_keys_var.set(None)
+        for k, v in saved.items():
+            self._config[k].user_override.set(v)
 
     def get_serializable_config_copy(self) -> dict[str, Any]:
         return self._get_dict(ignored_keys=getattr(self, "_save_config_ignore", []))
@@ -902,6 +1224,15 @@ class ConfigModule(ModuleType):
 
             with config.patch("name", val):
                 ...
+
+        On exit, each key's previous override is restored, so a key that had no
+        override becomes unset again and keeps following its env, JustKnob, or
+        default value.
+
+        For implication targets, this changes stored values; active implications
+        still take precedence. On exit, stored values are restored before checking
+        for conflicts. If changes to other sources leave conflicting implications,
+        exit raises ValueError, including when unwinding an exception from the body.
         """
         changes: dict[str, Any]
         if arg1 is not None:
@@ -932,21 +1263,57 @@ class ConfigModule(ModuleType):
                 )
         if not isinstance(changes, dict):
             raise AssertionError(f"expected `dict` got {type(changes)}")
+        if isinstance(self, _ImplicationConfigModule):
+            return _ImplicationConfigPatch(self, changes)
         config = self
 
         class ConfigPatch(ContextDecorator):
             def __init__(self) -> None:
                 self.changes = changes
-                self._prior: ContextVar[tuple[dict[str, Any], ...]] = ContextVar(
+                self._prior: ContextVar[
+                    tuple[dict[str, Any] | Callable[[], None], ...]
+                ] = ContextVar(
                     f"{config.__name__}.ConfigPatch[{id(self)}]",
                     default=(),
                 )
 
             def __enter__(self) -> None:
                 prior: dict[str, Any] = {}
-                for key in self.changes:
-                    # KeyError on invalid entry
-                    prior[key] = config.__getattr__(key)
+                # Snapshots taken in key order, for when a later alias reaches an
+                # implication module and the whole patch switches to _set_raw_values.
+                # Resolving that alias can import modules that change earlier values.
+                raw_prior: dict[tuple[ModuleType, str], tuple[Any, bool]] = {}
+                for key, value in self.changes.items():
+                    entry = config._config.get(key)
+                    if entry is None or entry.hide:
+                        raise AttributeError(f"{config.__name__}.{key} does not exist")
+                    # Warn before anything is written, in case warnings are errors.
+                    config._warn_if_deprecated(key, entry)
+                    module, name = config, key
+                    if entry.alias:
+                        targets, mods = config._resolve_patch_changes({key: value})
+                        if any(isinstance(m, _ImplicationConfigModule) for m in mods):
+                            revert = config._set_raw_values(
+                                self.changes, prior=raw_prior
+                            )
+                            self._prior.set((*self._prior.get(), revert))
+                            return
+                        module, name, _ = targets[0]
+                        if not isinstance(module, ConfigModule):
+                            prior[key] = config.__getattr__(key)
+                            raw_prior.setdefault((module, name), (prior[key], False))
+                            continue
+                        entry = module._config[name]
+                        # Only the key and the final target are checked for hide,
+                        # not intermediate hops of a multi-hop alias chain.
+                        if entry.hide:
+                            raise AttributeError(
+                                f"{module.__name__}.{name} does not exist"
+                            )
+                    # Save the raw override (of the final alias target) rather than the
+                    # resolved value so that exit leaves an unset key unset.
+                    prior[key] = entry.user_override.get()
+                    raw_prior.setdefault((module, name), (prior[key], False))
                 prior_stack = self._prior.get()
                 self._prior.set((*prior_stack, prior))
                 try:
@@ -964,8 +1331,11 @@ class ConfigModule(ModuleType):
                     )
                 prior = prior_stack[-1]
                 self._prior.set(prior_stack[:-1])
-                for k, v in prior.items():
-                    config.__setattr__(k, v)
+                if callable(prior):
+                    prior()
+                else:
+                    for k, v in prior.items():
+                        config.__setattr__(k, v)
 
         return ConfigPatch()
 
@@ -992,6 +1362,8 @@ class ConfigModule(ModuleType):
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override.get() for k in changes}
             for k, v in changes.items():
+                if k == "_custom_ops_profile":
+                    self._enable_cpp_fake_custom_op_profiles(v)
                 config[k].user_override.set(v)
                 self._hash_dirty_var.set(True)
                 self._mark_get_dict_dirty(k)
@@ -1005,6 +1377,133 @@ class ConfigModule(ModuleType):
             return revert
 
         return change
+
+
+class _ImplicationConfigModule(ConfigModule):
+    _implications: dict[str, tuple[tuple[str, Any, Any], ...]]
+    _implication_sources: set[str]
+    _implication_dynamic_sources: set[str]
+    _implication_hash: bytes
+
+    def _get_implied_value(
+        self, name: str, resolved: dict[str, Any] | None = None
+    ) -> Any:
+        if resolved is None:
+            resolved = {}
+        result = _UNSET_SENTINEL
+        for source, condition, value in self._implications.get(name, ()):
+            if source not in resolved:
+                resolved[source] = self._get_resolved_value(source, resolved)
+            selected = resolved[source]
+            if type(selected) is not type(condition) or selected != condition:
+                continue
+            if result is not _UNSET_SENTINEL and (
+                type(result) is not type(value) or result != value
+            ):
+                raise ValueError(f"conflicting config implications for {name}")
+            result = value
+        return result
+
+    def _validate_active_implications(self, changes: set[str] | None = None) -> None:
+        if changes is not None and not changes & self._implication_sources:
+            return
+        affected: dict[str, bool] = {}
+
+        def is_affected(name: str) -> bool:
+            if changes is None:
+                return True
+            if name not in affected:
+                affected[name] = any(
+                    source in changes or is_affected(source)
+                    for source, _, _ in self._implications.get(name, ())
+                )
+            return affected[name]
+
+        resolved: dict[str, Any] = {}
+        for target in self._implications:
+            if is_affected(target):
+                self._get_implied_value(target, resolved)
+
+    def _get_resolved_value(self, name: str, resolved: dict[str, Any]) -> Any:
+        if name in self._implications and not self._config[name].hide:
+            implied = self._get_implied_value(name, resolved)
+            if implied is not _UNSET_SENTINEL:
+                self._warn_if_deprecated(name, self._config[name])
+                return implied
+        return super().__getattr__(name)
+
+    def __getattr__(self, name: str) -> Any:
+        return self._get_resolved_value(name, {})
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in self._implication_sources:
+            self._set_raw_values({name: value})
+        else:
+            super().__setattr__(name, value)
+
+    def _is_default(self, name: str) -> bool:
+        return name not in self._implication_dynamic_sources and super()._is_default(
+            name
+        )
+
+    def _get_dict(
+        self,
+        ignored_keys: list[str] | None = None,
+        ignored_prefixes: list[str] | None = None,
+        skip_default: bool = False,
+        readonly_values: bool = False,
+    ) -> dict[str, Any]:
+        # JustKnobs can change without a config write to invalidate cached snapshots.
+        for source in self._implication_dynamic_sources:
+            self._mark_get_dict_dirty(source)
+        return super()._get_dict(
+            ignored_keys, ignored_prefixes, skip_default, readonly_values
+        )
+
+    def _validate_serialized_sources(
+        self,
+        values: dict[str, Any],
+        source_values: dict[str, Any] | None = None,
+        *,
+        skip_default: bool = False,
+    ) -> None:
+        for source in self._implication_sources:
+            if skip_default and source not in values and self._is_default(source):
+                continue
+            saved = values.get(source, _UNSET_SENTINEL)
+            expected = (
+                source_values.get(source, _UNSET_SENTINEL)
+                if source_values is not None
+                else saved
+            )
+            if (
+                saved is _UNSET_SENTINEL
+                or type(saved) is not type(expected)
+                or saved != expected
+            ):
+                raise ValueError(
+                    f"implication source {source} must be serialized unchanged"
+                )
+
+    def save_config(self) -> bytes:
+        values = self._get_dict(
+            ignored_keys=getattr(self, "_save_config_ignore", []), readonly_values=True
+        )
+        self._validate_serialized_sources(values)
+        return pickle.dumps(values, protocol=2)
+
+    def get_hash(self) -> bytes:
+        if self._implication_sources & self._compile_ignored_keys:
+            raise ValueError("implication sources must participate in config hashing")
+        if self._implication_dynamic_sources:
+            self._hash_dirty_var.set(True)
+        return hashlib.md5(
+            super().get_hash() + self._implication_hash, usedforsecurity=False
+        ).digest()
+
+    def _make_closure_patcher(self, **changes: dict[str, Any]) -> Any:
+        # Opt-in modules validate on apply and revert; persistent conflicting changes raise.
+        return functools.partial(self._set_raw_values, changes)
 
 
 class ContextDecorator(contextlib.ContextDecorator):
@@ -1048,6 +1547,28 @@ class ContextDecorator(contextlib.ContextDecorator):
         return super().__call__(func)
 
 
+class _ImplicationConfigPatch(ContextDecorator):
+    def __init__(
+        self, config: _ImplicationConfigModule, changes: dict[str, Any]
+    ) -> None:
+        self.config = config
+        self.changes = changes
+        self._prior: ContextVar[tuple[Callable[[], None], ...]] = ContextVar(
+            f"{config.__name__}.ImplicationConfigPatch[{id(self)}]", default=()
+        )
+
+    def __enter__(self) -> None:
+        revert = self.config._set_raw_values(self.changes)
+        self._prior.set((*self._prior.get(), revert))
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        prior = self._prior.get()
+        if not prior:
+            raise AssertionError("prior should not be empty when exiting config patch")
+        self._prior.set(prior[:-1])
+        prior[-1]()
+
+
 class SubConfigProxy:
     """
     Shim to redirect to main config.
@@ -1078,12 +1599,21 @@ def get_tristate_env(name: str, default: Any = None) -> bool | None:
     return default
 
 
-def inherit_fields_from(parent_cls):
-    def wrapper(child_cls):
+def deprecated_alias_fields_from(parent_cls: type) -> Callable[[type], type]:
+    """Adds the public fields of a nested config class that the decorated class
+    does not define as deprecated aliases, so reads and writes go to the parent."""
+
+    def wrapper(child_cls: type) -> type:
+        type_hints = inspect.get_annotations(parent_cls)
         for k, v in parent_cls.__dict__.items():
-            # copy fields that are not private and not overridden
             if not k.startswith("_") and k not in child_cls.__dict__:
-                setattr(child_cls, k, v)
+                alias = Config(
+                    alias=f"{parent_cls.__module__}.{parent_cls.__qualname__}.{k}",
+                    value_type=type_hints.get(k, type(v)),
+                    deprecated=True,
+                    deprecation_message=f"use {parent_cls.__qualname__}.{k} instead",
+                )
+                setattr(child_cls, k, alias)
         return child_cls
 
     return wrapper

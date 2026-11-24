@@ -89,22 +89,16 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   std::optional<AllocationID> allocation_id_;
 };
 
-// Used during post processing.
-struct TORCH_API ProfilerStepInfo {
-  int64_t start_time_ns; // start time of the profiler step
-  int64_t end_time_ns; // end time of the profiler step
-  uint64_t out_idx; // index of the profiler step in the profiler "out" var in
-                    // getRecords
-
-  ProfilerStepInfo(int64_t start, int64_t end, uint64_t out_idx)
-      : start_time_ns(start), end_time_ns(end), out_idx(out_idx) {}
-};
-
 using op_input_t = std::variant<
     TensorMetadata,
     std::vector<TensorMetadata>,
     c10::IValue,
     std::nullopt_t>;
+
+struct DecodedInputs {
+  std::vector<op_input_t> shapes;
+  std::vector<op_input_t> concrete;
+};
 
 // Parsed op-argument metadata (shapes, dtypes, concrete inputs). Shared by the
 // KinetoEvent constructor and the Kineto metadata producers.
@@ -117,9 +111,7 @@ struct OpArgData {
   std::vector<shape> strides;
 };
 
-TORCH_API OpArgData parseArgData(
-    const std::vector<op_input_t>& input_shapes,
-    const std::vector<op_input_t>& concreteInputs);
+TORCH_API OpArgData parseArgData(const DecodedInputs& inputs);
 
 // ============================================================================
 // == ExtraFields =============================================================
@@ -167,8 +159,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       TorchOpBasicFields&& f,
       uint64_t correlation_id,
       c10::time_t end_time_ns,
-      std::vector<op_input_t>&& inputs,
-      std::vector<op_input_t>&& concrete_inputs,
+      DecodedInputs&& inputs,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
@@ -181,7 +172,6 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
         inputs_{std::move(inputs)},
-        concrete_inputs_{std::move(concrete_inputs)},
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
@@ -192,8 +182,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         perf_event_counters_{std::move(perf_event_counters)} {}
   uint64_t correlation_id_;
   c10::time_t end_time_ns_;
-  std::vector<op_input_t> inputs_;
-  std::vector<op_input_t> concrete_inputs_;
+  DecodedInputs inputs_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
@@ -470,7 +459,6 @@ struct KinetoObserverContext : public at::ObserverContext {
     c10::approx_time_t end_time_{
         std::numeric_limits<c10::approx_time_t>::min()};
 
-    bool allow_tf32_cublas_;
     std::unique_ptr<perf_counters_t> counters_;
     collective_meta_t* collective_meta_{};
   };
@@ -487,11 +475,9 @@ struct KinetoObserverContext : public at::ObserverContext {
   // down and event_ freed, so the exit drops without touching event_.
   uint64_t session_generation_{0};
 
-  // True if begin_op pushed an external correlation id for this op. The
-  // matching pop must run on every exit path (including teardown /
-  // stale-session early exits), or the id leaks onto the device profiling
-  // backend's per-thread correlation stack, which is not reset across profiler
-  // sessions.
+  // True if begin_op pushed an external correlation id for this op. Every exit
+  // path pops it to keep the backend's per-thread correlation stack balanced,
+  // except global exits after the exit hook, since Kineto may be destroyed.
   bool pushed_correlation_id_{false};
 };
 
@@ -504,20 +490,16 @@ constexpr int SCALAR_LIST_LENGTH_LIMIT = 30;
 // contiguous AppendOnlyList so that we no longer create vectors for shapes
 // and dtypes on every op. Those vectors can be created during
 // post-processing.
-// It splits the data into two categories: input shapes and concrete inputs.
 class InputOutputEncoder final {
  public:
   void push(c10::ArrayRef<const c10::IValue> values);
 
   // Used during post-processing to unpack the encoded data.
-  // Each method returns a "supplier" lambda which takes no arguments;
-  // invoking the lambda once will return a list of args that represent
-  // the inputs for one op.
-  // The data is split into two streams: "input shapes" and "concrete inputs".
+  // Returns a decoder lambda which takes no arguments; invoking the lambda once
+  // returns the shape and concrete input views for one op.
   // Note: "auto" only works because these are only used in collection.cpp,
   // where they are implemented.
-  auto getInputShapeGenerator();
-  auto getConcreteInputGenerator();
+  auto getInputDecoder();
 
   bool isSupportedScalarList(const c10::IValue& list_candidate);
 
@@ -533,14 +515,8 @@ class InputOutputEncoder final {
     TERMINATOR
   };
 
-  enum class IOType { Shapes, ConcreteInputs, None };
-
  private:
   void push(const at::Tensor& t);
-
-  // Implementation detail for getInputShapeGenerator and
-  // getConcreteInputGenerator
-  auto getIValueGenerator(const IOType& io_type);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
   AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
@@ -613,7 +589,6 @@ class TORCH_API ThreadLocalSubqueue {
     // NB: This is a destructive operation.
     void materialize(
         std::vector<std::shared_ptr<Result>>& out,
-        std::vector<ProfilerStepInfo>& step_info,
         const std::function<c10::time_t(c10::approx_time_t)>& time_converter,
         const uint64_t tid,
         const kineto::DeviceAndResource& kineto_info);
@@ -657,6 +632,13 @@ class TORCH_API ThreadLocalSubqueue {
     // ProfilerState::KINETO_GPU_FALLBACK or
     // ProfilerState::KINETO_PRIVATEUSE1_FALLBACK
     AppendOnlyList<FallbackPair, BlockSize> device_fallback_;
+
+    // Read once per profiling session and reported for every op. Changing the
+    // setting during a session isn't reflected in its events.
+    bool allow_tf32_cublas_ =
+        at::globalContext().float32Precision(
+            at::Float32Backend::CUDA,
+            at::Float32Op::MATMUL) == at::Float32Precision::TF32;
   } torch_ops_;
 
   // reportBackendEventToActiveKinetoProfiler

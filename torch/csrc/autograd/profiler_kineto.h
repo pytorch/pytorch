@@ -205,14 +205,24 @@ TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 using ActivityFilter = std::unordered_map<
     torch::profiler::impl::ActivityType,
     std::unordered_set<std::string>>;
+using ProfilerExtensionMap = std::unordered_map<std::string, std::string>;
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
     const ActivityFilter& activity_filter = {});
+TORCH_API void prepareProfiler(
+    const torch::profiler::impl::ProfilerConfig& config,
+    const std::set<torch::profiler::impl::ActivityType>& activities,
+    const ActivityFilter& activity_filter,
+    const ProfilerExtensionMap& profiler_extensions);
 
 TORCH_API void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities);
+
+// Toggles Python stack tracing in the current Kineto profiling session. CPU and
+// device activity collection are unaffected. Only stopping is supported so far.
+TORCH_API void togglePythonCollectionDynamic(bool enable);
 
 TORCH_API void startMemoryProfile();
 TORCH_API void stopMemoryProfile();
