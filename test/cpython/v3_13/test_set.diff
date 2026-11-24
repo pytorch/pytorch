@@ -1,5 +1,5 @@
 diff --git a/test/cpython/v3_13/test_set.py b/test/cpython/v3_13/test_set.py
-index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f1ef91ba2 100644
+index d9102eb98a54a673f74530c8b3f89b4637adf3df..8049e5ca335147c962cd99d80fdb7ea670d17bdb 100644
 --- a/test/cpython/v3_13/test_set.py
 +++ b/test/cpython/v3_13/test_set.py
 @@ -1,3 +1,60 @@
@@ -525,31 +525,16 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
  
      def test_constructor(self):
          for cons in (set, frozenset):
-@@ -1785,7 +1875,11 @@ class bad_dict_clear:
+@@ -1785,7 +1875,7 @@ class bad_dict_clear:
      def __hash__(self):
          return 0
  
 -class TestWeirdBugs(unittest.TestCase):
 +class TestWeirdBugs(__TestCase):
-+    @unittest.skipIf(
-+        TEST_WITH_TORCHDYNAMO,
-+        "__build_class__ with closed over objects not supported",
-+    )
      def test_8420_set_merge(self):
          # This used to segfault
          global be_bad, set2, dict2
-@@ -1812,6 +1906,10 @@ class TestWeirdBugs(unittest.TestCase):
-         s.update(range(100))
-         list(si)
- 
-+    @unittest.skipIf(
-+        TEST_WITH_TORCHDYNAMO,
-+        "__build_class__ with closed over objects not supported",
-+    )
-     def test_merge_and_mutate(self):
-         class X:
-             def __hash__(self):
-@@ -1826,7 +1924,7 @@ class TestWeirdBugs(unittest.TestCase):
+@@ -1826,7 +1916,7 @@ class TestWeirdBugs(unittest.TestCase):
          s.update(other)
  
  
@@ -558,7 +543,7 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
      """Regression test for bpo-46615"""
  
      constructor1 = None
-@@ -1862,7 +1960,7 @@ class TestOperationsMutating:
+@@ -1862,7 +1952,7 @@ class TestOperationsMutating:
                  self.assertIn("changed size during iteration", str(e))
  
  
@@ -567,14 +552,14 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
  
      def test_eq_with_mutation(self):
          self.check_set_op_does_not_crash(lambda a, b: a == b)
-@@ -1933,24 +2031,40 @@ class TestBinaryOpsMutating(TestOperationsMutating):
+@@ -1933,24 +2023,40 @@ class TestBinaryOpsMutating(TestOperationsMutating):
          self.check_set_op_does_not_crash(f3)
  
  
 -class TestBinaryOpsMutating_Set_Set(TestBinaryOpsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestBinaryOpsMutating_Set_Set(_TestBinaryOpsMutating, __TestCase):
      constructor1 = set
@@ -583,7 +568,7 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
 -class TestBinaryOpsMutating_Subclass_Subclass(TestBinaryOpsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestBinaryOpsMutating_Subclass_Subclass(_TestBinaryOpsMutating, __TestCase):
      constructor1 = SetSubclass
@@ -592,7 +577,7 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
 -class TestBinaryOpsMutating_Set_Subclass(TestBinaryOpsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestBinaryOpsMutating_Set_Subclass(_TestBinaryOpsMutating, __TestCase):
      constructor1 = set
@@ -601,7 +586,7 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
 -class TestBinaryOpsMutating_Subclass_Set(TestBinaryOpsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestBinaryOpsMutating_Subclass_Set(_TestBinaryOpsMutating, __TestCase):
      constructor1 = SetSubclass
@@ -613,14 +598,14 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
  
      def test_issubset_with_mutation(self):
          self.check_set_op_does_not_crash(set.issubset)
-@@ -1986,27 +2100,51 @@ class TestMethodsMutating(TestOperationsMutating):
+@@ -1986,27 +2092,51 @@ class TestMethodsMutating(TestOperationsMutating):
          self.check_set_op_does_not_crash(set.update)
  
  
 -class TestMethodsMutating_Set_Set(TestMethodsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestMethodsMutating_Set_Set(_TestMethodsMutating, __TestCase):
      constructor1 = set
@@ -629,7 +614,7 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
 -class TestMethodsMutating_Subclass_Subclass(TestMethodsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestMethodsMutating_Subclass_Subclass(_TestMethodsMutating, __TestCase):
      constructor1 = SetSubclass
@@ -638,7 +623,7 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
 -class TestMethodsMutating_Set_Subclass(TestMethodsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestMethodsMutating_Set_Subclass(_TestMethodsMutating, __TestCase):
      constructor1 = set
@@ -647,7 +632,7 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
 -class TestMethodsMutating_Subclass_Set(TestMethodsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestMethodsMutating_Subclass_Set(_TestMethodsMutating, __TestCase):
      constructor1 = SetSubclass
@@ -656,7 +641,7 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
 -class TestMethodsMutating_Set_Dict(TestMethodsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestMethodsMutating_Set_Dict(_TestMethodsMutating, __TestCase):
      constructor1 = set
@@ -665,13 +650,13 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
 -class TestMethodsMutating_Set_List(TestMethodsMutating, unittest.TestCase):
 +@unittest.skipIf(
 +    TEST_WITH_TORCHDYNAMO,
-+    "__build_class__ with closed over objects not supported",
++    "range(randrange(n)) needs Tensor.item()",
 +)
 +class TestMethodsMutating_Set_List(_TestMethodsMutating, __TestCase):
      constructor1 = set
      constructor2 = list
  
-@@ -2068,7 +2206,7 @@ def faces(G):
+@@ -2068,7 +2198,7 @@ def faces(G):
      return f
  
  
@@ -680,7 +665,7 @@ index d9102eb98a54a673f74530c8b3f89b4637adf3df..e1497a71597f419b785e5b283956f28f
  
      def test_cube(self):
  
-@@ -2115,7 +2253,5 @@ class TestGraphs(unittest.TestCase):
+@@ -2115,7 +2245,5 @@ class TestGraphs(unittest.TestCase):
                  self.assertIn(cubevert, g)
  
  

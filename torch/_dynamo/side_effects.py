@@ -52,12 +52,18 @@ from .bytecode_transformation import (
     Instruction,
 )
 from .codegen import PyCodegen
-from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
+from .exc import (
+    collapse_resume_frames,
+    get_stack_above_dynamo,
+    raise_observed_exception,
+    unimplemented,
+)
 from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
     is_pybind11_enum_member,
+    istype,
     nn_module_new,
     object_new,
 )
@@ -260,6 +266,8 @@ class SideEffects:
         mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
         | None = None,
         keepalive: list[object] | None = None,
+        trace_time_empty_cells: dict[VariableTracker, CellType] | None = None,
+        trace_time_empty_cell_classes: set[int] | None = None,
         save_for_backward: list[
             tuple[AutogradFunctionContextVariable, list[VariableTracker]]
         ]
@@ -288,6 +296,13 @@ class SideEffects:
             side_effects_log.isEnabledFor(logging.DEBUG) or bool(trace_log.handlers)
         )
         self.keepalive = keepalive or []
+        # See track_trace_time_empty_cell.
+        self.trace_time_empty_cells: dict[VariableTracker, CellType] = (
+            trace_time_empty_cells or {}
+        )
+        self.trace_time_empty_cell_classes: set[int] = (
+            trace_time_empty_cell_classes or set()
+        )
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
         # Used by MappingProxyVariable to graph break in case of any mutated
@@ -415,6 +430,8 @@ class SideEffects:
             and self.attr_mutation_kinds == other.attr_mutation_kinds
             and self.save_for_backward == other.save_for_backward
             and self.tensor_hooks == other.tensor_hooks
+            and self.trace_time_empty_cell_classes
+            == other.trace_time_empty_cell_classes
         )
 
     def diff(self, other: "SideEffects") -> str | None:
@@ -438,6 +455,8 @@ class SideEffects:
             return "save_for_backward"
         elif self.tensor_hooks != other.tensor_hooks:
             return "tensor_hooks"
+        elif self.trace_time_empty_cell_classes != other.trace_time_empty_cell_classes:
+            return "trace_time_empty_cell_classes"
         else:
             return None
 
@@ -457,6 +476,8 @@ class SideEffects:
             },
             mutation_user_stacks=self.mutation_user_stacks,
             keepalive=list(self.keepalive),
+            trace_time_empty_cells=dict(self.trace_time_empty_cells),
+            trace_time_empty_cell_classes=set(self.trace_time_empty_cell_classes),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
         )
@@ -688,6 +709,9 @@ class SideEffects:
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
+        if cellvar in self.trace_time_empty_cells and output_graph:
+            msg = "cannot access free variable where it is not associated with a value"
+            raise_observed_exception(NameError, output_graph.current_tx, args=[msg])
         unimplemented(
             gb_type="Read uninitialized cell",
             context=str(cellvar),
@@ -1019,6 +1043,40 @@ class SideEffects:
         self.id_to_variable[id(cell)] = variable
         self.keepalive.append(cell)
         return variable
+
+    def track_trace_time_empty_cell(self, cellvar: VariableTracker) -> CellType:
+        """Real empty cell standing in for the never-assigned `cellvar` in a
+        class built by builtins.__build_class__. cellvar is re-keyed to it so
+        inlined methods resolve back to cellvar. The runtime frame never writes
+        this cell, so classes holding it must not outlive the trace.
+        """
+        cell = self.trace_time_empty_cells.get(cellvar)
+        if cell is None:
+            cell = CellType()
+            (old_key,) = [k for k, v in self.id_to_variable.items() if v is cellvar]
+            del self.id_to_variable[old_key]
+            self.id_to_variable[id(cell)] = cellvar
+            self.keepalive.append(cell)
+            self.trace_time_empty_cells[cellvar] = cell
+        return cell
+
+    def track_class_built_with_trace_time_empty_cell(
+        self, cls: type, closure: tuple[CellType, ...] | None
+    ) -> None:
+        if not self.trace_time_empty_cells or not closure:
+            return
+        empty_ids = {id(c) for c in self.trace_time_empty_cells.values()}
+        if any(id(c) in empty_ids for c in closure):
+            self.trace_time_empty_cell_classes.add(id(cls))
+            self.keepalive.append(cls)
+
+    def references_trace_time_empty_cell(self, value: object) -> bool:
+        if not self.trace_time_empty_cell_classes:
+            return False
+        # Mirrors the containers is_safe_constant lets codegen emit as one constant.
+        if istype(value, (tuple, frozenset)):
+            return any(map(self.references_trace_time_empty_cell, value))
+        return id(value) in self.trace_time_empty_cell_classes
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
         # Re-tracks are keyed by object identity and return the vt the first

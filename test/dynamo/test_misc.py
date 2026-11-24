@@ -19819,6 +19819,88 @@ A.last
         ):
             fn(t)
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_later_assigned_name(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(t):
+            class Maker:
+                def make(self):
+                    return Helper()
+
+            class Helper:
+                def value(self):
+                    return 5
+
+            class Node:
+                def is_node(self, other):
+                    return isinstance(other, Node)
+
+            return Maker().make().value() + t.sum() + Node().is_node(Node())
+
+        t = torch.randn(3)
+        self.assertEqual(fn(t), 6 + t.sum())
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_unassigned_name(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            class Maker:
+                def make(self):
+                    return Helper()
+
+            try:
+                Maker().make()
+            except NameError:
+                return t + 1
+            Helper = None  # noqa: F841
+            return t
+
+        t = torch.randn(3)
+        self.assertEqual(fn(t), t + 1)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_later_assigned_name_graph_break(self):
+        def fn(t):
+            class Maker:
+                def make(self):
+                    return Helper()
+
+            torch._dynamo.graph_break()
+
+            class Helper:
+                def value(self):
+                    return 5
+
+            return t + Maker().make().value()
+
+        t = torch.randn(3)
+        self.assertEqual(torch.compile(fn, backend="eager")(t), t + 5)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_over_later_assigned_name_escape(self):
+        def fn(t):
+            class Maker:
+                def make(self):
+                    return Helper()
+
+            class Helper:
+                def value(self):
+                    return 5
+
+            return Maker, t.sum()
+
+        t = torch.randn(3)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Class with trace-time empty closure cell escaped",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(t)
+        Maker, _ = torch.compile(fn, backend="eager")(t)
+        self.assertEqual(Maker().make().value(), 5)
+
     @expectedFailureDynamic
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_build_class_closure_over_nonconstant(self):

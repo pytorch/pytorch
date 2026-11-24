@@ -4185,6 +4185,9 @@ class InstructionTranslatorBase(
             and not self.skip_one_hop_torch_function_depth
             # Do not allow nested graph breaks in HOPs
             and self.output.current_tracer.parent is None
+            # Resume code writes the frame's cells, not the trace-time empty
+            # cells held by classes built during tracing.
+            and not self.output.side_effects.trace_time_empty_cells
         )
 
     @break_graph_if_unsupported(
