@@ -260,7 +260,6 @@ class MultiKernelTest(TestCase):
 
     @requires_triton()
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
-    @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
     def test_triton_gemm(self):
         def fn(x, y):
             return x @ y
@@ -288,7 +287,6 @@ class MultiKernelTest(TestCase):
         self.assertEqual(ref, act, **rocm_tol)
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
-    @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
     @requires_triton()
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
