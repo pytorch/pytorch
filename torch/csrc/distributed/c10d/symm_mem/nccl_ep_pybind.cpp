@@ -2,10 +2,10 @@
 //
 // The EP code lives in this optional extension -- which NEEDED-links libnccl_ep
 // -- rather than in libtorch_cuda / libtorch_python's init.cpp. It is imported
-// lazily by torch/distributed/_token_switch.py, so the normal Python
+// lazily by torch/distributed/_token_switch/__init__.py, so the normal Python
 // extension-import machinery loads libnccl_ep (and raises ImportError if the
-// optional nccl4py wheel that provides it is absent). libtorch_cuda therefore
-// never references ncclEp* and torch imports with or without nccl4py.
+// optional nccl-extensions wheel that provides it is absent). libtorch_cuda
+// never references ncclEp* and torch imports with or without nccl-extensions.
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_ep.hpp>
 #include <torch/csrc/utils/pybind.h>
 

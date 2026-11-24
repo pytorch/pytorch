@@ -285,13 +285,18 @@ inline void adaptive_avg_pool_check(
     int64_t pooling_dims,
     const char* fn_name) {
   const int64_t ndim = input.dim();
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       static_cast<int64_t>(output_size.size()) == pooling_dims, fn_name, ": output_size must be ", pooling_dims);
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       ndim == pooling_dims + 1 || ndim == pooling_dims + 2,
       fn_name, ": Expected ", pooling_dims + 1, "D or ", pooling_dims + 2, "D tensor, but got ", input.sizes());
-  check_non_empty_dims(input, /*first_dim=*/ndim - pooling_dims, fn_name, "input");
-  TORCH_CHECK(
+  // Not check_non_empty_dims: the other pooling ops still raise RuntimeError there.
+  for (const auto i : c10::irange(ndim - pooling_dims, ndim)) {
+    TORCH_CHECK_VALUE(input.size(i) > 0, fn_name,
+                      ": Expected input to have non-zero size for non-batch dimensions, but input has sizes ",
+                      input.sizes(), " with dimension ", i, " being empty");
+  }
+  TORCH_CHECK_VALUE(
       input.dtype() == output.dtype(),
       fn_name, ": Expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 }
@@ -305,16 +310,22 @@ inline void adaptive_avg_pool_backward_check(
     const char* fn_name) {
   const int64_t ndim = input.dim();
   check_non_empty_dims(grad_output, /*first_dim=*/1, fn_name, "grad_output");
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       ndim == pooling_dims + 1 || ndim == pooling_dims + 2,
       fn_name, ": Expected ", pooling_dims + 1, "D or ", pooling_dims + 2, "D tensor, but got ", input.sizes());
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       grad_output.dim() == ndim,
       fn_name, ": Expected dimensions ", ndim, " for `grad_output` but got dimensions ", grad_output.dim());
-  TORCH_CHECK(
+  for (const auto i : c10::irange(ndim - pooling_dims)) {
+    TORCH_CHECK_VALUE(
+        input.size(i) == grad_output.size(i),
+        fn_name, ": input and grad_output must have the same size at dim ", i,
+        ", but got ", input.size(i), " and ", grad_output.size(i));
+  }
+  TORCH_CHECK_VALUE(
       grad_output.dtype() == input.dtype(),
       fn_name, ": Expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       grad_input.dtype() == input.dtype(),
       fn_name, ": Expected dtype ", input.dtype(), " for `grad_input` but got dtype ", grad_input.dtype());
 }
