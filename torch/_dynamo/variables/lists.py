@@ -1439,6 +1439,7 @@ class ListVariable(BaseListVariable):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
+        "__getitem__": Method.from_slot(BaseListVariable.mp_subscript_impl),
         "append": Method(BaseListVariable.list_append),
         "extend": Method(BaseListVariable.list_extend),
         "insert": Method(BaseListVariable.list_insert),
@@ -1859,13 +1860,8 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not (self.is_mutable() and len(args) > 0):
             return None
-        if kwargs or len(args) != 2:
-            raise_args_mismatch(
-                tx,
-                "insert",
-                "2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        no_keywords(tx, "deque.insert", kwargs)
+        check_positional(tx, "insert", len(args), 2, 2)
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None and len(self.items) == maxlen:
             raise_observed_exception(
