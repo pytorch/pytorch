@@ -721,6 +721,17 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 16)
+    @parametrize("layout", [torch.strided, torch.sparse_coo])
+    def test_pyobject_tensor_layout(self, device, layout):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        tensor = torch.randn(2, 3, device=device)
+        if layout == torch.sparse_coo:
+            tensor = tensor.to_sparse()
+        self.assertIs(libtorch_agnostic._interop.tensor_layout(tensor), layout)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 16)
     def test_pyobject_non_layout_raises(self, device):
         import libtorch_agn_2_16 as libtorch_agnostic
 
