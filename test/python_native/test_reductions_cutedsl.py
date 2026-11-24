@@ -189,8 +189,9 @@ class TestCuTeDSLReductionWiring(TestCase):
         self._check(lambda: torch.sum(xn, dim=-1), **_TOL[torch.float32])
 
     def test_cow_tensors_survive_the_conditions(self, device):
-        """Serve copy-on-write inputs without materializing them, and check an out= in
-        PYTORCH_SUM_INNER_TREE's condition without materializing it either."""
+        """Serve copy-on-write inputs without materializing them, and decline a
+        copy-on-write out= in PYTORCH_SUM_INNER_TREE's condition without materializing
+        it either."""
         base = torch.randn(128, 512, device=device) * 0.01 + 1.0
         if not torch._C._is_cow_tensor(torch._lazy_clone(base)):
             self.skipTest("allocator does not support COW sharing")
@@ -204,20 +205,9 @@ class TestCuTeDSLReductionWiring(TestCase):
                 self.assertEqual(x.const_data_ptr(), data_ptr)
         x = torch._lazy_clone(base)
         out = torch._lazy_clone(torch.empty(128, device=device))
-        self.assertTrue(cutedsl_impl._out_cond(x, [1], out=out))
+        self.assertFalse(cutedsl_impl._out_cond(x, [1], out=out))
         self.assertTrue(torch._C._is_cow_tensor(x))
         self.assertTrue(torch._C._is_cow_tensor(out))
-
-    def test_strided_out_condition_allocates_no_span(self, device):
-        """Check a strided out= in PYTORCH_SUM_INNER_TREE's condition without allocating
-        the span its strides cover (here 32 MiB for 512 bytes of outputs)."""
-        x = torch.randn(128, 512, device=device)
-        out = torch.empty(128, 65536, device=device)[:, 0]
-        torch.cuda.synchronize(device)
-        torch.cuda.reset_peak_memory_stats(device)
-        before = torch.cuda.memory_allocated(device)
-        self.assertTrue(cutedsl_impl._out_cond(x, [1], out=out))
-        self.assertLess(torch.cuda.max_memory_allocated(device) - before, 1 << 20)
 
     @unittest.skipUnless(torch.cuda.device_count() >= 2, "needs >= 2 GPUs")
     def test_other_device_is_served(self, device):

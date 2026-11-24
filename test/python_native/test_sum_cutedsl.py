@@ -393,6 +393,17 @@ class TestSumCuteDSLOverride(TestCase):
         self.assertEqual(out.view(torch.int32), expected.view(torch.int32))
         self.assertEqual(storage[::2], torch.full_like(storage[::2], -1.0))
 
+    def test_strided_out_condition_allocates_no_span(self):
+        """Check a strided out= in the condition without allocating the span its
+        strides cover (here 32 MiB for 512 bytes of outputs)."""
+        x = torch.randn(128, 512, device="cuda")
+        out = torch.empty(128, 65536, device="cuda")[:, 0]
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        before = torch.cuda.memory_allocated()
+        self.assertTrue(cutedsl_impl._out_cond(x, [1], out=out))
+        self.assertLess(torch.cuda.max_memory_allocated() - before, 1 << 20)
+
     @parametrize("op", ("sum", "prod"))
     def test_singleton_zero_stride_out_falls_through(self, op):
         x = torch.arange(10, device="cuda", dtype=torch.float32).reshape(10, 1)
