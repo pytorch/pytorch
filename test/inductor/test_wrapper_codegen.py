@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 
-import types
 import re
+import types
 from itertools import count
 from types import SimpleNamespace
 from unittest import mock
@@ -1211,7 +1211,9 @@ int64_t s0 = s1;""",
         wrapper = self._new_cpp_wrapper()
         wrapper.lines = []
         wrapper.tmp_tensor_id = count()
-        layout = ir.FixedLayout(torch.device("cpu"), torch.float32, size=[8], stride=[1])
+        layout = ir.FixedLayout(
+            torch.device("cpu"), torch.float32, size=[8], stride=[1]
+        )
         view = ir.ReinterpretView(
             data=ir.StorageBox(ir.InputBuffer(name="arg0", layout=layout)),
             layout=layout,
@@ -1223,8 +1225,12 @@ int64_t s0 = s1;""",
         )
 
         with V.set_graph_handler(graph):
-            arg = wrapper.val_to_arg_str(view, torch.OptionalType(torch.TensorType.get()))
-        handles = re.findall(r"AtenTensorHandle (tmp_\w+);", "\n".join(map(str, wrapper.lines)))
+            arg = wrapper.val_to_arg_str(
+                view, torch.OptionalType(torch.TensorType.get())
+            )
+        handles = re.findall(
+            r"AtenTensorHandle (tmp_\w+);", "\n".join(map(str, wrapper.lines))
+        )
 
         self.assertEqual(len(handles), 1)
         self.assertIn(f"RAIIAtenTensorHandle({handles[0]})", arg)
