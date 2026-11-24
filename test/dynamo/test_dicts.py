@@ -163,8 +163,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(tuple(actual), tuple(expected))
         self.assertEqual(tuple(dict.items(actual)), tuple(dict.items(expected)))
 
-    @unittest.expectedFailure
-    def test_dict_repr_custom_new_input_falls_back(self):
+    def test_dict_repr_custom_new_input(self):
         class Mapping(dict):
             def __new__(cls, *args, **kwargs):
                 return super().__new__(cls)
@@ -173,7 +172,8 @@ class DictTests(torch._dynamo.test_case.TestCase):
             return x + 1, dict.__repr__(mapping)
 
         mapping, x = Mapping(a=1), torch.ones(1)
-        self.assertEqual(torch.compile(fn, backend="eager")(x, mapping), fn(x, mapping))
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x, mapping), fn(x, mapping))
 
     def test_dict_repr_uses_ordered_dict_storage(self):
         def fn(x, mapping):
