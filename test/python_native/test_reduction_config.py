@@ -347,7 +347,7 @@ class TestReductionConfigDevice(TestCase):
 
     @parametrize("entry", ["reduce_dim", "reduce_dim2", "reduce_all2"])
     def test_inner_tree_rejects_64bit_extents(self, device, entry):
-        """Refuse inner-tree order when the reduced extent needs 64-bit indexing."""
+        """Refuse inner-tree order for reduced extents within a batch of 2^31."""
         import cutlass
 
         from torch._native.ops.reductions import traits
@@ -356,15 +356,18 @@ class TestReductionConfigDevice(TestCase):
         two = traits.VarMeanOps(correction=1, acc=cutlass.Float32)
         f32 = torch.float32
         pair = [f32, f32]
-        # A stride-0 view reaches the extent check without allocating 2^31 elements.
-        wide = torch.zeros(1, 1, device=device).expand(2, 2**31)
-        with self.assertRaisesRegex(ValueError, rt._INNER_TREE_WIDE):
-            if entry == "reduce_dim":
-                kg.reduce_dim(one, "sum", wide, [1], f32, order="inner_tree")
-            elif entry == "reduce_dim2":
-                kg.reduce_dim2(two, "var_mean", wide, [1], pair, order="inner_tree")
-            else:
-                kg.reduce_all2(two, "var_mean", wide[0], pair, order="inner_tree")
+        # Stride-0 views reach the extent check without allocating 2^31 elements.
+        # A count within a batch of 2^31 is wide too: its Int32 columns would wrap.
+        wide_re = rt._INNER_TREE_WIDE
+        for n in (2**31, 2**31 - 512):
+            wide = torch.zeros(1, 1, device=device).expand(2, n)
+            with self.subTest(n=n), self.assertRaisesRegex(ValueError, wide_re):
+                if entry == "reduce_dim":
+                    kg.reduce_dim(one, "sum", wide, [1], f32, order="inner_tree")
+                elif entry == "reduce_dim2":
+                    kg.reduce_dim2(two, "var_mean", wide, [1], pair, order="inner_tree")
+                else:
+                    kg.reduce_all2(two, "var_mean", wide[0], pair, order="inner_tree")
 
     def test_reduce_all_rejects_64bit_extents(self, device):
         """Raise for explicit order beyond 32-bit extents; fall back under the gate."""
@@ -466,12 +469,13 @@ class TestReductionConfigDevice(TestCase):
 
     @largeTensorTest("5GB")
     def test_strict_env_gate_raises_in_reduce_all(self, device):
-        """Raise under the strict env gate when reduce-all has 64-bit extents."""
+        """Raise under the strict env gate when reduce-all's row is within one batch of
+        64-bit extents, where the tree's Int32 columns would wrap."""
         import cutlass
 
         from torch._native.ops.reductions import traits
 
-        x = torch.empty(2**31, device=device, dtype=torch.float16)  # never read
+        x = torch.empty(2**31 - 512, device=device, dtype=torch.float16)  # never read
         with (
             mock.patch.dict(os.environ, {rt._INNER_TREE_ENV: "strict"}),
             self.assertRaisesRegex(ValueError, f"{rt._INNER_TREE_ENV}=strict"),
