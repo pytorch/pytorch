@@ -10,13 +10,6 @@ using c10::metal::simdgroup_size;
 
 enum class GroupedMMMode { rows, cols, k };
 
-inline uint32_t grouped_mm_offset(int32_t offset, uint32_t limit) {
-  if (offset <= 0) {
-    return 0;
-  }
-  return min(static_cast<uint32_t>(offset), limit);
-}
-
 // One SIMD group computes one output element. Find the expert on-device so
 // sparse routing needs neither a CPU sync nor threadgroups for empty experts.
 template <typename T, typename idx_t>
@@ -39,15 +32,7 @@ kernel void grouped_mm_few_rows(
   }
   uint32_t group = 0;
   if (simd_lane == 0) {
-    uint32_t end = params.groups;
-    while (group < end) {
-      const uint32_t mid = group + (end - group) / 2;
-      if (offsets[mid] <= static_cast<int32_t>(row)) {
-        group = mid + 1;
-      } else {
-        end = mid;
-      }
-    }
+    group = grouped_mm_find_group(offsets, params.groups, row);
   }
   group = simd_broadcast_first(group);
   if (group == params.groups) {
@@ -98,65 +83,6 @@ kernel void grouped_mm_few_rows(
 INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(float);
 INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(half);
 INSTANTIATE_GROUPED_MM_FEW_ROWS_DTYPE(bfloat);
-
-// Maps a flat tile index along the jagged dimension (rows or columns, capped
-// at limit) to its (group, first index, valid count) triple by walking the
-// jagged group extents; padding tiles leave the zero-initialized outputs
-// unchanged.
-template <int TILE>
-inline void grouped_mm_group_tile(
-    device const int32_t* offsets,
-    uint32_t groups,
-    uint32_t limit,
-    uint32_t tile,
-    thread uint32_t& group,
-    thread uint32_t& tile_first,
-    thread uint32_t& tile_count) {
-  uint32_t start = 0;
-  uint32_t tile_start = 0;
-  for (uint32_t g = 0; g < groups; ++g) {
-    const uint32_t end = grouped_mm_offset(offsets[g], limit);
-    const uint32_t count = end > start ? end - start : 0;
-    const uint32_t tiles = ceil_div(count, static_cast<uint32_t>(TILE));
-    if (tile < tile_start + tiles) {
-      group = g;
-      tile_first = start + (tile - tile_start) * TILE;
-      tile_count = min(static_cast<uint32_t>(TILE), end - tile_first);
-      return;
-    }
-    tile_start += tiles;
-    start = max(start, end);
-  }
-}
-
-// One thread searches the offsets, then the tile is broadcast through
-// threadgroup memory to the whole threadgroup.
-template <int TILE>
-inline bool grouped_mm_group_tile_broadcast(
-    device const int32_t* offsets,
-    uint32_t groups,
-    uint32_t limit,
-    uint32_t tile,
-    uint32_t tid,
-    threadgroup uint32_t* tile_info,
-    thread uint32_t& group,
-    thread uint32_t& tile_first,
-    thread uint32_t& tile_count) {
-  if (tid == 0) {
-    uint32_t g = 0;
-    uint32_t first = 0;
-    uint32_t count = 0;
-    grouped_mm_group_tile<TILE>(offsets, groups, limit, tile, g, first, count);
-    tile_info[0] = g;
-    tile_info[1] = first;
-    tile_info[2] = count;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-  group = tile_info[0];
-  tile_first = tile_info[1];
-  tile_count = tile_info[2];
-  return tile_count != 0;
-}
 
 // Resolves this threadgroup's output tile and its operand views: rows and cols
 // modes look the tile up in the jagged offsets and pick the batched operand,
