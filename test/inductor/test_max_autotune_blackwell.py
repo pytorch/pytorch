@@ -1220,6 +1220,25 @@ class TestBlackwellTMAPrologueFusion(TestCase):
         torch.testing.assert_close(actual, fn(x, w), atol=5e-2, rtol=5e-2)
         self.assertIn("def triton_poi", code[0])
 
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_prologue_cost_model_rejects_reshaped_producer(self):
+        # The memory-bound case above, but the producer's output is reshaped
+        # into A: in A's (row, col) its source index is (row % 64) * M / 64 * K
+        # + (row // 64) * K + col, which no descriptor can load.
+        M, N, K = 262144, 128, 256
+        x = torch.randn(64, M // 64, K, device=GPU_TYPE)
+        w = torch.randn(K, N, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def fn(x, w):
+            return x.permute(1, 0, 2).to(torch.bfloat16).reshape(M, K) @ w
+
+        actual, code = self._compile(fn, x, w, force=False)
+        torch.testing.assert_close(actual, fn(x, w), atol=5e-2, rtol=5e-2)
+        self.assertIn("def triton_poi", code[0])
+
 
 @instantiate_parametrized_tests
 class TestBlackwellExhaustiveConfigs(TestCase):
