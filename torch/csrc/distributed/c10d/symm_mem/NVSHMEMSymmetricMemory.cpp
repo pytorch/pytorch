@@ -69,8 +69,7 @@ struct NVSHMEMAllocation {
   NVSHMEMAllocation& operator=(NVSHMEMAllocation&&) = delete;
 
   ~NVSHMEMAllocation() {
-    // Avoid calling CUDA functions after driver shutting down
-    if (is_finalizing()) {
+    if (should_skip_cuda_cleanup(device_idx)) {
       return;
     }
     c10::cuda::CUDAGuard guard(device_idx);
@@ -323,6 +322,10 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
 
   int get_rank() override {
     return pai_->rank_;
+  }
+
+  std::string get_group_name() override {
+    return group_name_;
   }
 
   int get_world_size() override {

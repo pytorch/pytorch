@@ -25,8 +25,16 @@ set XPU_EXTRA_INSTALLED=0
 set XPU_EXTRA_UNINSTALL=0
 
 if not [%XPU_VERSION%]==[] if [%XPU_VERSION%]==[2026.1] (
-    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/5d44690a-84fb-4d3b-bc5d-caed4bab56fc/intel-deep-learning-essentials-2026.1.2.22_offline.exe
-    set XPU_BUNDLE_VERSION=2026.1.2+17
+    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/ffd3f1fb-09fa-4b43-9df3-955b0e29ada0/intel-deep-learning-essentials-2026.1.3.20_offline.exe
+    set XPU_BUNDLE_VERSION=2026.1.3+11
+)
+
+if not [%XPU_VERSION%]==[] if [%XPU_VERSION%]==[2026.2] (
+    set XPU_BUNDLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/b177a006-5cd9-4cb2-807f-8199cc73d53c/intel-deep-learning-essentials-2026.2.0.638_offline.exe
+    set XPU_BUNDLE_VERSION=2026.2.0+632
+    set XPU_EXTRA_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/b56679bb-9a2b-4bf2-ae1e-dc90f3aa4ae5/intel-ocloc-2026.2.1.7_offline.exe
+    set XPU_EXTRA_PRODUCT_NAME=intel.oneapi.win.ocloc.product
+    set XPU_EXTRA_VERSION=2026.2.1+6
 )
 
 :: Check if XPU bundle is target version or already installed
