@@ -3639,6 +3639,8 @@ class TestMaxAutotune(TestCase):
             FileCheck().check("buf0 = empty_strided").check_same(
                 "(16, 45, 112), (5040, 112, 1)"
             ).run(code[0])
+        # Two kernels only because the `+ 1` is fused into the second bmm; without
+        # that fusion both templates have identical source and are emitted once.
         if torch.version.hip is None:
             FileCheck().check_count("stride_aq = 5040", 2, exactly=True).run(code[0])
 

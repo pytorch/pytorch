@@ -2241,8 +2241,11 @@ class TritonTemplateKernel(TritonKernel):
         Get the stride of an input node for template code generation, with deferred
         layout freezing:
         - If the layout is FlexibleLayout, compute speculative strides without freezing
-        - Record the expected layout (as FixedLayout) as a constraint for later validation
-        - Only freeze at finalization time after validating no conflicts exist
+        - Record the expected layout (as FixedLayout) in V.graph.buffer_layout_constraints;
+          the first consumer's layout wins and later consumers reuse it
+        - The buffer is frozen to it when a template that read it is selected: at
+          lowering for a single template, in GraphLowering.finalize for a
+          MultiTemplateBuffer whose best choice is a template
 
         Scheduler falls back to aten if layout constraint violated. If no aten,
         freeze right away.

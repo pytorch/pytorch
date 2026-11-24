@@ -1887,26 +1887,38 @@ class GraphLowering(torch.fx.Interpreter):
 
     def _constrained_buffers_with_selected_template_users(self) -> OrderedSet[str]:
         """
-        Layout-constrained buffers read by a selected Triton template. A
-        MultiTemplateBuffer counts only if its best unfused choice is a template;
-        otherwise the scheduler's layout conflict check falls back to extern.
+        Still-flexible, layout-constrained buffers read by a selected Triton
+        template. A MultiTemplateBuffer counts only if its best unfused choice is a
+        template; otherwise the buffer keeps its default layout and the extern
+        choice runs.
         """
-        constraints = self.buffer_layout_constraints
+        from .distributed_autotune import _DistributedAutotuneBuffer
+        from .select_algorithm import should_use_layout_constraints
+
         selected: OrderedSet[str] = OrderedSet()
-        if not constraints:
+        if not self.buffer_layout_constraints:
             return selected
         for buf in self.buffers:
-            if not isinstance(buf, ir.TritonTemplateBuffer):
+            # A placeholder for a kernel autotuned on another rank has no timings
+            # until the scheduler replaces it, and the replacement renders against
+            # the layout chosen here, so it doesn't pin its inputs.
+            if not isinstance(buf, ir.TritonTemplateBuffer) or isinstance(
+                buf, _DistributedAutotuneBuffer
+            ):
                 continue
             names = OrderedSet(
-                name
+                inp.get_name()
                 for inp in buf.inputs
                 if isinstance(inp, ir.IRNode)
-                and (name := inp.get_name()) in constraints
+                and should_use_layout_constraints(inp)
+                and isinstance(inp.get_layout(), ir.FlexibleLayout)
             )
             if not names or names <= selected:
                 continue
             if isinstance(buf, ir.MultiTemplateBuffer):
+                # The scheduler forces the extern choice without benchmarking.
+                if config.test_configs.force_extern_kernel_in_multi_template:
+                    continue
                 choice, _ = buf.get_min_choice()
                 if not isinstance(choice, ir.TritonTemplateCallerBase):
                     continue
