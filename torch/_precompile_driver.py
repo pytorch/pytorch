@@ -685,8 +685,8 @@ def _build_multigraph_forward():
                 f"cannot rebuild. Regenerate it from a module-level function."
             )
         if frame["trivial"] and frame["resume_names"]:
-            # Dynamo compiled nothing of this continuation, so it ran as plain
-            # Python during capture; rebuild it as one.
+            # Dynamo compiled nothing of this continuation or comprehension
+            # function, so it ran as plain Python during capture; rebuild it as one.
             # Its module is opened for the globals the bytecode reads.
             scope = _scope(frame)
 
