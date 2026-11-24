@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 import uuid
 from concurrent.futures import Future as _ThreadFuture
@@ -24,10 +25,12 @@ from .._api import (
 from .._work import _FutureWork, _validate_timeout, wait_all
 from ._memory import (
     _Registration,
+    _StorageRegistration,
     NIXLMemory,
     NIXLMemoryView,
     NIXLMutableMemoryView,
     NIXLRemoteBuffer,
+    NIXLStorage,
 )
 from ._work import _live_transports, _NIXLWork
 
@@ -39,6 +42,16 @@ if TYPE_CHECKING:
 # Fits every NIXL network plugin: GPUNetIO caps a notification, including the
 # sender's name, at 8 KiB.
 _MAX_NOTIFICATION_SIZE = 4 << 10
+
+_STORAGE_TYPES = ("FILE", "OBJ", "BLOCK")
+
+
+def _reject_stream_storage(remote_buffer: RemoteBuffer) -> None:
+    # Unregistering storage cannot see transfers queued on a stream or graph.
+    if isinstance(remote_buffer, NIXLRemoteBuffer) and (
+        remote_buffer.memory_type in _STORAGE_TYPES
+    ):
+        raise ValueError("storage does not support stream transfers")
 
 
 def _load_backend() -> Any:
@@ -62,6 +75,10 @@ class NIXLTransport(Transport):
     to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
     when selected. Transfers require registered views; raw tensors are rejected
     rather than allocated or registered implicitly.
+
+    Storage plugins such as ``POSIX``, ``GDS``, ``GDS_MT``, and ``OBJ`` move
+    registered tensors to and from files or objects registered with
+    :meth:`register_storage`.
 
     Notifications use the plugin's NIXL support; NIXL rejects them on plugins
     without it, such as storage plugins. Peer ids are agent names. A plugin may
@@ -122,6 +139,7 @@ class NIXLTransport(Transport):
         self._peers: set[str] = set()
         self._remote_agents: set[str] = set()
         self._registrations: dict[tuple[int, int, str], _Registration] = {}
+        self._storage: dict[tuple[str, int], _StorageRegistration] = {}
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
         self._operation_lock = RLock()
@@ -343,11 +361,89 @@ class NIXLTransport(Transport):
         _live_transports.add(self)
         return NIXLMemory(self, registration)
 
+    def register_storage(
+        self,
+        memory_type: str,
+        device_id: int,
+        length: int,
+        *,
+        key: str = "",
+        timeout: float | None = None,
+    ) -> NIXLStorage:
+        """Register storage with the plugin for local reads and writes.
+
+        ``memory_type`` is ``"FILE"`` with an open file descriptor as
+        ``device_id``, ``"OBJ"`` with the object name as ``key`` and a unique
+        ``device_id``, or ``"BLOCK"`` with the plugin's block device id.
+        ``to_remote_buffer()`` of the result is a descriptor that only this
+        registration accepts; ``write`` stores a local view at the descriptor's
+        byte offset, and ``read`` loads from it. Object plugins reject writes at
+        nonzero offsets. Stream transfers and notifications are not supported.
+        Unregister with ``unregister_memory``.
+        """
+        return self._call(
+            lambda: self._register_storage(memory_type, device_id, length, key),
+            timeout,
+        )
+
+    def _register_storage(
+        self, memory_type: str, device_id: int, length: int, key: str
+    ) -> NIXLStorage:
+        agent = self._ensure_open()
+        if memory_type not in _STORAGE_TYPES:
+            raise ValueError(f"memory_type must be one of {_STORAGE_TYPES}")
+        for name, value in (("device_id", device_id), ("length", length)):
+            if type(value) is not int:
+                raise TypeError(f"{name} must be an int")
+        if not isinstance(key, str):
+            raise TypeError("key must be a str")
+        if memory_type == "FILE" and key:
+            raise ValueError(
+                "FILE storage is an open file descriptor; key must be empty"
+            )
+        if device_id < 0:
+            raise ValueError("device_id must be non-negative")
+        if length <= 0:
+            raise ValueError("cannot register empty storage")
+        if (memory_type, device_id) in self._storage:
+            raise ValueError(f"{memory_type} {device_id} is already registered")
+        descs = agent.register_memory(
+            [(0, length, device_id, key)], memory_type, backends=[self._plugin]
+        )
+        registration = _StorageRegistration(
+            descs, memory_type, device_id, length, os.urandom(16)
+        )
+        self._storage[memory_type, device_id] = registration
+        _live_transports.add(self)
+        return NIXLStorage(self, registration)
+
+    def _unregister_storage(self, agent: Any, storage: NIXLStorage) -> None:
+        # Caller holds _operation_lock.
+        registration = storage._registration
+        if not registration.active:
+            return
+        key = registration.memory_type, registration.device_id
+        if any(
+            work._buffers[1].metadata == registration.token
+            for work in self._pending.values()
+        ):
+            raise RuntimeError(
+                "storage has pending transfers; wait before unregistering"
+            )
+        agent.deregister_memory(registration.descs, backends=[self._plugin])
+        registration.active = False
+        del self._storage[key]
+        if not self._registrations and not self._storage and not self._transfers:
+            _live_transports.discard(self)
+
     def unregister_memory(
-        self, memory: Memory, *, timeout: float | None = None
+        self, memory: Memory | NIXLStorage, *, timeout: float | None = None
     ) -> None:
         with self._locked(timeout):
             agent = self._ensure_open()
+            if isinstance(memory, NIXLStorage) and memory._transport is self:
+                self._unregister_storage(agent, memory)
+                return
             if not isinstance(memory, NIXLMemory) or memory._transport is not self:
                 raise TypeError("memory was not registered by this transport")
             registration = memory._registration
@@ -373,7 +469,7 @@ class NIXLTransport(Transport):
                 k for k, value in self._registrations.items() if value is registration
             )
             del self._registrations[key]
-            if not self._registrations and not self._transfers:
+            if not self._registrations and not self._storage and not self._transfers:
                 _live_transports.discard(self)
 
     def _remote_buffer(self, registration: _Registration) -> NIXLRemoteBuffer:
@@ -392,6 +488,30 @@ class NIXLTransport(Transport):
             metadata,
         )
 
+    def write_stream(
+        self,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        stream: torch.cuda.Stream | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        _reject_stream_storage(remote_buffer)
+        super().write_stream(
+            local_buffer, remote_buffer, stream=stream, timeout=timeout
+        )
+
+    def read_stream(
+        self,
+        local_buffer: MutableMemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        stream: torch.cuda.Stream | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        _reject_stream_storage(remote_buffer)
+        super().read_stream(local_buffer, remote_buffer, stream=stream, timeout=timeout)
+
     def _check_transfer(
         self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
     ) -> None:
@@ -402,7 +522,21 @@ class NIXLTransport(Transport):
             raise TypeError("local_buffer was not registered by this transport")
         if not isinstance(remote_buffer, NIXLRemoteBuffer):
             raise TypeError("remote_buffer was not registered by a NIXL transport")
-        if remote_buffer.agent_name not in self._peers:
+        if remote_buffer.memory_type in _STORAGE_TYPES:
+            storage = self._storage.get(
+                (remote_buffer.memory_type, remote_buffer.device_id)
+            )
+            if (
+                remote_buffer.agent_name != self._name
+                or storage is None
+                or remote_buffer.metadata != storage.token
+            ):
+                raise ValueError("storage was not registered by this transport")
+            if remote_buffer.address < 0 or (
+                remote_buffer.address + local_buffer.size() > storage.length
+            ):
+                raise ValueError("local view does not fit in the registered storage")
+        elif remote_buffer.agent_name not in self._peers:
             raise ValueError("remote buffer does not belong to a connected peer")
         if local_buffer.size() > remote_buffer.length:
             raise ValueError("local view does not fit in the remote buffer")
@@ -428,18 +562,25 @@ class NIXLTransport(Transport):
     ) -> _NIXLWork:
         agent = self._ensure_open()
         self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        local_buffer = cast(NIXLMemoryView, local_buffer)
+        remote_buffer = cast(NIXLRemoteBuffer, remote_buffer)
+        storage = remote_buffer.memory_type in _STORAGE_TYPES
         if notification is not None:
             self._check_notification(notification)
             if local_buffer.size() == 0:
                 raise ValueError("zero-byte transfers cannot carry notifications")
-        local_buffer = cast(NIXLMemoryView, local_buffer)
-        remote_buffer = cast(NIXLRemoteBuffer, remote_buffer)
+            if storage:
+                raise ValueError("storage transfers cannot carry notifications")
         registration = local_buffer._memory._registration
         work = _NIXLWork(self, local_buffer, remote_buffer, timeout)
         if local_buffer.size() == 0:
             work._done = True
             return work
-        loaded_name = _agent_name(agent.add_remote_agent(remote_buffer.metadata))
+        loaded_name = (
+            self._name
+            if storage
+            else _agent_name(agent.add_remote_agent(remote_buffer.metadata))
+        )
         if loaded_name != remote_buffer.agent_name:
             # Keep agents loaded by other peers; they may have transfers in flight.
             if loaded_name not in self._remote_agents:
@@ -686,6 +827,10 @@ class NIXLTransport(Transport):
             agent.deregister_memory(registration.descs, backends=[self._plugin])
             registration.active = False
             del self._registrations[key]
+        for key, storage in list(self._storage.items()):
+            agent.deregister_memory(storage.descs, backends=[self._plugin])
+            storage.active = False
+            del self._storage[key]
         for name in list(self._remote_agents):
             agent.remove_remote_agent(name)
             self._remote_agents.remove(name)
