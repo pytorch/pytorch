@@ -1101,7 +1101,9 @@ class TestBlackwellTMAPrologueFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    @parametrize("case", ("contiguous", "transposed", "row_broadcast"))
+    @parametrize(
+        "case", ("contiguous", "transposed", "row_broadcast", "weight_cast_t")
+    )
     def test_prologue_sources_load_through_descriptors(self, case: str):
         M, N, K = 512, 256, 256
 
@@ -1121,11 +1123,17 @@ class TestBlackwellTMAPrologueFusion(TestCase):
             def fn(x, w):
                 return (x.t() * 2.0).to(torch.bfloat16) @ w
 
-        else:
+        elif case == "row_broadcast":
             args = (randn(M, K), randn(M, 1), w)
 
             def fn(x, mu, w):
                 return (x - mu).to(torch.bfloat16) @ w
+
+        else:
+            args = (randn(M, K, dtype=torch.bfloat16), randn(N, K))
+
+            def fn(x, w):
+                return x @ w.to(torch.bfloat16).t()
 
         actual, code = self._compile(fn, *args)
         torch.testing.assert_close(actual, fn(*args), atol=5e-2, rtol=5e-2)
@@ -1134,6 +1142,24 @@ class TestBlackwellTMAPrologueFusion(TestCase):
         FileCheck().check("prologue_descriptor0 = tl.make_tensor_descriptor").check(
             "prologue_descriptor0.load(["
         ).run(code[0])
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_transposed_bias_producer_numerics(self):
+        # The bias is a store_output producer, which keeps its own loop order,
+        # so a transposed read must not be matched by reordering its loops.
+        M, N, K = 512, 256, 256
+        c = torch.randn(N, M, device=GPU_TYPE)
+        a = torch.randn(M, K, device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.bfloat16)
+
+        def fn(c, a, b):
+            return torch.addmm((c.t() * 2.0).to(torch.bfloat16), a, b)
+
+        actual, _ = self._compile(fn, c, a, b)
+        torch.testing.assert_close(actual, fn(c, a, b), atol=5e-2, rtol=5e-2)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
