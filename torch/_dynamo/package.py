@@ -934,23 +934,25 @@ class SystemInfo:
         gpu_name, toolkit_version = None, None
         gpu_arch, gpu_sm_count = None, None
         for device_type in cls.CHECK_GPUS:
-            if getattr(torch, device_type).is_available():
-                try:
-                    gpu_name = getattr(torch, device_type).get_device_name()
-                    toolkit_version = getattr(torch.version, device_type)
-                    if device_type == "cuda":
-                        interface = get_interface_for_device(device_type)
-                        gpu_arch, gpu_sm_count = (
-                            interface.get_compute_capability(),
-                            interface.get_multi_processor_count(),
-                        )
-                    break
-                except Exception:
-                    logger.debug(
-                        "Could not read the %s device's info for SystemInfo",
-                        device_type,
-                        exc_info=True,
+            device_module = getattr(torch, device_type)
+            if not device_module.is_available():
+                continue
+            try:
+                gpu_name = device_module.get_device_name()
+                toolkit_version = getattr(torch.version, device_type)
+                if device_type == "cuda":
+                    interface = get_interface_for_device(device_type)
+                    gpu_arch, gpu_sm_count = (
+                        interface.get_compute_capability(),
+                        interface.get_multi_processor_count(),
                     )
+                break
+            except Exception:
+                logger.debug(
+                    "Could not read the %s device's info for SystemInfo",
+                    device_type,
+                    exc_info=True,
+                )
 
         return cls(
             python_version=platform.python_version(),
@@ -1055,8 +1057,7 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        current_system_info = SystemInfo.current()
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        self.system_info.check_compatibility(SystemInfo.current(), self.device_type)
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
