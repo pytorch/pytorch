@@ -429,6 +429,7 @@ guess_tangent_strides_as_outputs = not is_fbcode()
 # Only the ranks that actually compile reach the partitioner, so with AOTAutogradCache on
 # this needs _sync_cache_decision_cross_ranks below to keep hits unanimous. Without it a
 # partial cache hit hangs the ranks that missed, as it did before that config existed.
+# Also aligns source-backed Dynamo inputs and final joint graph node names.
 _sync_decision_cross_ranks = False
 
 # Compilation itself issues collectives, for example, when _sync_decision_cross_ranks is
