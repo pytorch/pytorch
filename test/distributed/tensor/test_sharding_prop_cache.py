@@ -15,6 +15,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -64,6 +65,8 @@ class TestShardingPropCache(TestCase):
     mesh object, so every Devicemesh ever used stayed reachable for the life
     of the process.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
         super().setUp()
