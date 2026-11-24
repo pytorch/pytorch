@@ -1145,6 +1145,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             kernel.precompile()
 
             self.n_regs = kernel.launchers[0].n_regs
+            self.n_shared = getattr(kernel.launchers[0], "shared", None)
         finally:
             self.cleanup_run_fn()
 

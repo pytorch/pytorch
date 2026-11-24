@@ -99,6 +99,7 @@ from .utils import (
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
+    sympy_dot,
     sympy_product,
     sympy_subs,
 )
@@ -10179,6 +10180,150 @@ class Scheduler:
 
         return self.score_fusion_memory(node1, node2)
 
+    def _template_prologue_read(
+        self, snodes: Sequence[BaseSchedulerNode], template_node: BaseSchedulerNode
+    ) -> tuple[MemoryDep, MemoryDep] | None:
+        """(write, read) when a pointwise template producer's write does not
+        match the template's read of that buffer only because of loop order,
+        e.g. a cast whose output the template reads transposed."""
+        if not snodes or not all(
+            isinstance(sn, SchedulerNode)
+            and not sn.is_reduction()
+            and isinstance(sn.node, ir.ComputedBuffer)
+            for sn in snodes
+        ):
+            return None
+        write = next(iter(snodes[-1].read_writes.writes), None)
+        if not isinstance(write, MemoryDep):
+            return None
+        read = next(
+            (
+                dep
+                for dep in template_node.read_writes.reads
+                if isinstance(dep, MemoryDep) and dep.name == write.name
+            ),
+            None,
+        )
+        if read is None or self.fusable_read_and_write(read, write):
+            return None
+        if write.normalize_with_stride_order() != read.normalize_with_stride_order():
+            return None
+        return write, read
+
+    def reorder_template_prologue_loops(
+        self, snodes: Sequence[BaseSchedulerNode], template_node: BaseSchedulerNode
+    ) -> bool:
+        """Match a pointwise template producer's loops to the template's read
+        order. Returns whether the producer's write now matches the read.
+
+        load_input regenerates the producer at the template's indices, so the
+        producer's write must equal the template's read of that buffer. The
+        producer's loops are recomputed with the template's flat iteration
+        index as an extra indexing constraint, which keeps the dims the read
+        permutes from merging, and then permuted to the read's order. Every
+        node of a fused producer gets the same transform. Rolls back and
+        returns False if the write still does not match.
+        """
+        pair = self._template_prologue_read(snodes, template_node)
+        if pair is None:
+            return False
+        read = pair[1]
+        last = typing.cast(SchedulerNode, snodes[-1])
+
+        # Map each template read var to the producer var with the same stride
+        # into the shared buffer, in the producer's default (unmerged) loops.
+        sizevars = V.graph.sizevars
+        _, body, (ivars, _) = typing.cast(
+            ir.ComputedBuffer, last.node
+        ).get_default_sizes_body()
+        write_exprs = list(body.get_write_exprs())
+        if len(write_exprs) != 1:
+            return False
+        mapped: list[sympy.Expr] = []
+        for var, size in zip(read.var_names, read.size):
+            coeff = read.index.coeff(var)
+            match = [
+                v
+                for v in ivars
+                if sizevars.statically_known_equals(write_exprs[0].coeff(v), coeff)
+                and sizevars.statically_known_equals(body.var_ranges[v], size)
+            ]
+            if len(match) != 1 or match[0] in mapped:
+                return False
+            mapped.append(match[0])
+        constraint = ir.ExtraIndexingConstraints(
+            body.var_ranges,
+            [sympy_dot(ir.FlexibleLayout.contiguous_strides(read.size), mapped)],
+        )
+        normalize = not config.loop_ordering_after_fusion or not is_gpu(
+            last.get_device().type
+        )
+
+        snapshot = _LoopStateSnapshot.create(tuple(snodes))
+        try:
+            for sn in snodes:
+                sn = typing.cast(SchedulerNode, sn)
+                sn.recompute_size_and_body(extra_indexing_constraints=constraint)
+                # Unnormalized deps keep the unmerged loops so the order can
+                # be matched to the read.
+                sn.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
+            write = next(iter(last.read_writes.writes))
+            if isinstance(write, MemoryDep) and write.num_vars == read.num_vars:
+                new_order = write.decide_loop_order_to_match(read)
+                if new_order:
+                    for sn in snodes:
+                        typing.cast(SchedulerNode, sn).apply_new_loop_order(new_order)
+            # Restore the dependency form _compute_attrs uses, which the
+            # template's read dependency is in too.
+            for sn in snodes:
+                typing.cast(SchedulerNode, sn).refresh_dependencies(
+                    normalize=normalize, need_clear_tiling_cache=True
+                )
+        except AssertionError:
+            # Nodes with different default loop vars cannot share the
+            # constraint.
+            snapshot.restore()
+            return False
+        write = next(iter(last.read_writes.writes))
+        if not isinstance(write, MemoryDep) or not self.fusable_read_and_write(
+            read, write
+        ):
+            snapshot.restore()
+            return False
+        return True
+
+    def _template_prologue_reorder_match(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> tuple[MemoryDepMatch, ...]:
+        """The dependency match a loop reorder would create for a template
+        producer, probed without leaving node1 changed. The reorder itself
+        runs at codegen, once the fusion is final."""
+        template_snodes = [n for n in node2.get_nodes() if n.is_template()]
+        if len(template_snodes) != 1:
+            return ()
+        # Only load_input regenerates a producer at the template's indices;
+        # store_output producers (e.g. an addmm bias) keep their own loops.
+        template = template_snodes[0].get_template_node()
+        if template is None or not (
+            node1.get_buffer_names() & template.load_input_fusion_allowed_inputs
+        ):
+            return ()
+        snodes = node1.get_nodes()
+        pair = self._template_prologue_read(snodes, template_snodes[0])
+        if pair is None:
+            return ()
+        snapshot = _LoopStateSnapshot.create((node1,))
+        reorderable = self.reorder_template_prologue_loops(snodes, template_snodes[0])
+        snapshot.restore()
+        if not reorderable:
+            return ()
+        write, read = pair
+        return (
+            MemoryDepMatch(
+                write.rename(self.mutation_renames), read.rename(self.mutation_renames)
+            ),
+        )
+
     def _try_reorder_loops_for_candidates(
         self,
         node1: BaseSchedulerNode,
@@ -10515,6 +10660,137 @@ class Scheduler:
             )
         return False
 
+    def _descriptor_prologue_profitable(
+        self,
+        prologue_node: BaseSchedulerNode,
+        template_buf: ir.TemplateBuffer,
+        operand_name: str,
+        read_bytes: int,
+        write_bytes: int,
+        why: WhyNoFuse,
+    ) -> bool:
+        """Cost model for a producer the template reads through TMA descriptors.
+
+        Rejects the fusion when a source would not load through a descriptor
+        (so the template would gather it), when the source tiles would not fit
+        in shared memory next to the compiled kernel's, or when it is slower
+        than materializing the operand:
+
+        Unfused, the producer reads its sources and writes the operand, and the
+        template is bound by its MMAs or by reading its operands. Fused, the
+        template reads the sources instead and recomputes the producer once per
+        output tile that reads an operand tile (reuse). The producer's work runs
+        in the warps that feed the MMAs, so it adds to the MMA time, while the
+        source reads overlap both. Source re-reads hit L2 when the sources of
+        the operand tiles one wave of persistent CTAs touches fit in half of
+        it; otherwise every re-read goes to DRAM.
+        """
+        from .utils import (
+            _TMA_SUPPORTED_DTYPES,
+            get_device_tflops,
+            get_gpu_dram_gbps,
+            get_gpu_shared_memory,
+            get_num_sms,
+            TMA_ALIGNMENT,
+        )
+
+        record = template_buf.load_input_reuse[operand_name]
+        sizevars = V.graph.sizevars
+        operand = V.graph.get_buffer(operand_name)
+        operand_numel = sizevars.optimization_hint(
+            sympy_product(operand.get_size()), fallback=0
+        )
+        produced = prologue_node.get_buffer_names()
+
+        # Mirror load_prologue_descriptor: an affine index with positive
+        # aligned strides and a contiguous dim, a TMA dtype, aligned base.
+        source_tile_bytes = 0
+        for dep in prologue_node.read_writes.reads:
+            if not isinstance(dep, MemoryDep) or dep.name in produced:
+                continue
+            dtype = V.graph.get_dtype(dep.name)
+            coeffs = [dep.index.coeff(var) for var in dep.var_names]
+            offset = dep.index.subs({var: 0 for var in dep.var_names})
+            tma_ok = (
+                dtype in _TMA_SUPPORTED_DTYPES
+                and dep.name not in V.graph.unaligned_buffers
+                and is_affine_indexing(dep.index)
+                and all(sizevars.statically_known_gt(c, 0) for c in coeffs)
+                and (
+                    not dep.var_names
+                    or any(sizevars.statically_known_equals(c, 1) for c in coeffs)
+                )
+                and all(
+                    sizevars.statically_known_multiple_of(
+                        e * dtype.itemsize, TMA_ALIGNMENT
+                    )
+                    for e in [offset, *(c for c in coeffs if c != 1)]
+                )
+            )
+            if not tma_ok:
+                why(
+                    "descriptor prologue fusion: source %s would not load via TMA",
+                    dep.name,
+                )
+                return False
+            if sizevars.optimization_hint(dep.get_numel(), fallback=0) >= operand_numel:
+                source_tile_bytes += record.tile_elems * dtype.itemsize
+
+        shared = getattr(template_buf, "n_shared", None)
+        if shared is not None:
+            # Each pipeline stage holds the source tiles instead of the
+            # operand tile.
+            extra = record.num_stages * (
+                source_tile_bytes - record.tile_elems * operand.get_dtype().itemsize
+            )
+            if shared + extra > get_gpu_shared_memory():
+                why(
+                    "descriptor prologue fusion: sources need %d more bytes of shared memory",
+                    extra,
+                )
+                return False
+
+        device = template_buf.get_device_or_error()
+        props = torch.cuda.get_device_properties(device)
+        dram_bw = get_gpu_dram_gbps() * 1e9
+        num_sms = get_num_sms()
+        out_numel = sizevars.optimization_hint(
+            sympy_product(template_buf.get_size()), fallback=0
+        )
+        tflops = get_device_tflops(operand.get_dtype(), device)
+        mma_s = 2 * out_numel * record.k / (tflops * 1e12) if tflops > 0 else 0.0
+        wave_tiles = math.ceil(num_sms / record.reuse)
+        working_set = read_bytes * min(1.0, wave_tiles / max(record.tiles, 1))
+        source_reads = (
+            read_bytes
+            if working_set <= props.L2_cache_size / 2
+            else read_bytes * record.reuse
+        )
+        transform_s = (
+            operand_numel
+            * record.reuse
+            / (
+                num_sms
+                * props.clock_rate
+                * 1e3
+                * config.triton.prologue_transform_elems_per_cycle
+            )
+        )
+        unfused_s = (read_bytes + write_bytes) / dram_bw + max(
+            mma_s, write_bytes / dram_bw
+        )
+        fused_s = max(source_reads / dram_bw, mma_s + transform_s)
+        if fused_s >= unfused_s:
+            why(
+                "descriptor prologue fusion not profitable: fused %.1f us (reuse %d) "
+                ">= unfused %.1f us",
+                fused_s * 1e6,
+                record.reuse,
+                unfused_s * 1e6,
+            )
+            return False
+        return True
+
     def check_prologue_fusion_heuristics_fusable(
         self,
         prologue_node: BaseSchedulerNode,
@@ -10530,6 +10806,19 @@ class Scheduler:
 
         read_bytes = prologue_node.get_read_buffer_sizes()
         write_bytes = prologue_node.get_write_buffer_sizes()
+
+        template_buf = template_node.get_template_node_or_throw()
+        load_input_reuse = getattr(template_buf, "load_input_reuse", {})
+        reuse_inputs = [
+            name for name in prologue_node.get_buffer_names() if name in load_input_reuse
+        ]
+        if reuse_inputs:
+            if len(reuse_inputs) != 1:
+                why("descriptor prologue fusion: producer writes several template inputs")
+                return False
+            return self._descriptor_prologue_profitable(
+                prologue_node, template_buf, reuse_inputs[0], read_bytes, write_bytes, why
+            )
 
         # Initially, only do fusions which will result in fewer memory accesses inside of the template to avoid
         # potential bad cache behavior and shared memory use.
@@ -10924,6 +11213,7 @@ class Scheduler:
             return False
 
         why = WhyNoFuse(node1, node2)
+        prologue_reorder_match: tuple[MemoryDepMatch, ...] = ()
         if not self.get_backend(node1.get_device()).can_fuse_reduction_pair(
             node1, node2
         ):
@@ -11121,6 +11411,10 @@ class Scheduler:
 
             if not self.check_prologue_fusion_heuristics_fusable(node1, node2, why):
                 return False
+
+            prologue_reorder_match = self._template_prologue_reorder_match(
+                node1, node2
+            )
 
         if node1.is_template():
             atomic_add_mutation_epilogue = _can_fuse_atomic_add_template_epilogue(
@@ -11329,7 +11623,7 @@ class Scheduler:
             # node2 depends on node1 outputs
             backend = self.get_backend(device)
             vertical_fusion_legal = (
-                self.can_fuse_vertical(node1, node2)
+                self._can_fuse_vertical_impl(node1, node2, prologue_reorder_match)
                 if staged_matches is None
                 else self._can_fuse_vertical_impl(node1, node2, staged_matches)
             )

@@ -183,6 +183,11 @@ class ArgProperty(TypedDict, total=False):
 
 
 log = logging.getLogger(__name__)
+
+# Lowering contract for the exact two-input cat/cast prologue supported by the
+# Blackwell decompose-K template. The value is the ordered pair of source
+# buffer names. FX origins are provenance and must not be used as this contract.
+CAT2_FP32_TO_BF16_SOURCES = "cat2_fp32_to_bf16_sources"
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
 
@@ -6456,6 +6461,11 @@ class TemplateBuffer(OperationBuffer):
         self.load_input_fusion_allowed_inputs: OrderedSet[str] = (
             load_input_fusion_allowed_inputs or OrderedSet()
         )
+        # Per input read through TMA descriptors when prologue-fused, see
+        # TritonTemplateKernel.load_input_reuse.
+        self.load_input_reuse: dict[str, Any] = {}
+        # Shared memory of the compiled (unfused) kernel, when known.
+        self.n_shared: int | None = None
         self.store_output_fusion_allowed_inputs: OrderedSet[str] = (
             store_output_fusion_allowed_inputs or OrderedSet()
         )
