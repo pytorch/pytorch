@@ -1093,6 +1093,11 @@ class TestOptimRenewed(TestCase):
         [optim for optim in optim_db if "foreach" in optim.supported_impls],
         dtypes=[torch.float32],
     )
+    @decorateIf(
+        unittest.skip("https://github.com/intel/torch-xpu-ops/issues/5884"),
+        lambda p: _get_device_type(p["device"]) == "xpu"
+        and p["optim_info"].optim_cls.__name__ in ("ASGD", "Adamax", "RAdam", "SGD"),
+    )
     def test_peak_memory_foreach(self, device, dtype, optim_info):
         nparams = 10
         optim_inputs = optim_info.optim_inputs_func(device=device)
@@ -3080,7 +3085,9 @@ class TestOptimizerLoadStateDictContext(TestCase):
         self.assertEqual(asyncio.run(load_states()), [torch.float32, torch.bfloat16])
 
 
-instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
+instantiate_device_type_tests(
+    TestOptimRenewed, globals(), allow_mps=True, allow_xpu=True
+)
 
 
 if __name__ == "__main__":
