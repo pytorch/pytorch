@@ -105,6 +105,29 @@ class TestDevicePropertiesCreate(TestCase):
         finally:
             DeviceProperties.create.cache_clear()
 
+    def test_xcc_count(self):
+        class FakeDevice:
+            type = "fake"
+            index = 0
+
+        cases = ((SimpleNamespace(xcc_count=4), 4), (SimpleNamespace(), None))
+        for props, expected in cases:
+            interface = SimpleNamespace(
+                get_device_properties=lambda device, props=props: props,
+                get_multi_processor_count=lambda device: 32,
+                get_compute_capability=lambda device: 0,
+            )
+            DeviceProperties.create.cache_clear()
+            try:
+                with mock.patch(
+                    "torch._dynamo.device_interface.get_interface_for_device",
+                    return_value=interface,
+                ):
+                    xcc_count = DeviceProperties.create(FakeDevice()).xcc_count
+                self.assertEqual(xcc_count, expected)
+            finally:
+                DeviceProperties.create.cache_clear()
+
 
 class TestUsesGpuCppWrapper(TestCase):
     def test_builtin_devices(self):
