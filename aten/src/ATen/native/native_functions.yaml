@@ -7192,6 +7192,7 @@
   dispatch:
     CUDA: _scaled_grouped_mm_cuda_v2_out
     XPU: _scaled_grouped_mm_xpu_v2_out
+    MPS: _scaled_grouped_mm_mps_v2_out
   tags: needs_exact_strides
 
 - func: _grouped_mm(Tensor self, Tensor mat2, Tensor? offs=None, Tensor? bias=None, ScalarType? out_dtype=None) -> Tensor
@@ -12968,6 +12969,10 @@
   python_module: nn
   autogen: _upsample_lanczos2d_aa.vec_out
 
+- func: _upsample_inter_area2d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+  python_module: nn
+  autogen: _upsample_inter_area2d.vec_out
+
 - func: upsample_nearest1d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
   python_module: nn
   autogen: upsample_nearest1d.vec_out
@@ -13145,6 +13150,16 @@
 - func: _upsample_lanczos2d_aa_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
   structured_delegate: _upsample_lanczos2d_aa_backward.grad_input
+
+- func: _upsample_inter_area2d.out(Tensor self, SymInt[2] output_size, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  structured: True
+  dispatch:
+    CPU: _upsample_inter_area2d_out_cpu
+
+- func: _upsample_inter_area2d(Tensor self, SymInt[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  python_module: nn
+  structured_delegate: _upsample_inter_area2d.out
 
 - func: upsample_trilinear3d.out(Tensor self, SymInt[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
