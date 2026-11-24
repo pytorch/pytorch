@@ -881,16 +881,6 @@ class outer(torch.nn.Module):
 class TestLeafFunctionDynamo(PytreeRegisteringTestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        config.canonicalize_output_graph_node_order = True
-
-    @classmethod
-    def tearDownClass(cls):
-        config.canonicalize_output_graph_node_order = False
-        super().tearDownClass()
-
     def _assert_models_equal(
         self,
         model_expected,

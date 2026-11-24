@@ -539,12 +539,6 @@ class ReduceMod(torch.nn.Module):
         return self._reduce(*operands)
 
 
-class _CanonicalizeOutputGraphNodeOrderMixin:
-    def run(self, result=None):
-        with torch._dynamo.config.patch(canonicalize_output_graph_node_order=True):
-            return super().run(result)
-
-
 class _TestControlFlowBase(TestCase):
     def setUp(self):
         torch._dynamo.reset()
@@ -565,7 +559,7 @@ class _TestControlFlowBase(TestCase):
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
-class TestControlFlow(_CanonicalizeOutputGraphNodeOrderMixin, _TestControlFlowBase):
+class TestControlFlow(_TestControlFlowBase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_cond_no_trace(self):
@@ -5184,7 +5178,7 @@ class AssociativeScanModels:
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
-class AssociativeScanTests(_CanonicalizeOutputGraphNodeOrderMixin, TestCase):
+class AssociativeScanTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def setUp(self):
@@ -7512,7 +7506,7 @@ class AssociativeScanTestsDevice(TestCase):
 
 @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @skipIfNoDynamoSupport
-class TestControlFlowTraced(_CanonicalizeOutputGraphNodeOrderMixin, TestCase):
+class TestControlFlowTraced(TestCase):
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
@@ -12785,9 +12779,7 @@ class TestControlFlowTracedDevice(TestCase):
             self.assertEqual(output, org_data + 1)
 
 
-class TestAutoFunctionalizeControlFlow(
-    _CanonicalizeOutputGraphNodeOrderMixin, TestCase
-):
+class TestAutoFunctionalizeControlFlow(TestCase):
     @skipIfTorchDynamo()
     @parametrize("dynamic", [True, False])
     def test_switch_auto_functionalize_input_mutation(self, dynamic):
@@ -13305,9 +13297,7 @@ class <lambda>(torch.nn.Module):
             control_flow.map(body_fn, xs, buf)
 
 
-class TestAutoFunctionalizeControlFlowDevice(
-    _CanonicalizeOutputGraphNodeOrderMixin, TestCase
-):
+class TestAutoFunctionalizeControlFlowDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     def check(self, gen_fn, args, device, dynamic) -> torch.fx.GraphModule:
