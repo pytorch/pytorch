@@ -58,7 +58,7 @@ from torch._dynamo.exc import (
     ObservedException,
     TensorifyScalarRestartAnalysis,
 )
-from torch._guards import InlinedCodeCache, tracing, TracingContext
+from torch._guards import Guard, InlinedCodeCache, tracing, TracingContext
 from torch._logging.structured import dump_file
 from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
@@ -330,13 +330,15 @@ class SpeculationEntry:
     # TX error_on_graph_break setting at the time of failure
     error_on_graph_break: bool | None = None
     reason: GraphCompileReason | None = None
+    reconstruction_guards: frozenset[Guard] = frozenset()
 
-    def fail_and_restart_analysis(self, error_on_graph_break: bool) -> None:
+    def fail_and_restart_analysis(self, tx: InstructionTranslatorBase) -> None:
         """
         Start tracing of the current frame over again, and don't take this branch.
         """
         self._failed = True
-        self.error_on_graph_break = error_on_graph_break
+        self.error_on_graph_break = tx.error_on_graph_break
+        self.reconstruction_guards = tx.output.reconstruction_guards
         if self.reason is not None:
             restart_reason = self.reason.reason
         else:
@@ -350,6 +352,8 @@ class SpeculationEntry:
                     "expected self.error_on_graph_break is not None to be true"
                 )
             tx.error_on_graph_break = self.error_on_graph_break
+            if self.reconstruction_guards:
+                tx.output.reconstruction_guards |= self.reconstruction_guards
             return True
         return False
 
@@ -375,7 +379,8 @@ class SpeculationLog:
     # instead of tracing it. Set when we detect that such an intermediate
     # leaks as a graph output with requires_grad=True.
     graph_break_on_requires_grad_: bool = False
-    reconstruction_recovery: bool = False
+    # An empty dict indicates recovery from a bytecode reconstruction failure.
+    reconstruction_inputs: dict[Source, exc.InputRealizationFailure] | None = None
 
     def restart(self) -> None:
         self.index = 0
@@ -383,7 +388,7 @@ class SpeculationLog:
     def clear(self) -> None:
         self.entries.clear()
         self.index = 0
-        self.reconstruction_recovery = False
+        self.reconstruction_inputs = None
 
     def next(
         self, filename: str, lineno: int, instruction_pointer: int, inst: Instruction
@@ -1175,11 +1180,8 @@ def break_graph_if_unsupported(
             prev_push = self.current_instruction_push
             self.current_instruction_push = push
             speculation = self.speculate()
-            if self.speculation_log.reconstruction_recovery:
-                self.reconstruction_checkpoints[id(speculation)] = (
-                    speculation,
-                    self.output.can_reconstruct_continuation(self),
-                )
+            if self.speculation_log.reconstruction_inputs is not None:
+                self.output.checkpoint_reconstruction(self, speculation)
             if speculation.failed(self):
                 # no need to restore current_instruction_push if speculation failed
                 if speculation.reason is None:
@@ -1257,7 +1259,7 @@ def break_graph_if_unsupported(
                 )
             finally:
                 self.current_instruction_push = prev_push
-            speculation.fail_and_restart_analysis(self.error_on_graph_break)
+            speculation.fail_and_restart_analysis(self)
 
         def handle_graph_break(
             self: InstructionTranslatorBase,
@@ -1597,7 +1599,9 @@ class InstructionTranslatorBase(
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: SpeculationEntry | None
-    reconstruction_checkpoints: dict[int, tuple[SpeculationEntry, bool | None]]
+    reconstruction_checkpoints: dict[
+        int, tuple[SpeculationEntry, bool | None, tuple[Guard, ...]]
+    ]
     dispatch_table: list[Any]
     exn_vt_stack: ExceptionStack
     exec_recorder: ExecutionRecorder | None
@@ -1936,11 +1940,8 @@ class InstructionTranslatorBase(
             and self.is_non_empty_graph()
         ):
             self.current_speculation = self.speculate()
-            if self.speculation_log.reconstruction_recovery:
-                self.reconstruction_checkpoints[id(self.current_speculation)] = (
-                    self.current_speculation,
-                    self.output.can_reconstruct_continuation(self),
-                )
+            if self.speculation_log.reconstruction_inputs is not None:
+                self.output.checkpoint_reconstruction(self, self.current_speculation)
             if self.current_speculation.failed(self):
                 self.step_graph_break(inst)
                 return False
@@ -2039,7 +2040,7 @@ class InstructionTranslatorBase(
                 exc=e,
             )
 
-        self.current_speculation.fail_and_restart_analysis(self.error_on_graph_break)
+        self.current_speculation.fail_and_restart_analysis(self)
         return False
 
     def update_block_stack(self, inst: Instruction) -> None:

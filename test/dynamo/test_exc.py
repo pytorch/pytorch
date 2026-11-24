@@ -146,6 +146,21 @@ class ExcTests(LoggingTestCase):
             UserErrorType.INVALID_INPUT,
         )
 
+    def test_unsupported_error_pickles_without_input(self):
+        def fn(x):
+            return x.relu()
+
+        x = torch.ones(3).to_sparse()
+        x.non_pickleable = lambda: None
+        with self.assertRaises(Unsupported) as cm:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+        err = cm.exception
+        restored = pickle.loads(pickle.dumps(err))
+        self.assertEqual(str(restored), str(err))
+        self.assertEqual(restored.gb_type, err.gb_type)
+        self.assertIsNone(restored.input_realization_failure)
+
     def test_unsupported_real_stack(self):
         # exercise Unsupported constructor and augment_exc_message
         def fn002(x):

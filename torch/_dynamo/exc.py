@@ -59,6 +59,7 @@ import sys
 import textwrap
 import types
 import typing
+from dataclasses import dataclass
 from enum import auto, Enum
 from functools import lru_cache
 from pathlib import Path
@@ -76,7 +77,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from torch._dynamo.variables import VariableTracker
-    from torch._guards import CompileId
+    from torch._guards import CompileId, Guard, Source
 
     from .output_graph import DynamoTracerOutput
     from .symbolic_convert import InstructionTranslatorBase
@@ -100,6 +101,7 @@ _EXCEPTION_STATE_ATTRS_TO_DROP = frozenset(
         "_torch_dynamo_tracer_output",
         "first_useful_frame",
         "frame_exec_strategy",
+        "input_realization_failure",
     )
 )
 
@@ -309,12 +311,21 @@ class BackendCompilerFailed(ShortenTraceback):
         super().__init__(msg, first_useful_frame=first_useful_frame)
 
 
+@dataclass(frozen=True)
+class InputRealizationFailure:
+    source: Source
+    value: object
+    guards: tuple[Guard, ...]
+
+
 # NOTE: important invariant! Almost any exception handler that handles Unsupported
 # should NOT suppress the exception if skip_frame is set!
 # skip_frame is used by symbolic_convert.py to bubble up Unsupported exceptions to convert_frame to cause
 # a frame skip. Once the Unsupported exn is in convert_frame, we will always skip, so skip_frame
 # won't be checked
 class Unsupported(TorchDynamoException):
+    input_realization_failure: InputRealizationFailure | None = None
+
     def __init__(
         self,
         msg: str,
@@ -326,6 +337,7 @@ class Unsupported(TorchDynamoException):
         real_stack: StackSummary | None = None,
         preserve_skip_frame_after_inline: bool = False,
         apply_to_code: bool = True,
+        input_realization_failure: InputRealizationFailure | None = None,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -335,6 +347,7 @@ class Unsupported(TorchDynamoException):
         self.skip_frame = skip_frame
         self.preserve_skip_frame_after_inline = preserve_skip_frame_after_inline
         self.apply_to_code = apply_to_code
+        self.input_realization_failure = input_realization_failure
         self.category: str | None = None
         self.add_to_stats()
         self.gb_type: str | None = gb_type
@@ -798,6 +811,7 @@ def unimplemented(
     skip_frame: bool = False,
     preserve_skip_frame_after_inline: bool = False,
     apply_to_code: bool = True,
+    input_realization_failure: InputRealizationFailure | None = None,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
@@ -819,6 +833,7 @@ def unimplemented(
     options: dict[str, Any] = {
         "preserve_skip_frame_after_inline": preserve_skip_frame_after_inline,
         "apply_to_code": apply_to_code,
+        "input_realization_failure": input_realization_failure,
     }
     if from_exc is not _NOTHING:
         past_real_stack = None

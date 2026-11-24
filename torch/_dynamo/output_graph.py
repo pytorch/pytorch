@@ -68,6 +68,7 @@ from torch._guards import (
     CompileContext,
     CompileId,
     GlobalContextCheckpointState,
+    Guard,
     Source,
     tracing,
     TracingContext,
@@ -134,6 +135,7 @@ from .graph_id_filter import (
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
+from .resume_execution import ContinueExecutionCache
 from .side_effects import (
     AttributeMutationExisting,
     AttributeMutationNew,
@@ -540,6 +542,32 @@ class OutputGraphGuardsState:
         )
 
 
+def _is_nested_resume_call(tx: "InstructionTranslatorBase") -> bool:
+    if tx.current_instruction.opname != "CALL_FUNCTION_EX":
+        return False
+    meta = ContinueExecutionCache.generated_code_metadata.get(tx.f_code)
+    return (
+        meta is not None
+        and meta.nested_resume_call_offset is not None
+        and meta.nested_resume_call_offset == tx.current_instruction.offset
+    )
+
+
+def _failed_lazy_input(
+    value: VariableTracker, inputs: dict[Source, exc.InputRealizationFailure]
+) -> exc.InputRealizationFailure | None:
+    if (
+        type(value) is variables.LazyVariableTracker
+        and not value.is_realized()
+        and value.source is not None
+        and value.mutation_type is None
+    ):
+        failure = inputs.get(value.source)
+        if failure is not None and value.peek_value() is failure.value:
+            return failure
+    return None
+
+
 @dataclass
 class StackLocalsMetadata:
     """
@@ -740,6 +768,8 @@ class OutputGraph(OutputGraphCommon):
     we construct a InliningInstructionTranslator that continues to write into
     the root InstructionTranslator's OutputGraph.
     """
+
+    reconstruction_guards: frozenset[Guard] = frozenset()
 
     side_effects: SideEffects
 
@@ -2200,7 +2230,11 @@ class OutputGraph(OutputGraphCommon):
         return alias_insts, overridden_sources
 
     def _get_stack_values_to_restore(
-        self, tx: "InstructionTranslatorBase", stack_pops: int
+        self,
+        tx: "InstructionTranslatorBase",
+        stack_pops: int,
+        eager_resume_args: VariableTracker | None = None,
+        keep_lazy: dict[int, tuple[Any, Any]] | None = None,
     ) -> tuple[list[VariableTracker], StackLocalsMetadata]:
         """
         Gets the stack + locals values belonging to tx that need to be restored.
@@ -2233,7 +2267,9 @@ class OutputGraph(OutputGraphCommon):
             # Allow lazy constants through for values being returned (top of stack)
             allow_lazy_constant = len(tx.stack) - i <= stack_pops
             variables.LazyVariableTracker.realize_all(
-                value, allow_lazy_constant=allow_lazy_constant
+                value,
+                keep_lazy if value is eager_resume_args else None,
+                allow_lazy_constant=allow_lazy_constant,
             )
             # Do not allow non-stack WithExitFunctionVariable reconstructions
             if not isinstance(value, variables.WithExitFunctionVariable):
@@ -2316,6 +2352,32 @@ class OutputGraph(OutputGraphCommon):
 
         return stack_values, meta
 
+    def _eager_resume_args(
+        self, tx: "InstructionTranslatorBase", stack_pops: int
+    ) -> tuple[VariableTracker | None, dict[int, tuple[Any, Any]] | None]:
+        inputs = tx.speculation_log.reconstruction_inputs
+        args_depth = 2 if sys.version_info >= (3, 14) else 1
+        if (
+            tx is self.root_tx
+            and stack_pops >= args_depth
+            and inputs
+            and _is_nested_resume_call(tx)
+        ):
+            args = tx.stack[-args_depth]
+            if type(args) is variables.ListVariable and args.source is None:
+                keep_lazy: dict[int, tuple[Any, Any]] = {}
+                # The first two arguments hold the rest of the resume chain.
+                for arg in args.items[2:]:
+                    failure = _failed_lazy_input(arg, inputs)
+                    if failure is not None:
+                        keep_lazy[id(arg)] = (arg, arg)
+                        self.reconstruction_guards = self.reconstruction_guards.union(
+                            failure.guards
+                        )
+                if keep_lazy:
+                    return args, keep_lazy
+        return None, None
+
     def compile_subgraph(
         self,
         tx: "InstructionTranslatorBase",
@@ -2362,6 +2424,7 @@ class OutputGraph(OutputGraphCommon):
 
         self.compile_subgraph_reason = reason
         self.should_exit = True
+        eager_resume_args, keep_lazy = self._eager_resume_args(tx, stack_pops)
 
         log.debug("COMPILING GRAPH due to %s", reason)
 
@@ -2396,9 +2459,22 @@ class OutputGraph(OutputGraphCommon):
                     "all blocks in cur_tx.block_stack must be restorable"
                 )
 
-            stack_values, meta = self._get_stack_values_to_restore(
-                cur_tx, stack_pops if cur_tx is tx else 0
-            )
+            try:
+                stack_values, meta = self._get_stack_values_to_restore(
+                    cur_tx,
+                    stack_pops if cur_tx is tx else 0,
+                    eager_resume_args,
+                    keep_lazy,
+                )
+            except exc.Unsupported as error:
+                if error.input_realization_failure is not None:
+                    self.record_reconstruction_failure(
+                        tx,
+                        error,
+                        graph_break=reason.graph_break,
+                        input_failure_only=True,
+                    )
+                raise
             all_stack_values.append(stack_values)
             all_stack_locals_metas.append(meta)
 
@@ -2561,6 +2637,7 @@ class OutputGraph(OutputGraphCommon):
                 root,
                 graph_output_var,
                 overridden_sources=overridden_sources,
+                eager_resume_args=eager_resume_args,
             )
             self.codegen_suffix(tx, stack_values_flat, pass1, False)
 
@@ -2584,6 +2661,7 @@ class OutputGraph(OutputGraphCommon):
                 graph_output_var,
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
+                eager_resume_args=eager_resume_args,
             )
             self.codegen_suffix(tx, stack_values_flat, pass2, True)
 
@@ -2813,6 +2891,8 @@ class OutputGraph(OutputGraphCommon):
             self.side_effects.prune_dead_object_new(tx)
         self.raise_pending_event_record_violations_if_escaping(tx, all_stack_values)
 
+        if self.reconstruction_guards:
+            install_guard(*self.reconstruction_guards)
         return all_stack_locals_metas
 
     def codegen_cells(self, tx: "InstructionTranslatorBase", cg: PyCodegen) -> None:
@@ -2889,30 +2969,107 @@ class OutputGraph(OutputGraphCommon):
             cg.restore_stack(stack_values, value_from_source=not tx.export)
             self.side_effects.codegen_update_mutated(cg, log_side_effects)
         except exc.Unsupported as error:
-            self.record_reconstruction_failure(tx, error)
+            self.record_reconstruction_failure(
+                tx, error, graph_break=self.compile_subgraph_reason.graph_break
+            )
             raise
+
+    def _validated_input_failure(
+        self, error: exc.Unsupported
+    ) -> exc.InputRealizationFailure | None:
+        failure = error.input_realization_failure
+        if (
+            failure is None
+            # Packaged guards need a meta snapshot of the guarded input.
+            or self.package is not None
+            or config.generate_pycode
+            or self.root_tx.f_code not in ContinueExecutionCache.generated_code_metadata
+        ):
+            return None
+
+        source = failure.source
+        if type(source) is LocalSource and source.is_input:
+            if self.local_scope.get(source.local_name) is failure.value:
+                return failure
+        elif (
+            type(source) is GetItemSource
+            and type(source.index) is int
+            and type(source.base) is GetItemSource
+            and type(source.base.index) is int
+            and type(source.base.base) is LocalSource
+            and source.base.base.is_input
+            and source.base.base.local_name == "__nested_frame_values"
+        ):
+            frames = self.local_scope.get("__nested_frame_values")
+            if type(frames) is list:
+                try:
+                    frame = frames[source.base.index]
+                    if type(frame) is list and frame[source.index] is failure.value:
+                        return failure
+                except IndexError:
+                    pass
+        return None
 
     def record_reconstruction_failure(
         self,
         tx: "InstructionTranslatorBase",
         error: exc.Unsupported,
-    ) -> None:
-        self._failed_reconstruction = None
+        *,
+        graph_break: bool,
+        input_failure_only: bool = False,
+    ) -> bool:
         if (
             not config.nested_graph_breaks
             or tx.parent is None
-            or not self.compile_subgraph_reason.graph_break
+            or not graph_break
             or error.skip_frame
             or tx.one_graph
             or tx.error_on_graph_break
         ):
-            return
+            return False
+        failed_input = self._validated_input_failure(error)
+        if input_failure_only and failed_input is None:
+            return False
         self._failed_reconstruction = weakref.ref(error)
-        if not tx.speculation_log.reconstruction_recovery:
-            tx.speculation_log.reconstruction_recovery = True
+        inputs: dict[Source, exc.InputRealizationFailure] | None = (
+            tx.speculation_log.reconstruction_inputs
+        )
+        if inputs is None or (
+            failed_input is not None and failed_input.source not in inputs
+        ):
+            if inputs is None:
+                inputs = {}
+                tx.speculation_log.reconstruction_inputs = inputs
+            if failed_input is not None:
+                inputs[failed_input.source] = failed_input
             raise exc.SpeculationRestartAnalysis(
                 restart_reason="collecting reconstructible graph-break checkpoints"
             )
+        return True
+
+    def checkpoint_reconstruction(
+        self, tx: "InstructionTranslatorBase", entry: "SpeculationEntry"
+    ) -> None:
+        # Stack values need variable trackers even when their sources can emit
+        # bytecode. The generated eager call's own arguments can be forwarded.
+        inputs = tx.speculation_log.reconstruction_inputs
+        current = tx
+        while inputs and current is not None:
+            for value in current.stack:
+                failure = _failed_lazy_input(value, inputs)
+                if failure is not None:
+                    tx.reconstruction_checkpoints[id(entry)] = (
+                        entry,
+                        False,
+                        failure.guards,
+                    )
+                    return
+            current = current.parent
+        tx.reconstruction_checkpoints[id(entry)] = (
+            entry,
+            self.can_reconstruct_continuation(tx),
+            (),
+        )
 
     def can_reconstruct_continuation(
         self, tx: "InstructionTranslatorBase"
@@ -3022,21 +3179,34 @@ class OutputGraph(OutputGraphCommon):
         entry: "SpeculationEntry",
         error: BaseException,
     ) -> bool:
-        failure = self._failed_reconstruction
         if (
-            failure is None
-            or error is not failure()
-            or not isinstance(error, exc.Unsupported)
+            not isinstance(error, exc.Unsupported)
             or error.skip_frame
             or tx.one_graph
             or tx.error_on_graph_break
             or tx.output is not self
         ):
             return False
+        failure = self._failed_reconstruction
+        if failure is None or error is not failure():
+            failed_input = error.input_realization_failure
+            if (
+                failed_input is None
+                or type(failed_input.source) is not GetItemSource
+                or not _is_nested_resume_call(self.root_tx)
+                or not self.record_reconstruction_failure(
+                    tx, error, graph_break=True, input_failure_only=True
+                )
+            ):
+                return False
         checkpoint = tx.reconstruction_checkpoints.get(id(entry))
-        return (
-            checkpoint is not None and checkpoint[0] is entry and checkpoint[1] is False
-        )
+        if checkpoint is not None and checkpoint[0] is entry and checkpoint[1] is False:
+            if checkpoint[2]:
+                self.reconstruction_guards = self.reconstruction_guards.union(
+                    checkpoint[2]
+                )
+            return True
+        return False
 
     def cleanup_graph(self) -> None:
         """
