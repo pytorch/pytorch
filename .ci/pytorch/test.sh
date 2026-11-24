@@ -1945,13 +1945,13 @@ test_without_numpy() {
 test_rocm_packed_atomic() {
   # test_aoti_abi_check otherwise runs only in inductor_cpp_wrapper, which
   # ROCm jobs do not select. This filter is the ROCm packed-atomic case.
-  local bin="${TORCH_BIN_DIR}/test_aoti_abi_check"
-  if [[ ! -x "$bin" ]]; then
-    bin="${BUILD_BIN_DIR}/test_aoti_abi_check"
+  # Same slow-config skip as test_libtorch, so slow shard 1 doesn't rerun it.
+  if [[ "$TEST_CONFIG" != "slow" ]]; then
+    mkdir -p test/test-reports/cpp
+    LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}" "${BUILD_BIN_DIR}/test_aoti_abi_check" \
+      --gtest_filter='TestRocmPackedAtomic.*' \
+      --gtest_output=xml:test/test-reports/cpp/test_rocm_packed_atomic.xml
   fi
-  mkdir -p test/test-reports/cpp
-  "$bin" --gtest_filter='TestRocmPackedAtomic.*' \
-    --gtest_output=xml:test/test-reports/cpp/test_rocm_packed_atomic.xml
 }
 
 test_libtorch() {
