@@ -1100,8 +1100,8 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
 // hipBLASLt runs one GEMM per expert, each with a fixed cost, but beats ck_tile's single persistent kernel once each
 // expert is large: per-expert M * N * sqrt(K) of the forward GEMM above 3.165e-13 * (FLOP/s * bytes/s)^0.75, from the
 // GPU's datasheet TFLOPS for the dtype and DRAM bandwidth. Every call evaluates the forward GEMM's dims, so a layer's
-// forward, dX and dW pick the same backend. Fitted on the op benchmark's MoE shapes on MI300X and MI355X; GPUs without
-// datasheet numbers stay on hipBLASLt.
+// forward, dX and dW pick the same backend. Fitted on the op benchmark's MoE shapes on MI300X and MI355X; device_info.h
+// picks the datasheet entry by architecture and CU count.
 static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
@@ -1117,7 +1117,8 @@ static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat
   const bool grad = (a_is_2d && b_is_2d) || (!b_is_2d && b_row_major && (a_is_2d || !check_valid_strides_and_return_transposed(mat_a)));
   const double forward_mn_sqrt_k = m * n * k / std::sqrt(grad ? n : k);
   const auto dtype = mat_a.scalar_type();
-  return at::hip::detail::ck_tile_group_gemm::with_device_info(at::cuda::getCurrentDeviceProperties()->name, [&](auto info) {
+  const auto* props = at::cuda::getCurrentDeviceProperties();
+  return at::hip::detail::ck_tile_group_gemm::with_device_info(props->gcnArchName, props->multiProcessorCount, [&](auto info) {
     using Info = decltype(info);
     const double tflops = dtype == at::kFloat ? Info::fp32_tflops : (dtype == at::kHalf ? Info::fp16_tflops : Info::bf16_tflops);
     return forward_mn_sqrt_k <= 3.165e-13 * std::pow(tflops * 1e12 * Info::dram_bw_gbs * 1e9, 0.75);
