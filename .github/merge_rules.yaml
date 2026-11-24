@@ -734,6 +734,7 @@
   - dolpm
   - sanrise
   - NicolasHug
+  - thomasywang
   mandatory_checks_name:
   - EasyCLA
   - Lint
