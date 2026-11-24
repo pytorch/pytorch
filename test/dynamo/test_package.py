@@ -1783,6 +1783,7 @@ def fn(x):
                 compiled_fn = torch._dynamo.optimize(package=package)(fn)
                 package.install(backends)
                 self.assertEqual(compiled_fn(x), expected)
+        return package
 
     @parametrize("fn_name", ("range_iterator", "itertools_count"))
     def test_an_iterator_rebuilt_at_a_graph_break_is_served(self, fn_name):
@@ -1803,7 +1804,9 @@ def fn(x):
         # comprehension, by the name it bound it under while tracing.
         # With an unbound loop variable it also pops a NULL, by calling a nop it
         # holds as a constant, which saving pickles.
-        self._serve_from_a_fresh_import(fn_name)
+        package = self._serve_from_a_fresh_import(fn_name)
+        names = [n for c in package.cache_entry().codes for n in c.function_names]
+        self.assertTrue(any(n.startswith("__comprehension_") for n in names))
 
     def test_file_change(self):
         ctx = DiskDynamoStore()
