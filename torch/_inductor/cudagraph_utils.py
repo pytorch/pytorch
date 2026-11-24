@@ -206,7 +206,10 @@ def get_mutating_use_stack_trace_from_node(
         return next(iter(placeholder_node.users)).meta.get("stack_trace", None)
 
     for use in placeholder_node.users:
-        if use.target is torch.ops.aten.copy_.default:
+        if use.target in (
+            torch.ops.aten.copy_.default,
+            torch.ops.aten._foreach_copy_.default,
+        ):
             if stack_trace := use.meta.get("stack_trace", None):
                 return stack_trace
 
