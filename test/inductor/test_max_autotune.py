@@ -3716,7 +3716,8 @@ class TestMaxAutotune(TestCase):
 
         with fresh_cache():
             out, (code,) = run_and_get_code(torch.compile(fn), *args)
-        self.assertEqual(code.count(".run("), 2, code)
+        launch = "launchKernel(triton_" if config.cpp_wrapper else ".run("
+        self.assertEqual(code.count(launch), 2, code)
         self.assertEqual(
             out, fn(*[a.float() for a in args]).to(dtype), atol=2e-2, rtol=2e-2
         )
@@ -3754,7 +3755,8 @@ class TestMaxAutotune(TestCase):
             ),
         ):
             out, (code,) = run_and_get_code(torch.compile(fn), *args)
-        self.assertEqual(code.count(".run("), 3, code)
+        launch = "launchKernel(triton_" if config.cpp_wrapper else ".run("
+        self.assertEqual(code.count(launch), 3, code)
         self.assertEqual(
             out, fn(*[a.float() for a in args]).to(out.dtype), atol=2e-2, rtol=2e-2
         )
