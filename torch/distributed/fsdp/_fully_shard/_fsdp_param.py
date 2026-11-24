@@ -221,7 +221,7 @@ class FSDPParam:
     )  # set for DTensor params (SPMD or TP/EP)
     all_gather_outputs: list[torch.Tensor]  # 1D
     # Set when the outputs view a custom layout's buffers, which the param group
-    # allocates and frees
+    # allocates and frees, or a backend-owned layout's storage, which FSDP never frees
     _keep_all_gather_output_storage: bool = False
     _default_all_gather_output_layouts: tuple[_AllGatherOutputLayout, ...]
     # All-gather extension attributes, describing the latest all_gather_inputs call
