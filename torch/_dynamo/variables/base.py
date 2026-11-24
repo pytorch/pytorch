@@ -412,6 +412,13 @@ class Method:
 
     handler: Callable[..., VariableTracker | None]
 
+    @classmethod
+    def from_slot(cls, slot_impl: Callable[..., VariableTracker | None]) -> Method:
+        """Expose a `(self, tx, *args)` slot impl as a METH_COEXIST method.
+        The impl is bound when the table is built, so a subclass override of
+        the slot is not used, like CPython calling e.g. dict_subscript directly."""
+        return cls(lambda self, tx, args, kwargs: slot_impl(self, tx, *args))
+
     def __call__(
         self,
         vt: VariableTracker,
