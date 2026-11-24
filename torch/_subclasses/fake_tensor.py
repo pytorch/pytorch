@@ -181,6 +181,9 @@ class IncrementRecursionCount:
 @dataclass
 class UnsupportedFakeTensorException(RuntimeError):
     reason: str
+    quantized_input: bool = dataclasses.field(
+        default=False, kw_only=True, repr=False, compare=False
+    )
 
 
 class FakeTensorDeviceMismatchError(RuntimeError):
@@ -1410,7 +1413,9 @@ class FakeTensorConverter:
             return maybe_memo
         # not yet supported in metatensors
         if t.is_quantized:
-            raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
+            raise UnsupportedFakeTensorException(
+                "quantized nyi in meta tensors", quantized_input=True
+            )
         if type(t) is torch.nn.Parameter:
             if make_constant:
                 raise AssertionError("make_constant must be False for nn.Parameter")

@@ -273,6 +273,7 @@ class ReenterWith:
 class ResumeFunctionMetadata:
     code: types.CodeType
     instructions: list[Instruction] = dataclasses.field(default_factory=list)
+    nested_resume_call_offset: int | None = None
     # Python 3.11+ fields
     # NOTE: Python 3.11 removed blocks, but for our purposes, a "block" consists
     # of instructions of all exception table entries that have the same target.
@@ -387,10 +388,12 @@ class ContinueExecutionCache:
             )
 
         meta = ResumeFunctionMetadata(code)
+        nested_resume_call: Instruction | None = None
 
         def update(
             instructions: list[Instruction], code_options: dict[str, Any]
         ) -> None:
+            nonlocal nested_resume_call
             meta.instructions = _deepcopy_instructions(instructions)
 
             args = ["__nested_resume_fns", "__nested_frame_values"]
@@ -522,6 +525,8 @@ class ContinueExecutionCache:
 
             # Call nested resume function
             if nested_code_objs:
+                call = create_call_function_ex(False, False)
+                nested_resume_call = call[-1]
                 prefix.extend(
                     [
                         # set up __nested_resume_fns[-1] call
@@ -568,7 +573,7 @@ class ContinueExecutionCache:
                             "STORE_FAST", argval=IS_TRACING_RESUME_PROLOGUE_VARNAME
                         ),
                         # finish the call
-                        *create_call_function_ex(False, False),
+                        *call,
                     ]
                 )
                 if pop_nested_resume_result:
@@ -615,6 +620,8 @@ class ContinueExecutionCache:
             instructions[:] = prefix + instructions
 
         new_code, _ = transform_code_object(code, update)
+        if nested_resume_call is not None:
+            meta.nested_resume_call_offset = nested_resume_call.offset
         ContinueExecutionCache.generated_code_metadata[new_code] = meta
         return new_code
 
