@@ -2132,6 +2132,36 @@ class MemoryCoalescingTest(MockSchedulerTest):
             self.assertTrue(code)
             FileCheck().check("YBLOCK").check("XBLOCK").run(code[0])
 
+    @parametrize("allow_min_block", (False, True))
+    def test_min_tiling_block_is_opt_in(self, allow_min_block):
+        suggested = []
+
+        def fn(nodes):
+            self.assertTrue(len(nodes) == 1)
+            split = nodes[0].get_coalesce_analysis().suggested_split
+            suggested.append(None if split is None else split.tiling_factor)
+            return nodes
+
+        def forward(permute):
+            clone = torch.ops.aten.clone.default(
+                permute, memory_format=torch.contiguous_format
+            )
+            view = torch.ops.aten.view.default(clone, [-1, 32])
+            return torch.ops.aten.amax.default(view, [1])
+
+        arg0 = torch.randn([256, 4096], device=GPU_TYPE, dtype=torch.bfloat16)
+        permute = torch.ops.aten.permute.default(arg0, [1, 0])
+
+        patches = {
+            "_post_fusion_custom_pass": fn,
+            "triton.coalesce_tiling_allow_min_block": allow_min_block,
+        }
+        with torch._inductor.config.patch(patches), torch.no_grad():
+            out = torch.compile(forward)(permute)
+
+        self.assertEqual(out, forward(permute))
+        self.assertEqual(suggested, [8] if allow_min_block else [None])
+
 
 layouts = ("cont", "NHWC", "T")
 

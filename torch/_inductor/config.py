@@ -2443,6 +2443,13 @@ class triton:
         default=True,
     )
 
+    # Let the coalescing tiling analysis pick a tiling whose smaller block is
+    # exactly MIN_TILING_BLOCK (8). Off by default: it requires strictly more.
+    coalesce_tiling_allow_min_block: bool = Config(
+        env_name_force="TORCHINDUCTOR_COALESCE_TILING_ALLOW_MIN_BLOCK",
+        default=False,
+    )
+
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
     #   - max_tiles=2
