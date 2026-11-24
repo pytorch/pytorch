@@ -2122,8 +2122,11 @@ class MultiProcContinuousTest(TestCase):
         # I am the dispatcher
         self.rank = self.MAIN_PROCESS_RANK
 
-        # If this test class hits an exception in one test, skip the rest of tests
-        if self.__class__.poison_pill:
+        # If this test class hits an exception in one test, skip the rest of tests.
+        # Check the class's own dict: a subclass must not inherit the pill from a
+        # base test class that already ran, else one failure in the base class
+        # skips every test in the subclass (see _ensure_processes_spawned).
+        if self.__class__.__dict__.get("poison_pill", False):
             raise unittest.SkipTest(f"Previous test failed, skipping {self.id()}")
 
         # Enqueue "current test" to all workers
