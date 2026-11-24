@@ -934,23 +934,25 @@ class SystemInfo:
         gpu_name, toolkit_version = None, None
         gpu_arch, gpu_sm_count = None, None
         for device_type in cls.CHECK_GPUS:
-            if getattr(torch, device_type).is_available():
-                try:
-                    gpu_name = getattr(torch, device_type).get_device_name()
-                    toolkit_version = getattr(torch.version, device_type)
-                    if device_type == "cuda":
-                        interface = get_interface_for_device(device_type)
-                        gpu_arch, gpu_sm_count = (
-                            interface.get_compute_capability(),
-                            interface.get_multi_processor_count(),
-                        )
-                    break
-                except Exception:
-                    logger.debug(
-                        "Could not read the %s device's info for SystemInfo",
-                        device_type,
-                        exc_info=True,
+            device_module = getattr(torch, device_type)
+            if not device_module.is_available():
+                continue
+            try:
+                gpu_name = device_module.get_device_name()
+                toolkit_version = getattr(torch.version, device_type)
+                if device_type == "cuda":
+                    interface = get_interface_for_device(device_type)
+                    gpu_arch, gpu_sm_count = (
+                        interface.get_compute_capability(),
+                        interface.get_multi_processor_count(),
                     )
+                break
+            except Exception:
+                logger.debug(
+                    "Could not read the %s device's info for SystemInfo",
+                    device_type,
+                    exc_info=True,
+                )
 
         return cls(
             python_version=platform.python_version(),
@@ -1055,8 +1057,7 @@ class _DynamoCacheEntry:
 
     def check_versions(self) -> None:
         """Check if the current system is compatible with the system used to create this cache entry."""
-        current_system_info = SystemInfo.current()
-        self.system_info.check_compatibility(current_system_info, self.device_type)
+        self.system_info.check_compatibility(SystemInfo.current(), self.device_type)
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -1107,27 +1108,24 @@ class PrecompileCacheEntry:
 
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
-                if backend_id not in backends:
-                    logger.warning("Backend not found")
-                    debug_str = json.dumps(
-                        {
-                            "entry": cache_entry.debug_info(),
-                            "missing_backend": backend_id,
-                        }
-                    )
-                    torch._logging.trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": "dynamo_cache_bypass",
-                            "encoding": "json",
-                        },
-                        payload_fn=lambda: debug_str,
-                        expect_trace_id=False,
-                    )
-                    code.bypassed = True
-                    break
-                else:
+                if backend_id in backends:
                     backend_content[backend_id] = backends[backend_id]
+                    continue
+                logger.warning("Backend not found")
+                debug_str = json.dumps(
+                    {"entry": cache_entry.debug_info(), "missing_backend": backend_id}
+                )
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "dynamo_cache_bypass",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: debug_str,
+                    expect_trace_id=False,
+                )
+                code.bypassed = True
+                break
 
         return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
 
@@ -1148,9 +1146,9 @@ def _hash_sourcelines(m: types.ModuleType, firstlineno: int, lastlineno: int) ->
     return _hash_source("".join(_get_sourcelines(m, firstlineno, lastlineno)))
 
 
-def _compile_frame_context(
-    code: types.CodeType,
-) -> contextlib.AbstractContextManager[None]:
+# pyrefly: ignore [deprecated]
+@contextlib.contextmanager
+def _compile_frame_context(code: types.CodeType) -> Iterator[None]:
     from torch._dynamo.convert_frame import get_compile_id, log_dynamo_start
     from torch._guards import compile_context, CompileContext
 
@@ -1159,30 +1157,25 @@ def _compile_frame_context(
     # under the same cache entry, so we don't have recompile ids
     # i.e. If cold start had 0/0, 0/1, 1/0, 1/1, these would be
     # collapsed into 0/0, 1/0 on warm.
-    # pyrefly: ignore [deprecated]
-    @contextlib.contextmanager
-    def _ctx() -> Iterator[None]:
-        increment_frame()
-        compile_id = get_compile_id(frame_state={})
-        with (
-            compile_context(CompileContext(compile_id)),
-            dynamo_timed(
-                "_compile.compile_inner",
-                phase_name="entire_frame_compile",
-                dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
-                # TODO: save all relevant compilation metrics
-                metadata={
-                    "frame_key": str(torch._dynamo.utils.curr_frame),
-                    "co_name": code.co_name,
-                    "co_filename": code.co_filename,
-                    "co_firstlineno": code.co_firstlineno,
-                },
-            ),
-        ):
-            log_dynamo_start(code)
-            yield
-
-    return _ctx()
+    increment_frame()
+    compile_id = get_compile_id(frame_state={})
+    with (
+        compile_context(CompileContext(compile_id)),
+        dynamo_timed(
+            "_compile.compile_inner",
+            phase_name="entire_frame_compile",
+            dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
+            # TODO: save all relevant compilation metrics
+            metadata={
+                "frame_key": str(torch._dynamo.utils.curr_frame),
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+            },
+        ),
+    ):
+        log_dynamo_start(code)
+        yield
 
 
 # The skips installed packages hold on each code object, one per package, True
@@ -1975,8 +1968,9 @@ class DiskDynamoStore(DynamoStore):
         """
         Clear all CompilePackages from disk.
         """
-        if self.path_prefix():
-            shutil.rmtree(self.path_prefix(), ignore_errors=True)
+        prefix = self.path_prefix()
+        if prefix:
+            shutil.rmtree(prefix, ignore_errors=True)
 
     def write(
         self,
