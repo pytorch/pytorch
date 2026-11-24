@@ -1027,8 +1027,6 @@ Tensor batch_norm_jvp(
     const Tensor& bias_t,
     const std::optional<Tensor>& running_mean,
     const std::optional<Tensor>& running_var,
-    const Tensor& saved_mean,
-    const Tensor& saved_invstd,
     bool train,
     double eps);
 
