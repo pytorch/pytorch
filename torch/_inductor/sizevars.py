@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
+import contextlib
 import dataclasses
 import functools
 import itertools
 import logging
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Any, cast
 
 import sympy
@@ -315,6 +316,11 @@ class SizeVarAllocator:
         self._optimization_hint_cache = self._lru_cache(
             self._optimization_hint_uncached
         )
+        # Set by optimization_hint_overrides(); the key is the same values, hashable.
+        self._optimization_hint_overrides: dict[sympy.Symbol, int] | None = None
+        self.optimization_hint_overrides_key: (
+            frozenset[tuple[sympy.Symbol, int]] | None
+        ) = None
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
@@ -1163,7 +1169,8 @@ class SizeVarAllocator:
 
         Inside torch.fx.experimental._size_hinting.consistent_hints(), hints
         are computed from one shared per-symbol assignment; see
-        ConsistentHintState.
+        ConsistentHintState. Inside optimization_hint_overrides(), the given
+        symbols take the given values.
 
         Special cases:
         - Complex numbers (containing sympy.I): raises an error since tensor
@@ -1171,6 +1178,11 @@ class SizeVarAllocator:
         - Infinity (int_oo, sympy.oo): returns sys.maxsize.
         - NaN (sympy.nan): returns the fallback value.
         """
+        overrides = self._optimization_hint_overrides
+        if overrides is not None and isinstance(expr, Expr):
+            # Expand precomputed sizes first so that their symbols are overridden too.
+            expanded = sympy_subs(expr, self.inv_precomputed_replacements)
+            expr = expanded.xreplace(overrides)
         state = _current_consistent_hints()
         if state is not None and state.shape_env is self.shape_env:
             # Hints differ inside this ShapeEnv's context, so skip the cache.
@@ -1178,6 +1190,32 @@ class SizeVarAllocator:
                 self.shape_env, expr, self.inv_precomputed_replacements, fallback
             )
         return self._optimization_hint_cache(expr, fallback)
+
+    @contextlib.contextmanager
+    def optimization_hint_overrides(
+        self, values: dict[sympy.Symbol, int] | None
+    ) -> Iterator[None]:
+        """Context manager: inside `with sizevars.optimization_hint_overrides(values):`,
+        optimization_hint first replaces each symbol in values by its value, then
+        computes the hint of the result as usual (None: no override). For heuristics
+        that should target other sizes than the example inputs'. Guards, guarding
+        hints and replace_backed_symbols_with_hints are unaffected, so the generated
+        code stays correct for every input."""
+        previous = (
+            self._optimization_hint_overrides,
+            self.optimization_hint_overrides_key,
+        )
+        self._optimization_hint_overrides = values
+        self.optimization_hint_overrides_key = (
+            None if values is None else frozenset(values.items())
+        )
+        try:
+            yield
+        finally:
+            (
+                self._optimization_hint_overrides,
+                self.optimization_hint_overrides_key,
+            ) = previous
 
     def _optimization_hint_uncached(
         self, expr: Expr | int, fallback: int | None
