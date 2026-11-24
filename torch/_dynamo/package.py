@@ -1924,10 +1924,10 @@ class InMemoryDynamoStore(DynamoStore):
         """
         Read dynamo cache entry and backends from memory.
         """
-        if path not in self.packages:
+        entry = self.packages.get(path)
+        if entry is None:
             raise RuntimeError(f"No package found with key {path}")
-
-        return self.packages[path]
+        return entry
 
 
 class DiskDynamoStore(DynamoStore):
