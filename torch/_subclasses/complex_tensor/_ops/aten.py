@@ -5,10 +5,12 @@ import warnings
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch._refs.nn.functional import Tensor
+from torch.autograd.function import once_differentiable
 
 from .._core import ComplexTensor, InterleavedComplexTensor
 from .common import (
+    _as_complex_tensor,
+    _as_interleaved,
     _get_func_name,
     COMPLEX_TO_REAL,
     complex_to_real_dtype,
@@ -19,6 +21,7 @@ from .common import (
     REAL_TO_COMPLEX,
     register_binary_nonlinear,
     register_complex,
+    register_complex_function,
     register_error,
     register_force_test,
     register_inductor,
@@ -31,6 +34,8 @@ from .common import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    from torch.autograd.function import FunctionCtx
 
 
 aten = torch.ops.aten
@@ -365,6 +370,45 @@ def tril__impl(self: ComplexTensor, diagonal: int = 0) -> ComplexTensor:
     self.re.tril_(diagonal)
     self.im.tril_(diagonal)
     return self
+
+
+# The native backward writes in place through views of intermediates, which don't alias
+# for `ComplexTensor`, so run it on interleaved tensors instead.
+class HouseholderProduct(torch.autograd.Function):
+    @staticmethod
+    def forward(  # type: ignore[bad-override]
+        ctx: FunctionCtx, input: ComplexTensor, tau: ComplexTensor
+    ) -> ComplexTensor:
+        ctx.save_for_backward(input, tau)
+        with torch._C.DisableTorchFunctionSubclass():
+            return torch.linalg.householder_product(input, tau)
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx: Any, grad: ComplexTensor) -> tuple[Any, ...]:  # type: ignore[bad-override]
+        inputs = ctx.saved_tensors
+        with torch.enable_grad():
+            args = [_as_interleaved(t).detach().requires_grad_() for t in inputs]
+            out = torch.linalg.householder_product(*args)
+            grads = torch.autograd.grad(out, args, _as_interleaved(grad))
+        return tuple(
+            _as_complex_tensor(g, isinstance(t, InterleavedComplexTensor))
+            if is_complex_tensor(t)
+            else g
+            for g, t in zip(grads, inputs, strict=True)
+        )
+
+
+@register_complex_function(
+    torch.linalg.householder_product, torch.orgqr, torch.Tensor.orgqr
+)
+def householder_product_function(
+    input: torch.Tensor, tau: torch.Tensor, *, out: torch.Tensor | None = None
+) -> torch.Tensor:
+    if out is not None:
+        with torch._C.DisableTorchFunctionSubclass():
+            return torch.linalg.householder_product(input, tau, out=out)
+    return HouseholderProduct.apply(input, tau)
 
 
 @register_complex(aten.reciprocal)

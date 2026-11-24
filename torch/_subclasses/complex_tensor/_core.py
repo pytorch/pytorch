@@ -135,6 +135,27 @@ class ComplexTensor(Tensor):
         self.im[...] = value
 
     @classmethod
+    def __torch_function__(  # type: ignore[bad-override]
+        cls,
+        func: Any,
+        types: tuple[type, ...],
+        # pyrefly: ignore [implicit-any]
+        args: tuple = (),
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
+        from ._ops.common import COMPLEX_FUNCTIONS_TABLE
+
+        kwargs = {} if kwargs is None else kwargs
+
+        impl = COMPLEX_FUNCTIONS_TABLE.get(func)
+        if impl is not None:
+            return impl(*args, **kwargs)
+
+        # What `Tensor` installs for subclasses with `__torch_dispatch__` but no
+        # `__torch_function__`.
+        return torch._C._disabled_torch_function_impl(func, types, args, kwargs)
+
+    @classmethod
     def __torch_dispatch__(  # type: ignore[bad-override]
         cls,
         func: OpOverload,
