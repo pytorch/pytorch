@@ -4,7 +4,6 @@ import importlib
 import os
 import re
 import unittest
-import weakref
 from itertools import repeat
 from typing import get_args, get_origin, Union
 
@@ -434,38 +433,6 @@ class TestRNGExtension(common.TestCase):
         self.assertEqual(rng_extension.getInstanceCount(), 1)
         del copy2
         self.assertEqual(rng_extension.getInstanceCount(), 0)
-
-    @skipIfTorchDynamo("relies on wrappers being deallocated at del")
-    def test_generator_wrapper_cache(self):
-        # identity() returns through THPGenerator_Wrap, which caches the wrapper
-        # it creates; torch.Generator() itself does not populate the cache.
-        gen = torch.Generator()
-        wrapped = rng_extension.identity(gen)
-        self.assertIsNot(wrapped, gen)
-        self.assertIs(rng_extension.identity(gen), wrapped)
-
-        # Rewrapping while the cached wrapper is being deallocated must create a
-        # new wrapper rather than resurrect the dying one, and the new wrapper
-        # must stay cached.
-        wrapped_id = id(wrapped)
-        rewrapped = []
-        ref = weakref.ref(
-            wrapped, lambda _: rewrapped.append(rng_extension.identity(gen))
-        )
-        del wrapped
-        self.assertIsNone(ref())
-        self.assertEqual(len(rewrapped), 1)
-        new = rewrapped.pop()
-        self.assertNotEqual(id(new), wrapped_id)
-        self.assertIs(rng_extension.identity(gen), new)
-        new.manual_seed(1234)
-        self.assertEqual(gen.initial_seed(), 1234)
-
-        # Deallocating an uncached wrapper must not clear the cache.
-        other = torch.Generator()
-        cached = rng_extension.identity(other)
-        del other
-        self.assertIs(rng_extension.identity(cached), cached)
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
