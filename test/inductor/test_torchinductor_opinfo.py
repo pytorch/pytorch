@@ -299,6 +299,8 @@ inductor_expected_failures_single_sample["cuda"] = {
 
 inductor_expected_failures_single_sample["xpu"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
+    # test_comprehensive_nn_functional_interpolate_bicubic_xpu_float16: https://github.com/intel/torch-xpu-ops/issues/5860
+    "nn.functional.interpolate.bicubic": {f16},
     "sparse.sampled_addmm": {f32, f64, f16},
     "tan": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
