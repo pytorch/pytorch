@@ -220,6 +220,8 @@ jobs:
           REMOTE_BUILDKIT: "1"
           CI: "1"
           DOCKER_IMAGE: ${{ steps.tag.outputs.docker-image }}
+          # Trusted images don't reuse any cache
+          DOCKER_BUILD_NO_CACHE: ${{ env.TRUSTED_BUILD == 'true' && '1' || '' }}
         shell: bash
         working-directory: .ci/docker
         run: |

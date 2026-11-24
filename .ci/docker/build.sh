@@ -427,6 +427,11 @@ if [[ -n "${REMOTE_BUILDKIT:-}" ]]; then
     cache_flag="${cache_flag} --cache-to type=registry,ref=${cache_ref},mode=max,image-manifest=true,oci-mediatypes=true"
   fi
 fi
+# Build from scratch, without reusing a cache that another build (e.g. a
+# ciflow/docker PR on the same BuildKit pods) could have written.
+if [[ "${DOCKER_BUILD_NO_CACHE:-}" == "1" ]]; then
+  cache_flag="--no-cache"
+fi
 
 # Build image
 build_image() {
