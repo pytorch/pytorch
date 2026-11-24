@@ -213,7 +213,8 @@ case "$tag" in
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
     fi
-    # MoRI supports gfx942 and gfx950, which only the noble image tests.
+    # MoRI supports gfx942 and gfx950; only the noble image runs distributed
+    # tests on them.
     if [[ $tag =~ "noble" ]]; then
       MORI=yes
     fi

@@ -110,11 +110,11 @@ RUN bash -c 'source /etc/rocm_env.sh && source common_utils.sh && env_run pip in
 
 # Install MoRI
 ARG MORI
-COPY ./common/install_mori.sh install_mori.sh
+COPY ./common/install_rocm_mori.sh install_rocm_mori.sh
 COPY ./common/common_utils.sh common_utils.sh
-COPY ci_commit_pins/mori.txt mori.txt
-RUN if [ -n "${MORI}" ]; then bash ./install_mori.sh; fi
-RUN rm install_mori.sh common_utils.sh mori.txt
+COPY ci_commit_pins/rocm-mori.txt rocm-mori.txt
+RUN if [ -n "${MORI}" ]; then bash ./install_rocm_mori.sh; fi
+RUN rm install_rocm_mori.sh common_utils.sh rocm-mori.txt
 
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
