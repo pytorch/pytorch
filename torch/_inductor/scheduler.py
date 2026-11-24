@@ -3227,11 +3227,18 @@ class BaseSchedulerNode:
             return
 
         # NOTE remove V.graph.removed_operations once deps issue is fixed
-        inconsequential_nodes = (
-            self.ancestors
-            | V.graph.removed_operations
-            | self.scheduler.completed_operations
-        )
+        # Membership-only: avoid materializing the union, which is
+        # O(len(completed_operations)) per node and quadratic overall.
+        ancestors = self.ancestors
+        removed_operations = V.graph.removed_operations
+        completed_operations = self.scheduler.completed_operations
+
+        def is_inconsequential(name: str) -> bool:
+            return (
+                name in ancestors
+                or name in removed_operations
+                or name in completed_operations
+            )
 
         def single_index_in_fused_node(buf_to_be_inplaced: SchedulerBuffer) -> bool:
             # Inside of NodeUser, we track that the read and write are equivalent
@@ -3299,7 +3306,7 @@ class BaseSchedulerNode:
                     remaining_uses = [
                         x
                         for x in input_buf.users
-                        if x.node.get_name() not in inconsequential_nodes
+                        if not is_inconsequential(x.node.get_name())
                     ]
                     has_cross_stream_hazard = self.scheduler.has_cross_stream_hazard(
                         read.name, self
@@ -5161,11 +5168,12 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             self.node = None
             self.users: list[NodeUser] = []
 
-            self.set_read_writes(
-                dependencies.ReadWrites.merge_list(
-                    [prev_node_1.read_writes, prev_node_2.read_writes]
-                )
+            # Not set_read_writes(): its prune_deps() scans every read of the
+            # merged node, and unmet_dependencies is overwritten just below.
+            self.read_writes = dependencies.ReadWrites.merge_list(
+                [prev_node_1.read_writes, prev_node_2.read_writes]
             )
+            self.clear_read_writes_dependent_caches()
 
             self.unmet_dependencies = (
                 OrderedSet(
