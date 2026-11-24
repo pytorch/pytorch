@@ -4999,6 +4999,64 @@ class GraphModule(torch.nn.Module):
         # Should not have recompiled
         self.assertEqual(cnts.frame_count, 1)
 
+    @torch._dynamo.config.patch(allow_empty_graphs=True)
+    def test_user_function_code_recompile_hint(self):
+        def helper(x):
+            return x + 1
+
+        def replacement(x):
+            return x + 1 + 0
+
+        def fn(x):
+            return helper(x)
+
+        failures = []
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        self.assertEqual(compiled(1), 2)
+        helper.__code__ = replacement.__code__
+        self.assertEqual(compiled(1), 2)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("___check_obj_id(", failures[0])
+        self.assertIn(".__code__", failures[0])
+        self.assertIn("Dynamo installs this guard", failures[0])
+        self.assertIn("__code__ can recompile", failures[0])
+
+    @parametrize("inherited", [False, True])
+    @torch._dynamo.config.patch(allow_empty_graphs=True)
+    def test_method_lookup_code_recompile_hint(self, inherited):
+        class Box:
+            def method(self, x):
+                return x + 1
+
+        class Child(Box):
+            pass
+
+        def replacement(self, x):
+            return x + 2
+
+        def fn(x, box):
+            _ = box.method
+            return x + 1
+
+        box = Child() if inherited else Box()
+        failures = []
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        self.assertEqual(compiled(1, box), 2)
+        Box.method.__code__ = replacement.__code__
+        self.assertEqual(compiled(1, box), 2)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("___check_obj_id(", failures[0])
+        self.assertIn(".__code__", failures[0])
+        self.assertIn("even when a method is only looked up", failures[0])
+        if inherited:
+            self.assertIn("changing the parent's method", failures[0])
+
     def test_complex_closure(self):
         @torch.compile(backend="eager")
         def forward(y):

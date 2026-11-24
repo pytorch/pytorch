@@ -619,6 +619,14 @@ class BaseUserFunctionVariable(VariableTracker):
         return True
 
 
+_USER_FUNCTION_CODE_HINT = (
+    "Dynamo installs this guard even when a method is only looked up, so replacing "
+    "__code__ can recompile even when the method is never called and the "
+    "result stays the same. If the method is inherited from a parent class, "
+    "changing the parent's method can trigger this guard too (even if code only reads child.method)"
+)
+
+
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
@@ -642,7 +650,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     @classmethod
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
-        install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
+        hint = _USER_FUNCTION_CODE_HINT if type(value) is types.FunctionType else None
+        install_guard(
+            source.make_guard(GuardBuilder.CLOSURE_MATCH),
+            recompile_hint=hint,
+        )
         return cls(value, source=source)
 
     def __init__(
