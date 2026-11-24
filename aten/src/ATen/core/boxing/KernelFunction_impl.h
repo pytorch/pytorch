@@ -113,8 +113,22 @@ inline Return callUnboxedKernelFunction(
 // NB: keep this in sync with cloneWithRealTypes in function_schema.cpp
 
 template <typename T>
-inline typename remove_symint<T>::type unpackSymInt(T x) {
-  return x;
+inline std::conditional_t<
+    is_symint_vector<T>::value,
+    std::vector<int64_t>,
+    typename remove_symint<T>::type>
+unpackSymInt(T x) {
+  if constexpr (is_symint_vector<T>::value) {
+    // Own the converted storage even when the kernel takes a const reference.
+    std::vector<int64_t> result;
+    result.reserve(x.size());
+    for (const auto& value : x) {
+      result.push_back(value.guard_int(__FILE__, __LINE__));
+    }
+    return result;
+  } else {
+    return x;
+  }
 }
 
 template <>
