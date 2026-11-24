@@ -3028,6 +3028,21 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
         not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
         "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
     )
+    @dtypes(*floating_and_complex_types())
+    def test_eig_does_not_modify_input(self, device, dtype):
+        # https://github.com/pytorch/pytorch/issues/202629
+        column_major = make_tensor((2, 5, 5), device=device, dtype=dtype).mT
+        noncontiguous = make_tensor((2, 5, 5), device=device, dtype=dtype, noncontiguous=True)
+        for a, fn in itertools.product((column_major, noncontiguous), (torch.linalg.eig, torch.linalg.eigvals)):
+            a_orig = a.clone()
+            fn(a)
+            self.assertEqual(a, a_orig)
+
+    @skipCPUIfNoLapack
+    @skipCUDAIf(
+        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 8) and not torch.cuda.has_magma,
+        "torch.linalg.eig requires MAGMA for CUDA versions < 12.8",
+    )
     # NumPy computes only in float64 and complex128 precisions
     # for float32 or complex64 results might be very different from float64 or complex128
     @dtypes(torch.float64, torch.complex128)

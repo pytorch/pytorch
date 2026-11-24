@@ -457,7 +457,7 @@ def sample_inputs_linalg_invertible(
     """
     This function generates invertible inputs for linear algebra ops
     The input is generated as the itertools.product of 'batches' and 'ns'.
-    In total this function generates 10 SampleInputs
+    In total this function generates 9 SampleInputs
     'batches' cases include:
         () - single input,
         (0,) - zero batched dimension,
@@ -465,7 +465,7 @@ def sample_inputs_linalg_invertible(
         (1, 1) - 1x1 batch of matrices
     'ns' gives 0x0 and 5x5 matrices.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
-    Additionally, two column-major 5x5 inputs are generated, since backends may operate in-place on such inputs.
+    Additionally, a batch of column-major 5x5 inputs is generated, since backends may operate in-place on such inputs.
     """
     make_fn = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fn, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -476,9 +476,8 @@ def sample_inputs_linalg_invertible(
     for batch, n in product(batches, ns):
         yield SampleInput(make_arg(*batch, n, n))
 
-    for batch in [(), (2,)]:
-        A = make_fn(*batch, 5, 5, dtype=dtype, device=device)
-        yield SampleInput(A.mT.contiguous().mT.requires_grad_(requires_grad))
+    A = make_fn(2, 5, 5, dtype=dtype, device=device)
+    yield SampleInput(A.mT.contiguous().mT.requires_grad_(requires_grad))
 
 
 def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwargs):
