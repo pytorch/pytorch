@@ -1,10 +1,8 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <map>
 #include <mutex>
 #include <optional>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -397,15 +395,9 @@ createCustomAllocator(
   return allocator;
 }
 
-bool graphAllocatorsEnabled();
-
 void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator) {
-  TORCH_CHECK(
-      !graphAllocatorsEnabled(),
-      "change_current_allocator cannot be used once CUDA graph allocators "
-      "are enabled");
   TORCH_CHECK(
       !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");
@@ -422,9 +414,8 @@ namespace {
 namespace CCA = c10::cuda::CUDACachingAllocator;
 using c10::cuda::CaptureId_t;
 using c10::cuda::MempoolId_t;
-using PoolKey = std::pair<c10::DeviceIndex, MempoolId_t>;
 
-// The DataPtr context of a tensor made by a capture allocator.
+// The DataPtr context of a tensor made by a window's allocator.
 struct Owned {
   std::shared_ptr<CCA::CUDAAllocator> allocator;
   void* ptr;
@@ -432,20 +423,54 @@ struct Owned {
 
 void deleteOwned(void* ctx);
 
-// The current CUDA allocator after torch.cuda.memory._enable_graph_allocators.
-// It forwards everything to the native caching allocator (inner), except the
-// allocations inner would place into the pool of a capture given an allocator
-// (CUDAGraph::capture_begin(..., allocator)) while that capture is in
-// progress: the capture's allocator makes those, one call per allocation at
-// its exact size.
+// A layer over the native caching allocator (inner). A graph allocator window
+// (beginGraphAllocatorWindow, opened inside a CUDA graph capture) makes it the
+// current CUDA allocator until the window ends. It forwards everything to
+// inner, except the tensor allocations that inner would place into the pool of
+// the window's capture: the window's allocator makes those, one call per
+// allocation at its exact size.
 class LayeredAllocator final : public CCA::CUDAAllocator {
  public:
-  void install(CCA::CUDAAllocator* inner) {
-    inner_.store(inner);
+  void beginWindow(std::shared_ptr<CCA::CUDAAllocator> allocator) {
+    TORCH_CHECK(allocator, "a CUDA graph allocator window needs an allocator");
+    const c10::DeviceIndex device = c10::cuda::current_device();
+    const auto capture = c10::cuda::captureIdMayInitCtx(
+        c10::cuda::getCurrentCUDAStream(device).stream());
+    TORCH_CHECK(
+        capture.has_value(),
+        "a CUDA graph allocator window must be opened inside a CUDA graph "
+        "capture, on its capturing stream");
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto* current = CCA::allocator.load();
+    TORCH_CHECK(
+        current != this, "a CUDA graph allocator window is already open");
+    // The layer forwards to the caching allocator, which keeps owning
+    // everything allocated so far.
+    TORCH_CHECK(
+        current->name() == "native",
+        "CUDA graph allocator windows require the native CUDA caching "
+        "allocator, but the current allocator is '",
+        current->name(),
+        "'");
+    inner_.store(current);
+    window_ = Window{std::move(allocator), *capture, device};
+    active_.store(true, std::memory_order_relaxed);
     CCA::allocator.store(this);
   }
-  bool installed() const {
-    return CCA::allocator.load() == this;
+  // Idempotent. Returns whether another capture began or ended during the
+  // window.
+  bool endWindow() {
+    std::optional<Window> released; // dropped after the lock: may run Python
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (CCA::allocator.load() == this) {
+      CCA::allocator.store(inner());
+    }
+    active_.store(false, std::memory_order_relaxed);
+    released = std::move(window_);
+    window_.reset();
+    // a scope still open is older than the next window's capture
+    scopes_.clear();
+    return other_capture_.exchange(false);
   }
 
   c10::DataPtr allocate(size_t size) override {
@@ -461,9 +486,9 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
   }
   void recordStream(const c10::DataPtr& ptr, c10::cuda::CUDAStream stream)
       override {
-    // A capture allocator's tensor: its allocator handles the stream use (a
-    // CUDAPluggableAllocator passes it to its record_stream_fn, if set), as
-    // for any allocator's own tensors.
+    // A window allocator's tensor: its allocator handles the stream use (a
+    // CUDAPluggableAllocator passes it to its record_stream_fn, if set). After
+    // the window, the caching allocator ignores memory it does not own.
     if (ptr.get_deleter() == &deleteOwned) {
       static_cast<Owned*>(ptr.get_context())
           ->allocator->recordStream(ptr, stream);
@@ -472,46 +497,43 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
     inner()->recordStream(ptr, stream);
   }
 
-  // Called by CUDAGraph::capture_begin once the capture has begun, with the
-  // pool's allocation scope open (beginAllocateToPool allows one per pool).
-  void setPoolCaptureAllocator(
+  // Pool scopes opened during the window (use_mem_pool, NCCL and symmetric
+  // memory pools) are newer than the capture's own scope, so they win over it,
+  // as in inner's newest-first search: the layer keeps them to answer the same.
+  void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      CaptureId_t capture_id,
-      std::shared_ptr<CCA::CUDAAllocator> allocator) override {
-    TORCH_CHECK(allocator, "setPoolCaptureAllocator expects an allocator");
+      std::function<bool(cudaStream_t)> filter) override {
+    inner()->beginAllocateToPool(device, mempool_id, filter);
     std::lock_guard<std::mutex> lock(mutex_);
-    const bool inserted = claims_
-                              .try_emplace(
-                                  PoolKey{device, mempool_id},
-                                  Claim{std::move(allocator), capture_id})
-                              .second;
-    TORCH_INTERNAL_ASSERT(inserted, "a second claim on a CUDA graph pool");
-    active_.store(claims_.size(), std::memory_order_relaxed);
-  }
-  // For a capture abandoned before capture_end (CUDAGraph::reset).
-  void clearPoolCaptureAllocator(
-      c10::DeviceIndex device,
-      MempoolId_t mempool_id,
-      CaptureId_t capture_id) override {
-    std::vector<std::shared_ptr<CCA::CUDAAllocator>> released;
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto it = claims_.find({device, mempool_id});
-    if (it != claims_.end() && it->second.capture == capture_id) {
-      eraseLocked(it, released);
+    if (window_) {
+      scopes_.push_back(Scope{device, mempool_id, std::move(filter)});
     }
   }
-  size_t markCaptureEnd(c10::DeviceIndex device, CaptureId_t capture_id)
+  void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
       override {
-    if (C10_UNLIKELY(active_.load(std::memory_order_relaxed) != 0)) {
-      std::vector<std::shared_ptr<CCA::CUDAAllocator>> released;
-      std::lock_guard<std::mutex> lock(mutex_);
-      for (auto it = claims_.begin(); it != claims_.end();) {
-        it = it->second.capture == capture_id ? eraseLocked(it, released)
-                                              : std::next(it);
+    inner()->endAllocateToPool(device, mempool_id);
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+      if (it->device == device && it->pool == mempool_id) {
+        scopes_.erase(std::next(it).base());
+        break;
       }
     }
-    return inner()->markCaptureEnd(device, capture_id);
+  }
+  // These reach the layer only when another capture (e.g. a conditional
+  // node's body) begins or ends while it is current: CUDAGraphMemory sends the
+  // registration-aware hooks only to the native allocator. Not supported
+  // during a window: forwarded, so that the caching allocator's count of
+  // captures stays balanced, and reported when the window ends (raising here
+  // would leave the capture half begun).
+  void markCaptureBegin(c10::DeviceIndex device) override {
+    other_capture_.store(true);
+    inner()->markCaptureBegin(device);
+  }
+  void markCaptureEnd(c10::DeviceIndex device) override {
+    other_capture_.store(true);
+    inner()->markCaptureEnd(device);
   }
 
   // Everything else is inner's. A virtual added to CUDAAllocator (or its
@@ -585,37 +607,12 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
       snapshot,
       (MempoolId_t mempool_id, bool include_traces),
       (mempool_id, include_traces))
-  LAYERED_FORWARD(
-      void,
-      beginAllocateToPool,
-      (c10::DeviceIndex device,
-       MempoolId_t mempool_id,
-       std::function<bool(cudaStream_t)> filter),
-      (device, mempool_id, std::move(filter)))
-  LAYERED_FORWARD(
-      void,
-      endAllocateToPool,
-      (c10::DeviceIndex device, MempoolId_t mempool_id),
-      (device, mempool_id))
-  LAYERED_FORWARD(
-      void,
-      markCaptureBegin,
-      (c10::DeviceIndex device,
-       const c10::cuda::CUDAGraphMemory::CaptureRegistration& registration),
-      (device, registration))
-  LAYERED_FORWARD(void, markCaptureBegin, (c10::DeviceIndex device), (device))
-  LAYERED_FORWARD(void, markCaptureEnd, (c10::DeviceIndex device), (device))
   LAYERED_FORWARD(bool, isCaptureContext, (c10::DeviceIndex device), (device))
   LAYERED_FORWARD(
       void,
       releasePool,
       (c10::DeviceIndex device, MempoolId_t mempool_id),
       (device, mempool_id))
-  LAYERED_FORWARD(
-      MempoolId_t,
-      getAllocationPool,
-      (c10::DeviceIndex device, cudaStream_t stream),
-      (device, stream))
   LAYERED_FORWARD(
       int,
       getPoolUseCount,
@@ -772,10 +769,15 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
 #undef LAYERED_FORWARD
 
  private:
-  // The capture allocator of the capture in progress into a pool.
-  struct Claim {
+  struct Window {
     std::shared_ptr<CCA::CUDAAllocator> allocator;
     CaptureId_t capture;
+    c10::DeviceIndex device;
+  };
+  struct Scope {
+    c10::DeviceIndex device;
+    MempoolId_t pool;
+    std::function<bool(cudaStream_t)> filter;
   };
   struct Claimed {
     std::shared_ptr<CCA::CUDAAllocator> allocator;
@@ -787,43 +789,30 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
     return inner_.load(std::memory_order_relaxed);
   }
 
-  // The erased claim's allocator goes to `released`, to be dropped after the
-  // lock: dropping the last reference may run arbitrary (Python) code.
-  std::map<PoolKey, Claim>::iterator eraseLocked(
-      std::map<PoolKey, Claim>::iterator it,
-      std::vector<std::shared_ptr<CCA::CUDAAllocator>>& released) {
-    released.push_back(std::move(it->second.allocator));
-    it = claims_.erase(it);
-    active_.store(claims_.size(), std::memory_order_relaxed);
-    return it;
-  }
-
-  // The capture allocator serving an allocation of `size` on the current
-  // stream of the current device: inner would place it into the pool of a
-  // capture with an allocator in progress. One relaxed load while no such
-  // capture is in progress anywhere.
+  // The window's allocator, if inner would place an allocation of `size` on
+  // the current stream of the current device into the pool of the window's
+  // capture: no newer pool scope takes it, and the stream is capturing into
+  // that capture (the capture's own scope filter).
   std::optional<Claimed> claimant(size_t size) {
-    if (C10_LIKELY(active_.load(std::memory_order_relaxed) == 0) || size == 0) {
+    if (C10_LIKELY(!active_.load(std::memory_order_relaxed)) || size == 0) {
       return std::nullopt;
     }
     const c10::DeviceIndex device = c10::cuda::current_device();
     const cudaStream_t s = c10::cuda::getCurrentCUDAStream(device).stream();
-    // Only a capturing stream routes to a capture's pool: skip the caching
-    // allocator's scope lookup (its lock and filters) for the others.
-    if (c10::cuda::captureStatusMayInitCtx(s) ==
-        c10::cuda::CaptureStatus::None) {
-      return std::nullopt;
-    }
-    const MempoolId_t pool = inner()->getAllocationPool(device, s);
-    if (pool == MempoolId_t{0, 0}) {
-      return std::nullopt;
-    }
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = claims_.find({device, pool});
-    if (it == claims_.end()) {
+    if (!window_ || window_->device != device) {
       return std::nullopt;
     }
-    return Claimed{it->second.allocator, device, s};
+    for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
+      if (it->device == device && it->filter(s)) {
+        return std::nullopt;
+      }
+    }
+    const auto capture = c10::cuda::captureIdMayInitCtx(s);
+    if (!capture.has_value() || *capture != window_->capture) {
+      return std::nullopt;
+    }
+    return Claimed{window_->allocator, device, s};
   }
 
   static void* allocFrom(const Claimed& c, size_t size) {
@@ -837,15 +826,14 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
     TORCH_CHECK_WITH(
         OutOfMemoryError,
         ptr != nullptr,
-        "CUDA out of memory: the CUDA graph capture allocator returned null "
-        "for ",
+        "CUDA out of memory: the CUDA graph allocator returned null for ",
         size,
         " bytes");
     if (C10_UNLIKELY(reinterpret_cast<uintptr_t>(ptr) % 256 != 0)) {
       c.allocator->raw_delete(ptr);
       TORCH_CHECK(
           false,
-          "The CUDA graph capture allocator returned ",
+          "The CUDA graph allocator returned ",
           ptr,
           ", which is not aligned to 256 bytes");
     }
@@ -853,12 +841,17 @@ class LayeredAllocator final : public CCA::CUDAAllocator {
   }
 
   std::atomic<CCA::CUDAAllocator*> inner_{nullptr};
+  std::atomic<bool> active_{false};
+  std::atomic<bool> other_capture_{false};
   std::mutex mutex_;
-  std::map<PoolKey, Claim> claims_;
-  std::atomic<size_t> active_{0}; // claims_.size()
+  std::optional<Window> window_;
+  std::vector<Scope> scopes_;
 };
 
-// Never destroyed: once enabled, it stays the current allocator until exit.
+// Current only while a graph allocator window is open (a planned capture
+// runs). Never deleted, because storages created during a window keep a raw
+// pointer to it (the resize rule dynamic_casts it, and storage ops like
+// _lazy_clone call it).
 LayeredAllocator& layered() {
   static auto* allocator = new LayeredAllocator();
   return *allocator;
@@ -871,30 +864,13 @@ void deleteOwned(void* ctx) {
 
 } // namespace
 
-void enableGraphAllocators() {
-  auto& layer = layered();
-  if (layer.installed()) {
-    return;
-  }
-  static std::mutex enable_mutex;
-  std::lock_guard<std::mutex> lock(enable_mutex);
-  if (layer.installed()) {
-    return;
-  }
-  auto* current = c10::cuda::CUDACachingAllocator::allocator.load();
-  // Any time: the layer forwards to the caching allocator, which keeps owning
-  // everything allocated so far.
-  TORCH_CHECK(
-      current->name() == "native",
-      "CUDA graph allocators: the layer requires the native CUDA caching "
-      "allocator, but the current allocator is '",
-      current->name(),
-      "'");
-  layer.install(current);
+void beginGraphAllocatorWindow(
+    std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator) {
+  layered().beginWindow(std::move(allocator));
 }
 
-bool graphAllocatorsEnabled() {
-  return layered().installed();
+bool endGraphAllocatorWindow() {
+  return layered().endWindow();
 }
 
 } // namespace torch::cuda::CUDAPluggableAllocator

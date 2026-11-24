@@ -1436,6 +1436,18 @@ void callPythonDeallocator(
   }
 }
 
+void callPythonRecordStream(
+    const std::shared_ptr<c10::SafePyObject>& state,
+    void* ptr,
+    cudaStream_t stream) {
+  if (!Py_IsInitialized() || Py_IsFinalizing()) {
+    return;
+  }
+  py::gil_scoped_acquire gil;
+  py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 2))(
+      reinterpret_cast<uintptr_t>(ptr), reinterpret_cast<uintptr_t>(stream));
+}
+
 } // namespace
 
 static void registerCudaPluggableAllocator(PyObject* module) {
@@ -1457,8 +1469,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         torch::cuda::CUDAPluggableAllocator::changeCurrentAllocator(allocator);
       });
   m.def(
-      "_cuda_enableGraphAllocators",
-      &torch::cuda::CUDAPluggableAllocator::enableGraphAllocators);
+      "_cuda_beginGraphAllocatorWindow",
+      &torch::cuda::CUDAPluggableAllocator::beginGraphAllocatorWindow,
+      py::arg("allocator"));
+  m.def(
+      "_cuda_endGraphAllocatorWindow",
+      &torch::cuda::CUDAPluggableAllocator::endGraphAllocatorWindow);
   py::class_<
       torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator,
       c10::cuda::CUDACachingAllocator::CUDAAllocator,
@@ -1560,24 +1576,44 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   });
   m.def(
       "_cuda_createPythonAllocator",
-      [](py::object alloc_fn, py::object free_fn) {
+      [](py::object alloc_fn, py::object free_fn, py::object record_stream_fn) {
         TORCH_CHECK(
             PyCallable_Check(alloc_fn.ptr()),
             "alloc_fn must be a Python callable");
         TORCH_CHECK(
             PyCallable_Check(free_fn.ptr()),
             "free_fn must be a Python callable");
-        auto callbacks = py::make_tuple(alloc_fn, free_fn);
+        TORCH_CHECK(
+            record_stream_fn.is_none() ||
+                PyCallable_Check(record_stream_fn.ptr()),
+            "record_stream_fn must be a Python callable");
+        const bool has_record_stream = !record_stream_fn.is_none();
+        auto callbacks =
+            py::make_tuple(alloc_fn, free_fn, std::move(record_stream_fn));
         auto state = std::make_shared<c10::SafePyObject>(
             callbacks.release().ptr(), getPyInterpreter());
-        return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-            [state](size_t size, int device, cudaStream_t stream) {
-              return callPythonAllocator(state, size, device, stream);
-            },
-            [state](void* ptr, size_t size, int device, cudaStream_t stream) {
-              callPythonDeallocator(state, ptr, size, device, stream);
-            });
-      });
+        auto allocator =
+            torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+                [state](size_t size, int device, cudaStream_t stream) {
+                  return callPythonAllocator(state, size, device, stream);
+                },
+                [state](
+                    void* ptr, size_t size, int device, cudaStream_t stream) {
+                  callPythonDeallocator(state, ptr, size, device, stream);
+                });
+        if (has_record_stream) {
+          std::static_pointer_cast<
+              torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator>(
+              allocator)
+              ->set_record_stream_fn([state](void* ptr, cudaStream_t stream) {
+                callPythonRecordStream(state, ptr, stream);
+              });
+        }
+        return allocator;
+      },
+      py::arg("alloc_fn"),
+      py::arg("free_fn"),
+      py::arg("record_stream_fn") = py::none());
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
@@ -1602,31 +1638,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
-  m.def(
-      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
-        t.unsafeGetTensorImpl()
-            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
-      });
-
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
-
-  m.def(
-      "_tensors_data_ptrs_at_indices_equal",
-      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
-        for (auto index : indices) {
-          auto t = tensors[index].cast<at::Tensor>();
-          auto data_ptr = data_ptrs[index].cast<int64_t>();
-          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
-            return false;
-          }
-        }
-        return true;
-      });
 
   m.def(
       "_construct_CUDA_Tensor_From_Storage_And_Metadata",

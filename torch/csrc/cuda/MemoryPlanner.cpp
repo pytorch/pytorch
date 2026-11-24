@@ -12,14 +12,12 @@
 // free frontier is an ancestor of (or equal to) a node of j's allocation
 // frontier.
 //
-// The conflicts are computed once, in parallel. A fixed portfolio of
-// strategies (first and best fit over a few orders) then runs in parallel; the
-// plan used is validated against the rule above, re-evaluated from the inputs
-// (not from the conflict matrix).
-//
-// The strategy interface below is internal. A public API for custom planning
-// strategies (e.g. from C++ extensions) is planned as a follow-up; the
-// interface is kept so that it can be exposed later.
+// The conflicts are computed once, in parallel. Two strategies then run in
+// parallel: first fit, largest allocation first ("size"), and best fit,
+// largest breadth (the most bytes live during the allocation's lifetime) first
+// ("breadth/best"). The smaller plan is used, ties going to "size"; it is
+// validated against the rule above, re-evaluated from the inputs (not from the
+// conflict matrix).
 
 #include <ATen/Parallel.h>
 #include <c10/util/CallOnce.h>
@@ -32,12 +30,11 @@
 #include <cstdint>
 #include <exception>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <numeric>
-#include <optional>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -66,102 +63,80 @@ struct ProblemInput {
   std::vector<int64_t> edges;
 };
 
-class GraphMemoryStrategy;
+// The strategies, in tie-breaking order.
+constexpr const char* kStrategies[] = {"size", "breadth/best"};
 
-struct StrategyResult {
-  std::string name;
+struct Plan {
+  std::string strategy;
   int64_t arena = 0;
   std::vector<int64_t> offsets;
 };
 
-// What a strategy sees: the allocations and which pairs conflict.
+// The allocations and which pairs conflict.
 class PlanningProblem {
  public:
   // Computes the conflicts in parallel (the intra-op thread count, at most
   // 32 threads).
   explicit PlanningProblem(ProblemInput input);
-  ~PlanningProblem();
-  PlanningProblem(const PlanningProblem&) = delete;
-  PlanningProblem& operator=(const PlanningProblem&) = delete;
 
-  int64_t numAllocations() const;
-  const std::vector<int64_t>& sizes() const;
-  const std::vector<int64_t>& allocTimes() const;
-  const std::vector<int64_t>& freeTimes() const; // < 0: live at the end
-  int64_t alignment() const; // of every offset: 256 bytes
+  int64_t numAllocations() const {
+    return n;
+  }
   // whether allocations i and j may be in use at the same time
   bool conflict(int64_t i, int64_t j) const;
-  // the conflicts of i as a bitset over j, in words of 64
-  const uint64_t* conflictRow(int64_t i) const;
 
-  // Runs the strategies in parallel and returns the plan with the smallest
-  // arena, ties going to the earlier strategy, after validating it (throws if
-  // it is invalid).
-  StrategyResult plan(
-      const std::vector<std::shared_ptr<GraphMemoryStrategy>>& strategies)
-      const;
+  // Runs the strategies in parallel and keeps the plan with the smallest
+  // arena, ties going to the earlier strategy. Validates the plan returned
+  // (throws if it is invalid).
+  Plan plan() const;
   // Checks offsets (one per allocation, aligned, and no two conflicting
   // allocations overlap); throws with the first violation found. Returns the
   // arena size.
-  int64_t validate(const std::vector<int64_t>& offsets) const;
-
-  // weight of a clique of the conflict graph: no valid plan is smaller
-  int64_t lowerBound() const;
-
- private:
-  struct Impl;
-  std::unique_ptr<Impl> impl_;
-  friend class FirstFit;
-  friend class BestFit;
-};
-
-// A planning algorithm. plan() returns one offset per allocation, each a
-// multiple of the alignment; it runs without the GIL, possibly concurrently
-// with other strategies on the same problem, and the plan used is validated.
-class GraphMemoryStrategy {
- public:
-  virtual ~GraphMemoryStrategy() = default;
-  virtual std::string name() const = 0;
-  virtual std::vector<int64_t> plan(const PlanningProblem& problem) const = 0;
-};
-
-// The orders in which the built-in strategies place allocations.
-enum class Order : int8_t {
-  Size, // largest first
-  // largest first, then the largest total size of conflicting allocations
-  SizeWDegree,
-  Breadth, // largest total size live during its lifetime first
-};
-Order parseOrder(const std::string& name);
-const char* orderName(Order order);
-
-// Places the allocations one at a time in `order`, each at the lowest offset
-// that does not overlap a placed allocation it conflicts with.
-class FirstFit : public GraphMemoryStrategy {
- public:
-  explicit FirstFit(const std::string& order = "size");
-  Order order() const {
-    return order_;
+  int64_t validate(const std::vector<int64_t>& offsets) const {
+    return validateWith(offsets, threads, "invalid memory plan");
   }
-  std::string name() const override;
-  std::vector<int64_t> plan(const PlanningProblem& problem) const override;
 
  private:
-  Order order_;
-};
+  ProblemInput in;
+  int64_t n = 0;
+  int64_t threads = 1;
+  // the closures of the allocation frontiers over the nodes that appear in a
+  // free frontier ("columns"), stored by column: bit j of column c's row is
+  // set if c is an ancestor of (or in) allocation j's frontier;
+  // num_columns x words
+  int64_t num_columns = 0;
+  std::vector<uint64_t> closure;
+  // free frontiers as column indices; CSR
+  std::vector<int64_t> free_col_ptr, free_col;
+  // dense conflict bit matrix, n x words
+  int64_t words = 0;
+  std::vector<uint64_t> bits;
+  // the host time after the last event
+  int64_t end_time = 0;
+  mutable c10::once_flag breadth_once;
+  mutable std::vector<int64_t> breadth;
 
-// Like FirstFit, but each allocation takes the smallest gap that holds it.
-class BestFit : public GraphMemoryStrategy {
- public:
-  explicit BestFit(const std::string& order = "size");
-  Order order() const {
-    return order_;
+  const uint64_t* row(int64_t i) const {
+    return bits.data() + i * words;
   }
-  std::string name() const override;
-  std::vector<int64_t> plan(const PlanningProblem& problem) const override;
+  int64_t freeTime(int64_t i) const {
+    return in.free_time[i] < 0 ? end_time : in.free_time[i];
+  }
 
- private:
-  Order order_;
+  void check();
+  void computeClosures();
+  void computeConflicts();
+  bool conflictDirect(int64_t i, int64_t j) const;
+  void ensureBreadth() const;
+  Plan run(int64_t strategy) const;
+  int64_t place(
+      const std::vector<int64_t>& order,
+      bool best_fit,
+      std::vector<int64_t>& offsets) const;
+  int64_t validateWith(
+      const std::vector<int64_t>& offsets,
+      int64_t num_threads,
+      const std::string& what) const;
 };
 
 namespace {
@@ -189,6 +164,19 @@ void setBits(uint64_t* words, int64_t a, int64_t b) {
   }
   while (a < b) {
     setBit(words, a++);
+  }
+}
+
+// Transposes a 64 x 64 bit matrix in place: bit c of a[r] becomes bit r of
+// a[c].
+inline void transpose64(uint64_t* a) {
+  uint64_t m = 0x00000000FFFFFFFFULL;
+  for (int j = 32; j != 0; j >>= 1, m ^= (m << j)) {
+    for (int k = 0; k < 64; k = ((k | j) + 1) & ~j) {
+      const uint64_t t = ((a[k] >> j) ^ a[k | j]) & m;
+      a[k] ^= t << j;
+      a[k | j] ^= t;
+    }
   }
 }
 
@@ -231,12 +219,6 @@ void parallelTasks(
   }
 }
 
-constexpr std::pair<const char*, Order> kOrders[] = {
-    {"size", Order::Size},
-    {"size_wdegree", Order::SizeWDegree},
-    {"breadth", Order::Breadth},
-};
-
 // Placed allocations sorted by (offset, end), so that a placement walks them
 // in address order.
 struct Placed {
@@ -250,78 +232,7 @@ struct Placed {
 
 } // namespace
 
-Order parseOrder(const std::string& name) {
-  for (const auto& [n, o] : kOrders) {
-    if (name == n) {
-      return o;
-    }
-  }
-  std::ostringstream valid;
-  for (const auto& [n, o] : kOrders) {
-    valid << " " << n;
-  }
-  TORCH_CHECK_VALUE(
-      false,
-      "unknown memory planning order '",
-      name,
-      "'; valid orders:",
-      valid.str());
-}
-
-const char* orderName(Order order) {
-  for (const auto& [n, o] : kOrders) {
-    if (o == order) {
-      return n;
-    }
-  }
-  return "";
-}
-
-struct PlanningProblem::Impl {
-  ProblemInput in;
-  int64_t n = 0;
-  int64_t threads = 1;
-  // closures of the allocation frontiers, as bitsets over the nodes that
-  // appear in a free frontier ("columns"); n x closure_words
-  int64_t closure_words = 0;
-  std::vector<uint64_t> closure;
-  // free frontiers as column indices; CSR
-  std::vector<int64_t> free_col_ptr, free_col;
-  // dense conflict bit matrix, n x words
-  int64_t words = 0;
-  std::vector<uint64_t> bits;
-  // the host time after the last event
-  int64_t end_time = 0;
-  mutable c10::once_flag wdegree_once, breadth_once, bound_once;
-  mutable std::vector<int64_t> wdegree, breadth;
-  mutable int64_t bound = 0;
-
-  const uint64_t* row(int64_t i) const {
-    return bits.data() + i * words;
-  }
-
-  int64_t freeTime(int64_t i) const {
-    return in.free_time[i] < 0 ? end_time : in.free_time[i];
-  }
-
-  void check();
-  void computeClosures();
-  void computeConflicts();
-  bool conflictDirect(int64_t i, int64_t j) const;
-  void ensureWDegree() const;
-  void ensureBreadth() const;
-  std::vector<int64_t> visitOrder(Order order) const;
-  int64_t place(
-      const std::vector<int64_t>& order,
-      bool best_fit,
-      std::vector<int64_t>& offsets) const;
-  int64_t validate(
-      const std::vector<int64_t>& offsets,
-      int64_t num_threads,
-      const std::string& what) const;
-};
-
-void PlanningProblem::Impl::check() {
+void PlanningProblem::check() {
   n = static_cast<int64_t>(in.size.size());
   TORCH_CHECK(in.num_nodes >= 0, "negative number of graph nodes");
   for (auto* v : {&in.alloc_time, &in.free_time}) {
@@ -364,10 +275,10 @@ void PlanningProblem::Impl::check() {
   }
 }
 
-void PlanningProblem::Impl::computeClosures() {
+void PlanningProblem::computeClosures() {
   // columns: the distinct nodes that appear in a free frontier
   std::vector<int64_t> column(in.num_nodes, -1);
-  int64_t num_columns = 0;
+  num_columns = 0;
   free_col_ptr.assign(n + 1, 0);
   free_col.clear();
   free_col.reserve(in.free_nodes.size());
@@ -381,14 +292,14 @@ void PlanningProblem::Impl::computeClosures() {
     }
     free_col_ptr[i + 1] = static_cast<int64_t>(free_col.size());
   }
-  closure_words = (num_columns + 63) / 64;
-  closure.assign(n * closure_words, 0);
-  if (closure_words == 0) {
+  words = (n + 63) / 64;
+  closure.assign(num_columns * words, 0);
+  if (num_columns == 0) {
     return;
   }
   // per node: bitset of the columns that are the node itself or an ancestor
   const int64_t nodes = in.num_nodes;
-  const int64_t w = closure_words;
+  const int64_t w = (num_columns + 63) / 64;
   std::vector<uint64_t> node_bits(nodes * w, 0);
   const auto m = static_cast<int64_t>(in.edges.size() / 2);
   std::vector<int64_t> child_ptr(nodes + 1, 0), child(m), indegree(nodes, 0);
@@ -430,9 +341,15 @@ void PlanningProblem::Impl::computeClosures() {
     }
   }
   TORCH_CHECK(visited == nodes, "the captured graph has a cycle");
-  parallelTasks((n + 255) / 256, threads, [&](int64_t block) {
-    for (int64_t i = block * 256; i < std::min(n, (block + 1) * 256); i++) {
-      uint64_t* ci = closure.data() + i * w;
+  // per block of 64 allocations: their closures over the columns (the union
+  // of their frontier nodes' bits), transposed 64 x 64 bits at a time into
+  // the columns' rows (word `block` of each)
+  parallelTasks(words, threads, [&](int64_t block) {
+    const int64_t first = block * 64, count = std::min<int64_t>(64, n - first);
+    std::vector<uint64_t> rows(64 * w, 0);
+    for (int64_t r = 0; r < count; r++) {
+      const int64_t i = first + r;
+      uint64_t* ci = rows.data() + r * w;
       for (int64_t e = in.alloc_nodes_ptr[i]; e < in.alloc_nodes_ptr[i + 1];
            e++) {
         const uint64_t* bv = node_bits.data() + in.alloc_nodes[e] * w;
@@ -441,10 +358,20 @@ void PlanningProblem::Impl::computeClosures() {
         }
       }
     }
+    uint64_t a[64];
+    for (int64_t k = 0; k < w; k++) {
+      for (int64_t r = 0; r < 64; r++) {
+        a[r] = rows[r * w + k];
+      }
+      transpose64(a);
+      for (int64_t c = 0; c < 64 && k * 64 + c < num_columns; c++) {
+        closure[(k * 64 + c) * words + block] = a[c];
+      }
+    }
   });
 }
 
-bool PlanningProblem::Impl::conflictDirect(int64_t i, int64_t j) const {
+bool PlanningProblem::conflictDirect(int64_t i, int64_t j) const {
   if (i == j) {
     return false;
   }
@@ -455,16 +382,15 @@ bool PlanningProblem::Impl::conflictDirect(int64_t i, int64_t j) const {
   if (in.free_time[i] < 0 || in.free_time[i] > in.alloc_time[j]) {
     return true;
   }
-  const uint64_t* cj = closure.data() + j * closure_words;
   for (int64_t e = free_col_ptr[i]; e < free_col_ptr[i + 1]; e++) {
-    if (!testBit(cj, free_col[e])) {
+    if (!testBit(closure.data() + free_col[e] * words, j)) {
       return true;
     }
   }
   return false;
 }
 
-void PlanningProblem::Impl::computeConflicts() {
+void PlanningProblem::computeConflicts() {
   words = (n + 63) / 64;
   bits.assign(static_cast<size_t>(n) * words, 0);
   // upper triangle: row i owns bits j > i. Rows are paired (i, n - 1 - i) so
@@ -482,10 +408,23 @@ void PlanningProblem::Impl::computeConflicts() {
                                  in.free_time[i]) -
         in.alloc_time.begin();
     setBits(r, i + 1, host_end);
-    for (int64_t j = host_end; j < n; j++) {
-      if (conflictDirect(i, j)) {
-        setBit(r, j);
+    // later: j conflicts unless every node of i's free frontier is in j's
+    // closure (conflictDirect), a word of j's at a time
+    if (free_col_ptr[i] == free_col_ptr[i + 1] || host_end >= n) {
+      return;
+    }
+    for (int64_t k = host_end >> 6; k < words; k++) {
+      uint64_t x = 0;
+      for (int64_t e = free_col_ptr[i]; e < free_col_ptr[i + 1]; e++) {
+        x |= ~closure[free_col[e] * words + k];
       }
+      if (k == (host_end >> 6)) {
+        x &= ~uint64_t(0) << (host_end & 63);
+      }
+      if (k == words - 1 && (n & 63)) {
+        x &= (uint64_t(1) << (n & 63)) - 1;
+      }
+      r[k] |= x;
     }
   };
   parallelTasks((n + 1) / 2, threads, [&](int64_t t) {
@@ -494,41 +433,27 @@ void PlanningProblem::Impl::computeConflicts() {
       upper(n - 1 - t);
     }
   });
-  // mirror into the lower triangle: row j reads bit (i, j) of rows i < j
-  parallelTasks((n + 63) / 64, threads, [&](int64_t block) {
-    for (int64_t j = block * 64; j < std::min(n, (block + 1) * 64); j++) {
-      uint64_t* r = bits.data() + j * words;
-      for (int64_t i = 0; i < j; i++) {
-        if (testBit(row(i), j)) {
-          setBit(r, i);
-        }
+  // mirror into the lower triangle, 64 x 64 bits at a time: the rows of
+  // block jb get word ib <= jb from word jb of block ib's rows (which are only
+  // read at words > their own block, or by this task on the diagonal)
+  parallelTasks(words, threads, [&](int64_t jb) {
+    uint64_t a[64];
+    for (int64_t ib = 0; ib <= jb; ib++) {
+      for (int64_t r = 0; r < 64; r++) {
+        const int64_t i = ib * 64 + r;
+        a[r] = i < n ? bits[i * words + jb] : 0;
+      }
+      transpose64(a);
+      for (int64_t c = 0; c < 64 && jb * 64 + c < n; c++) {
+        bits[(jb * 64 + c) * words + ib] |= a[c];
       }
     }
   });
 }
 
-// For each allocation, the total size of the allocations it conflicts with.
-void PlanningProblem::Impl::ensureWDegree() const {
-  c10::call_once(wdegree_once, [&] {
-    wdegree.assign(n, 0);
-    parallelTasks((n + 63) / 64, threads, [&](int64_t block) {
-      for (int64_t i = block * 64; i < std::min(n, (block + 1) * 64); i++) {
-        const uint64_t* r = row(i);
-        int64_t w = 0;
-        for (int64_t k = 0; k < words; k++) {
-          for (uint64_t x = r[k]; x; x &= x - 1) {
-            w += in.size[k * 64 + std::countr_zero(x)];
-          }
-        }
-        wdegree[i] = w;
-      }
-    });
-  });
-}
-
 // For each allocation, the largest total size live (in host order) at any time
 // during its lifetime (TFLite's "greedy by breadth").
-void PlanningProblem::Impl::ensureBreadth() const {
+void PlanningProblem::ensureBreadth() const {
   c10::call_once(breadth_once, [&] {
     std::vector<int64_t> times;
     times.reserve(2 * n);
@@ -571,76 +496,130 @@ void PlanningProblem::Impl::ensureBreadth() const {
   });
 }
 
-std::vector<int64_t> PlanningProblem::Impl::visitOrder(Order order) const {
-  std::vector<int64_t> o(n);
-  std::iota(o.begin(), o.end(), 0);
+// Strategy `s` of kStrategies: "size" places the largest allocations first,
+// at the lowest offset that fits; "breadth/best" places those with the most
+// bytes live during their lifetime first, in the smallest gap that fits.
+Plan PlanningProblem::run(int64_t s) const {
+  std::vector<int64_t> order(n);
+  std::iota(order.begin(), order.end(), 0);
   const auto& S = in.size;
   const auto& A = in.alloc_time;
-  auto sort_by = [&](auto key) {
-    std::stable_sort(o.begin(), o.end(), [&](int64_t a, int64_t b) {
-      return key(a) < key(b);
-    });
-  };
-  switch (order) {
-    case Order::Size:
-      sort_by([&](int64_t i) { return std::make_tuple(-S[i], A[i]); });
-      break;
-    case Order::SizeWDegree:
-      ensureWDegree();
-      sort_by(
-          [&](int64_t i) { return std::make_tuple(-S[i], -wdegree[i], A[i]); });
-      break;
-    case Order::Breadth:
-      ensureBreadth();
-      sort_by(
-          [&](int64_t i) { return std::make_tuple(-breadth[i], -S[i], A[i]); });
-      break;
+  const bool by_breadth = s == 1;
+  if (by_breadth) {
+    ensureBreadth();
   }
-  return o;
+  std::stable_sort(order.begin(), order.end(), [&](int64_t a, int64_t b) {
+    return by_breadth
+        ? std::make_tuple(-breadth[a], -S[a], A[a]) <
+            std::make_tuple(-breadth[b], -S[b], A[b])
+        : std::make_tuple(-S[a], A[a]) < std::make_tuple(-S[b], A[b]);
+  });
+  Plan r;
+  r.strategy = kStrategies[s];
+  r.arena = place(order, /*best_fit=*/by_breadth, r.offsets);
+  return r;
 }
 
 // One greedy pass over `order`. First fit: the lowest offset that does not
 // overlap a placed allocation it conflicts with. Best fit: the smallest such
 // gap that holds it (the space above everything counts as an infinite gap).
-int64_t PlanningProblem::Impl::place(
+int64_t PlanningProblem::place(
     const std::vector<int64_t>& order,
     bool best_fit,
     std::vector<int64_t>& offsets) const {
   const int64_t align = kAlignment;
   offsets.assign(n, 0);
+  // the placed allocations: a bitset, and their intervals in address order
+  std::vector<uint64_t> placed(words, 0);
   Placed p(n);
+  std::vector<std::pair<int64_t, int64_t>> conflicting; // (lo, hi)
   int64_t arena = 0;
+  // the fits, over the placed allocations k conflicts with in address order
+  // (they do not depend on how intervals that start at the same address are
+  // ordered)
+  auto first_fit = [&](int64_t sz, auto&& each) {
+    int64_t offset = 0;
+    each([&](int64_t lo, int64_t hi) {
+      if (offset + sz <= lo) {
+        return false; // later ones start at or above lo
+      }
+      if (hi > offset) {
+        offset = alignUp(hi, align);
+      }
+      return true;
+    });
+    return offset;
+  };
+  auto best = [&](int64_t sz, auto&& each) {
+    int64_t cur = 0, best_gap = std::numeric_limits<int64_t>::max(),
+            best_off = -1;
+    each([&](int64_t lo, int64_t hi) {
+      if (lo > cur) {
+        const int64_t gap = lo - cur;
+        if (gap >= sz && gap < best_gap) {
+          best_gap = gap;
+          best_off = cur;
+        }
+      }
+      cur = std::max(cur, alignUp(hi, align));
+      return true;
+    });
+    return best_off >= 0 ? best_off : cur;
+  };
   for (const int64_t k : order) {
     const int64_t sz = in.size[k];
     const uint64_t* r = row(k);
+    int64_t c = 0;
+    for (int64_t w = 0; w < words; w++) {
+      c += std::popcount(r[w] & placed[w]);
+    }
+    // The conflicting placed allocations can be gathered from k's row and
+    // sorted (about c log c), or filtered from all the placed intervals in
+    // address order (up to all of them; first fit stops at the first gap that
+    // fits). First fit tries the filter within the gather's budget.
+    const int64_t gather_cost =
+        words + 4 * c * (64 - std::countl_zero(static_cast<uint64_t>(c)));
     const auto m = static_cast<int64_t>(p.id.size());
+    auto filtered = [&](int64_t budget, auto&& visit) {
+      for (int64_t q = 0; q < m; q++) {
+        if (q >= budget) {
+          return false;
+        }
+        if (testBit(r, p.id[q]) && !visit(p.lo[q], p.hi[q])) {
+          break;
+        }
+      }
+      return true;
+    };
+    auto gathered = [&](auto&& visit) {
+      conflicting.clear();
+      for (int64_t w = 0; w < words; w++) {
+        for (uint64_t x = r[w] & placed[w]; x; x &= x - 1) {
+          const int64_t j = w * 64 + std::countr_zero(x);
+          conflicting.emplace_back(offsets[j], offsets[j] + in.size[j]);
+        }
+      }
+      std::sort(conflicting.begin(), conflicting.end());
+      for (const auto& [lo, hi] : conflicting) {
+        if (!visit(lo, hi)) {
+          break;
+        }
+      }
+    };
     int64_t offset = 0;
     if (!best_fit) {
-      for (int64_t q = 0; q < m; q++) {
-        if (offset + sz <= p.lo[q]) {
-          break; // later ones start at or above p.lo[q]
-        }
-        if (p.hi[q] > offset && testBit(r, p.id[q])) {
-          offset = alignUp(p.hi[q], align);
-        }
+      bool done = false;
+      offset = first_fit(
+          sz, [&](auto&& visit) { done = filtered(gather_cost, visit); });
+      if (!done) {
+        offset = first_fit(sz, gathered);
       }
+    } else if (gather_cost < m) {
+      offset = best(sz, gathered);
     } else {
-      int64_t cur = 0, best_gap = std::numeric_limits<int64_t>::max(),
-              best_off = -1;
-      for (int64_t q = 0; q < m; q++) {
-        if (!testBit(r, p.id[q])) {
-          continue;
-        }
-        if (p.lo[q] > cur) {
-          const int64_t gap = p.lo[q] - cur;
-          if (gap >= sz && gap < best_gap) {
-            best_gap = gap;
-            best_off = cur;
-          }
-        }
-        cur = std::max(cur, alignUp(p.hi[q], align));
-      }
-      offset = best_off >= 0 ? best_off : cur;
+      offset = best(sz, [&](auto&& visit) {
+        filtered(std::numeric_limits<int64_t>::max(), visit);
+      });
     }
     offsets[k] = offset;
     const int64_t end = offset + sz;
@@ -652,12 +631,13 @@ int64_t PlanningProblem::Impl::place(
     p.id.insert(p.id.begin() + pos, k);
     p.lo.insert(p.lo.begin() + pos, offset);
     p.hi.insert(p.hi.begin() + pos, end);
+    setBit(placed.data(), k);
     arena = std::max(arena, end);
   }
   return arena;
 }
 
-int64_t PlanningProblem::Impl::validate(
+int64_t PlanningProblem::validateWith(
     const std::vector<int64_t>& offsets,
     int64_t num_threads,
     const std::string& what) const {
@@ -735,212 +715,35 @@ int64_t PlanningProblem::Impl::validate(
   return arena;
 }
 
-PlanningProblem::PlanningProblem(ProblemInput input)
-    : impl_(std::make_unique<Impl>()) {
-  impl_->in = std::move(input);
+PlanningProblem::PlanningProblem(ProblemInput input) : in(std::move(input)) {
   // the phases take milliseconds: more threads than this only add overhead
   constexpr int64_t kMaxThreads = 32;
-  impl_->threads = std::min<int64_t>(at::get_num_threads(), kMaxThreads);
-  impl_->check();
-  impl_->computeClosures();
-  impl_->computeConflicts();
-}
-
-PlanningProblem::~PlanningProblem() = default;
-
-int64_t PlanningProblem::numAllocations() const {
-  return impl_->n;
-}
-
-const std::vector<int64_t>& PlanningProblem::sizes() const {
-  return impl_->in.size;
-}
-
-const std::vector<int64_t>& PlanningProblem::allocTimes() const {
-  return impl_->in.alloc_time;
-}
-
-const std::vector<int64_t>& PlanningProblem::freeTimes() const {
-  return impl_->in.free_time;
-}
-
-int64_t PlanningProblem::alignment() const {
-  return kAlignment;
+  threads = std::min<int64_t>(at::get_num_threads(), kMaxThreads);
+  check();
+  computeClosures();
+  computeConflicts();
 }
 
 bool PlanningProblem::conflict(int64_t i, int64_t j) const {
-  TORCH_CHECK(i >= 0 && i < impl_->n && j >= 0 && j < impl_->n);
-  return testBit(impl_->row(i), j);
+  TORCH_CHECK(i >= 0 && i < n && j >= 0 && j < n);
+  return testBit(row(i), j);
 }
 
-const uint64_t* PlanningProblem::conflictRow(int64_t i) const {
-  TORCH_CHECK(i >= 0 && i < impl_->n);
-  return impl_->row(i);
-}
-
-StrategyResult PlanningProblem::plan(
-    const std::vector<std::shared_ptr<GraphMemoryStrategy>>& strategies) const {
-  TORCH_CHECK(!strategies.empty(), "no memory planning strategy");
-  const auto& d = *impl_;
-  std::vector<StrategyResult> results(strategies.size());
-  const auto num = static_cast<int64_t>(strategies.size());
-  parallelTasks(num, d.threads, [&](int64_t s) {
-    auto& r = results[s];
-    r.name = strategies[s]->name();
-    r.offsets = strategies[s]->plan(*this);
-    TORCH_CHECK(
-        static_cast<int64_t>(r.offsets.size()) == d.n,
-        "invalid memory plan from strategy '",
-        r.name,
-        "': ",
-        r.offsets.size(),
-        " offsets for ",
-        d.n,
-        " allocations");
-    for (int64_t i = 0; i < d.n; i++) {
-      r.arena = std::max(r.arena, r.offsets[i] + d.in.size[i]);
-    }
-  });
+Plan PlanningProblem::plan() const {
+  constexpr auto num = static_cast<int64_t>(std::size(kStrategies));
+  std::vector<Plan> results(num);
+  parallelTasks(num, threads, [&](int64_t s) { results[s] = run(s); });
   // the first of the smallest
   auto best = std::min_element(
       results.begin(), results.end(), [](const auto& a, const auto& b) {
         return a.arena < b.arena;
       });
   // only the plan used is validated
-  d.validate(
+  validateWith(
       best->offsets,
-      d.threads,
-      "invalid memory plan from strategy '" + best->name + "'");
+      threads,
+      "invalid memory plan from strategy '" + best->strategy + "'");
   return std::move(*best);
-}
-
-namespace {
-
-// "<order>" is FirstFit(order) and "<order>/best" is BestFit(order).
-std::shared_ptr<GraphMemoryStrategy> makeStrategy(const std::string& name) {
-  const auto slash = name.find('/');
-  const std::string order = name.substr(0, slash);
-  if (slash == std::string::npos) {
-    return std::make_shared<FirstFit>(order);
-  }
-  TORCH_CHECK_VALUE(
-      name.substr(slash) == "/best",
-      "unknown memory planning strategy '",
-      name,
-      "'; expected '<order>' or '<order>/best'");
-  return std::make_shared<BestFit>(order);
-}
-
-// The strategies MemoryPlannedGraph runs. On 105 plans recorded from training
-// steps of Llama 3 (70B, 405B), Qwen 3.5 (27B, 397B) and DeepSeek V3/V4
-// models, these give the best arena of 22 strategies (first and best fit over
-// eleven orders) on every plan.
-std::vector<std::shared_ptr<GraphMemoryStrategy>> defaultStrategies() {
-  std::vector<std::shared_ptr<GraphMemoryStrategy>> strategies;
-  for (const char* name :
-       {"size", "size/best", "size_wdegree", "breadth", "breadth/best"}) {
-    strategies.push_back(makeStrategy(name));
-  }
-  return strategies;
-}
-
-} // namespace
-
-int64_t PlanningProblem::validate(const std::vector<int64_t>& offsets) const {
-  return impl_->validate(offsets, impl_->threads, "invalid memory plan");
-}
-
-// A clique of the conflict graph: its members must be pairwise disjoint, so
-// their total size bounds any plan from below. Seeds are the sets live at the
-// heaviest host times (pairwise conflicting by the host-order rule), each grown
-// greedily, largest first, by allocations that conflict with every member.
-int64_t PlanningProblem::lowerBound() const {
-  auto& d = *impl_;
-  c10::call_once(d.bound_once, [&] {
-    const int64_t n = d.n;
-    std::vector<std::pair<int64_t, int64_t>> events; // (time, delta)
-    for (int64_t i = 0; i < n; i++) {
-      events.emplace_back(d.in.alloc_time[i], d.in.size[i]);
-      if (d.in.free_time[i] >= 0) {
-        events.emplace_back(d.in.free_time[i], -d.in.size[i]);
-      }
-    }
-    std::sort(events.begin(), events.end());
-    // live bytes right after each allocation
-    std::vector<std::pair<int64_t, int64_t>> live_at; // (-live, time)
-    int64_t live = 0;
-    for (size_t e = 0; e < events.size(); e++) {
-      live += events[e].second;
-      if (events[e].second > 0 &&
-          (e + 1 == events.size() || events[e + 1].first != events[e].first)) {
-        live_at.emplace_back(-live, events[e].first);
-      }
-    }
-    std::sort(live_at.begin(), live_at.end());
-    const int64_t seeds = std::min<int64_t>(64, live_at.size());
-    std::vector<int64_t> by_size(n);
-    std::iota(by_size.begin(), by_size.end(), 0);
-    std::stable_sort(by_size.begin(), by_size.end(), [&](int64_t a, int64_t b) {
-      return d.in.size[a] > d.in.size[b];
-    });
-    std::vector<int64_t> weight(seeds, 0);
-    parallelTasks(seeds, d.threads, [&](int64_t s) {
-      const int64_t t = live_at[s].second;
-      std::vector<uint64_t> cand(d.words, ~uint64_t(0));
-      if (n % 64) {
-        cand.back() = (uint64_t(1) << (n % 64)) - 1;
-      }
-      int64_t w = 0;
-      auto add = [&](int64_t k) {
-        w += d.in.size[k];
-        const uint64_t* r = d.row(k);
-        for (int64_t q = 0; q < d.words; q++) {
-          cand[q] &= r[q];
-        }
-      };
-      std::vector<int64_t> members;
-      for (int64_t i = 0; i < n && d.in.alloc_time[i] <= t; i++) {
-        if (d.in.free_time[i] < 0 || d.in.free_time[i] > t) {
-          members.push_back(i);
-        }
-      }
-      for (const int64_t k : members) {
-        add(k);
-      }
-      for (const int64_t k : by_size) {
-        if (testBit(cand.data(), k)) {
-          add(k);
-        }
-      }
-      weight[s] = w;
-    });
-    d.bound = seeds ? *std::max_element(weight.begin(), weight.end()) : 0;
-  });
-  return d.bound;
-}
-
-FirstFit::FirstFit(const std::string& order) : order_(parseOrder(order)) {}
-
-std::string FirstFit::name() const {
-  return orderName(order_);
-}
-
-std::vector<int64_t> FirstFit::plan(const PlanningProblem& problem) const {
-  std::vector<int64_t> offsets;
-  problem.impl_->place(problem.impl_->visitOrder(order_), false, offsets);
-  return offsets;
-}
-
-BestFit::BestFit(const std::string& order) : order_(parseOrder(order)) {}
-
-std::string BestFit::name() const {
-  return std::string(orderName(order_)) + "/best";
-}
-
-std::vector<int64_t> BestFit::plan(const PlanningProblem& problem) const {
-  std::vector<int64_t> offsets;
-  problem.impl_->place(problem.impl_->visitOrder(order_), true, offsets);
-  return offsets;
 }
 
 // Python binding (private): torch._C._cuda_PlanningProblem
@@ -982,31 +785,15 @@ void initMemoryPlannerBindings(PyObject* module) {
           py::arg("edges"))
       .def(
           "plan",
-          // the default strategies, or one ("<order>" or "<order>/best");
-          // returns (strategy, arena, offsets)
-          [](const PlanningProblem& p, std::optional<std::string> strategy) {
-            std::vector<std::shared_ptr<GraphMemoryStrategy>> strategies;
-            if (strategy) {
-              strategies.push_back(makeStrategy(*strategy));
-            } else {
-              strategies = defaultStrategies();
-            }
-            StrategyResult r;
+          // the smaller plan of the strategies; returns (strategy, arena,
+          // offsets)
+          [](const PlanningProblem& p) {
+            Plan r;
             {
               py::gil_scoped_release no_gil;
-              r = p.plan(strategies);
+              r = p.plan();
             }
-            return py::make_tuple(r.name, r.arena, py::cast(r.offsets));
-          },
-          py::arg("strategy") = py::none())
-      .def_static(
-          "strategies",
-          [] {
-            std::vector<std::string> names;
-            for (const auto& s : defaultStrategies()) {
-              names.push_back(s->name());
-            }
-            return names;
+            return py::make_tuple(r.strategy, r.arena, py::cast(r.offsets));
           })
       .def(
           "validate",
@@ -1017,11 +804,7 @@ void initMemoryPlannerBindings(PyObject* module) {
           py::arg("offsets"))
       .def("conflict", &PlanningProblem::conflict)
       .def_property_readonly(
-          "num_allocations", &PlanningProblem::numAllocations)
-      .def_property_readonly("lower_bound", [](const PlanningProblem& p) {
-        py::gil_scoped_release no_gil;
-        return p.lowerBound();
-      });
+          "num_allocations", &PlanningProblem::numAllocations);
 }
 
 } // namespace torch::cuda::memory_planner
