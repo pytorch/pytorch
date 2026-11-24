@@ -209,11 +209,9 @@ class PrecompileContext:
 
         for key, cache_entry in dynamo_entries.items():
             try:
-                result = PrecompileCacheEntry.from_cache_entry(
+                precompile_cache_entries[key] = PrecompileCacheEntry.from_cache_entry(
                     cache_entry, backend_artifacts
                 )
-                if result is not None:
-                    precompile_cache_entries[key] = result
             except Exception as e:
                 logger.warning("Failed to create cache entry %s", key, exc_info=True)
                 data = json.dumps({"key": key, "error": str(e)})
