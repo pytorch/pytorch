@@ -99,12 +99,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
-from .dicts import (
-    ConstDictVariable,
-    DictItemsVariable,
-    DictKeysVariable,
-    pydict_checkexact,
-)
+from .dicts import ConstDictVariable, DictItemsVariable, DictKeysVariable
 from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
@@ -129,7 +124,9 @@ from .object_protocol import (
     mro_lookup,
     object_generic_setattr,
     Py_TPFLAGS_HEAPTYPE,
+    pyanyset_checkexact,
     pycallable_check,
+    pydict_checkexact,
     pyiter_check,
     pylong_as_ssize_t,
     pylong_from_base,
@@ -157,7 +154,7 @@ from .object_protocol import (
     type_init,
     vt_identity_compare,
 )
-from .sets import FrozensetVariable, pyanyset_checkexact, SetVariable
+from .sets import FrozensetVariable, SetVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,

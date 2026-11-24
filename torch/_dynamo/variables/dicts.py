@@ -25,7 +25,6 @@ import types
 import weakref
 from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
-from typing_extensions import TypeIs
 
 from torch.utils._pytree import MappingKey
 
@@ -86,6 +85,7 @@ from .object_protocol import (
     generic_setitem,
     generic_str,
     mro_lookup,
+    pydict_check,
     pysequence_contains,
     repr_guard,
 )
@@ -127,15 +127,6 @@ def _guard_nan_key(key: VariableTracker) -> None:
     # on their identity, including NaNs nested inside tuple keys.
     if key.source and _contains_nan(_get_literal_key(key)):
         install_guard(key.make_guard(GuardBuilder.ID_MATCH))
-
-
-def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
-    # This is a simplified version of the CPython's PyDict_Check function:
-    return issubclass(obj.python_type(), dict)
-
-
-def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
-    return obj.python_type() is dict
 
 
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
