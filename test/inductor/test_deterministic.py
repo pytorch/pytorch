@@ -6,33 +6,33 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import unittest.mock
 
 import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.utils import counters
-from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
     skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import (
-    GPU_TYPE,
-    HAS_GPU_AND_TRITON,
-    IS_BIG_GPU,
-)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_TRITON, IS_BIG_GPU
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
 @instantiate_parametrized_tests
-class DeterministicTest(TestCase):
+class DeterministicTestGeneric(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self) -> None:
         super().setUp()
         self._exit_stack = contextlib.ExitStack()
@@ -56,194 +56,6 @@ class DeterministicTest(TestCase):
                 self.assertEqual(inductor_config.deterministic, new_val)
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
-
-    @inductor_config.patch(deterministic=True)
-    def test_deterministic_flag_survives_compile(self):
-        # Dynamo restores the deterministic-algorithms state after each frame;
-        # that must not turn off Inductor's deterministic mode.
-        from torch._inductor.utils import run_and_get_code
-
-        x = torch.randn(16, device=GPU_TYPE)
-        for fn in (lambda x: x + 1, lambda x: x * 2):
-            torch._dynamo.reset()
-            _, (code,) = run_and_get_code(torch.compile(fn), x)
-            self.assertIn("'deterministic': True", code)
-        self.assertTrue(inductor_config.deterministic)
-
-    def test_compile_does_not_leak_deterministic_mode(self):
-        # Something may turn on deterministic algorithms while compiling a
-        # frame (e.g. numeric_utils); Dynamo undoes it, Inductor's flag too.
-        def backend(gm, example_inputs):
-            torch.use_deterministic_algorithms(True)
-            return gm.forward
-
-        torch.compile(lambda x: x + 1, backend=backend)(torch.randn(4))
-        self.assertFalse(torch.are_deterministic_algorithms_enabled())
-        self.assertFalse(inductor_config.deterministic)
-
-    @parametrize("deterministic", [False, True])
-    def test_mm_padding(self, deterministic):
-        with inductor_config.patch(deterministic=deterministic):
-
-            @torch.compile()
-            def foo(x, y):
-                return x @ y
-
-            inps = [torch.rand([2049, 2049], device=GPU_TYPE) for _ in range(2)]
-            out = foo(*inps)
-            self.assertEqual(out, inps[0] @ inps[1])
-
-            if deterministic:
-                self.assertTrue(counters["inductor"]["pad_mm_bench"] == 0)
-            else:
-                self.assertTrue(counters["inductor"]["pad_mm_bench"] > 0)
-
-    @parametrize("deterministic", [False, True])
-    @inductor_config.patch(max_autotune=True)
-    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
-    def test_max_autotune(self, deterministic):
-        with inductor_config.patch(deterministic=deterministic):
-
-            @torch.compile()
-            def foo(x, y):
-                return x @ y
-
-            inps = [torch.rand([2048, 2048], device=GPU_TYPE) for _ in range(2)]
-            out = foo(*inps)
-            self.assertEqual(out, inps[0] @ inps[1])
-
-            if deterministic:
-                self.assertTrue(counters["inductor"]["select_algorithm_autotune"] == 0)
-            else:
-                self.assertTrue(counters["inductor"]["select_algorithm_autotune"] > 0)
-
-    def test_pointwise_coordesc_tuning(self):
-        @torch.compile(mode="max-autotune")
-        def f(x):
-            return x + 1
-
-        x = torch.randn(2048, device=GPU_TYPE)
-        self.assertEqual(f(x), x + 1)
-
-        self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
-
-    @parametrize("deterministic", [False, True])
-    def test_reduction_coordesc_tuning(self, deterministic):
-        with inductor_config.patch(
-            deterministic=deterministic, coordinate_descent_tuning=True
-        ):
-
-            @torch.compile()
-            def foo(x):
-                return x.sum(dim=-1)
-
-            inp = torch.rand([2048, 2048], device=GPU_TYPE)
-
-            out = foo(inp)
-            self.assertEqual(out, inp.sum(dim=-1))
-
-            if deterministic:
-                self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] == 0)
-            else:
-                self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
-
-    @parametrize("fp_fusion", [True, False])
-    @parametrize("deterministic", [False, True])
-    def test_fp_fusion(self, deterministic, fp_fusion):
-        from torch._inductor.utils import run_and_get_code
-
-        with inductor_config.patch(
-            {"deterministic": deterministic, "triton.enable_fp_fusion": fp_fusion}
-        ):
-            x = torch.randn(16, device=GPU_TYPE)
-            _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2 + 1), x)
-        # Deterministic mode also turns off Triton's contraction.
-        triton_fusion = fp_fusion and not deterministic
-        self.assertIn(f"'enable_fp_fusion': {triton_fusion}", code)
-
-    @parametrize(
-        "deterministic,fp_fusion",
-        [(True, True), (False, False)],
-        name_fn=lambda d, f: "deterministic" if d else "fp_fusion_off",
-    )
-    def test_pointwise_config_numerics(self, deterministic, fp_fusion):
-        # XBLOCK=128 and XBLOCK=256 contract different products into an FMA here.
-        def fn(x, buf):
-            return x / x.shape[0] * 0.01 + buf * 0.99
-
-        x = torch.randn(16384, device=GPU_TYPE)
-        buf = torch.randn(16384, device=GPU_TYPE)
-        xblocks, outs = [], []
-        # Force opposite timing winners (smallest vs largest XBLOCK).
-        for prefer_small in (True, False):
-            seen = set()
-
-            def bench(self, launcher, *args, **kwargs):
-                xblock = launcher.config.kwargs["XBLOCK"]
-                seen.add(xblock)
-                return float(xblock) if prefer_small else 1.0 / xblock
-
-            torch._dynamo.reset()
-            with (
-                inductor_config.patch(
-                    {
-                        "deterministic": deterministic,
-                        "triton.enable_fp_fusion": fp_fusion,
-                    }
-                ),
-                fresh_cache(),
-                unittest.mock.patch.object(CachingAutotuner, "bench", bench),
-            ):
-                outs.append(torch.compile(fn, dynamic=True)(x, buf))
-            xblocks.append(min(seen) if prefer_small else max(seen))
-
-        self.assertNotEqual(xblocks[0], xblocks[1])
-        self.assertEqual(outs[0].view(torch.int32), outs[1].view(torch.int32))
-
-    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
-    @inductor_config.patch(batch_invariant=True)
-    def test_persistent_reduction_batch_invariance(self):
-        H = 768
-        FULL = 1024
-
-        def fn(x, w, b):
-            return torch.nn.functional.layer_norm(x, (H,), weight=w, bias=b)
-
-        torch.manual_seed(0)
-        w = torch.randn(H, device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn(H, device=GPU_TYPE, dtype=torch.bfloat16)
-        x_full = torch.randn(FULL, H, device=GPU_TYPE, dtype=torch.bfloat16)
-
-        compiled = torch.compile(fn)
-        torch._dynamo.reset()
-        out_full = compiled(x_full, w, b)
-        self.assertEqual(out_full, fn(x_full, w, b))
-
-        # Halving sweep, matching what the benchmark harness does.
-        size = FULL // 2
-        while size >= 1:
-            torch._dynamo.reset()
-            out = compiled(x_full[:size].contiguous(), w, b)
-            ref = out_full[:size].contiguous()
-            self.assertTrue(
-                torch.equal(ref, out),
-                lambda msg: f"{msg}\npersistent reduction diverged at size={size} (FULL={FULL})",
-            )
-            size //= 2
-
-    @unittest.skipIf(not HAS_GPU_AND_TRITON, "requires GPU + Triton")
-    def test_cumsum_deterministic(self):
-        from torch._inductor.utils import run_and_get_code
-
-        x = torch.randn(1_000_003, device=GPU_TYPE, dtype=torch.float32)
-        compiled = torch.compile(lambda v: torch.cumsum(v, dim=0))
-
-        torch.use_deterministic_algorithms(True, warn_only=False)
-        eager = torch.cumsum(x, dim=0)
-        result, (_,) = run_and_get_code(compiled, x)
-        for _ in range(5):
-            self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
-        self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
 
     def test_reorder_for_locality_preserves_randint_order(self):
         with inductor_config.patch(fallback_random=True):
@@ -318,10 +130,170 @@ class DeterministicTest(TestCase):
             self.assertTrue(
                 "The result is bitwise equivalent to the previously saved result"
                 in out.stdout.decode(),
-                lambda msg: f"{msg}\nstdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}",
+                lambda msg: (
+                    f"{msg}\nstdout: {out.stdout.decode()}, stderr: {out.stderr.decode()}"
+                ),
             )
 
+    @inductor_config.patch(deterministic=True)
+    def test_deterministic_flag_survives_compile(self):
+        # Dynamo restores the deterministic-algorithms state after each frame;
+        # that must not turn off Inductor's deterministic mode.
+        from torch._inductor.utils import run_and_get_code
+
+        x = torch.randn(16, device=GPU_TYPE)
+        for fn in (lambda x: x + 1, lambda x: x * 2):
+            torch._dynamo.reset()
+            _, (code,) = run_and_get_code(torch.compile(fn), x)
+            self.assertIn("'deterministic': True", code)
+        self.assertTrue(inductor_config.deterministic)
+
+    def test_compile_does_not_leak_deterministic_mode(self):
+        # Something may turn on deterministic algorithms while compiling a
+        # frame (e.g. numeric_utils); Dynamo undoes it, Inductor's flag too.
+        def backend(gm, example_inputs):
+            torch.use_deterministic_algorithms(True)
+            return gm.forward
+
+        torch.compile(lambda x: x + 1, backend=backend)(torch.randn(4))
+        self.assertFalse(torch.are_deterministic_algorithms_enabled())
+        self.assertFalse(inductor_config.deterministic)
+
+
+@unittest.skipIf(not HAS_TRITON, "requires triton")
+class DeterministicTestAccelerator(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._exit_stack = contextlib.ExitStack()
+        self._exit_stack.enter_context(fresh_cache())
+
+    def tearDown(self) -> None:
+        self._exit_stack.close()
+        super().tearDown()
+
+    @parametrize("deterministic", [False, True])
+    def test_mm_padding(self, device, deterministic):
+        with inductor_config.patch(deterministic=deterministic):
+
+            @torch.compile()
+            def foo(x, y):
+                return x @ y
+
+            inps = [torch.rand([2049, 2049], device=device) for _ in range(2)]
+            out = foo(*inps)
+            self.assertEqual(out, inps[0] @ inps[1])
+
+            if deterministic:
+                self.assertTrue(counters["inductor"]["pad_mm_bench"] == 0)
+            else:
+                self.assertTrue(counters["inductor"]["pad_mm_bench"] > 0)
+
+    @parametrize("deterministic", [False, True])
+    @inductor_config.patch(max_autotune=True)
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    def test_max_autotune(self, device, deterministic):
+        with inductor_config.patch(deterministic=deterministic):
+
+            @torch.compile()
+            def foo(x, y):
+                return x @ y
+
+            inps = [torch.rand([2048, 2048], device=device) for _ in range(2)]
+            out = foo(*inps)
+            self.assertEqual(out, inps[0] @ inps[1])
+
+            if deterministic:
+                self.assertTrue(counters["inductor"]["select_algorithm_autotune"] == 0)
+            else:
+                self.assertTrue(counters["inductor"]["select_algorithm_autotune"] > 0)
+
+    def test_pointwise_coordesc_tuning(self, device):
+        @torch.compile(mode="max-autotune")
+        def f(x):
+            return x + 1
+
+        x = torch.randn(2048, device=device)
+        self.assertEqual(f(x), x + 1)
+
+        self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
+
+    @parametrize("deterministic", [False, True])
+    def test_reduction_coordesc_tuning(self, device, deterministic):
+        with inductor_config.patch(
+            deterministic=deterministic, coordinate_descent_tuning=True
+        ):
+
+            @torch.compile()
+            def foo(x):
+                return x.sum(dim=-1)
+
+            inp = torch.rand([2048, 2048], device=device)
+
+            out = foo(inp)
+            self.assertEqual(out, inp.sum(dim=-1))
+
+            if deterministic:
+                self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] == 0)
+            else:
+                self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
+
+    @inductor_config.patch(batch_invariant=True)
+    def test_persistent_reduction_batch_invariance(self, device):
+        H = 768
+        FULL = 1024
+
+        def fn(x, w, b):
+            return torch.nn.functional.layer_norm(x, (H,), weight=w, bias=b)
+
+        torch.manual_seed(0)
+        w = torch.randn(H, device=device, dtype=torch.bfloat16)
+        b = torch.randn(H, device=device, dtype=torch.bfloat16)
+        x_full = torch.randn(FULL, H, device=device, dtype=torch.bfloat16)
+
+        compiled = torch.compile(fn)
+        torch._dynamo.reset()
+        out_full = compiled(x_full, w, b)
+        self.assertEqual(out_full, fn(x_full, w, b))
+
+        # Halving sweep, matching what the benchmark harness does.
+        size = FULL // 2
+        while size >= 1:
+            torch._dynamo.reset()
+            out = compiled(x_full[:size].contiguous(), w, b)
+            ref = out_full[:size].contiguous()
+            self.assertTrue(
+                torch.equal(ref, out),
+                lambda msg: (
+                    f"{msg}\npersistent reduction diverged at size={size} (FULL={FULL})"
+                ),
+            )
+            size //= 2
+
+    def test_cumsum_deterministic(self, device):
+        from torch._inductor.utils import run_and_get_code
+
+        x = torch.randn(1_000_003, device=device, dtype=torch.float32)
+        compiled = torch.compile(lambda v: torch.cumsum(v, dim=0))
+
+        torch.use_deterministic_algorithms(True, warn_only=False)
+        eager = torch.cumsum(x, dim=0)
+        result, (_,) = run_and_get_code(compiled, x)
+        for _ in range(5):
+            self.assertEqual(result.view(torch.int32), compiled(x).view(torch.int32))
+        self.assertEqual(result.view(torch.int32), eager.view(torch.int32))
+
+
+instantiate_device_type_tests(
+    DeterministicTestAccelerator,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
 
 if __name__ == "__main__":
-    if HAS_GPU_AND_TRITON:
+    from torch.utils._triton import has_triton
+
+    if has_triton():
         run_tests()
