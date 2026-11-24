@@ -115,8 +115,11 @@ class MPSEventPtrTarget : public c10::intrusive_ptr_target {
   }
 
  private:
+  friend class MPSEventPool;
   MPSEvent* m_event;
   MPSEventPool* m_pool;
+  // The host signal counter belongs to this handle, which is never recycled.
+  MTLSharedEvent_t m_hostEvent = nullptr;
 };
 
 using MPSEventPtr = c10::intrusive_ptr<MPSEventPtrTarget>;
@@ -136,6 +139,8 @@ class MPSEventPool {
   void resetEvent(id_t event_id, MPSStream* stream, bool enable_timing);
   void recordEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
   void waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream = nullptr);
+  void waitForHostSignal(id_t event_id, MPSStream* stream, uint64_t value);
+  void signalEvent(id_t event_id, uint64_t value);
   void synchronizeEvent(id_t event_id);
   bool queryEvent(id_t event_id);
   // returns elapsed time between two recorded events in milliseconds
@@ -154,7 +159,9 @@ class MPSEventPool {
   friend class MPSEventPtrTarget;
   void returnEventToPool(MPSEvent* event);
 
-  MPSEvent* getInUseEvent(id_t event_id, bool locked = true);
+  MPSEventPtr getInUseEvent(id_t event_id);
+  MPSEventPtr getInUseEventLocked(id_t event_id);
+  MPSEventPtr getEventForHostSignal(id_t event_id);
 };
 
 // shared_ptr is used to get MPSEventPool destroyed after dependent instances

@@ -58,23 +58,25 @@ void MPSEvent::recordLocked(bool syncEvent, MPSStream* stream) {
   }
 }
 
-bool MPSEvent::waitLocked(bool syncEvent, MPSStream* stream) {
-  const uint64_t signalCounter = m_signalCounter.load();
-  // skip the wait if the event is unrecorded or already signaled
-  if (!m_recorded.load() || m_event.signaledValue >= signalCounter) {
+static bool encodeEventWait(MTLSharedEvent_t event, uint64_t value, MPSStream* stream, bool syncEvent) {
+  if (event.signaledValue >= value) {
     return false;
   }
-  MPSStream* wait_stream = stream ? stream : m_stream;
   // active encoders must end before encoding or waiting
-  wait_stream->endKernelCoalescing();
-  id<MTLCommandBuffer> commandBuffer = wait_stream->commandBuffer();
-  [commandBuffer encodeWaitForEvent:m_event value:signalCounter];
+  stream->endKernelCoalescing();
+  id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+  [commandBuffer encodeWaitForEvent:event value:value];
   // The stream is not idle until the awaited event signals
-  wait_stream->markWorkEncoded();
+  stream->markWorkEncoded();
   if (syncEvent) {
-    wait_stream->synchronize(SyncType::COMMIT);
+    stream->synchronize(SyncType::COMMIT);
   }
   return true;
+}
+
+bool MPSEvent::waitLocked(bool syncEvent, MPSStream* stream) {
+  const uint64_t signalCounter = m_signalCounter.load();
+  return m_recorded.load() && encodeEventWait(m_event, signalCounter, stream ? stream : m_stream, syncEvent);
 }
 
 void MPSEvent::record(bool needsLock, bool syncEvent, MPSStream* stream) {
@@ -110,7 +112,7 @@ void MPSEvent::notifyCpuSync(uint64_t timingGeneration, double completionTime) {
     m_completion_time = completionTime;
     m_completed_timing_generation = timingGeneration;
   }
-  m_cpu_sync_cv.notify_one();
+  m_cpu_sync_cv.notify_all();
 }
 
 double MPSEvent::waitForTiming() {
@@ -158,6 +160,7 @@ void MPSEvent::reset(MPSStream* stream, bool enable_timing) {
 //-----------------------------------------------------------------
 
 MPSEventPtrTarget::~MPSEventPtrTarget() {
+  [m_hostEvent release];
   m_pool->returnEventToPool(m_event);
 }
 
@@ -217,38 +220,52 @@ void MPSEventPool::releaseEvent(id_t event_id) {
 }
 
 void MPSEventPool::resetEvent(id_t event_id, MPSStream* stream, bool enable_timing) {
-  MPSEvent* event = getInUseEvent(event_id);
-  event->reset(stream, enable_timing);
+  getInUseEvent(event_id)->get()->reset(stream, enable_timing);
 }
 
 void MPSEventPool::recordEvent(id_t event_id, bool syncEvent, MPSStream* stream) {
-  MPSEvent* event = getInUseEvent(event_id);
-  event->record(/*needsLock*/ true, syncEvent, stream);
+  getInUseEvent(event_id)->record(/*needsLock*/ true, syncEvent, stream);
 }
 
 void MPSEventPool::waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream) {
-  MPSEvent* event = getInUseEvent(event_id);
-  event->wait(/*needsLock*/ true, syncEvent, stream);
+  getInUseEvent(event_id)->get()->wait(/*needsLock*/ true, syncEvent, stream);
+}
+
+void MPSEventPool::waitForHostSignal(id_t event_id, MPSStream* stream, uint64_t value) {
+  if (value == 0) {
+    return;
+  }
+  const auto event = getEventForHostSignal(event_id);
+  const auto host_event = event->m_hostEvent;
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      encodeEventWait(host_event, value, stream, /*syncEvent=*/true);
+    }
+  });
+}
+
+void MPSEventPool::signalEvent(id_t event_id, uint64_t value) {
+  getEventForHostSignal(event_id)->m_hostEvent.signaledValue = value;
 }
 
 void MPSEventPool::synchronizeEvent(id_t event_id) {
-  MPSEvent* event = getInUseEvent(event_id);
-  event->synchronize();
+  getInUseEvent(event_id)->synchronize();
 }
 
 bool MPSEventPool::queryEvent(id_t event_id) {
-  MPSEvent* event = getInUseEvent(event_id);
-  return event->query();
+  return getInUseEvent(event_id)->get()->query();
 }
 
 double MPSEventPool::elapsedTime(id_t start_event_id, id_t end_event_id) {
   // First make sure the command buffers containing both events have completed.
-  dispatch_sync(m_default_stream->queue(), ^() {
+  dispatch_sync_with_rethrow(m_default_stream->queue(), ^() {
     m_default_stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
-  std::lock_guard<std::recursive_mutex> lock(m_mutex);
-  MPSEvent* start_event = getInUseEvent(start_event_id, false);
-  MPSEvent* end_event = getInUseEvent(end_event_id, false);
+  // Keep the events alive while allowing the host to signal through the pool.
+  const auto start = getInUseEvent(start_event_id);
+  const auto end = getInUseEvent(end_event_id);
+  MPSEvent* start_event = start->get();
+  MPSEvent* end_event = end->get();
   TORCH_CHECK(start_event->isTimingEnabled() && end_event->isTimingEnabled(),
               "Events were not created with argument 'enable_timing=True'");
   TORCH_CHECK(start_event->isRecorded() && end_event->isRecorded(),
@@ -263,14 +280,23 @@ double MPSEventPool::elapsedTime(id_t start_event_id, id_t end_event_id) {
   return (end_time - start_time) * 1e3;
 }
 
-MPSEvent* MPSEventPool::getInUseEvent(id_t event_id, bool locked) {
-  if (locked) {
-    m_mutex.lock();
-  }
-  TORCH_CHECK(m_in_use_events.count(event_id) > 0, "Invalid Event ID: ", event_id);
-  MPSEvent* event = m_in_use_events[event_id]->get();
-  if (locked) {
-    m_mutex.unlock();
+MPSEventPtr MPSEventPool::getInUseEvent(id_t event_id) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  return getInUseEventLocked(event_id);
+}
+
+MPSEventPtr MPSEventPool::getInUseEventLocked(id_t event_id) {
+  const auto it = m_in_use_events.find(event_id);
+  TORCH_CHECK(it != m_in_use_events.end(), "Invalid Event ID: ", event_id);
+  return it->second;
+}
+
+MPSEventPtr MPSEventPool::getEventForHostSignal(id_t event_id) {
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  auto event = getInUseEventLocked(event_id);
+  if (!event->m_hostEvent) {
+    event->m_hostEvent = [m_default_stream->device() newSharedEvent];
+    TORCH_CHECK(event->m_hostEvent, "MPS failed to allocate a host signal event");
   }
   return event;
 }
