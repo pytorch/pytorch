@@ -490,7 +490,6 @@ class AOTInductorModelContainer {
       lease.mark_in_flight();
     } else {
       std::shared_lock model_lk(model_exec_mutex_);
-      [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
       auto lease = pool_.checkout(stream);
 
       // We swap the constant mapping to the inactive buffer in the model to run
@@ -1073,11 +1072,11 @@ class AOTInductorModelContainer {
   // constants load, an update of the active buffer, or a swap to an updated
   // buffer that wasn't folded), throws unless they are then FOLDED, and runs
   // fn on a model instance checked out of the pool, holding model_exec_mutex_
-  // shared and the stream lock. fn must record the instance's run_finished_
-  // event after the work it enqueues, as AOTInductorModel::run() does: the
-  // pool reclaims an in-flight instance only through that event. fn receives
-  // the instance's lease as const, so it can't end or move it; if fn throws,
-  // the instance goes back to the pool without waiting for that work.
+  // shared. fn must record the instance's run_finished_ event after the work
+  // it enqueues, as AOTInductorModel::run() does: the pool reclaims an
+  // in-flight instance only through that event. fn receives the instance's
+  // lease as const, so it can't end or move it; if fn throws, the instance
+  // goes back to the pool without waiting for that work.
   template <typename Fn>
   void run_on_available_model(
       DeviceStreamType stream,
@@ -1115,7 +1114,6 @@ class AOTInductorModelContainer {
           "Unknown constant state: " + toStringConstantState(const_folded));
     }
 
-    [[maybe_unused]] auto stream_lock = pool_.acquire_stream_lock(stream);
     auto lease = pool_.checkout(stream);
     std::forward<Fn>(fn)(std::as_const(lease));
     lease.mark_in_flight();
