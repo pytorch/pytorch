@@ -140,7 +140,7 @@ class _ItreeArch(NamedTuple):
     # holds and the combine stages a tile, skipping the count's staging. "weights" also
     # stages each partial's precomputed Chan weight in one row shared by the block;
     # weights depend only on the partial index.
-    uniform_combine: Literal["off", "counts", "weights"] = "off"
+    uniform_combine: tile.UniformCombineMode = "off"
 
 
 # Performance tuning is keyed by full compute capability. Each measured GPU has
@@ -311,7 +311,7 @@ class _ItreePlan(NamedTuple):
     # fold derives counts from it, so the count field is not staged. With "weights", a row
     # shared by the block holds the current tile's weights, 1 / (index + 1) for each
     # partial's global index, in the count's slot.
-    uniform_combine: Literal["off", "counts", "weights"] = "off"
+    uniform_combine: tile.UniformCombineMode = "off"
 
     @property
     def sig(self) -> tuple[Any, ...]:
@@ -922,13 +922,13 @@ def reduce_row_tile(
     x's device must be current. Rows may be pitched. `ragged_vector` asks for aligned wide
     loads with scalar edges (one kernel per launch class) and rejects empty rows,
     order="inner_tree" and use_tma=True for every N. Rows of whole 16-byte vectors at a
-    pitch of whole vectors otherwise fall through to normal path selection; ragged rows
-    need a 16-byte aligned base and raise ValueError on any other rather than fall back.
+    pitch of whole vectors otherwise fall through to normal path selection, taking
+    narrow loads at a misaligned base. Ragged rows need a 16-byte aligned base, which
+    callers must pre-check, and raise ValueError on any other rather than fall back.
     Other rows need stride(0) to be a multiple of vec_size(N). A ragged row's scalar
-    prefix depends on its start, so identical rows can round differently. Callers must
-    pre-check a 16-byte base for ragged rows: whole rows at a misaligned base take
-    narrow loads, but ragged rows raise. use_tma=True also requires threads_per_row=1, a
-    16-byte aligned base and stride, and a nonempty power-of-two N.
+    prefix depends on its start, so identical rows can round differently. use_tma=True
+    also requires threads_per_row=1, a 16-byte aligned base and stride, and a nonempty
+    power-of-two N.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
