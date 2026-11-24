@@ -106,10 +106,9 @@ TORCH_API IValue unpickle(
     c10::TypePtr (*type_parser)(const std::string&) =
         Unpickler::defaultTypeParser);
 
-#ifndef C10_MOBILE
 class VectorReader : public caffe2::serialize::ReadAdapterInterface {
  public:
-  VectorReader(std::vector<char> data) : data_(std::move(data)) {}
+  explicit VectorReader(std::vector<char> data) : data_(std::move(data)) {}
 
   size_t size() const override {
     return data_.size();
@@ -124,7 +123,7 @@ class VectorReader : public caffe2::serialize::ReadAdapterInterface {
 
 class StringViewReader : public caffe2::serialize::ReadAdapterInterface {
  public:
-  StringViewReader(std::string_view data) : data_(data) {}
+  explicit StringViewReader(std::string_view data) : data_(data) {}
 
   size_t size() const override {
     return data_.size();
@@ -136,5 +135,4 @@ class StringViewReader : public caffe2::serialize::ReadAdapterInterface {
  private:
   std::string_view data_;
 };
-#endif
 } // namespace torch::jit
