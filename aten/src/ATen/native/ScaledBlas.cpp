@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Linear.h>
@@ -18,6 +19,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_grouped_mm_native.h>
 #include <ATen/ops/_scaled_addmm_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
@@ -248,7 +250,7 @@ TORCH_META_FUNC(_scaled_grouped_mm_v2)(
     at::IntArrayRef contraction_dim,
     bool use_fast_accum) {
   scaled_blas::validate_scaled_grouped_mm_v2_inputs(
-      self, mat2, recipe_a, recipe_b, offs, bias, contraction_dim, out_dtype);
+      self, mat2, recipe_a, swizzle_a, recipe_b, swizzle_b, offs, bias, contraction_dim, out_dtype);
 
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   std::optional<Tensor> offs_opt =
@@ -619,9 +621,11 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
       mat_a.scalar_type(),
       scale_recipe_a_enum,
       scale_a_ref,
+      swizzle_a_enum,
       mat_b.scalar_type(),
       scale_recipe_b_enum,
-      scale_b_ref);
+      scale_b_ref,
+      swizzle_b_enum);
 
   if (gemm_impl == ScaledGemmImplementation::NONE) {
     const std::optional<at::Tensor> scale_a_opt = scale_a.empty() ? std::optional<at::Tensor>{std::nullopt} : std::optional<at::Tensor>{scale_a[0]};
@@ -652,14 +656,6 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
   }
 }
 
-// TODO(vasiliy, future PR): figure out why we need to declare this function, when
-// other functions that live in ATen/native/*.cpp without declarations
-// or headers work just fine.
-Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
-const std::optional<at::Tensor>& offs,
-const std::optional<at::Tensor>& bias,
-std::optional<c10::ScalarType> out_dtype);
-
 Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
@@ -667,6 +663,22 @@ std::optional<c10::ScalarType> out_dtype) {
   _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  return out;
+}
+
+Tensor& _grouped_mm_out(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype,
+Tensor& out) {
+  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  TORCH_CHECK(out.scalar_type() == out_dtype_, "Expected out tensor to have dtype ", out_dtype_, " but got ", out.scalar_type(), " instead");
+  TORCH_CHECK(out.device() == mat_a.device(), "Expected out tensor to be on device ", mat_a.device(), " but got ", out.device(), " instead");
+  TORCH_CHECK(!offs.has_value() || offs->device() == mat_a.device(), "Expected offs to be on device ", mat_a.device(), " but got ", offs->device(), " instead");
+  at::native::resize_output(out, compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype_).first);
+  at::assert_no_internal_overlap(out);
   _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   return out;
 }
