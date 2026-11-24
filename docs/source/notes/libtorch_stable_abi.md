@@ -63,7 +63,7 @@ which will handle all the rough edges of the C API for the user.
 - `tensor_from_pyobject` / `tensor_to_pyobject`: `torch.Tensor` <-> `torch::stable::Tensor`
 - `dtype_from_pyobject` / `dtype_to_pyobject`: `torch.dtype` <-> `torch::headeronly::ScalarType`
 - `device_from_pyobject` / `device_to_pyobject`: `torch.device` <-> `torch::stable::Device`
-- `layout_from_pyobject` / `layout_to_pyobject` (2.16+): `torch.layout` <-> `torch::headeronly::Layout`
+- `layout_from_pyobject` / `layout_to_pyobject`: `torch.layout` <-> `torch::headeronly::Layout`
 - `is_tensor_pyobject`: whether a Python object's actual type is `torch.Tensor`
   or a subclass; overridden `__class__` attributes are ignored, as in
   `tensor_from_pyobject`
