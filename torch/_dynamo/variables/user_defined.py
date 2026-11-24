@@ -12,7 +12,6 @@ The key classes are:
   - UserDefinedTupleVariable: For tuple subclasses
   - UserDefinedExceptionObjectVariable: For exception subclasses
   - FrozenDataClassVariable: Special handling of frozen dataclasses
-  - MutableMappingVariable: For collections.abc.MutableMapping subclasses
 
 Dynamo specializes to VariableTracker subclasses like FrozenDataClassVariable if available; if no
 subclass qualifies, it falls back to UserDefinedObjectVariable.
@@ -6012,11 +6011,6 @@ class StructSequenceVariable(UserDefinedTupleVariable):
             tx,
             f"{self.tuple_cls.__module__}.{self.tuple_cls.__qualname__}({items})",
         )
-
-
-class MutableMappingVariable(UserDefinedObjectVariable):
-    def __init__(self, value: object, **kwargs: Any) -> None:
-        super().__init__(value, **kwargs)
 
 
 class SimpleNamespaceVariable(UserDefinedObjectVariable):

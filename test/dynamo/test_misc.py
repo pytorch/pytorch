@@ -3925,7 +3925,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(out, "direct")
 
     def test_mutable_mapping_dict_update(self):
-        """Test that MutableMappingVariable handles __dict__ updates correctly."""
+        """Test that MutableMapping subclasses handle __dict__ updates correctly."""
         from collections import OrderedDict
 
         class CustomMapping(OrderedDict):

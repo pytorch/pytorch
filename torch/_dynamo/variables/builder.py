@@ -40,7 +40,7 @@ import sys
 import time
 import types
 import weakref
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable
 from types import ModuleType
 from typing import Any, cast, NamedTuple, NoReturn, overload, TYPE_CHECKING, Union
 
@@ -368,7 +368,6 @@ from .user_defined import (
     is_generic_ctx_manager_cls,
     is_reconstructable_decorator_ctx_manager_clone,
     KeyedJaggedTensorVariable,
-    MutableMappingVariable,
     SimpleNamespaceVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
@@ -2756,10 +2755,6 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 value, result, mutation_type_cls=ValueAndAttributeMutationExisting
             )
-        elif issubclass(type(value), MutableMapping):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = MutableMappingVariable(value, source=self.source)
-            return self.tx.output.side_effects.track_object_existing(value, result)
         elif is_frozen_dataclass(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable(value, source=self.source)
@@ -6232,10 +6227,7 @@ class SourcelessUserDefinedObjectBuilder:
         if options.get("source") is not None:
             raise AssertionError("SourcelessUserDefinedObjectBuilder got a source")
         options["mutation_type"] = ValueMutationNew()
-        value_type = type(value)
-        if issubclass(value_type, MutableMapping):
-            return MutableMappingVariable(value, **options)
-        elif isinstance(value, torch.nn.Module):
+        if isinstance(value, torch.nn.Module):
             return UnspecializedNNModuleVariable(value, **options)
         else:
             return UserDefinedObjectVariable(value, **options)

@@ -207,7 +207,6 @@ from .user_defined import (
     DefaultDictVariable,
     FrozenDataClassVariable,
     InspectVariable,
-    MutableMappingVariable,
     NamedTupleVariable,
     RemovableHandleVariable,
     SimpleNamespaceVariable,
