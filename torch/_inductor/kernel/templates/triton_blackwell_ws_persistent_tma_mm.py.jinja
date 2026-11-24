@@ -71,6 +71,7 @@
                 unfused_load="a_desc.load([offs_am_desc, offs_k_desc])" if A_ROW_MAJOR else "a_desc.load([offs_k_desc, offs_am_desc]).T",
                 prologue_descriptor_offsets=("offs_am_desc", "offs_k_desc"),
                 prologue_descriptor_block_shape=("BLOCK_M", "BLOCK_K"),
+                prologue_reuse=(-1, "BLOCK_N", -2, "BLOCK_M"),
             )}}
             {%- if TWO_CTAS %}
             # The 2-CTA MMA splits B across the cluster from shared memory, so
@@ -99,6 +100,7 @@
                 unfused_load="b_desc.load([offs_k_desc, offs_bn_desc])" if B_ROW_MAJOR else "b_desc.load([offs_bn_desc, offs_k_desc]).T",
                 prologue_descriptor_offsets=("offs_k_desc", "offs_bn_desc"),
                 prologue_descriptor_block_shape=("BLOCK_K", "BLOCK_N"),
+                prologue_reuse=(-2, "BLOCK_M", -1, "BLOCK_N"),
             )}}
             accumulator += tl.dot(a, b, allow_tf32=ALLOW_TF32)
             {%- endif %}
