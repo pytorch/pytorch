@@ -8653,7 +8653,7 @@ class TestTorch(TestCase):
         b = pickle.loads(serialized)
         self.assertEqual(a, b)
 
-    @skipIfTorchDynamo("Eager-only Generator wrapper lifetime coverage")
+    @skipIfTorchDynamo("relies on wrappers being deallocated at del")
     def test_generator_wrapper_cache(self):
         with torch.library._scoped_library("_generator_wrapper_cache", "FRAGMENT") as lib:
             lib.define("identity(Generator g) -> Generator")
