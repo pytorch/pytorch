@@ -3239,25 +3239,28 @@ class OutputGraph(OutputGraphCommon):
 
             # Saved tensors hooks only affect graphs that record autograd; guarding
             # otherwise recompiles e.g. a no_grad optimizer step under a hooks context.
-            def has_grad_fn(t: object) -> bool:
-                if not isinstance(t, torch.Tensor) or not t.requires_grad:
+            def has_grad_fn(t: torch.Tensor) -> bool:
+                if not t.requires_grad:
                     return False
                 try:
                     return t.grad_fn is not None
                 except RuntimeError:
-                    # Multi-output view of an in-place-modified base: still in a graph.
+                    # A view whose base was modified in place; treat it as recording.
                     return True
 
-            records_autograd = any(
-                has_grad_fn(t)
-                for node in self.graph.nodes
-                if node.op != "placeholder"
-                for t in pytree.tree_leaves(node.meta.get("example_value"))
+            # Placeholders count too: an in-place op on a graph input, such as
+            # `x[idx] = v`, leaves no node output with a grad_fn, but it rebases
+            # the input's (fake) example_value onto the autograd graph.
+            records_autograd = (
+                not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+                and any(
+                    pytree.tree_any_only(
+                        torch.Tensor, has_grad_fn, node.meta.get("example_value")
+                    )
+                    for node in self.graph.nodes
+                )
             )
-            if (
-                records_autograd
-                and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
-            ):
+            if records_autograd:
                 self.guards.add(
                     GlobalStateSource().make_guard(
                         GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS

@@ -12514,6 +12514,48 @@ Expected a .* tangent but got a plain Tensor.""",
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(p, p_ref + g * 0.1 + g * 0.1, atol=0, rtol=0)
 
+    def test_saved_tensors_hooks_guard_on_input_mutation(self):
+        # `x[idx] = v` on a requires-grad input records autograd, but no node
+        # output has a grad_fn; the hooks guard must still be installed.
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        cnt = CompileCounterWithBackend("aot_eager")
+
+        def fn(x, idx):
+            x[idx] = 0.0
+
+        compiled = torch.compile(fn, backend=cnt)
+
+        def run(f, hooks):
+            a = torch.ones(4, 4, requires_grad=True)
+            x = a * 1.0
+            with torch.autograd.graph.saved_tensors_hooks(*hooks):
+                f(x, torch.tensor([1, 3]))
+            x.sum().backward()
+            return a.grad
+
+        run(
+            compiled,
+            saved_tensors_hooks_to_gm(
+                lambda x: x * 1, lambda x: x * 1, "pack_hash", "unpack_hash"
+            ),
+        )
+        packed = []
+
+        def pack(x):
+            packed.append(x)
+            return x
+
+        # The unpack hook moves the saved indices to row 0, so it changes the grad.
+        hooks = (pack, lambda x: x * 0)
+        ref = run(fn, hooks)
+        n_eager = len(packed)
+        packed.clear()
+        res = run(compiled, hooks)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(len(packed), n_eager)
+        self.assertEqual(res, ref, atol=0, rtol=0)
+
 
 class TestAOTModuleSimplifiedDevice(AOTTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
