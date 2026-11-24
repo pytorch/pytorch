@@ -701,6 +701,36 @@ def _split_schema_for_cache(
     return (schema.op, args_sk, kwargs_sk, schema.schema_info), specs
 
 
+def _mesh_free_schema_key(
+    schema: OpSchema,
+) -> tuple[tuple[object, ...], list[DeviceMesh]] | None:
+    """Hashable cache key for an OpSchema holding no DeviceMesh and no DTensorSpec.
+
+    Each spec becomes (mesh-free hash key, slot index) and distinct meshes
+    contribute fingureprints. Slots keep the key sensitive to how arguments
+    alias meshes, and let a caller resolve a cached value against live meshes.
+    Returns None when the schema has no comparison key to derive from.
+    """
+    if schema._comparison_key is None:
+        return None
+
+    meshes: list[DeviceMesh] = []
+
+    def slot(mesh: DeviceMesh) -> int:
+        for i, seen in enumerate(meshes):
+            if seen is mesh:
+                return i
+        meshes.append(mesh)
+        return len(meshes) - 1
+
+    stripped = tree_map_only(
+        DTensorSpec,
+        lambda spec: (spec._hash_key_no_mesh, slot(spec.mesh)),
+        schema._comparison_key,
+    )
+    return (stripped, tuple(m._cache_key for m in meshes)), meshes
+
+
 def _rebuild_schema_from_cache(
     skeleton: _SchemaSkeleton, specs: Sequence[DTensorSpec]
 ) -> OpSchema:

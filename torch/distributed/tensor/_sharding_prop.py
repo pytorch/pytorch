@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import logging
 import threading
+from collections import namedtuple, OrderedDict
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
-from functools import lru_cache
+from dataclasses import dataclass
 from itertools import chain
 from typing import cast
 
@@ -15,8 +16,9 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._decompositions import DecompShardingStrategy
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, ShardOrder, TensorMeta
 from torch.distributed.tensor._op_schema import (
+    _mesh_free_schema_key,
     OpInfo,
     OpSchema,
     OpSpec,
@@ -36,9 +38,11 @@ from torch.distributed.tensor._utils import (
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.distributed.tensor.placement_types import _StridedShard, Placement, Shard
 from torch.utils._pytree import tree_map
 
+
+_TENSOR_META_CACHE_MAXSIZE = 128
 
 aten = torch.ops.aten
 
@@ -169,34 +173,141 @@ def _validate_tensor_meta_count(
         )
 
 
-class LocalLRUCache(threading.local):
-    def __init__(self, user_function: Callable) -> None:
-        self.cache = lru_cache(None)(user_function)
+_CacheInfo = namedtuple("_CacheInfo", ["hits", "misses", "maxsize", "currsize"])
 
-    def __call__(self, *args, **kwargs) -> object:
-        # Fast path: log.handlers check is very cheap (just checking if list is non-empty)
-        # Only do the more expensive isEnabledFor check if handlers exist
+
+@dataclass(frozen=True)
+class _CachedSpec:
+    placements: tuple[Placement, ...]
+    tensor_meta: TensorMeta | None
+    shard_order: ShardOrder
+    use_strided_shard_as_shard_order: bool | None
+    slot_idx: int
+
+    @classmethod
+    def from_spec(cls, spec: DTensorSpec, slot_idx: int) -> "_CachedSpec":
+        return cls(
+            spec.placements,
+            spec.tensor_meta,
+            spec.shard_order,
+            spec.use_strided_shard_as_shard_order,
+            slot_idx,
+        )
+
+    def to_spec(self, meshes: list[DeviceMesh]) -> DTensorSpec:
+        return DTensorSpec(
+            mesh=meshes[self.slot_idx],
+            placements=self.placements,
+            tensor_meta=self.tensor_meta,
+            shard_order=self.shard_order,
+            use_strided_shard_as_shard_order=self.use_strided_shard_as_shard_order,
+        )
+
+
+@dataclass
+class _CachedOutputSharding:
+    output_spec: _CachedSpec | tuple[_CachedSpec | None, ...] | None
+    needs_redistribute: bool
+    use_val_from_redistribute_schema: bool
+
+    @classmethod
+    def from_output_sharding(
+        cls, out: OutputSharding, meshes: list[DeviceMesh]
+    ) -> "_CachedOutputSharding | None":
+        if out.redistribute_schema is not None:
+            return None
+
+        def cache_one(spec):
+            slot = cls._slot_of(spec.mesh, meshes)
+            return None if slot is None else _CachedSpec.from_spec(spec, slot)
+
+        spec = out.output_spec
+        if spec is None:
+            cached = None
+        elif isinstance(spec, DTensorSpec):
+            cached = cache_one(spec)
+            if cached is None:
+                return None
+        elif isinstance(spec, tuple):
+            items = []
+            for element in spec:
+                if element is None:
+                    items.append(None)
+                    continue
+                one = cache_one(element)
+                if one is None:
+                    return None
+                items.append(one)
+            cached = tuple(items)
+        else:
+            return None
+        return cls(cached, out.needs_redistribute, out.use_val_from_redistribute_schema)
+
+    def to_output_sharding(self, meshes: list[DeviceMesh]) -> OutputSharding:
+        spec = self.output_spec
+        if spec is None:
+            rebuilt = None
+        elif isinstance(spec, _CachedSpec):
+            rebuilt = spec.to_spec(meshes)
+        else:
+            rebuilt = tuple(e.to_spec(meshes) if e is not None else None for e in spec)
+
+        return OutputSharding(
+            output_spec=rebuilt,
+            redistribute_schema=None,
+            needs_redistribute=self.needs_redistribute,
+            use_val_from_redistribute_schema=self.use_val_from_redistribute_schema,
+        )
+
+    @staticmethod
+    def _slot_of(mesh, meshes):
+        for i, m in enumerate(meshes):
+            if m is mesh:
+                return i
+        return None
+
+
+class MeshFreeShardingCache(threading.local):
+    """Per-thread sharding-prop cache whose keys and values hold no DeviceMesh."""
+
+    def __init__(self, user_function: Callable[[OpSchema], OutputSharding]) -> None:
+        self.user_function = user_function
+        self.entries: dict[tuple[object, ...], _CachedOutputSharding] = {}
+        self.hits = 0
+        self.misses = 0
+
+    def __call__(self, op_schema: OpSchema) -> OutputSharding:
+        keyed = _mesh_free_schema_key(op_schema)
+        if keyed is None:
+            return self.user_function(op_schema)
+        key, meshes = keyed
+
+        entry = self.entries.get(key)
+        if entry is not None:
+            self.hits += 1
+            result = entry.to_output_sharding(meshes)
+        else:
+            self.misses += 1
+            result = self.user_function(op_schema)
+            cached = _CachedOutputSharding.from_output_sharding(result, meshes)
+            if cached is not None:
+                self.entries[key] = cached
+
         if log.handlers and log.isEnabledFor(logging.DEBUG):
-            info_before = self.cache.cache_info()
-            result = self.cache(*args, **kwargs)
-            info_after = self.cache.cache_info()
-            cache_hit = info_after.hits > info_before.hits
-            op_schema = args[0] if args else None
-            output_spec = getattr(result, "output_spec", None)
             log.debug(
                 "sharding_prop python cache %s: %s -> %s",
-                "HIT" if cache_hit else "MISS",
+                "HIT" if entry is not None else "MISS",
                 op_schema,
-                output_spec,
+                result.output_spec,
             )
-            return result
-        return self.cache(*args, **kwargs)
+        return result
 
     def cache_info(self):
-        return self.cache.cache_info()
+        return _CacheInfo(self.hits, self.misses, None, len(self.entries))
 
     def cache_clear(self):
-        return self.cache.cache_clear()
+        self.entries.clear()
+        self.hits = self.misses = 0
 
 
 def _format_unbacked_hinting_log(
@@ -382,7 +493,10 @@ class ShardingPropagator:
         self.op_to_schema_info_for_single_dim_strategy: dict[
             OpOverload, RuntimeSchemaInfo
         ] = {}
-        self.propagate_op_sharding = LocalLRUCache(
+        self._tensor_meta_cache: OrderedDict[
+            tuple[object, ...], TensorMeta | Sequence[TensorMeta | None] | None
+        ] = OrderedDict()
+        self.propagate_op_sharding = MeshFreeShardingCache(
             self.propagate_op_sharding_non_cached
         )
         self.decomp_strategy = DecompShardingStrategy(self)
@@ -576,7 +690,6 @@ class ShardingPropagator:
             # if fake is not a tensor or tuple of tensor, return as none
             return None
 
-    @lru_cache  # noqa: B019
     def _propagate_tensor_meta_cached(
         self, op_schema: OpSchema
     ) -> TensorMeta | Sequence[TensorMeta | None] | None:
@@ -584,7 +697,21 @@ class ShardingPropagator:
         Cached version of _propagate_tensor_meta_non_cached
         Use _propagate_tensor_meta instead to handle dynamic shapes.
         """
-        return self._propagate_tensor_meta_non_cached(op_schema)
+        keyed = _mesh_free_schema_key(op_schema)
+        if keyed is None:
+            return self._propagate_tensor_meta_non_cached(op_schema)
+        key, _ = keyed
+        if key in self._tensor_meta_cache:
+            self._tensor_meta_cache.move_to_end(key)
+            return self._tensor_meta_cache[key]
+        result = self._propagate_tensor_meta_non_cached(op_schema)
+        self._tensor_meta_cache[key] = result
+        if len(self._tensor_meta_cache) > _TENSOR_META_CACHE_MAXSIZE:
+            self._tensor_meta_cache.popitem(last=False)
+        return result
+
+    def tensor_meta_cache_clear(self) -> None:
+        self._tensor_meta_cache.clear()
 
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
