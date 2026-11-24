@@ -567,8 +567,8 @@ def _prepare_default_all_gather_outputs(
     all_gather_result: AllGatherResult,
     world_size: int,
 ) -> _DefaultAllGatherCopyPlan:
-    device = all_gather_result.all_gather_output.device
-    output_ptr = all_gather_result.all_gather_output.untyped_storage().data_ptr()
+    all_gather_output = all_gather_result.all_gather_output
+    device = all_gather_output.device
     plan = _DefaultAllGatherCopyPlan(
         [],
         all_gather_result.all_gather_input_split_sizes,
@@ -582,6 +582,7 @@ def _prepare_default_all_gather_outputs(
         fsdp_param.init_all_gather_outputs(numels, dtypes, world_size, device)
         if fsdp_param._keep_all_gather_output_storage:
             # Backend-owned outputs may alias the rank-major collective output
+            output_ptr = all_gather_output.untyped_storage().data_ptr()
             plan.clone_input = plan.clone_input or any(
                 t.untyped_storage().data_ptr() == output_ptr
                 for t in fsdp_param.all_gather_outputs
