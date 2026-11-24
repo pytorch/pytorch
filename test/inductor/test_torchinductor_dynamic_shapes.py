@@ -432,17 +432,20 @@ if not TEST_WITH_ASAN:
 
 
 @contextlib.contextmanager
-def _record_launched_index_dtypes():
-    """Record the index dtype ("i32" or "i64", from the numel args) of every Triton
-    kernel launched inside the block."""
+def _record_launches():
+    """Record (index dtype, size_hints) for every Triton kernel launched inside the
+    block. The index dtype ("i32" or "i64") is the type of the kernel's numel args."""
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
-    launched: list[str] = []
+    launched: list[tuple[str, dict[str, int]]] = []
     run = CachingAutotuner.run
 
     def recording_run(self, *args, **kwargs):
         signature = self.triton_meta["signature"]
-        launched.extend(t for name, t in signature.items() if name.endswith("numel"))
+        dtypes = {t for name, t in signature.items() if name.endswith("numel")}
+        if dtypes:
+            (dtype,) = dtypes
+            launched.append((dtype, dict(self.size_hints)))
         return run(self, *args, **kwargs)
 
     with unittest.mock.patch.object(CachingAutotuner, "run", recording_run):
@@ -1079,10 +1082,10 @@ class TestInductorDynamic(DynamicShapesTestCase):
             for shape in [(512, 512), (3, 7), (300, 1000), (64, 512)]:
                 y = torch.randn(shape, device=device)
                 expected = fn(y)
-                with _record_launched_index_dtypes() as launched:
+                with _record_launches() as launched:
                     self.assertEqual(compiled(y), expected)
                 side = "i32" if y.numel() <= 64 * 1024 else "i64"
-                self.assertEqual(set(launched), {side})
+                self.assertEqual({dtype for dtype, _ in launched}, {side})
         self.assertEqual(counter.frame_count, 1)
 
         if cooperative:
@@ -1097,7 +1100,8 @@ class TestInductorDynamic(DynamicShapesTestCase):
     def test_dual_index_dtype_past_int32(self, device, dual):
         """A real input past 2**31 elements, after compiling on a small one: without
         dual_index_dtype_kernels the int32 kernel's size guard fails and the graph
-        recompiles; with it the int64 kernel runs and nothing recompiles."""
+        recompiles; with it the int64 kernel runs, tuned for sizes past 2**31, and
+        nothing recompiles."""
 
         def fn(x):
             return x.sum(-1)
@@ -1113,9 +1117,47 @@ class TestInductorDynamic(DynamicShapesTestCase):
             )
             # In chunks: eager sum upcasts int8 to int64, 16 GiB for all of big.
             expected = torch.cat([chunk.sum(-1) for chunk in big.split(2**10)])
-            self.assertEqual(compiled(big), expected)
+            with _record_launches() as launched:
+                actual = compiled(big)
+            if dual:
+                for dtype, size_hints in launched:
+                    self.assertEqual(dtype, "i64")
+                    self.assertGreaterEqual(math.prod(size_hints.values()), 2**31)
+            self.assertEqual(actual, expected)
         # Without dual kernels, the int32 kernel's size guard fails and recompiles.
         self.assertEqual(counter.frame_count, 1 if dual else 2)
+
+    @onlyAccelerator
+    def test_dual_index_dtype_int64_hints(self, device):
+        """The int64 kernel is tuned for the sizes at which it runs: its size_hints come
+        from the example's sizes scaled by the smallest power of two that exceeds the
+        int32 limit (lowered to 64K here), so 64x512 becomes 128x1024. The int32 kernel
+        keeps the example's hints."""
+        from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+
+        def fn(x):
+            return x.sum(-1)
+
+        int32_index_conditions = SIMDKernelFeatures.int32_index_conditions
+
+        def lowered_bound(self):
+            conds = int32_index_conditions(self)
+            return conds and [sympy.Le(cond.lhs, 64 * 1024) for cond in conds]
+
+        compiled = torch.compile(fn, dynamic=True)
+        with (
+            config.patch(dual_index_dtype_kernels=True),
+            unittest.mock.patch.object(
+                SIMDKernelFeatures, "int32_index_conditions", lowered_bound
+            ),
+        ):
+            compiled(torch.randn(64, 512, device=device))
+            with _record_launches() as launched:
+                compiled(torch.randn(32, 512, device=device))
+            self.assertEqual(launched, [("i32", {"x": 64, "r0_": 512})])
+            with _record_launches() as launched:
+                compiled(torch.randn(256, 512, device=device))
+            self.assertEqual(launched, [("i64", {"x": 128, "r0_": 1024})])
 
     @onlyAccelerator
     def test_dual_index_dtype_multi_kernel(self, device):
@@ -1150,10 +1192,10 @@ class TestInductorDynamic(DynamicShapesTestCase):
             for rows in [256, 3]:
                 y = torch.randn(rows, 512, device=device)
                 expected = fn(y)
-                with _record_launched_index_dtypes() as launched:
+                with _record_launches() as launched:
                     self.assertEqual(compiled(y), expected)
                 side = "i32" if y.numel() <= 64 * 1024 else "i64"
-                self.assertEqual(set(launched), {side})
+                self.assertEqual({dtype for dtype, _ in launched}, {side})
 
         # Each side of the dispatch is a multi-kernel.
         self.assertIn("multi_kernel_0.run(", code)
