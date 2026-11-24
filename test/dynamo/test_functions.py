@@ -4999,6 +4999,34 @@ class GraphModule(torch.nn.Module):
         # Should not have recompiled
         self.assertEqual(cnts.frame_count, 1)
 
+    @parametrize("use_hasattr", [False, True])
+    @torch._dynamo.config.patch(allow_empty_graphs=True)
+    def test_skipped_function_missing_attribute_recompile_hint(self, use_hasattr):
+        @torch._dynamo.disable
+        def helper():
+            return 1
+
+        def fn():
+            if use_hasattr:
+                return hasattr(helper, "setting")
+            try:
+                return helper.setting
+            except AttributeError:
+                return False
+
+        failures = []
+        compiled = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        self.assertEqual(compiled(), False)
+        helper.setting = True
+        self.assertEqual(compiled(), True)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("not hasattr(", failures[0])
+        self.assertIn("Dynamo did not trace this function's body", failures[0])
+        self.assertIn("even if the function is never called", failures[0])
+
     def test_complex_closure(self):
         @torch.compile(backend="eager")
         def forward(y):

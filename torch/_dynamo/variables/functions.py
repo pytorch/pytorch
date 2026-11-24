@@ -2875,7 +2875,13 @@ class SkipFunctionVariable(VariableTracker):
         source = self.get_source()
         if source is not None:
             install_guard(
-                source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+                source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name)),
+                recompile_hint=(
+                    "Dynamo did not trace this function's body, but it did trace "
+                    "the lookup of this missing attribute. It guarded that absence "
+                    "because adding the attribute changes the result or whether "
+                    "the lookup raises, even if the function is never called."
+                ),
             )
         msg = f"'{type(self.value).__name__}' object has no attribute '{name}'"
         raise_observed_exception(
