@@ -1168,6 +1168,10 @@ class CppOverrides(OpOverrides):
         return f"randint64_cpu({seed}, {offset}, {low}, {high})"
 
     @staticmethod
+    def philox_rand(seed, offset, idx, dtype):
+        raise NotImplementedError("philox_rand")
+
+    @staticmethod
     def sigmoid(x):
         return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
