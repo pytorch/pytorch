@@ -36,7 +36,7 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, cast, NoReturn, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -454,30 +454,38 @@ class UserDefinedVariable(VariableTracker):
         return None
 
 
-def pending_class_setattr_owner(
+def _find_pending_class_setattr(
     tx: "InstructionTranslatorBase",
     cls: type,
     cls_source: Source | None,
     name: str,
     cls_vt: VariableTracker | None = None,
-) -> VariableTracker | None:
-    """The class in *cls*'s MRO whose setattr of *name* is still pending in this
-    frame, or None.
-
-    A setattr on a class is replayed when the graph is done, so until then the
-    real ``__dict__`` still holds the old value that an instance lookup would
-    find. *cls_vt* is the VariableTracker for *cls* when the caller has it.
+    start: int = 0,
+) -> tuple[VariableTracker, int] | None:
+    """Walk *cls*'s MRO from index *start* for the first class that either has a
+    pending setattr of *name* in this frame (returned as ``(VariableTracker,
+    MRO index)``) or already holds *name* in its real namespace (None).
     """
     side_effects = tx.output.side_effects
     if not side_effects.store_attr_mutations:
         return None
-    for idx, (klass, namespace) in enumerate(iter_mro_static_dicts(cls)):
+    # Cheap pre-filter: most instance reads have no pending class write, so
+    # avoid building a mappingproxy per class unless one could match.
+    candidates: dict[type, VariableTracker] = {}
+    for klass in cls.__mro__:
         if klass is cls and cls_vt is not None:
-            klass_vt = cls_vt
+            candidates[klass] = cls_vt
         elif klass in side_effects:
-            klass_vt = side_effects[klass]
-        else:
-            klass_vt = None
+            candidates[klass] = side_effects[klass]
+    if not any(
+        side_effects.has_pending_mutation_of_attr(vt, name)
+        for vt in candidates.values()
+    ):
+        return None
+    for idx, (klass, namespace) in enumerate(iter_mro_static_dicts(cls)):
+        if idx < start:
+            continue
+        klass_vt = candidates.get(klass)
         if klass_vt is not None and side_effects.has_pending_mutation_of_attr(
             klass_vt, name
         ):
@@ -486,10 +494,31 @@ def pending_class_setattr_owner(
                 if klass is not cls:
                     mro_entry = GetItemSource(TypeMROSource(cls_source), idx)
                     install_guard(mro_entry.make_guard(GuardBuilder.CLASS_MATCH))
-            return klass_vt
+            return klass_vt, idx
         if name in namespace:
             return None
     return None
+
+
+def pending_class_setattr_owner(
+    tx: "InstructionTranslatorBase",
+    cls: type,
+    cls_source: Source | None,
+    name: str,
+    cls_vt: VariableTracker | None = None,
+) -> VariableTracker | None:
+    """The VariableTracker of the class in *cls*'s MRO whose setattr (or
+    delattr) of *name* is still pending in this frame, or None.
+
+    A setattr on a class is replayed when the graph is done, so until then the
+    real ``__dict__`` still holds the old value that a lookup would find. When
+    the owner is found, the absence of *name* from the classes before it and the
+    owner's place in the MRO are guarded (``DICT_NOT_CONTAINS`` and
+    ``CLASS_MATCH``), as ``__bases__`` can be reassigned between calls.
+    *cls_vt* is the VariableTracker for *cls* when the caller has it.
+    """
+    found = _find_pending_class_setattr(tx, cls, cls_source, name, cls_vt)
+    return found[0] if found is not None else None
 
 
 class UserDefinedClassVariable(UserDefinedVariable):
@@ -3971,9 +4000,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         - SuperVariable.call_method (when super().__getattribute__() resolves
           to object.__getattribute__)
 
-        The algorithm: MRO walk → data descriptor → instance __dict__ →
-        non-data descriptor / plain class attr → dynamic fallback →
-        __getattr__ → AttributeError.
+        The algorithm: MRO walk (a class setattr or delattr still pending in
+        this frame replaces the class's real __dict__ entry) → data descriptor →
+        instance __dict__ → non-data descriptor / plain class attr → dynamic
+        fallback → __getattr__ → AttributeError.
         """
         source: Source | None = AttrSource(self.source, name) if self.source else None
 
@@ -4011,36 +4041,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if type_attr is torch.nn.Module.__init__:
             type_attr = unpatched_nn_module_init
 
-        # A setattr on the class (or a base) that is still pending in this frame
-        # replaces type_attr: in eager it is already in the class __dict__.
-        owner = pending_class_setattr_owner(tx, type(self.value), self.cls_source, name)
-        if owner is not None:
-            value = tx.output.side_effects.load_attr(owner, name)
-            try:
-                is_descriptor = mro_lookup(value.python_type(), "__get__") is not (
-                    NO_SUCH_SUBOBJ
-                )
-            except NotImplementedError:
-                is_descriptor = True
-            if is_descriptor:
-                unimplemented(
-                    gb_type="Instance lookup of a descriptor set on its class",
-                    context=f"{type(self.value).__name__}.{name} = {value}",
-                    explanation="Dynamo cannot bind a descriptor that was assigned to "
-                    "the class earlier in the same frame.",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            result = self.lookup_instance_dict(tx, name)
-            if result is not None:
-                return result
-            if (
-                self.source is not None
-                and not is_constant_source(self.source)
-                and hasattr(self.value, "__dict__")
-                and name not in self.value.__dict__
-            ):
-                install_not_in_instance_dict_guard(self.source, name)
-            return value
+        # A setattr or delattr on the class (or a base) that is still pending in
+        # this frame replaces type_attr: in eager it is already in the class
+        # __dict__. Only a data descriptor beats the instance dict, so anything
+        # else is resolved after the instance dict is consulted.
+        found = _find_pending_class_setattr(tx, type(self.value), self.cls_source, name)
+        if found is not None:
+            return self._generic_getattr_pending_class_attr(tx, name, type_attr, *found)
 
         # Step 2: Data descriptors on the type take priority over instance dict.
         if type_attr is not NO_SUCH_SUBOBJ and is_data_descriptor(type_attr):
@@ -4108,6 +4115,125 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
             kwargs={"name": variables.ConstantVariable.create(name), "obj": self},
         )
+
+    def _generic_getattr_pending_class_attr(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        stale_type_attr: object,
+        owner: VariableTracker,
+        owner_idx: int,
+    ) -> VariableTracker:
+        """Steps 2-5 of generic_getattr when the type attribute is a class write
+        (or delete) that is still pending in this frame.
+        """
+        side_effects = tx.output.side_effects
+        owner_name = getattr(owner, "value", owner)
+        owner_name = getattr(owner_name, "__name__", str(owner_name))
+        value = side_effects.load_attr(owner, name, deleted_ok=True)
+
+        if isinstance(value, variables.DeletedVariable):
+            # The class no longer has the name; keep walking the MRO past it.
+            later = _find_pending_class_setattr(
+                tx,
+                type(self.value),
+                self.cls_source,
+                name,
+                start=owner_idx + 1,
+            )
+            if later is not None:
+                return self._generic_getattr_pending_class_attr(
+                    tx, name, stale_type_attr, *later
+                )
+            for _, namespace in list(iter_mro_static_dicts(type(self.value)))[
+                owner_idx + 1 :
+            ]:
+                if name in namespace:
+                    if is_data_descriptor(namespace[name]):
+                        break
+                    result = self.lookup_instance_dict(tx, name)
+                    if result is not None:
+                        return result
+                    break
+            else:
+                result = self.lookup_instance_dict(tx, name)
+                if result is not None:
+                    return result
+            unimplemented(
+                gb_type="Instance lookup of a class attribute deleted in the same frame",
+                context=f"del {owner_name}.{name}; instance.{name}",
+                explanation="Dynamo cannot resolve an attribute that is no longer on "
+                "its class and is not in the instance __dict__.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        def descriptor_kinds() -> tuple[bool, bool]:
+            # (is a descriptor, is a data descriptor); unknown types count as
+            # data descriptors so that they are never read as plain values.
+            try:
+                tp = value.python_type()
+            except NotImplementedError:
+                return True, True
+            has_get = mro_lookup(tp, "__get__") is not NO_SUCH_SUBOBJ
+            has_set = (
+                mro_lookup(tp, "__set__") is not NO_SUCH_SUBOBJ
+                or mro_lookup(tp, "__delete__") is not NO_SUCH_SUBOBJ
+            )
+            return has_get, has_get and has_set
+
+        is_descriptor, is_data = descriptor_kinds()
+
+        def break_on_descriptor() -> NoReturn:
+            unimplemented(
+                gb_type="Instance lookup of a descriptor set on its class",
+                context=f"{owner_name}.{name} = {value}",
+                explanation="Dynamo cannot bind a descriptor that was assigned to "
+                "the class earlier in the same frame.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        # Step 2: a data descriptor on the type wins over the instance dict.
+        if is_data:
+            break_on_descriptor()
+
+        # A slot written in this frame is not in an instance dict, and the
+        # class write has replaced the slot's descriptor.
+        if isinstance(
+            stale_type_attr, types.MemberDescriptorType
+        ) and side_effects.has_pending_mutation_of_attr(
+            self,
+            name,
+            (AttrMutationKind.INSTANCE_DICT, AttrMutationKind.GENERIC_SETATTR),
+        ):
+            unimplemented(
+                gb_type="Instance slot written before the slot was replaced on its class",
+                context=f"{owner_name}.{name} = {value}",
+                explanation="Dynamo cannot tell whether the slot write or the class "
+                "write came first.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
+        # Step 3: the instance __dict__ wins over a non-data descriptor or a
+        # plain class attribute.
+        result = self.lookup_instance_dict(tx, name)
+        if result is not None:
+            return result
+        # Step 4: Dynamo cannot bind the non-data descriptor yet.
+        if is_descriptor:
+            break_on_descriptor()
+        # Step 5: plain class attribute.
+        self._guard_not_in_instance_dict(name)
+        return value
+
+    def _guard_not_in_instance_dict(self, name: str) -> None:
+        # A traced deletion may leave the name present in the live dict.
+        if (
+            self.source
+            and not is_constant_source(self.source)
+            and hasattr(self.value, "__dict__")
+            and name not in self.value.__dict__
+        ):
+            install_not_in_instance_dict_guard(self.source, name)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
@@ -4460,14 +4586,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ):
                     mro_attr_source(tx, self.value_type, self.cls_source, name)
                 # Install before inlining so nested graph breaks preserve the guard.
-                # A traced deletion may leave the name present in the live dict.
-                if (
-                    self.source
-                    and not is_constant_source(self.source)
-                    and hasattr(self.value, "__dict__")
-                    and name not in self.value.__dict__
-                ):
-                    install_not_in_instance_dict_guard(self.source, name)
+                self._guard_not_in_instance_dict(name)
             if (
                 getattr_fn is unpatched_nn_module_getattr
                 and isinstance(self, variables.UnspecializedNNModuleVariable)

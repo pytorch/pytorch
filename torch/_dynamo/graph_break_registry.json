@@ -7432,5 +7432,35 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB3550": [
+    {
+      "Gb_type": "Instance lookup of a descriptor set on its class",
+      "Context": "{owner_name}.{name} = {value}",
+      "Explanation": "Dynamo cannot bind a descriptor that was assigned to the class earlier in the same frame.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5812": [
+    {
+      "Gb_type": "Instance lookup of a class attribute deleted in the same frame",
+      "Context": "del {owner_name}.{name}; instance.{name}",
+      "Explanation": "Dynamo cannot resolve an attribute that is no longer on its class and is not in the instance __dict__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB8965": [
+    {
+      "Gb_type": "Instance slot written before the slot was replaced on its class",
+      "Context": "{owner_name}.{name} = {value}",
+      "Explanation": "Dynamo cannot tell whether the slot write or the class write came first.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

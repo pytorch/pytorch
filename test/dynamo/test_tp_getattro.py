@@ -1766,7 +1766,9 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         Child.foo = 5
         self.assertEqual(fn(Child(), Base, x), x + 5)
         self.assertEqual(cnt.frame_count, 3)
-        # An instance attribute shadows the class write.
+        # An instance attribute shadows the class write. Child.foo is gone, so
+        # the write to Base.foo is what the walk finds, and the instance wins.
+        del Child.foo
         o = Child()
         o.foo = 7
         self.assertEqual(fn(o, Base, x), x + 7)
@@ -1786,22 +1788,195 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
             return t + obj.f()
 
         t = torch.zeros(1)
-        result = torch.compile(fn, backend="eager")(t)
-        self.assertEqual(result, t + 6)
+        # Dynamo cannot bind a function assigned to the class in the same frame.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Instance lookup of a descriptor set on its class",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(torch.compile(fn, backend="eager")(t), t + 6)
 
     def test_class_setattr_descriptor_then_instance_getattr(self):
         class MyClass:
             pass
 
+        double = property(lambda self: 2)
+
         def fn(t):
-            MyClass.double = property(lambda self: 2)
-            MyClass.plain = 4
+            MyClass.double = double
             obj = MyClass()
-            return t + obj.double + obj.plain
+            return t + obj.double
 
         t = torch.zeros(1)
-        result = torch.compile(fn, backend="eager")(t)
-        self.assertEqual(result, t + 6)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Instance lookup of a descriptor set on its class",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(torch.compile(fn, backend="eager")(t), t + 2)
+
+    def test_class_setattr_plain_value_then_instance_getattr(self):
+        class MyClass:
+            pass
+
+        def fn(t):
+            MyClass.plain = 4
+            obj = MyClass()
+            return t + obj.plain
+
+        t = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), t + 4)
+
+    def test_class_setattr_descriptor_break_names_owner(self):
+        class Base:
+            pass
+
+        class Child(Base):
+            pass
+
+        def fn(t):
+            Base.f = lambda self: 1
+            return t + Child().f()
+
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, r"Base\.f ="):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.zeros(1))
+
+    def test_class_setattr_function_with_instance_attr(self):
+        # An instance attribute shadows a function set on the class, as the
+        # instance dict wins over a non-data descriptor.
+        def make():
+            class MyClass:
+                pass
+
+            obj = MyClass()
+            obj.f = 1
+            return MyClass, obj
+
+        def g(self):
+            return 6
+
+        def fn(t, cls, obj):
+            cls.f = g
+            return t + obj.f
+
+        t = torch.zeros(1)
+        expected = fn(t, *make())
+        self.assertEqual(expected, t + 1)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t, *make())
+        self.assertEqual(result, expected)
+
+    def test_class_setattr_function_with_instance_attr_set_in_frame(self):
+        def make():
+            class MyClass:
+                pass
+
+            return MyClass
+
+        def g(self):
+            return 6
+
+        def fn(t, cls):
+            o = cls()
+            o.f = 1
+            cls.f = g
+            return t + o.f
+
+        t = torch.zeros(1)
+        expected = fn(t, make())
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t, make())
+        self.assertEqual(result, expected)
+
+    def test_class_delattr_with_instance_attr(self):
+        def make():
+            class A:
+                x = 1
+
+            obj = A()
+            obj.x = 2
+            return A, obj
+
+        def fn(t, cls, obj):
+            del cls.x
+            return t + obj.x
+
+        t = torch.zeros(1)
+        expected = fn(t, *make())
+        self.assertEqual(expected, t + 2)
+        A, obj = make()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t, A, obj)
+        self.assertEqual(result, expected)
+        self.assertFalse(hasattr(A, "x"))
+
+    def test_class_delattr_with_instance_attr_set_in_frame(self):
+        class A:
+            x = 1
+
+        def fn(t):
+            o = A()
+            o.x = 2
+            del A.x
+            return t + o.x
+
+        t = torch.zeros(1)
+        result = torch.compile(fn, backend="eager", fullgraph=True)(t)
+        self.assertEqual(result, t + 2)
+        self.assertFalse(hasattr(A, "x"))
+
+    def test_class_delattr_without_instance_attr_breaks(self):
+        class A:
+            x = 1
+
+        def fn(t):
+            o = A()
+            del A.x
+            try:
+                return t + o.x
+            except AttributeError:
+                return t - 1
+
+        t = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(t), t - 1)
+
+    def test_class_delattr_then_base_data_descriptor(self):
+        class Base:
+            @property
+            def x(self):
+                return 10
+
+        class A(Base):
+            x = 1
+
+        def fn(t):
+            o = A()
+            del A.x
+            return t + o.x
+
+        t = torch.zeros(1)
+        self.assertEqual(torch.compile(fn, backend="eager")(t), t + 10)
+
+    def test_class_setattr_slot_replaced_then_instance_getattr(self):
+        def make():
+            class S:
+                __slots__ = ("x",)
+
+            return S
+
+        def fn(t, cls):
+            s = cls()
+            s.x = 1
+            cls.x = 5
+            return t + s.x
+
+        t = torch.zeros(1)
+        expected = fn(t, make())
+        self.assertEqual(expected, t + 5)
+        # Dynamo cannot order the slot write and the class write, so it breaks.
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Instance slot written before the slot was replaced on its class",
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(t, make())
+        self.assertEqual(torch.compile(fn, backend="eager")(t, make()), expected)
 
     def test_class_setattr_replaces_property_then_instance_getattr(self):
         class MyClass:
