@@ -2105,6 +2105,49 @@ class TensorVariable(VariableTracker):
     def method___index__(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.nb_index_impl(tx)
 
+    def build_list_indices(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        # Tensor.__getitem__ turns a list inside a tuple index into an index
+        # tensor by reading the list's values (indexing_tensor_from_data in
+        # torch/csrc/utils/tensor_new.cpp), which fake tensors don't have. When
+        # the list holds integer or bool scalar tensors, build it in the graph.
+        from .lists import BaseListVariable, TupleVariable
+
+        def index_dtype(x: VariableTracker) -> torch.dtype | None:
+            x = x.realize()
+            if x.is_python_constant():
+                value = x.as_python_constant()
+                return {int: torch.int64, bool: torch.bool}.get(type(value))
+            if isinstance(x, TensorVariable) and x.ndim == 0 and x.dtype is not None:
+                if not (x.dtype.is_floating_point or x.dtype.is_complex):
+                    return x.dtype
+            return None
+
+        def build(item: VariableTracker) -> VariableTracker:
+            if not isinstance(item, BaseListVariable) or not any(
+                x.is_tensor() for x in item.items
+            ):
+                return item
+            dtype = torch.bool
+            for x in item.items:
+                x_dtype = index_dtype(x)
+                if x_dtype is None:
+                    return item
+                dtype = torch.promote_types(dtype, x_dtype)
+            if dtype not in (torch.bool, torch.uint8):
+                dtype = torch.int64
+            kwargs = {
+                "dtype": VariableTracker.build(tx, dtype),
+                "device": VariableTracker.build(tx, self.device),
+            }
+            tensor_fn = _create_internal_torch_function(torch.tensor)
+            return tensor_fn.call_function(tx, [item], kwargs)
+
+        if not isinstance(key, TupleVariable):
+            return key
+        return TupleVariable([build(item) for item in key.items])
+
     def method___getitem__(
         self,
         tx: "InstructionTranslatorBase",
@@ -2126,6 +2169,7 @@ class TensorVariable(VariableTracker):
             )
         else:
             fn = operator.getitem
+            args = (self.build_list_indices(tx, args[0]), *args[1:])
 
         proxy = tx.output.create_proxy(
             "call_function",

@@ -1990,6 +1990,8 @@ class BuiltinVariable(TypeVariable):
                         variables.VariableTracker.build(tx, 0),
                         args[1],
                     ]  # type: ignore[assignment]
+                elif isinstance(args[0], TensorVariable) and not use_numpy_operator():
+                    args = [args[0], args[0].build_list_indices(tx, args[1])]
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
