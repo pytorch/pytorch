@@ -784,15 +784,19 @@ def init_backend_registration() -> None:
             fx_wrapper_codegen = getattr(device_mod, "WrapperFxCodegen", None)
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 # Register the device's code cache class first, if the device
-                # module exposes one under the CodeCache attribute (see
-                # autoload.md): register_device_codecache validates the class
-                # against DeviceCodeCacheProtocol and raises TypeError for a
-                # non-conforming one *before* register_backend_for_device
-                # marks the device as registered, so the failure is loud on
-                # every init_backend_registration() call. Devices without the
-                # attribute keep whatever register_device_codecache calls
-                # their integration code already made, or none at all.
-                device_codecache = getattr(device_mod, "CodeCache", None)
+                # module exposes one under the InductorCodeCache attribute (see
+                # autoload.md). The name is deliberately Inductor-specific: a
+                # generic ``CodeCache`` attribute may already exist on a device
+                # module for an unrelated purpose, and validating it here would
+                # break that device's (and CPU's) compilation. register_device_codecache
+                # validates the class against DeviceCodeCacheProtocol and raises
+                # TypeError for a non-conforming one *before*
+                # register_backend_for_device marks the device as registered, so
+                # the failure is loud on every init_backend_registration() call.
+                # Devices without the attribute keep whatever
+                # register_device_codecache calls their integration code already
+                # made, or none at all.
+                device_codecache = getattr(device_mod, "InductorCodeCache", None)
                 if device_codecache is not None:
                     from ..codecache import register_device_codecache
 

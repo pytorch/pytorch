@@ -449,6 +449,7 @@ def patch_inductor_backend(
     python_wrapper_codegen=None,
     custom_pass=None,
     custom_backend_config: ConfigModule = None,
+    codecache=None,
 ):
     """
     Patch the inductor backend for a specific device.
@@ -461,7 +462,10 @@ def patch_inductor_backend(
         init_backend_registration,
         register_backend_for_device,
     )
-    from torch._inductor.codecache import _DEVICE_CODECACHE_REGISTRY
+    from torch._inductor.codecache import (
+        _DEVICE_CODECACHE_REGISTRY,
+        register_device_codecache,
+    )
 
     # Make sure the backend is already registered
     init_backend_registration()
@@ -494,6 +498,8 @@ def patch_inductor_backend(
                 else original_custom_backend_config
             ),
         )
+        if codecache is not None:
+            register_device_codecache(device, codecache)
         yield
     finally:
         # Restore the original backend
@@ -506,13 +512,14 @@ def patch_inductor_backend(
             original_custom_pass,
             original_custom_backend_config,
         )
-        # Restore the original code-cache registry entry (patching the
-        # backend never touches it, but a test body using this helper may
-        # have called register_device_codecache for the device).
-        if original_codecache is None:
-            _DEVICE_CODECACHE_REGISTRY.pop(device, None)
-        else:
-            _DEVICE_CODECACHE_REGISTRY[device] = original_codecache
+        # Restore the original code-cache registry entry only when this
+        # helper actually patched it via the codecache= argument.
+        if codecache is not None:
+            if original_codecache is None:
+                _DEVICE_CODECACHE_REGISTRY.pop(device, None)
+            else:
+                _DEVICE_CODECACHE_REGISTRY[device] = original_codecache
+
 
 def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
     """

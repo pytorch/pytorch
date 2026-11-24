@@ -79,9 +79,7 @@ class ROCmCPPScheduling(BaseScheduling):
             if V.graph.cpp_wrapper and not V.graph.aot_mode:
                 from ...codecache import get_device_codecache
 
-                # Resolve through the registry ("cuda" entry, which is
-                # ROCmCodeCache on a HIP build) so a custom CodeCache
-                # registered for "cuda" applies uniformly.
+                # See Note [Device code cache lookup] in async_compile.py.
                 so_path, _, _ = get_device_codecache("cuda").compile(src_code, "so")
                 wrapper.external_kernel_libs.add(so_path)
         return kernel_name

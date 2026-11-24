@@ -27,10 +27,11 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
     #
-    # The code cache is resolved through the registry ("cuda" entry, which is
-    # ROCmCodeCache on a HIP build) so a custom CodeCache registered for
-    # "cuda" applies uniformly to compilation, benchmarking, and the AOTI
-    # link step.
+    # See Note [Device code cache lookup] in async_compile.py: on a HIP build
+    # the "cuda" entry is ROCmCodeCache. The resolved class is *stored* on the
+    # instance because instances are pickled into the autotune subprocess,
+    # which never runs init_backend_registration(); resolving at call time
+    # there would silently fall back to the default ROCmCodeCache.
 
     def __init__(
         self,
@@ -48,7 +49,8 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
-        self.hash_key, self.source_file = get_device_codecache("cuda").write(
+        self.codecache_cls = get_device_codecache("cuda")
+        self.hash_key, self.source_file = self.codecache_cls.write(
             self.source_code, "so"
         )
 
@@ -56,10 +58,9 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         # Prepopulate code cache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
-        codecache_cls = get_device_codecache("cuda")
-        codecache_cls.compile(self.source_code, "so")
+        self.codecache_cls.compile(self.source_code, "so")
         if config.rocm.generate_test_runner:
-            codecache_cls.compile(self.source_code, "exe")
+            self.codecache_cls.compile(self.source_code, "exe")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
@@ -138,9 +139,9 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
 
     def ensure_dll_loaded(self):
         if self.DLL is None:
-            self.DLL, self.hash_key, self.source_file = get_device_codecache(
-                "cuda"
-            ).load(self.source_code, "so")
+            self.DLL, self.hash_key, self.source_file = self.codecache_cls.load(
+                self.source_code, "so"
+            )
 
     def cleanup_run_fn(self) -> None:
         if self.DLL is not None:

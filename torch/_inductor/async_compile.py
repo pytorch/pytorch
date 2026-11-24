@@ -732,22 +732,35 @@ class AsyncCompile:
             )
             return LambdaFuture(get_result)
 
-    def cutlass(self, cache_cls, source_code, dst_file_ext, aot_compile=False):
+    def cutlass(
+        self,
+        cache_cls,
+        source_code,
+        dst_file_ext,
+        aot_compile=False,
+        generate_test_runner=False,
+    ):
         def task():
             if aot_compile:
                 # We rely on JITInductor to compile the CUDA code,
                 # so that we can load it into AOTInductor.
                 output_path, *_ = cache_cls.compile(source_code, "o")
                 cache_cls.aot_kernels_o.append(output_path)
+            if generate_test_runner:
+                cache_cls.compile(source_code, "exe")
             return cache_cls.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 
+    # Note [Device code cache lookup]
+    # cuda()/xpu()/rocm() all resolve their CodeCache through the registry, so
+    # an out-of-tree override registered for an existing device type is used
+    # by async compilation, benchmarking, and the AOTI link step alike. On a
+    # HIP build the "cuda" entry is ROCmCodeCache, which is why rocm() also
+    # resolves "cuda".
+
     def cuda(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("CUDA Kernel:\n%s", source_code)
-        # Route through the registry so a custom CodeCache registered for
-        # "cuda" is used consistently by async compilation and the AOTI link
-        # step (which reads aot_kernels_o from the registry class).
         return self.cutlass(
             get_device_codecache("cuda"), source_code, dst_file_ext, aot_compile
         )
@@ -758,34 +771,15 @@ class AsyncCompile:
             get_device_codecache("xpu"), source_code, dst_file_ext, aot_compile
         )
 
-    def rocm(
-        self,
-        source_code,
-        dst_file_ext,
-        aot_compile=False,
-    ):
+    def rocm(self, source_code, dst_file_ext, aot_compile=False):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
-        # Route through the registry like cuda()/xpu() do: on a HIP build the
-        # "cuda" entry resolves to ROCmCodeCache, so a custom CodeCache
-        # registered for "cuda" applies uniformly here, in the other ROCm
-        # sites (rocm_benchmark_request, rocm_cpp_scheduling), and in the
-        # AOTI link step (which reads aot_kernels_o from the registry
-        # class) -- an override can no longer make the link step miss the
-        # .o files this entry point appended.
-        cache_cls = get_device_codecache("cuda")
-        generate_test_runner = config.rocm.generate_test_runner
-
-        def task():
-            if aot_compile:
-                # We rely on JITInductor to compile the CUDA code,
-                # so that we can load it into AOTInductor.
-                output_path, *_ = cache_cls.compile(source_code, dst_file_ext="o")
-                cache_cls.aot_kernels_o.append(output_path)
-            if generate_test_runner:
-                _ = cache_cls.compile(source_code, dst_file_ext="exe")
-            return cache_cls.load(source_code, dst_file_ext)[0]
-
-        return self.submit(task)
+        return self.cutlass(
+            get_device_codecache("cuda"),
+            source_code,
+            dst_file_ext,
+            aot_compile,
+            generate_test_runner=config.rocm.generate_test_runner,
+        )
 
     def halide(self, meta: HalideMeta, source_code: str):
         kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)

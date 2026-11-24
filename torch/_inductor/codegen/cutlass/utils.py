@@ -208,10 +208,9 @@ def _normalize_cuda_arch(arch: str | None) -> str:
         raise RuntimeError(
             "Unable to determine the CUDA architecture to generate CUTLASS kernels "
             "for. Set torch._inductor.config.cuda.arch or run on a CUDA device. "
-            "Note that the failed probe is cached by get_cuda_arch "
-            "(torch._inductor.codegen.cuda.cuda_env): after setting the knob, "
-            "re-run in a fresh process or use "
-            "torch._inductor.codecache.fresh_cache() to clear it."
+            "A failed probe is cached by get_cuda_arch in "
+            "torch._inductor.codegen.cuda.cuda_env; clear it in this process with "
+            "get_cuda_arch.cache_clear() (or torch._inductor.utils.clear_caches())."
         )
     arch_num = arch
     if isinstance(arch, str):
@@ -267,19 +266,22 @@ def toolkit_version(device_type: str) -> str:
             f"CUTLASS codegen is not implemented for device type {device_type!r}"
         )
     if not version:
-        raise RuntimeError(
-            f"Unable to determine the {device_type} toolkit version to generate "
-            "CUTLASS kernels for. Run on a "
-            f"{device_type} device"
-            + (
-                " or set torch._inductor.config.cuda.version"
-                if device_type == "cuda"
-                else ""
+        if device_type == "xpu":
+            # get_xpu_version() just returns torch.version.xpu, a build-time
+            # constant: no config knob or fresh process can change it.
+            raise RuntimeError(
+                "Unable to determine the XPU toolkit version to generate CUTLASS "
+                "kernels for. This requires an XPU build of PyTorch "
+                "(torch.version.xpu must be set); a CPU/CUDA-only build cannot "
+                "run XPU CUTLASS codegen."
             )
-            + ". Note that a failed probe is cached by get_"
-            f"{device_type}_version (torch/_inductor/codegen/{device_type}/"
-            f"{device_type}_env.py): after setting the knob, re-run in a fresh "
-            "process or use torch._inductor.codecache.fresh_cache() to clear it."
+        raise RuntimeError(
+            "Unable to determine the CUDA toolkit version to generate CUTLASS "
+            "kernels for. Run on a CUDA device or set "
+            "torch._inductor.config.cuda.version. A failed probe is cached by "
+            "get_cuda_version in torch._inductor.codegen.cuda.cuda_env; clear it "
+            "in this process with get_cuda_version.cache_clear() (or "
+            "torch._inductor.utils.clear_caches())."
         )
     return version
 

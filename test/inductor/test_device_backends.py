@@ -44,17 +44,18 @@ class DeviceBackendInitTest(TestCase):
     def tearDown(self) -> None:
         # Drop whatever the hooks registered, remove the fake device module
         # from torch, and clear the in-progress flag so later tests start clean.
+        from torch._inductor.codecache import _DEVICE_CODECACHE_REGISTRY
+
         for registry, orig in [
             (common.device_codegens, self._orig_codegen),
             (common.custom_backend_passes, self._orig_custom_passes),
             (common.custom_backend_codegen_configs, self._orig_custom_configs),
+            (_DEVICE_CODECACHE_REGISTRY, self._orig_codecache),
         ]:
             for device in [d for d in registry if d not in orig]:
                 del registry[device]
-        from torch._inductor.codecache import _DEVICE_CODECACHE_REGISTRY
-
-        for device in [d for d in _DEVICE_CODECACHE_REGISTRY if d not in self._orig_codecache]:
-            del _DEVICE_CODECACHE_REGISTRY[device]
+            for device, value in orig.items():
+                registry[device] = value
         if hasattr(torch, self.device):
             delattr(torch, self.device)
         sys.modules.pop(f"torch.{self.device}", None)
@@ -393,12 +394,12 @@ class DeviceBackendInitTest(TestCase):
         self.assertIsNotNone(get_scheduling_for_device(self.device))
 
     # ------------------------------------------------------------------
-    # CodeCache attribute path
+    # InductorCodeCache attribute path
     # ------------------------------------------------------------------
 
     def test_codecache_attribute_registers_code_cache(self) -> None:
         # A device module exposing Scheduling/PythonWrapperCodegen/
-        # CppWrapperCodegen plus a CodeCache attribute gets that class
+        # CppWrapperCodegen plus an InductorCodeCache attribute gets that class
         # registered in the device code-cache registry under the device's
         # own name.
         from torch._inductor.codecache import get_device_codecache
@@ -429,13 +430,28 @@ class DeviceBackendInitTest(TestCase):
             Scheduling=LegacyScheduling,
             PythonWrapperCodegen=LegacyWrapper,
             CppWrapperCodegen=LegacyCppWrapper,
-            CodeCache=MyCodeCache,
+            InductorCodeCache=MyCodeCache,
         )
         init_backend_registration()
         self.assertIs(get_device_codecache(self.device), MyCodeCache)
 
+    def test_generic_codecache_attribute_is_ignored(self) -> None:
+        # A generic ``CodeCache`` attribute may exist on a device module for
+        # purposes unrelated to Inductor. Probing it must not validate or
+        # register it: only the Inductor-specific name is an extension point.
+        from torch._inductor.codecache import _lookup_device_codecache
+
+        self._install_device_module(
+            Scheduling=object,
+            PythonWrapperCodegen=object,
+            CppWrapperCodegen=object,
+            CodeCache=object(),  # arbitrary, non-conforming value
+        )
+        init_backend_registration()
+        self.assertIsNone(_lookup_device_codecache(self.device))
+
     def test_codecache_attribute_rejects_nonconforming_class(self) -> None:
-        # A non-conforming CodeCache attribute raises TypeError from
+        # A non-conforming InductorCodeCache attribute raises TypeError from
         # register_device_codecache *before* register_backend_for_device
         # marks the device as registered, so the failure is loud and repeats
         # on every init_backend_registration() call (the device stays out of
@@ -456,7 +472,7 @@ class DeviceBackendInitTest(TestCase):
             Scheduling=LegacyScheduling,
             PythonWrapperCodegen=LegacyWrapper,
             CppWrapperCodegen=LegacyCppWrapper,
-            CodeCache=NotACodeCache,
+            InductorCodeCache=NotACodeCache,
         )
         for _ in range(2):
             with self.assertRaisesRegex(

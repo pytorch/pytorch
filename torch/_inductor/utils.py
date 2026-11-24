@@ -1828,7 +1828,8 @@ def clear_on_fresh_cache(obj: Any) -> Any:
     if not hasattr(obj, "cache_clear") or not callable(obj.cache_clear):
         raise AttributeError(f"{obj} does not have a cache_clear method")
 
-    _registered_caches.append(obj)
+    if not any(obj is registered for registered in _registered_caches):
+        _registered_caches.append(obj)
     return obj
 
 

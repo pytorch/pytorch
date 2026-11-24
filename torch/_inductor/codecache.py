@@ -3520,7 +3520,7 @@ end
             # Device types without a registered code cache (cpu, mps, npu
             # without a backend hook, ...) have no GPU kernels to link: skip
             # the GPU-kernel link step with an empty object list.
-            gpu_kernels_o = aot_kernels_o_for_device(device_type)
+            gpu_kernels_o = _pop_aot_kernels_o(device_type)
 
             if gpu_kernels_o:
                 if config.aot_inductor.emit_multi_arch_kernel:
@@ -5922,11 +5922,9 @@ class DeviceCodeCacheProtocol(Protocol):
     - ``cache_clear()``: clears this cache's entries; in-tree caches clear
       ``aot_kernels_o`` here too, so that ``fresh_cache()`` does not link
       stale ``.o`` files into the next AOTI ``.so``. Out-of-tree caches
-      should follow the same contract. Note that registration itself does
-      not add the class to Inductor's ``fresh_cache()`` bookkeeping: an
-      out-of-tree cache is cleared by ``fresh_cache()`` only if it applies
-      ``@clear_on_fresh_cache`` (from torch._inductor.utils) to its
-      ``cache_clear``-equivalent entry points.
+      should follow the same contract. ``register_device_codecache()`` adds
+      the class to Inductor's ``fresh_cache()`` bookkeeping (deduplicated),
+      so ``fresh_cache()`` calls its ``cache_clear()`` automatically.
     """
 
     aot_kernels_o: list[str]
@@ -5958,18 +5956,34 @@ def register_device_codecache(
     previous entry (last registration wins). The class must satisfy
     ``DeviceCodeCacheProtocol``; this is checked loudly at registration time.
     """
-    if not isinstance(codecache_cls, DeviceCodeCacheProtocol):
-        missing = [
-            name
-            for name in ("write", "compile", "load", "cache_clear", "aot_kernels_o")
-            if not hasattr(codecache_cls, name)
-        ]
+    # Derive the required members from the Protocol itself so this check cannot
+    # drift when the protocol grows a new method or attribute.
+    required_members = {
+        name
+        for name in (
+            *DeviceCodeCacheProtocol.__annotations__,
+            *DeviceCodeCacheProtocol.__dict__,
+        )
+        if not name.startswith("_")
+    }
+    missing = sorted(
+        name for name in required_members if not hasattr(codecache_cls, name)
+    )
+    if (
+        not isinstance(codecache_cls, type)
+        or not isinstance(codecache_cls, DeviceCodeCacheProtocol)
+        or missing
+    ):
         raise TypeError(
             f"codecache_cls {codecache_cls!r} does not satisfy "
-            f"DeviceCodeCacheProtocol (missing: {missing}); see the protocol "
-            "docstring in torch/_inductor/codecache.py."
+            f"DeviceCodeCacheProtocol (missing: {missing}); the registry stores "
+            "classes, not instances; see the protocol docstring in "
+            "torch/_inductor/codecache.py."
         )
     _DEVICE_CODECACHE_REGISTRY[device_type] = codecache_cls
+    # Registered caches participate in fresh_cache(): the decorator is
+    # idempotent (deduplicated by identity) and validates cache_clear exists.
+    clear_on_fresh_cache(codecache_cls)
 
 
 def _lookup_device_codecache(device_type: str) -> type[DeviceCodeCacheProtocol] | None:
@@ -5982,21 +5996,20 @@ def _lookup_device_codecache(device_type: str) -> type[DeviceCodeCacheProtocol] 
     return _DEVICE_CODECACHE_REGISTRY.get(device_type)
 
 
-def aot_kernels_o_for_device(device_type: str) -> list[str]:
-    """Return and clear the ``.o`` files to link into an AOTInductor ``.so``.
+def _pop_aot_kernels_o(device_type: str) -> list[str]:
+    """Pop and return the ``.o`` files to link into an AOTInductor ``.so``.
 
     Used by the AOTI link step: resolves ``device_type`` to its registered
-    CodeCache class, instantiates it, copies its ``aot_kernels_o`` and clears
-    the list (so each link only sees kernels compiled for it). Device types
+    CodeCache class, copies its class-level ``aot_kernels_o`` and clears the
+    list (so each link only sees kernels compiled for it). Device types
     without a registered code cache have no GPU kernels to link and get an
     empty list.
     """
     cache_cls = _lookup_device_codecache(device_type)
     if cache_cls is None:
         return []
-    gpu_codecache = cache_cls()
-    gpu_kernels_o = gpu_codecache.aot_kernels_o.copy()
-    gpu_codecache.aot_kernels_o.clear()
+    gpu_kernels_o = cache_cls.aot_kernels_o.copy()
+    cache_cls.aot_kernels_o.clear()
     return gpu_kernels_o
 
 
@@ -6009,13 +6022,16 @@ def get_device_codecache(device_type: str) -> type[DeviceCodeCacheProtocol]:
     compiled for the wrong device, which surfaces as a confusing error from the
     generated C++ rather than as a device dispatch problem.
 
-    Note: the registry currently only affects the built-in "cuda"/"xpu" devices.
-    Registering a code cache for another device type does not make Inductor
-    compile kernels for it -- codegen emits ``async_compile.<device_type>(...)``,
-    and :class:`AsyncCompile` only defines the cuda/xpu/rocm entry points. The
-    registry is the extension point for *overriding* the CUDA/XPU code caches
-    (e.g. out-of-tree backends that keep the "cuda"/"xpu" device type but swap
-    the compiler driver), not for adding new device types.
+    The registry holds one entry per device type and every caller that needs a
+    code cache for that type resolves it here -- async compilation,
+    benchmarking, and the AOTI link step. For the built-in "cuda"/"xpu" types
+    this overrides the compiler driver. A PrivateUse1 backend using the
+    attribute-based registration path may also register an entry under its own
+    device name (via the ``InductorCodeCache`` module attribute), which is used
+    by lookups such as the AOTI link step. Registering an entry does not add an
+    ``async_compile.<device_type>(...)`` entry point -- :class:`AsyncCompile`
+    only defines the cuda/xpu/rocm ones -- so it does not by itself make
+    Inductor generate kernels for a new device type.
     """
     codecache_cls = _lookup_device_codecache(device_type)
     if codecache_cls is None:

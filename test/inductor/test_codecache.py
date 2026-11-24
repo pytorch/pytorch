@@ -5935,13 +5935,13 @@ class TestDeviceCodeCacheRegistry(TestCase):
                 self.assertIsInstance(cls, DeviceCodeCacheProtocol)
 
     def test_aot_inductor_link_uses_registered_class_aot_kernels_o(self):
-        # The AOTI link step (aot_kernels_o_for_device) instantiates the
-        # *registered* codecache class and copies+clears its aot_kernels_o:
+        # The AOTI link step (_pop_aot_kernels_o) copies+clears the class-level
+        # aot_kernels_o of the *registered* codecache class (no instantiation):
         # verify with a registered mock class on a fake device (CPU-only, no
         # compilation involved), calling the real link-step helper rather
         # than re-typing its body here.
         from torch._inductor.codecache import (
-            aot_kernels_o_for_device,
+            _pop_aot_kernels_o,
             register_device_codecache,
         )
 
@@ -5949,20 +5949,20 @@ class TestDeviceCodeCacheRegistry(TestCase):
         MyCodeCache.aot_kernels_o = ["stale.o"]
 
         register_device_codecache(self.FAKE_DEVICE, MyCodeCache)
-        gpu_kernels_o = aot_kernels_o_for_device(self.FAKE_DEVICE)
+        gpu_kernels_o = _pop_aot_kernels_o(self.FAKE_DEVICE)
         # the helper returned the pre-link contents and cleared the list
         self.assertEqual(gpu_kernels_o, ["stale.o"])
         self.assertEqual(MyCodeCache.aot_kernels_o, [])
         # a second link sees no leftover kernels
-        self.assertEqual(aot_kernels_o_for_device(self.FAKE_DEVICE), [])
+        self.assertEqual(_pop_aot_kernels_o(self.FAKE_DEVICE), [])
 
     def test_aot_inductor_link_unregistered_device_returns_empty(self):
         # Device types without a registered code cache (cpu, mps, ...) have
         # no GPU kernels to link: the link-step helper returns an empty list
         # instead of raising.
-        from torch._inductor.codecache import aot_kernels_o_for_device
+        from torch._inductor.codecache import _pop_aot_kernels_o
 
-        self.assertEqual(aot_kernels_o_for_device(self.FAKE_DEVICE), [])
+        self.assertEqual(_pop_aot_kernels_o(self.FAKE_DEVICE), [])
 
     def test_capturing_context_patches_registered_custom_class(self):
         # CUTLASSCompileSourceCapturingContext must patch the class object of
@@ -6043,86 +6043,67 @@ class TestDeviceCodeCacheRegistry(TestCase):
             calls.append(("load", dst_file_ext))
             return "dll", "key", "path"
 
-        with config.patch({"compile_threads": 1}), mock.patch.object(
-            MyCodeCache, "compile", spy_compile
-        ), mock.patch.object(MyCodeCache, "load", spy_load), mock.patch.dict(
-            "torch._inductor.codecache._DEVICE_CODECACHE_REGISTRY",
-            {"cuda": MyCodeCache},
+        with (
+            config.patch({"compile_threads": 1}),
+            mock.patch.object(MyCodeCache, "compile", spy_compile),
+            mock.patch.object(MyCodeCache, "load", spy_load),
+            mock.patch.dict(
+                "torch._inductor.codecache._DEVICE_CODECACHE_REGISTRY",
+                {"cuda": MyCodeCache},
+            ),
         ):
             async_compile = AsyncCompile()
             result = async_compile.cuda("source", "so")
             self.assertEqual(result, "dll")
             self.assertEqual(calls, [("load", "so")])
 
-    def test_async_compile_aot_appends_to_registered_class(self):
-        # The aot_compile=True path appends the compiled .o path to the
-        # *registered* class's aot_kernels_o, which the AOTI link step later
-        # copies and clears (see test_aot_inductor_link_* above).
+    def test_async_compile_aot_routes_through_registry(self):
+        # AsyncCompile.cuda/xpu/rocm resolve the registry entry for their
+        # device (rocm uses "cuda", which is ROCmCodeCache on a HIP build).
+        # The AOTI path compiles an "o", appends it to the registered class's
+        # aot_kernels_o, and leaves the final "so" load to the same class.
+        # Assert dst_file_ext so a regression from "o" to "so" cannot hide.
         from torch._inductor.async_compile import AsyncCompile
 
-        MyCodeCache = self.make_codecache()
-
-        def spy_compile(source_code, dst_file_ext, extra_args=None):
-            return "kernel.o", "key", "path"
-
-        with config.patch({"compile_threads": 1}), mock.patch.object(
-            MyCodeCache, "compile", spy_compile
-        ), mock.patch.dict(
-            "torch._inductor.codecache._DEVICE_CODECACHE_REGISTRY",
-            {"cuda": MyCodeCache},
+        for entry_point, registry_key in (
+            ("cuda", "cuda"),
+            ("rocm", "cuda"),
+            ("xpu", "xpu"),
         ):
-            async_compile = AsyncCompile()
-            result = async_compile.cuda("source", "so", aot_compile=True)
-        self.assertEqual(result, "dll")
-        self.assertEqual(MyCodeCache.aot_kernels_o, ["kernel.o"])
+            with self.subTest(entry_point=entry_point):
+                MyCodeCache = self.make_codecache()
+                compiled_exts = []
 
-    def test_async_compile_rocm_routes_through_registry(self):
-        # On a HIP build codegen emits async_compile.rocm(...) for cpp
-        # wrapper kernels; it must resolve the "cuda" registry entry (which
-        # is ROCmCodeCache on HIP) so a custom class's aot_kernels_o is the
-        # one the AOTI link step reads -- the override applies uniformly.
-        from torch._inductor.async_compile import AsyncCompile
+                def spy_compile(source_code, dst_file_ext, extra_args=None):
+                    compiled_exts.append(dst_file_ext)
+                    return "kernel.o", "key", "path"
 
-        MyCodeCache = self.make_codecache()
-
-        def spy_compile(source_code, dst_file_ext, extra_args=None):
-            return "kernel.o", "key", "path"
-
-        with config.patch({"compile_threads": 1}), mock.patch.object(
-            MyCodeCache, "compile", spy_compile
-        ), mock.patch.dict(
-            "torch._inductor.codecache._DEVICE_CODECACHE_REGISTRY",
-            {"cuda": MyCodeCache},
-        ):
-            async_compile = AsyncCompile()
-            result = async_compile.rocm("source", "so", aot_compile=True)
-        self.assertEqual(result, "dll")
-        self.assertEqual(MyCodeCache.aot_kernels_o, ["kernel.o"])
-
-    def test_async_compile_xpu_routes_through_registry(self):
-        # AsyncCompile.xpu resolves the "xpu" registry entry the same way.
-        from torch._inductor.async_compile import AsyncCompile
-
-        MyCodeCache = self.make_codecache()
-
-        def spy_compile(source_code, dst_file_ext, extra_args=None):
-            return "kernel.o", "key", "path"
-
-        with config.patch({"compile_threads": 1}), mock.patch.object(
-            MyCodeCache, "compile", spy_compile
-        ), mock.patch.dict(
-            "torch._inductor.codecache._DEVICE_CODECACHE_REGISTRY",
-            {"xpu": MyCodeCache},
-        ):
-            async_compile = AsyncCompile()
-            result = async_compile.xpu("source", "so", aot_compile=True)
-        self.assertEqual(result, "dll")
-        self.assertEqual(MyCodeCache.aot_kernels_o, ["kernel.o"])
+                with (
+                    config.patch(
+                        {"compile_threads": 1, "rocm.generate_test_runner": False}
+                    ),
+                    mock.patch.object(MyCodeCache, "compile", spy_compile),
+                    mock.patch.dict(
+                        "torch._inductor.codecache._DEVICE_CODECACHE_REGISTRY",
+                        {registry_key: MyCodeCache},
+                    ),
+                ):
+                    async_compile = AsyncCompile()
+                    result = getattr(async_compile, entry_point)(
+                        "source", "so", aot_compile=True
+                    )
+                self.assertEqual(result, "dll")
+                self.assertEqual(compiled_exts, ["o"])
+                self.assertEqual(MyCodeCache.aot_kernels_o, ["kernel.o"])
 
     def test_use_cutlass_template_rejects_other_devices(self):
         # The device gate in use_cutlass_template: a layout on a non-
         # cuda/xpu device (e.g. a PrivateUse1 GPU) skips the CUTLASS
         # backend cleanly instead of crashing the arch/toolkit probes.
+        # Make the *rest* of the predicate true so this test actually fails
+        # if the gate is removed: enable max-autotune/CUTLASS, give the layout
+        # a supported dtype, and stub the GPU/template/CUTLASS-availability
+        # checks that need real hardware or a CUTLASS checkout.
         from torch._inductor.utils import use_cutlass_template
         from torch._inductor.virtualized import V
 
@@ -6135,8 +6116,29 @@ class TestDeviceCodeCacheRegistry(TestCase):
 
         class FakeLayout:
             device = torch.device("privateuseone")
+            dtype = torch.float16
 
-        with V.set_graph_handler(FakeGraph()):
+        with (
+            V.set_graph_handler(FakeGraph()),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "CUTLASS",
+                }
+            ),
+            mock.patch(
+                "torch._inductor.utils._use_template_for_gpu", return_value=True
+            ),
+            mock.patch(
+                "torch._inductor.codegen.cutlass.utils.try_import_cutlass",
+                return_value=True,
+            ),
+            mock.patch.object(torch.version, "hip", None),
+        ):
+            # Sanity-check that the predicate would pass without the gate,
+            # then assert the gate rejects the same layout.
+            cuda_layout = mock.Mock(device=torch.device("cuda"), dtype=torch.float16)
+            self.assertTrue(use_cutlass_template(cuda_layout, 128, 128, 128))
             self.assertFalse(use_cutlass_template(FakeLayout(), 128, 128, 128))
 
     def test_toolkit_version_xpu_empty_raises(self):
