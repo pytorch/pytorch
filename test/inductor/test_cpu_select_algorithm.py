@@ -1367,10 +1367,13 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 atol=atol,
                 rtol=rtol,
             )
-        self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
-        self.assertEqual(
-            counters["inductor"]["cpp_epilogue_fusion_counter"], 2 if TEST_MKL else 1
-        )
+        if not inductor_config.avoid_modular_indexing:
+            # the realized permute + reshape changes which epilogues fuse
+            self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 2)
+            self.assertEqual(
+                counters["inductor"]["cpp_epilogue_fusion_counter"],
+                2 if TEST_MKL else 1,
+            )
 
     @inductor_config.patch({"freezing": True})
     @patches

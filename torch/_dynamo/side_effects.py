@@ -886,7 +886,7 @@ class SideEffects:
             user_cls,
             variables.user_defined._CONSTANT_BASE_TYPES,
         ):
-            variable_cls = variables.UserDefinedConstantVariable
+            variable_cls = variables.UserDefinedConstantVariable.cls_for(user_cls)
         elif variables.InspectVariable.is_matching_class(user_cls):
             variable_cls = variables.InspectVariable
         elif variables.SimpleNamespaceVariable.is_matching_cls(user_cls):
@@ -908,12 +908,11 @@ class SideEffects:
             # TODO(anijain2305) - Is it possible to remove this specialization?
             obj = nn_module_new(user_cls)
         else:
+            base_cls: Any
             if isinstance(base_cls_vt, variables.BuiltinVariable):
                 base_cls = base_cls_vt.fn
-            elif isinstance(base_cls_vt, variables.DictBuiltinVariable):
-                base_cls = dict
-            elif isinstance(base_cls_vt, variables.ListBuiltinVariable):
-                base_cls = list
+            elif isinstance(base_cls_vt, variables.TypeVariable):
+                base_cls = base_cls_vt._fn
             elif isinstance(base_cls_vt, variables.UserDefinedClassVariable):
                 base_cls = base_cls_vt.value
             else:
@@ -2111,7 +2110,10 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             # DELETE_ATTR path below so descriptor semantics are preserved
             # during replay.
             elif isinstance(var.mutation_type, AttributeMutationExisting) and hasattr(
-                getattr(var, "value", None), name
+                var.value
+                if hasattr(var, "value")
+                else var.get_real_python_backed_value(),
+                name,
             ):
                 cg.tx.output.update_co_names(name)
                 cg(var.source)
