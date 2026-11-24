@@ -96,14 +96,16 @@ def _native_worker(rank, connection, progress_thread):
 def _multi_peer_worker(rank, connections):
     # Rank 0 reads from ranks 1 and 2 through one endpoint.
     with new_transport("nixl", "cpu", timeout=5) as transport:
-        tensor = torch.full((1024,), float(rank))
+        tensor = torch.arange(1024.0) + 1024 * rank
         memory = transport.register_memory(tensor)
         if rank == 0:
             urls = [_receive(connection) for connection in connections]
             for url in urls:
                 transport.connect(url)
             remotes = [NIXLRemoteBuffer.deserialize(_receive(c)) for c in connections]
+            extras = [NIXLRemoteBuffer.deserialize(_receive(c)) for c in connections]
             targets = [torch.zeros(1024) for _ in remotes]
+            expected = [torch.arange(1024.0) + 1024 * peer for peer in (1, 2)]
             views = [transport.register_memory(t).to_mutable_view() for t in targets]
             for _ in range(2):
                 works = [
@@ -112,14 +114,27 @@ def _multi_peer_worker(rank, connections):
                 ]
                 for work in works:
                     work.wait()
-                for value, target in enumerate(targets, 1):
-                    torch.testing.assert_close(target, torch.full_like(target, value))
+                for target, values in zip(targets, expected):
+                    torch.testing.assert_close(target, values)
                     target.zero_()
                 # Reconnecting with the same bind() bytes is a no-op.
                 transport.connect(urls[0])
+            # One batch reads from both peers; each peer's request spans two
+            # registrations, so NIXL must merge both partial metadata loads.
+            half = targets[0].nbytes // 2
+            pairs = []
+            for view, remote, extra_remote in zip(views, remotes, extras):
+                pairs += [(view[:half], remote[half:]), (view[half:], extra_remote)]
+            transport.read_batch(pairs)
+            for target, values in zip(targets, expected):
+                want = torch.cat([values[512:], -values[:512]])
+                torch.testing.assert_close(target, want)
         else:
             connections[0].send_bytes(transport.bind())
+            # Registered after bind(), so only its own partial metadata describes it.
+            extra = transport.register_memory(-tensor[:512].clone())
             connections[0].send_bytes(memory.to_remote_buffer().serialize())
+            connections[0].send_bytes(extra.to_remote_buffer().serialize())
         for connection in connections:
             connection.send_bytes(b"done")
             if _receive(connection) != b"done":
