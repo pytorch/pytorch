@@ -10690,6 +10690,38 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn, (1024,))
         self.common(fn, (1023,))
 
+    def test_scalar_fill_overflow(self):
+        # https://github.com/pytorch/pytorch/issues/205507
+        mask = torch.tensor([True, False, True, False], device=self.device)
+        index = torch.tensor([0, 2], device=self.device)
+
+        def fns(v):
+            return [
+                lambda a: a.clone().fill_(v),
+                lambda a: torch.full((4,), v, dtype=a.dtype, device=a.device),
+                lambda a: a.new_full((4,), v),
+                lambda a: torch.nn.functional.pad(a, (1, 1), value=v),
+                lambda a: a.masked_fill(mask, v),
+                lambda a: a.index_fill(0, index, v),
+                lambda a: a.scatter(0, index, v),
+            ]
+
+        for dtype, bad, good in (
+            (torch.float16, 70000.0, 65000.0),
+            (torch.float16, 65519.0, float("inf")),
+            (torch.int8, 300, -128),
+        ):
+            a = torch.zeros(4, dtype=dtype, device=self.device)
+            for fn in fns(bad):
+                with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                    fn(a)
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                    torch.compile(fn)(a)
+            for fn in fns(good):
+                torch._dynamo.reset()
+                self.common(fn, (a,), check_lowp=False)
+
     def test_index1(self):
         def fn(a, b, c):
             return aten.index(a, [b, c])

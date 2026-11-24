@@ -40,6 +40,7 @@ from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
     check,
+    check_scalar_fits_dtype,
     dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -4844,6 +4845,7 @@ def tensor_constructor(fill_value):
             if isinstance(s, torch.SymInt):
                 raise AssertionError("expected: not isinstance(s, torch.SymInt)")
         size = [sympy.expand(s) for s in size]
+        check_scalar_fits_dtype(fill_value, dtype)
         full_pointwise = _full(fill_value, decode_device(device), dtype, size)
 
         if pin_memory:
@@ -5993,6 +5995,7 @@ def _pad_as_cat(
 
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
+    check_scalar_fits_dtype(fill_value, x.get_dtype())
     if len(padding) % 2 != 0:
         raise AssertionError("expected: (len(padding) % 2) == 0")
     if all(p == 0 for p in padding):

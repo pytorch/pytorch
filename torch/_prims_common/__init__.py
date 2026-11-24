@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
+import math
 import operator
 import typing
 import warnings
@@ -1362,6 +1363,44 @@ def check_layout(layout: torch.layout):
     torch._check_not_implemented(
         layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}"
     )
+
+
+def check_scalar_fits_dtype(value: object, dtype: torch.dtype) -> None:
+    """
+    Raises like eager's checked Scalar conversion (c10::checked_convert) when the
+    Python number value cannot be represented in dtype. Infinities and NaN are
+    accepted for floating dtypes, and bool targets are never checked. Symbolic
+    values are not checked.
+    """
+    if dtype == torch.bool or not isinstance(value, (bool, int, float, complex)):
+        return
+
+    msg = f"value cannot be converted to type {dtype} without overflow"
+
+    def fail():
+        raise RuntimeError(msg)
+
+    if isinstance(value, complex):
+        if not is_complex_dtype(dtype):
+            if value.imag != 0:
+                fail()
+            value = value.real
+        else:
+            limit = torch.finfo(corresponding_real_dtype(dtype)).max
+            for part in (value.real, value.imag):
+                if math.isfinite(part) and abs(part) > limit:
+                    fail()
+            return
+    if is_float_dtype(dtype) or is_complex_dtype(dtype):
+        real = corresponding_real_dtype(dtype) if is_complex_dtype(dtype) else dtype
+        if math.isfinite(value) and abs(value) > torch.finfo(real).max:
+            fail()
+    elif is_integer_dtype(dtype):
+        info = torch.iinfo(dtype)
+        if not (isinstance(value, IntWithoutSymInt) or math.isfinite(value)) or not (
+            info.min <= value <= info.max
+        ):
+            fail()
 
 
 # TODO: maybe unify with can_cast_to?

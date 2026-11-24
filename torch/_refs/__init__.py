@@ -4528,6 +4528,8 @@ def _index_fill(
             f"Got a tensor with {value.ndim} dimensions.",
         )  # type: ignore[arg-type]
     else:
+        # scalar_tensor rounds out-of-range floats to inf; index_fill raises like eager
+        utils.check_scalar_fits_dtype(value, x.dtype)
         value = torch.scalar_tensor(
             value,
             dtype=x.dtype,
@@ -6308,6 +6310,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
         value_type = type(value)
+        utils.check_scalar_fits_dtype(value, a.dtype)
     else:
         # NOTE: Could not use value = item(value) as it resulted in
         # RuntimeError: Cannot cast FakeTensor(cpu) to number
