@@ -8695,6 +8695,40 @@ class TestTorch(TestCase):
         b = pickle.loads(serialized)
         self.assertEqual(a, b)
 
+    @skipIfTorchDynamo("relies on wrappers being deallocated at del")
+    def test_generator_wrapper_cache(self):
+        with torch.library._scoped_library("_generator_wrapper_cache", "FRAGMENT") as lib:
+            lib.define("identity(Generator g) -> Generator")
+            lib.impl("identity", lambda g: g, "CompositeExplicitAutograd")
+            identity = torch.ops._generator_wrapper_cache.identity
+            # identity() returns through THPGenerator_Wrap, which caches the wrapper
+            # it creates; torch.Generator() itself does not populate the cache.
+            gen = torch.Generator()
+            wrapped = identity(gen)
+            self.assertIsNot(wrapped, gen)
+            self.assertIs(identity(gen), wrapped)
+
+            # Rewrapping while the cached wrapper is being deallocated must create a
+            # new wrapper rather than resurrect the dying one, and the new wrapper
+            # must stay cached.
+            wrapped_id = id(wrapped)
+            rewrapped = []
+            ref = weakref.ref(wrapped, lambda _: rewrapped.append(identity(gen)))
+            del wrapped
+            self.assertIsNone(ref())
+            self.assertEqual(len(rewrapped), 1)
+            new = rewrapped.pop()
+            self.assertNotEqual(id(new), wrapped_id)
+            self.assertIs(identity(gen), new)
+            new.manual_seed(1234)
+            self.assertEqual(gen.initial_seed(), 1234)
+
+            # Deallocating an uncached wrapper must not clear the cache.
+            other = torch.Generator()
+            cached = identity(other)
+            del other
+            self.assertIs(identity(cached), cached)
+
     def test_generator_cpu(self):
         # test default generators are equal
         self.assertEqual(torch.default_generator, torch.default_generator)

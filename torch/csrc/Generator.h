@@ -27,6 +27,8 @@ TORCH_PYTHON_API PyObject* THPGenerator_Wrap(const at::Generator& gen);
 
 TORCH_PYTHON_API at::Generator THPGenerator_Unwrap(PyObject* state);
 
-// Creates a new Python object for a Generator. The Generator must not already
-// have a PyObject* associated with it.
+// Returns a new reference to a Python wrapper for gen, reusing a live cached
+// wrapper if one is found. Otherwise creates and caches a new wrapper with the
+// given type.
+// See Note [Generator PyObject cache] in Generator.cpp.
 PyObject* THPGenerator_NewWithVar(PyTypeObject* type, at::Generator gen);
