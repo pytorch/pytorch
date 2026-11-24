@@ -251,6 +251,26 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
             self._assert(t, 1 if op == "MIN" else self.world_size, dtype)
 
     @parametrize("dtype", FLOAT_DTYPES)
+    @parametrize("op", ["MIN", "MAX"])
+    @parametrize("algo", ["ring", "mesh"])
+    def test_allreduce_minmax_nan_signed_zero(self, dtype, op, algo):
+        # Each rank puts a NaN at its own index, and even ranks' +0 meets odd
+        # ranks' -0 at index ws: every rank must end with the same values.
+        ws = self.world_size
+        t = self._full(dtype)
+        t[self.rank] = float("nan")
+        t[ws] = -0.0 if self.rank % 2 else 0.0
+        with _force_algo(algo):
+            c10d.all_reduce(t, op=getattr(c10d.ReduceOp, op))
+        got = t.cpu()
+        expected = torch.full_like(got, ws if op == "MAX" else 1)
+        expected[:ws] = float("nan")
+        expected[ws] = 0.0
+        self.assertEqual(got, expected, equal_nan=True)
+        # assertEqual treats -0.0 == 0.0: check the sign itself.
+        self.assertEqual(bool(torch.signbit(got[ws])), op == "MIN")
+
+    @parametrize("dtype", FLOAT_DTYPES)
     def test_allreduce_avg(self, dtype):
         t = self._full(dtype)
         c10d.all_reduce(t, op=c10d.ReduceOp.AVG)

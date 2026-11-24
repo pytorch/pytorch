@@ -6,8 +6,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -226,7 +228,6 @@ inline void TCCLProdOp<bool>::operator()(
     for (std::size_t i = 0; i < n; ++i)                       \
       output[i] = std::min(output[i], input[i]);              \
   }
-TCCL_DEFINE_MINMAX(float)
 TCCL_DEFINE_MINMAX(int8_t)
 TCCL_DEFINE_MINMAX(int16_t)
 TCCL_DEFINE_MINMAX(int32_t)
@@ -235,24 +236,48 @@ TCCL_DEFINE_MINMAX(uint8_t)
 TCCL_DEFINE_MINMAX(bool)
 #undef TCCL_DEFINE_MINMAX
 
-#define TCCL_DEFINE_MINMAX_VIA_FLOAT(TYPE)                               \
+// Floating MIN/MAX follow IEEE 754-2019 minimum/maximum: a NaN wins and
+// -0 < +0. std::min/std::max keep or drop a NaN, and pick a signed zero, by
+// argument order, and on a 2-rank mesh each rank reduces its own value first,
+// so the ranks would end with different results.
+inline float tcclMaxFloat(float a, float b) {
+  if (std::isnan(a) || std::isnan(b)) {
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+  if (a == b) {
+    return std::signbit(a) ? b : a;
+  }
+  return a > b ? a : b;
+}
+inline float tcclMinFloat(float a, float b) {
+  if (std::isnan(a) || std::isnan(b)) {
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+  if (a == b) {
+    return std::signbit(a) ? a : b;
+  }
+  return a < b ? a : b;
+}
+
+#define TCCL_DEFINE_MINMAX_FLOAT(TYPE)                                   \
   template <>                                                            \
   inline void TCCLMaxOp<TYPE>::operator()(                               \
       const TYPE* input, TYPE* output, std::size_t n) const {            \
     for (std::size_t i = 0; i < n; ++i)                                  \
-      output[i] = static_cast<TYPE>(std::max(                            \
+      output[i] = static_cast<TYPE>(tcclMaxFloat(                        \
           static_cast<float>(output[i]), static_cast<float>(input[i]))); \
   }                                                                      \
   template <>                                                            \
   inline void TCCLMinOp<TYPE>::operator()(                               \
       const TYPE* input, TYPE* output, std::size_t n) const {            \
     for (std::size_t i = 0; i < n; ++i)                                  \
-      output[i] = static_cast<TYPE>(std::min(                            \
+      output[i] = static_cast<TYPE>(tcclMinFloat(                        \
           static_cast<float>(output[i]), static_cast<float>(input[i]))); \
   }
-TCCL_DEFINE_MINMAX_VIA_FLOAT(c10::Half)
-TCCL_DEFINE_MINMAX_VIA_FLOAT(c10::BFloat16)
-#undef TCCL_DEFINE_MINMAX_VIA_FLOAT
+TCCL_DEFINE_MINMAX_FLOAT(float)
+TCCL_DEFINE_MINMAX_FLOAT(c10::Half)
+TCCL_DEFINE_MINMAX_FLOAT(c10::BFloat16)
+#undef TCCL_DEFINE_MINMAX_FLOAT
 
 // TCCLEngine
 
