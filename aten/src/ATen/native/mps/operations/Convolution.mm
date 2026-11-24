@@ -833,93 +833,32 @@ static bool mpsgraph_depthwise_overflows(const Tensor& input,
   });
 }
 
-static Tensor _mps_convolution_impl(const Tensor& input_t,
-                                    const Tensor& weight_t,
-                                    const std::optional<Tensor>& bias_opt,
-                                    IntArrayRef padding,
-                                    IntArrayRef stride,
-                                    IntArrayRef dilation,
-                                    int64_t groups,
-                                    std::optional<IntArrayRef> input_shape,
-                                    Tensor output_t = {}) {
-  // MPSGraph 2D conv miscomputes the output once a filter spatial dim reaches 256; use a Metal kernel instead.
-  const bool has_large_filter = weight_t.size(2) >= 256 || weight_t.size(3) >= 256;
-  const bool overflows = mpsgraph_depthwise_overflows(input_t, weight_t, stride, dilation, groups);
-  if (input_t.dim() == 4 && (has_large_filter || overflows)) {
-    const auto outH = (input_t.size(2) + 2 * padding[0] - dilation[0] * (weight_t.size(2) - 1) - 1) / stride[0] + 1;
-    const auto outW = (input_t.size(3) + 2 * padding[1] - dilation[1] * (weight_t.size(3) - 1) - 1) / stride[1] + 1;
-    // Degenerate shapes fall through to the normal path's shape check.
-    if (outH >= 1 && outW >= 1) {
-      return mps_convolution_2d_large_kernel(input_t, weight_t, bias_opt, padding, stride, dilation, groups);
-    }
-  }
-  constexpr auto kChannelsLast = MemoryFormat::ChannelsLast;
-  constexpr auto kChannelsLast3d = MemoryFormat::ChannelsLast3d;
-  constexpr auto kContiguous = MemoryFormat::Contiguous;
+// MPSGraph 2D/3D convolutions miscompute once the batch reaches 2^16 (#96225, #200935); callers split the batch.
+constexpr int64_t kMPSGraphConvMaxBatch = std::numeric_limits<uint16_t>::max();
 
-  const bool is3DConv = input_t.dim() == 5;
-  const bool is1DConv = input_t.dim() == 4 && input_t.size(2) == 1 && weight_t.size(2) == 1 && padding[0] == 0;
-  const auto memory_format = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
-  const bool is_cl_input = memory_format == kChannelsLast && !is3DConv;
-  const auto input_suggested_layout = is_cl_input ? kChannelsLast : kContiguous;
-  // Allocate output in the user-requested layout regardless of fast-path gate.
-  const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t);
+static void mps_graph_conv2d(const Tensor& input_t,
+                             const Tensor& weight_t,
+                             const std::optional<Tensor>& bias_opt,
+                             IntArrayRef padding,
+                             IntArrayRef stride,
+                             IntArrayRef dilation,
+                             int64_t groups,
+                             const Tensor& output_t) {
+  using namespace at::native::mps;
+  constexpr auto kChannelsLast = MemoryFormat::ChannelsLast;
+  constexpr auto kContiguous = MemoryFormat::Contiguous;
   const bool bias_defined = bias_opt ? bias_opt->defined() : false;
 
-  TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");
-
-  using namespace at::native::mps;
-  CheckedFrom c = "mps_convolution";
-  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2};
-  checkAllSameType(c, {input, weight});
-  checkAllSameGPU(c, {input, weight});
-
-  if (!output_t.defined()) {
-    output_t = at::empty(input_shape.has_value()
-                             ? input_shape.value()
-                             : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
-                         input->scalar_type(),
-                         std::nullopt,
-                         kMPS,
-                         std::nullopt,
-                         is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
-  }
-  if (output_t.numel() == 0) {
-    return output_t;
-  }
-  TensorArg output{output_t, "result", 0};
-
-  if (!is_macos_at_least(MacOSVersion::MACOS_15_1) && !is3DConv && !is1DConv) {
+  if (!is_macos_at_least(MacOSVersion::MACOS_15_1)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : output_t.sizes()) {
       TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
     }
   }
 
-  convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
-
-  if (is3DConv) {
-    if (conv3d_is_pointwise(weight_t, stride, padding, groups)) {
-      conv3d_pointwise_matmul(input_t, weight_t, bias_opt, output_t);
-    } else if (conv3d_prefer_im2col(input_t, weight_t, stride, padding, dilation, groups, output_t)) {
-      conv3d_im2col_matmul(input_t, weight_t, bias_opt, stride, padding, output_t);
-    } else {
-      conv3d_metal_forward(input_t, weight_t, bias_opt, padding, stride, dilation, groups, output_t);
-    }
-    return output_t;
-  }
-  if (is1DConv) {
-    conv1d_metal_forward(input_t, weight_t, bias_opt, padding[1], stride[1], dilation[1], groups, output_t);
-    return output_t;
-  }
-  if (input_t.size(0) > UINT16_MAX) {
-    const auto inputs = input_t.split(UINT16_MAX);
-    const auto outputs = output_t.split(UINT16_MAX);
-    for (size_t i = 0; i < inputs.size(); i++) {
-      _mps_convolution_impl(inputs[i], weight_t, bias_opt, padding, stride, dilation, groups, std::nullopt, outputs[i]);
-    }
-    return output_t;
-  }
+  const bool is_cl_input = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true) == kChannelsLast;
+  const auto input_suggested_layout = is_cl_input ? kChannelsLast : kContiguous;
+  const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t);
 
   // Derive from MPSCachedGraph
   struct CachedGraph : public MPSCachedGraph {
@@ -1031,7 +970,78 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
+}
 
+static Tensor _mps_convolution_impl(const Tensor& input_t,
+                                    const Tensor& weight_t,
+                                    const std::optional<Tensor>& bias_opt,
+                                    IntArrayRef padding,
+                                    IntArrayRef stride,
+                                    IntArrayRef dilation,
+                                    int64_t groups,
+                                    std::optional<IntArrayRef> input_shape) {
+  // MPSGraph 2D conv miscomputes the output once a filter spatial dim reaches 256; use a Metal kernel instead.
+  const bool has_large_filter = weight_t.size(2) >= 256 || weight_t.size(3) >= 256;
+  const bool overflows = mpsgraph_depthwise_overflows(input_t, weight_t, stride, dilation, groups);
+  if (input_t.dim() == 4 && (has_large_filter || overflows)) {
+    const auto outH = (input_t.size(2) + 2 * padding[0] - dilation[0] * (weight_t.size(2) - 1) - 1) / stride[0] + 1;
+    const auto outW = (input_t.size(3) + 2 * padding[1] - dilation[1] * (weight_t.size(3) - 1) - 1) / stride[1] + 1;
+    // Degenerate shapes fall through to the normal path's shape check.
+    if (outH >= 1 && outW >= 1) {
+      return mps_convolution_2d_large_kernel(input_t, weight_t, bias_opt, padding, stride, dilation, groups);
+    }
+  }
+  constexpr auto kChannelsLast = MemoryFormat::ChannelsLast;
+  constexpr auto kChannelsLast3d = MemoryFormat::ChannelsLast3d;
+  constexpr auto kContiguous = MemoryFormat::Contiguous;
+
+  const bool is3DConv = input_t.dim() == 5;
+  const bool is1DConv = input_t.dim() == 4 && input_t.size(2) == 1 && weight_t.size(2) == 1 && padding[0] == 0;
+  // Allocate output in the user-requested layout regardless of fast-path gate.
+  const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t);
+
+  TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");
+
+  using namespace at::native::mps;
+  CheckedFrom c = "mps_convolution";
+  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2};
+  checkAllSameType(c, {input, weight});
+  checkAllSameGPU(c, {input, weight});
+
+  auto output_t =
+      at::empty(input_shape.has_value() ? input_shape.value()
+                                        : conv_output_size(input->sizes(), weight->sizes(), padding, stride, dilation),
+                input->scalar_type(),
+                std::nullopt,
+                kMPS,
+                std::nullopt,
+                is_channels_last ? (is3DConv ? kChannelsLast3d : kChannelsLast) : kContiguous);
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
+  TensorArg output{output_t, "result", 0};
+
+  convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
+
+  if (is3DConv) {
+    if (conv3d_is_pointwise(weight_t, stride, padding, groups)) {
+      conv3d_pointwise_matmul(input_t, weight_t, bias_opt, output_t);
+    } else if (conv3d_prefer_im2col(input_t, weight_t, stride, padding, dilation, groups, output_t)) {
+      conv3d_im2col_matmul(input_t, weight_t, bias_opt, stride, padding, output_t);
+    } else {
+      conv3d_metal_forward(input_t, weight_t, bias_opt, padding, stride, dilation, groups, output_t);
+    }
+    return output_t;
+  }
+  if (is1DConv) {
+    conv1d_metal_forward(input_t, weight_t, bias_opt, padding[1], stride[1], dilation[1], groups, output_t);
+    return output_t;
+  }
+  const auto inputs = input_t.split(kMPSGraphConvMaxBatch);
+  const auto outputs = output_t.split(kMPSGraphConvMaxBatch);
+  for (const auto i : c10::irange(inputs.size())) {
+    mps_graph_conv2d(inputs[i], weight_t, bias_opt, padding, stride, dilation, groups, outputs[i]);
+  }
   return output_t;
 }
 
@@ -1045,18 +1055,18 @@ Tensor _mps_convolution(const Tensor& input_t,
   return _mps_convolution_impl(input_t, weight_t, bias_opt, padding, stride, dilation, groups, std::nullopt);
 }
 
-static Tensor mps_convolution_backward_input(IntArrayRef input_size,
-                                             const Tensor& grad_output_t,
-                                             const Tensor& weight_t,
-                                             IntArrayRef padding,
-                                             IntArrayRef stride,
-                                             IntArrayRef dilation,
-                                             int64_t groups,
-                                             bool bias_defined,
-                                             at::MemoryFormat output_memory_format) {
+static void mps_graph_conv_backward_input(const Tensor& grad_output_t,
+                                          const Tensor& weight_t,
+                                          IntArrayRef padding,
+                                          IntArrayRef stride,
+                                          IntArrayRef dilation,
+                                          int64_t groups,
+                                          at::MemoryFormat output_memory_format,
+                                          const Tensor& grad_input_t) {
   using namespace at::native::mps;
   using namespace mps;
-  bool is3DConv = grad_output_t.dim() == 5;
+  const bool is3DConv = grad_output_t.dim() == 5;
+  const auto input_size = grad_input_t.sizes();
   if (!is_macos_at_least(MacOSVersion::MACOS_15_1)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : grad_output_t.sizes()) {
@@ -1064,11 +1074,6 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
     }
   }
 
-  TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
-  CheckedFrom c = "mps_convolution_backward_input";
-  TensorArg grad_output{grad_output_t, "grad_output", 1}, weight{weight_t, "weight", 2};
-  checkAllSameType(c, {grad_output, weight});
-  checkAllSameGPU(c, {grad_output, weight});
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = at::MemoryFormat::ChannelsLast3d;
   constexpr auto kContiguous = at::MemoryFormat::Contiguous;
@@ -1078,7 +1083,6 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
       is3DConv && is_packed_channels_last_3d(grad_output_t) && conv3d_dhwio_is_beneficial(weight_t.sizes());
   const bool use_nhwc = !is3DConv && is_packed_channels_last_2d(grad_output_t);
   const auto desc_layout = use_dhwio ? kChannelsLast3d : use_nhwc ? kChannelsLast : kContiguous;
-  // Allocate grad_input in the caller-supplied layout so it matches input.
   const bool is_channels_last = output_memory_format == kChannelsLast || output_memory_format == kChannelsLast3d;
   // Depthwise conv is input feature channels = groups. So I in OIHW has to be 1.
   // The depthwise op is NCHW-only, hence the desc_layout condition.
@@ -1087,25 +1091,6 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   // The graph computes in desc_layout, which is chosen from grad_output; transpose
   // back in-graph when the caller asked for a different layout.
   const bool transpose_grad_input = (use_nhwc || use_dhwio) && !is_channels_last;
-  auto grad_input_t =
-      at::empty(input_size,
-                grad_output_t.options(),
-                is_channels_last ? std::optional(is3DConv ? kChannelsLast3d : kChannelsLast) : std::nullopt);
-
-  // Avoid "grad_input" when this is being used as transposed convolution
-  TensorArg grad_input{grad_input_t, "result", 0};
-  convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
-  if (!is3DConv && grad_output_t.size(0) > UINT16_MAX) {
-    const auto grad_outputs = grad_output_t.split(UINT16_MAX);
-    const auto grad_inputs = grad_input_t.split(UINT16_MAX);
-    for (size_t i = 0; i < grad_outputs.size(); i++) {
-      const auto chunk_size = grad_inputs[i].sizes();
-      const auto chunk = mps_convolution_backward_input(
-          chunk_size, grad_outputs[i], weight_t, padding, stride, dilation, groups, bias_defined, output_memory_format);
-      grad_inputs[i].copy_(chunk);
-    }
-    return grad_input_t;
-  }
 
   // Contig scratch when graph emits NCDHW but grad_input is CL3d -- covers
   // the macOS-14 fallback and the 3D NCDHW fallback on macOS 15+.
@@ -1230,6 +1215,43 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   if (grad_input_c) {
     grad_input_t.copy_(*grad_input_c);
   }
+}
+
+static Tensor mps_convolution_backward_input(IntArrayRef input_size,
+                                             const Tensor& grad_output_t,
+                                             const Tensor& weight_t,
+                                             IntArrayRef padding,
+                                             IntArrayRef stride,
+                                             IntArrayRef dilation,
+                                             int64_t groups,
+                                             bool bias_defined,
+                                             at::MemoryFormat output_memory_format) {
+  const bool is3DConv = grad_output_t.dim() == 5;
+  TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
+  CheckedFrom c = "mps_convolution_backward_input";
+  TensorArg grad_output{grad_output_t, "grad_output", 1}, weight{weight_t, "weight", 2};
+  checkAllSameType(c, {grad_output, weight});
+  checkAllSameGPU(c, {grad_output, weight});
+  constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
+  constexpr auto kChannelsLast3d = at::MemoryFormat::ChannelsLast3d;
+  // Allocate grad_input in the caller-supplied layout so it matches input.
+  const bool is_channels_last = output_memory_format == kChannelsLast || output_memory_format == kChannelsLast3d;
+  auto grad_input_t =
+      at::empty(input_size,
+                grad_output_t.options(),
+                is_channels_last ? std::optional(is3DConv ? kChannelsLast3d : kChannelsLast) : std::nullopt);
+
+  // Avoid "grad_input" when this is being used as transposed convolution
+  TensorArg grad_input{grad_input_t, "result", 0};
+  convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
+  // 3D data gradient is not affected by the MPSGraph batch bug
+  const auto max_batch = is3DConv ? std::numeric_limits<int64_t>::max() : kMPSGraphConvMaxBatch;
+  const auto grad_outputs = grad_output_t.split(max_batch);
+  const auto grad_inputs = grad_input_t.split(max_batch);
+  for (const auto i : c10::irange(grad_outputs.size())) {
+    mps_graph_conv_backward_input(
+        grad_outputs[i], weight_t, padding, stride, dilation, groups, output_memory_format, grad_inputs[i]);
+  }
   return grad_input_t;
 }
 
@@ -1262,14 +1284,12 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   // stays contiguous OIDHW (the graph already transposes DHWIO -> OIDHW).
   const bool allocate_grad_weight_cl = output_memory_format == kChannelsLast && !is3DConv;
 
-  // MPSGraph's 2D and 3D convolution weight gradients go wrong once the batch
-  // reaches 2^16 (#96225), so accumulate over batch chunks below that.
-  constexpr int64_t kMaxBatch = std::numeric_limits<uint16_t>::max();
-  if (input_t.size(0) > kMaxBatch) {
+  // Weight gradients are summed over batch chunks, see kMPSGraphConvMaxBatch
+  if (input_t.size(0) > kMPSGraphConvMaxBatch) {
     const int64_t N = input_t.size(0);
     auto acc = at::zeros(weight_size, grad_output_t.options());
-    for (int64_t i = 0; i < N; i += kMaxBatch) {
-      int64_t end = std::min(i + kMaxBatch, N);
+    for (int64_t i = 0; i < N; i += kMPSGraphConvMaxBatch) {
+      int64_t end = std::min(i + kMPSGraphConvMaxBatch, N);
       acc += mps_convolution_backward_weights(weight_size,
                                               grad_output_t.narrow(0, i, end - i),
                                               input_t.narrow(0, i, end - i),
