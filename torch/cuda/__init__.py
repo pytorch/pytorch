@@ -30,6 +30,7 @@ from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
 from . import _device_limits, gds
+from ._memory_planning import MemoryPlannedGraph
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -41,7 +42,6 @@ from .graphs import (
     make_graphed_callables,
 )
 from .green_contexts import GreenContext
-from .memory_planning import MemoryPlannedGraph
 from .streams import Event, execute_on_streams, ExternalStream, Stream
 
 
@@ -401,6 +401,10 @@ PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
         "aarch64": {80, 90, 100, 110, 120},
     },
     "13.4": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.5": {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
@@ -2275,7 +2279,6 @@ __all__ = [
     "memory_stats",
     "memory_stats_as_nested_dict",
     "memory_summary",
-    "memory_planning",
     "memory_usage",
     "MemoryPlannedGraph",
     "MemPool",
