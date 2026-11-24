@@ -3328,7 +3328,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
         return False
-    from .codegen.cutlass.utils import try_import_cutlass
+    from .codegen.cutlass.utils import is_cutlass_arch_supported, try_import_cutlass
 
     # Do not use cutlass template on ROCm
     if torch.version.hip:
@@ -3342,6 +3342,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     res = (
         (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("CUTLASS")
+        and is_cutlass_arch_supported(layout.device.type)
         and _use_template_for_gpu(layout, layout_dtypes)
     )
 
@@ -3514,11 +3515,16 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
 
     pow_of_2_divisors, mul_of_32_divisors, rest_of_splits = [], [], []
 
+    max_k_per_split = config.triton.decompose_k_max_k_per_split
     for d in divisors:
         kPart = k // d
 
         # Smaller than 128 might not even fit in a single tile, BLOCK_K can be 128
         if kPart < 128:
+            continue
+
+        # Long per-split chunks lose fp32 accumulation accuracy in the partial matmul
+        if max_k_per_split > 0 and kPart > max_k_per_split:
             continue
 
         # Power of 2 divisors are best performing, conform to hardware

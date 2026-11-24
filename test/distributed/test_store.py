@@ -437,12 +437,16 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertTrue(store2.libuvBackend)
 
     def test_repr(self) -> None:
+        # Once a getnameinfo call fails (e.g. a DNS timeout), c10d prints
+        # numeric addresses for the rest of the process.
+        loopback = r"\[?(?:localhost|(?:::ffff:)?127\.0\.0\.1|::1)\]?:\d+"
+
         # server
         store1 = self._create_store()
         self.assertRegex(
             repr(store1),
             r"TCPStore\("
-            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            rf"client=TCPClient\(SocketImpl\(fd=\d+, addr={loopback}, remote={loopback}\)\), "
             r"server=TCPServer\(port=\d+\)\)",
         )
 
@@ -456,7 +460,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertRegex(
             repr(store2),
             r"TCPStore\("
-            r"client=TCPClient\(SocketImpl\(fd=\d+, addr=\[?localhost\]?:\d+, remote=\[?localhost\]?:\d+\)\), "
+            rf"client=TCPClient\(SocketImpl\(fd=\d+, addr={loopback}, remote={loopback}\)\), "
             r"server=<nullptr>\)",
         )
 
