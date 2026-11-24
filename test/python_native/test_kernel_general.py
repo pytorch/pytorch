@@ -319,9 +319,9 @@ class TestKernelGeneral(TestCase):
     def test_dense_permuted_full_reduction_takes_the_reduce_all_route(self):
         """TI flattens a transposed full reduction to the storage's unit-stride run."""
         y = torch.randn(1024, 1024, device="cuda")
-        trait, f32, block = T.SumOps(acc=cutlass.Float32), torch.float32, kg._K0_BLOCK
-        got = kg.reduce_dim(trait, "ti_flat_all", y.t(), [0, 1], f32, block=block)
-        want = kg.reduce_all(trait, "ti_flat_all_ref", y, f32, block=block)
+        trait, f32 = T.SumOps(acc=cutlass.Float32), torch.float32
+        got = kg.reduce_dim(trait, "ti_flat_all", y.t(), [0, 1], f32)
+        want = kg.reduce_all(trait, "ti_flat_all_ref", y, f32)
         self.assertEqual(got.view(torch.int32), want.view(torch.int32))
         with torch.backends.python_native.cutedsl.disabled():
             self.assertEqual(got, y.double().sum().float(), atol=1e-2, rtol=1e-5)
@@ -452,7 +452,7 @@ class TestKernelGeneral(TestCase):
         # reduce-all has no flat view of a transposed input, so it routes it through _reduce
         # (TI's flat view of this dense run) rather than refusing it.
         xt = torch.randn(64, 128, device="cuda").t()
-        (flat,) = kg._reduce_all(trait, "inv", xt, [torch.float32], 1, 128, 4)
+        (flat,) = kg._reduce_all(trait, "inv", xt, [torch.float32], 1)
         with torch.backends.python_native.cutedsl.disabled():
             self.assertEqual(flat, xt.double().sum().float(), atol=1e-5, rtol=1e-5)
         # The general path needs a CUDA input; a CPU tensor is refused, not silently run.
