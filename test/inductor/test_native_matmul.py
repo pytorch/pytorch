@@ -7,12 +7,14 @@ import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 from torch._inductor import config as inductor_config, metrics
+from torch._inductor.choices import InductorChoices
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
     fresh_inductor_cache,
     run_and_get_code,
     run_and_get_triton_code,
 )
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -29,7 +31,14 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 aten = torch.ops.aten
 
 
-@inductor_config.patch({"triton.native_matmul": True})
+# These tests check codegen and numerics. Benchmarking every reduction config of
+# their matmul kernels takes most of this file's runtime, so they use one config.
+@inductor_config.patch(
+    {
+        "triton.native_matmul": True,
+        "test_configs.force_filter_reduction_configs": True,
+    }
+)
 class TestTritonDotReduction(TestCase):
     def _check_equal(
         self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4
@@ -117,6 +126,14 @@ class TestTritonDotReduction(TestCase):
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
 
+    # force_filter_reduction_configs compiles one config, XBLOCK=64, YBLOCK=128,
+    # R0_BLOCK=64. On MI350 this kernel's second K loop,
+    #     for r0_offset in tl.range(0, r0_numel, R0_BLOCK, num_stages = 2):
+    #         ... tl.dot(tmp10, tmp11, ...) ... tl.dot(tmp18, tmp19, ...)
+    # then fails with "out of resource: triton_red_fused_add_mm_0 Required: 196608
+    # Hardware limit: 163840". The num_stages=1 retry does not help, because the
+    # loop's num_stages = 2 wins. Autotuning skips the configs that do not fit.
+    @inductor_config.patch({"test_configs.force_filter_reduction_configs": False})
     def test_3mm_add(self):
         def f(x, y, z, w, r, t):
             return x @ y + z @ w + r @ t
@@ -186,6 +203,21 @@ class TestTritonDotReduction(TestCase):
 
         self._check_equal(f, (x, y, z, w))
         self._check_code(f, (x, y, z, w), 1, 2)
+
+    def test_mm_bmm_not_fused(self):
+        # Both read x and have equal numel and K, but no tiling reads the bmm's
+        # y operand, y[b, k, n] with b = m // 20, by the mm's [40, 136] tiles.
+        def f(x, w, y):
+            return x @ w, torch.bmm(x.view(2, 20, 72), y)
+
+        x = torch.randn(40, 72, device=GPU_TYPE)
+        w = torch.randn(72, 136, device=GPU_TYPE)
+        y = torch.randn(2, 72, 136, device=GPU_TYPE)
+
+        self._check_equal(f, (x, w, y))
+        code = run_and_get_triton_code(torch.compile(f), x, w, y)
+        self.assertEqual(code.count("@triton.jit"), 2)
+        self.assertEqual(code.count("tl.dot("), 2)
 
     def test_bmm_fusion_complex1(self):
         # Out[O[b,i],j] += Input[I[b,i],r] * Weight[W[b],r,j] * Val[b,i]
@@ -271,6 +303,91 @@ class TestTritonDotReduction(TestCase):
         ).check("tl.arange(0, XBLOCK)[None, None, :, None]").check(
             "tl.arange(0, R0_BLOCK)[None, None, None, :]"
         ).run(code)
+
+    def test_out_dtype(self):
+        x = torch.randn(40, 72, device=GPU_TYPE, dtype=torch.bfloat16)
+        y = torch.randn(72, 136, device=GPU_TYPE, dtype=torch.bfloat16)
+        for f, args in [
+            (lambda x, y: torch.mm(x, y, out_dtype=torch.float32), (x, y)),
+            (
+                lambda x, y: torch.bmm(x, y, out_dtype=torch.float32),
+                (x.expand(3, 40, 72), y.expand(3, 72, 136)),
+            ),
+        ]:
+            with self.subTest(len(args[0].shape)):
+                torch._dynamo.reset()
+                actual, (code,) = run_and_get_code(torch.compile(f), *args)
+                self.assertIn("tl.dot", code)
+                self.assertEqual(actual.dtype, torch.float32)
+                self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
+
+    def test_zero_alpha_beta(self):
+        M, K, N = 40, 72, 136
+        cases = {
+            "addmm_alpha0": (
+                lambda c, x, y: torch.addmm(c, x, y, alpha=0),
+                [(N,), (M, K), (K, N)],
+            ),
+            "addmm_beta0": (
+                lambda c, x, y: torch.addmm(c, x, y, beta=0),
+                [(N,), (M, K), (K, N)],
+            ),
+            "baddbmm_alpha0": (
+                lambda c, x, y: torch.baddbmm(c, x, y, alpha=0),
+                [(N,), (3, M, K), (3, K, N)],
+            ),
+            "baddbmm_alpha0_beta0": (
+                lambda c, x, y: torch.baddbmm(c, x, y, alpha=0, beta=0),
+                [(3, M, N), (3, M, K), (3, K, N)],
+            ),
+        }
+        for name, (f, shapes) in cases.items():
+            with self.subTest(name):
+                args = [torch.randn(shape, device=GPU_TYPE) for shape in shapes]
+                torch._dynamo.reset()
+                actual, (code,) = run_and_get_code(torch.compile(f), *args)
+                # The native lowering, not an extern kernel.
+                self.assertNotRegex(code, r"extern_kernels\.\w+\(")
+                self.assertEqual(actual, f(*args), atol=1e-4, rtol=1e-4)
+
+
+@instantiate_parametrized_tests
+class TestNativeMatmulChoices(TestCase):
+    @parametrize("native_matmul", [False, True])
+    def test_choices_use_native_matmul(self, native_matmul):
+        # V.choices decides which matmuls are lowered natively, whatever
+        # triton.native_matmul says.
+        asked = []
+
+        class Choices(InductorChoices):
+            def use_native_matmul(self, mat1, mat2):
+                asked.append(mat1.get_dtype())
+                return mat1.get_dtype() == torch.float32
+
+        dtypes = {torch.float32: True, torch.bfloat16: False, torch.float64: False}
+        with (
+            inductor_config.patch(
+                {
+                    "triton.native_matmul": native_matmul,
+                    "max_autotune": False,
+                    "force_disable_caches": True,
+                    "test_configs.force_filter_reduction_configs": True,
+                }
+            ),
+            V.set_choices_handler(Choices()),
+        ):
+            for dtype, native in dtypes.items():
+                with self.subTest(dtype=dtype):
+                    a = torch.randn(40, 72, device=GPU_TYPE, dtype=dtype)
+                    b = torch.randn(72, 136, device=GPU_TYPE, dtype=dtype)
+                    torch._dynamo.reset()
+                    actual, (code,) = run_and_get_code(torch.compile(torch.mm), a, b)
+                    self.assertEqual("tl.dot" in code, native)
+                    self.assertEqual("extern_kernels.mm(" in code, not native)
+                    self.assertEqual(actual, a @ b, atol=1e-4, rtol=1e-4)
+        # V.choices is asked about fp64 too, which only the default declines:
+        # tl.dot takes no fp64.
+        self.assertEqual(set(asked), {torch.float32, torch.bfloat16, torch.float64})
 
 
 @inductor_config.patch({"triton.native_matmul": True})

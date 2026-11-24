@@ -594,6 +594,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_stream(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_device_index(int32_t* ret_device_index);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+// Blocks until all work enqueued on the device of the current accelerator has
+// completed; that is the registered PrivateUse1 backend if there is one.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_synchronize_device(int32_t device_index);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
 #ifdef USE_CUDA
 
 struct CUDAGuardOpaque;

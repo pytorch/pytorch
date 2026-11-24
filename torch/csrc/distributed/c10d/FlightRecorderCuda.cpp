@@ -4,7 +4,7 @@
 #include <fstream>
 
 #include <torch/csrc/distributed/c10d/FlightRecorderDetail.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/NCCLCommon.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 namespace c10d {

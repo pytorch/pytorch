@@ -162,8 +162,13 @@ inline scalar_t interpolate_non_separable(char* src, char** data, const int64_t*
 //     -> upsample_separable_1d
 //       -> basic_loop_separable_1d_horizontal  (for last spatial dim, i.e. W)
 //         -> interpolate_separable_1d
-//       -> basic_loop_separable_1d_vertical  (for other spatial dims, e.g. H, D)
+//       -> basic_loop_separable_1d_vertical  (for other spatial dims, e.g. H, D,
+//                                             when the indices/weights are
+//                                             constant along the inner loop)
 //         -> interpolate_separable_1d_zero_strides
+//       -> basic_loop_separable_1d_horizontal (for other spatial dims otherwise,
+//                                             see upsample_separable_1d)
+//         -> interpolate_separable_1d
 
 template <typename scalar_t, typename index_t>
 inline scalar_t interpolate_separable_1d_zero_strides(
@@ -1658,9 +1663,23 @@ void upsample_separable_1d(
             // Strides are : X X | 0 0 0 0 0  (Channels last)
             basic_loop_separable_1d_horizontal<scalar_t>(data, strides, n, weights_precision);
           } else {
-            // Strides are : X Y | 0 0 0 0 0 (Channels first)
-            // Strides are : X X | 0 0 0 0 0 (Channels last)
-            basic_loop_separable_1d_vertical<scalar_t>(data, strides, n, weights_precision);
+            // Usually the inner loop runs over W (channels first) or C
+            // (channels last) and the strides are:
+            //   X Y | 0 0 0 0 0 (Channels first)
+            //   X X | 0 0 0 0 0 (Channels last)
+            // The vertical kernel relies on that: it only reads the first
+            // element of each indices/weights tensor. TensorIterator squashes
+            // size-1 dims, so when every dim inside the interpolated one has
+            // size 1 (W == 1 in channels first, C == 1 and W == 1 in channels
+            // last) the interpolated dim itself becomes the inner loop and the
+            // strides are:
+            //   X 0 | 8 8 8 0 8
+            // The horizontal kernel handles arbitrary strides, so use it then.
+            if (is_zero_stride<5>(&strides[2])) {
+              basic_loop_separable_1d_vertical<scalar_t>(data, strides, n, weights_precision);
+            } else {
+              basic_loop_separable_1d_horizontal<scalar_t>(data, strides, n, weights_precision);
+            }
           }
         };
         iter.for_each(loop);
