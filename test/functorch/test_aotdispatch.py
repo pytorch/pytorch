@@ -2486,6 +2486,56 @@ def forward(self, primals_1):
     return (view, transpose, transpose_1, mul)""",
         )
 
+    def test_output_input_view_created_under_no_grad(self):
+        def f(x):
+            with torch.no_grad():
+                view = x[1:]
+            return view, x[1:], x * 2
+
+        x = torch.arange(1.0, 5.0, requires_grad=True)
+        view, grad_view, y = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+        self.assertTrue(view.requires_grad)
+        self.assertTrue(view.is_leaf)
+        self.assertIsNone(view.grad_fn)
+        self.assertIs(view._base, x)
+
+        (view.sum() + grad_view.sum() + y.sum()).backward()
+        self.assertEqual(x.grad, torch.tensor([2.0, 3.0, 3.0, 3.0]))
+
+    @parametrize("return_base", [False, True])
+    def test_intermediate_views_created_under_no_grad(self, return_base):
+        def f(x):
+            y = x * 2
+            with torch.no_grad():
+                first = y[1:]
+                second = y[:-1]
+            return first, second, y if return_base else y[:1]
+
+        def run(fn):
+            x = torch.arange(1.0, 5.0, requires_grad=True)
+            first, second, grad_out = fn(x)
+            self.assertIsNone(first.grad_fn)
+            self.assertIsNone(second.grad_fn)
+            self.assertTrue(first.requires_grad)
+            self.assertTrue(second.requires_grad)
+            self.assertIs(first._base, second._base)
+            self.assertIs(first._base, grad_out if return_base else grad_out._base)
+            (first.sum() + second.sum() + grad_out.sum()).backward()
+            return first, second, grad_out, x.grad
+
+        expected = run(f)
+        compiled = torch.compile(f, backend="aot_eager", fullgraph=True)
+        self.assertEqual(run(compiled), expected)
+
+    def test_input_view_replay_after_no_grad_first_call(self):
+        compiled = aot_function(lambda x: x.t(), nop)
+        x = torch.randn(2, 3, requires_grad=True)
+        with torch.no_grad():
+            compiled(x)
+        with torch.enable_grad():
+            compiled(x).sum().backward()
+        self.assertEqual(x.grad, torch.ones_like(x))
+
     def test_output_all_alias_types(self):
         # There are 3 types of aliasing that require us to return metadata in the compiled fw:
         # (1) outputs that are views of inputs

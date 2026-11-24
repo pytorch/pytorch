@@ -124,6 +124,9 @@ class OutputAliasInfo:
     # we compare the ViewMeta elements appropriately, i.e. their type and
     # the elements returned by the `as_tuple()` call.
     view_meta_sequence: ViewMetaSequence | None = None
+    # Suppress the backward edge for an input or intermediate view created under no_grad
+    # during an otherwise grad-enabled trace.
+    replay_under_no_grad: bool = False
 
 
 class MutationType(Enum):
