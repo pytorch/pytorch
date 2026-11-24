@@ -40,6 +40,28 @@ class TestKernelXcta(TestCase):
         )
         self.assertEqual(out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4)
 
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2 or torch.cuda.get_device_capability(1)[0] < 9,
+        "requires a second Hopper+ CUDA device",
+    )
+    def test_plans_key_and_require_the_current_device(self):
+        trait = T.SumOps(acc=cutlass.Float32)
+        x = torch.randn(2, 1 << 20, device="cuda:1")
+        before = (set(kernel_xcta._GEOM), set(kernel_xcta._PLAN))
+        with torch.cuda.device(0):
+            with self.assertRaisesRegex(AssertionError, "is current"):
+                kernel_xcta.reduce_row_xcta(trait, "bydevice", x, torch.float32)
+        self.assertEqual((set(kernel_xcta._GEOM), set(kernel_xcta._PLAN)), before)
+        with torch.cuda.device(1):
+            out = kernel_xcta.reduce_row_xcta(trait, "bydevice", x, torch.float32)
+        self.assertEqual(out, x.double().sum(dim=1).float(), atol=2e-2, rtol=1e-4)
+        # Geometry and plan keys both end with the device index.
+        geom = [k for k in kernel_xcta._GEOM if k[0] == "bydevice"]
+        plans = [k for k in kernel_xcta._PLAN if k[1] == "bydevice"]
+        self.assertEqual(len(geom), 1)
+        self.assertEqual(len(plans), 1)
+        self.assertEqual({k[-1] for k in geom + plans}, {1})
+
     def test_two_output_split(self):
         # Stage 2 projects both outputs from one accumulator; this path rejects index traits.
         x = torch.randn(2, 1 << 20, device="cuda")
