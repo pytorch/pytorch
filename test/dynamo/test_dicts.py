@@ -1333,6 +1333,37 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(vars(actual), vars(expected))
 
+    def test_unbound_dict_getitem_calls_missing(self):
+        # dict_subscript calls type(self).__missing__ for a dict subclass.
+        class Missing(dict):
+            def __missing__(self, key):
+                return key * 2
+
+        def fn():
+            dd = defaultdict(int)
+            return dict.__getitem__(dd, "a"), dict(dd), dict.__getitem__(Missing(), 3)
+
+        self.assertEqual(fn(), torch.compile(fn, backend="eager", fullgraph=True)())
+
+    def test_missing_raises_keyerror_called_once(self):
+        calls = []
+
+        class M(dict):
+            def __missing__(self, k):
+                calls.append(k)
+                raise KeyError(k)
+
+        def fn(d):
+            try:
+                d["x"]
+            except KeyError:
+                pass
+            return len(calls)
+
+        self.assertEqual(fn(M()), 1)
+        calls.clear()
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(M()), 1)
+
     def test_defaultdict_subclass_construct_custom_init_missing(self):
         class CountingDefaultDict(defaultdict):
             def __init__(self, scale):
@@ -4763,6 +4794,16 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
             self.fail("empty mapping must compare to False")
         if not bool(q):
             self.fail("non-empty mapping must compare to True")
+
+    @make_dynamo_test
+    def test_unbound_getitem_contains(self):
+        # dict.__getitem__/__contains__ are METH_COEXIST methods, so the unbound
+        # forms are method descriptors rather than slot wrappers.
+        d = self.thetype({"a": 1})
+        self.assertEqual(dict.__getitem__(d, "a"), 1)
+        self.assertEqual(dict.__contains__(d, "a"), True)
+        self.assertEqual(dict.__contains__(d, "b"), False)
+        self.assertRaises(KeyError, dict.__getitem__, d, "b")
 
 
 class DictSubclassMethodsTests(DictMethodsTests):
