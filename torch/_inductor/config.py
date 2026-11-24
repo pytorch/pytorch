@@ -639,6 +639,16 @@ inductor_default_autotune_rep = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_REP", 100)
 )
 
+# Benchmark in short bursts separated by idle gaps instead of one sustained run.
+# On a power-capped GPU a sustained benchmark triggers power throttling, which
+# slows some kernels (e.g. cuBLAS GEMMs) more than others and biases autotuning.
+# Applies to every CUDA Benchmarker.benchmark() call (max-autotune choices,
+# fusion and runtime Triton autotuning); ignored with
+# autotune_cudagraph_benchmarking.
+autotune_duty_cycle_benchmarking: bool = (
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_DUTY_CYCLE_BENCHMARKING", "0") == "1"
+)
+
 # When enabled, the autotuner captures each candidate kernel in a CUDA graph
 # and benchmarks graph replay instead of eager kernel launches. This eliminates
 # host-side dispatch overhead from timing measurements, giving results that are
