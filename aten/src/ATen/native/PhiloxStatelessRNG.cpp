@@ -95,6 +95,7 @@ void philox_distribution_kernel(
         op_name, ": key batch shape ", key_batch,
         " is not broadcastable with output shape ", self.sizes());
   }
+  at::assert_no_internal_overlap(self);
 
   if (self.numel() == 0) {
     return;
@@ -128,7 +129,7 @@ void philox_distribution_kernel(
   }
 
   // Generate values; each chunk is one Philox call producing epc elements.
-  auto output = self.contiguous();
+  Tensor output = self.is_contiguous() ? self : at::empty(self.sizes(), self.options());
   scalar_t* out_ptr = output.mutable_data_ptr<scalar_t>();
   const uint64_t* keys_ptr = key_flat.const_data_ptr<uint64_t>();
   constexpr int epc = elems_per_call<scalar_t>;
