@@ -30,6 +30,12 @@ tensors and CUDA operations.
 // Previous device is restored
 ```
 
+## InferenceMode Class
+
+```{doxygenclass} torch::stable::InferenceMode
+:members:
+```
+
 ## Stream
 
 ```{doxygenclass} torch::stable::accelerator::Stream
