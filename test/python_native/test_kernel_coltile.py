@@ -984,8 +984,8 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNone(got)
         with mock.patch.object(ct, "_INT32_LIMIT", 129):
             got = ct.reduce_ordered_col(trait, key, x, f32, 1, config=_FIXED)
-        wide = {_ordered_fields(k)["wide"] for k in ct._CACHE if k[1] == key}
-        self.assertEqual(wide, {True})
+        (wide,) = [_ordered_fields(k)["wide"] for k in ct._CACHE if k[1] == key]
+        self.assertIs(wide, True)
         reference = kg._try_indexed_itree(
             trait,
             key + "_ref",
