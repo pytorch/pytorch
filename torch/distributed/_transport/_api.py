@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import contextlib
 import numbers
+import operator
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from functools import partial
-from typing import Any, cast, Literal, Protocol, runtime_checkable, Self, TYPE_CHECKING
+from typing import (
+    Any,
+    cast,
+    Literal,
+    NamedTuple,
+    Protocol,
+    runtime_checkable,
+    Self,
+    TYPE_CHECKING,
+)
 
 import torch
 import torch.distributed as dist
@@ -16,13 +27,44 @@ from ._work import _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
-    import builtins
-
     from ._cuda_stream import _CudaStreamOrdering
 
 
 # TCPStore polls with an int millisecond timeout.
 _MAX_STORE_TIMEOUT = (2**31 - 1) / 1000
+
+
+# Shared by backends so every view and descriptor implements the slice contract
+# below with the same bounds and error messages.
+def _subrange(
+    size: int, offset: int | None, length: int | None, name: str = "registered memory"
+) -> tuple[int, int]:
+    offset = 0 if offset is None else operator.index(offset)
+    if offset < 0 or offset > size:
+        raise ValueError(f"offset is outside the {name}")
+    length = size - offset if length is None else operator.index(length)
+    if length < 0 or length > size - offset:
+        raise ValueError(f"range exceeds the {name}")
+    return offset, length
+
+
+PeerId = str
+
+
+class Notification(NamedTuple):
+    """A message from ``peer``, as returned by ``Transport.wait_notifications``."""
+
+    peer: PeerId
+    payload: bytes
+
+
+def _slice_range(size: int, key: builtins.slice) -> tuple[int, int]:
+    if not isinstance(key, builtins.slice):
+        raise TypeError("expected a slice such as [a:b]")
+    start, stop, step = key.indices(size)
+    if step != 1:
+        raise ValueError("slice step must be 1")
+    return start, max(stop - start, 0)
 
 
 @runtime_checkable
@@ -67,6 +109,11 @@ class RemoteBuffer(Protocol):
     version without executing code or importing classes named by the payload.
     Descriptors grant memory access: exchange them only with authorized peers.
     """
+
+    @property
+    def peer_id(self) -> PeerId:
+        """The peer that registered this memory, as addressed by notifications."""
+        ...
 
     def serialize(self) -> bytes: ...
 
@@ -147,6 +194,17 @@ class Transport(ABC):
     while the transfer is in flight, and can be captured in CUDA graphs.
     Transfer failures terminate the process, since consumers may already be
     enqueued. Ordinary ``read`` and ``write`` do not interact with CUDA streams.
+
+    Backends with a nonzero ``max_notification_size`` exchange small byte
+    messages with peers. ``send_notification`` sends one to a connected peer;
+    ``notification=`` on ``write``/``read`` sends one to the remote buffer's
+    peer once the transfer succeeds, so a written range is visible in the
+    destination's host memory when its notification arrives. Receivers see
+    messages from all senders, including peers they never connected to.
+    Messages are not duplicated or ordered with each other or with unrelated
+    transfers. A successful send does not guarantee delivery: backends may drop
+    messages a receiver leaves undrained (see each backend). Peer ids are
+    asserted by the sender, not authenticated.
     """
 
     def __init__(self, device: torch.device | str | None = None) -> None:
@@ -278,7 +336,7 @@ class Transport(ABC):
 
         # compare_set decides whether our bytes or the b"\x00" of a peer that
         # stopped waiting land; the prefix keeps them distinct. Waiters wait on
-        # a separate flag: legacy TCPStore's compare_set does not wake them.
+        # a separate flag: not every Store's compare_set wakes them.
         # pyrefly: ignore [bad-argument-type]
         if store.compare_set(str(rank), b"", url) != url:
             discard(rank)
@@ -302,6 +360,63 @@ class Transport(ABC):
     @abstractmethod
     def connected(self) -> bool:
         """Return whether the endpoint is connected to any peer."""
+
+    @property
+    def peer_id(self) -> PeerId:
+        """This endpoint's id, as peers see it in notifications and descriptors."""
+        raise NotImplementedError("transport does not support notifications")
+
+    def max_notification_size(self) -> int:
+        """Return the largest notification payload in bytes; 0 if unsupported."""
+        return 0
+
+    def send_notification(
+        self, peer: PeerId, payload: bytes, *, timeout: float | None = None
+    ) -> Work:
+        """Send a nonempty ``payload`` to the connected ``peer``.
+
+        The Work completes once the backend accepted the message, not when the
+        peer receives it. Raises ``ValueError`` for an unconnected peer.
+        """
+        raise NotImplementedError("transport does not support notifications")
+
+    def wait_notifications(self, *, timeout: float | None = None) -> list[Notification]:
+        """Return received notifications, waiting up to ``timeout`` for one.
+
+        Each notification is returned to exactly one caller. Returns an empty
+        list on timeout; ``timeout=0`` returns without waiting. Raises
+        ``RuntimeError`` if the transport closes.
+        """
+        raise NotImplementedError("transport does not support notifications")
+
+    async def wait_notifications_async(
+        self, *, timeout: float | None = None
+    ) -> list[Notification]:
+        """Like ``wait_notifications``, yielding to asyncio while waiting.
+
+        Cancellation loses no notifications.
+        """
+        _validate_timeout(timeout)
+        timeout = self._default_timeout if timeout is None else timeout
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+        delay = 1e-6
+        while True:
+            received = self.wait_notifications(timeout=0)
+            if received or (deadline is not None and loop.time() >= deadline):
+                return received
+            # Backends cannot signal arrivals to the loop, so poll with backoff.
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 1e-3)
+
+    def _check_notification(self, payload: bytes) -> None:
+        limit = self.max_notification_size()
+        if not limit:
+            raise NotImplementedError("transport does not support notifications")
+        if not isinstance(payload, bytes):
+            raise TypeError("notification payload must be bytes")
+        if not 0 < len(payload) <= limit:
+            raise ValueError(f"notification payload must be 1 to {limit} bytes")
 
     @abstractmethod
     def register_memory(
@@ -334,8 +449,13 @@ class Transport(ABC):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
-        """Write a local view; return Work for async_op=True, otherwise zero."""
+        """Write a local view; return Work for async_op=True, otherwise zero.
+
+        A ``notification`` is sent to the destination after the write succeeds;
+        the transfer completes once it has been sent.
+        """
 
     @abstractmethod
     def read(
@@ -345,8 +465,13 @@ class Transport(ABC):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
-        """Read into a local view; return Work for async_op=True, otherwise zero."""
+        """Read into a local view; return Work for async_op=True, otherwise zero.
+
+        A ``notification`` is sent to the source after the read succeeds; the
+        transfer completes once it has been sent.
+        """
 
     def write_stream(
         self,
@@ -419,6 +544,7 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Write a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
@@ -426,7 +552,13 @@ class Transport(ABC):
         started = asyncio.get_running_loop().time()
         work = cast(
             Work,
-            self.write(local_buffer, remote_buffer, async_op=True, timeout=timeout),
+            self.write(
+                local_buffer,
+                remote_buffer,
+                async_op=True,
+                timeout=timeout,
+                notification=notification,
+            ),
         )
         remaining = (
             None
@@ -441,6 +573,7 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Read into a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
@@ -448,7 +581,13 @@ class Transport(ABC):
         started = asyncio.get_running_loop().time()
         work = cast(
             Work,
-            self.read(local_buffer, remote_buffer, async_op=True, timeout=timeout),
+            self.read(
+                local_buffer,
+                remote_buffer,
+                async_op=True,
+                timeout=timeout,
+                notification=notification,
+            ),
         )
         remaining = (
             None
