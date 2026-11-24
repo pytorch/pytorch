@@ -3689,6 +3689,59 @@ print(json.dumps({**state, "result": result, "segments_kept": segments == [40 * 
         self.assertEqual(result["frees_during_capture"], 0)
         self.assertTrue(result["segments_kept"])
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_skips_garbage_collection(self):
+        # Garbage collection frees cached default-pool segments with cudaFree,
+        # which invalidates a capture. Use a subprocess, because a regression
+        # leaves an invalid capture open. torch.cuda.graph calls empty_cache, so
+        # the script calls capture_begin directly.
+        script = """
+import json
+import torch
+
+MiB = 1 << 20
+total = torch.cuda.get_device_properties(0).total_memory
+# Garbage collection starts above 0.1 * 256 MiB of segments.
+torch.cuda.set_per_process_memory_fraction(256 * MiB / total)
+stream = torch.cuda.Stream()
+with torch.cuda.stream(stream):
+    # Cache a small segment for the allocations of capture_begin, so that they
+    # do not start garbage collection before the capture.
+    torch.empty(1, device="cuda")
+cached = torch.empty(40 * MiB, dtype=torch.uint8, device="cuda")
+del cached
+torch.cuda.synchronize()
+
+def frees():
+    return torch.cuda.memory_stats()["num_device_free"]
+
+before = frees()
+graph = torch.cuda.CUDAGraph()
+try:
+    with torch.cuda.stream(stream):
+        graph.capture_begin()
+        torch.empty(20 * MiB, dtype=torch.uint8, device="cuda")
+        graph.capture_end()
+    result = "captured"
+except Exception as error:
+    result = type(error).__name__
+during = frees() - before
+# Outside of capture, garbage collection frees the cached segment.
+torch.empty(60 * MiB, dtype=torch.uint8, device="cuda")
+print(json.dumps({"result": result, "frees_during": during, "frees_after": frees() - before - during}))
+"""
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "garbage_collection_threshold:0.1"
+        proc = subprocess.run(
+            [sys.executable, "-c", script], env=env, capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        expected = {"result": "captured", "frees_during": 0, "frees_after": 1}
+        self.assertEqual(result, expected, proc.stderr)
+
     def _allocate_graph_temporary(self, state, value):
         temporary = torch.empty(LARGE_BUFFER // 4, device="cuda")
         temporary.fill_(value)
