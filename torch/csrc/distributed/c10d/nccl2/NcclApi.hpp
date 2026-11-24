@@ -269,6 +269,10 @@ class NcclApi {
   [[nodiscard]] virtual ncclResult_t memAlloc(void** buff, size_t size) = 0;
   [[nodiscard]] virtual ncclResult_t memFree(void* buff) = 0;
 
+  // Process-global PSK for TLS on NCCL's TCP sockets; nullptr disables it.
+  // Available on NCCL 2.32.3+ (older NCCL returns ncclInvalidUsage).
+  [[nodiscard]] virtual ncclResult_t setEncryptionPsk(const char* psk) = 0;
+
   // Memory offload (suspend/resume) operations.
   // Available on NCCL 2.29.7+ (older NCCL returns ncclInvalidUsage).
   [[nodiscard]] virtual ncclResult_t commSuspend(
@@ -406,6 +410,8 @@ class DefaultNcclApi : public NcclApi {
 
   [[nodiscard]] ncclResult_t commDeregister(ncclComm_t comm, void* handle)
       override;
+
+  [[nodiscard]] ncclResult_t setEncryptionPsk(const char* psk) override;
 
   [[nodiscard]] ncclResult_t commSuspend(ncclComm_t comm, int flags) override;
   [[nodiscard]] ncclResult_t commResume(ncclComm_t comm) override;
