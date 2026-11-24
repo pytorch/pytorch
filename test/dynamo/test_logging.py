@@ -20,10 +20,10 @@ from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     find_free_port,
     IS_WINDOWS,
     munge_exc,
-    skipIfRocmVersionAtLeast,
     skipIfTorchDynamo,
     skipIfWindows,
 )
@@ -358,9 +358,7 @@ class LoggingTests(LoggingTestCase):
         except Exception:
             pass
         record = self.getRecord(records, "WON'T CONVERT")
-        self.assertExpectedInline(
-            munge_exc(record.getMessage()),
-            """\
+        expected = """\
 WON'T CONVERT dynamo_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
@@ -374,7 +372,13 @@ torch._dynamo.exc.TorchRuntimeError: RuntimeError when making fake tensor call
 
 from user code:
    File "test_logging.py", line N, in dynamo_error_fn
-    output = output.add(torch.ones(10, 10))""",
+    output = output.add(torch.ones(10, 10))"""
+        expected = expectedIfCppFakeTensor(
+            expected.replace("FakeTensor(...", "tensor(..."), expected
+        )
+        self.assertExpectedInline(
+            munge_exc(record.getMessage()),
+            expected,
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
@@ -591,6 +595,43 @@ Mutating object of type list (source name: L['my_list'])
         my_list.append(3)
 """,
         )
+
+    def test_side_effects_stacks_captured_only_when_consumed(self):
+        from torch._dynamo.side_effects import SideEffects
+        from torch._logging._internal import trace_log
+        from torch.testing._internal.logging_utils import log_api
+
+        seen_stacks = []
+        orig = SideEffects.codegen_update_mutated
+
+        def spy(self_, cg, log_side_effects=False):
+            seen_stacks.append(dict(self_.mutation_user_stacks))
+            return orig(self_, cg, log_side_effects)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, lst):
+            lst.append(4)
+            return x + len(lst)
+
+        with unittest.mock.patch.object(SideEffects, "codegen_update_mutated", spy):
+            # The dynamo TestCase installs a trace_log handler; drop it so no
+            # consumer of the user stacks is active.
+            with unittest.mock.patch.object(trace_log, "handlers", []):
+                lst = [1, 2, 3]
+                self.assertEqual(fn(torch.ones(1), lst), torch.ones(1) + 4)
+                self.assertEqual(lst, [1, 2, 3, 4])
+                self.assertTrue(seen_stacks)
+                self.assertTrue(all(not stacks for stacks in seen_stacks))
+
+            torch._dynamo.reset()
+            seen_stacks.clear()
+            records = []
+            with log_api(side_effects=True), self._handler_watcher(records):
+                lst = [1, 2, 3]
+                fn(torch.ones(1), lst)
+            self.assertTrue(any(stacks for stacks in seen_stacks))
+            self.assertEqual(len(records), 1)
+            self.assertIn("lst.append(4)", records[0].getMessage())
 
     @make_logging_test(side_effects=True)
     def test_side_effects_multiple_mutations_same_object(self, records):
@@ -1077,7 +1118,6 @@ Mutating object of type dict (source name: L['mod']._buffers)
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_invalid_artifact_flag_error_msg(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "not_an_existing_log_artifact_should_error"
@@ -1426,7 +1466,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
-    @skipIfRocmVersionAtLeast([10, 1])  # AIPROFSDK-1066
     def test_logs_out(self):
         import tempfile
 
@@ -1455,6 +1494,16 @@ fn(torch.randn(5))
                 """,
                 env=env,
             )
+            torch_log_line = re.compile(
+                r"(\[rank\d+\]:)?[VIWEC]\d{4} \d{2}:\d{2}:\d{2}\.\d{6} \d+ \S+\.py:\d+\]"
+            )
+            # Other libraries (e.g. kineto) may write to stderr concurrently,
+            # without an atomic trailing newline; compare only torch log lines.
+            stderr_logs = "".join(
+                line[m.start() :] + "\n"
+                for line in stderr.decode("utf-8").splitlines()
+                if (m := torch_log_line.search(line))
+            )
             with open(
                 file_path, encoding="utf-8"
             ) as fd:  # encoding file to UTF-8 for Windows.
@@ -1464,7 +1513,7 @@ fn(torch.randn(5))
                 try:
                     self.assertEqual(  # process wrap difference: /r/n on Windows, /n on posix.
                         empty_line_normalizer(lines),
-                        empty_line_normalizer(stderr.decode("utf-8")),
+                        empty_line_normalizer(stderr_logs),
                     )
                 except Exception:
                     unittest.TestCase.maxDiff = orig_maxDiff

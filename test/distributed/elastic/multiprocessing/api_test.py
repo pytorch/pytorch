@@ -275,7 +275,7 @@ class _StartProcessesTest(TestCase):
     ) -> None:
         mp_queue = mp.get_context("spawn").Queue()
         child_nproc = 2
-        mp.spawn(
+        process_context = mp.spawn(
             start_processes_zombie_test,
             nprocs=1,
             args=(entrypoint, mp_queue, self.log_dir(), child_nproc),
@@ -289,8 +289,8 @@ class _StartProcessesTest(TestCase):
         child_pids = pids[1:]
 
         os.kill(parent_pid, signal.SIGTERM)
-        # Wait to give time for signal handlers to finish work
-        time.sleep(5)
+        # Wait for the parent to finish closing its children.
+        process_context.processes[0].join(timeout=5)
         for child_pid in child_pids:
             # Killing parent should kill all children, we expect that each call to
             # os.kill would raise OSError

@@ -33,7 +33,7 @@ from torch.testing._internal.common_fsdp import (
     DEVICE_TYPE,
     DEVICEInitMode,
     FSDPInitMode,
-    FSDPTest,
+    FSDPTestContinuous,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -321,7 +321,7 @@ class TestDummyModel(torch.nn.Module):
         return torch.rand(8, 8, device=device_type)
 
 
-class TestFSDPOptimState(FSDPTest):
+class TestFSDPOptimState(FSDPTestContinuous):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._model_class = {
@@ -1151,6 +1151,8 @@ class TestFSDPOptimState(FSDPTest):
         # As a sanity check, check that we can load and run a few iterations
         optim2.load_state_dict(sharded_osd2)
         self._step_model(model2, optim2, num_iters=num_iters)
+        if halve_world_size:
+            dist.destroy_process_group(new_group)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", STATE_DICT_TYPES)
@@ -1861,6 +1863,8 @@ class TestFSDPOptimState(FSDPTest):
         # As a sanity check, check that we can load and run a few iterations
         optim2.load_state_dict(sharded_osd2)
         self._step_model(model2, optim2, num_iters=num_iters)
+        if halve_world_size:
+            dist.destroy_process_group(new_group)
 
     @skip_if_lt_x_gpu(2)
     def test_interface_arguments(self):

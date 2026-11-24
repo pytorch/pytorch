@@ -2399,11 +2399,10 @@ class TestViewOps(DTensorContinuousTestBase):
             self.assertEqual(r.full_tensor(), e)
 
     def test_flatten_then_unbind_on_strided_shard_dim(self):
-        """Verify _StridedShard is detected by unbind on the shard dim.
+        """Unbinding on a _StridedShard dim raises.
 
-        gen_unbind_strategy uses is_tensor_dim_sharded which calls is_shard(),
-        missing _StridedShard. Unbinding on a _StridedShard dim should raise
-        RuntimeError (same as unbinding on a regular Shard dim).
+        Redistributing would turn the view operation into a copy, so callers
+        must redistribute explicitly before unbinding.
         """
         mesh = init_device_mesh(self.device_type, (self.world_size,))
         shape = (2, self.world_size * 2, 3)
@@ -2414,9 +2413,14 @@ class TestViewOps(DTensorContinuousTestBase):
         self.assertIsInstance(dt_flat.placements[0], _StridedShard)
         self.assertEqual(dt_flat.placements[0].dim, 0)
 
-        # unbind on the _StridedShard dim (dim 0) — should raise
-        with self.assertRaises(RuntimeError):
-            torch.unbind(dt_flat, dim=0)
+        with CommDebugMode() as comm_mode:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Attempted to unbind along the sharded dimension 0. "
+                "Please redistribute the input explicitly before unbinding.",
+            ):
+                torch.unbind(dt_flat, dim=0)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
 
     def test_flatten_then_add_strided_shard_inputs(self):
         """Verify _StridedShard is treated as shard in placement merge.
