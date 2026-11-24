@@ -626,10 +626,11 @@ Tensor& multinomial_out(const Tensor& self,
     return result;
   }
 
-  // The CPU and CUDA kernels search a double CDF past 2^24 categories; other
+  // The CPU, CUDA and XPU kernels search a double CDF past 2^24 categories; other
   // backends (e.g. MPS) may search a float CDF, which cannot resolve that many.
   TORCH_CHECK(
-      self.is_cpu() || self.is_cuda() || n_categories <= FLOAT32_MAX_CONSECUTIVE_INT,
+      self.is_cpu() || self.is_cuda() || self.is_xpu() ||
+          n_categories <= FLOAT32_MAX_CONSECUTIVE_INT,
       "number of categories cannot exceed 2^24 when sampling with replacement on ",
       self.device().type());
   multinomial_with_replacement_stub(
