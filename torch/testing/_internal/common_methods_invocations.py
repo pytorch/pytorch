@@ -17969,6 +17969,11 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs__to_dtype_rounded,
+        skips=(
+            # AssertionError: expected inferred_arg_type.success(), as TorchScript
+            # cannot infer the type of the memory_format kwarg (like for "to").
+            DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+        ),
     ),
     OpInfo('topk',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
