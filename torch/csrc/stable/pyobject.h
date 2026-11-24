@@ -196,13 +196,8 @@ inline void* double_to_pyobject(double value) {
 inline std::string string_from_pyobject(void* py_obj) {
   StringHandle raw = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(torch_string_from_pyobject(py_obj, &raw));
-  std::unique_ptr<StringOpaque, void (*)(StringHandle)> handle(
-      raw, [](StringHandle h) { torch_delete_string(h); });
-  size_t length = 0;
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_string_length(handle.get(), &length));
-  const char* data = nullptr;
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle.get(), &data));
-  return std::string(data, length);
+  return torch::stable::detail::to<std::string>(
+      torch::stable::detail::from(raw));
 }
 
 // Decode UTF-8 bytes as a new-reference Python str. The bytes are copied, so
