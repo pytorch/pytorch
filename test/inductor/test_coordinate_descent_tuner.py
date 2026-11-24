@@ -687,9 +687,7 @@ class TestCoordinateDescentTuner(TestCase):
                 name == "R0_BLOCK"
                 and tuner_self.inductor_meta.get("grid_type") == "SplitScanGrid"
             ):
-                observed_min_rblocks.append(
-                    tuner_self.inductor_meta.get("min_rblock")
-                )
+                observed_min_rblocks.append(tuner_self.inductor_meta.get("min_rblock"))
             return orig_value_too_small(tuner_self, name, val)
 
         with (

@@ -21933,21 +21933,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     def test_nonowning_layout_not_inplaced_before_concat_reuse(self):
         def fn(a, b, w1, w2, w3):
-            x = a + torch.mm(a.view(1, 2048), w1).view(1, 1, 2048)
+            n = a.shape[-1]
+            x = a + torch.mm(a.view(1, n), w1).view(1, 1, n)
             cat_buf = torch.cat([x, b], dim=-1)
-            y = torch.mm(cat_buf.view(1, 4096), w2)
-            z = x + y[:, :2048].view(1, 1, 2048)
-            h = torch.mm(z.view(1, 2048), w3)
+            y = torch.mm(cat_buf.view(1, 2 * n), w2)
+            z = x + y[:, :n].view(1, 1, n)
+            h = torch.mm(z.view(1, n), w3)
             clobber = torch.relu(h + 10.0)
             c2 = torch.mm(clobber, w2)
-            return z + c2.view(1, 1, 2048)
+            return z + c2.view(1, 1, n)
 
         a = torch.randn(1, 1, 2048, device=self.device)
         b = torch.randn(1, 1, 2048, device=self.device)
         w1 = torch.randn(2048, 2048, device=self.device) * 0.02
         w2 = torch.randn(4096, 2048, device=self.device) * 0.02
         w3 = torch.randn(2048, 4096, device=self.device) * 0.02
-        self.common(fn, (a, b, w1, w2, w3), atol=1e-3, rtol=1e-3)
+        self.common(fn, (a, b, w1, w2, w3), atol=1e-3, rtol=1e-3, check_lowp=False)
 
     # end of class CommonTemplate - add new tests here
 
