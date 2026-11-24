@@ -35,7 +35,7 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
     world_size = 2
 
     @classmethod
-    def backend_str(cls):
+    def backend_str(cls, device):
         return "gloo"
 
     def test_hooks_fire_for_all_collectives(self):
