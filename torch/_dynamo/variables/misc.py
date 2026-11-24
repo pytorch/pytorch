@@ -66,6 +66,7 @@ from ..source import (
 from ..utils import (
     check_positional,
     check_unspec_or_constant_args,
+    extract_fake_example_value,
     istype,
     no_keywords,
     proxy_args_kwargs,
@@ -107,6 +108,7 @@ if TYPE_CHECKING:
 
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._subclasses.fake_tensor import FakeTensor
 
 
 class SuperVariable(VariableTracker):
@@ -1300,6 +1302,11 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.non_differentiable = non_differentiable
         self.dirty_tensors = dirty_tensors
+        # Fake values of the tensors passed to the last
+        # ctx.mark_non_differentiable / ctx.mark_dirty call, or None if there
+        # was none.
+        self.non_differentiable_fakes: list[FakeTensor] | None = None
+        self.dirty_fakes: list[FakeTensor] | None = None
         self.output_grad_dtypes = output_grad_dtypes
 
     # _FunctionBase.needs_input_grad is a writable getset. apply() seeds it as an
@@ -1371,6 +1378,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         no_keywords(tx, "mark_non_differentiable", kwargs)
+        self.non_differentiable_fakes = self._marked_tensor_fakes(
+            "mark_non_differentiable", args
+        )
         self.non_differentiable = args
         return variables.ConstantVariable.create(None)
 
@@ -1389,8 +1399,30 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 "inside autograd.Function.apply.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
+        self.dirty_fakes = self._marked_tensor_fakes("mark_dirty", args)
         self.dirty_tensors = args
         return variables.ConstantVariable.create(None)
+
+    def _marked_tensor_fakes(
+        self, method: str, args: list[VariableTracker]
+    ) -> list["FakeTensor"]:
+        """
+        Return the fake value of each tensor passed to ``ctx.<method>``.
+
+        The fake values are taken when the mark is made, because a marked
+        intermediate can lose its proxy later (see taint_filtered_vt). Graph
+        breaks if an argument is not a tensor, so that eager raises its usual
+        error.
+        """
+        for arg in args:
+            if not arg.is_tensor():
+                unimplemented(
+                    gb_type="autograd.Function context mark with a non-tensor argument",
+                    context=f"call_method {self} {method} {args}",
+                    explanation=f"ctx.{method} only accepts tensors.",
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+        return [extract_fake_example_value(arg.as_proxy().node) for arg in args]
 
     def set_output_grad_dtype(
         self,
@@ -1477,6 +1509,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             return LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, list(args), kwargs)
             )
+        # The tensors passed to the last ctx.mark_dirty /
+        # ctx.mark_non_differentiable call, or None if there was none.
         if name == "dirty_tensors":
             if self.dirty_tensors is None:
                 return variables.ConstantVariable.create(None)

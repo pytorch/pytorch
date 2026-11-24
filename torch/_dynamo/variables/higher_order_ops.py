@@ -63,6 +63,7 @@ from ..exc import (
 )
 from ..source import AttrSource, DictGetItemSource
 from ..utils import (
+    extract_fake_example_value,
     proxy_args_kwargs,
     set_example_value,
     specialize_symnode,
@@ -5398,12 +5399,14 @@ class AutogradFunctionApplyVariable(VariableTracker):
             self.trace_forward_graph(tx, ctx, fwd_tracer, args, kwargs)
         )
 
-        # Only marks made in forward apply to the forward outputs. Tracing
-        # backward runs the user's backward on the same ctx, where a
-        # ctx.mark_non_differentiable / ctx.mark_dirty call replaces them (in
-        # eager those calls do nothing), so read them before tracing backward.
-        fwd_non_differentiable = ctx.non_differentiable
-        fwd_dirty_tensors = ctx.dirty_tensors
+        # Only marks made in forward apply to the forward outputs. Backward is
+        # traced on the same ctx, so keep the forward marks here and clear
+        # them from ctx, as eager does after forward. A mark made in backward
+        # then has no effect on the outputs, as in eager.
+        fwd_non_differentiable_fakes = ctx.non_differentiable_fakes
+        fwd_dirty_fakes = ctx.dirty_fakes
+        ctx.non_differentiable = ctx.non_differentiable_fakes = None
+        ctx.dirty_tensors = ctx.dirty_fakes = None
 
         bwd_args, bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
             self.trace_backward_graph(tx, ctx, fwd_tracer, fwd_out, fwd_fn)
@@ -5426,13 +5429,13 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # are marked as non-differentiable and pass them to ApplyTemplate
         # at torch._functorch.autograd_function.AutogradFunctionApply for reconstruction.
         non_differentiable_idx, _ = self.marked_output_indices(
-            fwd_non_differentiable, fwd_out, fwd_graph_output_vts
+            fwd_non_differentiable_fakes, fwd_out, fwd_graph_output_vts
         )
 
-        dirty_idx, unmatched_dirty_tensors = self.marked_output_indices(
-            fwd_dirty_tensors, fwd_out, fwd_graph_output_vts
+        dirty_idx, all_dirty_returned = self.marked_output_indices(
+            fwd_dirty_fakes, fwd_out, fwd_graph_output_vts
         )
-        if unmatched_dirty_tensors:
+        if not all_dirty_returned:
             unimplemented(
                 gb_type="autograd.Function.apply: mark_dirty input not returned",
                 context="",
@@ -5526,40 +5529,63 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
     def marked_output_indices(
         self,
-        marked_vts: Sequence[VariableTracker] | None,
+        marked_fakes: Sequence["FakeTensor"] | None,
         fwd_out: VariableTracker,
         fwd_graph_output_vts: VariableTracker | tuple[VariableTracker, ...],
-    ) -> tuple[list[int], set[Proxy]]:
-        """Map tensors passed to ctx.mark_non_differentiable / ctx.mark_dirty
-        to indices into the traced fwd outputs.
-
-        The marks refer to the original forward's outputs (``fwd_out``), but
-        the emitted autograd.Function returns ``fwd_graph_output_vts``: only
-        tensor/symint outputs, flattened, plus any intermediates. Match the
-        two by VariableTracker identity, as remap_output_grad_dtypes does.
-        Also returns the marked proxies that are not an original output.
+    ) -> tuple[list[int], bool]:
         """
-        if marked_vts is None:
-            return [], set()
-        marked_proxies: set[Proxy] = {
-            vt.as_proxy() for vt in marked_vts if vt.is_tensor()
-        }
+        Find the traced forward outputs that are marked tensors.
+
+        A forward output is marked if its fake value is one of ``marked_fakes``,
+        the fake values of the tensors passed to ``ctx.mark_non_differentiable``
+        or ``ctx.mark_dirty``. Matching by fake value follows a marked tensor
+        through in-place ops, which return a new proxy for the same tensor.
+
+        The marked outputs are found among the original forward outputs
+        (``fwd_out``) and then mapped to positions in ``fwd_graph_output_vts``,
+        which holds only the tensor and symint outputs, flattened, followed by
+        any intermediates. That mapping is by VariableTracker identity, as in
+        remap_output_grad_dtypes.
+
+        Parameters
+        ----------
+        marked_fakes : sequence of FakeTensor or None
+            Fake values of the marked tensors, or None if nothing was marked.
+        fwd_out : VariableTracker
+            The value returned by the forward.
+        fwd_graph_output_vts : VariableTracker or tuple of VariableTracker
+            The outputs of the traced forward graph.
+
+        Returns
+        -------
+        indices : list of int
+            Positions in ``fwd_graph_output_vts`` of the marked outputs.
+        all_returned : bool
+            Whether every marked tensor is one of the forward outputs.
+        """
+        if marked_fakes is None:
+            return [], True
+        marked_ids = {id(fake) for fake in marked_fakes}
         fwd_out_vts = (
             fwd_out.items
             if isinstance(fwd_out, variables.BaseListVariable)
             else [fwd_out]
         )
-        marked_fwd_out_vts = {
-            vt
-            for vt in fwd_out_vts
-            if vt.is_tensor() and vt.as_proxy() in marked_proxies
-        }
+        marked_fwd_out_vts: set[VariableTracker] = set()
+        returned_ids: set[int] = set()
+        for vt in fwd_out_vts:
+            if not vt.is_tensor():
+                continue
+            fake_id = id(extract_fake_example_value(vt.as_proxy().node))
+            if fake_id in marked_ids:
+                marked_fwd_out_vts.add(vt)
+                returned_ids.add(fake_id)
         if not isinstance(fwd_graph_output_vts, (list, tuple)):
             fwd_graph_output_vts = (fwd_graph_output_vts,)
         idx = [
             i for i, vt in enumerate(fwd_graph_output_vts) if vt in marked_fwd_out_vts
         ]
-        return idx, marked_proxies - {vt.as_proxy() for vt in marked_fwd_out_vts}
+        return idx, returned_ids == marked_ids
 
     def remap_output_grad_dtypes(
         self,

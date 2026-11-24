@@ -930,10 +930,11 @@ class DynamoAutogradFunctionTraceHelper:
                     return out
                 if is_non_differentiable_tensor(out):
                     # A returned input marked via ctx.mark_non_differentiable
-                    # comes back as a detached alias instead (set_history in
-                    # custom_function.cpp). The alias is the output now, so
-                    # the mark has to cover it as well.
-                    alias = out.detach()
+                    # comes back as an alias, as set_history does in
+                    # custom_function.cpp: detached if the input requires
+                    # grad, otherwise a view of it. The alias is the output,
+                    # so the mark has to cover it as well.
+                    alias = out.detach() if out.requires_grad else out.view_as(out)
                     # pyrefly: ignore [missing-attribute]
                     ctx.mark_non_differentiable(*ctx.non_differentiable, alias)
                     return alias

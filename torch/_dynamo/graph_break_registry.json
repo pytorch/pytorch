@@ -2530,6 +2530,16 @@
       ]
     }
   ],
+  "GB6358": [
+    {
+      "Gb_type": "autograd.Function context mark with a non-tensor argument",
+      "Context": "call_method {self} {method} {args}",
+      "Explanation": "ctx.{method} only accepts tensors.",
+      "Hints": [
+        "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
   "GB0142": [
     {
       "Gb_type": "Unsupported context manager",
