@@ -1614,8 +1614,19 @@ class TritonTemplateKernel(TritonKernel):
             if isinstance(input_node.layout, ir.FlexibleLayout):
                 # This will set a layout constraint on the template
                 self.get_stride_and_maybe_freeze_layout(input_node)
-                with patch.object(ir.FlexibleLayout, "allow_indexing", True):
-                    output_index = input_node.make_indexer()(index_symbols)
+                constraint = V.graph.buffer_layout_constraints.get(
+                    input_node.get_name()
+                )
+                if (
+                    isinstance(input_node.layout, ir.FlexibleLayout)
+                    and constraint is not None
+                ):
+                    # Index with the recorded layout, as stride() does: the live
+                    # layout's as_fixed() can pad differently for this FX node.
+                    output_index = constraint.make_indexer()(index_symbols)
+                else:
+                    with patch.object(ir.FlexibleLayout, "allow_indexing", True):
+                        output_index = input_node.make_indexer()(index_symbols)
             else:
                 output_index = input_node.make_indexer()(index_symbols)
 
@@ -1994,7 +2005,15 @@ class TritonTemplateKernel(TritonKernel):
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
-                input_node.freeze_layout()
+                if should_use_layout_constraints(input_node) and isinstance(
+                    input_node.get_layout(), ir.FlexibleLayout
+                ):
+                    # Freeze to the layout another template already recorded.
+                    input_node.freeze_layout_with_exact_strides(
+                        get_strides_with_layout_constraints(input_node)
+                    )
+                else:
+                    input_node.freeze_layout()
                 input_name = input_node.get_name()
                 if input_name in self.store_output_input_producer_groups:
                     input_value = store_output_capture.captured_values[input_name]
@@ -2241,8 +2260,11 @@ class TritonTemplateKernel(TritonKernel):
         Get the stride of an input node for template code generation, with deferred
         layout freezing:
         - If the layout is FlexibleLayout, compute speculative strides without freezing
-        - Record the expected layout (as FixedLayout) as a constraint for later validation
-        - Only freeze at finalization time after validating no conflicts exist
+        - Record the expected layout (as FixedLayout) in V.graph.buffer_layout_constraints;
+          the first consumer's layout wins and later consumers reuse it
+        - The buffer is frozen to it when a template that read it is selected: at
+          lowering for a single template, in GraphLowering.finalize for a
+          MultiTemplateBuffer whose best choice is a template
 
         Scheduler falls back to aten if layout constraint violated. If no aten,
         freeze right away.
@@ -2265,19 +2287,16 @@ class TritonTemplateKernel(TritonKernel):
                 # (e.g., for FlexAttention templates), freeze immediately
                 node.data.freeze_layout()
             else:
-                # Compute what strides WOULD be if frozen, without actually freezing
-                fixed_layout_copy = layout.get_fixed_layout_without_freezing()
-                # Save to graph-level constraints instead of per-kernel
-                existing = V.graph.buffer_layout_constraints.get(node_name)
-                if existing is not None and existing != fixed_layout_copy:
-                    raise AssertionError(
-                        f"Layout constraint mismatch for {node_name}: "
-                        f"existing {existing} vs new {fixed_layout_copy}"
-                    )
-                else:
-                    V.graph.buffer_layout_constraints[node_name] = fixed_layout_copy
+                # Reuse an earlier consumer's layout: recomputing can give different
+                # strides, since padding is skipped for dislike_padding FX nodes.
+                fixed_layout = V.graph.buffer_layout_constraints.get(node_name)
+                if fixed_layout is None:
+                    # Compute what strides WOULD be if frozen, without actually freezing
+                    fixed_layout = layout.get_fixed_layout_without_freezing()
+                    # Save to graph-level constraints instead of per-kernel
+                    V.graph.buffer_layout_constraints[node_name] = fixed_layout
 
-                return list(fixed_layout_copy.stride)
+                return list(fixed_layout.stride)
         # Already frozen or not a FlexibleLayout, just return current strides
         return node.get_stride()
 
@@ -3864,6 +3883,15 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
 
     def output_node(self):
+        # Rendered against its inputs' recorded layouts with no extern fallback, so
+        # freeze them before a later consumer picks a different layout.
+        for inp in self.input_nodes:
+            if should_use_layout_constraints(inp) and isinstance(
+                inp.get_layout(), ir.FlexibleLayout
+            ):
+                inp.freeze_layout_with_exact_strides(
+                    V.graph.buffer_layout_constraints[inp.get_name()].stride
+                )
         buffer = ir.TritonTemplateBuffer(
             layout=self.layout,
             inputs=self.input_nodes,
