@@ -6,6 +6,7 @@ import os
 import unittest
 
 import torch
+import torch.distributed as dist
 from torch.distributed._transport import new_transport, wait_all
 from torch.distributed._transport.nixl import NIXLRemoteBuffer
 from torch.testing._internal.common_utils import (
@@ -22,10 +23,8 @@ def _receive(connection):
     return connection.recv_bytes()
 
 
-def _native_worker(rank, connection, progress_thread):
-    with new_transport(
-        "nixl", "cpu", timeout=5, enable_prog_thread=progress_thread
-    ) as transport:
+def _native_worker(rank, connection):
+    with new_transport("nixl", "cpu", timeout=5) as transport:
         connection.send_bytes(transport.bind())
         transport.connect(_receive(connection))
         source = torch.arange(1024, dtype=torch.float32) + rank
@@ -129,6 +128,92 @@ def _multi_peer_worker(rank, connections):
         connection.close()
 
 
+def _passive_worker(rank, connection, operation):
+    # Rank 1 only waits on the pipe; the progress thread must service rank 0's
+    # one-sided transfer over TCP.
+    with new_transport(
+        "nixl", "cpu", timeout=5, backend_options={"engine_config": "TLS=tcp"}
+    ) as transport:
+        expected = torch.arange(4096, dtype=torch.int64)
+        source_rank = 0 if operation == "write" else 1
+        tensor = expected.clone() if rank == source_rank else torch.zeros_like(expected)
+        memory = transport.register_memory(tensor)
+        if rank == 1:
+            connection.send_bytes(transport.bind())
+            connection.send_bytes(memory.to_remote_buffer().serialize())
+            if _receive(connection) != b"done":
+                raise AssertionError("unexpected control-plane message")
+        else:
+            transport.connect(_receive(connection))
+            remote = NIXLRemoteBuffer.deserialize(_receive(connection))
+            if operation == "write":
+                transport.write(memory.to_view(), remote)
+            else:
+                transport.read(memory.to_mutable_view(), remote)
+            connection.send_bytes(b"done")
+        torch.testing.assert_close(tensor, expected)
+    connection.close()
+
+
+def _connect_rank_worker(rank, port):
+    # Rank 0 connects to ranks 1 and 2 with connect_rank and reads from both.
+    store = dist.TCPStore("127.0.0.1", port, is_master=False)
+    with new_transport("nixl", "cpu", timeout=5) as transport:
+        memory = transport.register_memory(torch.full((1024,), float(rank)))
+        if rank == 0:
+            for peer in (1, 2):
+                transport.connect_rank(
+                    peer, store=store, rank=0, tag="nixl", timeout=10
+                )
+            for peer in (1, 2):
+                remote = NIXLRemoteBuffer.deserialize(store.get(f"remote/{peer}"))
+                target = torch.zeros(1024)
+                view = transport.register_memory(target).to_mutable_view()
+                transport.read(view, remote)
+                torch.testing.assert_close(target, torch.full_like(target, peer))
+            store.set("done", "1")
+        else:
+            transport.connect_rank(0, store=store, rank=rank, tag="nixl", timeout=10)
+            # pyrefly: ignore [bad-argument-type]
+            store.set(f"remote/{rank}", memory.to_remote_buffer().serialize())
+            store.wait(["done"])
+        asyncio.run(transport.close_async(timeout=5))
+
+
+def _next_notifications(transport):
+    notifications = transport.wait_notifications(timeout=10)
+    if not notifications:
+        raise AssertionError("timed out waiting for a notification")
+    return notifications
+
+
+def _notification_worker(rank, connection, progress_thread):
+    with new_transport(
+        "nixl", "cpu", timeout=10, enable_prog_thread=progress_thread
+    ) as transport:
+        connection.send_bytes(transport.bind())
+        transport.connect(_receive(connection))
+        data = torch.full((1 << 20,), rank + 1, dtype=torch.uint8)
+        memory = transport.register_memory(data)
+        connection.send_bytes(memory.to_remote_buffer().serialize())
+        remote = NIXLRemoteBuffer.deserialize(_receive(connection))
+        if rank == 0:
+            # Never waited on before the reply: the transport sends it itself.
+            work = transport.write(
+                memory.to_view(), remote, async_op=True, notification=b"written"
+            )
+            if _next_notifications(transport) != [(remote.peer_id, b"read")]:
+                raise AssertionError("unexpected notification")
+            work.wait()
+            connection.send_bytes(b"done")
+        else:
+            if _next_notifications(transport) != [(remote.peer_id, b"written")]:
+                raise AssertionError("unexpected notification")
+            torch.testing.assert_close(data, torch.ones_like(data))
+            transport.send_notification(remote.peer_id, b"read").wait()
+            _receive(connection)  # Stay open until the reply arrives.
+
+
 def _run_worker(worker, *args):
     # Some NIXL 0.6-1.5 wheels segfault at exit on hosts with libefa, whose UCX modules
     # load a second libnl-route-3: https://github.com/ai-dynamo/nixl/issues/2428
@@ -142,11 +227,26 @@ def _run_worker(worker, *args):
     "set TORCH_TEST_NIXL=1 with NIXL/UCX installed",
 )
 class TestNIXLNative(TestCase):
-    @parametrize("progress_thread", [True, False])
-    def test_two_process_cpu_transfers(self, progress_thread):
+    def test_two_process_cpu_transfers(self):
         connections = multiprocessing.Pipe()
         self._spawn(
-            _native_worker,
+            _native_worker, [(connection,) for connection in connections], connections
+        )
+
+    @parametrize("operation", ["read", "write"])
+    def test_passive_peer_tcp(self, operation):
+        connections = multiprocessing.Pipe()
+        self._spawn(
+            _passive_worker,
+            [(connection, operation) for connection in connections],
+            connections,
+        )
+
+    @parametrize("progress_thread", [True, False])
+    def test_two_process_notifications(self, progress_thread):
+        connections = multiprocessing.Pipe()
+        self._spawn(
+            _notification_worker,
             [(connection, progress_thread) for connection in connections],
             connections,
         )
@@ -158,6 +258,10 @@ class TestNIXLNative(TestCase):
             [([first for first, _ in pipes],), ([pipes[0][1]],), ([pipes[1][1]],)],
             [connection for pipe in pipes for connection in pipe],
         )
+
+    def test_three_process_cpu_connect_rank(self):
+        store = dist.TCPStore("127.0.0.1", 0, is_master=True, wait_for_workers=False)
+        self._spawn(_connect_rank_worker, [(store.port,)] * 3, [])
 
     def _spawn(self, worker, args, connections):
         context = multiprocessing.get_context("spawn")

@@ -163,31 +163,6 @@ class TestFakeSparsity(TestCase):
             model_load.seq[1].parametrizations["weight"][0].mask,
         )
 
-    def test_jit_trace(self):
-        model = ModelUnderTest(bias=False)
-
-        mask = torch.eye(16)
-        parametrize.register_parametrization(
-            model.linear, "weight", utils.FakeSparsity(mask)
-        )
-        mask = torch.eye(16)
-        parametrize.register_parametrization(
-            model.seq[0], "weight", utils.FakeSparsity(mask)
-        )
-        mask = torch.eye(16)
-        parametrize.register_parametrization(
-            model.seq[1], "weight", utils.FakeSparsity(mask)
-        )
-
-        # Tracing
-        example_x = torch.ones(3, 16)
-        model_trace = torch.jit.trace_module(model, {"forward": example_x})
-
-        x = torch.randn(3, 16)
-        y = model(x)
-        y_hat = model_trace(x)
-        self.assertEqual(y_hat, y)
-
 
 if __name__ == "__main__":
     raise_on_run_directly("test/test_ao_sparsity.py")

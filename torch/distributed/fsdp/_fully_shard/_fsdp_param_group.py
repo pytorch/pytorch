@@ -5,8 +5,8 @@ import contextlib
 import functools
 import logging
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, TYPE_CHECKING
-from typing_extensions import TypeVarTuple, Unpack
+from typing import Any, Literal, NamedTuple, NoReturn, TYPE_CHECKING
+from typing_extensions import TypeVarTuple
 
 import torch
 import torch.distributed as dist
@@ -21,14 +21,21 @@ from torch.distributed.fsdp._common_utils import (
 from torch.profiler import record_function
 from torch.utils.hooks import RemovableHandle
 
+from ._all_gather_layout import (
+    _PersistentBuffers,
+    AllGatherLayout,
+    DEFAULT_ALL_GATHER_LAYOUT,
+    DefaultAllGatherLayout,
+)
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
-    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     _wait_all_gather,
     AllGather,
     AllGatherResult,
+    AllReduce,
     DefaultAllGather,
+    DefaultAllReduce,
     DefaultReduceScatter,
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -177,8 +184,9 @@ class AllGatherState(NamedTuple):
 
 
 class ReduceScatterState(NamedTuple):
-    reduce_scatter_input: torch.Tensor
-    event: torch.Event | None  # reduce-scatter event
+    # For a single-rank group, the reduce-dtype copies of the gradients
+    reduce_scatter_input: torch.Tensor | list[torch.Tensor]
+    event: torch.Event | None  # last use of the input (see foreach_reduce)
     allocation_stream: torch.Stream  # Owns the input allocation
     param_group: FSDPParamGroup  # Identifies the owning FSDP root
 
@@ -248,6 +256,7 @@ class FSDPParamGroup:
         self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._all_reduce_hook: Callable[[torch.Tensor], None] | None = None
+        self._all_reduce_comm: AllReduce = DefaultAllReduce()
         self._all_gather_comm: AllGather = DefaultAllGather()
         self._all_gather_output = torch.empty(0, device=self.device)
         self._reduce_scatter_comm: ReduceScatter = DefaultReduceScatter()
@@ -258,8 +267,11 @@ class FSDPParamGroup:
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
-        # See Note [All-gather output fn] and Note [Reduce-scatter input fn]
-        self._all_gather_output_fn: Callable = _default_all_gather_output_fn
+        self._all_gather_layout: AllGatherLayout = DEFAULT_ALL_GATHER_LAYOUT
+        # FSDP-owned buffers behind the all-gather outputs when a custom layout
+        # chose them on the first unshard, freed on reshard
+        self._all_gather_buffers: _PersistentBuffers | None = None
+        # See Note [Reduce-scatter input fn]
         self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
         self._fsdp_params_deferring_grad_upcast: list[FSDPParam] = []
@@ -392,6 +404,7 @@ class FSDPParamGroup:
         self._register_state_dict_hooks()
 
     def set_symm_mem(self, backend: Literal["NCCL"] = "NCCL") -> None:
+        self._check_layout_comm(self._all_gather_layout, SymmMemAllGather)
         if not isinstance(self._all_gather_comm, (DefaultAllGather | SymmMemAllGather)):
             raise AssertionError(
                 "cannot call set_symm_mem() "
@@ -418,6 +431,8 @@ class FSDPParamGroup:
         Whether to (try to) use the ProcessGroup's allocate_tensor method for
         the staging buffers for collective comms.
         """
+        comm_type = ProcessGroupAllocAllGather if enable else DefaultAllGather
+        self._check_layout_comm(self._all_gather_layout, comm_type)
         if not isinstance(
             self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
         ):
@@ -479,6 +494,7 @@ class FSDPParamGroup:
                 param_all_gather_input_dtypes=[],
                 param_all_gather_input_numels=[],
                 all_gather_input_split_sizes=[],
+                all_gather_input_outer_sizes=[],
             )
 
             return
@@ -491,6 +507,7 @@ class FSDPParamGroup:
                 *self.comm_ctx.get_all_gather_streams(async_op, self._training_state),
                 self.device,
                 self._all_gather_comm,
+                self._all_gather_layout,
             )
 
     @_disable_functorch_if_active
@@ -516,12 +533,24 @@ class FSDPParamGroup:
             # directly initialize unsharded parameters from sharded parameters
 
             for fsdp_param in self.fsdp_params:
-                all_gather_inputs = fsdp_param.all_gather_inputs
+                local_tensor = fsdp_param._sharded_local_tensor
+                # The copy below casts a plain shard, which saves a cast kernel
+                if (
+                    fsdp_param.sharded_state == ShardedState.SHARDED
+                    and fsdp_param.param_dtype is not None
+                    and not fsdp_param.offload_to_cpu
+                    and not hasattr(local_tensor, "fsdp_pre_all_gather")
+                ):
+                    all_gather_inputs = [fsdp_param._sharded_param_data]
+                    dtypes = [fsdp_param.param_dtype]
+                else:
+                    all_gather_inputs = fsdp_param.all_gather_inputs
+                    dtypes = [t.dtype for t in all_gather_inputs]
                 # Avoids building the lists once the outputs exist
                 if not fsdp_param.all_gather_outputs:
                     fsdp_param.init_all_gather_outputs(
                         [t.numel() for t in all_gather_inputs],
-                        [t.dtype for t in all_gather_inputs],
+                        dtypes,
                         world_size,
                         self.device,
                     )
@@ -547,11 +576,11 @@ class FSDPParamGroup:
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
-                foreach_all_gather_copy_out(
+                self._all_gather_buffers = foreach_all_gather_copy_out(
                     self._all_gather_result,
                     self.fsdp_params,
                     self._all_gather_process_group,
-                    all_gather_output_fn=self._all_gather_output_fn,
+                    self._all_gather_buffers,
                 )
 
         for fsdp_param in self.fsdp_params:
@@ -719,8 +748,8 @@ class FSDPParamGroup:
                 if self.reshard_after_backward:
                     self.reshard()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
-            # `max_input_buffers` in flight: reclaim the oldest (wait on its
-            # reduce-scatter, then drop the keepalive ref that was deferring the
+            # `max_input_buffers` in flight: reclaim the oldest (wait on its last
+            # use, then drop the keepalive ref that was deferring the
             # allocator's reuse of its memory) until fewer than that remain, before
             # this module's reduce appends one more. See
             # set_reduce_scatter_max_input_buffers for the memory/overlap tradeoff.
@@ -823,6 +852,7 @@ class FSDPParamGroup:
                     self._all_reduce_hook,
                     self.force_sum_reduction_for_comms,
                     prepare_reduce_scatter_inputs=self._prepare_reduce_scatter_inputs,
+                    all_reduce_comm=self._all_reduce_comm,
                 )
                 self.comm_ctx._last_post_reduce_events[post_reduce_stream] = (
                     self._post_reduce_event
@@ -898,10 +928,9 @@ class FSDPParamGroup:
         output = self._partial_reduce_output
         if output is None or param not in self._partial_reduce_output_layout:
             return None
-        offset, _ = self._partial_reduce_output_layout[param]
-        return output.narrow(0, offset, param.sharded_size.numel()).view(
-            param.sharded_size
-        )
+        # The padded flat shard, as the reduce-scatter output holds it
+        offset, size = self._partial_reduce_output_layout[param]
+        return output.narrow(0, offset, size)
 
     def _validate_unused_param_grad_dtypes(self) -> None:
         # Check configuration rather than gradient presence so every rank raises
@@ -1037,9 +1066,9 @@ class FSDPParamGroup:
             if repacked_output is not None:
                 grad_pending_all_reduce = self._get_partial_reduce_grad(param)
                 if grad_pending_all_reduce is not None:
-                    repacked_output.narrow(
-                        0, offset, grad_pending_all_reduce.numel()
-                    ).copy_(grad_pending_all_reduce.reshape(-1))
+                    repacked_output.narrow(0, offset, size).copy_(
+                        grad_pending_all_reduce
+                    )
             offset += size
         self._partial_reduce_output_layout = new_layout
         self._partial_reduce_output = repacked_output
@@ -1123,15 +1152,26 @@ class FSDPParamGroup:
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED
+            self._free_all_gather_buffers()
 
     def _to_sharded_post_forward(self):
         if not self.is_sharded_post_forward:
             # Check every parameter before resharding any
             for fsdp_param in self.fsdp_params:
                 fsdp_param.check_post_forward_reshard()
+            # Parameters copy their post-forward shards out of shared buffers
+            # before the group frees them
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded_post_forward()
             self._sharded_state = ShardedState.SHARDED_POST_FORWARD
+            self._free_all_gather_buffers()
+
+    def _free_all_gather_buffers(self) -> None:
+        # Every parameter's unsharded storage views the shared buffers
+        if self._all_gather_buffers is not None and not any(
+            fsdp_param.keep_unsharded_storage for fsdp_param in self.fsdp_params
+        ):
+            self._all_gather_buffers.free()
 
     def _to_unsharded(self):
         if not self.is_unsharded:
@@ -1150,6 +1190,18 @@ class FSDPParamGroup:
     @property
     def is_unsharded(self) -> bool:
         return self._sharded_state == ShardedState.UNSHARDED
+
+    def _removed_all_gather_output_fn(self, *args: Any) -> NoReturn:
+        raise AttributeError(
+            "FSDPParamGroup._all_gather_output_fn was removed; install the copy-out "
+            "function with set_all_gather_layout(DefaultAllGatherLayout(fn)), which "
+            "calls fn(output, outputs, *, split_sizes, outer_sizes, world_size)"
+        )
+
+    # 2.15's private hook, so that using it fails instead of being ignored
+    _all_gather_output_fn = property(
+        _removed_all_gather_output_fn, _removed_all_gather_output_fn
+    )
 
     @contextlib.contextmanager
     def use_training_state(self, training_state: TrainingState):
@@ -1355,6 +1407,40 @@ class FSDPParamGroup:
                 "reduce-scatter comm."
             )
 
+    def _check_all_gather_replaceable(self) -> None:
+        # Only the layout that created a group's outputs can refill them, and a
+        # pending first all-gather adopts its layout's outputs when it completes
+        if self._all_gather_result is not None or self.is_unsharded:
+            raise RuntimeError(
+                self._with_fqn(
+                    "cannot replace the all-gather layout while an all-gather is "
+                    "pending or parameters are unsharded; reshard, or call "
+                    "reset_iter_state() after a failed unshard"
+                )
+            )
+        if any(p._keep_all_gather_output_storage for p in self.fsdp_params):
+            raise RuntimeError(
+                self._with_fqn(
+                    "cannot replace the all-gather layout after parameters adopted "
+                    "outputs from the installed custom layout"
+                )
+            )
+
+    def _check_layout_comm(self, layout: AllGatherLayout, comm_type: type) -> None:
+        # Installed comms expect the default copy-in into the output they allocate,
+        # while a custom layout packs its own input and carries its own comm
+        custom_layout = not isinstance(layout, DefaultAllGatherLayout)
+        if custom_layout and comm_type is not DefaultAllGather:
+            raise ValueError(
+                self._with_fqn(
+                    f"all-gather layout {type(layout).__name__} cannot use "
+                    f"{comm_type.__name__}: comms from set_custom_all_gather(), "
+                    "set_symm_mem_for_comm() and "
+                    "set_allocate_memory_from_process_group_for_comm() only work "
+                    "with DefaultAllGatherLayout; a custom layout carries its own comm"
+                )
+            )
+
 
 def _get_param_module_infos(
     params: list[nn.Parameter], modules: tuple[nn.Module, ...]
@@ -1411,8 +1497,8 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
     def jvp(
         ctx: Any,
         param_group_tangent: object,
-        *grad_inputs: Unpack[_GradInputs],
-    ) -> tuple[Unpack[_GradInputs]]:
+        *grad_inputs: *_GradInputs,
+    ) -> tuple[*_GradInputs]:
         # Drop the non-tensor param_group tangent. The output pre-backward hook
         # queues final post-backward after all primal/tangent paths finish.
         return grad_inputs
