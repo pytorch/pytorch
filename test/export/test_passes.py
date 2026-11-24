@@ -49,7 +49,6 @@ from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -1545,6 +1544,51 @@ default](args = (%x, %b_state), kwargs = {})
     return (b_state, getitem_3, getitem_4)""",
             )
 
+    def test_move_to_device_pass_interpreter_only_graph(self):
+        init_torchbind_implementations()
+        with _scoped_library("test_move_to_device_pass", "DEF") as lib:
+            lib.define("identity_with_obj(Any obj, Tensor x) -> Tensor")
+
+            @impl(lib, "identity_with_obj", "CompositeExplicitAutograd")
+            def identity_with_obj(obj, x):
+                return x
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ones(3, device=x.device) + x
+
+            ep = torch.export.export(M(), (torch.zeros(3),))
+            custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+            add = next(
+                node
+                for node in ep.graph.nodes
+                if node.op == "call_function"
+                and node.target == torch.ops.aten.add.Tensor
+            )
+            inp = add.args[0]
+            with ep.graph.inserting_before(add):
+                with_obj = ep.graph.call_function(
+                    torch.ops.test_move_to_device_pass.identity_with_obj.default,
+                    (custom_obj, inp),
+                )
+                with_obj.meta = add.meta.copy()
+            add.replace_input_with(inp, with_obj)
+
+            with self.assertWarnsRegex(
+                UserWarning, "graph module will no longer be directly callable"
+            ):
+                ep = ep._update(ep.graph_module, ep.graph_signature)
+
+            self.assertEqual(
+                torch.fx.Interpreter(ep.graph_module).run(torch.ones(3)),
+                (torch.full((3,), 2.0),),
+            )
+            ep = move_to_device_pass(ep, "meta")
+            (out,) = torch.fx.Interpreter(ep.graph_module).run(
+                torch.ones(3, device="meta")
+            )
+            self.assertEqual(out.device, torch.device("meta"))
+
 
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
@@ -1659,27 +1703,19 @@ def forward(self, arg0_1):
         self.assertEqual(moved_ep.example_inputs[0][1].device, torch.device(device))
         self.assertEqual(moved_ep.example_inputs[1]["z"].device, torch.device(device))
 
-
-@skipIfTorchDynamo("recursively running dynamo on export is unlikely")
-@unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
-class TestMoveToDevicePassCuda(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_to_device_pass_recompiles_graph_module(self):
+    def test_move_to_device_pass_recompiles_graph_module(self, device):
         class M(torch.nn.Module):
             def forward(self, x):
                 return x.long().sum()
 
         ep = torch.export.export(M(), (torch.zeros(4, dtype=torch.float32),))
-        ep = move_to_device_pass(ep, "cuda:0")
+        ep = move_to_device_pass(ep, device)
 
-        self.assertIn("cuda:0", ep.graph_module.code)
-        (out,) = ep.graph_module(torch.ones(4, dtype=torch.float32, device="cuda:0"))
-        self.assertEqual(out.device, torch.device("cuda:0"))
+        self.assertIn(device, ep.graph_module.code)
+        (out,) = ep.graph_module(torch.ones(4, dtype=torch.float32, device=device))
+        self.assertEqual(out.device, torch.device(device))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_to_device_pass_recompiles_nested_graph_modules(self):
+    def test_move_to_device_pass_recompiles_nested_graph_modules(self, device):
         class M(torch.nn.Module):
             def forward(self, x):
                 def true_fn(x):
@@ -1691,7 +1727,7 @@ class TestMoveToDevicePassCuda(TestCase):
                 return torch.cond(x.sum() > 0, true_fn, false_fn, (x,))
 
         ep = torch.export.export(M(), (torch.zeros(4),))
-        ep = move_to_device_pass(ep, "cuda:0")
+        ep = move_to_device_pass(ep, device)
 
         submodules = [
             m
@@ -1700,12 +1736,11 @@ class TestMoveToDevicePassCuda(TestCase):
         ]
         self.assertEqual(len(submodules), 2)
         for submodule in submodules:
-            self.assertIn("cuda:0", submodule.code)
-        (out,) = ep.graph_module(torch.ones(4, device="cuda:0"))
-        self.assertEqual(out, torch.full((4,), 2.0, device="cuda:0"))
+            self.assertIn(device, submodule.code)
+        (out,) = ep.graph_module(torch.ones(4, device=device))
+        self.assertEqual(out, torch.full((4,), 2.0, device=device))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_to_device_pass_does_not_mutate_source_module(self):
+    def test_move_to_device_pass_does_not_mutate_source_module(self, device):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1720,7 +1755,7 @@ class TestMoveToDevicePassCuda(TestCase):
         param = ep.state_dict["weight"]
         buffer = ep.state_dict["bias"]
 
-        ep = move_to_device_pass(ep, "cuda:0")
+        ep = move_to_device_pass(ep, device)
 
         self.assertIsNot(ep.state_dict["weight"], param)
         self.assertIsNot(ep.state_dict["bias"], buffer)
@@ -1728,17 +1763,16 @@ class TestMoveToDevicePassCuda(TestCase):
         self.assertIs(m.bias, buffer)
         self.assertEqual(m.weight.device, torch.device("cpu"))
         self.assertEqual(m.bias.device, torch.device("cpu"))
-        self.assertEqual(ep.state_dict["weight"].device, torch.device("cuda:0"))
-        self.assertEqual(ep.state_dict["bias"].device, torch.device("cuda:0"))
+        self.assertEqual(ep.state_dict["weight"].device, torch.device(device))
+        self.assertEqual(ep.state_dict["bias"].device, torch.device(device))
 
         self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
         self.assertEqual(
-            ep.module()(torch.ones(3, device="cuda:0")).device,
-            torch.device("cuda:0"),
+            ep.module()(torch.ones(3, device=device)).device,
+            torch.device(device),
         )
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_move_to_device_pass_wrapper_subclass_parameter(self):
+    def test_move_to_device_pass_wrapper_subclass_parameter(self, device):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1754,7 +1788,7 @@ class TestMoveToDevicePassCuda(TestCase):
         ep = torch.export.export(m, (torch.zeros(3),))
         param = ep.state_dict["weight"]
 
-        ep = move_to_device_pass(ep, "cuda:0")
+        ep = move_to_device_pass(ep, device)
 
         self.assertIsNot(ep.state_dict["weight"], param)
         self.assertIs(m.weight, param)
@@ -1764,60 +1798,14 @@ class TestMoveToDevicePassCuda(TestCase):
         self.assertEqual(m.bias.device, torch.device("cpu"))
 
         moved_param = ep.state_dict["weight"]
-        self.assertEqual(moved_param.device, torch.device("cuda:0"))
-        self.assertEqual(moved_param.a.device, torch.device("cuda:0"))
-        self.assertEqual(moved_param.b.device, torch.device("cuda:0"))
-        self.assertEqual(ep.state_dict["bias"].device, torch.device("cuda:0"))
+        self.assertEqual(moved_param.device, torch.device(device))
+        self.assertEqual(moved_param.a.device, torch.device(device))
+        self.assertEqual(moved_param.b.device, torch.device(device))
+        self.assertEqual(ep.state_dict["bias"].device, torch.device(device))
 
-        inp = torch.ones(3, device="cuda:0")
-        self.assertEqual(ep.module()(inp).device, torch.device("cuda:0"))
+        inp = torch.ones(3, device=device)
+        self.assertEqual(ep.module()(inp).device, torch.device(device))
         self.assertEqual(m(torch.ones(3)).device, torch.device("cpu"))
-
-    @unittest.skipIf(IS_MACOS, "non-portable load_library call used in test")
-    def test_move_to_device_pass_interpreter_only_graph(self):
-        init_torchbind_implementations()
-        with _scoped_library("test_move_to_device_pass", "DEF") as lib:
-            lib.define("identity_with_obj(Any obj, Tensor x) -> Tensor")
-
-            @impl(lib, "identity_with_obj", "CompositeExplicitAutograd")
-            def identity_with_obj(obj, x):
-                return x
-
-            class M(torch.nn.Module):
-                def forward(self, x):
-                    return torch.ones(3, device=x.device) + x
-
-            ep = torch.export.export(M(), (torch.zeros(3),))
-            custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
-            add = next(
-                node
-                for node in ep.graph.nodes
-                if node.op == "call_function"
-                and node.target == torch.ops.aten.add.Tensor
-            )
-            inp = add.args[0]
-            with ep.graph.inserting_before(add):
-                with_obj = ep.graph.call_function(
-                    torch.ops.test_move_to_device_pass.identity_with_obj.default,
-                    (custom_obj, inp),
-                )
-                with_obj.meta = add.meta.copy()
-            add.replace_input_with(inp, with_obj)
-
-            with self.assertWarnsRegex(
-                UserWarning, "graph module will no longer be directly callable"
-            ):
-                ep = ep._update(ep.graph_module, ep.graph_signature)
-
-            self.assertEqual(
-                torch.fx.Interpreter(ep.graph_module).run(torch.ones(3)),
-                (torch.full((3,), 2.0),),
-            )
-            ep = move_to_device_pass(ep, "meta")
-            (out,) = torch.fx.Interpreter(ep.graph_module).run(
-                torch.ones(3, device="meta")
-            )
-            self.assertEqual(out.device, torch.device("meta"))
 
 
 # except_for="cpu" also instantiates privateuse1; allow_xpu keeps the XPU class.
