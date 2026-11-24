@@ -57,7 +57,7 @@ class TestBenchmarker(TestCase):
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         return (fn, fn_args, fn_kwargs), _callable
 
-    @unittest.skipIf(GPU_TYPE != "cuda", "requires CUDA")
+    @unittest.skipIf(not HAS_GPU or GPU_TYPE != "cuda", "requires CUDA")
     @parametrize("benchmarker_cls", (TritonBenchmarker, InductorBenchmarker))
     def test_benchmark_duty_cycle_dispatch(self, benchmarker_cls):
         benchmarker = benchmarker_cls()

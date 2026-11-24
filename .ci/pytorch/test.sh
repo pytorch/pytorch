@@ -100,12 +100,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     # thread, which runs compilation inline with no pool) but bounds the number of
     # concurrent GPU-attached workers below the oversubscription threshold.
     export TORCHINDUCTOR_COMPILE_THREADS=16
-    # ROCr loads code objects larger than HSA_CO_DMACOPY_SIZE (default 1 MiB)
-    # via a blit kernel whose first dispatch can execute stale instructions and
-    # fault or hang (ROCm/rocm-systems#12209, fixed in ROCm 10.2). Raise the
-    # threshold to 1 GiB so code-object loads stay on the memcpy path. The value
-    # is parsed with atoi, so it must stay within int range.
-    export HSA_CO_DMACOPY_SIZE=1073741824
 fi
 
 export VALGRIND=ON
@@ -899,6 +893,8 @@ test_einops() {
 
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
+  echo "Testing dynamo/test_streams multi_gpu"
+  python test/run_test.py -i dynamo/test_streams -k "test_cuda_current_stream_other_device or test_cuda_current_stream_queries_distinct_objects" --verbose
   echo "Testing multi_gpu tests in test_torchinductor"
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_on_gpu_device1 --verbose
@@ -951,6 +947,7 @@ test_inductor_core() {
               inductor/test_cpu_select_algorithm \
               inductor/test_torchinductor_dynamic_shapes \
               inductor/test_torchinductor \
+              inductor/test_torchinductor_avoid_modular_indexing \
               inductor/test_mkldnn_pattern_matcher \
               inductor/test_torchinductor_codegen_dynamic_shapes \
               inductor/test_max_autotune_blackwell \
@@ -2100,15 +2097,6 @@ test_aot_compilation() {
   fi
 }
 
-test_vulkan() {
-  if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
-    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
-    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
-    CPP_TESTS_DIR="${TORCH_TEST_DIR}" LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ python test/run_test.py --cpp --verbose -i cpp/vulkan_api_test
-  fi
-}
-
 test_distributed() {
   # $1 (optional): multigpu filter ("multigpu" | "not-multigpu"), see the
   # `multigpu` marker in test/conftest.py. Empty runs the whole suite.
@@ -2157,8 +2145,6 @@ test_distributed() {
       fi
 
       python test/run_test.py --cpp --verbose -i cpp/ProcessGroupGlooTest
-      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLTest
-      python test/run_test.py --cpp --verbose -i cpp/ProcessGroupNCCLErrorsTest
     fi
     python test/run_test.py --cpp --verbose -i cpp/NCCLDevCommManagerTest
   fi
@@ -2176,7 +2162,7 @@ test_distributed_single_gpu() {
 test_distributed_4gpu() {
   # Distributed tests that need more GPUs than the standard 2-GPU distributed
   # runner provides (3-4 GPU tests), run on runners with 4-GPU labels (e.g. ROCm
-  # gfx950.4). Selection reuses the native `multigpu` marker machinery (see
+  # mi350.dpx.4). Selection reuses the native `multigpu` marker machinery (see
   # test/conftest.py): --distributed-tests discovers every distributed test file
   # dynamically, --multigpu-filter multigpu keeps the process-spawning tests, and
   # --multigpu-min-gpus 3 keeps only those needing more than the standard 2-GPU
@@ -2542,18 +2528,48 @@ test_cpp_extensions() {
   assert_git_not_dirty
 }
 
-test_vec256() {
-  # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
+test_vec_all_types() {
+  # Runs vec_test_all_types, built once per CPU capability, for each capability
+  # that dispatch can pick on this CPU.
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing vec256 instructions"
-    mkdir -p test/test-reports/vec256
+    echo "Testing vectorized types (vec_test_all_types) for the CPU capabilities that dispatch can pick"
     pushd build/bin
-    vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
-    for vec256_exec in $vec256_tests
+    vec_all_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
+    # The CPU's capability, not an ATEN_CPU_CAPABILITY override.
+    cpu_capability=$(env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
+    # Unlike most tests, deliberately run every binary and report their failures
+    # at the end, so that one CI run shows the failures of all capabilities (few
+    # contributors can run them all locally), and fail if none ran, so that these
+    # tests can't silently stop running.
+    ran=0
+    failed=""
+    for vec_all_exec in $vec_all_tests
     do
-      $vec256_exec --gtest_output=xml:test/test-reports/vec256/"$vec256_exec".xml
+      # Only run the capabilities that dispatch can pick on this CPU: the others
+      # would hit illegal instructions, or for SVE, assume another vector length.
+      capability=${vec_all_exec#./vec_test_all_types_}
+      if [[ "$capability" != DEFAULT && "$capability" != "$cpu_capability" &&
+            ! ( "$capability" == AVX2 && "$cpu_capability" == AVX512 ) ]]; then
+        echo "Skipping $vec_all_exec: PyTorch uses $cpu_capability"
+        continue
+      fi
+      # Find libc10 in the installed torch, as the build tree's RPATH doesn't
+      # point to it where jobs run from a copy of the workspace (XPU). Each
+      # capability reports to its own directory, which test stats key on.
+      if ! LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}" $vec_all_exec --gtest_output=xml:../../test/test-reports/vec_test_all_types_"$capability"/"$vec_all_exec".xml; then
+        failed="$failed $vec_all_exec"
+      fi
+      ran=$((ran + 1))
     done
     popd
+    if [[ "$ran" == 0 ]]; then
+      echo "No vec_test_all_types binary ran"
+      return 1
+    fi
+    if [[ -n "$failed" ]]; then
+      echo "Failed vec_test_all_types binaries:$failed"
+      return 1
+    fi
     assert_git_not_dirty
   fi
 }
@@ -2611,7 +2627,7 @@ test_torchtitan() {
   pip_install helion
 
   pushd torchtitan
-  pip_install -e . "pyarrow<26" "click!=8.3.0,<8.4,>=8"
+  pip_install -e . "pyarrow<26" "click>=8.4.2,<9"
 
   local installed_versions
   installed_versions=$(get_pkg_versions torch torchao)
@@ -2734,12 +2750,9 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${CPP_FAKETENSOR:-0}" == 1 && -f .ci/pytorch/cpp_faketensor_tests.json ]]; then
-  if [[ "${NUM_TEST_SHARDS}" -gt 1 ]]; then
-    test_python_shard "${SHARD_NUMBER}"
-  else
-    test_python
-  fi
+if [[ "$TEST_CONFIG" == "default" && "${CPP_FAKETENSOR:-0}" == 1 ]]; then
+  install_torchvision
+  INCLUDE_CLAUSE="--compiler-tests" test_python_shard "${SHARD_NUMBER}"
 elif [[ "${TEST_CONFIG}" == "onnx" ]]; then
   install_torchvision
   "$(dirname "${BASH_SOURCE[0]}")/../../scripts/onnx/test.sh"
@@ -2971,6 +2984,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_python_shard 1
   test_aten
+  test_vec_all_types
   test_libtorch 1
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
@@ -2994,8 +3008,6 @@ elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   fi
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
-elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-  test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
@@ -3031,7 +3043,7 @@ else
   test_cpuset_num_threads
   test_python
   test_aten
-  test_vec256
+  test_vec_all_types
   test_libtorch
   test_aot_compilation
   test_custom_script_ops
