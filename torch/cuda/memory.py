@@ -1678,17 +1678,6 @@ def change_current_allocator(allocator: _CUDAAllocator) -> None:
     torch._C._cuda_changeCurrentAllocator(allocator.allocator())
 
 
-def _enable_graph_allocators() -> None:
-    r"""Make a layer over the caching allocator the current CUDA allocator, for the rest of the process.
-
-    The layer forwards every call to the caching allocator, which keeps owning what it allocated,
-    so this can be called at any time, e.g. at the start of the program or after an eager warm-up.
-    Storages created before it re-allocate from it when they are resized. Requires the native
-    caching allocator; :func:`change_current_allocator` raises afterwards.
-    """
-    torch._C._cuda_enableGraphAllocators()
-
-
 def _get_current_allocator() -> _CUDAAllocator:
     r"""Return the allocator being currently used.
 

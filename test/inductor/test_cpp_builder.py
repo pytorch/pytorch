@@ -304,6 +304,7 @@ class TestGetCppTorchDeviceOptionsWindows(TestCase):
             mock.patch.object(cpp_builder, "_IS_WINDOWS", True),
             mock.patch.object(torch.version, "hip", "7.14.0"),
             mock.patch.object(cpp_builder.config.aot_inductor, "link_libtorch", True),
+            mock.patch.dict(cpp_builder.config.__dict__, {"is_fbcode": lambda: False}),
             mock.patch(
                 "torch.utils.cpp_extension.include_paths", return_value=[]
             ) as include_paths,
@@ -417,6 +418,16 @@ class TestCppBuilder(TestCase):
         register_interface_for_device("mock_own_options", MockDeviceInterface)
         command = builder(True, False, "mock_own_options").get_command_line()
         self.assertIn("-Wl,--as-needed", command.split())
+
+    def test_run_compile_cmd_passes_environment_snapshot(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {"PATH": "/mock/bin"}),
+            mock.patch.object(cpp_builder.subprocess, "run") as run,
+        ):
+            cpp_builder._run_compile_cmd("g++ -c x.cpp", "/tmp")
+        env = run.call_args.kwargs["env"]
+        self.assertIsInstance(env, dict)
+        self.assertEqual(env["PATH"], "/mock/bin")
 
 
 if __name__ == "__main__":
