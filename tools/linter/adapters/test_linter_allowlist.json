@@ -596,7 +596,6 @@
   "test/test_sort_and_select.py",
   "test/test_sparse.py",
   "test/test_spectral_ops.py",
-  "test/test_stateless_rng.py",
   "test/test_subclass.py",
   "test/test_sympy_utils.py",
   "test/test_tensor_creation_ops.py",
