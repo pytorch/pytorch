@@ -1306,23 +1306,21 @@ for warning in w:
         import libtorch_agn_2_16 as libtorch_agnostic
 
         getters = {
-            int: (libtorch_agnostic.ops.my_cpu_capability_int, 0),
-            bool: (libtorch_agnostic.ops.my_cpu_capability_bool, False),
-            str: (libtorch_agnostic.ops.my_cpu_capability_string, "unknown"),
+            int: libtorch_agnostic.ops.my_cpu_capability_int,
+            bool: libtorch_agnostic.ops.my_cpu_capability_bool,
+            str: libtorch_agnostic.ops.my_cpu_capability_string,
         }
         capabilities = torch.cpu.get_capabilities()
         for key, value in capabilities.items():
             with self.subTest(key=key):
-                op, fallback = getters[type(value)]
+                op = getters[type(value)]
                 self.assertEqual(op(key), value)
-                self.assertEqual(op(key, fallback), value)
 
         missing_key = "nonexistent_test_cpu_capability"
         self.assertNotIn(missing_key, capabilities)
-        for kind, (op, fallback) in getters.items():
+        for kind, op in getters.items():
             with self.subTest(kind=kind):
                 self.assertIsNone(op(missing_key))
-                self.assertEqual(op(missing_key, fallback), fallback)
 
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
@@ -1330,7 +1328,7 @@ for warning in w:
         import libtorch_agn_2_16 as libtorch_agnostic
 
         with self.assertRaisesRegex(
-            RuntimeError, "torch_get_cpu_capabilities_value_int"
+            RuntimeError, "CPU capability 'architecture' has type String, expected Int"
         ):
             libtorch_agnostic.ops.my_cpu_capability_int("architecture")
 

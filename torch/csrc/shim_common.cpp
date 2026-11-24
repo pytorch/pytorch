@@ -617,47 +617,69 @@ torch_get_num_threads(uint32_t* out_num_threads) {
 }
 
 static const c10::IValue* find_cpu_capability(const char* key) {
+  // Capture the capability map on the first lookup.
   static const auto capabilities = at::cpu::get_cpu_capabilities();
   const auto it = capabilities.find(key);
   return it == capabilities.end() ? nullptr : &it->second;
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_int(
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_int(
     const char* key,
     int64_t* ret_value,
-    bool* key_exists) {
+    bool* ret_key_exists) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     const auto* value = find_cpu_capability(key);
-    *key_exists = value != nullptr;
     if (value) {
+      TORCH_CHECK_TYPE(
+          value->isInt(),
+          "CPU capability '",
+          key,
+          "' has type ",
+          value->tagKind(),
+          ", expected Int");
       *ret_value = value->toInt();
     }
+    *ret_key_exists = value != nullptr;
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_string(
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_string(
     const char* key,
     const char** ret_value,
-    bool* key_exists) {
+    bool* ret_key_exists) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     const auto* value = find_cpu_capability(key);
-    *key_exists = value != nullptr;
     if (value) {
+      TORCH_CHECK_TYPE(
+          value->isString(),
+          "CPU capability '",
+          key,
+          "' has type ",
+          value->tagKind(),
+          ", expected String");
       *ret_value = value->toStringRef().c_str();
     }
+    *ret_key_exists = value != nullptr;
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_bool(
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_bool(
     const char* key,
     bool* ret_value,
-    bool* key_exists) {
+    bool* ret_key_exists) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     const auto* value = find_cpu_capability(key);
-    *key_exists = value != nullptr;
     if (value) {
+      TORCH_CHECK_TYPE(
+          value->isBool(),
+          "CPU capability '",
+          key,
+          "' has type ",
+          value->tagKind(),
+          ", expected Bool");
       *ret_value = value->toBool();
     }
+    *ret_key_exists = value != nullptr;
   });
 }
 

@@ -10,7 +10,6 @@
 #include <optional>
 #include <string>
 #include <type_traits>
-#include <utility>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, cpu)
 
@@ -20,6 +19,10 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, cpu)
  * @brief Looks up a key in the CPU capabilities reported by
  * at::cpu::get_cpu_capabilities().
  *
+ * The runtime snapshots the ATen map on first lookup and exposes individual
+ * values by NUL-terminated key, keeping the map and IValue types behind the
+ * ABI.
+ *
  * T must be int64_t, bool, or std::string. A missing key returns std::nullopt.
  * A key with a different value type raises an error.
  *
@@ -28,19 +31,19 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, cpu)
  */
 template <typename T>
 inline std::optional<T> get_cpu_capability(const char* key) {
-  bool key_exists = false;
+  bool ret_key_exists = false;
   if constexpr (std::is_same_v<T, int64_t>) {
     int64_t value = 0;
     STABLE_TORCH_ERROR_CODE_CHECK(
-        torch_get_cpu_capabilities_value_int(key, &value, &key_exists));
-    if (key_exists) {
+        torch_get_cpu_capability_int(key, &value, &ret_key_exists));
+    if (ret_key_exists) {
       return value;
     }
   } else if constexpr (std::is_same_v<T, bool>) {
     bool value = false;
     STABLE_TORCH_ERROR_CODE_CHECK(
-        torch_get_cpu_capabilities_value_bool(key, &value, &key_exists));
-    if (key_exists) {
+        torch_get_cpu_capability_bool(key, &value, &ret_key_exists));
+    if (ret_key_exists) {
       return value;
     }
   } else {
@@ -49,18 +52,12 @@ inline std::optional<T> get_cpu_capability(const char* key) {
         "CPU capability type must be int64_t, bool, or std::string");
     const char* value = nullptr;
     STABLE_TORCH_ERROR_CODE_CHECK(
-        torch_get_cpu_capabilities_value_string(key, &value, &key_exists));
-    if (key_exists) {
+        torch_get_cpu_capability_string(key, &value, &ret_key_exists));
+    if (ret_key_exists) {
       return std::string(value);
     }
   }
   return std::nullopt;
-}
-
-/** Returns the caller-supplied fallback when the key is missing. */
-template <typename T>
-inline T get_cpu_capability(const char* key, std::common_type_t<T> fallback) {
-  return get_cpu_capability<T>(key).value_or(std::move(fallback));
 }
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0

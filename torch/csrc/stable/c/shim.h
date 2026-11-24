@@ -385,28 +385,29 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 // Reads an integer from at::cpu::get_cpu_capabilities().
-// Borrowed key; caller-owned outputs. A miss sets *key_exists to false.
-// A miss leaves *ret_value unchanged. A wrong type returns an error.
-AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_int(
+// Key is borrowed and NUL-terminated. Outputs are caller-owned.
+// A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_int(
     const char* key,
     int64_t* ret_value,
-    bool* key_exists);
+    bool* ret_key_exists);
 
 // Reads a string from at::cpu::get_cpu_capabilities().
-// Borrowed key; caller-owned outputs. A miss sets *key_exists to false.
-// Wrong type errors. Returned strings are borrowed until runtime unload.
-AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_string(
+// Borrowed NUL-terminated key and caller-owned outputs.
+// A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
+// libtorch owns the returned string. Do not free it or use it after unload.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_string(
     const char* key,
     const char** ret_value,
-    bool* key_exists);
+    bool* ret_key_exists);
 
 // Reads a boolean from at::cpu::get_cpu_capabilities().
-// Borrowed key; caller-owned outputs. A miss sets *key_exists to false.
-// A miss leaves *ret_value unchanged. A wrong type returns an error.
-AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_bool(
+// Key is borrowed and NUL-terminated. Outputs are caller-owned.
+// A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_bool(
     const char* key,
     bool* ret_value,
-    bool* key_exists);
+    bool* ret_key_exists);
 
 // Returns whether torch.set_warn_always(True) is in effect.
 AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
