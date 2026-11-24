@@ -1870,7 +1870,6 @@ class TestReductionsDevice(TestCase):
 
     @dtypes(torch.int32, torch.int64)
     @skipIfMPS
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5092")
     def test_nansum_int_out_dtype_matches_inductor(self, device, dtype):
         # Eager/inductor parity for #183318.
         out_dtype = dtype
