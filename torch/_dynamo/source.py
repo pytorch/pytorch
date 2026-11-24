@@ -179,6 +179,18 @@ class LocalSource(Source):
         else:
             codegen.append_output(codegen.create_load(self.local_name))
 
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not LocalSource:
+            return None
+        names = (
+            codegen.code_options["co_cellvars"] + codegen.code_options["co_freevars"]
+            if self.is_derefed_cell_contents
+            else codegen.code_options["co_varnames"]
+        )
+        return True if self.local_name in names else None
+
     def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
         return self.local_name
 
@@ -251,6 +263,11 @@ class GlobalSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self.global_name, add=True))
 
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        return True if type(self) is GlobalSource else None
+
     def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
         return self.global_name
 
@@ -319,6 +336,13 @@ class AttrSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self).reconstruct is not AttrSource.reconstruct:
+            return None
+        return codegen.can_reconstruct(self.base, visiting=visiting)
+
     def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
         base = self.base.reconstruct_pycode(codegen)
         if self.member.isidentifier():
@@ -351,6 +375,13 @@ class CellContentsSource(AttrSource):
             raise AssertionError(
                 "CellContentsSource should only be used for cell_contents"
             )
+
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not CellContentsSource:
+            return None
+        return codegen.can_reconstruct(self.base, visiting=visiting)
 
 
 @dataclass_with_cached_hash(frozen=True)
@@ -438,6 +469,16 @@ class LocalCellSource(Source):
         # always emit `LOAD_CLOSURE` here.
         codegen.append_output(codegen.create_load_closure(self.local_name))
 
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not LocalCellSource:
+            return None
+        names = (
+            codegen.code_options["co_cellvars"] + codegen.code_options["co_freevars"]
+        )
+        return True if self.local_name in names else None
+
     # All the other methods are intentionally unimplemented because e.g., a
     # local cell object should never be used for guards.
 
@@ -457,6 +498,13 @@ class CodeSource(ChainedSource):
 # Represents obj.__closure__ where object is type object
 @dataclass_with_cached_hash(frozen=True)
 class ClosureSource(ChainedSource):
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self).reconstruct is not ClosureSource.reconstruct:
+            return None
+        return codegen.can_reconstruct(self.base, visiting=visiting)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__closure__"))
@@ -745,6 +793,15 @@ class DefaultsSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.idx_key))
         codegen.append_output(create_binary_subscr())
 
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self).reconstruct is not DefaultsSource.reconstruct:
+            return None
+        if type(self.idx_key) not in (int, str):
+            return None
+        return codegen.can_reconstruct(self.base, visiting=visiting)
+
     def get_value(
         self,
         globals: dict[str, Any],
@@ -796,6 +853,15 @@ class GetItemSource(ChainedSource):
         else:
             codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_binary_subscr())
+
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not GetItemSource or self.index_is_slice:
+            return None
+        if utils.is_safe_constant_for_reconstruction(self.index):
+            return codegen.can_reconstruct(self.base, visiting=visiting)
+        return None
 
     def unpack_slice(self) -> slice:
         if not self.index_is_slice:
@@ -924,6 +990,15 @@ class DictGetItemSource(ChainedSource):
             codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_binary_subscr())
 
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not DictGetItemSource:
+            return None
+        if utils.is_safe_constant_for_reconstruction(self.index):
+            return codegen.can_reconstruct(self.base, visiting=visiting)
+        return None
+
     def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
         base = self.base.reconstruct_pycode(codegen)
         if isinstance(self.index, ConstDictKeySource):
@@ -1044,6 +1119,15 @@ class ListGetItemSource(GetItemSource):
     """
     Same as GetItemSource with reconstruct and name overridden to be list specific.
     """
+
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self).reconstruct is not ListGetItemSource.reconstruct:
+            return None
+        if self.index_is_slice or type(self.index) is not int:
+            return None
+        return codegen.can_reconstruct(self.base, visiting=visiting)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Reconstruct list.__getitem__(lst, index) to avoid any side effects
@@ -1170,6 +1254,13 @@ class OptimizerSource(ChainedSource):
 
 @dataclass_with_cached_hash(frozen=True)
 class NNModuleSource(ChainedSource):
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self).reconstruct is not NNModuleSource.reconstruct:
+            return None
+        return codegen.can_reconstruct(self.base, visiting=visiting)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
@@ -1275,6 +1366,13 @@ class ConstantSource(Source):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self.source_name, add=False))
+
+    def can_reconstruct(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not ConstantSource:
+            return None
+        return True if self.source_name in codegen.code_options["co_names"] else None
 
     @property
     def guard_source(self) -> GuardSource:

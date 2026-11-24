@@ -99,6 +99,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import config, exc, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
+from .bytecode_analysis import livevars_analysis
 from .bytecode_transformation import (
     create_binary_slice,
     create_binary_subscr,
@@ -205,7 +206,10 @@ from .variables.user_defined import RandomCallOnSource, UserDefinedDictVariable
 if TYPE_CHECKING:
     from torch._dynamo.dynamo_profiler import DynamoProfilerState
     from torch._dynamo.package import CompilePackage
-    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.symbolic_convert import (
+        InstructionTranslatorBase,
+        SpeculationEntry,
+    )
     from torch._dynamo.variables.functions import LocalGeneratorObjectVariable
     from torch._inductor import _CudagraphAnnotation
     from torch.multiprocessing.reductions import StorageWeakRef
@@ -821,6 +825,9 @@ class OutputGraph(OutputGraphCommon):
 
         self.region_tracker = GraphRegionTracker()
         self._emit_debugger_breakpoint: bool = False
+        self._failed_reconstruction: weakref.ReferenceType[exc.Unsupported] | None = (
+            None
+        )
         self._shallow_copy_placeholder_snapshots: dict[torch.fx.Node, torch.Tensor] = {}
 
         # tracked_fakes says where any tensor that was wrapped to fake came
@@ -2333,6 +2340,8 @@ class OutputGraph(OutputGraphCommon):
         if self.root_tx is None:
             raise AssertionError("root_tx must not be None")
 
+        self._failed_reconstruction = None
+
         # Finalize shapes_spec wiring: errors if any spec assumption/derived
         # check still has unbound IntVar dependencies (i.e. an IntVar
         # appears in an expression but never as a bare-IntVar input slot).
@@ -2844,38 +2853,190 @@ class OutputGraph(OutputGraphCommon):
         cg: PyCodegen,
         log_side_effects: bool,
     ) -> None:
-        # NOTE: `codegen_save_tempvars` must run first to update `source` fields
-        # for variables with `AttributeMutationNew`, as they don't implement
-        # `reconstruct` themselves.
-        self.side_effects.codegen_save_tempvars(cg)
-        if self.backward_state:
-            if self.export:
-                raise AssertionError("backward_state is not supported in export mode")
-            for name, val in self.backward_state.items():
-                cg(val)
-                if self.backward_state_var is None:
+        try:
+            # NOTE: `codegen_save_tempvars` must run first to update `source` fields
+            # for variables with `AttributeMutationNew`, as they don't implement
+            # `reconstruct` themselves.
+            self.side_effects.codegen_save_tempvars(cg)
+            if self.backward_state:
+                if self.export:
                     raise AssertionError(
-                        "backward_state_var must not be None when backward_state is set"
+                        "backward_state is not supported in export mode"
                     )
-                cg.append_output(cg.create_load(self.backward_state_var))
-                cg.store_attr(name)
-        if config.replay_side_effects:
-            self.side_effects.codegen_hooks(cg)
+                for name, val in self.backward_state.items():
+                    cg(val)
+                    if self.backward_state_var is None:
+                        raise AssertionError(
+                            "backward_state_var must not be None when backward_state is set"
+                        )
+                    cg.append_output(cg.create_load(self.backward_state_var))
+                    cg.store_attr(name)
+            if config.replay_side_effects:
+                self.side_effects.codegen_hooks(cg)
 
-        # TODO get debug_locals working for nested graph breaks
-        # Return variables used for logging at the end
-        for debug_var, args in tx.debug_locals:
-            cg.add_push_null(lambda: cg(debug_var))
-            for arg in args:
-                cg(arg)
-            cg.extend_output(create_call_function(len(args), False))
-            cg.extend_output([create_instruction("POP_TOP")])
+            # TODO get debug_locals working for nested graph breaks
+            # Return variables used for logging at the end
+            for debug_var, args in tx.debug_locals:
+                cg.add_push_null(lambda: cg(debug_var))
+                for arg in args:
+                    cg(arg)
+                cg.extend_output(create_call_function(len(args), False))
+                cg.extend_output([create_instruction("POP_TOP")])
 
-        # codegen cells before we apply side effects
-        self.codegen_cells(tx, cg)
+            # codegen cells before we apply side effects
+            self.codegen_cells(tx, cg)
 
-        cg.restore_stack(stack_values, value_from_source=not tx.export)
-        self.side_effects.codegen_update_mutated(cg, log_side_effects)
+            cg.restore_stack(stack_values, value_from_source=not tx.export)
+            self.side_effects.codegen_update_mutated(cg, log_side_effects)
+        except exc.Unsupported as error:
+            self.record_reconstruction_failure(tx, error)
+            raise
+
+    def record_reconstruction_failure(
+        self,
+        tx: "InstructionTranslatorBase",
+        error: exc.Unsupported,
+    ) -> None:
+        self._failed_reconstruction = None
+        if (
+            not config.nested_graph_breaks
+            or tx.parent is None
+            or not self.compile_subgraph_reason.graph_break
+            or error.skip_frame
+            or tx.one_graph
+            or tx.error_on_graph_break
+        ):
+            return
+        self._failed_reconstruction = weakref.ref(error)
+        if not tx.speculation_log.reconstruction_recovery:
+            tx.speculation_log.reconstruction_recovery = True
+            raise exc.SpeculationRestartAnalysis(
+                restart_reason="collecting reconstructible graph-break checkpoints"
+            )
+
+    def can_reconstruct_continuation(
+        self, tx: "InstructionTranslatorBase"
+    ) -> bool | None:
+        """Inspect the current continuation without pruning or realizing its values."""
+        if self.local_generators:
+            return None
+        # Continuation codegen supplies graph outputs before restoring these values.
+        cg = PyCodegen(self.root_tx, reconstruction_graph_outputs=True)
+        values: list[VariableTracker] = []
+        cells: set[VariableTracker] = set()
+        result: bool | None = True
+        current = tx
+        while current is not None:
+            if (
+                current.block_stack
+                or current.active_generic_context_managers
+                or current.debug_locals
+                or current.exn_vt_stack
+                or current.export
+            ):
+                return None
+            reads = livevars_analysis(current.instructions, current.current_instruction)
+            reads = {
+                r.replace(".", "implicit") if r.startswith(".") else r for r in reads
+            }
+            cell_names = current.cellvars() + current.freevars()
+            values.extend(current.stack)
+            for name, value in current.symbolic_locals.items():
+                if name not in reads or name in cell_names:
+                    continue
+                if (
+                    current is self.root_tx
+                    and type(value.source) is LocalSource
+                    and value.source.local_name == name
+                ):
+                    continue
+                values.append(value)
+            for name in cell_names:
+                cell = current.symbolic_locals.get(name)
+                if not type.__instancecheck__(variables.CellVariable, cell):
+                    cell = current.symbolic_cellvars.get(name)
+                if cell is None:
+                    result = None
+                    continue
+                cells.add(cell)
+                if current is not self.root_tx:
+                    values.append(cell)
+            current = current.parent
+
+        if (
+            self.backward_state
+            or self.side_effects.tensor_hooks
+            or self.side_effects.save_for_backward
+        ):
+            result = None
+        for value in values:
+            status = cg.can_reconstruct(value)
+            if status is False:
+                return False
+            if status is None:
+                result = None
+        for var in self.side_effects._get_modified_vars():
+            if isinstance(var.mutation_type, AttributeMutationNew):
+                if (
+                    type(var) is variables.TensorVariable
+                    and var.class_type is torch.Tensor
+                    and not self.side_effects.store_attr_mutations.get(var)
+                    and cg.can_reconstruct(var, allow_cache=False) is True
+                ):
+                    continue
+                # Codegen can prune new objects or assign their reconstruction sources.
+                result = None
+                continue
+            if type(var) in (variables.ListVariable, variables.ConstDictVariable):
+                status = cg.can_reconstruct(var, allow_cache=False)
+                if status is False:
+                    return False
+                if status is None or var.source is None:
+                    result = None
+                elif cg.can_reconstruct(var.source) is not True:
+                    result = None
+            elif type(var) is variables.CellVariable and (
+                var.source is not None or var in cells
+            ):
+                if var.source is None or cg.can_reconstruct(var.source) is not True:
+                    result = None
+                contents = self.side_effects.store_attr_mutations.get(var, {}).get(
+                    "cell_contents"
+                )
+                if (
+                    contents is not None
+                    and type(contents) is not variables.DeletedVariable
+                ):
+                    status = cg.can_reconstruct(contents)
+                    if status is False:
+                        return False
+                    if status is None:
+                        result = None
+            else:
+                result = None
+        return result
+
+    def should_reject_reconstruction_checkpoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        entry: "SpeculationEntry",
+        error: BaseException,
+    ) -> bool:
+        failure = self._failed_reconstruction
+        if (
+            failure is None
+            or error is not failure()
+            or not isinstance(error, exc.Unsupported)
+            or error.skip_frame
+            or tx.one_graph
+            or tx.error_on_graph_break
+            or tx.output is not self
+        ):
+            return False
+        checkpoint = tx.reconstruction_checkpoints.get(id(entry))
+        return (
+            checkpoint is not None and checkpoint[0] is entry and checkpoint[1] is False
+        )
 
     def cleanup_graph(self) -> None:
         """
@@ -3951,6 +4112,7 @@ class OutputGraph(OutputGraphCommon):
         # There is a reference cycle between tracer and OutputGraph, causing
         # some of the tensor objects to be held alive for longer than necessary.
         self.root_tx = None  # type: ignore[assignment]
+        self._failed_reconstruction = None
         self.local_generators.clear()
         self.nn_modules.clear()
         self.used_inlined_inbuilt_modules_names.clear()

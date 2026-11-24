@@ -5142,6 +5142,11 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
+    // Early return
+    if (_size == 0) {
+      return true;
+    }
+
     PyObject *key = nullptr, *value = nullptr;
     Py_ssize_t pos = 0;
 
@@ -5191,6 +5196,11 @@ class DictGuardManager : public GuardManager {
     // than embedding these functionalities within the DictGuardManager itself.
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(obj);
     if (!debug_info.result) {
+      return debug_info;
+    }
+
+    // Early return
+    if (_size == 0) {
       return debug_info;
     }
 
