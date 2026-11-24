@@ -2328,7 +2328,7 @@ class CudaReproTests(TestCase):
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_min_pow_chain(self):
         torch.manual_seed(0)
-        torch.cuda.manual_seed_all(0) if TEST_CUDA else torch.xpu.manual_seed_all(0)
+        torch.get_device_module(device_type).manual_seed_all(0)
 
         with dynamo_config.patch(
             capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
