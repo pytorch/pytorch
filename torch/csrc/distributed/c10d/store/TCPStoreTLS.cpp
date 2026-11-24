@@ -235,7 +235,8 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
   TLSConfig config;
   std::string pskFile;
   if (opts.tlsCert || opts.tlsKey || opts.tlsCa || opts.tlsPsk ||
-      opts.tlsPskFile || opts.tlsPeerCertOid || opts.tlsPeerCertValue) {
+      opts.tlsPskFile || opts.tlsPeerCertOid || opts.tlsPeerCertValue ||
+      opts.tlsPeerCertPrefix) {
     config = {
         value(opts.tlsCert, "tls_cert"),
         value(opts.tlsKey, "tls_key"),
@@ -244,6 +245,8 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
     pskFile = value(opts.tlsPskFile, "tls_psk_file");
     config.peerCertOid = value(opts.tlsPeerCertOid, "tls_peer_cert_oid");
     config.peerCertValue = value(opts.tlsPeerCertValue, "tls_peer_cert_value");
+    config.peerCertPrefix =
+        value(opts.tlsPeerCertPrefix, "tls_peer_cert_prefix");
   } else {
     auto env = [&](const char* name) {
       return value(c10::utils::get_env(name), name);
@@ -257,18 +260,22 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
     pskFile = env("TORCH_TCPSTORE_TLS_PSK_FILE");
     config.peerCertOid = env("TORCH_TCPSTORE_TLS_PEER_CERT_OID");
     config.peerCertValue = env("TORCH_TCPSTORE_TLS_PEER_CERT_VALUE");
+    config.peerCertPrefix = env("TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX");
   }
-  if (!config.peerCertOid.empty() || !config.peerCertValue.empty()) {
+  if (!config.peerCertOid.empty() || !config.peerCertValue.empty() ||
+      !config.peerCertPrefix.empty()) {
     TORCH_CHECK_WITH(
         DistStoreError,
-        !config.peerCertOid.empty() && !config.peerCertValue.empty() &&
+        !config.peerCertOid.empty() &&
+            (config.peerCertValue.empty() != config.peerCertPrefix.empty()) &&
             !config.cert.empty() && !config.key.empty() && !config.ca.empty() &&
             config.psk.empty() && pskFile.empty(),
-        "TCPStore TLS: peer certificate OID and value require certificate mode and both identity settings; explicit TLS options replace all TLS environment settings");
+        "TCPStore TLS: peer certificate policy requires certificate mode, an OID, and exactly one value or prefix; explicit TLS options replace all TLS environment settings");
     TORCH_CHECK_WITH(
         DistStoreError,
-        config.peerCertValue.find(',') == std::string::npos,
-        "TCPStore TLS: peer certificate value must be a single identity (no comma)");
+        config.peerCertValue.find(',') == std::string::npos &&
+            config.peerCertPrefix.find(',') == std::string::npos,
+        "TCPStore TLS: peer certificate value or prefix must be a single identity (no comma)");
   }
   if (!config.enabled() && pskFile.empty()) {
     TORCH_CHECK_WITH(
@@ -329,6 +336,75 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
                      : " (from TCPStore options)");
   return config;
 }
+
+namespace {
+using Asn1String = std::unique_ptr<void, void (*)(void*)>;
+
+Asn1String readIdentityExtension(void* cert, const void* oid) {
+  const auto& lib = openssl();
+  if (!cert || !oid) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  const int index = lib.X509_get_ext_by_OBJ(cert, oid, -1);
+  if (index < 0 || lib.X509_get_ext_by_OBJ(cert, oid, index) >= 0) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  void* ext = lib.X509_EXTENSION_get_data(lib.X509_get_ext(cert, index));
+  const int size = lib.ASN1_STRING_length(ext);
+  const unsigned char* data = lib.ASN1_STRING_get0_data(ext);
+  if (size <= 0 || !data || *data != kVAsn1Utf8String) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  const unsigned char* end = data + size;
+  void* value = lib.d2i_ASN1_UTF8STRING(nullptr, &data, size);
+  Asn1String result(value, lib.ASN1_UTF8STRING_free);
+  if (!value || data != end ||
+      lib.i2d_ASN1_UTF8STRING(value, nullptr) != size) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  // MBSTRING_UTF8 and B_ASN1_UTF8STRING: validate every code point,
+  // without allocating another string. d2i alone accepts invalid UTF-8.
+  const auto* bytes = lib.ASN1_STRING_get0_data(value);
+  const int length = lib.ASN1_STRING_length(value);
+  if (lib.ASN1_mbstring_copy(
+          nullptr, bytes, length, kMbstringUtf8, kBAsn1Utf8String) !=
+      kVAsn1Utf8String) {
+    return {nullptr, lib.ASN1_UTF8STRING_free};
+  }
+  return result;
+}
+
+std::optional<std::string_view> uniqueIdentity(
+    void* value,
+    std::string_view selector,
+    bool prefix) {
+  if (!value) {
+    return std::nullopt;
+  }
+  const auto& lib = openssl();
+  std::string_view remaining(
+      reinterpret_cast<const char*>(lib.ASN1_STRING_get0_data(value)),
+      lib.ASN1_STRING_length(value));
+  if (remaining.find('\0') != std::string_view::npos) {
+    return std::nullopt;
+  }
+  std::optional<std::string_view> found;
+  while (true) {
+    const auto comma = remaining.find(',');
+    const auto token = remaining.substr(0, comma);
+    if (prefix ? token.starts_with(selector) : token == selector) {
+      if (found) {
+        return std::nullopt;
+      }
+      found = token;
+    }
+    if (comma == std::string_view::npos) {
+      return found;
+    }
+    remaining.remove_prefix(comma + 1);
+  }
+}
+} // namespace
 
 std::shared_ptr<TLSContext> TLSContext::fromConfig(
     const TLSConfig& config,
@@ -450,7 +526,19 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
                        : "tls_peer_cert_oid",
         ": ",
         errorString());
+    res->peerCertPrefix_ = config.peerCertPrefix;
     res->peerCertValue_ = config.peerCertValue;
+    if (!config.peerCertPrefix.empty()) {
+      auto extension = readIdentityExtension(
+          ssl.SSL_CTX_get0_certificate(ctx), res->peerCertOid_);
+      auto identity =
+          uniqueIdentity(extension.get(), config.peerCertPrefix, true);
+      TORCH_CHECK_WITH(
+          DistStoreError,
+          identity,
+          "TCPStore TLS: local certificate must contain exactly one identity matching tls_peer_cert_prefix");
+      res->peerCertValue_ = *identity;
+    }
   }
   ssl.SSL_CTX_set_verify(
       ctx,
@@ -461,49 +549,12 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
 }
 
 bool TLSContext::verifyPeerCertificate(void* cert) const {
-  const auto& lib = openssl();
-  if (!cert || !peerCertOid_) {
-    return false;
-  }
-  const int index = lib.X509_get_ext_by_OBJ(cert, peerCertOid_, -1);
-  if (index < 0 || lib.X509_get_ext_by_OBJ(cert, peerCertOid_, index) >= 0) {
-    return false;
-  }
-  void* ext = lib.X509_EXTENSION_get_data(lib.X509_get_ext(cert, index));
-  const int size = lib.ASN1_STRING_length(ext);
-  const unsigned char* data = lib.ASN1_STRING_get0_data(ext);
-  if (size <= 0 || !data || *data != kVAsn1Utf8String) {
-    return false;
-  }
-  const unsigned char* end = data + size;
-  void* value = lib.d2i_ASN1_UTF8STRING(nullptr, &data, size);
-  auto free = c10::make_scope_exit([&] { lib.ASN1_UTF8STRING_free(value); });
-  if (!value || data != end ||
-      lib.i2d_ASN1_UTF8STRING(value, nullptr) != size) {
-    return false;
-  }
-  // MBSTRING_UTF8 and B_ASN1_UTF8STRING: validate every code point,
-  // without allocating another string. d2i alone accepts invalid UTF-8.
-  const auto* bytes = lib.ASN1_STRING_get0_data(value);
-  const int length = lib.ASN1_STRING_length(value);
-  if (lib.ASN1_mbstring_copy(
-          nullptr, bytes, length, kMbstringUtf8, kBAsn1Utf8String) !=
-      kVAsn1Utf8String) {
-    return false;
-  }
-  std::string_view remaining(reinterpret_cast<const char*>(bytes), length);
-  // Exact, case-sensitive tokens only: no substring, wildcard, or whitespace
-  // normalization. This also handles single-identity UTF8String extensions.
-  while (true) {
-    auto comma = remaining.find(',');
-    if (remaining.substr(0, comma) == peerCertValue_) {
-      return true;
-    }
-    if (comma == std::string_view::npos) {
-      return false;
-    }
-    remaining.remove_prefix(comma + 1);
-  }
+  auto extension = readIdentityExtension(cert, peerCertOid_);
+  const auto identity = uniqueIdentity(
+      extension.get(),
+      peerCertPrefix_.empty() ? peerCertValue_ : peerCertPrefix_,
+      !peerCertPrefix_.empty());
+  return identity && *identity == peerCertValue_;
 }
 
 TLSContext::~TLSContext() {

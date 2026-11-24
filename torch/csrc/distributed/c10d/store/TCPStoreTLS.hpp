@@ -36,6 +36,7 @@ struct TLSConfig {
   bool fromEnv = false;
   std::string peerCertOid;
   std::string peerCertValue;
+  std::string peerCertPrefix;
 
   bool enabled() const {
     return !cert.empty() || !key.empty() || !ca.empty() || !psk.empty();
@@ -44,13 +45,15 @@ struct TLSConfig {
   bool sameSettings(const TLSConfig& other) const {
     return cert == other.cert && key == other.key && ca == other.ca &&
         psk == other.psk && peerCertOid == other.peerCertOid &&
-        peerCertValue == other.peerCertValue;
+        peerCertValue == other.peerCertValue &&
+        peerCertPrefix == other.peerCertPrefix;
   }
 };
 
 // Explicit TLS options replace all TORCH_TCPSTORE_TLS_* environment settings.
 // Otherwise resolve CERT, KEY, CA, PSK, PSK_FILE, PEER_CERT_OID and
-// PEER_CERT_VALUE from the environment. Invalid or mixed modes fail closed.
+// PEER_CERT_VALUE and PEER_CERT_PREFIX from the environment. Invalid or mixed
+// modes fail closed.
 TLSConfig tlsConfig(const TCPStoreOptions& opts);
 
 class TLSContext {
@@ -87,6 +90,7 @@ class TLSContext {
   std::string psk_;
   void* peerCertOid_ = nullptr;
   std::string peerCertValue_;
+  std::string peerCertPrefix_;
 };
 
 // A TLS connection over memory buffers. Ciphertext received from the peer is

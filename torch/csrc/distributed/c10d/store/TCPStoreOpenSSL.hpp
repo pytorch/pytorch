@@ -46,6 +46,7 @@ using PskFindSessionCallback =
     (void*, PskFindSessionCallback))                                         \
   _(int, SSL_CTX_set_ex_data, (void*, int, void*))                           \
   _(void*, SSL_CTX_get_ex_data, (const void*, int))                          \
+  _(void*, SSL_CTX_get0_certificate, (const void*))                          \
   _(void*, SSL_get_SSL_CTX, (const void*))                                   \
   _(const void*, SSL_CIPHER_find, (void*, const unsigned char*))             \
   _(void*, SSL_SESSION_new, ())                                              \

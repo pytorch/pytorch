@@ -2477,10 +2477,11 @@ Arguments:
     tls_ca (str, optional): Path to the PEM CA bundle used to verify peer certificates. Default is None.
     tls_psk (str, optional): Shared random key value (not a filename) for TLS 1.3 instead of certificates. Use a fresh key per job, for example ``secrets.token_hex(32)``. The value is used as UTF-8 bytes without decoding and must contain 32 to 256 bytes with no NUL. Both peers must use the same key. Cannot be combined with certificate options or ``tls_psk_file``. Default is None.
     tls_psk_file (str, optional): Preferred PSK source: a regular file owned by the effective user, with no group/other permissions or symlink. Contains the raw 32 to 256 key bytes, with no NUL; contents are not stripped or decoded. Exclusive with all other TLS settings. Default is None.
-    tls_peer_cert_oid (str, optional): Numeric OID of a required non-critical leaf-certificate extension containing one DER UTF8String. Requires certificate mode and ``tls_peer_cert_value``. Each configured store checks its peer in addition to CA verification; set the policy on every rank, including the server's own client. Default is None.
-    tls_peer_cert_value (str, optional): Exact, case-sensitive identity in that extension, either the whole string or one complete comma-separated token. Must be nonempty and contain no comma. The issuing CA must enforce the extension's identity and delimiter rules. This does not check hostname or endpoint role. Default is None.
+    tls_peer_cert_oid (str, optional): Numeric OID of a required non-critical leaf-certificate extension containing one DER UTF8String. Requires certificate mode and exactly one of ``tls_peer_cert_value`` or ``tls_peer_cert_prefix``. Each configured store checks its peer in addition to CA verification; set the policy on every rank, including the server's own client. Default is None.
+    tls_peer_cert_value (str, optional): Exact, case-sensitive identity in that extension, either the whole string or exactly one complete comma-separated token. Must be nonempty and contain no comma. The issuing CA must enforce the extension's identity and delimiter rules. This does not check hostname or endpoint role. Default is None.
+    tls_peer_cert_prefix (str, optional): Instead of an explicit value, select exactly one comma-separated identity beginning with this prefix from the local certificate. Require the peer to have exactly one identity with that prefix and the same full value. The local certificate is read on construction, including clones. Default is None.
 
-.. note:: TLS requires 64-bit Linux and OpenSSL >= 1.1.1 at runtime. It protects only TCPStore traffic, not Gloo/NCCL data traffic. If no ``tls_*`` argument is set, the corresponding ``TORCH_TCPSTORE_TLS_*`` environment variables are used; use these for stores created internally by ``torchrun`` or ``init_process_group``. The identity variables are ``TORCH_TCPSTORE_TLS_PEER_CERT_OID`` and ``TORCH_TCPSTORE_TLS_PEER_CERT_VALUE``; older versions may ignore them. All-empty/unset settings disable TLS; partial configurations and NUL bytes are rejected. Set ``TORCH_TCPSTORE_TLS_REQUIRE=1`` to forbid plaintext (the default is ``0``). ``clone()`` retains the resolved settings, and a shared ``multi_tenant`` server requires identical settings.
+.. note:: TLS requires 64-bit Linux and OpenSSL >= 1.1.1 at runtime. The server allows 10 seconds for the TLS handshake. It protects only TCPStore traffic, not Gloo/NCCL data traffic. If no ``tls_*`` argument is set, the corresponding ``TORCH_TCPSTORE_TLS_*`` environment variables are used; use these for stores created internally by ``torchrun`` or ``init_process_group``. The identity variables are ``TORCH_TCPSTORE_TLS_PEER_CERT_OID`` ``TORCH_TCPSTORE_TLS_PEER_CERT_VALUE`` and ``TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX``; older versions may ignore them. All-empty/unset settings disable TLS; partial configurations and NUL bytes are rejected. Set ``TORCH_TCPSTORE_TLS_REQUIRE=1`` to forbid plaintext (the default is ``0``). ``clone()`` retains the resolved settings, and a shared ``multi_tenant`` server requires identical settings.
 
 .. note:: The server limits keys (including any prefix) to 8 KiB, values to 8 MiB per request and multi-key requests to 128K keys; it disconnects clients that exceed them.
 
@@ -2511,7 +2512,8 @@ Example::
                       std::optional<std::string> tlsPsk,
                       std::optional<std::string> tlsPskFile,
                       std::optional<std::string> tlsPeerCertOid,
-                      std::optional<std::string> tlsPeerCertValue) {
+                      std::optional<std::string> tlsPeerCertValue,
+                      std::optional<std::string> tlsPeerCertPrefix) {
             if (!useLibUV) {
               static std::atomic<bool> warned{false};
               if (!warned.load() || c10::WarningUtils::get_warnAlways()) {
@@ -2552,7 +2554,8 @@ Example::
                 .tlsPsk = std::move(tlsPsk),
                 .tlsPskFile = std::move(tlsPskFile),
                 .tlsPeerCertOid = std::move(tlsPeerCertOid),
-                .tlsPeerCertValue = std::move(tlsPeerCertValue)};
+                .tlsPeerCertValue = std::move(tlsPeerCertValue),
+                .tlsPeerCertPrefix = std::move(tlsPeerCertPrefix)};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2576,6 +2579,7 @@ Example::
           py::arg("tls_psk_file") = py::none(),
           py::arg("tls_peer_cert_oid") = py::none(),
           py::arg("tls_peer_cert_value") = py::none(),
+          py::arg("tls_peer_cert_prefix") = py::none(),
           R"(Creates a new TCPStore.)")
       .def_property_readonly(
           "host",

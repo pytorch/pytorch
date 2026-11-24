@@ -67,7 +67,7 @@ struct TCPStoreOptions {
   // a pre-shared key value of 32 to 256 random bytes, which cannot
   // be combined with the certificate options. If no tls* option is set, the
   // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK,PSK_FILE,PEER_CERT_OID,
-  // PEER_CERT_VALUE} environment
+  // PEER_CERT_VALUE,PEER_CERT_PREFIX} environment
   // variables are used instead. All empty/unset settings disable TLS; otherwise
   // empty values are rejected. TORCH_TCPSTORE_TLS_REQUIRE=1 forbids disabled
   // TLS. NUL bytes are rejected. Never log the PSK value.
@@ -80,6 +80,8 @@ struct TCPStoreOptions {
   // Optional peer identity in a DER UTF8String certificate extension.
   std::optional<std::string> tlsPeerCertOid = std::nullopt;
   std::optional<std::string> tlsPeerCertValue = std::nullopt;
+  // Derive exactly one matching identity from the local certificate.
+  std::optional<std::string> tlsPeerCertPrefix = std::nullopt;
 };
 
 class TORCH_API TCPStore : public Store {
@@ -190,6 +192,7 @@ class TORCH_API TCPStore : public Store {
   std::optional<std::string> tlsPsk_;
   std::optional<std::string> tlsPeerCertOid_;
   std::optional<std::string> tlsPeerCertValue_;
+  std::optional<std::string> tlsPeerCertPrefix_;
 };
 
 } // namespace c10d

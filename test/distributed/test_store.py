@@ -799,6 +799,7 @@ class TCPStoreTLSTest(TestCase):
             "REQUIRE",
             "PEER_CERT_OID",
             "PEER_CERT_VALUE",
+            "PEER_CERT_PREFIX",
         ):
             os.environ.pop(f"TORCH_TCPSTORE_TLS_{name}", None)
 
@@ -911,15 +912,112 @@ class TCPStoreTLSTest(TestCase):
         )
         self.assertEqual(plain_policy_server.add("alive", 1), 1)
 
-    def test_tls_peer_identity_clone_policy(self):
+    def _identity_prefix_tls(self, cert, prefix="job:"):
+        options = self._identity_tls(cert)
+        del options["tls_peer_cert_value"]
+        options["tls_peer_cert_prefix"] = prefix
+        return options
+
+    @parametrize("from_env", [False, True])
+    def test_tls_peer_identity_prefix(self, from_env):
+        cert = self._identity_cert(
+            "prefix-server", "ASN1:UTF8String:service:x,job:123,task:0"
+        )
+        options = self._identity_prefix_tls(cert)
+        if from_env:
+            os.environ.update(
+                {"TORCH_TCPSTORE_" + k.upper(): v for k, v in options.items()}
+            )
+        server = self._store(tls={} if from_env else options, multi_tenant=True)
+        client_cert = self._identity_cert(
+            "prefix-client", "ASN1:UTF8String:task:1,job:123"
+        )
+        client = self._store(
+            server.port, False, tls=self._identity_prefix_tls(client_cert)
+        )
+        client.set("identity", "ok")
+        os.environ["TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX"] = "other:"
+        self.assertEqual(client.clone().get("identity"), b"ok")
+        self.assertEqual(server.clone().get("identity"), b"ok")
+        with self.assertRaisesRegex(DistStoreError, "different TLS configuration"):
+            self._store(
+                server.port,
+                tls=self._identity_prefix_tls(cert, "job:1"),
+                multi_tenant=True,
+            )
+
+    @parametrize(
+        "identities", ["job:456", "job:123,job:456", "job:123,job:123", "task:1"]
+    )
+    def test_tls_peer_identity_prefix_mismatch(self, identities):
+        local = self._identity_cert("prefix-good", "ASN1:UTF8String:job:123")
+        peer = self._identity_cert("prefix-bad", "ASN1:UTF8String:" + identities)
+        server = self._store(tls=self._identity_prefix_tls(local))
+        self._assert_fails_fast(
+            "alert handshake failure", port=server.port, is_master=False, cert=peer
+        )
+        self.assertEqual(server.add("alive", 1), 1)
+        other = self._store(cert=peer)
+        self._assert_fails_fast(
+            "application verification failure",
+            port=other.port,
+            is_master=False,
+            tls=self._identity_prefix_tls(local),
+        )
+        self.assertEqual(other.add("alive", 1), 1)
+
+    @parametrize(
+        "extension",
+        [
+            "ASN1:UTF8String:task:1",
+            "ASN1:UTF8String:job:123,job:456",
+            "ASN1:UTF8String:job:123,job:123",
+            "ASN1:IA5STRING:job:123",
+        ],
+    )
+    def test_tls_peer_identity_prefix_local_invalid(self, extension):
+        cert = self._identity_cert("prefix-local-invalid", extension)
+        self._assert_fails_fast(
+            "local certificate must contain exactly one identity",
+            tls=self._identity_prefix_tls(cert),
+        )
+
+    @parametrize(
+        "change,error",
+        [
+            ({"tls_peer_cert_value": "job:123"}, "exactly one value or prefix"),
+            ({"tls_peer_cert_prefix": ""}, "exactly one value or prefix"),
+            ({"tls_peer_cert_prefix": "job:,task:"}, "single identity"),
+            ({"tls_peer_cert_prefix": "job:\x00"}, "NUL bytes"),
+            ({"tls_peer_cert_oid": ""}, "exactly one value or prefix"),
+        ],
+    )
+    def test_tls_peer_identity_prefix_invalid(self, change, error):
+        cert = self._identity_cert("prefix-config", "ASN1:UTF8String:job:123")
+        self._assert_fails_fast(
+            error, tls={**self._identity_prefix_tls(cert), **change}
+        )
+
+    @parametrize("prefix", [False, True])
+    def test_tls_peer_identity_clone_policy(self, prefix):
         cert = self._identity_cert("identity-clone", "ASN1:UTF8String:job:123")
-        server = self._store(tls=self._identity_tls(cert))
+        options = (
+            self._identity_prefix_tls(cert) if prefix else self._identity_tls(cert)
+        )
+        server = self._store(tls=options)
         port = server.port
-        client = self._store(port, False, tls=self._identity_tls(cert))
+        client = self._store(port, False, tls=options)
         # Replace the endpoint with another trusted certificate lacking the
         # identity. A clone that drops its policy would accept it.
         del server
-        replacement = self._store(port, cert=self.server)
+        replacement_cert = (
+            self._identity_cert(
+                "identity-clone-ambiguous", "ASN1:UTF8String:job:123,job:456"
+            )
+            if prefix
+            else self.server
+        )
+        replacement = self._store(port, cert=replacement_cert)
         with self.assertRaisesRegex(DistStoreError, "application verification failure"):
             client.clone()
         self.assertEqual(replacement.add("alive", 1), 1)
@@ -939,6 +1037,7 @@ class TCPStoreTLSTest(TestCase):
         "extension",
         [
             "ASN1:UTF8String:job:1234",
+            "ASN1:UTF8String:job:123,job:123",
             "ASN1:UTF8String:xjob:123",
             "ASN1:UTF8String:JOB:123",
             "ASN1:UTF8String: job:123",
@@ -984,7 +1083,7 @@ class TCPStoreTLSTest(TestCase):
             ("tls_peer_cert_oid", "1.2\x003", "NUL bytes"),
             ("tls_peer_cert_value", "job:123,job:456", "single identity"),
             ("tls_peer_cert_value", "job:123\x00", "NUL bytes"),
-            ("tls_peer_cert_value", "", "both identity settings"),
+            ("tls_peer_cert_value", "", "exactly one value or prefix"),
         ],
     )
     def test_tls_peer_identity_invalid(self, field, value, error):
