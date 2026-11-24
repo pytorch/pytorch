@@ -23,7 +23,7 @@ from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
 from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
-from ..xpu.xpu_env import get_xpu_arch, get_xpu_version
+from ..xpu.xpu_env import get_xpu_arch_for_sycl_tla, get_xpu_version
 
 
 log = logging.getLogger(__name__)
@@ -101,12 +101,7 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_dir = (
-        config.xpu.cutlass_dir
-        if torch.xpu._is_compiled()
-        else config.cutlass.cutlass_dir
-    )
-    cutlass_python_path = path_join(cutlass_dir, "python")
+    cutlass_python_path = path_join(config.cutlass.cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(
         torch_root,
@@ -251,7 +246,7 @@ def _normalize_cuda_arch(arch: str) -> str:
 @functools.lru_cache(8)
 def cutlass_arch(device_type: str) -> str:
     if device_type == "xpu":
-        arch = get_xpu_arch()
+        arch = get_xpu_arch_for_sycl_tla()
         return _normalize_xpu_arch(arch)
     else:
         arch = get_cuda_arch()
@@ -264,15 +259,6 @@ def toolkit_version(device_type: str) -> str:
         return get_xpu_version()
     else:
         return get_cuda_version()
-
-
-def get_device_cutlass_config(device_type: str):
-    """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
-    if device_type == "xpu":
-        return config.xpu
-    from ...config import cutlass as inductor_cutlass_config
-
-    return inductor_cutlass_config
 
 
 @dataclass
