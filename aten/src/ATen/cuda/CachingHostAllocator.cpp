@@ -115,7 +115,11 @@ struct CUDACachingHostAllocatorImpl
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(ptr) == 1);
       use_register = use_host_register[ptr];
+      // Erase before freeing: a concurrent allocation can get ptr back as soon
+      // as it is freed, and inserts its own entry.
+      use_host_register.erase(ptr);
     }
+    at::cuda::CUDAStreamCaptureModeGuard capture_mode{cudaStreamCaptureModeRelaxed};
     if (use_register) {
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
@@ -129,7 +133,6 @@ struct CUDACachingHostAllocatorImpl
     // Update the statistics on the time spent on cudaFreeHost/hostUnregister
     {
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
-      use_host_register.erase(ptr);
       stats_.host_free_time.increase(duration.count());
     }
   }
