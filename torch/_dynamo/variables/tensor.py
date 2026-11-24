@@ -1780,6 +1780,12 @@ class TensorVariable(VariableTracker):
         TODO: Support non-leaf tensors by fixing .grad access on non-leaf in Dynamo.
         """
         if not config.trace_autograd_ops:
+            if (
+                tx.parent is not None
+                and tx.should_compile_partial_graph()
+                and not tx.maybe_has_backedge()
+            ):
+                tx.output._check_requires_grad_intermediate_outputs([self], tx)
             unimplemented(
                 gb_type="Unsupported Tensor.backward() call",
                 context=f"call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
