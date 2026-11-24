@@ -564,7 +564,7 @@ void validate_scaled_mm_v2_inputs(
         is_mx_32_8
         ? "; SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)"
         : is_mx_128
-        ? "; SWIZZLE_128 block scales require gfx1250 with ROCm 7.14"
+        ? "; SWIZZLE_128 block scales require gfx1250 or gfx1250-strict with ROCm 7.14"
         : "";
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
     // to keep aten-cpu free of GPU-conditional compilation. Formulas mirror

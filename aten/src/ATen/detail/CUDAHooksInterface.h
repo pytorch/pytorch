@@ -224,7 +224,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   }
 
 #ifdef USE_ROCM
-  // Unanchored prefix match on gcnArchName, so {"gfx12"} matches
+  // Unanchored substring match on gcnArchName, so {"gfx12"} matches
   // gfx1250-strict. The match stops when the next character is '-'.
   // A ':' feature suffix still belongs to the matched target, so
   // {"gfx1250"} matches gfx1250:xnack- and not gfx1250-strict.
