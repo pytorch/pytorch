@@ -69,6 +69,42 @@ class _Registration:
             raise RuntimeError("memory has been unregistered")
 
 
+@dataclass
+class _StorageRegistration:
+    path: str
+    length: int
+    storage_id: int
+    active: bool = True
+    # Set when a transfer times out: Mooncake may still be accessing the file.
+    pinned: bool = False
+
+
+class MooncakeStorage:
+    """A file range registered with a Mooncake transport."""
+
+    def __init__(
+        self, transport: MooncakeTransport, registration: _StorageRegistration
+    ) -> None:
+        self._transport = transport
+        self._registration = registration
+
+    def to_remote_buffer(self, *, timeout: float | None = None) -> MooncakeRemoteBuffer:
+        """Return a descriptor for transfers by the registering transport only."""
+        return self._transport._call(self._remote_buffer, timeout)
+
+    def _remote_buffer(self) -> MooncakeRemoteBuffer:
+        registration = self._registration
+        if not registration.active:
+            raise RuntimeError("storage has been unregistered")
+        return MooncakeRemoteBuffer(
+            self._transport.peer_id,
+            0,
+            registration.length,
+            registration.storage_id,
+            "FILE",
+        )
+
+
 class MooncakeMemoryView:
     """A byte range in Mooncake-registered memory."""
 

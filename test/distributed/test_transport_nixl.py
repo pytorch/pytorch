@@ -3,6 +3,8 @@
 import asyncio
 import gc
 import json
+import os
+import tempfile
 import threading
 import weakref
 from concurrent.futures import ThreadPoolExecutor
@@ -277,12 +279,14 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
                 first.register_storage("FILE", 7, 64)
             with self.assertRaisesRegex(ValueError, "memory_type"):
                 first.register_storage("VRAM", 8, 64)
-            with self.assertRaisesRegex(TypeError, "device_id"):
+            with self.assertRaisesRegex(TypeError, "wrong type"):
                 first.register_storage("FILE", True, 64)
+            with self.assertRaisesRegex(TypeError, "wrong type"):
+                first.register_storage("BLOCK", "/dev/nvme0n1", 64)
+            with self.assertRaisesRegex(TypeError, "object key"):
+                first.register_storage("OBJ", 8, 64)
             with self.assertRaisesRegex(ValueError, "non-negative"):
                 first.register_storage("FILE", -1, 64)
-            with self.assertRaisesRegex(ValueError, "key must be empty"):
-                first.register_storage("FILE", 8, 64, key="/etc/passwd")
         register.assert_called_once_with([(0, 64, 7, "")], "FILE", backends=["UCX"])
         remote = storage.to_remote_buffer()
         self.assertEqual(
@@ -332,8 +336,31 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
         with patch.object(agent, "deregister_memory") as deregister:
             first.close()
         deregister.assert_any_call("descs", backends=["UCX"])
-        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+        with self.assertRaisesRegex(RuntimeError, "closed"):
             renewed.to_remote_buffer()
+
+    def test_storage_path_and_object_key(self):
+        first, *_ = self.registered_pair()
+        agent = first._agent
+        with (
+            tempfile.NamedTemporaryFile() as file,
+            patch.object(agent, "register_memory", return_value="descs") as register,
+            patch.object(agent, "deregister_memory"),
+        ):
+            by_path = first.register_storage("FILE", file.name, 64)
+            fd = by_path._registration.device_id
+            os.fstat(fd)
+            objects = [first.register_storage("OBJ", k, 64) for k in ("a", "b")]
+            with self.assertRaises(FileNotFoundError):
+                first.register_storage("FILE", file.name + ".missing", 64)
+            for storage in (by_path, *objects):
+                first.unregister_memory(storage)
+            with self.assertRaises(OSError):
+                os.fstat(fd)
+        self.assertEqual(register.call_args_list[0].args[0], [(0, 64, fd, "")])
+        objects = [call.args[0][0] for call in register.call_args_list[1:]]
+        self.assertEqual([o[3] for o in objects], ["a", "b"])
+        self.assertNotEqual(objects[0][2], objects[1][2])
 
     def test_unregister_failure_can_be_retried(self):
         first, second, memory, remote = self.registered_pair()

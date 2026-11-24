@@ -40,6 +40,8 @@ types are rejected. Tensor contents and native handles are never serialized.
 .. autoclass:: torch.distributed._transport.MutableMemoryView
 .. autoclass:: torch.distributed._transport.RemoteBuffer
    :members:
+.. autoclass:: torch.distributed._transport.Storage
+   :members:
 .. autofunction:: torch.distributed._transport.wait_all
 .. autofunction:: torch.distributed._transport.available_transports
 .. autofunction:: torch.distributed._transport.register_transport
@@ -145,54 +147,30 @@ cannot interrupt a blocked native call, even when it releases the GIL.
    :members:
 ```
 
-### Storage
+(storage-plugins)=
+### Storage plugins
 
-A transport constructed with a NIXL storage plugin moves registered tensors to
-and from files, objects, or block devices. `register_storage` returns a
-{class}`~torch.distributed._transport.nixl.NIXLStorage` whose remote buffer
-addresses byte offsets in that storage. Storage descriptors are accepted only by
-the registering transport and become invalid after unregistering. They grant
-access to the storage: do not send them to peers or pass descriptors received
-from peers to `read` or `write`. Storage
-transfers cannot carry notifications or use `read_stream`/`write_stream`. Plugin availability depends on the NIXL build; check
+A transport constructed with a NIXL storage plugin supports
+{meth}`~torch.distributed._transport.Transport.register_storage` (see
+[Storage](#storage)). Plugin availability depends on the NIXL build; check
 `nixl_agent.get_plugin_list()`. `GUSLI` requires a `config_file` backend option
 and `AZURE_BLOB` requires `AZURE_STORAGE_CONTAINER_NAME` with an account URL or
 connection string.
 
-| Plugin | Storage | Tensors | Registration |
+| Plugin | Storage | Tensors | `register_storage` location |
 | --- | --- | --- | --- |
-| `POSIX` | Local or network files | CPU | `"FILE"`, file descriptor |
-| `GDS`, `GDS_MT` | Files via GPUDirect Storage (cuFile), including NVMe-oF and parallel file systems | CPU, CUDA | `"FILE"`, file descriptor |
-| `OBJ` | S3-compatible objects | CPU | `"OBJ"`, object `key` |
-| `AZURE_BLOB` | Azure Blob Storage | CPU | `"OBJ"`, blob `key` |
+| `POSIX` | Local or network files | CPU | `"FILE"`, path or file descriptor |
+| `GDS`, `GDS_MT` | Files via GPUDirect Storage (cuFile), including NVMe-oF and parallel file systems | CPU, CUDA | `"FILE"`, `O_DIRECT` file descriptor |
+| `OBJ` | S3-compatible objects | CPU | `"OBJ"`, object key |
+| `AZURE_BLOB` | Azure Blob Storage | CPU | `"OBJ"`, blob name |
 | `GUSLI` | NVMe block devices | CPU | `"BLOCK"`, device id |
 
-Write a CUDA tensor to a file with GPUDirect Storage and read it back:
-
-```python
-import os
-import torch
-from torch.distributed._transport.nixl import NIXLTransport
-
-fd = os.open("/mnt/nvme/shard0.bin", os.O_RDWR | os.O_CREAT | os.O_DIRECT)
-tensor = torch.randn(1 << 20, device="cuda")
-size = tensor.nbytes
-os.ftruncate(fd, size)
-with NIXLTransport("cuda", plugin="GDS") as transport:
-    memory = transport.register_memory(tensor)
-    storage = transport.register_storage("FILE", fd, size)
-    file = storage.to_remote_buffer()
-    transport.write(memory.to_view(), file)  # tensor -> file offset 0
-    transport.read(memory.to_mutable_view(), file)  # file offset 0 -> tensor
-    transport.unregister_memory(storage)
-os.close(fd)
-```
-
-Use `plugin="POSIX"` with CPU tensors and a file opened without `O_DIRECT` when
-GPUDirect Storage is unavailable; `backend_options={"use_uring": "true"}`
-selects io_uring. Slices address file offsets:
-`transport.write(view, file.slice(offset, view.size()))`. With `O_DIRECT`,
-offsets, sizes, and buffers must meet the file system's alignment.
+Use `plugin="POSIX"` with CPU tensors when GPUDirect Storage is unavailable;
+`backend_options={"use_uring": "true"}` selects io_uring. With `O_DIRECT`,
+offsets, sizes, and buffers must meet the file system's alignment. Object
+plugins write whole objects: writes must start at offset 0, while reads may use
+any offset. Credentials follow the AWS SDK defaults unless `access_key` and
+`secret_key` are set in `backend_options`.
 
 Store a CPU tensor as an S3 object:
 
@@ -208,13 +186,74 @@ with NIXLTransport(
     },
 ) as transport:
     memory = transport.register_memory(tensor)
-    storage = transport.register_storage(
-        "OBJ", 0, tensor.nbytes, key="step100/shard0"
-    )
+    storage = transport.register_storage("OBJ", "step100/shard0", tensor.nbytes)
     transport.write(memory.to_view(), storage.to_remote_buffer())
 ```
 
-`device_id` must be unique among a transport's registrations of the same type.
-Object plugins write whole objects: writes must start at offset 0, while reads
-may use any offset. Credentials follow the AWS SDK defaults unless
-`access_key` and `secret_key` are set in `backend_options`.
+## Mooncake backend
+
+{class}`~torch.distributed._transport.mooncake.MooncakeTransport` uses Mooncake's
+Transfer Engine. Peers exchange metadata directly by default
+(`metadata_server="P2PHANDSHAKE"`) or through an etcd, Redis, or HTTP metadata
+server, where each endpoint publishes a segment named `segment_name`.
+
+With Mooncake's TENT engine (`MC_USE_TENT=1`), `register_storage("FILE", ...)`
+registers a local file, which Mooncake reads and writes with io_uring or
+buffered I/O. The file must already hold the registered length. TENT opens
+files with `O_DIRECT`, so offsets, lengths, and host buffers should be aligned
+to the device block size (typically 4 KiB). TENT does not support
+notifications. Each FILE registration holds file descriptors until the
+transport closes, so scope a transport to a bounded set of files.
+
+```{eval-rst}
+.. autoclass:: torch.distributed._transport.mooncake.MooncakeTransport
+   :members: register_storage
+.. autoclass:: torch.distributed._transport.mooncake.MooncakeStorage
+   :members:
+```
+
+(storage)=
+## Storage
+
+Backends that support storage move registered tensors to and from files,
+objects, or block devices. `register_storage(memory_type, location, length)`
+returns a {class}`~torch.distributed._transport.Storage` whose remote buffer
+addresses byte offsets in that storage, so the same `read` and `write` calls
+work for peers and storage. `location` is a path or open file descriptor for
+`"FILE"`, an object key for `"OBJ"`, and a device id for `"BLOCK"`. Keep a
+file descriptor open until the storage is unregistered.
+
+Storage descriptors are accepted only by the registering transport and become
+invalid after unregistering. They grant access to the storage: do not send them
+to peers or pass descriptors received from peers to `read` or `write`. Storage
+transfers cannot carry notifications or use `read_stream`/`write_stream`.
+Release storage with `unregister_memory`.
+
+| Backend | Memory types |
+| --- | --- |
+| NIXL (storage plugin) | `"FILE"`, `"OBJ"`, `"BLOCK"`; see [storage plugins](#storage-plugins) |
+| Mooncake (`MC_USE_TENT=1`) | `"FILE"` |
+
+Write a tensor to a file and read it back:
+
+```python
+import os
+import torch
+from torch.distributed._transport.nixl import NIXLTransport
+
+tensor = torch.randn(1 << 20, device="cuda")
+fd = os.open("/mnt/nvme/shard0.bin", os.O_RDWR | os.O_CREAT | os.O_DIRECT)
+os.ftruncate(fd, tensor.nbytes)
+with NIXLTransport("cuda", plugin="GDS") as transport:
+    memory = transport.register_memory(tensor)
+    storage = transport.register_storage("FILE", fd, tensor.nbytes)
+    file = storage.to_remote_buffer()
+    transport.write(memory.to_view(), file)  # tensor -> file offset 0
+    transport.read(memory.to_mutable_view(), file)  # file offset 0 -> tensor
+    transport.unregister_memory(storage)
+os.close(fd)
+```
+
+With Mooncake, construct the transport with `MC_USE_TENT=1` set instead:
+`MooncakeTransport("cuda")`. Slices address offsets:
+`transport.write(view, file.slice(offset, view.size()))`.

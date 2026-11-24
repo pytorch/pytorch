@@ -155,6 +155,16 @@ class Memory(Protocol):
     def to_remote_buffer(self, *, timeout: float | None = None) -> RemoteBuffer: ...
 
 
+class Storage(Protocol):
+    """A file, object, or block range registered with a transport.
+
+    Its remote buffer addresses byte offsets in the storage and is accepted only
+    by the registering transport.
+    """
+
+    def to_remote_buffer(self, *, timeout: float | None = None) -> RemoteBuffer: ...
+
+
 class Transport(ABC):
     """Base class for one-sided tensor transports.
 
@@ -427,10 +437,31 @@ class Transport(ABC):
         Exchange its remote-buffer descriptor with peers before remote access.
         """
 
+    def register_storage(
+        self,
+        memory_type: str,
+        location: int | str,
+        length: int,
+        *,
+        timeout: float | None = None,
+    ) -> Storage:
+        """Register ``length`` bytes of storage for local reads and writes.
+
+        ``memory_type`` is ``"FILE"`` with a path or open file descriptor,
+        ``"OBJ"`` with an object key, or ``"BLOCK"`` with a block device id.
+        ``write`` stores a registered local view at the storage descriptor's
+        byte offset and ``read`` loads from it. Storage transfers reject
+        notifications and stream transfers. Keep a file descriptor open until
+        the storage is released with ``unregister_memory``. Backends raise
+        ``ValueError`` for unsupported memory types and ``NotImplementedError``
+        without storage support.
+        """
+        raise NotImplementedError("transport does not support storage")
+
     def unregister_memory(
-        self, memory: Memory, *, timeout: float | None = None
+        self, memory: Memory | Storage, *, timeout: float | None = None
     ) -> None:
-        """Unregister memory after coordinating with peers to stop remote access.
+        """Unregister memory or storage after peers stop remote access.
 
         Wait for locally submitted transfers using this registration first.
         Reused registrations share one lifetime: unregistering any handle
@@ -488,6 +519,9 @@ class Transport(ABC):
         _validate_timeout(timeout)
         if timeout == 0:
             raise ValueError("stream transfers require a positive timeout")
+        if self._is_storage(remote_buffer):
+            # Unregistering storage cannot see transfers queued on a stream.
+            raise ValueError("storage does not support stream transfers")
         self._check_transfer(local_buffer, remote_buffer, mutable=False)
         submit = partial(self.write_async, local_buffer, remote_buffer, timeout=timeout)
         self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
@@ -506,11 +540,17 @@ class Transport(ABC):
         _validate_timeout(timeout)
         if timeout == 0:
             raise ValueError("stream transfers require a positive timeout")
+        if self._is_storage(remote_buffer):
+            # Unregistering storage cannot see transfers queued on a stream.
+            raise ValueError("storage does not support stream transfers")
         self._check_transfer(local_buffer, remote_buffer, mutable=True)
         submit = partial(self.read_async, local_buffer, remote_buffer, timeout=timeout)
         self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
             submit, local_buffer
         )
+
+    def _is_storage(self, remote_buffer: RemoteBuffer) -> bool:
+        return False
 
     def _check_transfer(  # noqa: B027
         self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool

@@ -3,6 +3,7 @@ from ._memory import (
     MooncakeMemoryView,
     MooncakeMutableMemoryView,
     MooncakeRemoteBuffer,
+    MooncakeStorage,
 )
 from ._transport import MooncakeTransport
 
@@ -12,5 +13,6 @@ __all__ = [
     "MooncakeMemoryView",
     "MooncakeMutableMemoryView",
     "MooncakeRemoteBuffer",
+    "MooncakeStorage",
     "MooncakeTransport",
 ]

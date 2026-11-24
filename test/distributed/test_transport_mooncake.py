@@ -4,6 +4,7 @@ import asyncio
 import ctypes
 import itertools
 import os
+import tempfile
 import threading
 from dataclasses import dataclass, replace
 from datetime import timedelta
@@ -19,6 +20,7 @@ from torch.distributed._transport.mooncake import (
     _transport as _mooncake,
     MooncakeMemory,
     MooncakeRemoteBuffer,
+    MooncakeStorage,
     MooncakeTransport,
 )
 from torch.testing._internal.common_utils import (
@@ -46,7 +48,9 @@ class _Engine:
     registered tensors, so the shared conformance assertions observe real data
     movement without RDMA hardware. Like Mooncake, a transfer resolves ``peer``
     to that engine and fails unless the local range is registered here and the
-    remote range is registered on the peer. Mooncake batch ids are freed
+    remote range is registered on the peer. A peer is a P2P ``host:port``, a
+    segment name published to a metadata server, or a ``file://`` segment that
+    TENT reads and writes with positioned I/O. Mooncake batch ids are freed
     BatchDesc addresses, so a settled batch id is handed out again.
 
     Notifies model Mooncake 0.3.14's RDMA path: messages come back as str and
@@ -56,6 +60,7 @@ class _Engine:
 
     _next_port = 20000
     _by_port: dict[int, "_Engine"] = {}
+    _by_name: dict[str, "_Engine"] = {}
 
     def __init__(self):
         self._regions: dict[int, int] = {}
@@ -71,6 +76,8 @@ class _Engine:
         type(self)._next_port += 1
         self._port = type(self)._next_port
         self._by_port[self._port] = self
+        if metadata_server != "P2PHANDSHAKE":
+            self._by_name[host] = self
         return 0
 
     def get_rpc_port(self):
@@ -92,11 +99,39 @@ class _Engine:
             for start, size in self._regions.items()
         )
 
+    def _peer(self, peer):
+        if peer in self._by_name:
+            return self._by_name[peer]
+        port = peer.rpartition(":")[2]
+        return self._by_port.get(int(port)) if port.isdigit() else None
+
+    def _file_transfer(self, path, requests, opcode):
+        fd = os.open(path, os.O_RDWR)
+        try:
+            size = os.fstat(fd).st_size
+            if not all(
+                self._covers(buffer, length) and offset + length <= size
+                for buffer, offset, length in requests
+            ):
+                return False
+            for buffer, offset, length in requests:
+                if opcode == _Opcode.Write:
+                    os.pwrite(fd, ctypes.string_at(buffer, length), offset)
+                else:
+                    ctypes.memmove(buffer, os.pread(fd, length, offset), length)
+            return True
+        finally:
+            os.close(fd)
+
     def batch_transfer_async(self, peer, buffers, peer_buffers, lengths, opcode):
         batch_id = next(i for i in itertools.count(1) if i not in self._batches)
         self._batches.add(batch_id)
-        target = self._by_port.get(int(peer.rpartition(":")[2]))
         requests = list(zip(buffers, peer_buffers, lengths))
+        if peer.startswith("file://"):
+            if not self._file_transfer(peer[len("file://") :], requests, opcode):
+                self._failed.add(batch_id)
+            return batch_id
+        target = self._peer(peer)
         if target is None or not all(
             self._covers(buffer, length) and target._covers(peer_buffer, length)
             for buffer, peer_buffer, length in requests
@@ -118,7 +153,7 @@ class _Engine:
         return 1
 
     def transfer_sync(self, peer, buffer, peer_buffer, length, opcode, notify=None):
-        target = self._by_port.get(int(peer.rpartition(":")[2]))
+        target = self._peer(peer)
         if target is None:
             return -1
         if length:
@@ -159,6 +194,12 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         super().setUp()
         register_transport("mooncake", MooncakeTransport, replace=True)
         self.addCleanup(_mooncake._pinned_registrations.clear)
+        # The fake engine models the classic engine unless a test enables TENT.
+        env = patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("MC_USE_TENT", None)
+        os.environ.pop("MC_USE_TEV1", None)
 
     def make_transport_pair(self):
         with patch.object(_mooncake, "_load_backend", return_value=_backend()):
@@ -523,6 +564,156 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         self.assertFalse(waiter.is_alive())
         self.assertRegex(str(errors[0]), "closed")
 
+    def _new_transport(self, tent=False, **kwargs):
+        env = {"MC_USE_TENT": "1"} if tent else {}
+        with (
+            patch.dict(os.environ, env),
+            patch.object(_mooncake, "_load_backend", return_value=_backend()),
+        ):
+            transport = new_transport("mooncake", host="127.0.0.1", **kwargs)
+        self.addCleanup(transport.close)
+        return transport
+
+    def test_metadata_server_uses_segment_names(self):
+        server = "redis://127.0.0.1:6379"
+        first = self._new_transport(metadata_server=server)
+        second = self._new_transport(metadata_server=server, segment_name="peer-b")
+        self.assertEqual(first._engine.options[0], server)
+        self.assertEqual(second.bind(), b"peer-b")
+        self.assertIn("/", first.peer_id)
+        self.assertEqual(first.connect(second.bind()), 0)
+        with self.assertRaisesRegex(ValueError, r"bind\(\) endpoint"):
+            first.connect(b"file:///tmp/x")
+        source = torch.arange(8, dtype=torch.uint8)
+        target = torch.zeros(8, dtype=torch.uint8)
+        remote = second.register_memory(target).to_remote_buffer()
+        first.write(first.register_memory(source).to_view(), remote)
+        self.assertEqual(target, source)
+        with self.assertRaisesRegex(ValueError, "metadata_server"):
+            MooncakeTransport(segment_name="peer-c")
+        with self.assertRaisesRegex(ValueError, "segment_name"):
+            MooncakeTransport(metadata_server=server, segment_name="file://x")
+
+    def _tent_transport(self):
+        return self._new_transport(tent=True)
+
+    def _temp_file(self, size):
+        file = tempfile.NamedTemporaryFile()  # noqa: SIM115
+        self.addCleanup(file.close)
+        os.ftruncate(file.fileno(), size)
+        return file
+
+    def test_file_storage(self):
+        transport = self._tent_transport()
+        self.assertEqual(transport.max_notification_size(), 0)
+        size = 64
+        file = self._temp_file(size)
+        source = torch.arange(size, dtype=torch.uint8)
+        destination = torch.zeros_like(source)
+        source_view = transport.register_memory(source).to_view()
+        destination_view = transport.register_memory(destination).to_mutable_view()
+        storage = transport.register_storage("FILE", file.name, size)
+        self.assertIsInstance(storage, MooncakeStorage)
+        remote = storage.to_remote_buffer()
+        half = size // 2
+        transport.write(source_view[:half], remote[half:])
+        transport.write(source_view[half:], remote[:half], async_op=True).wait()
+        transport.read(destination_view[:half], remote[half:])
+        transport.read(destination_view[half:], remote[:half])
+        self.assertEqual(destination, source)
+        self.assertEqual(os.pread(file.fileno(), 4, half), bytes(range(4)))
+
+        fd = os.dup(file.fileno())
+        by_fd = transport.register_storage("FILE", fd, half)
+        os.close(fd)
+        transport.read(destination_view[:half], by_fd.to_remote_buffer())
+        self.assertEqual(destination[:half], source[half:])
+        # Targets stay unique after unregistering: Mooncake caches a file
+        # handle per target for the engine's lifetime.
+        old_path = by_fd._registration.path
+        transport.unregister_memory(by_fd)
+        renewed = transport.register_storage("FILE", file.name, half)
+        self.assertNotEqual(renewed._registration.path, old_path)
+        transport.unregister_memory(renewed)
+
+        with self.assertRaisesRegex(ValueError, "registered storage"):
+            transport.write(source_view[:8], replace(remote, address=size - 4))
+        with self.assertRaisesRegex(NotImplementedError, "notifications"):
+            transport.write(source_view, remote, notification=b"done")
+        with self.assertRaisesRegex(NotImplementedError, "notifications"):
+            transport.wait_notifications(timeout=0)
+        with self.assertRaisesRegex(ValueError, "not registered"):
+            transport.read(destination_view, replace(remote, device_id=0))
+        with self.assertRaisesRegex(ValueError, "stream"):
+            transport.write_stream(source_view, remote)
+        transport.unregister_memory(storage)
+        transport.unregister_memory(storage)
+        with self.assertRaisesRegex(ValueError, "not registered"):
+            transport.read(destination_view, remote)
+        with self.assertRaisesRegex(RuntimeError, "unregistered"):
+            storage.to_remote_buffer()
+
+    def test_file_storage_validation(self):
+        file = self._temp_file(16)
+        with self.assertRaisesRegex(NotImplementedError, "MC_USE_TENT"):
+            self._new_transport().register_storage("FILE", file.name, 16)
+        transport = self._tent_transport()
+        with self.assertRaisesRegex(ValueError, "only FILE"):
+            transport.register_storage("OBJ", "key", 16)
+        with self.assertRaisesRegex(ValueError, "less than"):
+            transport.register_storage("FILE", file.name, 17)
+        with self.assertRaises(IsADirectoryError):
+            transport.register_storage("FILE", tempfile.gettempdir(), 16)
+        with self.assertRaisesRegex(ValueError, "empty"):
+            transport.register_storage("FILE", file.name, 0)
+        with self.assertRaisesRegex(TypeError, "length"):
+            transport.register_storage("FILE", file.name, True)
+        with self.assertRaisesRegex(TypeError, "path or file descriptor"):
+            transport.register_storage("FILE", b"path", 16)
+        read_only = os.open(file.name, os.O_RDONLY)
+        self.addCleanup(os.close, read_only)
+        with self.assertRaisesRegex(ValueError, "read-write"):
+            transport.register_storage("FILE", read_only, 16)
+        other = self._tent_transport()
+        remote = other.register_storage("FILE", file.name, 16).to_remote_buffer()
+        view = transport.register_memory(torch.zeros(16, dtype=torch.uint8)).to_view()
+        with self.assertRaisesRegex(ValueError, "not registered"):
+            transport.write(view, remote)
+
+    def test_unregister_storage_with_pending_transfer(self):
+        transport = self._tent_transport()
+        file = self._temp_file(16)
+        storage = transport.register_storage("FILE", file.name, 16)
+        view = transport.register_memory(torch.zeros(16, dtype=torch.uint8)).to_view()
+        with patch.object(_Engine, "transfer_check_status", return_value=0):
+            work = transport.write(view, storage.to_remote_buffer(), async_op=True)
+            with self.assertRaisesRegex(RuntimeError, "pending"):
+                transport.unregister_memory(storage)
+        work.wait()
+        transport.unregister_memory(storage)
+
+    def test_timed_out_storage_transfer_pins_storage(self):
+        transport = self._tent_transport()
+        file = self._temp_file(16)
+        storage = transport.register_storage("FILE", file.name, 16)
+        view = transport.register_memory(torch.zeros(16, dtype=torch.uint8)).to_view()
+        with patch.object(_Engine, "transfer_check_status", return_value=-2):
+            with self.assertRaisesRegex(RuntimeError, "pinned"):
+                transport.write(view, storage.to_remote_buffer())
+        with self.assertRaisesRegex(RuntimeError, "pinned"):
+            transport.unregister_memory(storage)
+
+    def test_close_releases_storage(self):
+        transport = self._tent_transport()
+        file = self._temp_file(16)
+        storage = transport.register_storage("FILE", file.name, 16)
+        fd = int(storage._registration.path.rsplit("/", 1)[1])
+        transport.close()
+        self.assertFalse(storage._registration.active)
+        self.assertEqual(transport._storage, {})
+        with self.assertRaises(OSError):
+            os.fstat(fd)
+
     def test_send_notification_wait_honors_timeout(self):
         first, second = self.make_transport_pair()
         real_sync = first._engine.transfer_sync
@@ -551,26 +742,30 @@ _RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"
 class TestMooncakeTransportIntegration(TransportTestMixin, TestCase):
     hw_classification = HardwareClassification.GENERIC
     protocol = os.environ.get("MOONCAKE_PROTOCOL", "rdma")
+    # For example redis://host:6379; notifications are skipped under MC_USE_TENT=1.
+    metadata_server = os.environ.get("MOONCAKE_METADATA_SERVER", "P2PHANDSHAKE")
+
+    def _new_transport(self):
+        transport = new_transport(
+            "mooncake",
+            "cpu",
+            host="127.0.0.1",
+            protocol=self.protocol,
+            metadata_server=self.metadata_server,
+        )
+        self.addCleanup(transport.close)
+        return transport
 
     def make_transport_pair(self):
-        first = new_transport(
-            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
-        )
-        second = new_transport(
-            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
-        )
-        self.addCleanup(second.close)
-        self.addCleanup(first.close)
+        first = self._new_transport()
+        second = self._new_transport()
         self.assertEqual(first.connect(second.bind()), 0)
         self.assertEqual(second.connect(first.bind()), 0)
         return first, second
 
     def test_connects_multiple_peers(self):
         first, second = self.make_transport_pair()
-        third = new_transport(
-            "mooncake", "cpu", host="127.0.0.1", protocol=self.protocol
-        )
-        self.addCleanup(third.close)
+        third = self._new_transport()
         self.assertEqual(first.connect(third.bind()), 0)
         source = torch.arange(64, dtype=torch.uint8)
         view = first.register_memory(source).to_view()
@@ -589,6 +784,30 @@ class TestMooncakeTransportIntegration(TransportTestMixin, TestCase):
         self.assertEqual(targets[1][:32], source[32:])
         self.assertEqual(targets[0][:16].count_nonzero(), 0)
         self.assertEqual(targets[1][32:].count_nonzero(), 0)
+
+    def test_file_storage(self):
+        transport = self._new_transport()
+        if not transport._tent:
+            self.skipTest("set MC_USE_TENT=1")
+        size = 1 << 20
+        with tempfile.NamedTemporaryFile() as file:
+            os.ftruncate(file.fileno(), size)
+            source = torch.arange(size // 4, dtype=torch.int32)
+            destination = torch.zeros_like(source)
+            source_view = transport.register_memory(source).to_view()
+            destination_view = transport.register_memory(destination).to_mutable_view()
+            storage = transport.register_storage("FILE", file.name, size)
+            remote = storage.to_remote_buffer()
+            half = size // 2
+            transport.write(source_view.slice(0, half), remote.slice(half, half))
+            transport.write(source_view.slice(half, half), remote.slice(0, half))
+            transport.read(destination_view.slice(0, half), remote.slice(half, half))
+            transport.read(destination_view.slice(half, half), remote.slice(0, half))
+            self.assertEqual(destination, source)
+            self.assertEqual(
+                os.pread(file.fileno(), 16, half), source[:4].numpy().tobytes()
+            )
+            transport.unregister_memory(storage)
 
 
 if __name__ == "__main__":
