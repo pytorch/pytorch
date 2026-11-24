@@ -1,5 +1,5 @@
-#include <ATen/native/CPUBlas.h>
 #include <ATen/cpu/Utils.h>
+#include <ATen/native/CPUBlas.h>
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
@@ -615,7 +615,7 @@ torch_get_num_threads(uint32_t* out_num_threads) {
       { *out_num_threads = static_cast<uint32_t>(at::get_num_threads()); });
 }
 
-static AOTITorchError get_cpu_capabilities_value_int(
+static inline AOTITorchError get_cpu_capabilities_value_int(
     const char* key,
     int64_t* ret_size) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -625,11 +625,13 @@ static AOTITorchError get_cpu_capabilities_value_int(
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_get_l1d_cache_size(int64_t* ret_size) {
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpu_get_l1d_cache_size(int64_t* ret_size) {
   return get_cpu_capabilities_value_int("l1d_cache_size", ret_size);
 }
 
-AOTI_TORCH_EXPORT AOTITorchError torch_get_l2_cache_size(int64_t* ret_size) {
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpu_get_l2_cache_size(int64_t* ret_size) {
   return get_cpu_capabilities_value_int("l2_cache_size", ret_size);
 }
 
