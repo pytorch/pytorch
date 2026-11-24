@@ -524,7 +524,7 @@ class TestComplexTensorGeneric(TestCase):
     # These ops are force-tested, so `TestComplexBwdGradients` doesn't cover them. Their
     # backward formulas need `div_` (`eig`), `tril_` (`householder_product`) and
     # `lu_unpack` (`lu_factor_ex`, `lu_solve`).
-    @parametrize("op", ["eig", "lu_factor_ex", "lu_solve"])
+    @parametrize("op", ["eig", "householder_product", "lu_factor_ex", "lu_solve"])
     def test_linalg_backward_matches_native(self, op: str):
         from torch._subclasses.complex_tensor import ComplexTensor
 
@@ -532,6 +532,11 @@ class TestComplexTensorGeneric(TestCase):
             # Eigenvectors are only defined up to a phase, so use their magnitudes.
             eigenvalues, eigenvectors = torch.linalg.eig(a)
             return eigenvalues, eigenvectors.abs()
+
+        def householder_product(
+            a: torch.Tensor, tau: torch.Tensor
+        ) -> tuple[torch.Tensor, ...]:
+            return (torch.linalg.householder_product(a, tau),)
 
         def lu_factor_ex(a: torch.Tensor) -> tuple[torch.Tensor, ...]:
             return (torch.linalg.lu_factor_ex(a).LU,)
@@ -542,6 +547,7 @@ class TestComplexTensorGeneric(TestCase):
 
         fn, shapes = {
             "eig": (eig, [(3, 3)]),
+            "householder_product": (householder_product, [(2, 4, 3), (2, 2)]),
             "lu_factor_ex": (lu_factor_ex, [(3, 3)]),
             "lu_solve": (lu_solve, [(3, 3), (3, 2)]),
         }[op]
@@ -558,22 +564,33 @@ class TestComplexTensorGeneric(TestCase):
         for a, e in zip(actual, expected, strict=True):
             self.assertEqual(a, e)
 
-    def test_householder_product_backward_runs(self):
-        from torch._subclasses.complex_tensor import ComplexTensor
+    @parametrize("a_interleaved", [False, True])
+    def test_interleaved_householder_product_backward(self, a_interleaved: bool):
+        from torch._subclasses.complex_tensor import (
+            ComplexTensor,
+            InterleavedComplexTensor,
+        )
 
-        # The gradient values are wrong for now: the backward writes through views of
-        # intermediates, which don't alias for `ComplexTensor`. Check it doesn't raise.
-        a = ComplexTensor.from_interleaved(
-            torch.randn(4, 3, dtype=torch.complex128)
-        ).requires_grad_()
-        tau = ComplexTensor.from_interleaved(
-            torch.randn(2, dtype=torch.complex128)
-        ).requires_grad_()
-        out = torch.linalg.householder_product(a, tau)
-        grad_a, grad_tau = torch.autograd.grad((out.abs() ** 2).sum(), (a, tau))
+        a = torch.randn(4, 3, dtype=torch.complex128)
+        tau = torch.randn(2, dtype=torch.complex128)
+        grad = torch.randn(4, 3, dtype=torch.complex128)
+        ar, taur = a.clone().requires_grad_(), tau.clone().requires_grad_()
+        expected = torch.autograd.grad(
+            torch.linalg.householder_product(ar, taur), (ar, taur), grad
+        )
 
-        self.assertEqual(grad_a.shape, a.shape)
-        self.assertEqual(grad_tau.shape, tau.shape)
+        xa = (
+            InterleavedComplexTensor(a)
+            if a_interleaved
+            else ComplexTensor.from_interleaved(a)
+        ).requires_grad_()
+        xtau = InterleavedComplexTensor(tau).requires_grad_()
+        out = torch.linalg.householder_product(xa, xtau)
+        actual = torch.autograd.grad(out, (xa, xtau), InterleavedComplexTensor(grad))
+
+        self.assertIsInstance(actual[1], InterleavedComplexTensor)
+        for x, e in zip(actual, expected, strict=True):
+            self.assertEqual(x.as_interleaved(), e)
 
     def test_interleaved_views_input(self):
         from torch._subclasses.complex_tensor import InterleavedComplexTensor
