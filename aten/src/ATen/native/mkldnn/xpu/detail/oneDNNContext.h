@@ -18,10 +18,25 @@ dnnl::memory make_onednn_memory(
     dnnl::engine& engine,
     void* ptr);
 
-TORCH_XPU_API dnnl::memory make_onednn_memory(
+// Overload for Input-only arguments(see uxlfoundation/oneDNN#4843).
+inline dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    const void* ptr);
+    const void* ptr) {
+  TORCH_CHECK(
+      ptr != nullptr || md.get_size() == 0,
+      "make_onednn_memory: null pointer passed for Input-only argument");
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return make_onednn_memory(md, engine, const_cast<void*>(ptr));
+}
+
+// This version is used for grouped matmul.
+// see https://uxlfoundation.github.io/oneDNN/dev_guide_grouped_mem.html
+dnnl::memory make_onednn_grouped_memory(
+    dnnl::memory::desc md,
+    dnnl::engine& engine,
+    void* ptr,
+    void* offs_ptr);
 
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
@@ -61,15 +76,25 @@ struct GpuStreamManager {
   dnnl::stream& get_stream(
       DeviceIndex device_index = c10::xpu::current_device()) {
     auto stream = c10::xpu::getCurrentXPUStream(device_index);
-    auto priority = stream.priority();
-    if (stream_pool[device_index][priority].find(stream) ==
-        stream_pool[device_index][priority].end()) {
-      stream_pool[device_index][priority][stream] =
+    // A lower priority has a larger priority number, so the lowest priority
+    // maps to index 0. See Note [XPU Stream priorities].
+    const auto lowest_priority =
+        std::get<0>(c10::xpu::XPUStream::priority_range());
+    const auto priority_idx = lowest_priority - stream.priority();
+    TORCH_CHECK(
+        priority_idx >= 0 &&
+            priority_idx < c10::xpu::max_compile_time_stream_priorities,
+        "Unsupported XPU stream priority: ",
+        stream.priority());
+
+    auto& pool = stream_pool[device_index][priority_idx];
+    if (pool.find(stream) == pool.end()) {
+      pool[stream] =
           std::make_shared<dnnl::stream>(dnnl::sycl_interop::make_stream(
               GpuEngineManager::Instance().get_engine(device_index),
               stream.queue()));
     }
-    return *stream_pool[device_index][priority][stream];
+    return *pool[stream];
   }
 
   GpuStreamManager(GpuStreamManager const&) = delete;

@@ -12,8 +12,8 @@ import tempfile
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeGuard
-from typing_extensions import final, override, Self
+from typing import final, Self, TYPE_CHECKING, TypeGuard
+from typing_extensions import override
 
 import torch._inductor.async_compile
 import torch.fx
@@ -26,7 +26,7 @@ from torch._inductor.output_code import (
     OutputCode,
 )
 from torch._inductor.utils import patch_subprocess_env
-from torch._subclasses import FakeTensorMode
+from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -46,25 +46,19 @@ if TYPE_CHECKING:
     from torch.fx import GraphModule
 
 
-def _graph_contains_triton_kernel_wrappers(gm: GraphModule) -> bool:
+def _graph_contains_user_kernel_wrappers(gm: GraphModule) -> bool:
     """
-    Check if the graph contains triton kernel wrapper nodes. These nodes contain
-    references to the kernel_side_table which is process-local and can't be
-    serialized across processes.
+    Check if the graph contains user-kernel wrapper nodes (triton_kernel_wrapper_*,
+    ...). These nodes contain references to a kernel side table which is
+    process-local and can't be serialized across processes.
     """
-    from torch._higher_order_ops.triton_kernel_wrap import (
-        triton_kernel_wrapper_functional,
-        triton_kernel_wrapper_mutation,
-    )
+    from torch._higher_order_ops.user_kernel_hop import get_user_kernel_hop_info
 
     for module in gm.modules():
         if not isinstance(module, torch.fx.GraphModule):
             continue
         for node in module.graph.nodes:
-            if node.target in (
-                triton_kernel_wrapper_functional,
-                triton_kernel_wrapper_mutation,
-            ):
+            if get_user_kernel_hop_info(node.target) is not None:
                 return True
     return False
 
@@ -191,12 +185,14 @@ class _LoweringSerializerContextManager(contextlib.ExitStack):
 class _FakeTensorModeSerializer:
     allow_non_fake_inputs: bool
 
-    def __init__(self, fake_mode: FakeTensorMode) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode) -> None:
         self.allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
         self.shape_env = fake_mode.shape_env
 
     @contextlib.contextmanager
-    def patch(self, fake_mode: FakeTensorMode) -> Generator[None, None, None]:
+    def patch(
+        self, fake_mode: FakeTensorMode | CppFakeTensorMode
+    ) -> Generator[None, None, None]:
         saved_allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
         fake_mode.allow_non_fake_inputs = self.allow_non_fake_inputs
 
@@ -240,7 +236,7 @@ class _WireProtocolInput:
         return _WireProtocolPickledInput(GraphPickler.dumps(self))
 
 
-def _current_fake_mode() -> FakeTensorMode:
+def _current_fake_mode() -> FakeTensorMode | CppFakeTensorMode:
     fake_mode = None
     if context := torch._guards.TracingContext.try_get():
         fake_mode = context.fake_mode
@@ -489,11 +485,11 @@ class _SerializedFxCompile(FxCompile):
             log.debug("Skipping %s compile: %s", type(self), e)
             return None
 
-        # Triton kernel wrapper nodes contain references to the kernel_side_table
+        # User-kernel wrapper nodes contain references to a kernel side table
         # which is process-local and can't be serialized across processes.
-        if _graph_contains_triton_kernel_wrappers(gm):
+        if _graph_contains_user_kernel_wrappers(gm):
             log.debug(
-                "Skipping %s compile: graph contains triton kernel wrappers", type(self)
+                "Skipping %s compile: graph contains user kernel wrappers", type(self)
             )
             return None
 

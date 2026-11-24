@@ -25,7 +25,7 @@ from torch._inductor.codegen.mps_device_op_overrides import MPSDeviceOpOverrides
 from torch._inductor.codegen.mtia.device_op_overrides import MTIADeviceOpOverrides
 from torch._inductor.codegen.xpu.device_op_overrides import XPUDeviceOpOverrides
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer
+from torch._inductor.utils import DualIndentedBuffer, IndentedBuffer, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -109,6 +109,57 @@ def _register_fbcode_cpp_wrapper_arg_helper_op(m, device):
 
 class TestGpuWrapper(InductorTestCase):
     device = GPU_TYPE
+
+    @parametrize("empty_middle", [False, True])
+    def test_nested_tensor_list_fallback(self, empty_middle):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        with torch.library._scoped_library("gpu_nested_fallback", "FRAGMENT") as lib:
+            torch.library.define(
+                "gpu_nested_fallback::lists",
+                "(Tensor x) -> (Tensor[], Tensor[], Tensor[])",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "gpu_nested_fallback::lists", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("gpu_nested_fallback::lists", lib=lib)
+            def lists(x):
+                return [x + 1, x * 2], [] if empty_middle else [x - 3], [x.square()]
+
+            class Model(torch.nn.Module):
+                def forward(self, x):
+                    first, middle, last = torch.ops.gpu_nested_fallback.lists(x.sin())
+                    result = first[0] * first[1] + last[0]
+                    if not empty_middle:
+                        result = result + middle[0]
+                    return result
+
+            model = Model()
+            compiled = torch.compile(
+                model,
+                fullgraph=True,
+                dynamic=True,
+                options={
+                    "cpp_wrapper": True,
+                    "triton.autotune_at_compile_time": False,
+                },
+            )
+            x = torch.randn(4, 16, device=self.device)
+            actual, code = run_and_get_code(compiled, x)
+            self.assertEqual(actual, model(x))
+            code = "\n".join(code)
+            self.assertIn('findSchemaOrThrow("gpu_nested_fallback::lists", "")', code)
+            self.assertIn(".callBoxed(", code)
+            self.assertIn(".toTensorList()", code)
+            self.assertNotIn("custom_op_wrapper", code)
+            self.assertNotIn("PyObject_CallObject", code)
+            for batch in (7, 12):
+                x = torch.randn(batch, 16, device=self.device)
+                self.assertEqual(compiled(x), model(x))
 
     def test_cpp_wrapper_compile_timing_recorded(self):
         if not RUN_GPU:
@@ -405,6 +456,9 @@ class TestGpuWrapper(InductorTestCase):
             _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
         self.assertIn("torch.tensor(arg, device='cpu')", code)
 
+    @unittest.skipIf(
+        not config.is_fbcode(), "fbcode-only cpp_wrapper symbol visibility test"
+    )
     @config.patch(implicit_fallbacks=True)
     def test_fbcode_custom_op_fallback_python_arg_helpers(self):
         if not RUN_GPU:
@@ -500,6 +554,7 @@ class TestGpuWrapper(InductorTestCase):
         self.assertIn("aoti_custom_ops::forward_maybe_weighted", code)
         self.assertIn("c10::IValue(at::Tensor())", code)
 
+    @unittest.skipIf(torch.version.hip is not None, "requires CUDA TMA helpers")
     @skipIfXpu(msg="tests CUDA TMA helper codegen")
     def test_tma_descriptor_separates_global_and_kernel_shapes(self):
         if torch.version.hip is not None:
@@ -678,6 +733,7 @@ class TestGpuWrapper(InductorTestCase):
                 return supports_pdl
 
         class FakeWrapper:
+            device = "cuda"  # production wrappers always carry .device (see _generate_lazy_scratch)
             device_codegen = FakeDeviceCodegen()
 
             @staticmethod
@@ -1006,7 +1062,10 @@ class TestLazyCompileKernelCollision(InductorTestCase):
         if not RUN_GPU:
             self.skipTest("GPU not available")
 
-        with tempfile.TemporaryDirectory() as cache_dir:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Keep the cache off the subprocess's sys.path: `python -c` puts its
+            # cwd first, and a cache subdir such as "z3/" would shadow that module.
+            cache_dir = os.path.join(tmp_dir, "inductor_cache")
             env = {
                 **os.environ,
                 "TORCHINDUCTOR_CACHE_DIR": cache_dir,
@@ -1016,7 +1075,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             r1 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
                 capture_output=True,
-                cwd=cache_dir,
+                cwd=tmp_dir,
                 text=True,
                 env=env,
             )
@@ -1029,7 +1088,7 @@ class TestLazyCompileKernelCollision(InductorTestCase):
             r2 = subprocess.run(
                 [sys.executable, "-c", _LAZY_COMPILE_COLLISION_SCRIPT],
                 capture_output=True,
-                cwd=cache_dir,
+                cwd=tmp_dir,
                 text=True,
                 env=env,
             )
@@ -1076,7 +1135,9 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
         if not RUN_GPU:
             self.skipTest("GPU not available")
 
-        with tempfile.TemporaryDirectory() as cache_dir:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Keep the cache off sys.path; see the collision test above.
+            cache_dir = os.path.join(tmp_dir, "inductor_cache")
             env = {
                 **os.environ,
                 "TORCHINDUCTOR_CACHE_DIR": cache_dir,
@@ -1085,7 +1146,7 @@ class TestCppWrapperStaticInitDeadlock(InductorTestCase):
                 r = subprocess.run(
                     [sys.executable, "-c", _STATIC_INIT_DEADLOCK_SCRIPT],
                     capture_output=True,
-                    cwd=cache_dir,
+                    cwd=tmp_dir,
                     text=True,
                     env=env,
                     timeout=60,
@@ -1207,6 +1268,9 @@ run()
 class TestLazyTmaGlobalScratch(InductorTestCase):
     device = GPU_TYPE
 
+    @unittest.skipIf(
+        GPU_TYPE not in ("cuda", "xpu") or torch.version.hip, "requires CUDA or XPU"
+    )
     def test_lazy_tma_global_scratch_scales_with_launch_grid(self):
         if not RUN_GPU:
             self.skipTest("GPU not available")
@@ -1217,8 +1281,11 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
         if not has_triton_tensor_descriptor_host_tma():
             self.skipTest("requires Triton TensorDescriptor TMA support")
 
-        with tempfile.TemporaryDirectory() as cache_dir:
-            script_path = Path(cache_dir) / "lazy_tma_global_scratch_repro.py"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # The script's directory is first on sys.path, so keep the cache in a
+            # subdir; see TestLazyCompileKernelCollision.
+            cache_dir = os.path.join(tmp_dir, "inductor_cache")
+            script_path = Path(tmp_dir) / "lazy_tma_global_scratch_repro.py"
             script_path.write_text(_LAZY_TMA_GLOBAL_SCRATCH_SCRIPT, encoding="utf-8")
             env = {
                 **os.environ,
@@ -1228,7 +1295,7 @@ class TestLazyTmaGlobalScratch(InductorTestCase):
             result = subprocess.run(
                 [sys.executable, str(script_path)],
                 capture_output=True,
-                cwd=cache_dir,
+                cwd=tmp_dir,
                 text=True,
                 env=env,
                 timeout=180,

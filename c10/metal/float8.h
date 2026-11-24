@@ -45,6 +45,32 @@ inline uchar fp8e4m3fn_from_fp32(float value) {
   return result | static_cast<uchar>(sign >> 24);
 }
 
+// 0 decodes to 2^-127 and 0xff to NaN; there is no sign, zero or infinity.
+inline float fp8e8m0fnu_to_fp32(uchar input) {
+  if (input == 0) {
+    return as_type<float>(0x00400000u);
+  }
+  if (input == 0xff) {
+    return as_type<float>(0x7f800001u);
+  }
+  return as_type<float>(uint(input) << 23);
+}
+
+// Keeps the exponent of |value|, rounding the mantissa to nearest even; NaN and
+// infinity map to NaN.
+inline uchar fp8e8m0fnu_from_fp32(float value) {
+  const uint bits = as_type<uint>(value);
+  uint exponent = (bits >> 23) & 0xff;
+  if (exponent == 0xff) {
+    return exponent;
+  }
+  const bool guard = bits & 0x400000;
+  const bool round = bits & 0x200000;
+  const bool sticky = bits & 0x1fffff;
+  const bool lsb = exponent > 0;
+  return exponent + (guard && (round || sticky || lsb));
+}
+
 } // namespace detail
 
 struct alignas(1) float8_e4m3fn {
@@ -57,8 +83,19 @@ struct alignas(1) float8_e4m3fn {
   }
 };
 
+struct alignas(1) float8_e8m0fnu {
+  uchar x;
+  float8_e8m0fnu() = default;
+  template <typename T>
+  float8_e8m0fnu(T value) : x(detail::fp8e8m0fnu_from_fp32(float(value))) {}
+  operator float() const {
+    return detail::fp8e8m0fnu_to_fp32(x);
+  }
+};
+
 template <typename T>
-constexpr constant bool is_float8_v = ::metal::is_same_v<T, float8_e4m3fn>;
+constexpr constant bool is_float8_v = ::metal::is_same_v<T, float8_e4m3fn> ||
+    ::metal::is_same_v<T, float8_e8m0fnu>;
 
 } // namespace metal
 } // namespace c10
