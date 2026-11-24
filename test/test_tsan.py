@@ -60,6 +60,9 @@ class TestTSan(TestCase):
     def test_concurrent_generator_wrap(self):
         # Concurrently wrapping one generator while its cached Python wrapper is
         # repeatedly deallocated exercises the GeneratorImpl PyObject cache.
+        # We reuse dispatcher machinery here to get the native Generator back
+        # into a Python object, thereby calling THPGenerator_Wrap() to execute
+        # the cache machinery.
         with torch.library._scoped_library("_tsan_generator", "FRAGMENT") as lib:
             lib.define("identity(Generator g) -> Generator")
             lib.impl("identity", lambda g: g, "CompositeExplicitAutograd")
@@ -67,6 +70,7 @@ class TestTSan(TestCase):
             gen = torch.Generator().manual_seed(1234)
 
             def rewrap():
+                # Repeatedly acquire and release Generator Python wrapper references.
                 for _ in range(500):
                     self.assertEqual(identity(gen).initial_seed(), 1234)
 
