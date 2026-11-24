@@ -82,7 +82,7 @@ which will handle all the rough edges of the C API for the user.
 NumPy scalar acceptance additionally depends on the runtime build's NumPy
 support and on the corresponding unpack operation succeeding.
 
-`from_pyobject<T>` / `to_pyobject` (2.16+) are generic forms of the
+`from_pyobject<T>` / `to_pyobject` are generic forms of the
 conversions above, for any `T` they support, and compose them:
 `std::optional<T>` maps Python `None` to `std::nullopt` and converts any other
 object as `T`. A null `PyObject*` is an error, not `None`. `std::vector<T>` is
