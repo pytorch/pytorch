@@ -1687,7 +1687,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @parametrize("num_kv_heads", [8, 2])
     @parametrize("paged", [False, True])
     @parametrize("window_size", [(-1, -1), (-1, 0)])
-    @parametrize("head_dim", [64, 128, 256])
+    @parametrize("head_dim", [32, 64, 96, 128, 160, 192, 224, 256])
     def test_fa2_decode_batch_invariance(
         self, device, dtype, num_kv_heads, paged, window_size, head_dim
     ):
@@ -1697,52 +1697,26 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         with paged KV), so the KV tiles must match at every head dim. Head dim 128 is
         where the standard kernel's KV tile depends on causality (sm86/sm89)."""
         torch.manual_seed(42)
-        num_heads, page_size = 8, 256
+        num_heads = 8
         decode_kv_lens = [300, 1, 520]
         kv_lens = [*decode_kv_lens, 200]
         q_lens = [1, 1, 1, 200]
         num_decode = len(decode_kv_lens)
-
         q = torch.randn(sum(q_lens), num_heads, head_dim, device=device, dtype=dtype)
-        if paged:
-            pages_per_seq = (max(kv_lens) + page_size - 1) // page_size
-            k = torch.randn(
-                len(kv_lens) * pages_per_seq,
-                page_size,
-                num_kv_heads,
-                head_dim,
-                device=device,
-                dtype=dtype,
-            )
-            block_table = torch.randperm(
-                k.size(0), device=device, dtype=torch.int32
-            ).view(len(kv_lens), pages_per_seq)
-            seqused_k = torch.tensor(kv_lens, device=device, dtype=torch.int32)
-        else:
-            k = torch.randn(
-                sum(kv_lens), num_kv_heads, head_dim, device=device, dtype=dtype
-            )
-        v = torch.randn_like(k)
+        kv = make_decode_kv(
+            kv_lens, num_kv_heads, head_dim, paged=paged, device=device, dtype=dtype
+        )
 
         def run(num_seqs):
             """Attention for the first ``num_seqs`` sequences."""
-            kwargs = {}
-            if paged:
-                max_k = pages_per_seq * page_size
-                # FA2 needs cu_seq_k for paged KV: each sequence spans its whole page row.
-                cu_seq_k = torch.arange(
-                    0, (num_seqs + 1) * max_k, max_k, device=device, dtype=torch.int32
-                )
-                kwargs = {
-                    "seqused_k": seqused_k[:num_seqs],
-                    "block_table": block_table[:num_seqs],
-                }
-                key, value = k, v
-            else:
-                max_k = max(kv_lens[:num_seqs])
-                cu_seq_k = make_cu_seq(kv_lens[:num_seqs], device)
-                key, value = k[: cu_seq_k[-1]], v[: cu_seq_k[-1]]
             cu_seq_q = make_cu_seq(q_lens[:num_seqs], device)
+            cu_seq_k = kv.cu_seq_k[: num_seqs + 1]
+            if paged:
+                key, value, max_k = kv.k, kv.v, kv.max_k
+                kwargs = {name: t[:num_seqs] for name, t in kv.kwargs.items()}
+            else:
+                key, value = kv.k[: cu_seq_k[-1]], kv.v[: cu_seq_k[-1]]
+                max_k, kwargs = max(kv_lens[:num_seqs]), {}
             with _use_backend("fa2"), torch.no_grad():
                 return varlen_attn(
                     q[: cu_seq_q[-1]],
@@ -1811,7 +1785,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             varlen_attn_out(out, *args, num_splits=2, **paged_kwargs)
             expected = varlen_attn(*args, num_splits=1, **paged_kwargs)
         self.assertEqual(out, expected)
-        self.assertTrue((buffer[q_len:] == sentinel).all())
+        self.assertEqual(buffer[q_len:], torch.full_like(buffer[q_len:], sentinel))
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

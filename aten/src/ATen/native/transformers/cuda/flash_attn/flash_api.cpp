@@ -812,8 +812,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     params.page_block_size = page_block_size;
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
-    // Every packed call may split, causal or not, as on main; force_split_kernel only decides
-    // which kernel runs a single split.
+    // Every packed call may split, causal or not; force_split_kernel only decides which kernel
+    // runs a single split.
     if (paged_KV || seqlenq_ngroups_swapped) {
         // Split-KV's combine kernel ignores cu_seqlens_q: it writes max_seqlen_q rows per sequence
         // at batch_idx * o_batch_stride, and a varlen q has no batch stride. Several sequences

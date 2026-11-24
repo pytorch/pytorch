@@ -415,8 +415,8 @@ def varlen_attn(
             regardless of what other sequences are in the batch, at the
             cost of lower GPU utilization when there are few queries. When
             ``None`` (default), the kernel chooses automatically. FA2 honors
-            ``num_splits`` only for GQA calls it packs (one query token in every
-            sequence, ``window_size`` ``(-1, -1)`` or ``(-1, 0)``, no dropout) and
+            ``num_splits`` only for GQA calls it packs (``max_q == 1`` and one query
+            token in every sequence, ``window_size`` ``(-1, -1)`` or ``(-1, 0)``) and
             for paged KV with a single sequence of ``max_q`` query tokens; it runs
             one split for all other calls.
 
