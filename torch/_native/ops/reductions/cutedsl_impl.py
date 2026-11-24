@@ -195,13 +195,11 @@ def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
     if out_kd is None:
         return False
     # TensorIterator takes its outputs' mutable data pointers, which would materialize
-    # a copy-on-write out, so probe those (and subclasses, where _is_cow_tensor raises)
-    # with a fresh tensor of out's geometry. Others probe as is: a fresh tensor would
-    # allocate out's whole strided span.
-    probe = out_kd
+    # a copy-on-write out, so ATen serves those. It serves subclasses too, since
+    # _is_cow_tensor raises on Python-key tensors.
     if type(out_kd) is not torch.Tensor or torch._C._is_cow_tensor(out_kd):
-        probe = out_kd.new_empty_strided(out_kd.shape, out_kd.stride())
-    return _eligibility(self, d, probe) is not None
+        return False
+    return _eligibility(self, d, out_kd) is not None
 
 
 def _sum_into():
