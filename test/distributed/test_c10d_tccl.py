@@ -913,6 +913,29 @@ class ProcessGroupTcclContractTest(TcclTestBase):
 
     hw_classification = HardwareClassification.MPS
 
+    def test_empty_tensors_are_noops(self):
+        # A zero-element tensor has no MPS buffer; every collective must return
+        # at once without touching one.
+        dev, ws = self.device, self.world_size
+        e = torch.zeros(0, device=dev)
+        c10d.all_reduce(e)
+        c10d.reduce(e, dst=0)
+        c10d.broadcast(e, src=0)
+        c10d.all_gather([torch.zeros(0, device=dev) for _ in range(ws)], e)
+        c10d.all_gather_into_tensor(torch.zeros(0, device=dev), e)
+        c10d.reduce_scatter_tensor(torch.zeros(0, device=dev), e)
+        c10d.all_to_all_single(torch.zeros(0, device=dev), e)
+        parts = [torch.zeros(0, device=dev) for _ in range(ws)]
+        if not _ring_topology():  # gather/scatter are mesh-only
+            c10d.gather(e, parts if self.rank == 0 else None, dst=0)
+            c10d.scatter(e, parts if self.rank == 0 else None, src=0)
+        c10d.reduce_scatter(e, parts)
+        if self.rank == 0:
+            c10d.send(e, dst=1)
+        elif self.rank == 1:
+            c10d.recv(e, src=0)
+        self.assertEqual(e.numel(), 0)
+
     def test_avg_integer_rejects(self):
         # AVG is float-only (matches NCCL); integer AVG must raise.
         t = self._full(torch.int32)

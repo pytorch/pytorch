@@ -38,6 +38,12 @@ namespace {
 // pointer, NOT data_ptr() - on MPS data_ptr() folds storage_offset into
 // MTLBuffer arithmetic, unmappable for offset views (e.g. _allgather_base).
 at::Tensor mpsSharedCpuView(const at::Tensor& mpsTensor) {
+  // A zero-element MPS tensor has no buffer at all; there is nothing to view.
+  if (mpsTensor.numel() == 0) {
+    return at::empty(
+        mpsTensor.sizes(),
+        at::TensorOptions().dtype(mpsTensor.dtype()).device(at::kCPU));
+  }
   auto* allocator = at::mps::getIMPSAllocator();
   const void* storage_ptr = mpsTensor.storage().data_ptr().get();
   // Pair is {cpu_ptr, retain_count}; only the pointer is used here.

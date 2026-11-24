@@ -446,6 +446,9 @@ void TCCLEngine::all_reduce(
     T* data,
     std::size_t count,
     ReduceOp reduce_op) {
+  if (count == 0) {
+    return;
+  }
   TORCH_CHECK_WITH(
       DistBackendError,
       data != nullptr,
@@ -801,6 +804,9 @@ void TCCLEngine::ring_all_reduce(
     T* data,
     std::size_t count,
     ReduceOp reduce_op) {
+  if (count == 0) {
+    return;
+  }
   TORCH_CHECK_WITH(
       DistBackendError,
       data != nullptr,
@@ -913,6 +919,9 @@ inline void TCCLEngine::ring_all_gather(
     const void* in,
     const std::vector<void*>& out_ptrs,
     std::size_t per_rank_bytes) {
+  if (per_rank_bytes == 0) {
+    return;
+  }
   TORCH_CHECK_WITH(
       DistBackendError, in != nullptr,
       "TCCL ring: all_gather called with null input pointer.");
@@ -975,6 +984,9 @@ void TCCLEngine::ring_reduce_scatter(
     T* out,
     std::size_t count_per_rank,
     ReduceOp reduce_op) {
+  if (count_per_rank == 0) {
+    return;
+  }
   TORCH_CHECK_WITH(
       DistBackendError,
       static_cast<int>(in_chunks.size()) == size_ && out != nullptr,
@@ -1120,6 +1132,9 @@ inline void TCCLEngine::broadcast(
     void* data,
     std::size_t total_bytes,
     int root) {
+  if (total_bytes == 0) {
+    return;
+  }
   TORCH_CHECK_WITH(
       DistBackendError,
       data != nullptr,
@@ -1160,6 +1175,9 @@ inline void TCCLEngine::all_gather(
     const void* in,
     const std::vector<void*>& out_ptrs,
     std::size_t per_rank_bytes) {
+  if (per_rank_bytes == 0) {
+    return;
+  }
   TORCH_CHECK_WITH(
       DistBackendError,
       in != nullptr,
@@ -1206,6 +1224,9 @@ inline void TCCLEngine::gather(
     const std::vector<void*>& out_ptrs,
     std::size_t per_rank_bytes,
     int root) {
+  if (per_rank_bytes == 0) {
+    return;
+  }
   TORCH_CHECK_WITH(
       DistBackendError, in != nullptr,
       "TCCL mesh: gather called with null input pointer.");
@@ -1250,6 +1271,9 @@ inline void TCCLEngine::scatter(
     void* out,
     std::size_t per_rank_bytes,
     int root) {
+  if (per_rank_bytes == 0) {
+    return;
+  }
   TORCH_CHECK_WITH(
       DistBackendError, out != nullptr,
       "TCCL mesh: scatter called with null output pointer.");
@@ -1294,6 +1318,9 @@ void TCCLEngine::reduce_scatter(
     T* out,
     std::size_t count_per_rank,
     ReduceOp reduce_op) {
+  if (count_per_rank == 0) {
+    return;
+  }
   TORCH_CHECK_WITH(
       DistBackendError,
       static_cast<int>(in_chunks.size()) == size_ && out != nullptr,
