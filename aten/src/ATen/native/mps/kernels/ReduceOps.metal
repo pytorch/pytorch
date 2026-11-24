@@ -1636,3 +1636,54 @@ INSTANTIATE_DOT_REDUCE(int);
 INSTANTIATE_DOT_REDUCE(short);
 INSTANTIATE_DOT_REDUCE(char);
 INSTANTIATE_DOT_REDUCE(uchar);
+
+template <typename OP, typename T, typename I, bool MEAN, bool PARALLEL>
+[[max_total_threads_per_threadgroup(INNER_TG_SIZE)]]
+kernel void segment_reduce(
+    device const T* input [[buffer(0)]],
+    device T* output [[buffer(1)]],
+    device const long* offsets [[buffer(2)]],
+    constant SegmentReduceParams<I>& params [[buffer(3)]],
+    uint3 tid [[thread_position_in_grid]]) {
+  const uint lane = PARALLEL ? tid.x : 0;
+  const I column = PARALLEL ? 0 : tid.x;
+  const I stride = PARALLEL ? 1 : params.inner;
+  const I row = tid.z * params.segments + tid.y;
+  const I start = static_cast<I>(offsets[row + tid.z]);
+  const I end = min(static_cast<I>(offsets[row + tid.z + 1]), params.axis_size);
+  device const T* values = input + tid.z * params.axis_size * stride + column;
+  float val = lane == 0 && params.has_initial ? params.initial : OP::identity();
+  for (I j = start + lane; j < end; j += PARALLEL ? INNER_TG_SIZE : 1) {
+    val = OP::combine(val, static_cast<float>(values[j * stride]));
+  }
+  threadgroup float shared[INNER_TG_SIZE / simdgroup_size];
+  if IF_CONSTEXPR (PARALLEL) {
+    val = OP::threadgroup_reduce(shared, val, lane, INNER_TG_SIZE);
+  }
+  if (lane == 0) {
+    if IF_CONSTEXPR (MEAN) {
+      val = end != start ? val / float(end - start)
+                         : (params.has_initial ? val : NAN);
+    }
+    output[row * stride + column] = T(val);
+  }
+}
+
+#define INSTANTIATE_SEGMENT(NAME, ...)                                    \
+  INSTANTIATE_KERNEL(NAME "_serial", segment_reduce, __VA_ARGS__, false); \
+  INSTANTIATE_KERNEL(NAME "_parallel", segment_reduce, __VA_ARGS__, true)
+
+#define INSTANTIATE_SEGMENT_IDX(T, I, SUFFIX)                               \
+  INSTANTIATE_SEGMENT("segment_max_" #T SUFFIX, MaxOp<float>, T, I, false); \
+  INSTANTIATE_SEGMENT("segment_min_" #T SUFFIX, MinOp<float>, T, I, false); \
+  INSTANTIATE_SEGMENT("segment_sum_" #T SUFFIX, SumOp<float>, T, I, false); \
+  INSTANTIATE_SEGMENT("segment_mean_" #T SUFFIX, SumOp<float>, T, I, true); \
+  INSTANTIATE_SEGMENT("segment_prod_" #T SUFFIX, ProdOp<float>, T, I, false)
+
+#define INSTANTIATE_SEGMENT_REDUCE(T)       \
+  INSTANTIATE_SEGMENT_IDX(T, uint, "_u32"); \
+  INSTANTIATE_SEGMENT_IDX(T, ulong, "_u64")
+
+INSTANTIATE_SEGMENT_REDUCE(float);
+INSTANTIATE_SEGMENT_REDUCE(half);
+INSTANTIATE_SEGMENT_REDUCE(bfloat);
