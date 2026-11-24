@@ -301,7 +301,7 @@ class AOTEagerOutputCode(OutputCode):
 
     def post_compile(self, *args: Any, **kwargs: Any) -> None:
         if self.gm is None and self._serialized_gm is not None:
-            from torch._subclasses import FakeTensorMode
+            from torch._subclasses.fake_tensor import FakeTensorMode
             from torch.fx._graph_pickler import GraphPickler
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
             from torch.fx.graph import _BoxedCodeGen

@@ -207,6 +207,7 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     frozenset.__getattribute__,
     int.__getattribute__,
     float.__getattribute__,
+    complex.__getattribute__,
     str.__getattribute__,
     list.__getattribute__,
     tuple.__getattribute__,
@@ -555,6 +556,18 @@ class SideEffects:
         mutation_kind: AttrMutationKind = AttrMutationKind.GENERIC_SETATTR,
         mutated_source: Source | None = None,
     ) -> None:
+        output_graph = self.output_graph_weakref()
+        if (
+            output_graph is not None
+            and output_graph.deleted_globals_by_dict
+            and not isinstance(value, variables.DeletedVariable)
+            and isinstance(item, variables.PythonModuleVariable)
+            and not self.has_pending_mutation_of_attr(item, name)
+        ):
+            # No pending on the module VT: the replayed delete races this
+            # write. With one (e.g. an inlined delete), the setattr chain
+            # orders them.
+            output_graph.check_deleted_global_access(item.value.__dict__, name)
         if not self.is_attribute_mutation(item):
             raise AssertionError(
                 f"Expected attribute mutation for {item} in store_attr"
@@ -874,7 +887,7 @@ class SideEffects:
             user_cls,
             variables.user_defined._CONSTANT_BASE_TYPES,
         ):
-            variable_cls = variables.UserDefinedConstantVariable
+            variable_cls = variables.UserDefinedConstantVariable.cls_for(user_cls)
         elif variables.InspectVariable.is_matching_class(user_cls):
             variable_cls = variables.InspectVariable
         elif variables.SimpleNamespaceVariable.is_matching_cls(user_cls):
@@ -896,12 +909,11 @@ class SideEffects:
             # TODO(anijain2305) - Is it possible to remove this specialization?
             obj = nn_module_new(user_cls)
         else:
+            base_cls: Any
             if isinstance(base_cls_vt, variables.BuiltinVariable):
                 base_cls = base_cls_vt.fn
-            elif isinstance(base_cls_vt, variables.DictBuiltinVariable):
-                base_cls = dict
-            elif isinstance(base_cls_vt, variables.ListBuiltinVariable):
-                base_cls = list
+            elif isinstance(base_cls_vt, variables.TypeVariable):
+                base_cls = base_cls_vt._fn
             elif isinstance(base_cls_vt, variables.UserDefinedClassVariable):
                 base_cls = base_cls_vt.value
             else:
@@ -1010,6 +1022,10 @@ class SideEffects:
         return variable
 
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
+        # Re-tracks are keyed by object identity and return the vt the first
+        # call built; the source of a later call is not honored.
+        if id(item) in self.id_to_variable:
+            return self.id_to_variable[id(item)]
         variable = variables.NewGlobalVariable.create(source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
@@ -2032,15 +2048,28 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     for name, value in reversed(side_effects.store_attr_mutations.get(var, {}).items()):
         mutation_kind = side_effects.get_attr_mutation_kind(var, name)
         if isinstance(var, variables.NewGlobalVariable):
-            cg.tx.output.update_co_names(name)
-            cg(value)
             if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
                 raise AssertionError(
                     f"Expected GlobalSource for NewGlobalVariable, "
                     f"got {type(var.source)}"  # type: ignore[attr-defined]
                 )
-            ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
-            side_effect_occurred = True
+            if isinstance(value, variables.DeletedVariable):
+                # TODO(3.16): CPython 3.16 compiles `del name` to PUSH_NULL;
+                # STORE_GLOBAL, so emit that pair once 3.16 is supported.
+                # Through 3.15, STORE_GLOBAL would write the null as an
+                # ordinary value into the dict, so DELETE_GLOBAL must be
+                # emitted.
+                if name in cg.tx.output.global_scope:
+                    cg.tx.output.update_co_names(name)
+                    ctx.suffixes.append(
+                        [create_instruction("DELETE_GLOBAL", argval=name)]
+                    )
+                    side_effect_occurred = True
+            else:
+                cg.tx.output.update_co_names(name)
+                cg(value)
+                ctx.suffixes.append([create_instruction("STORE_GLOBAL", argval=name)])
+                side_effect_occurred = True
         elif isinstance(value, variables.DeletedVariable):
             if isinstance(var, variables.CellVariable):
                 # Cells created during inlining (no local_name) are rebuilt via
@@ -2082,7 +2111,10 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
             # DELETE_ATTR path below so descriptor semantics are preserved
             # during replay.
             elif isinstance(var.mutation_type, AttributeMutationExisting) and hasattr(
-                getattr(var, "value", None), name
+                var.value
+                if hasattr(var, "value")
+                else var.get_real_python_backed_value(),
+                name,
             ):
                 cg.tx.output.update_co_names(name)
                 cg(var.source)
