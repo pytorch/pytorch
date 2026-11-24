@@ -2527,10 +2527,10 @@ test_vec_all_types() {
   # Runs vec_test_all_types, built once per CPU capability, for each capability
   # that dispatch can pick on this CPU.
   echo "Testing vectorized types (vec_test_all_types) for the CPU capabilities that dispatch can pick"
-  # The CPU's capability, not an ATEN_CPU_CAPABILITY override. Probe outside
-  # build/bin: test_aten symlinks libtorch* there, which an empty
-  # LD_LIBRARY_PATH entry (ROCm) makes torch load without libshm.
-  cpu_capability=$(env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
+  # The CPU's capability, not an ATEN_CPU_CAPABILITY override. Probe from test/:
+  # the repo root shadows the installed torch, and on ROCm an empty
+  # LD_LIBRARY_PATH entry makes build/bin's libtorch* symlinks miss libshm.
+  cpu_capability=$(cd test && env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
   pushd build/bin
   vec_all_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
   # Unlike most tests, deliberately run every binary and report their failures
