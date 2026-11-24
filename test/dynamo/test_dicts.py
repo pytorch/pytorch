@@ -1768,9 +1768,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
-    def test_dict_mutable_mapping_subclass_get_ignores_getitem(self):
-        # The custom __new__ makes Dynamo wrap this as a MutableMapping, not a
-        # dict. dict.get must not dispatch to the overridden __getitem__.
+    def test_dict_mutable_mapping_subclass_custom_new(self):
+        # A custom __new__ must not stop Dynamo from treating this as a dict.
+        # dict.get must not dispatch to the overridden __getitem__.
         class D(dict, MutableMapping):
             def __new__(cls, *args, **kwargs):
                 return super().__new__(cls, *args, **kwargs)
@@ -1778,13 +1778,15 @@ class DictTests(torch._dynamo.test_case.TestCase):
             def __getitem__(self, key):
                 return 100
 
-        d = D({"a": 2})
-
         def fn(x, d):
-            return x * d.get("a", 3)
+            r = x * d.get("a", 3) + len(d) + ("a" in d)
+            return r * d.setdefault("b", 4) * d.pop("a")
 
         x = torch.randn(2)
-        self.assertEqual(fn(x, d), torch.compile(fn, backend="eager")(x, d))
+        d_eager, d_compiled = D({"a": 2}), D({"a": 2})
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, d_eager), opt_fn(x, d_compiled))
+        self.assertEqual(dict.copy(d_eager), dict.copy(d_compiled))
 
     def test_dict_order_keys(self):
         def fn(d):
