@@ -2870,11 +2870,12 @@ class TestCompileOnOneRankLocalShapeAndChunks(TestCase):
 
 
 @unittest.skipIf(not dist.is_available(), "distributed not available")
+@instantiate_parametrized_tests
 class TestCompileOnOneRankPrecompile(TestCase):
-    def test_dtensor_package_loads_in_fresh_process(self):
-        # Rank 0 saves a package and rank 1 serves it without tracing, so only an
-        # import can have registered the device_mesh ops the compiled graph calls.
-        # Needs fresh processes: an op this process traced stays registered.
+    @parametrize("saved_mode", (False, True))
+    def test_dtensor_package_loads_in_fresh_process(self, saved_mode):
+        # Rank 1 must retrace a rank-specialized package, but serve a portable
+        # one without tracing (including in a process that never traced the ops).
         script = textwrap.dedent(
             """
             import sys
@@ -2887,7 +2888,8 @@ class TestCompileOnOneRankPrecompile(TestCase):
             from torch.testing._internal.distributed.fake_pg import FakeStore
 
             rank = int(sys.argv[1])
-            torch.compiler.config.compile_on_one_rank = True
+            saved_mode = bool(int(sys.argv[2]))
+            torch.compiler.config.compile_on_one_rank = saved_mode or rank == 1
             torch._dynamo.config.caching_precompile = True
             dist.init_process_group("fake", store=FakeStore(), rank=rank, world_size=2)
             mesh = init_device_mesh("cpu", (2,))
@@ -2898,7 +2900,8 @@ class TestCompileOnOneRankPrecompile(TestCase):
                 return d.redistribute(mesh, [Shard(0)]).to_local()
 
 
-            with torch.compiler.set_stance("default" if rank == 0 else "fail_on_recompile"):
+            stance = "fail_on_recompile" if rank == 1 and saved_mode else "default"
+            with torch.compiler.set_stance(stance):
                 out = torch.compile(fn, fullgraph=True)(torch.arange(4.0))
             assert out.tolist() == [[0.0, 1.0], [2.0, 3.0]][rank], out
             if rank == 0:
@@ -2917,7 +2920,7 @@ class TestCompileOnOneRankPrecompile(TestCase):
             }
             for rank, step in enumerate(("save", "load")):
                 proc = subprocess.run(
-                    [sys.executable, path, str(rank)],
+                    [sys.executable, path, str(rank), str(int(saved_mode))],
                     env=env,
                     capture_output=True,
                     text=True,

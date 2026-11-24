@@ -26,7 +26,7 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import nullcontext
 from typing import Any, IO, Never, NewType, TYPE_CHECKING, Union
 
@@ -501,6 +501,7 @@ class _GuardedCodeCacheEntry:
 
     guards_state: bytes
     dynamo_code: SerializedCode
+    compile_on_one_rank: bool = False
 
 
 class _GuardsStateUnpickler(pickle.Unpickler):
@@ -1057,6 +1058,12 @@ class _DynamoCacheEntry:
         """Check if the current system is compatible with the system used to create this cache entry."""
         current_system_info = SystemInfo.current()
         self.system_info.check_compatibility(current_system_info, self.device_type)
+        if torch.compiler.config.compile_on_one_rank and not _all_rank_portable(
+            self.codes
+        ):
+            raise RuntimeError(
+                "Compile package contains code traced without compile_on_one_rank"
+            )
 
     def debug_info(self) -> dict[str, Any]:
         if len(self.codes) == 0:
@@ -1367,11 +1374,13 @@ class CompilePackage:
     def cached_backends(self) -> dict[_BackendId, Any]:
         return self._cached_backends
 
-    @functools.cached_property
+    @property
     def source_id(self) -> str:
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set")
-        return CompilePackage.source_id_from_fn(self._innermost_fn)
+        return CompilePackage.source_id_from_fn(
+            self._innermost_fn, _all_rank_portable(self._codes.values())
+        )
 
     def _add_user_function(
         self,
@@ -1445,12 +1454,15 @@ class CompilePackage:
         self,
         guards_state: bytes,
         dynamo_code: types.CodeType,
+        *,
+        compile_on_one_rank: bool = False,
     ) -> None:
         if self._current_entry is None:
             raise AssertionError("_current_entry is not set in add_guarded_code")
         guarded_code_entry = _GuardedCodeCacheEntry(
             guards_state=guards_state,
             dynamo_code=SerializedCode.from_code_object(dynamo_code),
+            compile_on_one_rank=compile_on_one_rank,
         )
         self._current_entry.guarded_codes.append(guarded_code_entry)
         self._current_entry.bypassed = False
@@ -1774,26 +1786,49 @@ class CompilePackage:
         if self._innermost_fn is None:
             raise AssertionError("_innermost_fn is not set in cache_entry")
         return _DynamoCacheEntry(
-            codes=list(self._codes.values()),
-            source_info=self._source_info,
+            # A later recompile can record this package under a different key.
+            # Its mutable bookkeeping must not change the earlier cache entry.
+            codes=[
+                dataclasses.replace(
+                    code,
+                    guarded_codes=code.guarded_codes.copy(),
+                    backend_ids=code.backend_ids.copy(),
+                    function_names=code.function_names.copy(),
+                    import_sources=code.import_sources.copy(),
+                )
+                for code in self._codes.values()
+            ],
+            source_info=SourceInfo(self._source_info.inlined_sources.copy()),
             device_type=_collapse_device_types(self._device_types),
             fn_name=self._innermost_fn.__qualname__,
             fn_first_lineno=self._innermost_fn.__code__.co_firstlineno,
         )
 
     @staticmethod
-    def source_id_from_fn(fn: Callable[..., Any]) -> str:
+    def source_id_from_fn(
+        fn: Callable[..., Any], compile_on_one_rank: bool | None = None
+    ) -> str:
         from .eval_frame import innermost_fn
 
         innermost_fn_ = innermost_fn(fn)
+        if compile_on_one_rank is None:
+            compile_on_one_rank = torch.compiler.config.compile_on_one_rank
 
         sha256_hash = hashlib.sha256()
         sha256_hash.update(innermost_fn_.__qualname__.encode())
         sha256_hash.update(str(innermost_fn_.__code__.co_firstlineno).encode())
+        # Graphs traced without compile_on_one_rank can specialize on the rank.
+        sha256_hash.update(bytes([bool(compile_on_one_rank)]))
         return sha256_hash.hexdigest()
 
 
 _Backends = dict[_BackendId, Any]
+
+
+def _all_rank_portable(codes: Iterable[_DynamoCodeCacheEntry]) -> bool:
+    modes = (g.compile_on_one_rank for code in codes for g in code.guarded_codes)
+    # A fully bypassed package has no traced code to constrain its mode.
+    return bool(next(modes, torch.compiler.config.compile_on_one_rank)) and all(modes)
 
 
 class DynamoStore(abc.ABC):
