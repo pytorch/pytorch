@@ -15,7 +15,7 @@ _FATBIN_ELF = 2
 log = logging.getLogger(__name__)
 
 
-def compress_cuda_image(cubin: bytes, arch: str) -> bytes:
+def compress_cubin(cubin: bytes, arch: str) -> bytes:
     """Keep the cubin unchanged when a compressed CUDA image would be larger."""
     from cuda.bindings import nvfatbin
     from cuda.pathfinder import DynamicLibNotFoundError
@@ -36,7 +36,7 @@ def compress_cuda_image(cubin: bytes, arch: str) -> bytes:
         nvfatbin.destroy(handle)
 
 
-def compress_cute_module(compiled: Any, arch: str | None = None) -> None:
+def compress_cute_embedded_cubin(compiled: Any, arch: str | None = None) -> None:
     """Compress the captured cubin for an explicit arch; retain other images."""
     if arch is None:
         return
@@ -77,7 +77,7 @@ def compress_cute_module(compiled: Any, arch: str | None = None) -> None:
             ):
                 continue
             matched = True
-            compressed = compress_cuda_image(cubin, arch)
+            compressed = compress_cubin(cubin, arch)
             if len(compressed) >= len(cubin):
                 continue
             old_type = op.attributes["global_type"]
@@ -88,7 +88,7 @@ def compress_cute_module(compiled: Any, arch: str | None = None) -> None:
             op.attributes["value"] = ir.StringAttr.get(compressed)
             op.attributes["global_type"] = new_type
 
-            def update_gep(operation: Any) -> Any:
+            def update_gep_element_type(operation: Any) -> Any:
                 if (
                     operation.operation.name == "llvm.getelementptr"
                     and "elem_type" in operation.attributes
@@ -103,6 +103,6 @@ def compress_cute_module(compiled: Any, arch: str | None = None) -> None:
                         operation.attributes["elem_type"] = new_type
                 return ir.WalkResult.ADVANCE
 
-            module.operation.walk(update_gep)
+            module.operation.walk(update_gep_element_type)
     if not matched:
         log.debug("No supported CuTeDSL cubin buffer; retaining original images")

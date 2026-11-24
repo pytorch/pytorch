@@ -55,7 +55,7 @@ def _fake_cute_compile():
         seen["options"] = kwargs.get("options")
         return types.SimpleNamespace(export_to_c=lambda **kw: None)
 
-    def compress(image: Any, arch: str | None) -> None:
+    def record_compression_arch(compiled: Any, arch: str | None) -> None:
         seen["compression_arch"] = arch
 
     fake_cute = types.ModuleType("cutlass.cute")
@@ -69,7 +69,9 @@ def _fake_cute_compile():
             sys.modules, {"cutlass": fake_cutlass, "cutlass.cute": fake_cute}
         ),
         mock.patch.object(toolchains.CuteDslToolchain, "_warm_up_exporter"),
-        mock.patch.object(toolchains, "compress_cute_module", compress),
+        mock.patch.object(
+            toolchains, "compress_cute_embedded_cubin", record_compression_arch
+        ),
     ):
         yield seen
 
@@ -291,9 +293,9 @@ llvm.func @use() -> !llvm.ptr {{
                 gep = function.regions[0].blocks[0].operations[1]
                 compiled = types.SimpleNamespace(__cubin__=cubin, ir_module=module)
                 with mock.patch.object(
-                    cuda_image, "compress_cuda_image", return_value=result
+                    cuda_image, "compress_cubin", return_value=result
                 ):
-                    cuda_image.compress_cute_module(compiled, "sm_100")
+                    cuda_image.compress_cute_embedded_cubin(compiled, "sm_100")
                 expected = data if result is cubin else result
                 value = ir.StringAttr(image.attributes["value"]).value_bytes
                 self.assertEqual(value, expected)
@@ -1068,7 +1070,7 @@ def _fake_triton(**metadata):
     cast(Any, fake_triton).compiler = fake_compiler
     cast(Any, fake_triton).runtime = _Poisoned("triton.runtime")
 
-    def compress(data: bytes, arch: str) -> bytes:
+    def fake_compress_cubin(data: bytes, arch: str) -> bytes:
         seen["compression_arch"] = arch
         return data[:4]
 
@@ -1081,7 +1083,7 @@ def _fake_triton(**metadata):
                 "triton.backends.compiler": fake_backends_compiler,
             },
         ),
-        mock.patch.object(toolchains, "compress_cuda_image", compress),
+        mock.patch.object(toolchains, "compress_cubin", fake_compress_cubin),
     ):
         yield seen
 

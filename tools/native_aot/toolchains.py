@@ -50,7 +50,7 @@ import shlex
 import tempfile
 from typing import Any
 
-from tools.native_aot.cuda_image import compress_cuda_image, compress_cute_module
+from tools.native_aot.cuda_image import compress_cubin, compress_cute_embedded_cubin
 
 
 class Toolchain:
@@ -258,7 +258,7 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                 opts = f"{opts} --gpu-arch {arch}"
                 self._warm_up_exporter()
             compiled = cute.compile(b["fn"], *b["fake_args"], options=opts)
-            compress_cute_module(compiled, arch)
+            compress_cute_embedded_cubin(compiled, arch)
             compiled.export_to_c(
                 file_path=out_dir, file_name=b["prefix"], function_prefix=b["prefix"]
             )
@@ -700,7 +700,7 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
                     f"has no way to allocate"
                 )
         image_arch = f"sm_{target.arch}{'a' if target.arch >= 90 else ''}"
-        image = compress_cuda_image(compiled.asm["cubin"], image_arch)
+        image = compress_cubin(compiled.asm["cubin"], image_arch)
         with open(os.path.join(out_dir, b["prefix"] + ".cubin"), "wb") as f:
             f.write(image)
         return {
