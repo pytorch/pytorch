@@ -1300,12 +1300,6 @@ class OutputGraph(OutputGraphCommon):
             self.guards.add(
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
-        if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-            self.guards.add(
-                GlobalStateSource().make_guard(
-                    GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS
-                )
-            )
 
     def maybe_install_saved_tensors_hooks_subgraphs(self) -> list[str] | None:
         if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
@@ -3243,10 +3237,42 @@ class OutputGraph(OutputGraphCommon):
 
             dce_hop_extra_outputs(gm)
 
+            # Saved tensors hooks only affect graphs that record autograd; guarding
+            # otherwise recompiles e.g. a no_grad optimizer step under a hooks context.
+            def has_grad_fn(t: torch.Tensor) -> bool:
+                if not t.requires_grad:
+                    return False
+                try:
+                    return t.grad_fn is not None
+                except RuntimeError:
+                    # A view whose base was modified in place; treat it as recording.
+                    return True
+
+            # Placeholders count too: an in-place op on an input, such as
+            # `x[idx] = v`, can leave no other node with a grad_fn. The input's fake
+            # has one if it is a non-leaf that requires grad (even if the graph only
+            # reads it under no_grad, which over-guards) or if the op made it
+            # require grad.
+            records_autograd = (
+                not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+                and any(
+                    pytree.tree_any_only(
+                        torch.Tensor, has_grad_fn, node.meta.get("example_value")
+                    )
+                    for node in self.graph.nodes
+                )
+            )
+            if records_autograd:
+                self.guards.add(
+                    GlobalStateSource().make_guard(
+                        GuardBuilder.AUTOGRAD_SAVED_TENSORS_HOOKS
+                    )
+                )
+
             # Saved tensors hooks are not used by the graph.
             # GraphModule by default only copies used in the graph submodules.
             # Copying them into the result graph manually.
-            if self.saved_tensors_hooks_subgraph_names:
+            if records_autograd and self.saved_tensors_hooks_subgraph_names:
                 for subgraph_name in self.saved_tensors_hooks_subgraph_names:
                     setattr(gm, subgraph_name, getattr(root, subgraph_name))
 

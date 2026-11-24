@@ -5312,7 +5312,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         def trace(*fns):
             return tuple(torch.fx.symbolic_trace(f) for f in fns)
 
-        x = torch.randn(3, 2)
+        x = torch.randn(3, 2, requires_grad=True)
         captured = trace(pack, unpack)
         with torch.autograd.graph.saved_tensors_hooks(*captured):
             ref, loaded = self._test_serialization(
@@ -5339,7 +5339,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             next(iter(pack.graph.nodes)).meta["user_cache_hash"] = user_hash
             return pack, unpack
 
-        x = torch.randn(3, 2)
+        x = torch.randn(3, 2, requires_grad=True)
         with torch.autograd.graph.saved_tensors_hooks(*hooks("v1")):
             ref, loaded = self._test_serialization(
                 "AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x
@@ -5356,7 +5356,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         def trace(*fns):
             return tuple(torch.fx.symbolic_trace(f) for f in fns)
 
-        x = torch.randn(3, 2)
+        x = torch.randn(3, 2, requires_grad=True)
         with torch.autograd.graph.saved_tensors_hooks(
             *trace(lambda x: x * 2, lambda x: x / 2)
         ):
@@ -5399,7 +5399,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 torch.fx.symbolic_trace(lambda x: x / 2),
             )
 
-        x = torch.randn(3, 2)
+        x = torch.randn(3, 2, requires_grad=True)
         self.assertEqual(hooks(double())[0].code, hooks(triple())[0].code)
         with torch.autograd.graph.saved_tensors_hooks(*hooks(double())):
             _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
@@ -5438,7 +5438,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
                 torch.fx.symbolic_trace(lambda x: x.to(torch.float32)),
             )
 
-        x = torch.randn(3, 2)
+        x = torch.randn(3, 2, requires_grad=True)
         with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.bfloat16)):
             _, loaded = self._test_serialization("AUTOGRAD_SAVED_TENSORS_HOOKS", fn, x)
         with torch.autograd.graph.saved_tensors_hooks(*hooks(torch.bfloat16)):
@@ -5465,7 +5465,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ):
                 return capture()
 
-        x = torch.randn(3, 2)
+        x = torch.randn(3, 2, requires_grad=True)
         for ref, loaded in (capture(), capture_under_python_hooks()):
             self._test_check_fn(ref, loaded, {"x": x}, True)
             with torch.autograd.graph.saved_tensors_hooks(
