@@ -345,6 +345,74 @@ def decode_attention_reference(q, k, v, q_lens, kv_lens, dtype):
     return torch.cat(outs), torch.cat(lses, dim=1)
 
 
+def decode_golden(q, k, v, q_lens, kv_lens, dtype):
+    """fp64 golden output and LSE from decode_attention_reference, and the error bound
+    for a ``dtype`` kernel: 5x the math backend's error in ``dtype``, as _check_equal
+    in test_transformers.py does."""
+    golden_out, golden_lse = decode_attention_reference(
+        q, k, v, q_lens, kv_lens, torch.float64
+    )
+    reference_out, _ = decode_attention_reference(q, k, v, q_lens, kv_lens, dtype)
+    threshold = max(1e-5, 5 * (reference_out - golden_out).abs().max().item())
+    return golden_out, golden_lse, threshold
+
+
+DecodeKV = namedtuple(
+    "DecodeKV",
+    ["k", "v", "cu_seq_k", "max_k", "kwargs", "k_contiguous", "v_contiguous"],
+)
+
+
+def make_decode_kv(
+    kv_lens, num_kv_heads, head_dim, *, paged, device, dtype, page_size=256
+):
+    """Random KV for sequences of the given lengths: contiguous, or a page pool with one
+    randomly placed row of pages per sequence. ``kwargs`` holds ``seqused_k`` and
+    ``block_table`` for paged KV; ``k_contiguous`` and ``v_contiguous`` hold each
+    sequence's KV in order, for references."""
+    batch_size = len(kv_lens)
+    if not paged:
+        k = torch.randn(
+            sum(kv_lens), num_kv_heads, head_dim, device=device, dtype=dtype
+        )
+        v = torch.randn_like(k)
+        return DecodeKV(k, v, make_cu_seq(kv_lens, device), max(kv_lens), {}, k, v)
+    pages_per_seq = (max(kv_lens) + page_size - 1) // page_size
+    max_k = pages_per_seq * page_size
+    k = torch.randn(
+        batch_size * pages_per_seq,
+        page_size,
+        num_kv_heads,
+        head_dim,
+        device=device,
+        dtype=dtype,
+    )
+    v = torch.randn_like(k)
+    block_table = torch.randperm(
+        batch_size * pages_per_seq, device=device, dtype=torch.int32
+    ).view(batch_size, pages_per_seq)
+    # FA2 needs cu_seq_k for paged KV: each sequence spans its whole page row.
+    cu_seq_k = torch.arange(
+        0, (batch_size + 1) * max_k, max_k, device=device, dtype=torch.int32
+    )
+    kwargs = {
+        "seqused_k": torch.tensor(kv_lens, device=device, dtype=torch.int32),
+        "block_table": block_table,
+    }
+    k_contiguous, v_contiguous = (
+        torch.cat(
+            [
+                pages[:length]
+                for pages, length in zip(
+                    gather_paged_cache(cache, block_table), kv_lens
+                )
+            ]
+        )
+        for cache in (k, v)
+    )
+    return DecodeKV(k, v, cu_seq_k, max_k, kwargs, k_contiguous, v_contiguous)
+
+
 def gather_paged_cache(cache: torch.Tensor, block_table: torch.Tensor) -> torch.Tensor:
     """Gather a logical batched KV cache from a physical page pool."""
     page_size, num_heads, head_dim = cache.shape[1:]
@@ -1557,58 +1625,18 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         # (nheads_kv, ngroups, b) and (nheads_kv, b, ngroups) differ in shape.
         kv_lens = [300, 1, 520, 256, 77]
         q_lens = [1, 0, 1, 1, 1] if empty_sequence else [1, 1, 1, 1, 1]
-        batch_size = len(kv_lens)
         group = num_heads // num_kv_heads
 
         q = torch.randn(sum(q_lens), num_heads, head_dim, device=device, dtype=dtype)
-        if paged:
-            pages_per_seq = (max(kv_lens) + page_size - 1) // page_size
-            max_k = pages_per_seq * page_size
-            k = torch.randn(
-                batch_size * pages_per_seq,
-                page_size,
-                num_kv_heads,
-                head_dim,
-                device=device,
-                dtype=dtype,
-            )
-            v = torch.randn_like(k)
-            block_table = torch.randperm(
-                batch_size * pages_per_seq, device=device, dtype=torch.int32
-            ).view(batch_size, pages_per_seq)
-            # FA2 needs cu_seq_k for paged KV: each sequence spans its whole page row.
-            cu_seq_k = torch.arange(
-                0,
-                (batch_size + 1) * max_k,
-                max_k,
-                device=device,
-                dtype=torch.int32,
-            )
-            paged_kwargs = {
-                "seqused_k": torch.tensor(kv_lens, device=device, dtype=torch.int32),
-                "block_table": block_table,
-            }
-            # The reference reads each sequence's pages in order, cut to its length.
-            k_contiguous, v_contiguous = (
-                torch.cat(
-                    [
-                        pages[:length]
-                        for pages, length in zip(
-                            gather_paged_cache(cache, block_table), kv_lens
-                        )
-                    ]
-                )
-                for cache in (k, v)
-            )
-        else:
-            max_k = max(kv_lens)
-            k = torch.randn(
-                sum(kv_lens), num_kv_heads, head_dim, device=device, dtype=dtype
-            )
-            v = torch.randn_like(k)
-            cu_seq_k = make_cu_seq(kv_lens, device)
-            paged_kwargs = {}
-            k_contiguous, v_contiguous = k, v
+        kv = make_decode_kv(
+            kv_lens,
+            num_kv_heads,
+            head_dim,
+            paged=paged,
+            device=device,
+            dtype=dtype,
+            page_size=page_size,
+        )
 
         def run(key, value, cu_seq_k, max_k, **kwargs):
             out = torch.full_like(q, float("nan"))
@@ -1629,29 +1657,23 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             return out, lse
 
         out_gqa, lse_gqa = run(
-            k,
-            v,
-            cu_seq_k,
-            max_k,
+            kv.k,
+            kv.v,
+            kv.cu_seq_k,
+            kv.max_k,
             enable_gqa=True,
             num_splits=num_splits,
-            **paged_kwargs,
+            **kv.kwargs,
         )
         out_mha, lse_mha = run(
-            k_contiguous.repeat_interleave(group, dim=1),
-            v_contiguous.repeat_interleave(group, dim=1),
+            kv.k_contiguous.repeat_interleave(group, dim=1),
+            kv.v_contiguous.repeat_interleave(group, dim=1),
             make_cu_seq(kv_lens, device),
             max(kv_lens),
         )
-        golden_out, golden_lse = decode_attention_reference(
-            q, k_contiguous, v_contiguous, q_lens, kv_lens, torch.float64
+        golden_out, golden_lse, threshold = decode_golden(
+            q, kv.k_contiguous, kv.v_contiguous, q_lens, kv_lens, dtype
         )
-        reference_out, _ = decode_attention_reference(
-            q, k_contiguous, v_contiguous, q_lens, kv_lens, dtype
-        )
-        # As _check_equal in test_transformers.py: allow 5x the error of the math backend
-        # in the same dtype against the fp64 golden.
-        threshold = max(1e-5, 5 * (reference_out - golden_out).abs().max().item())
         for out, lse in ((out_gqa, lse_gqa), (out_mha, lse_mha)):
             self.assertFalse(out.isnan().any())
             self.assertLessEqual((out - golden_out).abs().max().item(), threshold)
@@ -1665,16 +1687,17 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @parametrize("num_kv_heads", [8, 2])
     @parametrize("paged", [False, True])
     @parametrize("window_size", [(-1, -1), (-1, 0)])
+    @parametrize("head_dim", [64, 128, 256])
     def test_fa2_decode_batch_invariance(
-        self, device, dtype, num_kv_heads, paged, window_size
+        self, device, dtype, num_kv_heads, paged, window_size, head_dim
     ):
         """With num_splits=1, decode tokens get the same bits in a decode-only batch as
         next to a prefill. FA2 packs a decode-only GQA batch and runs it, if causal, on
         the split-KV kernel; a mixed batch runs unpacked on the standard kernel (split-KV
-        with paged KV), so the KV tiles must match. Head dim 128 is where the standard
-        kernel's KV tile depends on causality (sm86/sm89)."""
+        with paged KV), so the KV tiles must match at every head dim. Head dim 128 is
+        where the standard kernel's KV tile depends on causality (sm86/sm89)."""
         torch.manual_seed(42)
-        num_heads, head_dim, page_size = 8, 128, 256
+        num_heads, page_size = 8, 256
         decode_kv_lens = [300, 1, 520]
         kv_lens = [*decode_kv_lens, 200]
         q_lens = [1, 1, 1, 200]
@@ -1801,87 +1824,42 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         order (different bits from one split) and both must match an fp64 golden; an
         unpacked call would run one split whatever num_splits says."""
         torch.manual_seed(42)
-        num_heads, num_kv_heads, head_dim, page_size = 8, 2, 64, 256
+        num_heads, num_kv_heads, head_dim = 8, 2, 64
         # Every sequence has KV in both splits (2 x 512 tokens at head dim 64).
         kv_lens = [600, 700, 520, 1000, 800]
-        batch_size = len(kv_lens)
+        q_lens = [1] * len(kv_lens)
         q = torch.randn(
-            batch_size, num_heads, head_dim, device=device, dtype=torch.bfloat16
+            len(kv_lens), num_heads, head_dim, device=device, dtype=torch.bfloat16
         )
-        if paged:
-            pages_per_seq = (max(kv_lens) + page_size - 1) // page_size
-            max_k = pages_per_seq * page_size
-            k = torch.randn(
-                batch_size * pages_per_seq,
-                page_size,
-                num_kv_heads,
-                head_dim,
-                device=device,
-                dtype=torch.bfloat16,
-            )
-            v = torch.randn_like(k)
-            block_table = torch.randperm(
-                batch_size * pages_per_seq, device=device, dtype=torch.int32
-            ).view(batch_size, pages_per_seq)
-            # FA2 needs cu_seq_k for paged KV: each sequence spans its whole page row.
-            cu_seq_k = torch.arange(
-                0, (batch_size + 1) * max_k, max_k, device=device, dtype=torch.int32
-            )
-            kwargs = {
-                "seqused_k": torch.tensor(kv_lens, device=device, dtype=torch.int32),
-                "block_table": block_table,
-            }
-            k_contiguous, v_contiguous = (
-                torch.cat(
-                    [
-                        pages[:length]
-                        for pages, length in zip(
-                            gather_paged_cache(cache, block_table), kv_lens
-                        )
-                    ]
-                )
-                for cache in (k, v)
-            )
-        else:
-            max_k = max(kv_lens)
-            k = torch.randn(
-                sum(kv_lens),
-                num_kv_heads,
-                head_dim,
-                device=device,
-                dtype=torch.bfloat16,
-            )
-            v = torch.randn_like(k)
-            cu_seq_k = make_cu_seq(kv_lens, device)
-            kwargs = {}
-            k_contiguous, v_contiguous = k, v
-        cu_seq_q = make_cu_seq([1] * batch_size, device)
+        kv = make_decode_kv(
+            kv_lens,
+            num_kv_heads,
+            head_dim,
+            paged=paged,
+            device=device,
+            dtype=torch.bfloat16,
+        )
         with _use_backend("fa2"), torch.no_grad():
             one_split, two_splits = (
                 varlen_attn(
                     q,
-                    k,
-                    v,
-                    cu_seq_q,
-                    cu_seq_k,
+                    kv.k,
+                    kv.v,
+                    make_cu_seq(q_lens, device),
+                    kv.cu_seq_k,
                     1,
-                    max_k,
+                    kv.max_k,
                     window_size=(-1, 0),
                     enable_gqa=True,
                     num_splits=n,
-                    **kwargs,
+                    **kv.kwargs,
                 )
                 for n in (1, 2)
             )
         self.assertFalse(torch.equal(one_split, two_splits))
-        q_lens = [1] * batch_size
-        golden, _ = decode_attention_reference(
-            q, k_contiguous, v_contiguous, q_lens, kv_lens, torch.float64
+        golden, _, threshold = decode_golden(
+            q, kv.k_contiguous, kv.v_contiguous, q_lens, kv_lens, torch.bfloat16
         )
-        reference, _ = decode_attention_reference(
-            q, k_contiguous, v_contiguous, q_lens, kv_lens, torch.bfloat16
-        )
-        threshold = max(1e-5, 5 * (reference - golden).abs().max().item())
         for out in (one_split, two_splits):
             self.assertLessEqual((out - golden).abs().max().item(), threshold)
 

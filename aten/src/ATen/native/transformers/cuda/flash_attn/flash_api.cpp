@@ -680,10 +680,13 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     // so a causal mask (window_size_right == 0) masks nothing and the packed call drops it.
     const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && q.size(0) == batch_size && num_heads > num_heads_k && window_size_left < 0 && window_size_right <= 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
     // A causal packed call runs the split-KV kernel even without paged KV. With one split its KV
-    // tile matches the standard causal kernel's at every head dim (run_mha_fwd_splitkv_align),
-    // which the same token runs in a batch with a prefill, so num_splits=1 stays batch invariant.
-    // A non-causal packed call keeps the standard kernel, as in a mixed batch: the standard
-    // non-causal tile differs from the split-KV one at head dim 128 on sm86/sm89.
+    // tile matches the standard causal kernel's at every head dim (run_mha_fwd_splitkv_align in
+    // third_party/flash-attention/csrc/flash_attn/src/flash_fwd_launch_template.h; the block_n in
+    // set_params_splitkv is the tile for several splits), which the same token runs in a batch
+    // with a prefill, so num_splits=1 stays batch invariant. A non-causal packed call keeps the
+    // standard kernel, as in a mixed batch: the standard non-causal tile differs from the
+    // split-KV one at head dim 128 on sm86/sm89. Computed before the packed block below clears
+    // window_size_right.
     const bool force_split_kernel = paged_KV || (seqlenq_ngroups_swapped && window_size_right == 0);
     at::Tensor temp_q = q;
     const int ngroups = num_heads / num_heads_k;
@@ -809,6 +812,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     params.page_block_size = page_block_size;
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
+    // Every packed call may split, causal or not, as on main; force_split_kernel only decides
+    // which kernel runs a single split.
     if (paged_KV || seqlenq_ngroups_swapped) {
         // Split-KV's combine kernel ignores cu_seqlens_q: it writes max_seqlen_q rows per sequence
         // at batch_idx * o_batch_stride, and a varlen q has no batch stride. Several sequences

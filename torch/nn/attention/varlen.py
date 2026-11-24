@@ -415,9 +415,10 @@ def varlen_attn(
             regardless of what other sequences are in the batch, at the
             cost of lower GPU utilization when there are few queries. When
             ``None`` (default), the kernel chooses automatically. FA2 honors
-            ``num_splits`` only for GQA calls with one query token per sequence
-            that it packs, and for paged KV with a single sequence of ``max_q``
-            query tokens; it runs one split for all other calls.
+            ``num_splits`` only for GQA calls it packs (one query token in every
+            sequence, ``window_size`` ``(-1, -1)`` or ``(-1, 0)``, no dropout) and
+            for paged KV with a single sequence of ``max_q`` query tokens; it runs
+            one split for all other calls.
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H_q, D)`.
