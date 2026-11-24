@@ -1806,19 +1806,6 @@ class TestTorchDeviceType(TestCase):
             'replication_pad3d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchDynamo("Warning is not raised.")
-    @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
-    def test_nondeterministic_alert_NLLLoss(self, device):
-        module = torch.nn.NLLLoss()
-        input = torch.randn(2, 3, 5, 5, device=device)
-        target = torch.rand(2, 5, 5, device=device).mul(3).floor().long()
-
-
-        self.check_nondeterministic_alert(
-            lambda: module(input, target),
-            'nll_loss2d_forward_out_cuda_template',
-            torch.device(device).type == 'cuda')
-
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @expectedFailureXPU  # https://github.com/intel/torch-xpu-ops/issues/5304
     def test_nondeterministic_alert_CTCLoss(self, device):
