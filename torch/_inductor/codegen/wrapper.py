@@ -4774,6 +4774,11 @@ class PythonWrapperCodegen(CodeGen):
         (KERNEL_CONFIGS).
         """
         if not self.defines_triton_kernels_as_code():
+            if config.cpp_wrapper:
+                # The C++ wrapper embeds this ''' literal in an r"""...""" block, so a
+                # """ in the source (e.g. a template helper's docstring) would end that
+                # block early. The ''' literal decodes \" back to ".
+                src_code = src_code.replace('"""', '\\"\\"\\"')
             self.define_kernel(
                 kernel_name,
                 self.async_compile_triton_body(subs_name, src_code, device_type),
