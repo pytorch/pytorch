@@ -188,16 +188,16 @@ def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
         return False
     if out.dtype != self.dtype or not out.is_cuda or is_fake_tensor(out):
         return False
+    # ATen serves copy-on-write outs, whose mutable data pointers TensorIterator would
+    # materialize, and subclass outs, on whose Python-key instances _is_cow_tensor
+    # raises. Check out, not its keepdim view, which is plain for a Parameter.
+    if type(out) is not torch.Tensor or torch._C._is_cow_tensor(out):
+        return False
     # The kernel writes ``out`` directly via a keepdim-aligned view; ``out``
     # must already have the reduced shape. Reject mis-shaped ``out`` and let
     # aten produce the proper error.
     out_kd = _out_keepdim_view(self, d, keepdim, out)
     if out_kd is None:
-        return False
-    # TensorIterator takes its outputs' mutable data pointers, which would materialize
-    # a copy-on-write out, so ATen serves those. It serves subclasses too, since
-    # _is_cow_tensor raises on Python-key tensors.
-    if type(out_kd) is not torch.Tensor or torch._C._is_cow_tensor(out_kd):
         return False
     return _eligibility(self, d, out_kd) is not None
 
