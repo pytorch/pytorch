@@ -233,15 +233,15 @@ cudaError_t GetDeviceCount(int* dev_count) {
 //
 // MaybeSetDevice first queries the runtime's current device. If it is already
 // the requested device, it clears the deferred device index without calling
-// cudaSetDevice. Otherwise, it calls cudaSetDevice and clears the deferred index
-// if the requested device has a primary context, or only saves the requested
-// index if it does not. GetDevice reports the deferred index when one is set.
-// This preserves lazy context creation for applications like this:
+// cudaSetDevice. Otherwise, it calls cudaSetDevice and clears the deferred
+// index if the requested device has a primary context, or only saves the
+// requested index if it does not. GetDevice reports the deferred index when one
+// is set. This preserves lazy context creation for applications like this:
 //
 // ```
 // import torch
-// x = torch.empty(1, device="cuda:1") # no CUDA context on cuda:0 after this call
-// y = torch.empty(1, device="cuda")   # CUDA context is created on cuda:0
+// x = torch.empty(1, device="cuda:1") # no CUDA context on cuda:0 after this
+// call y = torch.empty(1, device="cuda")   # CUDA context is created on cuda:0
 // ```
 #if CUDA_VERSION >= 12000
 thread_local static DeviceIndex deferredDeviceIndex = -1;
@@ -290,8 +290,8 @@ cudaError_t MaybeSetDevice(DeviceIndex device) {
 }
 
 // Return the deferred device index, or the runtime's current device if none is
-// deferred, and clear the deferred index. Call cudaSetDevice unless no index was
-// deferred and to_device is already current; that early return does not
+// deferred, and clear the deferred index. Call cudaSetDevice unless no index
+// was deferred and to_device is already current; that early return does not
 // initialize a context.
 DeviceIndex ExchangeDevice(DeviceIndex to_device) {
   auto cur_device = deferredDeviceIndex;
@@ -310,8 +310,8 @@ DeviceIndex ExchangeDevice(DeviceIndex to_device) {
 
 // Return the runtime's current device. If to_device is already current, return
 // without changing the deferred index. Otherwise, call cudaSetDevice if
-// to_device has a primary context, or save to_device as the deferred index if it
-// does not. Calling cudaSetDevice here leaves any deferred index unchanged.
+// to_device has a primary context, or save to_device as the deferred index if
+// it does not. Calling cudaSetDevice here leaves any deferred index unchanged.
 DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
   int tmp_cur_device = -1;
   C10_CUDA_CHECK(cudaGetDevice(&tmp_cur_device));
