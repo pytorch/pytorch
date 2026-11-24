@@ -1419,6 +1419,14 @@ class Source:
     def reconstruct(self, codegen: PyCodegen) -> None:
         raise NotImplementedError
 
+    def can_reconstruct(self, codegen: PyCodegen, *, visiting: set[int]) -> bool | None:
+        r"""can_reconstruct(codegen, *, visiting) -> bool | None
+
+        Classify reconstruction without realizing values or emitting code.
+        ``True`` proves success, ``False`` proves failure, and ``None`` is unknown.
+        """
+        return None
+
     def reconstruct_pycode(self, codegen: PyCodegen) -> str:
         """
         Reconstructs the source into a string of Python code. This method should

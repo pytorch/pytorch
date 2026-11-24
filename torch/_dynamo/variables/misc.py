@@ -1624,6 +1624,21 @@ class GetAttrVariable(VariableTracker):  # noqa: RVT001
             raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if (
+            type(self) is not GetAttrVariable
+            or type(self.obj) is not variables.TensorVariable
+        ):
+            return None
+        if (
+            codegen.graph_output_var is None
+            and not codegen.reconstruction_graph_outputs
+        ):
+            return None
+        return codegen.can_reconstruct(self.obj, visiting=visiting)
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.name))
@@ -2144,6 +2159,13 @@ class NullVariable(VariableTracker):  # noqa: RVT001
 
     def __repr__(self) -> str:
         return "NullVariable"
+
+    def can_reconstruct_value(
+        self, codegen: "PyCodegen", *, visiting: set[int]
+    ) -> bool | None:
+        if type(self) is not NullVariable:
+            return super().can_reconstruct_value(codegen, visiting=visiting)
+        return True
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(create_instruction("PUSH_NULL"))

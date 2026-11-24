@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing import Self
 
+    from ..codegen import PyCodegen
     from ..symbolic_convert import InstructionTranslatorBase
     from .tensor import SymNodeVariable
 
@@ -189,6 +190,33 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
             if self._cache.vt is None:
                 raise AssertionError("LazyCache.realize() did not set vt")
         return self._cache.vt
+
+    def can_reconstruct(
+        self,
+        codegen: PyCodegen,
+        *,
+        allow_cache: bool = True,
+        visiting: set[int],
+    ) -> bool | None:
+        if self.is_realized():
+            from .functions import LocalGeneratorObjectVariable
+
+            if type.__instancecheck__(LocalGeneratorObjectVariable, self._cache.vt):
+                return None
+        return super().can_reconstruct(
+            codegen, allow_cache=allow_cache, visiting=visiting
+        )
+
+    def can_reconstruct_value(
+        self, codegen: PyCodegen, *, visiting: set[int]
+    ) -> bool | None:
+        value = self._cache.vt
+        if (
+            type(self) in (LazyVariableTracker, LazyConstantVariable)
+            and value is not None
+        ):
+            return codegen.can_reconstruct(value, allow_cache=False, visiting=visiting)
+        return None
 
     def lazy_isinstance(self, cls: type) -> bool:
         """Check isinstance after realizing, used by ImplicitRealizingVariableTrackerMeta"""

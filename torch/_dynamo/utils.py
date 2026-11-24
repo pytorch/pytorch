@@ -3088,6 +3088,32 @@ def is_safe_constant(v: object) -> bool:
     )
 
 
+def is_safe_constant_for_reconstruction(value: object) -> bool:
+    """Check constant metadata without invoking value or metaclass hooks."""
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        cls = type(current)
+        if cls is tuple or cls is frozenset:
+            pending.extend(cast(tuple[object, ...] | frozenset[object], current))
+        elif not (
+            any(cls is literal for literal in common_constant_types)
+            or any(
+                cls is literal
+                for literal in (
+                    slice,
+                    type,
+                    torch.Size,
+                    typing._GenericAlias,  # type: ignore[attr-defined]
+                    types.GenericAlias,
+                )
+            )
+            or (type(cls) is enum.EnumType and type.__subclasscheck__(enum.Enum, cls))
+        ):
+            return False
+    return True
+
+
 @functools.cache
 def common_constants() -> set[int]:
     return {
