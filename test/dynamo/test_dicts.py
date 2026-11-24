@@ -3717,14 +3717,75 @@ class DictTests(torch._dynamo.test_case.TestCase):
                         results.append(self.shallow(val))
                 return torch.cat(results, dim=-1).sum()
 
+        def graph_metadata(model, inp):
+            backend = torch._dynamo.testing.EagerAndRecordGraphs()
+            torch.compile(model, backend=backend)(inp)
+            graph = backend.graphs[0].graph
+            return (
+                [node.name for node in graph.nodes],
+                [
+                    (
+                        node.name,
+                        node._dynamo_source.name,
+                        tuple(sorted(user.name for user in node.users)),
+                    )
+                    for node in graph.nodes
+                    if node.op == "placeholder"
+                ],
+            )
+
         model = Model()
         d1 = {"a": torch.randn(4, 8), "b": torch.randn(4, 8)}
         d2 = {"b": torch.randn(4, 8), "a": torch.randn(4, 8)}
 
-        names1 = self._get_graph_node_names(model, d1)
+        names1, placeholders1 = graph_metadata(model, d1)
         torch._dynamo.reset()
-        names2 = self._get_graph_node_names(model, d2)
+        names2, placeholders2 = graph_metadata(model, d2)
+
         self.assertEqual(names1, names2)
+        self.assertEqual(placeholders1, placeholders2)
+        sources = [source for _, source, _ in placeholders1]
+        self.assertEqual(sources, sorted(sources))
+
+    @parametrize(
+        "source_names,expected_order,preserves_names",
+        (
+            (("z", "a"), (1, 0), False),
+            (("z", None), (0, 1), True),
+            (("same", "same"), (0, 1), True),
+        ),
+    )
+    def test_canonical_graph_placeholder_source_fallback(
+        self, source_names, expected_order, preserves_names
+    ):
+        from torch._dynamo.output_graph import _canonicalize_graph
+
+        graph = fx.Graph()
+        graphargs = []
+        for i, source_name in enumerate(source_names):
+            node = graph.placeholder(f"arg_{i}")
+            node.name = f"original_{i}"
+            source = (
+                None if source_name is None else types.SimpleNamespace(name=source_name)
+            )
+            grapharg = types.SimpleNamespace(source=source)
+            node.meta["grapharg"] = grapharg
+            graphargs.append(grapharg)
+        graph.output(tuple(graph.find_nodes(op="placeholder")))
+
+        _canonicalize_graph(graph)
+
+        placeholders = graph.find_nodes(op="placeholder")
+        actual_order = tuple(
+            next(i for i, arg in enumerate(graphargs) if arg is node.meta["grapharg"])
+            for node in placeholders
+        )
+        self.assertEqual(actual_order, expected_order)
+        if preserves_names:
+            self.assertEqual(
+                [node.name for node in placeholders],
+                ["original_0", "original_1"],
+            )
 
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_dict_order_canonical_graph_correctness(self):
@@ -3892,19 +3953,25 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(len(mul_after) >= 1)
 
     def test_canonical_graph_config_gating(self):
+        # The branches must be asymmetric (deep vs shallow) so the node order
+        # actually differs without canonicalization.
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear_a = torch.nn.Linear(8, 16)
-                self.linear_b = torch.nn.Linear(8, 16)
+                self.deep = torch.nn.Sequential(
+                    torch.nn.Linear(8, 16),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(16, 16),
+                )
+                self.shallow = torch.nn.Linear(8, 16)
 
             def forward(self, d):
                 results = []
                 for key, val in d.items():
                     if key == "a":
-                        results.append(self.linear_a(val))
+                        results.append(self.deep(val))
                     else:
-                        results.append(self.linear_b(val))
+                        results.append(self.shallow(val))
                 return torch.cat(results, dim=-1)
 
         model = Model()
