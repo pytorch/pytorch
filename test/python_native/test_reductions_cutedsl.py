@@ -189,9 +189,7 @@ class TestCuTeDSLReductionWiring(TestCase):
         self._check(lambda: torch.sum(xn, dim=-1), **_TOL[torch.float32])
 
     def test_cow_tensors_survive_the_conditions(self, device):
-        """Serve copy-on-write inputs without materializing them, and decline a
-        copy-on-write out= in PYTORCH_SUM_INNER_TREE's condition without materializing
-        it either."""
+        """Serve copy-on-write inputs without materializing them."""
         base = torch.randn(128, 512, device=device) * 0.01 + 1.0
         if not torch._C._is_cow_tensor(torch._lazy_clone(base)):
             self.skipTest("allocator does not support COW sharing")
@@ -203,11 +201,6 @@ class TestCuTeDSLReductionWiring(TestCase):
                 self._check(call, **_TOL[torch.float32])
                 self.assertTrue(torch._C._is_cow_tensor(x))
                 self.assertEqual(x.const_data_ptr(), data_ptr)
-        x = torch._lazy_clone(base)
-        out = torch._lazy_clone(torch.empty(128, device=device))
-        self.assertFalse(cutedsl_impl._out_cond(x, [1], out=out))
-        self.assertTrue(torch._C._is_cow_tensor(x))
-        self.assertTrue(torch._C._is_cow_tensor(out))
 
     @unittest.skipUnless(torch.cuda.device_count() >= 2, "needs >= 2 GPUs")
     def test_other_device_is_served(self, device):
