@@ -85,15 +85,16 @@ class MooncakeTransport(Transport):
     By default uses Mooncake's P2P metadata exchange: ``bind`` returns the
     endpoint's ``host:rpc_port`` and ``connect`` records a peer endpoint without
     an external metadata server. With a ``metadata_server`` such as
-    ``etcd://host:2379``, ``redis://host:6379`` or ``http://host:8080/metadata``,
-    Mooncake publishes the endpoint's segment under ``segment_name`` (default:
-    a unique name) and peers resolve it there; ``bind`` returns that name, which
-    is also the peer id. An endpoint may connect to several peers;
-    reconnecting with the same ``bind()`` bytes is a no-op. Peers are addressed
-    by endpoint and their registered segments are reached directly, so remote
-    descriptors carry no opaque metadata blob. Mooncake is an optional
-    dependency, imported only when selected. Transfers require registered views;
-    raw tensors are rejected rather than allocated or registered implicitly.
+    ``etcd://localhost:2379``, ``redis://localhost:6379`` or
+    ``http://localhost:8080/metadata``, Mooncake publishes the endpoint's
+    segment under ``segment_name`` (default: a unique name) and peers resolve it
+    there; ``bind`` returns that name, which is also the peer id. An endpoint
+    may connect to several peers; reconnecting with the same ``bind()`` bytes is
+    a no-op. Peers are addressed by endpoint and their registered segments are
+    reached directly, so remote descriptors carry no opaque metadata blob.
+    Mooncake is an optional dependency, imported only when selected. Transfers
+    require registered views; raw tensors are rejected rather than allocated or
+    registered implicitly.
 
     There is no per-peer disconnect; ``close`` releases all peers. A failed
     transfer fails only its Work. A timed-out transfer also pins its local
