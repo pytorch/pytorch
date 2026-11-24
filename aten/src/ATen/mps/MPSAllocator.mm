@@ -61,7 +61,14 @@ class MPSAllocatorConfig {
       const auto& key = tokenizer[i];
       if (key == "mps_large_alloc_threshold_mb") {
         tokenizer.checkToken(++i, ":");
-        m_large_alloc_threshold_bytes.store(tokenizer.toSizeT(++i) * 1024ull * 1024ull);
+        const size_t threshold_mb = tokenizer.toSizeT(++i);
+        // Allocations of kXLargeHeap / 2 or more already get their own OVERSIZE heap.
+        TORCH_CHECK_VALUE(MB(threshold_mb) <= kXLargeHeap / 2,
+                          "mps_large_alloc_threshold_mb must be at most ",
+                          kXLargeHeap / 2 / MB(1),
+                          ", got ",
+                          threshold_mb);
+        m_large_alloc_threshold_bytes.store(MB(threshold_mb));
       } else {
         // PYTORCH_ALLOC_CONF is shared by every backend, so only reject unknown
         // keys in our own namespace; e.g. CUDA's `backend` must not throw here.

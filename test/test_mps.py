@@ -9184,6 +9184,8 @@ class TestMPS(TestCaseMPS):
         self.addCleanup(torch._C._accelerator_setAllocatorSettings, "mps_large_alloc_threshold_mb:0")
         with self.assertRaisesRegex(ValueError, "Unrecognized key 'mps_larg_alloc_threshold_mb'"):
             torch._C._accelerator_setAllocatorSettings("mps_larg_alloc_threshold_mb:64")
+        with self.assertRaisesRegex(ValueError, "at most 512"):
+            torch._C._accelerator_setAllocatorSettings("mps_large_alloc_threshold_mb:1024")
         # Keys of other backends in the shared env var must not break MPS
         env = {**os.environ, "PYTORCH_ALLOC_CONF": "backend:native,mps_large_alloc_threshold_mb:64"}
         cmd = [sys.executable, "-c", "import torch; print(torch.ones(1, device='mps').item())"]
