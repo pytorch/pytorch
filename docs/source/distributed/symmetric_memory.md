@@ -411,21 +411,16 @@ import torch.distributed as dist
 
 device = torch.device("cuda", rank)
 
-# `device_id` eagerly initializes the NCCL communicator. `register_mem_pool`
-# requires a communicator that already exists, and raises otherwise.
 dist.init_process_group(backend="nccl", device_id=device)
 pg = dist.group.WORLD
 
 backend = dist.get_backend_impl(pg, device)
 
-# A MemPool backed by `ncclMemAlloc` / `ncclMemFree`.
-pool = torch.cuda.MemPool(backend.mem_allocator)
-
-# `symm=True` registers each segment with `ncclCommWindowRegister` using
-# `NCCL_WIN_COLL_SYMMETRIC`, which is what makes the symmetric kernels
-# eligible. The default `symm=False` performs ordinary user-buffer
-# registration, which does not.
-backend.register_mem_pool(pool, symm=True)
+# A MemPool backed by `ncclMemAlloc` / `ncclMemFree`. `symm=True` registers each
+# segment with `ncclCommWindowRegister` using `NCCL_WIN_COLL_SYMMETRIC`, which
+# is what makes the symmetric kernels eligible. The default `symm=False`
+# performs ordinary user-buffer registration, which does not.
+pool = torch.cuda.MemPool(backend.allocator(symm=True))
 
 with torch.cuda.use_mem_pool(pool):
     x = torch.ones(1024 * 1024, dtype=torch.bfloat16, device=device)
@@ -433,12 +428,16 @@ with torch.cuda.use_mem_pool(pool):
 # Dispatches to a NCCL symmetric kernel.
 dist.all_reduce(x, op=dist.ReduceOp.SUM)
 
-# De-register before the pool is torn down.
-backend.deregister_mem_pool(pool)
+# Collective: freeing the pool tears down its symmetric windows.
+del x, pool
 ```
 
-`register_mem_pool` registers the segments already in the pool *and* installs an
-allocator hook, so later allocations in the pool are registered as well.
+Every segment is registered with every process group as it is allocated and
+deregistered when it is freed. A pool from `backend.allocator(symm=True)` also
+gives each segment a symmetric window on `backend`, and tears the window down
+when the pool frees the segment. That is collective, so free the pool's
+tensors and then the pool at the same point on every rank.
+`register_mem_pool` and `deregister_mem_pool` are not needed; they are no-ops.
 
 ### Option 2: allocate through the NCCL symmetric memory backend
 

@@ -912,12 +912,10 @@ allocate tensors into that pool:
 
 ```python
 with torch.cuda.use_mem_pool(pool):
-    # tensor gets allocated with ncclMemAlloc passed in the pool
+    # tensor gets allocated with ncclMemAlloc passed in the pool, and is
+    # registered with ncclCommRegister
     tensor = torch.arange(1024 * 1024 * 2, device=device)
     print(f"tensor ptr on rank {rank} is {hex(tensor.data_ptr())}")
-
-# register user buffers using ncclCommRegister (called under the hood)
-backend.register_mem_pool(pool)
 
 # Collective uses Zero Copy NVLS
 dist.all_reduce(tensor[0:4])
@@ -926,9 +924,9 @@ print(tensor[0:4])
 ```
 
 
-Note the usage of `register_mem_pool` in the above example. This is an extra step for
-NVLS reductions, where the user buffers need to be registered with NCCL. A user can
-de-register the buffers with a similar `deregister_mem_pool` call.
+NVLS reductions need the user buffers to be registered with NCCL. Each buffer is
+registered with every process group as it is allocated and deregistered when it is freed,
+so no extra step is needed. `register_mem_pool` and `deregister_mem_pool` are no-ops.
 
 To reclaim memory, users will first need to ensure nothing is using the pool. When none
 of the tensors are holding a reference to the pool, {meth}`~torch.cuda.empty_cache` will
