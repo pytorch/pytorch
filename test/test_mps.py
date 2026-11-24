@@ -1890,6 +1890,18 @@ class TestMPS(TestCaseMPS):
         out_cpu = torch.nn.functional.linear(x.cpu(), w.cpu(), bias.cpu())
         self.assertEqual(out_cpu, out.cpu(), **tol)
 
+    def test_linear_error(self):
+        x = torch.randn(8, 16, dtype=torch.bfloat16)
+        w = torch.randn(4, 16)
+        b = torch.randn(4)
+
+        try:
+            torch.nn.functional.linear(x, w, b)
+        except RuntimeError as e:
+            print("cpu:", e)
+
+        torch.nn.functional.linear(x.to("mps"), w.to("mps"), b.to("mps"))
+
     @serialTest()
     @largeTensorTest("5GB", device="mps")
     @parametrize("layout", ["nn", "tn"])
