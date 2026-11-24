@@ -226,22 +226,22 @@ cudaError_t GetDeviceCount(int* dev_count) {
   return cudaGetDeviceCount(dev_count);
 }
 
-// CUDA 12+ and HIP 7.14+ eagerly create primary context when cudaSetDevice
-// (hipSetDevice) is called. To avoid unnecessary context creation when
-// restoring a device, MaybeSetDevice is used by device guard destructors
-// and on exit from torch.cuda.device context managers.
+// CUDA 12+ eagerly creates a primary context when cudaSetDevice is called.
+// To avoid unnecessary context creation when restoring a device, device guard
+// destructors use MaybeSetDevice, and torch.cuda.device context managers use
+// MaybeExchangeDevice on exit. Deferred device switching is not enabled on
+// ROCm.
 //
-// MaybeSetDevice first queries the runtime's current device. If it is already
-// the requested device, it clears the deferred device index without calling
-// cudaSetDevice. Otherwise, it calls cudaSetDevice and clears the deferred
-// index if the requested device has a primary context, or only saves the
-// requested index if it does not. GetDevice reports the deferred index when one
-// is set. This preserves lazy context creation for applications like this:
+// If the requested device has a primary context, MaybeSetDevice calls
+// SetDevice, which clears the deferred index and skips cudaSetDevice if the
+// device is already current. Otherwise, it only records the requested device as
+// the deferred index. GetDevice reports the deferred index when one is set.
+// This preserves lazy context creation for applications like this:
 //
 // ```
 // import torch
-// x = torch.empty(1, device="cuda:1") # no CUDA context on cuda:0 after this
-// call y = torch.empty(1, device="cuda")   # CUDA context is created on cuda:0
+// x = torch.empty(1, device="cuda:1")  # no context on cuda:0 after this call
+// y = torch.empty(1, device="cuda")    # creates a context on cuda:0
 // ```
 #if CUDA_VERSION >= 12000
 thread_local static DeviceIndex deferredDeviceIndex = -1;
@@ -332,6 +332,7 @@ DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
   return cur_device;
 }
 
+// Apply the deferred device index, if any, via SetDevice.
 void SetTargetDevice() {
   if (deferredDeviceIndex >= 0) {
     C10_CUDA_CHECK(c10::cuda::SetDevice(deferredDeviceIndex));
@@ -385,7 +386,7 @@ DeviceIndex MaybeExchangeDevice(DeviceIndex to_device) {
 }
 
 void SetTargetDevice() {
-  // No deferred device switching on CUDA < 12 without ROCm.
+  // No deferred device switching on CUDA < 12 or ROCm.
 }
 #endif
 
