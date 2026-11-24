@@ -539,7 +539,7 @@ class TestOnlineSoftmax(TestCase):
 
 
 class TestOnlineSoftmaxOnlyCPU(TestCase):
-    hw_classification = HardwareClassification.GENERIC
+    hw_classification = HardwareClassification.CPU
 
     def test_no_online_softmax_for_cpu(self):
         code = get_softmax_wrapper(V=2048, device="cpu")

@@ -511,7 +511,6 @@
   "test/inductor/test_needs_exact_strides.py",
   "test/inductor/test_nested_reduction.py",
   "test/inductor/test_nv_universal_gemm.py",
-  "test/inductor/test_online_softmax.py",
   "test/inductor/test_op_dtype_prop.py",
   "test/inductor/test_optimize_indexing.py",
   "test/inductor/test_optimize_loop_body.py",
