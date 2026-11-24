@@ -1006,7 +1006,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(orig_w, w.grad)
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     @parametrize("mode", ["avoid_32bit_indexing_guards", "dual_index_dtype_kernels"])
     def test_split_scan_int64_index(self, device, mode):
         """A split scan (cumsum over a long row) compiled with int64 indexing: the
@@ -1039,7 +1038,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     @parametrize("cooperative", [False, True])
     def test_dual_index_dtype_reductions(self, device, cooperative):
         """With dual_index_dtype_kernels, a dynamic-shape reduction compiles once into
@@ -1093,7 +1091,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     @serialTest()
     @largeTensorTest("3GB")  # measured peak: 2.25 GiB
     @parametrize("dual", [False, True])
@@ -1121,7 +1118,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(counter.frame_count, 1 if dual else 2)
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     def test_dual_index_dtype_multi_kernel(self, device):
         """dual_index_dtype_kernels with triton.multi_kernel: each side of the
         int32/int64 dispatch is itself a multi-kernel (persistent and looped variants),
@@ -1166,7 +1162,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     def test_dual_index_dtype_keeps_pointwise_guard(self, device):
         """Pointwise kernels are not covered yet: they keep a single int32 kernel and
         its size guard."""
