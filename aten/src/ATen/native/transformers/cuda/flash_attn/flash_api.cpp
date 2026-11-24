@@ -129,10 +129,6 @@ void set_params_fprop(Flash_fwd_params &params,
         params.k_batch_stride = k.stride(0);
         params.v_batch_stride = v.stride(0);
         params.o_batch_stride = out.stride(0);
-        if (seqlenq_ngroups_swapped) {
-             params.q_batch_stride *= seqlen_q;
-             params.o_batch_stride *= seqlen_q;
-        }
     }
 
     params.cu_seqlens_q = static_cast<int *>(cu_seqlens_q_d);
@@ -802,12 +798,6 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                      seqlenq_ngroups_swapped,
                      /*unpadded_lse*/true);
     params.total_q = total_q;
-    // set_params_fprop multiplies the batch strides of the 3D packed layout by seqlen_q;
-    // the 4D views' stride(0) already is the batch stride.
-    if (seqlenq_ngroups_swapped) {
-        params.q_batch_stride = q_padded.stride(0);
-        params.o_batch_stride = out_kernel.stride(0);
-    }
     if (paged_KV) {
         params.block_table = block_table.data_ptr<int>();
         params.block_table_batch_stride = block_table.stride(0);
@@ -818,9 +808,13 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
     if (paged_KV || seqlenq_ngroups_swapped) {
+        // Split-KV's combine kernel writes a row at batch_idx * o_batch_stride, but a varlen q
+        // (cu_seqlens_q) has no batch stride, so with several sequences every sequence's rows
+        // would land on the first one's (#194167). Split only the packed path or one sequence.
+        const bool can_split = seqlenq_ngroups_swapped || batch_size == 1;
         std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
-                           head_size_rounded, p_dropout, num_splits, dprops, opts);
+                           head_size_rounded, p_dropout, can_split ? num_splits : 1, dprops, opts);
     }
 
     // [Note] BC breaking change to flash seed/offset

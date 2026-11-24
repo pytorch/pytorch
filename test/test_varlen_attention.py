@@ -1522,11 +1522,6 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @parametrize("paged", [False, True])
     @parametrize("empty_sequence", [False, True])
     @parametrize("num_splits", [1, None])
-    # Paged split-KV on the unpacked path leaves rows unwritten (#194167).
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda p: p["paged"] and p["empty_sequence"] and p["num_splits"] is None,
-    )
     def test_fa2_gqa_decode_matches_mha(
         self, device, dtype, window_size, paged, empty_sequence, num_splits
     ):
