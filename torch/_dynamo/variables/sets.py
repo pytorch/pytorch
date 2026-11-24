@@ -31,6 +31,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import is_constant_source, is_from_local_source
 from ..utils import (
     _item_debug_repr,
+    check_positional,
     cmp_name_to_op_mapping,
     istype,
     lazily_unpack,
@@ -267,6 +268,8 @@ class BaseSetVariable(VariableTracker):
         # matching CPython's hash-at-insert behavior.
         from .dicts import ConstDictVariable
 
+        if isinstance(other, ConstDictVariable):
+            other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
             yield from other.items.keys()
             return
@@ -281,6 +284,8 @@ class BaseSetVariable(VariableTracker):
         # protocol.
         from .dicts import ConstDictVariable
 
+        if isinstance(other, ConstDictVariable):
+            other.install_dict_order_guard(tx)
         if isinstance(other, (BaseSetVariable, ConstDictVariable)):
             return list(other.items.keys())
         return [HashableTracker(x) for x in unpack_iterable(tx, other)]
@@ -827,6 +832,7 @@ class SetVariable(BaseSetVariable):  # noqa: RVT001
         return self
 
     tp_methods = {
+        "__contains__": Method.from_slot(BaseSetVariable.sq_contains_impl),
         "intersection": Method(BaseSetVariable.intersection),
         "union": Method(BaseSetVariable.union),
         "difference": Method(BaseSetVariable.difference),
@@ -1208,10 +1214,7 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         cls = args[0].as_python_constant()
         if cls is frozenset or cls.__init__ is frozenset.__init__:
             no_keywords(tx, "frozenset", kwargs)
-        if len(args) > 2:
-            raise_type_error(
-                tx, f"{cls.__name__} expected at most 1 argument, got {len(args) - 1}"
-            )
+        check_positional(tx, cls.__name__, len(args) - 1, 0, 1)
         if isinstance(args[0], variables.BuiltinVariable) and args[0].fn is frozenset:
             init_args = unpack_iterable(tx, args[1]) if len(args) > 1 else []
             return FrozensetVariable(init_args, mutation_type=ValueMutationNew())
@@ -1273,6 +1276,7 @@ class FrozensetVariable(BaseSetVariable):  # noqa: RVT001
         return FrozensetVariable(r.items)  # type: ignore[attr-defined]
 
     tp_methods = {
+        "__contains__": Method.from_slot(BaseSetVariable.sq_contains_impl),
         "copy": Method(copy),
         "difference": Method(difference),
         "intersection": Method(intersection),
@@ -1383,6 +1387,8 @@ class DictKeySetVariable(BaseSetVariable):
     ) -> "SetVariable":
         from .dicts import ConstDictVariable
 
+        if isinstance(vt, ConstDictVariable):
+            vt.install_dict_order_guard(tx)
         if isinstance(vt, (BaseSetVariable, ConstDictVariable)):
             items: list[Any] = list(vt.items.keys())
         else:
