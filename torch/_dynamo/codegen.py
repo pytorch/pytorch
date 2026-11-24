@@ -368,7 +368,20 @@ class PyCodegen:
             and value.is_python_constant()
             and is_safe_constant(value.as_python_constant())
         ):
-            output.append(self.create_load_const(value.as_python_constant()))
+            const = value.as_python_constant()
+            if self.tx.output.side_effects.references_trace_time_empty_cell(const):
+                unimplemented(
+                    gb_type="Class with trace-time empty closure cell escaped",
+                    context=f"{const}",
+                    explanation="A class defined in the compiled region closes over a "
+                    "name assigned after the class statement. Dynamo built it with a "
+                    "placeholder cell that is not updated outside the trace.",
+                    hints=[
+                        "Do not return or store the class outside the compiled region.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+            output.append(self.create_load_const(const))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)
 

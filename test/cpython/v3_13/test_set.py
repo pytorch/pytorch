@@ -1876,10 +1876,6 @@ class bad_dict_clear:
         return 0
 
 class TestWeirdBugs(__TestCase):
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_8420_set_merge(self):
         # This used to segfault
         global be_bad, set2, dict2
@@ -1906,10 +1902,6 @@ class TestWeirdBugs(__TestCase):
         s.update(range(100))
         list(si)
 
-    @unittest.skipIf(
-        TEST_WITH_TORCHDYNAMO,
-        "__build_class__ with closed over objects not supported",
-    )
     def test_merge_and_mutate(self):
         class X:
             def __hash__(self):
@@ -2033,7 +2025,7 @@ class _TestBinaryOpsMutating(_TestOperationsMutating):
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestBinaryOpsMutating_Set_Set(_TestBinaryOpsMutating, __TestCase):
     constructor1 = set
@@ -2041,7 +2033,7 @@ class TestBinaryOpsMutating_Set_Set(_TestBinaryOpsMutating, __TestCase):
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestBinaryOpsMutating_Subclass_Subclass(_TestBinaryOpsMutating, __TestCase):
     constructor1 = SetSubclass
@@ -2049,7 +2041,7 @@ class TestBinaryOpsMutating_Subclass_Subclass(_TestBinaryOpsMutating, __TestCase
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestBinaryOpsMutating_Set_Subclass(_TestBinaryOpsMutating, __TestCase):
     constructor1 = set
@@ -2057,7 +2049,7 @@ class TestBinaryOpsMutating_Set_Subclass(_TestBinaryOpsMutating, __TestCase):
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestBinaryOpsMutating_Subclass_Set(_TestBinaryOpsMutating, __TestCase):
     constructor1 = SetSubclass
@@ -2102,7 +2094,7 @@ class _TestMethodsMutating(_TestOperationsMutating):
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestMethodsMutating_Set_Set(_TestMethodsMutating, __TestCase):
     constructor1 = set
@@ -2110,7 +2102,7 @@ class TestMethodsMutating_Set_Set(_TestMethodsMutating, __TestCase):
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestMethodsMutating_Subclass_Subclass(_TestMethodsMutating, __TestCase):
     constructor1 = SetSubclass
@@ -2118,7 +2110,7 @@ class TestMethodsMutating_Subclass_Subclass(_TestMethodsMutating, __TestCase):
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestMethodsMutating_Set_Subclass(_TestMethodsMutating, __TestCase):
     constructor1 = set
@@ -2126,7 +2118,7 @@ class TestMethodsMutating_Set_Subclass(_TestMethodsMutating, __TestCase):
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestMethodsMutating_Subclass_Set(_TestMethodsMutating, __TestCase):
     constructor1 = SetSubclass
@@ -2134,7 +2126,7 @@ class TestMethodsMutating_Subclass_Set(_TestMethodsMutating, __TestCase):
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestMethodsMutating_Set_Dict(_TestMethodsMutating, __TestCase):
     constructor1 = set
@@ -2142,7 +2134,7 @@ class TestMethodsMutating_Set_Dict(_TestMethodsMutating, __TestCase):
 
 @unittest.skipIf(
     TEST_WITH_TORCHDYNAMO,
-    "__build_class__ with closed over objects not supported",
+    "range(randrange(n)) needs Tensor.item()",
 )
 class TestMethodsMutating_Set_List(_TestMethodsMutating, __TestCase):
     constructor1 = set
