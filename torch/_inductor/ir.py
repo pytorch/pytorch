@@ -7534,6 +7534,25 @@ class ConcatKernel(NopKernel):
         return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
+    def _src_is_localized(cls, src: StorageBox) -> bool:
+        r"""Require a copy for localized producers instead of aliasing cat storage."""
+        data = getattr(src, "data", None)
+        if data is None:
+            return False
+        # Inspect the producer's origin, not inherited origins of the inserted
+        # Pointwise copy, so recursive realize_into can place the copy in dst.
+        origin_node = (
+            data.get_origin_node() if hasattr(data, "get_origin_node") else None
+        )
+        if origin_node is None:
+            return False
+        meta = getattr(origin_node, "meta", None)
+        if not meta:
+            return False
+        custom = meta.get("custom") or {}
+        return custom.get("localization") is True
+
+    @classmethod
     def realize_into(cls, src: IRNode, dst: IRNode, allow_alias: bool = True) -> IRNode:
         # Attempt to turn this into a ReinterpretView rather than assert.
         # This has concessions around layout, as as_storage_and_layout
@@ -7553,7 +7572,9 @@ class ConcatKernel(NopKernel):
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             if not hasattr(src.data, "layout"):
                 raise AssertionError('Expected hasattr(src.data, "layout")')
-            if cls.can_realize_into_without_copy(src, dst):
+            if cls.can_realize_into_without_copy(
+                src, dst
+            ) and not cls._src_is_localized(src):
                 # pyrefly: ignore [missing-attribute]
                 src.data.layout = NonOwningLayout(dst)
                 return src.data
