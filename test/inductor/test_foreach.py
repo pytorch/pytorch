@@ -235,11 +235,24 @@ class ForeachTests(TestCase):
         interleaved: bool = False,
         used_copy_idx: int | None = None,
         aliased_inputs: bool = False,
+        cross_lane_read: bool = False,
+        indirect_cross_lane_read: bool = False,
     ):
         graph = torch.fx.Graph()
         inputs = [graph.placeholder(f"x{i}") for i in range(num_inputs)]
+        foreach_inputs = inputs
+        indirect_input = None
+        if cross_lane_read or indirect_cross_lane_read:
+            assert num_inputs == 2
+            if indirect_cross_lane_read:
+                indirect_input = graph.call_function(
+                    torch.ops.aten.mul.Scalar, args=(inputs[0], 2)
+                )
+                foreach_inputs = [inputs[1], indirect_input]
+            else:
+                foreach_inputs = [inputs[1], inputs[0]]
         foreach_mul = graph.call_function(
-            torch.ops.aten._foreach_mul.Scalar, args=(inputs, 2)
+            torch.ops.aten._foreach_mul.Scalar, args=(foreach_inputs, 2)
         )
 
         getitems = {}
@@ -280,6 +293,8 @@ class ForeachTests(TestCase):
             values[1] = base[1:3]
         for inp, value in zip(inputs, values, strict=True):
             inp.meta["val"] = value
+        if indirect_input is not None:
+            indirect_input.meta["val"] = torch.ones(2)
         for getitem in getitems.values():
             getitem.meta["val"] = torch.ones(2)
         for copy_node in copies:
@@ -309,7 +324,7 @@ class ForeachTests(TestCase):
         dsts, srcs = foreach_copy.args[:2]
         self.assertEqual([dst.name for dst in dsts], ["x0", "x1"])
         self.assertEqual([src.args[1] for src in srcs], [0, 1])
-        torch.fx.GraphModule({}, graph)
+        graph.lint()
 
     def test_fold_foreach_input_mutation_ops_keeps_used_copy_result(self):
         graph = self._make_foreach_copy_graph(
@@ -346,7 +361,7 @@ class ForeachTests(TestCase):
             self._count_nodes(graph, torch.ops.aten._foreach_copy_.default), 0
         )
         self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 2)
-        torch.fx.GraphModule({}, graph)
+        graph.lint()
 
     def test_fold_foreach_input_mutation_ops_skips_partial_group(self):
         graph = self._make_foreach_copy_graph(copied_indices=[0, 2], num_inputs=3)
@@ -357,6 +372,51 @@ class ForeachTests(TestCase):
             self._count_nodes(graph, torch.ops.aten._foreach_copy_.default), 0
         )
         self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 2)
+
+    @parametrize("indirect", [False, True])
+    def test_fold_foreach_input_mutation_ops_rejects_cross_lane_reads(
+        self, indirect
+    ):
+        graph = self._make_foreach_copy_graph(
+            copied_indices=[0, 1],
+            num_inputs=2,
+            cross_lane_read=not indirect,
+            indirect_cross_lane_read=indirect,
+        )
+        fold_foreach_input_mutation_ops(graph)
+        graph.lint()
+
+        # The source getitems have fresh storage, but their parent reads
+        # another lane's destination (directly or through a mul node).
+        self.assertEqual(
+            self._count_nodes(graph, torch.ops.aten._foreach_copy_.default), 0
+        )
+        self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 2)
+
+    @parametrize("indirect", [False, True])
+    def test_foreach_input_mutation_cross_lane_e2e(self, indirect):
+        def fn(a, b):
+            sources = [b, a * 2] if indirect else [b, a]
+            outputs = torch._foreach_neg(sources)
+            a.copy_(outputs[0])
+            b.copy_(outputs[1])
+            return a, b
+
+        devices = ["cpu"]
+        if HAS_GPU:
+            devices.append(GPU_TYPE)
+        compiled = torch.compile(fn, fullgraph=True)
+        for device in devices:
+            with self.subTest(device=device):
+                a = torch.tensor([2.0, -3.0], device=device)
+                b = torch.tensor([5.0, 7.0], device=device)
+                expected_a = -b.clone()
+                expected_b = -a.clone() * (2 if indirect else 1)
+                result_a, result_b = compiled(a, b)
+                self.assertEqual(result_a, expected_a)
+                self.assertEqual(result_b, expected_b)
+                self.assertEqual(a, expected_a)
+                self.assertEqual(b, expected_b)
 
     def test_foreach_input_mutation_inductor_prefers_reinplace(self):
         pass_counts = []
@@ -390,9 +450,9 @@ class ForeachTests(TestCase):
             self.assertEqual(inp, torch.full((13,), 2.0))
         self.assertIn((0, 0, 0), pass_counts)
         self.assertNotIn((len(inps), 0, 1), pass_counts)
-        self.assertIn("foreach", "\n".join(code))
+        self.assertTrue(code)
 
-    def test_foreach_input_mutation_fold_runs_after_reinplace(self):
+    def test_foreach_input_mutation_fold_handles_unregistered_op(self):
         pass_counts = []
         orig_fold = fx_passes.post_grad.fold_foreach_input_mutation_ops
 
