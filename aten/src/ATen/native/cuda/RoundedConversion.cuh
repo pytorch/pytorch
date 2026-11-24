@@ -53,7 +53,7 @@ convert_rounded_from_float(float x, c10::RoundingMode mode) {
       case RoundingMode::TowardNegative:
         return __float2half_rd(x);
     }
-#if !defined(USE_ROCM) || TORCH_HIP_VERSION >= 702
+#if !defined(USE_ROCM)
   } else if constexpr (std::is_same_v<dst_t, BFloat16>) {
     // These use cvt.rn/rz.bf16.f32 on sm_80+ and cvt.rp/rm.bf16.f32 on
     // sm_90+, and emulate them otherwise.
