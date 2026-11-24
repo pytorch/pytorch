@@ -1923,6 +1923,54 @@ class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
         )
     )
 
+    @torch._functorch.config.patch(donated_buffer=True)
+    def test_saved_tensor_hooks_preserve_donated_buffer(self, device):
+        from torch._functorch._aot_autograd import runtime_wrappers
+
+        @torch.compile(backend="inductor")
+        def fn(x, w):
+            h = (x @ w).sin()
+            return (h * h + h.cos()).sum()
+
+        retained = []
+
+        def pack(t):
+            alias = t.detach()
+            retained.append(alias)
+            return alias
+
+        x = torch.randn(32, 32, device=device, requires_grad=True)
+        w = torch.randn_like(x, requires_grad=True)
+        with patch.object(
+            runtime_wrappers,
+            "clone_preserve_strides",
+            wraps=runtime_wrappers.clone_preserve_strides,
+        ) as clone:
+            # Without hooks the backward keeps reusing donated buffers.
+            fn(x, w).backward()
+            self.assertEqual(clone.call_count, 0)
+
+            with torch.autograd.graph.saved_tensors_hooks(pack, lambda t: t):
+                loss = fn(x, w)
+            self.assertTrue(retained)
+            before = [t.clone() for t in retained]
+            loss.backward()
+            self.assertGreater(clone.call_count, 0)
+            for t, expected in zip(retained, before):
+                self.assertEqual(t, expected, atol=0, rtol=0)
+
+            # Disabled hooks never see the saved tensors, as when AOTAutograd
+            # inlines GraphModule hooks, so donation is kept.
+            clone.reset_mock()
+            with torch.autograd.graph.saved_tensors_hooks(pack, lambda t: t):
+                torch._C._autograd._saved_tensors_hooks_disable("disabled", False)
+                try:
+                    loss = fn(x, w)
+                finally:
+                    torch._C._autograd._saved_tensors_hooks_enable()
+            loss.backward()
+            self.assertEqual(clone.call_count, 0)
+
     @onlyAccelerator
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)
