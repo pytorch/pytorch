@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Literal, TypeAlias
+from typing_extensions import deprecated
 
 from torch._C import device, dtype, layout
 
@@ -153,8 +154,13 @@ Input: TypeAlias = _TensorMetadata | list[_TensorMetadata] | Scalar | None
 class _ExtraFields_TorchOp:
     name: str
     sequence_number: int
-    allow_tf32_cublas: bool
-
+    @property
+    @deprecated(
+        "allow_tf32_cublas is deprecated as of PyTorch 2.16 and will be removed "
+        "in 2.18. Read torch.backends.cuda.matmul.fp32_precision instead.",
+        category=None,
+    )
+    def allow_tf32_cublas(self) -> bool: ...
     @property
     def inputs(self) -> list[Input]: ...
     @property

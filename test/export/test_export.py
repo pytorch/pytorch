@@ -55,7 +55,11 @@ from torch._higher_order_ops.while_loop import while_loop
 from torch._inductor.compile_fx import split_const_gm
 from torch._library.opaque_object import _OPAQUE_TYPES_BY_NAME
 from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
+from torch._subclasses.fake_tensor import (
+    is_fake_tensor,
+    maybe_get_fake_mode,
+    maybe_get_real_tensor,
+)
 from torch.export import default_decompositions, Dim, export, unflatten
 from torch.export._patches import register_lstm_while_loop_decomposition
 from torch.export._trace import (
@@ -1136,7 +1140,9 @@ class TestExport(TestCase):
                 for node in placeholders:
                     val = node.meta["val"]
                     if real:
-                        self.assertIsNotNone(functorch.get_unwrapped(val).real_tensor)
+                        self.assertIsNotNone(
+                            maybe_get_real_tensor(functorch.get_unwrapped(val))
+                        )
                     else:
                         self.assertTrue(is_fake_tensor(val), node.name)
                 for args in (inp, (torch.randn(3, 4), -torch.ones(2))):
@@ -8409,7 +8415,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
             self.assertTrue(torch.allclose(er, r))
 
-    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureCppRuntimeNonStrict
     def test_more_multidimensional_slicing(self):
         # Inputs: a 3d tensor t and a 1d tensor x of indices into t
@@ -15751,6 +15756,29 @@ def forward(self, x, b_t, y):
             gm.code,
         )
 
+    def test_export_with_outer_autocast(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x @ y
+
+        x, y = torch.randn(4, 4), torch.randn(4, 4)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            ep = export(Model(), (x, y))
+        out = ep.graph.find_nodes(op="output")[0].args[0][0]
+        self.assertEqual(out.meta["val"].dtype, torch.bfloat16)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            self.assertEqual(ep.module()(x, y).dtype, torch.bfloat16)
+        expected = torch.float32
+        if is_training_ir_test(self._testMethodName):
+            # These variants lower inside the autocast, which records the casts.
+            expected = torch.bfloat16
+        self.assertEqual(ep.module()(x, y).dtype, expected)
+
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            lowered = ep.run_decompositions()
+        self.assertEqual(lowered.module()(x, y).dtype, torch.bfloat16)
+        self.assertIn("torch.ops.aten._to_copy.default", lowered.graph_module.code)
+
     def test_export_as_backend(self):
         def f(x, y):
             return x + y
@@ -18461,43 +18489,15 @@ def forward(self, x):
     @unittest.skipIf(not (TEST_CUDA or TEST_XPU), "Test requires CUDA or XPU.")
     def test_exception(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.embedding = torch.nn.Embedding(num_embeddings=10, embedding_dim=8)
-                self.register_buffer("buffer", torch.ones(4, 4))
-                self.register_buffer("param", torch.ones(4, 4))
-
-            def forward(self, x):
-                token_ids = torch.randint(0, 10, (4,), device=x.device)
-                embedded = self.embedding(token_ids).sum()
-                return self.buffer.sum() + self.param.sum() + x.sum() + embedded
-
-        class BarModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = Model()
-
-            def forward(self, x):
-                if GPU_TYPE in str(x.device):
-                    mod = self.mod.to(x.device)
-                    return mod(x)
-                else:
-                    return x.sum()
-
-        class BarBar(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod = BarModel()
-
             def forward(self, x):
                 with torch.amp.autocast(device_type=GPU_TYPE):
-                    y = self.mod(x)
-                return y
+                    x.sin()
+                    raise RuntimeError("exception inside autocast")
 
         with torch.no_grad():
-            with self.assertRaisesRegex(RuntimeError, "Couldn't swap Embedding.weight"):
+            with self.assertRaisesRegex(RuntimeError, "exception inside autocast"):
                 _ = torch.export.export(
-                    BarBar(),
+                    Model(),
                     (),
                     {"x": torch.randn(4, 4, 4, device=GPU_TYPE)},
                     strict=False,

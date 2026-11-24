@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfCrossRef,
     skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
@@ -940,7 +941,6 @@ class TestPrecompile(TestCase):
             backend_id: EagerCacheArtifact(key=backend_id, content=backend)
             for backend_id, backend in package.cached_backends.items()
         }
-        torch._dynamo.reset()
         binding = {"defaults": step.__defaults__, "kwdefaults": step.__kwdefaults__}
         # torch: an artifact-namespace name the captured module also binds; the
         # module's binding is the one the rebuilt bytecode must LOAD_GLOBAL.
@@ -951,6 +951,7 @@ class TestPrecompile(TestCase):
         # and sends the user to a fresh process (which the scrub below stands for).
         with self.assertRaisesRegex(PrecompileError, "fresh process"):
             build()
+        torch._dynamo.reset()
         scope = step.__globals__
         scrub = self._scrub_minted(scope)
         forward = build()
@@ -3200,6 +3201,7 @@ class TestPrecompile(TestCase):
         self.assertIn("forward = _build_installed_forward()", python_code)
         self.assertNotIn("_FRAMES = ", python_code)
 
+    @skipIfCppFakeTensor("no nested tensor support")
     def test_nested_input_refused(self):
         # A nested example input is refused up front with a named PrecompileError rather
         # than the raw internal error one produces further down (a static capture has no
