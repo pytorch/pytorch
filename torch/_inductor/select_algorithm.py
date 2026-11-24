@@ -2975,6 +2975,7 @@ class GeneratedCodeCache:
         num_consumer_groups: int,
         num_buffers_warp_spec: int,
         kwargs: dict[str, Any],
+        index_dtype: str,
         hint_override: int | None = None,
         triton_meta: TritonMeta | None = None,
     ) -> str | None:
@@ -3051,6 +3052,8 @@ class GeneratedCodeCache:
                 "tma_load_for_template_epilogue": tma_load_for_template_epilogue,
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
+                # Chosen from size hints, which the symbolic layouts above do not capture.
+                "index_dtype": index_dtype,
                 "hint_override": hint_override,
                 "emulate_precision_casts": config.emulate_precision_casts,
                 "triton_meta": triton_meta,
@@ -3189,6 +3192,21 @@ class TritonTemplate(KernelTemplate):
             and torch._inductor.config.enable_caching_generated_triton_templates
         )
 
+        fake_out = ir.Buffer(name="buf_out", layout=layout)
+        kernel_name = f"triton_{self.name}"
+
+        numel = sympy_product(layout.size)
+        buffers = itertools.chain(
+            input_nodes,
+            template_subgraph_index_dtype_nodes(subgraphs),
+            (fake_out,),
+        )
+
+        if TritonScheduling.can_use_32bit_indexing(numel, buffers):
+            index_dtype = "tl.int32"
+        else:
+            index_dtype = "tl.int64"
+
         cache_key = None
         if caching_enabled:
             cache_key = self._generated_code_cache.make_key(
@@ -3209,6 +3227,7 @@ class TritonTemplate(KernelTemplate):
                 num_consumer_groups,
                 num_buffers_warp_spec,
                 kwargs,
+                index_dtype,
                 hint_override,
                 triton_meta,
             )
@@ -3219,21 +3238,6 @@ class TritonTemplate(KernelTemplate):
 
         for name, val in kwargs.items():
             defines.write(f"{name} : tl.constexpr = {val}\n")
-
-        fake_out = ir.Buffer(name="buf_out", layout=layout)
-        kernel_name = f"triton_{self.name}"
-
-        numel = sympy_product(layout.size)
-        buffers = itertools.chain(
-            input_nodes,
-            template_subgraph_index_dtype_nodes(subgraphs),
-            (fake_out,),
-        )
-
-        if TritonScheduling.can_use_32bit_indexing(numel, buffers):
-            index_dtype = "tl.int32"
-        else:
-            index_dtype = "tl.int64"
 
         # Add index dtype to defines so it's available in the template
         defines.write(f"INDEX_DTYPE : tl.constexpr = {index_dtype}\n")
