@@ -1732,15 +1732,11 @@ class CompilePackage:
             with context:
                 module = sys.modules[entry.python_module]
                 self._install_import_sources(module, entry.import_sources)
-                target_code = code
                 if entry.install_to_global:
                     self._install_resume_functions(module, code, entry.function_names)
-                if entry.code_source:
-                    target_code = _lookup_code(entry)
+                target_code = _lookup_code(entry) if entry.code_source else code
 
                 if entry.bypassed:
-                    # If the entry is bypassed, do not install backends
-                    # or guarded codes.
                     continue
 
                 input_codes.add(target_code)
@@ -1748,7 +1744,7 @@ class CompilePackage:
 
                 # Dynamo generates empty graph for trivial functions, should just skip them
                 # in these cases.
-                if entry.skip_recursive or len(entry.guarded_codes) == 0:
+                if entry.skip_recursive or not entry.guarded_codes:
                     _update_skip_hold(target_code, entry.skip_recursive, hold=True)
                     self._skipped_codes.append((target_code, entry.skip_recursive))
 
