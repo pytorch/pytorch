@@ -896,6 +896,7 @@ class AOTAutogradCachePickler(FxGraphCachePickler):
                 cacheable.dynamic_shapes,
                 cacheable.aot_autograd_arg_pos_to_source,
                 cacheable.static_input_indices,
+                cacheable.saved_tensors_hooks_input_indices,
                 cacheable.enable_log,
                 cacheable.pre_dispatch,
                 cacheable.precompile_backend_id,

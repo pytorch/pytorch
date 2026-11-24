@@ -51,6 +51,7 @@ from torch.fx.passes._tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import IntLikeType, py_sym_types
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.checkpoint import CheckpointPolicy
 from torchgen.utils import dataclass_repr
 
 from .. import config
@@ -61,7 +62,7 @@ from .autograd_cache import (
     should_use_remote_autograd_cache,
 )
 from .codegen import aggregate_runtime_wrapper_sources
-from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
+from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
@@ -89,6 +90,7 @@ from .schemas import (
     AOTState,
     FlatFn,
     FxValue,
+    InputAliasInfo,
     MutationType,
     SubclassMeta,
     ViewAndMutationMeta,
@@ -100,8 +102,10 @@ from .subclass_utils import (
 from .utils import (
     _get_inner_meta,
     _is_primal,
+    _is_tangent,
     contain_metadata_mutation_ops,
     get_default_generator,
+    is_with_effects,
     make_boxed_func,
     simple_wraps,
     strict_zip,
@@ -158,6 +162,9 @@ def maybe_skip_decompose(aot_config: AOTConfig) -> Generator[AOTConfig, None, No
 #
 # As for now in context we expose forward graph, backward graph and current saved node,
 # which contains node.meta with additional information about that fx.Node.
+# A graph input that the user marked `_saved_tensors_hooks_input = True` (see
+# `torch._functorch.config.saved_tensors_hooks_filtering_mode`) has
+# node.meta["saved_tensors_hooks_input"] = True.
 # Warning: This API may change without backward compatibility.
 @contextmanager
 def _saved_tensor_hook_context(state: dict[str, Any]) -> Generator[None, None, None]:
@@ -1499,6 +1506,33 @@ def maybe_inline_graph_saved_tensors_hooks(
         fw_g_inputs = fw_g.find_nodes(op="placeholder")
         exclude_set = {fw_g_inputs[i].name for i in static_input_indices}
 
+    # Marked inputs saved for backward reach the hooks in every mode, which
+    # find them through node.meta["saved_tensors_hooks_input"].
+    marked = set(aot_config.saved_tensors_hooks_input_indices or ())
+    if marked:
+        saved_nodes: set[torch.fx.Node] = set()
+        torch.fx.map_arg(fw_outs_saved_for_bw, saved_nodes.add)
+        for node in fw_g.find_nodes(op="placeholder"):
+            desc = node.meta.get("desc")
+            if (
+                isinstance(desc, PlainAOTInput)
+                and desc.idx in marked
+                and node in saved_nodes
+            ):
+                node.meta["saved_tensors_hooks_input"] = True
+                if allow_set is not None:
+                    allow_set.add(node.name)
+                if exclude_set is not None:
+                    exclude_set.discard(node.name)
+        log.debug(
+            "saved tensors hooks: marked inputs saved for backward: %s",
+            [
+                n.name
+                for n in fw_g.find_nodes(op="placeholder")
+                if n.meta.get("saved_tensors_hooks_input")
+            ],
+        )
+
     if (allow_set is not None) and (not allow_set):
         # This means we have empty whitelist,
         # No donated (intermediate) saved.
@@ -1947,6 +1981,95 @@ def _log_fw_bw_graphs(
     return fw_module_str, bw_module_str
 
 
+def _recompute_views_of_marked_inputs(
+    fx_g: torch.fx.GraphModule,
+    primals: list[torch.fx.Node],
+    input_info: list[InputAliasInfo],
+    marked: set[int],
+    num_fwd_outputs: int,
+    default_partitioner: bool,
+) -> None:
+    """Backward often saves a view of an input instead of the input itself:
+    `mm` saves its transpose, `linear` on a 3D input a 2D reshape. Tags the
+    views of marked inputs that backward uses `MUST_RECOMPUTE`, so that the
+    partitioner saves the marked input, which then reaches the inlined saved
+    tensors hooks, and replays the view in backward.
+
+    Views that backward does not use are left alone. So are inputs the graph
+    mutates (backward would recompute the view from the mutated data), views
+    that already have a recompute policy, and, for the default partitioner,
+    graphs with an impure forward op that it rejects once a recompute tag is
+    set."""
+    partitioners = torch._functorch.partitioners
+    bases = {
+        node
+        for node, info in zip(primals, input_info)
+        if isinstance(node.meta.get("desc"), PlainAOTInput)
+        and node.meta["desc"].idx in marked
+        and info.mutation_type == MutationType.NOT_MUTATED
+    }
+    views: list[torch.fx.Node] = []
+    for node in fx_g.graph.nodes:
+        if "recompute" in node.meta or not node.args or node.args[0] not in bases:
+            continue
+        # A multi-output view (split, chunk, unbind) is used through getitem.
+        is_view = node.op == "call_function" and (
+            node.target is operator.getitem
+            or (isinstance(node.target, torch._ops.OpOverload) and node.target.is_view)
+        )
+        if is_view:
+            bases.add(node)
+            views.append(node)
+    if not views:
+        return
+    # The joint graph's forward: what the forward outputs are computed from.
+    fwd_outputs, bwd_outputs, _, _ = partitioners._extract_fwd_bwd_outputs(
+        fx_g, num_fwd_outputs=num_fwd_outputs
+    )
+    forward: set[torch.fx.Node] = set()
+    stack = [n for n in fwd_outputs if isinstance(n, torch.fx.Node)]
+    while stack:
+        node = stack.pop()
+        if node not in forward:
+            forward.add(node)
+            stack.extend(node.all_input_nodes)
+    if default_partitioner:
+        # The default partitioner raises once a recompute tag is set in a graph
+        # with an impure op it neither skips nor saves; ops computed from the
+        # tangents are backward and do not count.
+        backward: set[torch.fx.Node] = set()
+        for node in fx_g.graph.nodes:
+            if _is_tangent(node) or any(
+                arg in backward for arg in node.all_input_nodes
+            ):
+                backward.add(node)
+            elif (
+                partitioners.is_impure_for_partition(node)
+                and node.target not in partitioners.AC_SAFE_IMPURE_OPS
+                and node.meta.get("recompute") != CheckpointPolicy.MUST_SAVE
+                and not is_with_effects(node)
+            ):
+                log.debug("saved tensors hooks: impure op %s, no recompute", node)
+                return
+    # A view is used by backward if a backward op or a backward output uses it;
+    # a forward output alone is not a use.
+    used = {n for n in bwd_outputs if isinstance(n, torch.fx.Node)}
+    for node in reversed(views):
+        if any(
+            (user not in forward and user.op != "output") or user in used
+            for user in node.users
+        ):
+            used.add(node)
+    for node in views:
+        if node in used:
+            node.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
+    log.debug(
+        "saved tensors hooks: marked inputs %s; views recomputed in backward: %s",
+        sorted(marked),
+        [node.name for node in views if node in used],
+    )
+
+
 def _partition_joint_graph_into_fw_bw(
     fx_g: torch.fx.GraphModule,
     joint_inputs: list[Any] | tuple[list[Any], list[Any]],
@@ -2001,6 +2124,18 @@ def _partition_joint_graph_into_fw_bw(
             and info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ):
             node.meta["aot_runtime_epilogue_input_mutation"] = True
+
+    marked = set(aot_config.saved_tensors_hooks_input_indices or ())
+    if marked and _should_disable_saved_tensors_hooks():
+        _recompute_views_of_marked_inputs(
+            fx_g,
+            primals,
+            inner_input_info,
+            marked,
+            num_inner_fwd_outputs,
+            getattr(partition_fn, "func", partition_fn)
+            is torch._functorch.partitioners.default_partition,
+        )
 
     # fx_g's primals are the unwrapped inputs, whose static positions are in
     # inner_meta.

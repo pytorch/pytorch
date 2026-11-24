@@ -1616,6 +1616,46 @@ def _extract_fwd_bwd_modules(
     return fwd_module, bwd_module
 
 
+# Impure ops that the default partitioner neither saves nor rejects when it
+# applies activation checkpointing: they are safe to duplicate.
+AC_SAFE_IMPURE_OPS = (
+    torch.ops.aten._assert_scalar.default,
+    torch.ops.aten._assert_async.default,
+    torch.ops.aten._assert_async.msg,
+    # Profiler record_function ops are technically impure (they set up
+    # profiling spans), but they're safe to duplicate during AC recompute.
+    # We skip both enter and exit to keep profiling spans balanced.
+    torch.ops.profiler._record_function_enter_new.default,
+    torch.ops.profiler._record_function_enter.default,
+    torch.ops.profiler._record_function_exit.default,
+    torch.ops.profiler._record_function_exit._RecordFunction,
+)
+
+
+def is_impure_for_partition(node: fx.Node) -> bool:
+    """Whether the default partitioner treats `node` as impure."""
+    # wait tensor is an "impure" op according to DCE's definition of impure
+    # (see is_impure in torch/fx/node.py), but it survives past
+    # functionalization and can be safely dup'd and reordered under the
+    # assumption SPMD.
+    return (
+        node.is_impure(impure_random=False)
+        and node.op
+        not in (
+            "placeholder",
+            "output",
+        )
+        and (
+            not torch.distributed.is_available()
+            or node.target
+            not in (
+                torch.ops._c10d_functional.wait_tensor.default,
+                torch.ops._c10d_functional.wait_tensors.default,
+            )
+        )
+    )
+
+
 def default_partition(
     joint_module: fx.GraphModule,
     _joint_inputs: Any,
@@ -1698,8 +1738,6 @@ def default_partition(
     saved_sym_nodes = []
     saved_opaque_nodes = []
 
-    distributed_enabled = torch.distributed.is_available()
-
     def is_tensor(node: fx.Node) -> bool:
         return "tensor_meta" in node.meta or is_fake_tensor(node.meta.get("val"))
 
@@ -1709,28 +1747,6 @@ def default_partition(
             and len(node.users) > 0
         )
 
-    def is_impure(node: fx.Node) -> bool:
-        # wait tensor is an "impure" op according to DCE's definition of impure
-        # (see is_impure in torch/fx/node.py), but it survives past
-        # functionalization and can be safely dup'd and reordered under the
-        # assumption SPMD.
-        return (
-            node.is_impure(impure_random=False)
-            and node.op
-            not in (
-                "placeholder",
-                "output",
-            )
-            and (
-                not distributed_enabled
-                or node.target
-                not in (
-                    torch.ops._c10d_functional.wait_tensor.default,
-                    torch.ops._c10d_functional.wait_tensors.default,
-                )
-            )
-        )
-
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
@@ -1738,18 +1754,7 @@ def default_partition(
             k for k, v in joint_module.named_modules()
         ):
             continue
-        if node.target in (
-            torch.ops.aten._assert_scalar.default,
-            torch.ops.aten._assert_async.default,
-            torch.ops.aten._assert_async.msg,
-            # Profiler record_function ops are technically impure (they set up
-            # profiling spans), but they're safe to duplicate during AC recompute.
-            # We skip both enter and exit to keep profiling spans balanced.
-            torch.ops.profiler._record_function_enter_new.default,
-            torch.ops.profiler._record_function_enter.default,
-            torch.ops.profiler._record_function_exit.default,
-            torch.ops.profiler._record_function_exit._RecordFunction,
-        ):
+        if node.target in AC_SAFE_IMPURE_OPS:
             continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
@@ -1765,7 +1770,7 @@ def default_partition(
             else:
                 saved_values.append(node)
             continue
-        if is_impure(node):
+        if is_impure_for_partition(node):
             if graph_has_recomputable_ops:
                 raise AssertionError(
                     f"Trying to apply AC on a graph with impure op: {node}, {node.target}"
