@@ -1411,6 +1411,11 @@ void callPythonDeallocator(
   };
   try {
     py::gil_scoped_acquire gil;
+    // A tensor's last reference may be dropped while a Python exception is
+    // propagating (e.g. a temporary of the expression that raised): set the
+    // pending error aside for the callback and restore it afterwards, or the
+    // callback fails with a SystemError and the pending error is lost.
+    py::error_scope pending_error;
     try {
       py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 1))(
           reinterpret_cast<uintptr_t>(ptr),
@@ -1429,6 +1434,18 @@ void callPythonDeallocator(
   } catch (...) {
     warn_failure("unknown exception");
   }
+}
+
+void callPythonRecordStream(
+    const std::shared_ptr<c10::SafePyObject>& state,
+    void* ptr,
+    cudaStream_t stream) {
+  if (!Py_IsInitialized() || Py_IsFinalizing()) {
+    return;
+  }
+  py::gil_scoped_acquire gil;
+  py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 2))(
+      reinterpret_cast<uintptr_t>(ptr), reinterpret_cast<uintptr_t>(stream));
 }
 
 } // namespace
@@ -1451,6 +1468,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              allocator) {
         torch::cuda::CUDAPluggableAllocator::changeCurrentAllocator(allocator);
       });
+  m.def(
+      "_cuda_beginGraphAllocatorWindow",
+      &torch::cuda::CUDAPluggableAllocator::beginGraphAllocatorWindow,
+      py::arg("allocator"));
+  m.def(
+      "_cuda_endGraphAllocatorWindow",
+      &torch::cuda::CUDAPluggableAllocator::endGraphAllocatorWindow);
   py::class_<
       torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator,
       c10::cuda::CUDACachingAllocator::CUDAAllocator,
@@ -1552,24 +1576,44 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   });
   m.def(
       "_cuda_createPythonAllocator",
-      [](py::object alloc_fn, py::object free_fn) {
+      [](py::object alloc_fn, py::object free_fn, py::object record_stream_fn) {
         TORCH_CHECK(
             PyCallable_Check(alloc_fn.ptr()),
             "alloc_fn must be a Python callable");
         TORCH_CHECK(
             PyCallable_Check(free_fn.ptr()),
             "free_fn must be a Python callable");
-        auto callbacks = py::make_tuple(alloc_fn, free_fn);
+        TORCH_CHECK(
+            record_stream_fn.is_none() ||
+                PyCallable_Check(record_stream_fn.ptr()),
+            "record_stream_fn must be a Python callable");
+        const bool has_record_stream = !record_stream_fn.is_none();
+        auto callbacks =
+            py::make_tuple(alloc_fn, free_fn, std::move(record_stream_fn));
         auto state = std::make_shared<c10::SafePyObject>(
             callbacks.release().ptr(), getPyInterpreter());
-        return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-            [state](size_t size, int device, cudaStream_t stream) {
-              return callPythonAllocator(state, size, device, stream);
-            },
-            [state](void* ptr, size_t size, int device, cudaStream_t stream) {
-              callPythonDeallocator(state, ptr, size, device, stream);
-            });
-      });
+        auto allocator =
+            torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
+                [state](size_t size, int device, cudaStream_t stream) {
+                  return callPythonAllocator(state, size, device, stream);
+                },
+                [state](
+                    void* ptr, size_t size, int device, cudaStream_t stream) {
+                  callPythonDeallocator(state, ptr, size, device, stream);
+                });
+        if (has_record_stream) {
+          std::static_pointer_cast<
+              torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator>(
+              allocator)
+              ->set_record_stream_fn([state](void* ptr, cudaStream_t stream) {
+                callPythonRecordStream(state, ptr, stream);
+              });
+        }
+        return allocator;
+      },
+      py::arg("alloc_fn"),
+      py::arg("free_fn"),
+      py::arg("record_stream_fn") = py::none());
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
@@ -2782,6 +2826,11 @@ void initCusparseltBindings(PyObject* module);
 
 } // namespace shared
 
+namespace memory_planner {
+void initMemoryPlanningUtilsBindings(PyObject* module);
+void initMemoryPlannerBindings(PyObject* module);
+} // namespace memory_planner
+
 void initModule(PyObject* module) {
   python::initCommMethods(module);
   // As weird as it seems, this file is also compiled for ROCm,
@@ -2797,6 +2846,8 @@ void initModule(PyObject* module) {
   shared::initGdsBindings(module);
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
+  memory_planner::initMemoryPlanningUtilsBindings(module);
+  memory_planner::initMemoryPlannerBindings(module);
   initCudaMethodBindings(module);
 }
 

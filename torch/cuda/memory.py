@@ -1678,6 +1678,51 @@ def change_current_allocator(allocator: _CUDAAllocator) -> None:
     torch._C._cuda_changeCurrentAllocator(allocator.allocator())
 
 
+@contextlib.contextmanager
+def _graph_allocator(allocator: _CUDAAllocator | torch._C._cuda_CUDAAllocator):
+    r"""Make the current CUDA graph capture's tensor allocations from ``allocator`` (private).
+
+    Use it inside the capture, on its capturing stream::
+
+        with torch.cuda.graph(g):
+            with torch.cuda.memory._graph_allocator(allocator):
+                fn()
+
+    While it is open, the tensor allocations made through the CUDA caching allocator that it
+    would place into the capture's pool (including ``resize_`` of storages, from any thread) are
+    made by ``allocator`` at their exact size, one call per allocation. Everything else keeps
+    using the caching allocator: raw allocations (:func:`~torch.cuda.caching_allocator_alloc`),
+    eager code, other devices, :func:`~torch.cuda.use_mem_pool` scopes opened inside it
+    (:class:`~torch.cuda.MemPool` pools, NCCL and symmetric memory), and the few internal paths
+    that allocate through ``c10::GetAllocator(kCUDA)``.
+
+    The allocator gets ``alloc_fn(size, device, stream)``, which must return a 256-byte aligned
+    address (``None`` raises :class:`torch.OutOfMemoryError`), runs in relaxed capture mode and
+    must not allocate CUDA memory through PyTorch, and ``free_fn(ptr, size, device, stream)`` as
+    soon as the allocation dies, in order, during the capture or after it. The graph keeps using
+    memory freed during the capture, so the allocator must not hand it out outside the graph
+    until the graph is destroyed. :meth:`~torch.Tensor.record_stream` on its memory during the
+    window goes to the allocator; after the window it is ignored. Its memory is not counted in
+    the memory statistics or snapshots. ``_lazy_clone`` of its tensors is not supported.
+
+    One at a time, and it requires the native caching allocator. No other CUDA graph capture may
+    begin or end while it is open (e.g. conditional nodes, or captures on other threads).
+    """
+    if isinstance(allocator, _CUDAAllocator):
+        allocator = allocator.allocator()
+    torch._C._cuda_beginGraphAllocatorWindow(allocator)
+    try:
+        yield
+    finally:
+        other_capture = torch._C._cuda_endGraphAllocatorWindow()
+    if other_capture:
+        raise RuntimeError(
+            "another CUDA graph capture began or ended while a CUDA graph allocator "
+            "window was open (conditional nodes and concurrent captures are not "
+            "supported)"
+        )
+
+
 def _get_current_allocator() -> _CUDAAllocator:
     r"""Return the allocator being currently used.
 

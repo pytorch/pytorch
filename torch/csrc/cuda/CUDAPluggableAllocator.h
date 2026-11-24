@@ -22,6 +22,17 @@ createCustomAllocator(
 TORCH_CUDA_CPP_API void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator);
+// Graph allocator windows (torch.cuda.memory._graph_allocator): opened inside
+// a CUDA graph capture, on its capturing stream, a window makes a layer over
+// the native caching allocator the current CUDA allocator until it ends. While
+// it is open, the tensor allocations that the caching allocator would place
+// into the capture's pool are made by `allocator`; everything else is
+// forwarded to the caching allocator. One window at a time; no other capture
+// may begin or end during it. End is idempotent and returns whether another
+// capture began or ended during the window.
+TORCH_CUDA_CPP_API void beginGraphAllocatorWindow(
+    std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator);
+TORCH_CUDA_CPP_API bool endGraphAllocatorWindow();
 
 struct _AllocationMetadata {
   _AllocationMetadata();
