@@ -324,6 +324,27 @@ def make_cu_seq(lengths: list[int], device) -> torch.Tensor:
     return torch.tensor([0, *accumulate(lengths)], device=device, dtype=torch.int32)
 
 
+def decode_attention_reference(q, k, v, q_lens, kv_lens, dtype):
+    """Output ``(T_q, H, D)`` and LSE ``(H, T_q)`` of attention for sequences of at most
+    one query token over contiguous varlen KV, per sequence with the math SDPA backend
+    in ``dtype``. A one-token query is the last position, so causal masking would
+    mask nothing."""
+    group = q.size(1) // k.size(1)
+    outs, lses = [], []
+    for q_seq, k_seq, v_seq in zip(q.split(q_lens), k.split(kv_lens), v.split(kv_lens)):
+        if q_seq.numel() == 0:
+            continue
+        q_seq, k_seq, v_seq = (
+            x.to(dtype).transpose(0, 1) for x in (q_seq, k_seq, v_seq)
+        )
+        with sdpa_kernel(SDPBackend.MATH):
+            out = F.scaled_dot_product_attention(q_seq, k_seq, v_seq, enable_gqa=True)
+        outs.append(out.transpose(0, 1))
+        scores = q_seq @ k_seq.repeat_interleave(group, dim=0).transpose(1, 2)
+        lses.append((scores * q.size(-1) ** -0.5).logsumexp(-1))
+    return torch.cat(outs), torch.cat(lses, dim=1)
+
+
 def gather_paged_cache(cache: torch.Tensor, block_table: torch.Tensor) -> torch.Tensor:
     """Gather a logical batched KV cache from a physical page pool."""
     page_size, num_heads, head_dim = cache.shape[1:]
@@ -1526,11 +1547,10 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         self, device, dtype, window_size, paged, empty_sequence, num_splits
     ):
         """FA2 packs a GQA call with one query token per sequence: the query heads of
-        a KV head become one query. It packs window (-1, -1), and with paged KV also the
-        causal window (-1, 0); non-paged causal calls and calls with a sequence that has
-        no query token stay unpacked. Either way varlen_attn_out must fill the caller's
-        ``out``, and the output and LSE must match an MHA call over contiguous KV with
-        the KV heads repeated, which FA2 runs unpacked and without split-KV."""
+        a KV head become one query. It packs both windows; calls with a sequence that
+        has no query token stay unpacked. Either way varlen_attn_out must fill the
+        caller's ``out``, and the output and LSE, like those of the same call with the
+        KV heads repeated to MHA (never packed), must match an fp64 golden."""
         torch.manual_seed(42)
         num_heads, num_kv_heads, head_dim, page_size = 8, 2, 64, 256
         # 5 sequences against 4 query heads per KV head, so that the packed LSE layouts
@@ -1623,15 +1643,19 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             make_cu_seq(kv_lens, device),
             max(kv_lens),
         )
-        self.assertFalse(out_gqa.isnan().any())
-        # Split-KV sums the partial results in another order than the reference.
-        self.assertEqual(
-            out_gqa,
-            out_mha,
-            atol=5e-4 if dtype is torch.bfloat16 else 1e-4,
-            rtol=0.016 if dtype is torch.bfloat16 else 0.001,
+        golden_out, golden_lse = decode_attention_reference(
+            q, k_contiguous, v_contiguous, q_lens, kv_lens, torch.float64
         )
-        self.assertEqual(lse_gqa, lse_mha)
+        reference_out, _ = decode_attention_reference(
+            q, k_contiguous, v_contiguous, q_lens, kv_lens, dtype
+        )
+        # As _check_equal in test_transformers.py: allow 5x the error of the math backend
+        # in the same dtype against the fp64 golden.
+        threshold = max(1e-5, 5 * (reference_out - golden_out).abs().max().item())
+        for out, lse in ((out_gqa, lse_gqa), (out_mha, lse_mha)):
+            self.assertFalse(out.isnan().any())
+            self.assertLessEqual((out - golden_out).abs().max().item(), threshold)
+            self.assertEqual(lse.double(), golden_lse, atol=1e-4, rtol=1e-5)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -1640,12 +1664,15 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("num_kv_heads", [8, 2])
     @parametrize("paged", [False, True])
-    def test_fa2_decode_batch_invariance(self, device, dtype, num_kv_heads, paged):
-        """With num_splits=1, causal decode tokens get the same bits in a decode-only
-        batch as next to a prefill. With paged KV, FA2 runs a decode-only batch on the
-        non-causal kernel (packed for GQA) and a mixed batch on the causal one, so
-        their tiles must match. Head dim 128 is where the standard kernel's KV tile
-        depends on causality (sm86/sm89)."""
+    @parametrize("window_size", [(-1, -1), (-1, 0)])
+    def test_fa2_decode_batch_invariance(
+        self, device, dtype, num_kv_heads, paged, window_size
+    ):
+        """With num_splits=1, decode tokens get the same bits in a decode-only batch as
+        next to a prefill. FA2 packs a decode-only GQA batch and runs it, if causal, on
+        the split-KV kernel; a mixed batch runs unpacked on the standard kernel (split-KV
+        with paged KV), so the KV tiles must match. Head dim 128 is where the standard
+        kernel's KV tile depends on causality (sm86/sm89)."""
         torch.manual_seed(42)
         num_heads, head_dim, page_size = 8, 128, 256
         decode_kv_lens = [300, 1, 520]
@@ -1702,7 +1729,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                     cu_seq_k,
                     max(q_lens[:num_seqs]),
                     max_k,
-                    window_size=(-1, 0),
+                    window_size=window_size,
                     enable_gqa=num_kv_heads < num_heads,
                     num_splits=1,
                     **kwargs,
@@ -1767,51 +1794,96 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @unittest.skipIf(TEST_WITH_ROCM, "Tests the CUDA FA2 kernels")
-    def test_fa2_paged_causal_gqa_decode_honors_num_splits(self, device):
-        """Causal decode-only GQA with paged KV takes the packed path, the only path
-        on which FA2 splits KV for several sequences. So num_splits=2 must change the
-        reduction order (different bits from one split) and keep the values; an
+    @parametrize("paged", [False, True])
+    def test_fa2_causal_gqa_decode_honors_num_splits(self, device, paged):
+        """Causal decode-only GQA takes the packed path, the only path on which FA2
+        splits KV for several sequences. So num_splits=2 must change the reduction
+        order (different bits from one split) and both must match an fp64 golden; an
         unpacked call would run one split whatever num_splits says."""
         torch.manual_seed(42)
         num_heads, num_kv_heads, head_dim, page_size = 8, 2, 64, 256
-        kv_lens = [300, 1, 520, 256, 77]
+        # Every sequence has KV in both splits (2 x 512 tokens at head dim 64).
+        kv_lens = [600, 700, 520, 1000, 800]
         batch_size = len(kv_lens)
-        pages_per_seq = (max(kv_lens) + page_size - 1) // page_size
-        max_k = pages_per_seq * page_size
         q = torch.randn(
             batch_size, num_heads, head_dim, device=device, dtype=torch.bfloat16
         )
-        k = torch.randn(
-            batch_size * pages_per_seq,
-            page_size,
-            num_kv_heads,
-            head_dim,
-            device=device,
-            dtype=torch.bfloat16,
-        )
-        v = torch.randn_like(k)
-        kwargs = {
-            "window_size": (-1, 0),
-            "enable_gqa": True,
-            "seqused_k": torch.tensor(kv_lens, device=device, dtype=torch.int32),
-            "block_table": torch.randperm(
+        if paged:
+            pages_per_seq = (max(kv_lens) + page_size - 1) // page_size
+            max_k = pages_per_seq * page_size
+            k = torch.randn(
+                batch_size * pages_per_seq,
+                page_size,
+                num_kv_heads,
+                head_dim,
+                device=device,
+                dtype=torch.bfloat16,
+            )
+            v = torch.randn_like(k)
+            block_table = torch.randperm(
                 batch_size * pages_per_seq, device=device, dtype=torch.int32
-            ).view(batch_size, pages_per_seq),
-        }
-        # FA2 needs cu_seq_k for paged KV: each sequence spans its whole page row.
-        cu_seq_k = torch.arange(
-            0, (batch_size + 1) * max_k, max_k, device=device, dtype=torch.int32
-        )
+            ).view(batch_size, pages_per_seq)
+            # FA2 needs cu_seq_k for paged KV: each sequence spans its whole page row.
+            cu_seq_k = torch.arange(
+                0, (batch_size + 1) * max_k, max_k, device=device, dtype=torch.int32
+            )
+            kwargs = {
+                "seqused_k": torch.tensor(kv_lens, device=device, dtype=torch.int32),
+                "block_table": block_table,
+            }
+            k_contiguous, v_contiguous = (
+                torch.cat(
+                    [
+                        pages[:length]
+                        for pages, length in zip(
+                            gather_paged_cache(cache, block_table), kv_lens
+                        )
+                    ]
+                )
+                for cache in (k, v)
+            )
+        else:
+            max_k = max(kv_lens)
+            k = torch.randn(
+                sum(kv_lens),
+                num_kv_heads,
+                head_dim,
+                device=device,
+                dtype=torch.bfloat16,
+            )
+            v = torch.randn_like(k)
+            cu_seq_k = make_cu_seq(kv_lens, device)
+            kwargs = {}
+            k_contiguous, v_contiguous = k, v
         cu_seq_q = make_cu_seq([1] * batch_size, device)
         with _use_backend("fa2"), torch.no_grad():
             one_split, two_splits = (
                 varlen_attn(
-                    q, k, v, cu_seq_q, cu_seq_k, 1, max_k, num_splits=n, **kwargs
+                    q,
+                    k,
+                    v,
+                    cu_seq_q,
+                    cu_seq_k,
+                    1,
+                    max_k,
+                    window_size=(-1, 0),
+                    enable_gqa=True,
+                    num_splits=n,
+                    **kwargs,
                 )
                 for n in (1, 2)
             )
         self.assertFalse(torch.equal(one_split, two_splits))
-        self.assertEqual(two_splits, one_split, atol=5e-4, rtol=0.016)
+        q_lens = [1] * batch_size
+        golden, _ = decode_attention_reference(
+            q, k_contiguous, v_contiguous, q_lens, kv_lens, torch.float64
+        )
+        reference, _ = decode_attention_reference(
+            q, k_contiguous, v_contiguous, q_lens, kv_lens, torch.bfloat16
+        )
+        threshold = max(1e-5, 5 * (reference - golden).abs().max().item())
+        for out in (one_split, two_splits):
+            self.assertLessEqual((out - golden).abs().max().item(), threshold)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"

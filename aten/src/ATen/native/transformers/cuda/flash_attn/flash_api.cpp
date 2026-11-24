@@ -665,18 +665,8 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     const int page_block_size = !paged_KV ? 1 : k.size(1);
     TORCH_CHECK(!paged_KV || page_block_size % 256 == 0, "Paged KV cache block size must be divisible by 256");
 
-    // A one-token query is the last position of its sequence (masks align to the bottom
-    // right), so causal masking and any right window mask nothing.
-    if (max_seqlen_q == 1 && !alibi_slopes_.has_value()) {
-        is_causal = false;
-        // Dropping the right window too lets causal GQA take the packed path below, which
-        // runs the non-causal kernel. Only with paged KV: it always runs the split-KV kernel,
-        // whose tiles do not depend on causality, so a decode token gets the same bits in a
-        // decode-only batch as in a mixed one and num_splits=1 stays batch invariant. The
-        // standard kernel picks a different KV tile for causal calls on sm86/sm89 at head
-        // dims 96 and 128 (run_mha_fwd_hdim96/128 in flash_fwd_launch_template.h).
-        if (paged_KV) { window_size_right = -1; }
-    }
+    // set_params_fprop derives params.is_causal from window_size_right == 0, so canonicalize
+    // is_causal into the window once and both caller conventions take the same path.
     if (is_causal) { window_size_right = 0; }
 
     void *cu_seqlens_q_d = cu_seqlens_q.data_ptr();
@@ -686,7 +676,15 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     // The packed layout drops cu_seqlens_q, so every sequence needs exactly one query token:
     // with q holding no rows past cu_seqlens_q[-1] (T_q = sum of query lengths, as varlen_attn
     // documents), that is total_q == batch_size. A sequence with none would break the view below.
-    const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && q.size(0) == batch_size && num_heads > num_heads_k && window_size_left < 0 && window_size_right < 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
+    // A one-token query is the last position of its sequence (masks align to the bottom right),
+    // so a causal mask (window_size_right == 0) masks nothing and the packed call drops it.
+    const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && q.size(0) == batch_size && num_heads > num_heads_k && window_size_left < 0 && window_size_right <= 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
+    // A causal packed call runs the split-KV kernel even without paged KV. With one split its KV
+    // tile matches the standard causal kernel's at every head dim (run_mha_fwd_splitkv_align),
+    // which the same token runs in a batch with a prefill, so num_splits=1 stays batch invariant.
+    // A non-causal packed call keeps the standard kernel, as in a mixed batch: the standard
+    // non-causal tile differs from the split-KV one at head dim 128 on sm86/sm89.
+    const bool force_split_kernel = paged_KV || (seqlenq_ngroups_swapped && window_size_right == 0);
     at::Tensor temp_q = q;
     const int ngroups = num_heads / num_heads_k;
     if (seqlenq_ngroups_swapped) {
@@ -696,6 +694,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         max_seqlen_q = ngroups;
         num_heads = num_heads_k;
         cu_seqlens_q_d = nullptr;
+        window_size_right = -1;
     }
 
     const int total_q = seqlenq_ngroups_swapped ? batch_size * ngroups : temp_q.size(0);
@@ -847,7 +846,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     if (max_seqlen_k > 0) {
         auto stream = at::cuda::getCurrentCUDAStream().stream();
-        run_mha_fwd(params, stream, paged_KV);
+        run_mha_fwd(params, stream, force_split_kernel);
     } else {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
         out.zero_();
@@ -856,14 +855,14 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     if (seqlenq_ngroups_swapped) {
         q_padded = q;
-        // The other kernels write the packed LSE as (nheads_kv, ngroups, b). Paged KV runs the
-        // split-KV kernel; without splits it skips the combine kernel and writes the LSE in
-        // packed-token order, (nheads_kv, b, ngroups).
+        // The other kernels write the packed LSE as (nheads_kv, ngroups, b). The split-KV kernel
+        // without splits skips the combine kernel and writes it in packed-token order,
+        // (nheads_kv, b, ngroups).
         // TODO: drop this transpose once the vendored kernel's LSE offset without splits
         // (row_offset_lseaccum in third_party/flash-attention/csrc/flash_attn/src/
         // flash_fwd_kernel.h) accounts for seqlenq_ngroups_swapped. A submodule bump with
         // that fix makes this transpose wrong; test_fa2_gqa_decode_matches_mha checks the LSE.
-        if (paged_KV && params.num_splits <= 1) {
+        if (force_split_kernel && params.num_splits <= 1) {
             softmax_lse = softmax_lse.view({num_heads, batch_size, max_seqlen_q}).transpose(1, 2);
         }
         softmax_lse = softmax_lse.reshape({num_heads * max_seqlen_q, batch_size});
