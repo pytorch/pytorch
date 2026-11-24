@@ -1916,6 +1916,17 @@ if(BUILD_STATIC_RUNTIME_BENCHMARK)
   target_link_libraries(static_runtime_test torch_library gtest_main gtest)
 endif()
 
+# The vec tests compare vectorized code and scalar references compiled in the
+# same file, often from the same source (e.g. complex division): contracting
+# them into FMAs differently would round them differently. This also applies
+# to the vectorized code under test, which is inlined, unlike in kernels, which
+# keep the compiler's default.
+if(NOT MSVC)
+  set_property(
+    SOURCE ${TORCH_ROOT}/aten/src/ATen/test/vec_test_all_types.cpp
+    APPEND PROPERTY COMPILE_OPTIONS -ffp-contract=off)
+endif()
+
 # ---[ Test binaries.
 if(BUILD_TEST)
 

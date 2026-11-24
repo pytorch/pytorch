@@ -6,10 +6,13 @@ reduction axes use increasing numeric order.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import TYPE_CHECKING
 
 from torch.utils._sympy.symbol import prefix_str, SymT, symt_to_block_prefix
+
+from .runtime_utils import ceildiv
 
 
 if TYPE_CHECKING:
@@ -97,6 +100,23 @@ def get_pointwise_prefixes(prefixes: Iterable[str]) -> tuple[str, ...]:
     )
 
 
+def get_yz_grid_extents(
+    size_hints: Mapping[str, int], block_sizes: Mapping[str, int]
+) -> dict[tuple[str, ...], int]:
+    """Compute Y and packed Z extents for groups with complete block sizes.
+
+    Kernels without Z axes use a separate Y-overflow launch layout.
+    """
+    z_prefixes = get_z_prefixes(size_hints)
+    if not z_prefixes:
+        return {}
+    return {
+        group: math.prod(ceildiv(size_hints[p], block_sizes[p]) for p in group)
+        for group in (("y",), z_prefixes)
+        if all(p in size_hints and p in block_sizes for p in group)
+    }
+
+
 def get_max_block_prefix(prefix: str, max_blocks: Mapping[str, int]) -> str:
     key = (
         symt_to_block_prefix(SymT.Z0_BLOCK)
@@ -111,6 +131,12 @@ def get_max_block_prefix(prefix: str, max_blocks: Mapping[str, int]) -> str:
 def get_max_block(prefix: str, max_blocks: Mapping[str, int]) -> int:
     """Use the shared Z0_ limit for Z axes and R1_ for unlisted reductions."""
     return max_blocks[get_max_block_prefix(prefix, max_blocks)]
+
+
+def get_z_blocks(config: Mapping[str, int]) -> list[int]:
+    """List single-kernel Z blocks from innermost to outermost."""
+    prefixes = get_z_prefixes(block_to_prefix(k) for k in config) or ("z0_",)
+    return [config.get(f"{p.upper()}BLOCK", 1) for p in prefixes]
 
 
 def block_to_prefix(block: str) -> str:

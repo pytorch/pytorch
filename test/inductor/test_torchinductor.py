@@ -88,7 +88,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     SM90OrLater,
@@ -172,6 +172,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_MULTIGPU,
     HAS_TPU,
     IS_BIG_GPU,
+    platform_supports_tensor_descriptor,
     requires_block_ptr,
     requires_gpu,
     RUN_CPU,
@@ -12598,6 +12599,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
+    @skip_if_halide
+    @skip_if_pallas
+    def test_index_put_duplicate_indices_single_element(self):
+        def fn(x):
+            x = x * 1
+            x[[0, 0]] += x[[0, 0]]
+            x[[0, 0]] += x[[0, 0]]
+            return x
+
+        for shape in [(1,), (1, 1), (1, 1, 1)]:
+            self.common(fn, (torch.randn(shape),))
+
     @skip_if_pallas
     def test_index_put_duplicate_indices_accumulate(self):
         # accumulate=True is well-defined with duplicate indices.
@@ -14912,6 +14925,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (
                 aten.roll(a, [-3, 10], [1, 2]),
                 aten.roll(a, [5]),
+                aten.roll(a, [60], [1]),
             )
 
         self.common(
@@ -16484,8 +16498,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 )
                 return clone
 
-        # DeterministicGuard locks MIOpen's solver choice on gfx950. atol/rtol
-        # cover the fp16 hgemm noise floor on gfx90a. Derivation:
+        # The conv is an aten call on both sides. On ROCm, MIOpen times its
+        # solvers even in deterministic mode and may pick an fp16 Winograd
+        # solver whose error against an fp32 reference exceeds atol, so compare
+        # with an fp16 eager reference that runs the same MIOpen conv.
+        # DeterministicGuard keeps both runs off nondeterministic solvers.
+        # atol/rtol cover the fp16 hgemm noise floor against an fp32 reference:
         # https://github.com/pytorch/pytorch/issues/183581
         with DeterministicGuard(True, warn_only=True):
             self.common(
@@ -16494,6 +16512,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=not is_halide_backend(self.device),
                 atol=2e-3,
                 rtol=2e-3,
+                reference_in_float=not torch.version.hip,
             )
 
     def test_inplace_where_pointwise(self):
@@ -24217,7 +24236,7 @@ if RUN_GPU:
             ).run(code[0])
 
         @unittest.skipIf(
-            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)),
+            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8_GROUPED_GEMM)),
             "no scaled_grouped_mm support",
         )
         def test_respect_scaled_grouped_mm_layout_tag(self):
@@ -24392,16 +24411,25 @@ if RUN_GPU:
                 "triton.prefer_nd_tiling": True,
                 "triton.max_tiles": 3,
                 "triton.tile_reductions": True,
+                "assume_aligned_inputs": True,
             }
         )
-        def test_3d_reduction_respects_tensor_rank_limit(self):
-            """Keep three reduction tiles while limiting total tensor rank to five.
-
-            max_tiles=3 applies independently to the pointwise and reduction
-            tilings. With R0/R1/R2 present, the three pointwise dimensions must
-            therefore collapse to Y/X rather than producing a sixth tensor axis.
-            """
-
+        @parametrize(
+            "tensor_descriptor",
+            [
+                False,
+                subtest(
+                    True,
+                    decorators=[
+                        unittest.skipUnless(
+                            platform_supports_tensor_descriptor(),
+                            "requires CUDA tensor descriptor support",
+                        )
+                    ],
+                ),
+            ],
+        )
+        def test_3d_pointwise_and_reduction_tiling(self, tensor_descriptor):
             def reduce_3d(x):
                 return torch.sum(x, dim=(3, 4, 5))
 
@@ -24411,13 +24439,25 @@ if RUN_GPU:
                 device=GPU_TYPE,
             ).normal_()
 
-            actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
+            with config.patch({"triton.use_tensor_descriptor": tensor_descriptor}):
+                actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
 
             torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
-            for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
+            for block_arg in (
+                "Z0_BLOCK",
+                "YBLOCK",
+                "XBLOCK",
+                "R0_BLOCK",
+                "R1_BLOCK",
+                "R2_BLOCK",
+            ):
                 self.assertIn(block_arg, code[0])
-            self.assertNotIn("Z0_BLOCK", code[0])
-            self.assertIn("tl.load", code[0])
+            self.assertIn("tl.load(in_ptr0", code[0])
+            self.assertNotIn("tl.make_tensor_descriptor(in_ptr0", code[0])
+            if tensor_descriptor:
+                self.assertIn("tl.make_tensor_descriptor(out_ptr0", code[0])
+            else:
+                self.assertIn("tl.store(out_ptr0", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_median_decompose_sort_ops(self):
