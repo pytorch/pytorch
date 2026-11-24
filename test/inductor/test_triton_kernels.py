@@ -29,6 +29,7 @@ from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._higher_order_ops.reinplace_trigger import TRIGGER_DSLS
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
+    kernel_side_table,
     maybe_unpack_host_tma_descriptor,
     triton_kernel_wrapper_functional,
     triton_kernel_wrapper_mutation,
@@ -3513,6 +3514,83 @@ def forward(self, x_1, output_1):
         self.assertEqual(
             kernels[0].kwargs["in_ptr0"].get_name(),
             kernels[0].kwargs["in_ptr1"].get_name(),
+        )
+
+    @inductor_config.patch(
+        triton_kernel_default_layout_constraint="needs_fixed_stride_order",
+        force_disable_caches=True,
+    )
+    @requires_gpu
+    def test_layout_constraint_preserves_missing_triton_scalar_metadata(self):
+        @triton.jit
+        def add_with_offset(in_ptr0, in_ptr1, out_ptr, OFFSET: tl.constexpr):
+            offsets = tl.arange(0, 32)
+            a = tl.load(in_ptr0 + offsets)
+            b = tl.load(in_ptr1 + offsets)
+            tl.store(out_ptr + offsets, a + b + OFFSET)
+
+        def f(x):
+            z = (x * 2).relu()
+            out = torch.empty_like(z)
+            add_with_offset[(1,)](z, z, out, OFFSET=0)
+            return out
+
+        run_node = GraphLowering.run_node
+        written_args = lowering._written_args
+        checked = []
+
+        def lower_node(graph, node):
+            if node.target is triton_kernel_wrapper_mutation:
+                hop_kwargs = dict(node.kwargs)
+                kernel_args = dict(hop_kwargs["kwargs"])
+                constant_args_idx = hop_kwargs["constant_args_idx"]
+                constants = dict(kernel_side_table.get_constant_args(constant_args_idx))
+                # Keep OFFSET in the FX arguments so the side table cannot mask
+                # the missing scalar metadata in the mutation analysis.
+                if "OFFSET" in constants:
+                    kernel_args["OFFSET"] = constants.pop("OFFSET")
+                    hop_kwargs["kwargs"] = kernel_args
+                    constant_args_idx = kernel_side_table.add_constant_args(constants)
+                    hop_kwargs["constant_args_idx"] = constant_args_idx
+                    node.kwargs = hop_kwargs
+                self.assertEqual(kernel_args["OFFSET"], 0)
+                fake_args, fake_kwargs = node.meta["eager_input_vals"]
+                fake_kernel_args = {**fake_kwargs["kwargs"], "OFFSET": None}
+                node.meta["eager_input_vals"] = (
+                    fake_args,
+                    {
+                        **fake_kwargs,
+                        "constant_args_idx": constant_args_idx,
+                        "kwargs": fake_kernel_args,
+                    },
+                )
+            return run_node(graph, node)
+
+        def check_written(node, args, kwargs, fake_kwargs):
+            result = written_args(node, args, kwargs, fake_kwargs)
+            if node.target is triton_kernel_wrapper_mutation:
+                self.assertEqual(kwargs["kwargs"]["OFFSET"], 0)
+                self.assertIsNone(fake_kwargs["kwargs"]["OFFSET"])
+                self.assertEqual(len(result), 1)
+                self.assertIs(result[0], kwargs["kwargs"]["out_ptr"])
+                checked.append(True)
+            return result
+
+        x = torch.randn(32, device=GPU_TYPE)
+        with (
+            mock.patch.object(GraphLowering, "run_node", lower_node),
+            mock.patch.object(lowering, "_written_args", check_written),
+        ):
+            compiled_out, (graph,) = run_and_get_graph_lowering(
+                torch.compile(f, fullgraph=True), x
+            )
+        self.assertEqual(checked, [True])
+        self.assertEqual(compiled_out, f(x))
+        (kernel,) = [
+            op for op in graph.operations if isinstance(op, UserDefinedTritonKernel)
+        ]
+        self.assertEqual(
+            kernel.kwargs["in_ptr0"].get_name(), kernel.kwargs["in_ptr1"].get_name()
         )
 
     @unittest.skipIf(not has_triton_package(), "requires triton")
