@@ -2,8 +2,11 @@
 
 import asyncio
 import ctypes
+import itertools
 import os
-from dataclasses import replace
+import threading
+from dataclasses import dataclass, replace
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest import skipUnless
 from unittest.mock import patch
@@ -30,6 +33,12 @@ class _Opcode:
     Write = "WRITE"
 
 
+@dataclass(frozen=True)
+class _Notify:
+    name: str
+    msg: str | bytes
+
+
 class _Engine:
     """In-process fake of mooncake.engine.TransferEngine.
 
@@ -37,7 +46,12 @@ class _Engine:
     registered tensors, so the shared conformance assertions observe real data
     movement without RDMA hardware. Like Mooncake, a transfer resolves ``peer``
     to that engine and fails unless the local range is registered here and the
-    remote range is registered on the peer.
+    remote range is registered on the peer. Mooncake batch ids are freed
+    BatchDesc addresses, so a settled batch id is handed out again.
+
+    Notifies model Mooncake 0.3.14's RDMA path: messages come back as str and
+    a non-UTF-8 one makes ``get_notifies`` raise, and a notify attached to a
+    nonempty transfer is dropped, as real ones can be.
     """
 
     _next_port = 20000
@@ -46,8 +60,10 @@ class _Engine:
     def __init__(self):
         self._regions: dict[int, int] = {}
         self._port = 0
-        self._next_batch = 0
+        self._batches: set[int] = set()
         self._failed: set[int] = set()
+        self._notifies: list[_Notify] = []
+        self._notify_lock = threading.Lock()
         self.options = None
 
     def initialize(self, host, metadata_server, protocol, device_name):
@@ -77,28 +93,63 @@ class _Engine:
         )
 
     def batch_transfer_async(self, peer, buffers, peer_buffers, lengths, opcode):
-        self._next_batch += 1
+        batch_id = next(i for i in itertools.count(1) if i not in self._batches)
+        self._batches.add(batch_id)
         target = self._by_port.get(int(peer.rpartition(":")[2]))
         requests = list(zip(buffers, peer_buffers, lengths))
         if target is None or not all(
             self._covers(buffer, length) and target._covers(peer_buffer, length)
             for buffer, peer_buffer, length in requests
         ):
-            self._failed.add(self._next_batch)
-            return self._next_batch
+            self._failed.add(batch_id)
+            return batch_id
         for buffer, peer_buffer, length in requests:
             if opcode == _Opcode.Write:
                 ctypes.memmove(peer_buffer, buffer, length)
             else:
                 ctypes.memmove(buffer, peer_buffer, length)
-        return self._next_batch
+        return batch_id
 
     def transfer_check_status(self, batch_id):
-        return -1 if batch_id in self._failed else 1
+        self._batches.discard(batch_id)
+        if batch_id in self._failed:
+            self._failed.discard(batch_id)
+            return -1
+        return 1
+
+    def transfer_sync(self, peer, buffer, peer_buffer, length, opcode, notify=None):
+        target = self._by_port.get(int(peer.rpartition(":")[2]))
+        if target is None:
+            return -1
+        if length:
+            if not (
+                self._covers(buffer, length) and target._covers(peer_buffer, length)
+            ):
+                return -1
+            source, destination = (
+                (buffer, peer_buffer)
+                if opcode == _Opcode.Write
+                else (peer_buffer, buffer)
+            )
+            ctypes.memmove(destination, source, length)
+        elif notify is not None:
+            with target._notify_lock:
+                target._notifies.append(notify)
+        return 0
+
+    def get_notifies(self):
+        with self._notify_lock:
+            notifies, self._notifies = self._notifies, []
+        return [
+            _Notify(n.name, n.msg if isinstance(n.msg, str) else n.msg.decode())
+            for n in notifies
+        ]
 
 
 def _backend():
-    return SimpleNamespace(TransferEngine=_Engine, TransferOpcode=_Opcode)
+    return SimpleNamespace(
+        TransferEngine=_Engine, TransferOpcode=_Opcode, TransferNotify=_Notify
+    )
 
 
 class TestMooncakeTransport(TransportTestMixin, TestCase):
@@ -164,9 +215,13 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
     def test_registration_reuse_and_validation(self):
         first, _ = self.make_transport_pair()
         tensor = torch.zeros(32, dtype=torch.uint8)
-        memory = first.register_memory(tensor)
+        with patch.object(_Engine, "register_memory", return_value=0) as native:
+            memory = first.register_memory(tensor)
+            self.assertIs(
+                memory._registration, first.register_memory(tensor)._registration
+            )
+        native.assert_called_once_with(tensor.data_ptr(), 32, "*")
         self.assertIsInstance(memory, MooncakeMemory)
-        self.assertIs(memory._registration, first.register_memory(tensor)._registration)
         with self.assertRaises(ValueError):
             first.register_memory(torch.empty(0))
         with self.assertRaises(ValueError):
@@ -330,6 +385,31 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
         self.assertEqual(first._peers, peers)
         self.assertEqual(first.connect(b"[::1]:1234"), 0)
 
+    def test_reused_batch_id_is_not_dropped(self):
+        first, second = self.make_transport_pair()
+        source = first.register_memory(torch.ones(8, dtype=torch.uint8))
+        remote = second.register_memory(
+            torch.zeros(8, dtype=torch.uint8)
+        ).to_remote_buffer()
+        check = _Engine.transfer_check_status
+        resubmitted = []
+
+        def check_then_submit(engine, batch_id):
+            # Submit while the poller is between the status check, which frees
+            # batch_id, and its bookkeeping, as a concurrent caller could.
+            status = check(engine, batch_id)
+            if not resubmitted:
+                work = first.write(source.to_view(), remote, async_op=True)
+                resubmitted.append((work, batch_id in first._batches))
+            return status
+
+        with patch.object(_Engine, "transfer_check_status", check_then_submit):
+            first.write(source.to_view(), remote)
+            work, reused = resubmitted[0]
+            self.assertTrue(reused)
+            work.wait(timedelta(seconds=5))
+        self.assertEqual(first._batches, {})
+
     def test_close_async_after_handled_failure_does_not_reraise(self):
         first, second = self.make_transport_pair()
         source = first.register_memory(torch.ones(8, dtype=torch.uint8))
@@ -346,6 +426,119 @@ class TestMooncakeTransport(TransportTestMixin, TestCase):
             await first.close_async()
 
         asyncio.run(run())
+
+    def test_notifications_from_unconnected_peers(self):
+        first, second = self.make_transport_pair()
+        with patch.object(_mooncake, "_load_backend", return_value=_backend()):
+            third = new_transport("mooncake", host="127.0.0.1")
+        self.addCleanup(third.close)
+        third.connect(first.bind())
+        third.send_notification(first.peer_id, b"third").wait()
+        second.send_notification(first.peer_id, b"second").wait()
+        self.assertEqual(
+            sorted(self._receive(first, 2)),
+            sorted([(third.peer_id, b"third"), (second.peer_id, b"second")]),
+        )
+        with self.assertRaisesRegex(ValueError, "not connected"):
+            first.send_notification(third.peer_id, b"reply")
+
+    def test_failed_transfer_sends_no_notification(self):
+        first, second = self.make_transport_pair()
+        view = first.register_memory(torch.ones(8, dtype=torch.uint8)).to_view()
+        memory = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        remote = memory.to_remote_buffer()
+        second.unregister_memory(memory)
+        work = first.write(view, remote, async_op=True, notification=b"lost")
+        with self.assertRaisesRegex(RuntimeError, "transfer failed"):
+            work.wait()
+        first.send_notification(second.peer_id, b"after").wait()
+        self.assertEqual(self._receive(second), [(first.peer_id, b"after")])
+
+    def test_notify_construction_failure_raises_before_transfer(self):
+        first, second = self.make_transport_pair()
+        view = first.register_memory(torch.ones(8, dtype=torch.uint8)).to_view()
+        remote = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        error = AttributeError("no TransferNotify")
+        with patch.object(first._backend, "TransferNotify", side_effect=error):
+            with self.assertRaisesRegex(AttributeError, "no TransferNotify"):
+                first.write(view, remote.to_remote_buffer(), notification=b"x")
+        self.assertEqual(first._pending, {})
+        first.close()
+
+    def test_notify_dispatch_failure_settles_work(self):
+        first, second = self.make_transport_pair()
+        view = first.register_memory(torch.ones(8, dtype=torch.uint8)).to_view()
+        remote = second.register_memory(torch.zeros(8, dtype=torch.uint8))
+        error = TypeError("bad binding call")
+        with patch.object(first, "_send_notify", side_effect=error):
+            work = first.write(
+                view, remote.to_remote_buffer(), async_op=True, notification=b"x"
+            )
+            with self.assertRaisesRegex(TypeError, "bad binding call"):
+                work.wait(timedelta(seconds=30))
+        first.close()
+
+    def test_foreign_notifies_are_dropped(self):
+        first, second = self.make_transport_pair()
+        engine = second._engine
+        engine._notifies += [_Notify("raw", "not base64!"), _Notify("ok", "b2s=")]
+        self.assertEqual(second.wait_notifications(timeout=0), [("ok", b"ok")])
+        engine._notifies.append(_Notify("raw", b"\xff"))
+        with self.assertLogs(_mooncake.logger, "WARNING"):
+            self.assertEqual(second.wait_notifications(timeout=0), [])
+        first.send_notification(second.peer_id, b"still works").wait()
+        self.assertEqual(self._receive(second), [(first.peer_id, b"still works")])
+
+    def test_drain_failure_propagates(self):
+        first, second = self.make_transport_pair()
+        error = RuntimeError("transient native error")
+        with patch.object(second._engine, "get_notifies", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, "transient native error"):
+                second.wait_notifications(timeout=0)
+        first.send_notification(second.peer_id, b"after").wait()
+        self.assertEqual(self._receive(second), [(first.peer_id, b"after")])
+
+    def test_close_wakes_blocked_waiter(self):
+        first, second = self.make_transport_pair()
+        drained = threading.Event()
+        drain = second._drain_notifies
+        errors = []
+
+        def drain_and_signal():
+            drain()
+            drained.set()
+
+        def blocked():
+            try:
+                second.wait_notifications(timeout=30)
+            except RuntimeError as error:
+                errors.append(error)
+
+        with patch.object(second, "_drain_notifies", drain_and_signal):
+            waiter = threading.Thread(target=blocked)
+            waiter.start()
+            self.assertTrue(drained.wait(30))
+            second.close()
+            waiter.join(30)
+        self.assertFalse(waiter.is_alive())
+        self.assertRegex(str(errors[0]), "closed")
+
+    def test_send_notification_wait_honors_timeout(self):
+        first, second = self.make_transport_pair()
+        real_sync = first._engine.transfer_sync
+        release = threading.Event()
+
+        def held_sync(*args):
+            release.wait(30)
+            return real_sync(*args)
+
+        with patch.object(first._engine, "transfer_sync", held_sync):
+            work = first.send_notification(second.peer_id, b"x", timeout=0.05)
+            with self.assertRaises(TimeoutError):
+                work.wait()
+            release.set()
+            self.assertTrue(work.wait(timedelta(seconds=30)))
+        self.assertEqual(self._receive(second), [(first.peer_id, b"x")])
 
 
 _RUN_INTEGRATION = os.environ.get("RUN_MOONCAKE_INTEGRATION") == "1"

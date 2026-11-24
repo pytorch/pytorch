@@ -605,7 +605,13 @@ Tensor to_dense_backward(
     semantics. Masked semantics of tensors is implemented in the
     framework of masked tensors.
   */
-  const auto input_layout = input_.layout();
+  auto input_layout = input_.layout();
+  if (input_.is_fake()) {
+    const auto keys = input_.unsafeGetTensorImpl()->fake_dispatch_keys();
+    if (keys.has_value() && keys->has_all(c10::mkldnn_ks)) {
+      input_layout = kMkldnn;
+    }
+  }
   const bool masked_grad = masked_grad_.value_or(true);
   switch (input_layout) {
     case kStrided:
@@ -673,6 +679,14 @@ Tensor to_dense(
   }
   if (tensor.layout() == c10::kMkldnn) {
     return tensor._to_dense(dtype, masked_grad);
+  }
+  if (tensor.is_fake()) {
+    // Match FakeTensor.to_dense() without exposing MKLDNN to native layout
+    // queries.
+    const auto keys = tensor.unsafeGetTensorImpl()->fake_dispatch_keys();
+    if (keys.has_value() && keys->has_all(c10::mkldnn_ks)) {
+      return tensor._to_dense(dtype, masked_grad);
+    }
   }
   TORCH_CHECK(
       tensor.layout() == c10::kStrided,
@@ -1881,7 +1895,8 @@ void convert_indices_from_coo_to_csr_cpu(
     const Tensor& input,
     const int64_t size) {
   int64_t numel = input.numel();
-  const input_t* data_in = input.const_data_ptr<input_t>();
+  const auto input_ = input.expect_contiguous();
+  const input_t* data_in = input_->const_data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
 
   if (numel == 0) {
