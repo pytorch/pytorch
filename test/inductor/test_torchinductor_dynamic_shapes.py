@@ -1028,7 +1028,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(orig_w, w.grad)
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     @parametrize("mode", ["avoid_32bit_indexing_guards", "dual_index_dtype_kernels"])
     def test_split_scan_int64_index(self, device, mode):
         """A split scan (cumsum over a long row) compiled with int64 indexing: the
@@ -1071,7 +1070,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(set(launched), {side})
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     @parametrize("cooperative", [False, True])
     def test_dual_index_dtype_reductions(self, device, cooperative):
         """With dual_index_dtype_kernels, a dynamic-shape reduction compiles once into
@@ -1110,7 +1108,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     @serialTest()
     @largeTensorTest("5GB")  # measured peak: 4.1 GiB (add)
     @parametrize("op", ["sum", "add"])
@@ -1140,7 +1137,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual(counter.frame_count, 1 if dual else 2)
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     def test_dual_index_dtype_multi_kernel(self, device):
         """dual_index_dtype_kernels with triton.multi_kernel: each side of the
         int32/int64 dispatch is itself a multi-kernel (persistent and looped variants),
@@ -1172,7 +1168,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     @parametrize("op", ["elementwise", "transposed", "index_select"])
     def test_dual_index_dtype_pointwise(self, device, op):
         """test_dual_index_dtype_reductions for pointwise kernels: a 1D elementwise
@@ -1200,7 +1195,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     def test_dual_index_dtype_cat(self, device):
         """test_dual_index_dtype_pointwise for a concat of graph inputs. Up to
         config.max_pointwise_cat_inputs inputs, the concat is lowered as one pointwise
@@ -1229,7 +1223,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertNotIn("2147483647", str(entry.guard_manager))
 
     @onlyAccelerator
-    @skipPRIVATEUSE1
     def test_dual_index_dtype_foreach_cat_keeps_guard(self, device):
         """A concat of more than config.max_pointwise_cat_inputs graph inputs is a
         foreach combo kernel, which dual_index_dtype_kernels does not cover: it keeps a
