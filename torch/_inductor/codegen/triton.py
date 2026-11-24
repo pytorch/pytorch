@@ -4850,7 +4850,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 block_descriptor = self.prologue_cache[var]
             else:
                 block_ptr_line = indexing.format(var, roffset=False)
-                block_var = self.cse.try_get(block_ptr_line)
+                # Key by `name` too: the definition below is deferred on it, and
+                # in-place aliases share `var`.
+                cache_key = f"{name}:{block_ptr_line}"
+                block_var = self.cse.try_get(cache_key)
 
                 # Early return if block descriptor already exists
                 if block_var:
@@ -4864,7 +4867,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 named_var = self.cse.namedvar(
                     block_descriptor, dtype=torch.uint64, shape=[]
                 )
-                self.cse.put(block_ptr_line, named_var)
+                self.cse.put(cache_key, named_var)
 
                 line_body = DeferredLine(name, f"{block_descriptor} = {block_ptr_line}")
                 if indexing.can_lift:
