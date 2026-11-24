@@ -19,7 +19,8 @@ times backward through both inputs (dX and dW).
 The long tag runs bf16 and fp16 everywhere, and fp32 only on ROCm.
 
 On ROCm, grouped_mm picks CK-Tile or hipBLASLt per call; ROCM_ALLOW_GROUP_GEMM_CK_TILE=1
-forces CK-Tile and ROCM_ALLOW_GROUP_GEMM_CK_TILE=0 forces hipBLASLt.
+forces CK-Tile and ROCM_ALLOW_GROUP_GEMM_CK_TILE=0 forces hipBLASLt. The older CK backend
+(ROCM_ALLOW_GROUP_GEMM_CK=1) also needs ROCM_ALLOW_GROUP_GEMM_CK_TILE=0, since CK-Tile is tried first.
 """
 
 # (n_routed_experts, moe_intermediate_size, hidden_size), in Primus-Turbo's order

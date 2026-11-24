@@ -1099,9 +1099,10 @@ static bool ck_tile_group_gemm_supported(const Tensor& mat_a, const Tensor& mat_
 
 // hipBLASLt runs one GEMM per expert, each with a fixed cost, but beats ck_tile's single persistent kernel once each
 // expert is large: per-expert M * N * sqrt(K) of the forward GEMM above 3.165e-13 * (FLOP/s * bytes/s)^0.75, from the
-// GPU's datasheet TFLOPS for the dtype and DRAM bandwidth. Every call evaluates the forward GEMM's dims, so a layer's
-// forward, dX and dW pick the same backend. Fitted on the op benchmark's MoE shapes on MI300X and MI355X; device_info.h
-// picks the datasheet entry by architecture and CU count.
+// GPU's datasheet TFLOPS for the dtype and DRAM bandwidth. Every call evaluates the forward GEMM's dims, so with the
+// op benchmark's layout (2D x 3D forward with a transposed-view weight) a layer's forward, dX and dW pick the same
+// backend; other layouts may not. Fitted on the op benchmark's MoE shapes on MI300X and MI355X; device_info.h picks
+// the datasheet entry by architecture and CU count.
 static bool should_use_ck_tile_group_gemm(const Tensor& mat_a, const Tensor& mat_b, const std::optional<at::Tensor>& offs) {
   const bool a_is_2d = mat_a.dim() == 2;
   const bool b_is_2d = mat_b.dim() == 2;
@@ -1162,7 +1163,8 @@ std::optional<c10::ScalarType> out_dtype) {
 #elif defined(USE_ROCM_CK_GEMM)
   // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
   // ROCM_ALLOW_GROUP_GEMM_CK_TILE=1 forces CK-tile, =0 disables it, unset lets should_use_ck_tile_group_gemm pick.
-  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1, plus ROCM_ALLOW_GROUP_GEMM_CK_TILE=0 since
+  // CK-tile is tried first.
   const bool supported_ck_tile_arch = at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"});
   const std::optional<bool> ck_tile_env = at::globalContext().rocmAllowGroupGemmCkTile();
   if (ck_tile_env != false && supported_ck_tile_arch && ck_tile_group_gemm_supported(mat_a, mat_b, offs) &&
