@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import operator
+import unittest
 from types import SimpleNamespace
 from unittest import mock
 
@@ -258,6 +259,7 @@ def _make_qkv(
     )
 
 
+@unittest.skipIf(not _has_gfx950_flydsl(), "requires gfx950 and a built FlyDSL runtime")
 class TestFlyDSLFlexAttentionBackend(TestCase):
     @parametrize("qk_dim", [128, 192])
     @parametrize("partial", [False, True])
@@ -1014,6 +1016,7 @@ class TestFlyDSLFlexAttentionLowering(TestCase):
         self.assertIsNotNone(kwargs, reason)
 
 
+@unittest.skipIf(not _has_gfx950_flydsl(), "requires gfx950 and a built FlyDSL runtime")
 class TestFlyDSLFlexAttention(_FlyDSLFlexAttentionRuntimeMixin, TestCase):
     @parametrize(
         "qk_dim,mask_kind,dq_accum_fp32",

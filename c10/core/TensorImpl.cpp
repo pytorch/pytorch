@@ -4,6 +4,7 @@
 #include <c10/core/CopyBytes.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/SymIntArrayRef.h>
+#include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -101,6 +102,25 @@ TensorImpl::TensorImpl(
 // the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
 // The point is to delay the dispatch key setting until that point.
 
+namespace {
+
+// Note [C++ fake outputs inside Meta kernels]
+// Like Python's removal of subclass keys, new tensors made inside a Meta
+// kernel must not inherit Fake from an input. Their storage is Meta, and the
+// fake fallback assigns their logical device when the kernel returns. An
+// existing fake returned by the kernel keeps its keys and device. As for
+// Python subclass keys, removing Fake retains the backend keys: shallow-copy
+// compatibility checks still use them for copies made inside the kernel.
+DispatchKeySet remove_fake_keys_in_kernel(DispatchKeySet key_set) {
+  if (key_set.has(DispatchKey::Fake) &&
+      impl::FakeTensorModeTLS::in_kernel_invocation()) [[unlikely]] {
+    key_set = key_set.remove(DispatchKey::Fake);
+  }
+  return key_set;
+}
+
+} // namespace
+
 TensorImpl::TensorImpl(
     ImplType /*type*/,
     Storage&& storage,
@@ -110,7 +130,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set - c10::python_ks) { // See [Note: Python key removal]
+      key_set_(remove_fake_keys_in_kernel(key_set - c10::python_ks)) {
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
@@ -132,6 +152,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt) {
+  key_set = remove_fake_keys_in_kernel(key_set);
   if (!key_set.empty()) {
     TORCH_INTERNAL_ASSERT(
         data_type == ScalarType::Undefined || device_opt_.has_value());
@@ -207,7 +228,8 @@ void TensorImpl::set_fake_device(c10::Device fake_device) {
   // but since we have an extra field for fake_device_,
   // we can just set it upon FakeTensor creation
   // and determine in device_custom() which device to return
-  // (based on if DispatchKey::Fake is excluded or not)
+  // (based on FakeTensorModeTLS::in_kernel_invocation(), see
+  // Note [C++ in_kernel_invocation])
   get_extra_meta().fake_device_ = fake_device;
   key_set_ = key_set_.add(DispatchKey::Fake);
 
@@ -309,9 +331,9 @@ bool TensorImpl::try_incref_pyobject() const noexcept {
   return pyobj_slot_.try_incref();
 }
 
-// Guards ExtraMeta::fake_sym_memos_ of every tensor. Only the nonzero and
-// unique fake impls use these memos, so one lock is enough.
-static std::mutex& fake_sym_memo_mutex() {
+// Guards ExtraMeta::fake_sym_memos_ and fake_item_memo_ of every tensor. These
+// memos are only used while tracing with a fake mode, so one lock is enough.
+static std::mutex& fake_memo_mutex() {
   static std::mutex mutex;
   return mutex;
 }
@@ -329,7 +351,7 @@ void TensorImpl::set_fake_sym_memo(
   // The replaced memo may hold a Python SymNode, so destroy it after the lock
   // is released.
   c10::SymInt replaced;
-  std::lock_guard<std::mutex> lock(fake_sym_memo_mutex());
+  std::lock_guard<std::mutex> lock(fake_memo_mutex());
   auto& entry = get_extra_meta().fake_sym_memos_[name];
   replaced = std::exchange(entry.value, std::move(memo));
   entry.version = version;
@@ -341,7 +363,7 @@ std::optional<c10::SymInt> TensorImpl::fake_sym_memo(
     uint64_t epoch) {
   // Like the replaced memo in set_fake_sym_memo, destroyed after unlocking.
   c10::SymInt dropped;
-  std::lock_guard<std::mutex> lock(fake_sym_memo_mutex());
+  std::lock_guard<std::mutex> lock(fake_memo_mutex());
   if (!extra_meta_) {
     return std::nullopt;
   }
@@ -361,10 +383,41 @@ std::optional<c10::SymInt> TensorImpl::fake_sym_memo(
   return entry.value;
 }
 
+void TensorImpl::set_fake_item_memo(
+    std::shared_ptr<c10::SafePyObject> memo,
+    std::optional<uint64_t> epoch) {
+  // Like set_fake_sym_memo, read the version first, and drop the replaced
+  // memo, which may be the last reference to a Python object, after unlocking.
+  auto version = is_inference()
+      ? std::nullopt
+      : std::optional<uint32_t>(version_counter().current_version());
+  std::optional<ExtraMeta::FakeItemMemo> replaced;
+  std::lock_guard<std::mutex> lock(fake_memo_mutex());
+  replaced = std::exchange(
+      get_extra_meta().fake_item_memo_,
+      ExtraMeta::FakeItemMemo{std::move(memo), version, epoch});
+}
+
+std::shared_ptr<c10::SafePyObject> TensorImpl::fake_item_memo(uint64_t epoch) {
+  // Like the replaced memo in set_fake_item_memo, dropped after unlocking.
+  std::optional<ExtraMeta::FakeItemMemo> dropped;
+  std::lock_guard<std::mutex> lock(fake_memo_mutex());
+  if (!extra_meta_ || !extra_meta_->fake_item_memo_) {
+    return nullptr;
+  }
+  const auto& entry = *extra_meta_->fake_item_memo_;
+  bool mutated = entry.version.has_value() &&
+      *entry.version != version_counter().current_version();
+  if (mutated || (entry.epoch.has_value() && *entry.epoch != epoch)) {
+    dropped = std::exchange(extra_meta_->fake_item_memo_, std::nullopt);
+    return nullptr;
+  }
+  return entry.value;
+}
+
 void TensorImpl::release_resources() {
-  if (extra_meta_ && extra_meta_->fake_constant_) {
+  if (extra_meta_ && extra_meta_->fake_tensor_mode_) {
     auto mode = extra_meta_->fake_tensor_mode_;
-    TORCH_INTERNAL_ASSERT(mode);
     mode->clear_constant(this);
   }
   autograd_meta_.reset();
@@ -374,6 +427,7 @@ void TensorImpl::release_resources() {
   if (extra_meta_) {
     extra_meta_->real_tensor_.reset();
     extra_meta_->fake_sym_memos_.clear();
+    extra_meta_->fake_item_memo_.reset();
     extra_meta_->fake_tensor_mode_.reset();
   }
 }
@@ -409,10 +463,10 @@ void TensorImpl::throw_data_ptr_access_error() const {
 
 c10::SymBool TensorImpl::sym_is_contiguous_custom(
     at::MemoryFormat memory_format) const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     // TO reduce BC breaking and reduce having to introduce
     // sym_is_contiguous. call is_contiguous when tensor does not
-    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+    if (has_symbolic_sizes_strides_) [[unlikely]] {
       return (*c10::impl::getGlobalPyInterpreter())
           ->sym_is_contiguous(this, memory_format);
     } else {
@@ -425,7 +479,7 @@ c10::SymBool TensorImpl::sym_is_contiguous_custom(
 }
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())
         ->is_strides_like(this, memory_format);
   }
@@ -433,7 +487,7 @@ bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
 }
 
 c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())
         ->is_non_overlapping_and_dense(this);
   }
@@ -444,10 +498,10 @@ IntArrayRef TensorImpl::sizes_custom() const {
   // for faketensors with symints, a return type of IntArrayRef is problematic
   // because in order to return a ref you need to have smth owning it and for
   // SymInts this is not materialized yet
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sizes(this);
   }
-  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+  if (has_symbolic_sizes_strides_) [[unlikely]] {
     // guard_int() the SymInts to materialize an int64_t vector owned by
     // SymbolicShapeMeta (lifetime tied to the TensorImpl). Explicit Python
     // customization goes through the CustomSizes branch above; every other
@@ -458,32 +512,32 @@ IntArrayRef TensorImpl::sizes_custom() const {
 }
 
 c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sym_sizes(this);
   }
   return sym_sizes_default();
 }
 
 c10::SymInt TensorImpl::sym_numel_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sym_numel(this);
   }
   return sym_numel_default();
 }
 
 c10::SymIntArrayRef TensorImpl::sym_strides_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sym_strides(this);
   }
   return sym_strides_default();
 }
 
 c10::Device TensorImpl::device_custom() const {
-  if (C10_UNLIKELY(python_custom_device_)) {
+  if (python_custom_device_) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->device(this);
   }
-  if (C10_UNLIKELY(extra_meta_ && extra_meta_->fake_device_.has_value())) {
-    if (c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Fake)) {
+  if (extra_meta_ && extra_meta_->fake_device_.has_value()) [[unlikely]] {
+    if (c10::impl::FakeTensorModeTLS::in_kernel_invocation()) {
       return device_default();
     }
     // has_value() is checked above; the dataflow check misses it here.
@@ -497,10 +551,10 @@ IntArrayRef TensorImpl::strides_custom() const {
   // for faketensors with symints, a return type of IntArrayRef is problematic
   // because in order to return a ref you need to have smth owning it and for
   // SymInts this is not materialized yet
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomStrides)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->strides(this);
   }
-  if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+  if (has_symbolic_sizes_strides_) [[unlikely]] {
     // same reasoning as sizes_custom() above
     return symbolic_shape_meta().materialized_strides();
   }
@@ -508,21 +562,21 @@ IntArrayRef TensorImpl::strides_custom() const {
 }
 
 int64_t TensorImpl::dim_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->dim(this);
   }
   return dim_default();
 }
 
 int64_t TensorImpl::numel_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->numel(this);
   }
   return numel_default();
 }
 
 c10::Layout TensorImpl::layout_custom() const {
-  if (C10_UNLIKELY(python_custom_layout_)) {
+  if (python_custom_layout_) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->layout(this);
   }
   // TODO: fix this
@@ -532,7 +586,7 @@ c10::Layout TensorImpl::layout_custom() const {
 }
 
 int64_t TensorImpl::storage_offset_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     // TODO: fix this
     return (*c10::impl::getGlobalPyInterpreter())
         ->sym_storage_offset(this)
@@ -542,7 +596,7 @@ int64_t TensorImpl::storage_offset_custom() const {
 }
 
 c10::SymInt TensorImpl::sym_storage_offset_custom() const {
-  if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomSizes))) {
+  if (matches_python_custom(SizesStridesPolicy::CustomSizes)) [[unlikely]] {
     return (*c10::impl::getGlobalPyInterpreter())->sym_storage_offset(this);
   }
   return sym_storage_offset_default();
@@ -678,6 +732,9 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
 void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl) {
+  TORCH_INTERNAL_ASSERT(
+      !dest_impl->is_fake() || !impl::FakeTensorModeTLS::in_kernel_invocation(),
+      "Meta kernels must not replace the metadata of an existing fake tensor");
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
   dest_impl->has_symbolic_sizes_strides_ =
       src_impl->has_symbolic_sizes_strides_;
@@ -699,18 +756,22 @@ void TensorImpl::copy_generic_tensor_metadata(
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->numel_ = src_impl->numel_;
   if (dest_impl->extra_meta_ != nullptr &&
-      dest_impl->extra_meta_->fake_constant_) {
+      dest_impl->extra_meta_->fake_tensor_mode_) {
     auto mode = dest_impl->extra_meta_->fake_tensor_mode_;
-    TORCH_INTERNAL_ASSERT(mode);
     mode->set_constant(dest_impl, nullptr);
   }
-  if (src_impl->extra_meta_ != nullptr) {
-    dest_impl->extra_meta_ = src_impl->extra_meta_->clone();
-  } else if (dest_impl->extra_meta_ != nullptr) {
-    // Clean dest_impl extra meta data, cause shallow_copy_from dest impl is a
-    // real tensor impl, which maybe take extra meta data. This info will
-    // contaminate the new dest_impl metadata info.
-    dest_impl->extra_meta_.reset(nullptr);
+  dest_impl->extra_meta_ =
+      src_impl->extra_meta_ ? src_impl->extra_meta_->clone() : nullptr;
+  if (src_impl->is_fake() && impl::FakeTensorModeTLS::in_kernel_invocation()) {
+    // A new shallow copy inside a kernel is a Meta tensor.
+    // See Note [C++ fake outputs inside Meta kernels].
+    if (auto& extra = dest_impl->extra_meta_) {
+      extra->fake_device_.reset();
+      extra->fake_tensor_mode_.reset();
+      extra->real_tensor_.reset();
+      extra->fake_dispatch_keys_.reset();
+    }
+    dest_impl->custom_device_ = false;
   }
 
   // NB: symbolic sizes and strides are copied as is custom policy, but python
@@ -736,8 +797,9 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   // it should), which means that we have to preserve whatever the
   // original Python keyset was (as it's associated with the PyObject
   // being a tensor subclass or not)
-  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
-      (dest_impl->key_set_ & c10::python_ks);
+  auto key_set =
+      remove_fake_keys_in_kernel(src_impl->key_set_ - c10::python_ks);
+  dest_impl->key_set_ = key_set | (dest_impl->key_set_ & c10::python_ks);
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
@@ -965,12 +1027,16 @@ void TensorImpl::ShareExternalPointer(
   }
 }
 
-static void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
-  dst.clear();
-  dst.reserve(src.size());
+// Returns a new vector instead of writing into an existing one, as callers may
+// pass a view into the vector being replaced (e.g. squeeze_() calls
+// `self.as_strided_(self.sym_sizes(), self.sym_strides())`).
+static SymDimVector clone_symvec(SymIntArrayRef src) {
+  SymDimVector result;
+  result.reserve(src.size());
   for (const auto& i : src) {
-    dst.emplace_back(i.clone());
+    result.emplace_back(i.clone());
   }
+  return result;
 }
 
 // NB: this doesn't check that the sizes/strides/offset are in bound for the
@@ -1009,9 +1075,13 @@ void TensorImpl::set_sizes_and_strides(
     }
   }
 
+  // Clone both before assigning either, as sizes and strides may be views into
+  // the current sizes_ and strides_.
+  auto new_sizes = clone_symvec(sizes);
+  auto new_strides = clone_symvec(strides);
   auto& sym_shape_meta{symbolic_shape_meta()};
-  clone_symvec(sizes, sym_shape_meta.sizes_);
-  clone_symvec(strides, sym_shape_meta.strides_);
+  sym_shape_meta.sizes_ = std::move(new_sizes);
+  sym_shape_meta.strides_ = std::move(new_strides);
   if (storage_offset.has_value())
     sym_shape_meta.storage_offset_ = storage_offset->clone();
 
@@ -1044,7 +1114,7 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
     extra_meta.symbolic_shape_meta_->storage_offset_ = storage_offset_;
   }
 
-  clone_symvec(sizes, symbolic_shape_meta().sizes_);
+  symbolic_shape_meta().sizes_ = clone_symvec(sizes);
   refresh_numel();
   empty_tensor_restride_symint(
       MemoryFormat::Contiguous); // calls refresh_contiguous()
@@ -1072,15 +1142,15 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
     case MemoryFormat::ChannelsLast: {
       TORCH_CHECK(
           dim() == 4, "required rank 4 tensor to use channels_last format");
-      clone_symvec(
-          get_channels_last_strides_2d(sym_sizes()), sym_shape_meta.strides_);
+      sym_shape_meta.strides_ =
+          clone_symvec(get_channels_last_strides_2d(sym_sizes()));
       break;
     }
     case MemoryFormat::ChannelsLast3d: {
       TORCH_CHECK(
           dim() == 5, "required rank 5 tensor to use channels_last_3d format");
-      clone_symvec(
-          get_channels_last_strides_3d(sym_sizes()), sym_shape_meta.strides_);
+      sym_shape_meta.strides_ =
+          clone_symvec(get_channels_last_strides_3d(sym_sizes()));
       break;
     }
     case MemoryFormat::Preserve:
@@ -1138,6 +1208,20 @@ AutogradMetaFactory* GetAutogradMetaFactory() {
 
 } // namespace impl
 
+FakeTensorMode::FakeTensorMode(
+    std::shared_ptr<c10::SafePyObject> shape_env,
+    std::shared_ptr<c10::SafePyObject> converter,
+    bool allow_meta,
+    bool allow_unsafe_data_ptr_access,
+    bool propagate_real_tensors)
+    : shape_env_(std::move(shape_env)),
+      fake_tensor_converter_(std::move(converter)),
+      allow_meta_(allow_meta),
+      allow_unsafe_data_ptr_access_(allow_unsafe_data_ptr_access),
+      propagate_real_tensors_(propagate_real_tensors) {}
+
+FakeTensorMode::~FakeTensorMode() = default;
+
 void FakeTensorMode::set_constant(
     c10::TensorImpl* fake_impl,
     c10::intrusive_ptr<c10::TensorImpl> constant) {
@@ -1149,6 +1233,7 @@ void FakeTensorMode::set_constant(
     return;
   }
 
+  std::lock_guard guard(constant_mutex_);
   TORCH_INTERNAL_ASSERT(!extra_meta->fake_constant_);
   TORCH_INTERNAL_ASSERT(!constant->is_fake());
   TORCH_INTERNAL_ASSERT(constant->has_storage());
@@ -1166,9 +1251,12 @@ void FakeTensorMode::set_constant(
 }
 
 void FakeTensorMode::clear_constant(c10::TensorImpl* fake_impl) noexcept {
+  c10::intrusive_ptr<c10::TensorImpl> old_constant;
+  std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> old_aliases;
+  std::lock_guard guard(constant_mutex_);
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
-  auto old_constant = std::move(extra_meta->fake_constant_);
+  old_constant = std::move(extra_meta->fake_constant_);
   if (!old_constant) {
     return;
   }
@@ -1180,23 +1268,22 @@ void FakeTensorMode::clear_constant(c10::TensorImpl* fake_impl) noexcept {
     return;
   }
 
-  auto& tensors = old_it->second.tensors;
-  tensors.erase(
-      std::remove_if(
-          tensors.begin(),
-          tensors.end(),
-          [&](const c10::weak_intrusive_ptr<c10::TensorImpl>& weak_ref) {
-            auto impl = weak_ref.lock();
-            return !impl || impl.get() == fake_impl;
-          }),
-      tensors.end());
-  if (tensors.empty()) {
+  old_aliases = std::move(old_it->second.tensors);
+  const auto self =
+      c10::weak_intrusive_ptr<c10::TensorImpl>::reclaim_copy(fake_impl);
+  for (const auto& weak_ref : old_aliases) {
+    if (!weak_ref.expired() && weak_ref != self) {
+      old_it->second.tensors.push_back(weak_ref);
+    }
+  }
+  if (old_it->second.tensors.empty()) {
     constant_storage_mapping_.erase(old_it);
   }
 }
 
-const c10::intrusive_ptr<c10::TensorImpl>& FakeTensorMode::get_constant(
+c10::intrusive_ptr<c10::TensorImpl> FakeTensorMode::get_constant(
     c10::TensorImpl* fake_impl) const {
+  std::lock_guard guard(constant_mutex_);
   auto* extra_meta = fake_impl->maybe_get_extra_meta();
   TORCH_INTERNAL_ASSERT(extra_meta != nullptr);
   return extra_meta->fake_constant_;
@@ -1204,17 +1291,27 @@ const c10::intrusive_ptr<c10::TensorImpl>& FakeTensorMode::get_constant(
 
 void FakeTensorMode::invalidate_constant_aliases(
     c10::StorageImpl* storage_impl) {
-  auto it = constant_storage_mapping_.find(storage_impl);
-  if (it == constant_storage_mapping_.end()) {
-    return;
+  std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> aliases;
+  {
+    std::lock_guard guard(constant_mutex_);
+    auto it = constant_storage_mapping_.find(storage_impl);
+    if (it == constant_storage_mapping_.end()) {
+      return;
+    }
+    aliases = std::move(it->second.tensors);
+    constant_storage_mapping_.erase(it);
   }
+  // Releasing a constant can run a finalizer that reenters the mode. Keep all
+  // constants alive until every alias is cleared, then release outside the
+  // mutex.
   std::vector<c10::intrusive_ptr<c10::TensorImpl>> constants_to_release;
-  constants_to_release.reserve(it->second.tensors.size());
-  for (const auto& weak_ref : it->second.tensors) {
+  constants_to_release.reserve(aliases.size());
+  for (const auto& weak_ref : aliases) {
     auto impl = weak_ref.lock();
     if (!impl) {
       continue;
     }
+    std::lock_guard guard(constant_mutex_);
     auto* extra_meta = impl->maybe_get_extra_meta();
     if (extra_meta == nullptr || !extra_meta->fake_constant_ ||
         !extra_meta->fake_constant_->has_storage() ||
@@ -1224,44 +1321,40 @@ void FakeTensorMode::invalidate_constant_aliases(
     }
     constants_to_release.emplace_back(std::move(extra_meta->fake_constant_));
   }
-  constant_storage_mapping_.erase(it);
 }
 
 void FakeTensorMode::clear_non_cpu_constants() {
-  for (auto it = constant_storage_mapping_.begin();
-       it != constant_storage_mapping_.end();) {
-    std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> live_tensors;
-    c10::intrusive_ptr<c10::TensorImpl> constant;
-    for (auto& weak_ref : it->second.tensors) {
+  decltype(constant_storage_mapping_) snapshot;
+  {
+    std::lock_guard guard(constant_mutex_);
+    snapshot = constant_storage_mapping_;
+    for (auto it = constant_storage_mapping_.begin();
+         it != constant_storage_mapping_.end();) {
+      auto& aliases = it->second.tensors;
+      std::erase_if(
+          aliases, [](const auto& weak_ref) { return weak_ref.expired(); });
+      if (aliases.empty()) {
+        it = constant_storage_mapping_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  for (const auto& [storage_impl, aliases] : snapshot) {
+    for (const auto& weak_ref : aliases.tensors) {
       auto impl = weak_ref.lock();
       if (!impl) {
         continue;
       }
-      auto* extra_meta = impl->maybe_get_extra_meta();
-      if (extra_meta == nullptr || !extra_meta->fake_constant_ ||
-          !extra_meta->fake_constant_->has_storage() ||
-          extra_meta->fake_constant_->storage().unsafeGetStorageImpl() !=
-              it->first) {
+      auto constant = get_constant(impl.get());
+      if (!constant || !constant->has_storage() ||
+          constant->storage().unsafeGetStorageImpl() != storage_impl) {
         continue;
       }
-      live_tensors.push_back(weak_ref);
-      if (!constant) {
-        constant = extra_meta->fake_constant_;
+      if (!constant->device().is_cpu()) {
+        invalidate_constant_aliases(storage_impl);
       }
-    }
-
-    if (!constant) {
-      it = constant_storage_mapping_.erase(it);
-    } else if (constant->device().is_cpu()) {
-      it->second.tensors = std::move(live_tensors);
-      ++it;
-    } else {
-      auto* storage_impl = it->first;
-      ++it;
-      invalidate_constant_aliases(storage_impl);
-      // Reentrant destruction may mutate the map, so do not reuse an iterator
-      // that was live while constants were released.
-      it = constant_storage_mapping_.begin();
+      break;
     }
   }
 }
