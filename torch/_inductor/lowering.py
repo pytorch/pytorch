@@ -4845,7 +4845,22 @@ def tensor_constructor(fill_value):
             if isinstance(s, torch.SymInt):
                 raise AssertionError("expected: not isinstance(s, torch.SymInt)")
         size = [sympy.expand(s) for s in size]
-        check_scalar_fits_dtype(fill_value, dtype)
+        relax_cpu_scalar_conversion = (
+            device.type == "cpu"
+            and dtype
+            in {
+                torch.float16,
+                torch.bfloat16,
+                torch.float8_e4m3fn,
+                torch.float8_e4m3fnuz,
+                torch.float8_e5m2,
+                torch.float8_e5m2fnuz,
+                torch.float8_e8m0fnu,
+            }
+            and V.graph.sizevars.statically_known_equals(sympy.prod(size), 1)
+        )
+        if not relax_cpu_scalar_conversion:
+            check_scalar_fits_dtype(fill_value, dtype)
         full_pointwise = _full(fill_value, decode_device(device), dtype, size)
 
         if pin_memory:
@@ -5995,9 +6010,10 @@ def _pad_as_cat(
 
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
-    check_scalar_fits_dtype(fill_value, x.get_dtype())
     if len(padding) % 2 != 0:
         raise AssertionError("expected: (len(padding) % 2) == 0")
+    if not all(V.graph.sizevars.statically_known_leq(p, 0) for p in padding):
+        check_scalar_fits_dtype(fill_value, x.get_dtype(), strict_unsigned=True)
     if all(p == 0 for p in padding):
         return clone(x)
 

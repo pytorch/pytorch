@@ -10695,32 +10695,56 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         mask = torch.tensor([True, False, True, False], device=self.device)
         index = torch.tensor([0, 2], device=self.device)
 
-        def fns(v):
+        def wrapping_fns(v):
             return [
                 lambda a: a.clone().fill_(v),
                 lambda a: torch.full((4,), v, dtype=a.dtype, device=a.device),
                 lambda a: a.new_full((4,), v),
-                lambda a: torch.nn.functional.pad(a, (1, 1), value=v),
                 lambda a: a.masked_fill(mask, v),
                 lambda a: a.index_fill(0, index, v),
                 lambda a: a.scatter(0, index, v),
             ]
 
-        for dtype, bad, good in (
-            (torch.float16, 70000.0, 65000.0),
-            (torch.float16, 65519.0, float("inf")),
-            (torch.int8, 300, -128),
+        def assert_raises(a, fn):
+            with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                fn(a)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(RuntimeError, "without overflow"):
+                torch.compile(fn, fullgraph=True)(a)
+
+        def assert_matches(a, fn):
+            expected = fn(a.clone())
+            torch._dynamo.reset()
+            actual = torch.compile(fn, fullgraph=True)(a.clone())
+            self.assertEqual(actual, expected)
+
+        for dtype, bad, good_values in (
+            (torch.float16, 70000.0, (65504.0, float("inf"))),
+            (torch.int8, 128, (127, 127.5)),
+            (torch.uint8, -256, (-1,)),
         ):
             a = torch.zeros(4, dtype=dtype, device=self.device)
-            for fn in fns(bad):
-                with self.assertRaisesRegex(RuntimeError, "without overflow"):
-                    fn(a)
-                torch._dynamo.reset()
-                with self.assertRaisesRegex(RuntimeError, "without overflow"):
-                    torch.compile(fn)(a)
-            for fn in fns(good):
-                torch._dynamo.reset()
-                self.common(fn, (a,), check_lowp=False)
+            for fn in wrapping_fns(bad):
+                assert_raises(a, fn)
+            for good in good_values:
+                for fn in wrapping_fns(good):
+                    assert_matches(a, fn)
+
+        for dtype, value in ((torch.float16, 70000.0), (torch.uint8, -1)):
+            a = torch.zeros(4, dtype=dtype, device=self.device)
+            assert_raises(a, lambda a: torch.nn.functional.pad(a, (1, 1), value=value))
+
+        a = torch.zeros(4, dtype=torch.float16, device=self.device)
+        assert_matches(a, lambda a: torch.nn.functional.pad(a, (-1, 0), value=70000.0))
+
+        if self.is_dtype_supported(torch.float8_e4m3fn):
+            a = torch.zeros(4, dtype=torch.float8_e4m3fn, device=self.device)
+            assert_raises(
+                a,
+                lambda a: torch.full(
+                    (4,), float("inf"), dtype=a.dtype, device=a.device
+                ),
+            )
 
     def test_index1(self):
         def fn(a, b, c):
