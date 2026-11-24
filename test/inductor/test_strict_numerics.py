@@ -1260,15 +1260,10 @@ NONFLOAT_XFAIL = frozenset(
 )
 
 
-# Preserve all floating dtype coverage after removing repaired xfail entries.
-FULL_DTYPE_POINTWISE_OPS = frozenset({"div_trunc_rounding"})
-
-
 class _strict_ops(ops):
-    def __init__(self, op_list, xfails, *, full_dtype_ops=()):
+    def __init__(self, op_list, xfails):
         super().__init__(op_list, allowed_dtypes=POINTWISE_DTYPES)
         self.xfails = xfails
-        self.full_dtype_ops = full_dtype_ops
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         for case in super()._parametrize_test(test, generic_cls, device_cls):
@@ -1279,7 +1274,6 @@ class _strict_ops(ops):
             if (
                 ALL_SAMPLES
                 or dtype == preferred
-                or _op_id(op) in self.full_dtype_ops
                 or (_op_id(op), _dtype_label(dtype)) in self.xfails
             ):
                 yield case
@@ -1558,9 +1552,7 @@ class PointwiseStrictNumericsTest(TestCase):
         unittest.skip("uncompilable op under fullgraph"),
         lambda p: p["op"].name in COMPILE_UNSUPPORTED,
     )
-    @_strict_ops(
-        POINTWISE_OPS, POINTWISE_XFAIL, full_dtype_ops=FULL_DTYPE_POINTWISE_OPS
-    )
+    @_strict_ops(POINTWISE_OPS, POINTWISE_XFAIL)
     def test_pointwise_bitwise(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
         self._assert_ledger(
