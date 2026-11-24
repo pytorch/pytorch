@@ -8,8 +8,8 @@ import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
 from torch.utils._config_module import (
     Config,
+    deprecated_alias_fields_from,
     get_tristate_env,
-    inherit_fields_from,
     install_config_module,
 )
 from torch.utils._triton import triton_compile_iq_enabled
@@ -291,6 +291,10 @@ pick_loop_orders = True
 # reuse a kernel input as the output
 inplace_buffers = True
 
+# Ignore fusion profitability for view scatters in the post-grad FX reinplace pass.
+# All-reduce retains its layout and symmetric-memory guards.
+reinplace_whenever_possible = False
+
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = lite_mode_default(False, True)
 
@@ -496,6 +500,8 @@ reorder_prefetch_limit: int | None = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = lite_mode_default(False, True)
 reorder_for_peak_memory_debug = False
+# reject a reorder_for_peak_memory candidate that changes the input order of collectives and waits
+reorder_for_peak_memory_preserve_collective_order = False
 
 # In some cases, when all the nodes that can be scheduled are quite large,
 # it is beneficial to switch the scheduling strategy. So instead of using
@@ -584,8 +590,20 @@ use_torch_profiler_benchmarker: bool = Config(
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
-# enable slow autotuning passes to select pointwise/reductions algorithms
+# enable slow autotuning passes to select pointwise algorithms. Until
+# max_autotune_reduction stops defaulting to None, this also covers reductions.
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+
+# Widen the configs tried for reduction, persistent reduction and split
+# reduction kernels. None follows max_autotune_pointwise. max_autotune=True
+# enables both regardless.
+# TODO: once no callers rely on max_autotune_pointwise also covering reductions
+# (they set max_autotune_reduction=True instead), default this to False and
+# remove the None fallback, so that max_autotune_pointwise covers only pointwise
+# kernels.
+max_autotune_reduction: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_REDUCTION"
+)
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
@@ -882,6 +900,26 @@ max_autotune_subproc_terminate_timeout_seconds = 0.0
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
+# should_reinplace_scatter() controls whether a chain of scatter ops in the fxgraph is
+# functionalized (scatter chain) or mutate in-place (mutation).
+# Functionalized scatter usually can be fused into a single kernel, but each threadblock
+# must bear of cost of wastefully loading all the input pointers for each scatter dim, while
+# mutate in-place usually results in many smaller inductor kernels, but does not have the
+# loading issue.
+# Therefore, when you have a long chain of scatter ops, it is usually beneficial to use the
+# mutate in-place form as the increased kernel launch cost is lower than wasted memory load
+# cost. When you have a short chain of scatter ops, it is usually beneficial to use the
+# functionalized form.
+#
+# This configuration value changes the chain length threshold. At a scatter chain length larger
+# than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD, inductor will actively switches to
+# mutate in-place (non-fused) form to avoid wastefully loading kernel inputs.
+# At a scatter chain length lower than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD or when
+# TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD < 0, the original form is used.
+reinplace_scatter_chain_threshold = int(
+    os.environ.get("TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD", "-1")
+)
+
 # Number of benchmark runs for collective operations
 collective_benchmark_nruns = int(
     os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "50")
@@ -989,6 +1027,28 @@ keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == 
 # Whether view outputs must match eager strides exactly instead of only matching
 # their stride order. Exact matching can introduce additional copy kernels.
 strict_output_strides = False
+
+# Keep load/store indices affine in the loop variables, as the scheduler's
+# memory dependencies see them: no ModularIndexing, FloorDiv, Min/Max/Abs/Where
+# of loop variables and no products of them (the Triton backend still splits
+# its flat block index with // and %). Views that merge dims are realized (a
+# copy, unless the producer's layout is still flexible) instead of being
+# inlined, split reductions split at a dim boundary, repeat, roll and strided
+# slice_scatter are lowered without modular arithmetic, a loop reindexing
+# during fusion is undone when it leaves a non-affine index, and non-affine
+# index arithmetic (%, //, abs, clamp) stays a value computation behind an
+# indirect variable. The indirect variable does not remove the %, //: it is
+# computed as a value and the load becomes a data-dependent gather, like
+# aten.index or an embedding lookup. That helps a backend that lowers direct
+# loads only from affine addresses but has a gather path (MTIA); it is not
+# faster elsewhere. Best effort: adaptive pooling and
+# upsample_nearest2d_backward with non-divisible sizes, split reductions over
+# symbolic ranges and a strided slice_scatter whose dim is not provably a
+# multiple of the step still produce modular addresses. Helps backends with
+# restricted memory addressing at the cost of extra buffers and copies. Each of
+# these choices is made by InductorChoices.use_modular_indexing, which follows
+# this option by default and can be overridden through V.set_choices_handler.
+avoid_modular_indexing = os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "1"
 
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
@@ -2058,6 +2118,17 @@ class cpp:
     # uses the platform default. Set to "" to suppress the architecture flag.
     march: str | None = os.environ.get("TORCHINDUCTOR_CPP_MARCH")
 
+    # Linux only, ignored on other platforms: extra flags passed verbatim to
+    # every C++ compiler command, e.g. ["-mllvm", "-enable-misched=false"].
+    extra_cflags: list[str] = []
+
+    # Linux only, ignored on other platforms: extra flags passed verbatim to the
+    # C++ compiler commands that link. These go to the compiler, which runs the
+    # linker, so linker options need the -Wl, prefix. With
+    # aot_inductor.enable_lto, machine code is generated at link time, so code
+    # generation flags go here, e.g. ["-Wl,-mllvm,-enable-misched=false"].
+    extra_ldflags: list[str] = []
+
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
@@ -2381,8 +2452,7 @@ class triton:
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
     #   - max_tiles=2
-    #   - max_tiles=3 is experimental and may have bugs
-    # higher values are unsupported
+    #   - max_tiles > 3 is experimental and may have bugs
 
     #  We use a max of 3 if coalesce_tiling_analysis is True, and 2 otherwise.
     #  Note - coalesce_tiling_analysis does not yet apply to dynamic shapes.
@@ -2642,6 +2712,13 @@ class triton:
     # it as an autotuning choice for all matmuls
     decompose_k_threshold = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+    )
+
+    # Skip decompose_k splits whose chunk (K // split) exceeds this: fp32 accumulation
+    # error in each partial grows with the chunk length. 0 disables. Not applied when
+    # K is symbolic.
+    decompose_k_max_k_per_split = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_MAX_K_PER_SPLIT", "16384")
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
@@ -2971,14 +3048,15 @@ class cutlass:
     # Whether to use fast math.
     use_fast_math = False
 
-    # Path to the CUTLASS repo root directory.
+    # Path to the CUTLASS repo root directory (SYCL-TLA on XPU).
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
             os.path.join(
                 os.path.dirname(torch.__file__),
-                "../third_party/cutlass/",
+                "../third_party",
+                "sycl-tla" if torch.xpu._is_compiled() else "cutlass",
             ),
         )
     )
@@ -3088,7 +3166,7 @@ class cutlass:
     enable_caching_codegen: bool = True
 
 
-@inherit_fields_from(cutlass)
+@deprecated_alias_fields_from(cutlass)
 class cuda(cutlass):
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
@@ -3121,7 +3199,7 @@ class cuda(cutlass):
     autotune_tunableop_dynamic_dims_wildcard: bool = False
 
 
-@inherit_fields_from(cutlass)
+@deprecated_alias_fields_from(cutlass)
 class xpu(cutlass):
     # Xe arch to use for SYCL kernel compilation.
     # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
@@ -3132,8 +3210,6 @@ class xpu(cutlass):
 
     # Path to Intel OneAPI.
     oneapi_root: str | None = None
-
-    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
 
 
 class rocm:
@@ -3457,9 +3533,7 @@ _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
-    "cuda.cutlass_dir",
     "cutlass.cutlass_dir",
-    "xpu.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",
@@ -3540,6 +3614,14 @@ class test_configs:
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
     static_cpp_dtype_assert = False
+
+    # Raise when a scheduler node's load/store index is not affine in the loop
+    # variables (contains ModularIndexing, FloorDiv, Min/Max/Abs/Where or a
+    # product of loop variables). Used together with avoid_modular_indexing to
+    # find the places that still generate such indexing.
+    raise_on_modular_indexing = (
+        os.environ.get("TORCHINDUCTOR_RAISE_ON_MODULAR_INDEXING") == "1"
+    )
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description

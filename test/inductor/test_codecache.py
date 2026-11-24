@@ -3902,6 +3902,29 @@ class _TestCustomPartitionerFn(CustomPartitionerFn):
 
 
 class TestFxGraphCacheHashing(TestCase):
+    def test_hash_aten_c_shim_ops(self):
+        from torch._inductor.codegen.common import get_device_op_overrides
+
+        with mock.patch.object(
+            get_device_op_overrides("cpu"), "get_aten_c_shim_ops"
+        ) as hook:
+            hook.return_value = {"aten.mul.Tensor": {}, "aten.add.Tensor": {}}
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            hook.return_value = {"aten.add.Tensor": {}, "aten.mul.Tensor": {}}
+            details2 = FxGraphHashDetails(None, [], {}, [])
+            hook.return_value = {}
+            details3 = FxGraphHashDetails(None, [], {}, [])
+            hook.return_value = {"aten.mul.Tensor": {"v2": {"new_args": []}}}
+            details4 = FxGraphHashDetails(None, [], {}, [])
+            hook.return_value = {"aten.mul.Tensor": {"v3": {"new_args": []}}}
+            details5 = FxGraphHashDetails(None, [], {}, [])
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+        self.assertEqual(pickler.dumps(details1), pickler.dumps(details2))
+        self.assertNotEqual(pickler.dumps(details1), pickler.dumps(details3))
+        self.assertNotEqual(pickler.dumps(details4), pickler.dumps(details5))
+
     def _fx_graph_cache_key(self, gm, example_inputs):
         details = FxGraphHashDetails(gm, example_inputs, cast(Any, {}), [])
         return FxGraphCachePickler(gm).get_key(details)
@@ -5949,6 +5972,31 @@ class TestCppCodeCacheKey(TestCase):
                 with fresh_cache(), self._torch_root(root), scope():
                     keys.append(self._key())
             self.assertNotEqual(keys[0], keys[1])
+
+    def test_key_tracks_link_flags_of_a_split_build(self):
+        # With optimized code, cpp.extra_ldflags reach only the separate link.
+        from torch.compiler import _runtime_cache
+
+        for scope in (nullcontext, _runtime_cache.capture_scope):
+            keys = set()
+            for flags in ([], ["-Wl,--defsym,a=1"], ["-Wl,--defsym,a=2"]):
+                with (
+                    fresh_cache(),
+                    scope(),
+                    config.patch({"cpp.extra_ldflags": flags}),
+                ):
+                    CppCodeCache.load_async(
+                        self.CODE,
+                        optimized_code="// optimized\n",
+                        needs_vec_isa=False,
+                        kernel_needs_vec_isa=False,
+                    )
+                    if scope is nullcontext:
+                        (key,) = CppCodeCache.cache
+                    else:
+                        (key,) = _runtime_cache._capture.cpp_kernels
+                    keys.add(key)
+            self.assertEqual(len(keys), 3)
 
     def test_frozen_key_tracks_torch_build(self):
         from torch.compiler._runtime_cache import capture_scope
