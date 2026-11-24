@@ -665,34 +665,23 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     const int page_block_size = !paged_KV ? 1 : k.size(1);
     TORCH_CHECK(!paged_KV || page_block_size % 256 == 0, "Paged KV cache block size must be divisible by 256");
 
-    // set_params_fprop derives params.is_causal from window_size_right == 0, so canonicalize
-    // is_causal into the window once and both caller conventions take the same path.
+    // Canonicalize is_causal into window_size_right = 0 (set_params_fprop derives params.is_causal from it).
     if (is_causal) { window_size_right = 0; }
 
     void *cu_seqlens_q_d = cu_seqlens_q.data_ptr();
 
     // Faster to transpose q from (b, 1, (nheads_kv ngroups), d) to (b, ngroups, nheads_kv, d) in this case
     // H/t Daniel Haziza
-    // The packed layout drops cu_seqlens_q, so every sequence needs exactly one query token:
-    // with q holding no rows past cu_seqlens_q[-1] (T_q = sum of query lengths, as varlen_attn
-    // documents), that is total_q == batch_size. A sequence with none would break the view below.
-    // A one-token query is the last position of its sequence (masks align to the bottom right),
-    // so a causal mask (window_size_right == 0) masks nothing and the packed call drops it.
+    // Requires q.size(0) == batch_size (no empty sequences) since packing drops cu_seqlens_q;
+    // window_size_right == 0 (bottom-right causal) masks nothing for a 1-token query.
     const int seqlenq_ngroups_swapped = max_seqlen_q == 1 && q.size(0) == batch_size && num_heads > num_heads_k && window_size_left < 0 && window_size_right <= 0 && p_dropout == 0.f && head_size_og % 8 == 0 && !alibi_slopes_.has_value();
-    // A causal packed call runs the split-KV kernel even without paged KV. With one split its KV
-    // tile matches the standard causal kernel's at every head dim (run_mha_fwd_splitkv_align in
-    // third_party/flash-attention/csrc/flash_attn/src/flash_fwd_launch_template.h; the block_n in
-    // set_params_splitkv is the tile for several splits), which the same token runs in a batch
-    // with a prefill, so num_splits=1 stays batch invariant. A non-causal packed call keeps the
-    // standard kernel, as in a mixed batch: the standard non-causal tile differs from the
-    // split-KV one at head dim 128 on sm86/sm89. Computed before the packed block below clears
-    // window_size_right.
+    // Route causal packed decode through split-KV (must be computed before clearing window_size_right):
+    // its 1-split KV tile matches the standard causal kernel, while non-causal stays on the standard
+    // kernel to match sm86/sm89 hdim-128 mixed batches (preserving num_splits=1 batch invariance).
     const bool force_split_kernel = paged_KV || (seqlenq_ngroups_swapped && window_size_right == 0);
     at::Tensor temp_q = q;
     const int ngroups = num_heads / num_heads_k;
     if (seqlenq_ngroups_swapped) {
-        // As in mha_fwd, the kernel reads q, and writes out below, through the strided view
-        // (b, ngroups, nheads_kv, d) instead of a copy in the packed layout (b * ngroups, nheads_kv, d).
         temp_q = q.view({batch_size, num_heads_k, ngroups, head_size_og}).transpose(1, 2);
         max_seqlen_q = ngroups;
         num_heads = num_heads_k;
@@ -812,15 +801,11 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     params.page_block_size = page_block_size;
     // Keep references to these tensors to extend their lifetime
     at::Tensor softmax_lse_accum, out_accum;
-    // Every packed call may split, causal or not; force_split_kernel only decides which kernel
-    // runs a single split.
+    // All packed calls may split (force_split_kernel only controls the 1-split kernel).
     if (paged_KV || seqlenq_ngroups_swapped) {
-        // Split-KV's combine kernel ignores cu_seqlens_q: it writes max_seqlen_q rows per sequence
-        // at batch_idx * o_batch_stride, and a varlen q has no batch stride. Several sequences
-        // would land on the first one's rows (#194167), and a sequence shorter than max_seqlen_q
-        // would write past out. Split only the packed path or one sequence of max_seqlen_q tokens.
-        // TODO: paged MHA decode with several sequences now runs one split; taking the packed
-        // path with ngroups == 1 would let it split correctly.
+        // Split-KV combine ignores cu_seqlens_q and indexes by batch_idx * o_batch_stride
+        // (0 for varlen q), so only split packed calls or a single full-length sequence (#194167).
+        // TODO: allow ngroups == 1 on the packed path so multi-sequence paged MHA decode can split.
         const bool can_split = seqlenq_ngroups_swapped || (batch_size == 1 && q.size(0) == max_seqlen_q);
         std::tie(softmax_lse_accum, out_accum) = set_params_splitkv(params, batch_size, num_heads,
                            head_size, max_seqlen_k, max_seqlen_q,
@@ -860,13 +845,9 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
     if (seqlenq_ngroups_swapped) {
         q_padded = q;
-        // The other kernels write the packed LSE as (nheads_kv, ngroups, b). The split-KV kernel
-        // without splits skips the combine kernel and writes it in packed-token order,
-        // (nheads_kv, b, ngroups).
-        // TODO: drop this transpose once the vendored kernel's LSE offset without splits
-        // (row_offset_lseaccum in third_party/flash-attention/csrc/flash_attn/src/
-        // flash_fwd_kernel.h) accounts for seqlenq_ngroups_swapped. A submodule bump with
-        // that fix makes this transpose wrong; test_fa2_gqa_decode_matches_mha checks the LSE.
+        // Split-KV with num_splits <= 1 skips the combine kernel and writes LSE as
+        // (nheads_kv, b, ngroups) instead of (nheads_kv, ngroups, b).
+        // TODO: remove once row_offset_lseaccum in flash_fwd_kernel.h handles seqlenq_ngroups_swapped.
         if (force_split_kernel && params.num_splits <= 1) {
             softmax_lse = softmax_lse.view({num_heads, batch_size, max_seqlen_q}).transpose(1, 2);
         }
