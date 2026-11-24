@@ -1049,6 +1049,20 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                         self.assertEqual(opt_fn(x), expected(x))
                         self.assertNotIn("_dg_a", globals())
 
+    def test_delete_global_module_getattr_other_name(self):
+        me = sys.modules[__name__]
+
+        def fn(x):
+            global _dg_a
+            del _dg_a
+            return x + getattr(me, "_dg_b") + getattr(me, "_dg_missing", 3)  # noqa: B009
+
+        x = torch.ones(2, 2)
+        with mock.patch.dict(globals(), {"_dg_a": 1, "_dg_b": 2}):
+            out = torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(out, x + 5)
+            self.assertNotIn("_dg_a", globals())
+
     @parametrize("shape", ("attr", "setitem", "update", "setdefault"))
     def test_delete_global_module_write_after(self, shape):
         me = sys.modules[__name__]
