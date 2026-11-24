@@ -9,7 +9,7 @@ import types
 import unittest
 import weakref
 from collections import defaultdict, namedtuple, OrderedDict, UserDict
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from functools import partial
 from typing import Any, NamedTuple
 from unittest.mock import patch
@@ -1767,6 +1767,24 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_mutable_mapping_subclass_get_ignores_getitem(self):
+        # The custom __new__ makes Dynamo wrap this as a MutableMapping, not a
+        # dict. dict.get must not dispatch to the overridden __getitem__.
+        class D(dict, MutableMapping):
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls, *args, **kwargs)
+
+            def __getitem__(self, key):
+                return 100
+
+        d = D({"a": 2})
+
+        def fn(x, d):
+            return x * d.get("a", 3)
+
+        x = torch.randn(2)
+        self.assertEqual(fn(x, d), torch.compile(fn, backend="eager")(x, d))
 
     def test_dict_order_keys(self):
         def fn(d):

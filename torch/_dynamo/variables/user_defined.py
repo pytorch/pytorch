@@ -6016,26 +6016,6 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
 
-    def _get(self, tx: "InstructionTranslatorBase") -> "VariableTracker | None":
-        # `.get` backed by the stdlib Mapping/dict implementation resolves to a
-        # traceable polyfill; anything else declines to the generic getattro.
-        if type(self.value).get in (  # type: ignore[attr-defined]
-            collections.abc.Mapping.get,
-            dict.get,
-        ):
-            from .builder import SourcelessBuilder
-
-            fn_vt = SourcelessBuilder.create_internal_user_function(
-                polyfills.mapping_get
-            )
-            return variables.UserMethodVariable(
-                fn_vt,
-                self,
-            )
-        return None
-
-    tp_getset = {"get": GetSet(_get, readonly_setter)}
-
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
             return VariableTracker.build(tx, len(self.value))  # type: ignore[bad-argument-type]
