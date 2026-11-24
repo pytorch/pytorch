@@ -98,7 +98,7 @@ def loss_fn(y, target, scale=1e-4):
 
 class ComposabilityTest(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str:
+    def backend_str(cls, device) -> str:
         return backend
 
     @property
