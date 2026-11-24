@@ -79,8 +79,7 @@ class DeterministicTestGeneric(TestCase):
             torch.testing.assert_close(eager, compiled_out)
 
 
-@instantiate_parametrized_tests
-class DeterministicTestRun2RunCUDA(TestCase):
+class DeterministicTestRun2Run(TestCase):
     hw_classification = HardwareClassification.CUDA
 
     @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/180681")
@@ -169,14 +168,6 @@ class DeterministicTestRun2RunCUDA(TestCase):
         torch.compile(lambda x: x + 1, backend=backend)(torch.randn(4))
         self.assertFalse(torch.are_deterministic_algorithms_enabled())
         self.assertFalse(inductor_config.deterministic)
-
-
-instantiate_device_type_tests(
-    DeterministicTestRun2RunCUDA,
-    globals(),
-    only_for=("cuda",),
-    allow_xpu=True,
-)
 
 
 @unittest.skipIf(not HAS_TRITON, "requires triton")
@@ -352,6 +343,13 @@ instantiate_device_type_tests(
     except_for="cpu",
     allow_xpu=True,
 )
+
+instantiate_device_type_tests(
+    DeterministicTestRun2Run,
+    globals(),
+    only_for="cuda",
+)
+
 
 if __name__ == "__main__":
     from torch.utils._triton import has_triton
