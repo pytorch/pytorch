@@ -12757,7 +12757,8 @@ class TestGroupedMM(TestCase):
     @parametrize("b_row_major", [False, True])
     @parametrize("a_shape,b_shape,offsets,backward", _GROUPED_MM_CASES)
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
-    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})  # same as test_grouped_gemm_rocm_backend; ck_tile is on by default
+    # same as test_grouped_gemm_rocm_backend: ck_tile, on by default on ROCm, sums K in one fp32 accumulator
+    @toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)} if TEST_WITH_ROCM else {})
     @decorateIf(
         unittest.skip('Unaligned cases require the CUDA float32 fallback'),
         lambda p: torch.device(p["device"]).type == "cuda" and not torch.version.hip and p["dtype"] != torch.float32 and any(size % (16 // p["dtype"].itemsize) for size in p["a_shape"][-2:] + p["b_shape"][-2:] + tuple(p["offsets"] or ())),
