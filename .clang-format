@@ -99,7 +99,7 @@ SpacesInContainerLiterals: true
 SpacesInCStyleCastParentheses: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-Standard:        c++17
+Standard:        c++20
 StatementMacros:
   - C10_DEFINE_bool
   - C10_DEFINE_int
@@ -109,6 +109,7 @@ StatementMacros:
   - C10_DEFINE_REGISTRY_WITHOUT_WARNING
   - C10_REGISTER_CREATOR
   - DEFINE_BINARY
+  - jiterator_also_stringify_as
   - PyObject_HEAD
   - PyObject_VAR_HEAD
   - PyException_HEAD

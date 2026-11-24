@@ -21,7 +21,11 @@ configure_file(
 file(GLOB HEADERONLY_HEADERS CONFIGURE_DEPENDS
     core/**/*.h
     cpu/**/*.h
+    cuda/*.h
+    cuda/detail/*.h
     macros/*.h
+    native/*.h
+    native/**/*.h
     util/*.h
 )
 

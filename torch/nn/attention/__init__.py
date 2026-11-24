@@ -3,6 +3,7 @@
 
 import contextlib
 from collections.abc import Iterable
+from contextvars import ContextVar
 from typing import Union
 from warnings import warn
 
@@ -24,6 +25,9 @@ __all__: list[str] = [
     "list_flash_attention_impls",
     "current_flash_attention_impl",
     "restore_flash_attention_impl",
+    "enable_cudnn_sdp_python",
+    "cudnn_sdp_python_enabled",
+    "is_cudnn_sdp_python_available",
 ]
 
 
@@ -37,23 +41,10 @@ __all__: list[str] = [
 WARN_FOR_UNFUSED_KERNELS = False
 
 
-r"""An enum-like class that contains the different backends for scaled dot product attention.
-    This backend class is designed to be used with the sdpa_kernel context manager.
-
-    The following Enums are available:
-        - ERROR: An error occurred when trying to determine the backend.
-        - MATH: The math backend for scaled dot product attention.
-        - FLASH_ATTENTION: The flash attention backend for scaled dot product attention.
-        - EFFICIENT_ATTENTION: The efficient attention backend for scaled dot product attention.
-        - CUDNN_ATTENTION: The cuDNN backend for scaled dot product attention.
-        - OVERRIDEABLE: The overridable backend for extension.
-
-    See :func:`torch.nn.attention.sdpa_kernel` for more details.
-
-    .. warning:: This class is in beta and subject to change.
-"""
+# SDPBackend is defined and documented in torch/csrc/Module.cpp.
 SDPBackend.__module__ = __name__
 SDPBackend.__name__ = "SDPBackend"
+SDPBackend.__qualname__ = "SDPBackend"
 
 
 def _raise_kernel_warnings(params: SDPAParams) -> None:
@@ -77,6 +68,12 @@ _backend_names = {
     "math": "MATH",
     "overrideable": "OVERRIDEABLE",
 }
+_sdpa_kernel_uses_priority = ContextVar("sdpa_kernel_uses_priority", default=False)
+
+
+def _is_sdp_priority_order_active() -> bool:
+    """Return whether an enclosing sdpa_kernel context set backend priority."""
+    return _sdpa_kernel_uses_priority.get()
 
 
 def _backend_from_string(name: str):
@@ -156,10 +153,14 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
     backends = list(dict.fromkeys(backends))
 
     previous_backends = _cur_sdpa_kernel_backends(with_priority=set_priority)
+    priority_token = _sdpa_kernel_uses_priority.set(
+        set_priority or _sdpa_kernel_uses_priority.get()
+    )
     try:
         _sdpa_kernel(backends, set_priority)
         yield {}
     finally:
+        _sdpa_kernel_uses_priority.reset(priority_token)
         _sdpa_kernel(previous_backends, set_priority)
 
 
@@ -193,5 +194,69 @@ list_flash_attention_impls.__module__ = __name__
 current_flash_attention_impl.__module__ = __name__
 restore_flash_attention_impl.__module__ = __name__
 
-# Import built-in implementations to trigger self-registration
-from . import _fa3, _fa4
+# _fa3 and _fa4 register themselves as flash attention implementations on
+# import; _cudnn registers nothing and backs the cuDNN Python SDPA switch below.
+from . import _cudnn, _fa3, _fa4
+
+
+def is_cudnn_sdp_python_available() -> bool:
+    r"""
+    .. warning:: This API is beta and subject to change.
+
+    Returns whether ``nvidia-cudnn-frontend``'s ``cudnn.torch`` module can be
+    found. It imports the ``cudnn`` package to look, but not ``cudnn.torch``,
+    and does not check the version: :func:`enable_cudnn_sdp_python` still
+    raises if the installed package is older than it requires. An installed
+    ``cudnn`` package that fails to import is reported as unavailable;
+    :func:`enable_cudnn_sdp_python` raises the underlying error.
+    """
+    return _cudnn.is_available()
+
+
+def cudnn_sdp_python_enabled() -> bool:
+    r"""
+    .. warning:: This API is beta and subject to change.
+
+    Returns whether :func:`enable_cudnn_sdp_python` has installed the cuDNN
+    frontend's implementation. Dense scaled dot product attention reaches it
+    only when the cuDNN backend is selected (see
+    :func:`torch.backends.cuda.enable_cudnn_sdp`). Every varlen call reaches
+    it, and it passes on the calls that did not select cuDNN. Either way, the
+    frontend passes configurations it does not support to the built-in C++
+    implementation.
+    """
+    return _cudnn.is_enabled()
+
+
+def enable_cudnn_sdp_python(enabled: bool) -> None:
+    r"""
+    .. warning:: This API is beta and subject to change.
+
+    Selects which implementation backs cuDNN scaled dot product attention: the
+    cuDNN frontend Python API when True, or the built-in C++ implementation
+    when False. Enabling requires ``nvidia-cudnn-frontend>=1.32.3``. Its
+    ``cudnn.torch`` module is imported on the first enable and not before;
+    :func:`is_cudnn_sdp_python_available` imports only the ``cudnn`` package.
+
+    This chooses an *implementation*, so it is orthogonal to
+    :func:`torch.backends.cuda.enable_cudnn_sdp`, which chooses whether the
+    cuDNN *backend* is eligible for selection at all: with that off, neither
+    implementation runs.
+
+    It replaces the CUDA kernels of ``_scaled_dot_product_cudnn_attention``, its
+    backward, and the :func:`~torch.nn.attention.varlen.varlen_attn` ops. The
+    varlen ops are shared with flash attention, so with this on every varlen
+    call reaches the frontend first; it serves the calls that selected cuDNN
+    and passes the rest to PyTorch's own kernels, so the active flash attention
+    implementation is unaffected. Nested-tensor inputs keep the built-in
+    implementation. So does dense SDPA in code that calls the CUDA kernels
+    without going through the dispatcher: AOTInductor and ``torch.compile``
+    with ``cpp_wrapper=True`` call C shims for it, while the varlen ops there
+    still reach the frontend.
+    """
+    if not isinstance(enabled, bool):
+        raise TypeError(f"enabled must be a bool, got {type(enabled).__name__}")
+    if enabled:
+        _cudnn.enable()
+    else:
+        _cudnn.disable()

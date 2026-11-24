@@ -174,7 +174,7 @@ void div_true_kernel(TensorIteratorBase& iter) {
       iter.remove_operand(2);
       cpu_kernel_vec(
           iter,
-          [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+          [=](scalar_t a) -> scalar_t {
             return static_cast<opmath_t>(a) / b;
           },
           [=](Vectorized<scalar_t> a) {
@@ -190,8 +190,7 @@ void div_true_kernel(TensorIteratorBase& iter) {
         kBFloat16, kHalf, dtype, "div_cpu", [&]() {
           cpu_kernel_vec(
               iter,
-              [](scalar_t a, scalar_t b)
-                  __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+              [](scalar_t a, scalar_t b) -> scalar_t {
                     return a / b;
                   },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
@@ -221,8 +220,7 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
           iter.remove_operand(2);
           cpu_kernel_vec(
               iter,
-              [=](scalar_t a)
-                  __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+              [=](scalar_t a) -> scalar_t {
                     return std::trunc(static_cast<opmath_t>(a) / b);
                   },
               [=](Vectorized<scalar_t> a) {
@@ -240,8 +238,7 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
         kBFloat16, kHalf, dtype, "div_trunc_cpu", [&]() {
           cpu_kernel_vec(
               iter,
-              [](scalar_t a, scalar_t b)
-                  __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+              [](scalar_t a, scalar_t b) -> scalar_t {
                     return std::trunc(a / b);
                   },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
@@ -366,8 +363,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
   } else if (iter.common_dtype() == kBFloat16) {
     cpu_kernel_vec(
         iter,
-        [=](BFloat16 a, BFloat16 b)
-            __ubsan_ignore_float_divide_by_zero__ -> BFloat16 {
+        [=](BFloat16 a, BFloat16 b) -> BFloat16 {
               float a0 = static_cast<float>(a);
               float b0 = static_cast<float>(b);
               float mod0 = std::fmod(a0, b0);
@@ -393,8 +389,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
         iter.common_dtype(), "remainder_cpu", [&]() {
           cpu_kernel_vec(
               iter,
-              [=](scalar_t a, scalar_t b)
-                  __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+              [=](scalar_t a, scalar_t b) -> scalar_t {
                     scalar_t mod = std::fmod(a, b);
                     if ((mod != 0) && ((b < 0) != (mod < 0)))
                       mod += b;
@@ -659,18 +654,31 @@ void ne_kernel(TensorIteratorBase& iter) {
   }
 }
 
+// std::min and std::max return their first argument when the two compare equal,
+// so they keep the sign of a zero; a hardware min/max does not. Restore `a`
+// where both operands are zeros -- their bitwise or is +-0, which still
+// compares equal to zero.
+template <typename scalar_t>
+Vectorized<scalar_t> keep_zero_sign(
+    const Vectorized<scalar_t>& res,
+    const Vectorized<scalar_t>& a,
+    const Vectorized<scalar_t>& b) {
+  const auto both_zero = (a | b) == Vectorized<scalar_t>(scalar_t(0));
+  return Vectorized<scalar_t>::blendv(res, a, both_zero);
+}
+
 void maximum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) -> bool { return a || b; });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "maximum_cpu", [&]() {
+    AT_DISPATCH_V2(iter.dtype(), "maximum_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
             return at::vec::maximum(a, b);
           });
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -688,7 +696,7 @@ void maximum_kernel(TensorIteratorBase& iter) {
                 }
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-                return at::vec::maximum(a, b);
+                return keep_zero_sign(at::vec::maximum(a, b), a, b);
               });
         });
   }
@@ -698,14 +706,14 @@ void minimum_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(iter, [](bool a, bool b) -> bool { return a && b; });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "minimum_cpu", [&]() {
+    AT_DISPATCH_V2(iter.dtype(), "minimum_cpu", AT_WRAP([&]() {
       cpu_kernel_vec(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
           [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
             return at::vec::minimum(a, b);
           });
-    });
+    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -723,7 +731,7 @@ void minimum_kernel(TensorIteratorBase& iter) {
                 }
               },
               [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-                return at::vec::minimum(a, b);
+                return keep_zero_sign(at::vec::minimum(a, b), a, b);
               });
         });
   }

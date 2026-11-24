@@ -1,7 +1,9 @@
 # Owner(s): ["module: inductor"]
+import io
 import json
 import operator
 import os
+import select
 import subprocess
 import sys
 import tempfile
@@ -9,24 +11,44 @@ import textwrap
 import time
 import types
 import unittest
-from concurrent.futures import TimeoutError as FuturesTimeoutError
+from concurrent.futures import Future, TimeoutError as FuturesTimeoutError
+from concurrent.futures.process import BrokenProcessPool
+from contextlib import contextmanager
 from threading import Event
 from unittest.mock import patch
 
+import torch
 import torch._inductor.config as config
+from torch._inductor.compile_worker import subproc_pool, watchdog
 from torch._inductor.compile_worker.subproc_pool import (
+    _recv_msg,
+    _SubprocExceptionInfo,
+    MsgHeader,
     raise_testexc,
     SubprocException,
     SubprocKind,
+    SubprocMain,
+    SubprocPickler,
     SubprocPool,
 )
 from torch._inductor.compile_worker.timer import Timer
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_LINUX, skipIfWindows
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    skipIfWindows,
+    subtest,
+)
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+from torch.utils._triton import has_triton_package
+from torch.utils.cpp_extension import CUDA_HOME
 
 
 class TestCompileWorker(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def make_pool(self, size):
         return SubprocPool(size)
 
@@ -139,8 +161,16 @@ class TestCompileWorker(TestCase):
         # but EOF never arrives" case: with that path dead, only _health_monitor
         # -> _on_sidecar_death can resolve pending futures. (The complementary
         # test_sidecar_death_eofs_without_watchdog covers the EOF path in
-        # isolation by disabling the watchdog instead.)
-        with patch.object(SubprocPool, "_read_thread", lambda self: None):
+        # isolation by disabling the watchdog instead.) The injected diagnostic
+        # failure proves pending futures are failed before best-effort reporting.
+        with (
+            patch.object(SubprocPool, "_read_thread", lambda self: None),
+            patch.object(
+                SubprocPool,
+                "_log_sidecar_death_diagnostics",
+                side_effect=SystemExit(3),
+            ),
+        ):
             pool = self.make_pool(2)
             try:
                 fut = pool.submit(time.sleep, 600)
@@ -323,203 +353,652 @@ class TestCompileWorkerWithTimer(TestCompileWorker):
         return SubprocPool(size, quiesce=True)
 
 
-class TestCompileWorkerWatchdog(TestCase):
-    # The sidecar runs a watchdog that, every interval (shortened to 1s here via
-    # env), reports jobs still running past that interval to the parent, which
-    # turns them into a "compile_worker_status" structured-trace artifact -- so a
-    # stuck/slow worker leaves a breadcrumb in tlparse instead of silently
-    # wedging. See subproc_pool.SubprocMain._watchdog_loop.
-    @skipIfWindows(msg="pass_fds not supported on Windows.")
-    def test_watchdog_reports_slow_jobs(self):
-        reports = []
-        got_report = Event()
-
-        def fake_trace_structured(name, *args, **kwargs):
-            if name != "artifact":
-                return
-            metadata = kwargs.get("metadata_fn", dict)()
-            if metadata.get("name") != "compile_worker_status":
-                return
-            reports.append(json.loads(kwargs["payload_fn"]()))
-            got_report.set()
-
-        with patch.dict(
-            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
-        ):
-            with patch(
-                "torch._inductor.compile_worker.subproc_pool.trace_structured",
-                fake_trace_structured,
-            ):
-                pool = SubprocPool(2)
-                try:
-                    slow = pool.submit(time.sleep, 8)
-                    self.assertTrue(
-                        got_report.wait(30), "watchdog did not report the slow job"
-                    )
-                    slow.result()
-                finally:
-                    pool.shutdown()
-
-        self.assertTrue(reports)
-        self.assertGreaterEqual(reports[-1]["elapsed_s"], 1.0)
+class TestSubprocPoolCallbackSafety(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
-    def test_watchdog_silent_for_fast_jobs(self):
-        reports = []
+    def test_done_callback_can_submit_job(self):
+        code = textwrap.dedent(
+            """
+            import operator
+            import threading
+            import time
 
-        def fake_trace_structured(name, *args, **kwargs):
-            if name != "artifact":
-                return
-            metadata = kwargs.get("metadata_fn", dict)()
-            if metadata.get("name") == "compile_worker_status":
-                reports.append(metadata)
+            from torch._inductor.compile_worker.subproc_pool import SubprocPool
 
-        with patch.dict(
-            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
-        ):
             pool = SubprocPool(2)
-            try:
-                # Warm the pool before collecting reports. The first job pays cold
-                # pool creation and the worker forks, which can exceed the
-                # (test-shortened) interval and be legitimately reported; that
-                # cost must not be attributed to the "fast" job below. The
-                # callback drops a job from _inflight before its result is sent,
-                # so once this result returns the warm-up job can no longer be
-                # reported.
-                self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
-                with patch(
-                    "torch._inductor.compile_worker.subproc_pool.trace_structured",
-                    fake_trace_structured,
-                ):
-                    self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
-                    time.sleep(2.5)  # a couple of watchdog ticks with no slow job
-            finally:
-                pool.shutdown()
+            callback_done = threading.Event()
+            chained = []
 
-        self.assertEqual(reports, [])
+            def callback(future):
+                chained.append(pool.submit(operator.add, 20, 22))
+                callback_done.set()
 
-    @skipIfWindows(msg="pass_fds not supported on Windows.")
-    def test_watchdog_reports_worker_phase(self):
-        # A worker that reports a heartbeat phase should have that phase surface
-        # in the STATUS report (Phase 2: shared-memory phase heartbeat).
-        from torch._inductor.compile_worker.subproc_pool import (
-            _report_phase_and_sleep_for_test,
+            first = pool.submit(time.sleep, 1)
+            first.add_done_callback(callback)
+            assert first.result(timeout=60) is None
+            assert callback_done.wait(60), "done callback deadlocked in pool.submit()"
+            assert chained[0].result(timeout=60) == 42
+            pool.shutdown()
+            print("reentrant callback completed")
+            """
         )
-        from torch._inductor.compile_worker.watchdog import Phase
-
-        reports = []
-        got_phase = Event()
-
-        def fake_trace_structured(name, *args, **kwargs):
-            if name != "artifact":
-                return
-            metadata = kwargs.get("metadata_fn", dict)()
-            if metadata.get("name") != "compile_worker_status":
-                return
-            record = json.loads(kwargs["payload_fn"]())
-            reports.append(record)
-            if record.get("phase") == "querying_cache":
-                got_phase.set()
-
-        with patch.dict(
-            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
-        ):
-            with patch(
-                "torch._inductor.compile_worker.subproc_pool.trace_structured",
-                fake_trace_structured,
-            ):
-                pool = SubprocPool(2)
-                try:
-                    fut = pool.submit(
-                        _report_phase_and_sleep_for_test, int(Phase.QUERYING_CACHE), 8
-                    )
-                    self.assertTrue(
-                        got_phase.wait(30),
-                        f"watchdog did not report the phase; got {reports}",
-                    )
-                    fut.result()
-                finally:
-                    pool.shutdown()
-
-        phased = [r for r in reports if r.get("phase") == "querying_cache"]
-        self.assertTrue(phased)
-        self.assertIn("phase_elapsed_s", phased[-1])
-        self.assertIn("worker_pid", phased[-1])
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("reentrant callback completed", result.stdout)
 
     @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_sidecar_death_completes_all_futures_after_callback_base_exception(self):
+        code = textwrap.dedent(
+            """
+            import threading
+            import time
+
+            from torch._inductor.compile_worker.subproc_pool import SubprocPool
+
+            pool = SubprocPool(2)
+            callback_done = threading.Event()
+            first = pool.submit(time.sleep, 600)
+            second = pool.submit(time.sleep, 600)
+
+            class BrokenWaitCounter:
+                def __exit__(
+                    self, exc_type=None, exc_value=None, traceback=None
+                ):
+                    raise SystemExit(3)
+
+            first_job_id = next(iter(pool.pending_jobs))
+            pool.pending_jobs[first_job_id].waitcounter = BrokenWaitCounter()
+
+            def reentrant_callback(future):
+                try:
+                    pool.submit(time.sleep, 0)
+                except RuntimeError:
+                    callback_done.set()
+                else:
+                    raise AssertionError("submit unexpectedly succeeded on dead pool")
+
+            def base_exception_callback(future):
+                raise SystemExit(3)
+
+            first.add_done_callback(reentrant_callback)
+            first.add_done_callback(base_exception_callback)
+            time.sleep(1)
+            pool.process.kill()
+
+            for future in (first, second):
+                try:
+                    future.result(timeout=60)
+                except Exception:
+                    pass
+                else:
+                    raise AssertionError("sidecar death unexpectedly succeeded")
+            assert callback_done.wait(60), "sidecar-death callback did not run"
+            pool.shutdown()
+            print("all pending futures completed")
+            """
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, timeout=120
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+        )
+        self.assertIn("all pending futures completed", result.stdout)
+
+
+class _UnpicklableError(Exception):
+    """Stands in for a job exception that the pickler cannot serialize."""
+
+
+class _FailingPickler(SubprocPickler):
+    def dumps(self, obj):
+        if isinstance(obj, _UnpicklableError):
+            raise RuntimeError("cannot pickle this exception")
+        return super().dumps(obj)
+
+
+class _RefusesFailurePickler(_FailingPickler):
+    """Also refuses the failure details, forcing the empty-payload last resort."""
+
+    def dumps(self, obj):
+        if isinstance(obj, _SubprocExceptionInfo):
+            raise RuntimeError("cannot pickle the failure payload either")
+        return super().dumps(obj)
+
+
+class _RaisesBaseExceptionPickler(SubprocPickler):
+    def dumps(self, obj):
+        raise SystemExit(3)
+
+
+class _RaisesOnBadLoadPickler(SubprocPickler):
+    def loads(self, data):
+        if data == b"bad":
+            raise SystemExit(3)
+        return super().loads(data)
+
+
+class _DoneFuture:
+    """
+    A finished future that runs done callbacks the way concurrent.futures does:
+    inline, swallowing anything they raise. That swallowing is what turned a
+    dead callback into a silent hang, so the fake has to reproduce it.
+    """
+
+    def __init__(self, result=None, exc=None, cancelled=False):
+        self._result = result
+        self._exc = exc
+        self._cancelled = cancelled
+
+    def cancelled(self):
+        return self._cancelled
+
+    def exception(self, timeout=None):
+        if self._cancelled:
+            raise AssertionError("exception() must not be called on a cancelled future")
+        return self._exc
+
+    def result(self, timeout=None):
+        if self._exc is not None:
+            raise self._exc
+        return self._result
+
+    def add_done_callback(self, fn):
+        try:
+            fn(self)
+        except Exception:
+            pass
+
+
+class _FakePool:
+    def __init__(self, future):
+        self._future = future
+
+    def submit(self, fn, *args, **kwargs):
+        return self._future
+
+
+class _EmptyTolerantPickler(SubprocPickler):
+    """
+    Returns a value for empty input instead of raising. Custom picklers are a
+    supported hook (SubprocPool takes one), so "unpickling empty data throws"
+    is not something the parent gets to assume.
+    """
+
+    def loads(self, data):
+        return None if not data else super().loads(data)
+
+
+def _run_callback(future, job_id, pickler):
+    """
+    Run SubprocMain's result callback in-process for a finished job and return
+    the bytes it put on the wire, or b"" if it sent nothing.
+    """
+    read_fd, write_fd = os.pipe()
+    with os.fdopen(read_fd, "rb") as parent_read:
+        with os.fdopen(write_fd, "wb") as sidecar_write:
+            # SubprocMain only reads its command pipe from main(), which we
+            # bypass by calling _submit_inner directly.
+            main = SubprocMain(
+                pickler, SubprocKind.FORK, 1, io.BytesIO(), sidecar_write
+            )
+            # Presetting the pool keeps _start_pool from forking real workers.
+            main.pool = _FakePool(future)
+            with main._inflight_lock:
+                main._inflight[job_id] = time.monotonic()
+
+            main._submit_inner(job_id, b"")
+        # The callback ran inline above and the write end is closed now, so this
+        # reads whatever was sent and then hits EOF. A callback that sent nothing
+        # surfaces as no bytes rather than as a hang.
+        return parent_read.read()
+
+
+@instantiate_parametrized_tests
+class TestSubprocMainResultDelivery(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # Drive SubprocMain's result callback in-process against a fake pool, so the
+    # two escapes in the pre-send work can be reproduced directly. Running the
+    # callback here rather than through a real sidecar is what lets these tests
+    # fail -- instead of hanging -- when it dies without sending anything.
+
+    @parametrize(
+        "future",
+        [
+            # The job raised and the pickler cannot serialize the exception.
+            subtest(
+                _DoneFuture(exc=_UnpicklableError("boom")),
+                name="unpicklable_exception",
+            ),
+            # A BaseException must become a job failure rather than a successful
+            # result containing the exception object.
+            subtest(_DoneFuture(exc=SystemExit(3)), name="base_exception"),
+            # Future.exception() raises on cancellation, so cancellation must be
+            # handled before reading the outcome.
+            subtest(_DoneFuture(cancelled=True), name="cancelled"),
+            # do_job is supposed to hand back bytes; anything else trips the
+            # isinstance check just before the send.
+            subtest(_DoneFuture(result="not bytes"), name="non_bytes_result"),
+        ],
+    )
+    def test_callback_escape_fails_the_job(self, future):
+        pickler = _FailingPickler()
+        delivered = _run_callback(future, 7, pickler)
+
+        self.assertTrue(
+            delivered, "callback sent nothing: the parent's future would hang forever"
+        )
+        msg_header, job_id, data = _recv_msg(io.BytesIO(delivered))
+        self.assertEqual(msg_header, MsgHeader.JOB)
+        self.assertEqual(job_id, 7)
+        result = pickler.loads(data)
+        self.assertIsInstance(result, _SubprocExceptionInfo)
+        self.assertIn(
+            "SubprocPool failed to deliver a result for job 7", result.details
+        )
+
+    def test_unpicklable_failure_sends_error_frame(self):
+        # Last resort: the pickler refuses even _SubprocExceptionInfo, so there
+        # is no way to describe the failure. Sending an empty payload is still
+        # better than sending nothing. A distinct header keeps an empty success
+        # payload unambiguous (see test_empty_payload_can_be_a_success).
+        delivered = _run_callback(
+            _DoneFuture(exc=_UnpicklableError("boom")), 7, _RefusesFailurePickler()
+        )
+
+        self.assertTrue(
+            delivered, "callback sent nothing: the parent's future would hang forever"
+        )
+        msg_header, job_id, data = _recv_msg(io.BytesIO(delivered))
+        self.assertEqual(msg_header, MsgHeader.JOB_ERROR)
+        self.assertEqual(job_id, 7)
+        self.assertEqual(data, b"")
+
+    def test_base_exception_from_failure_pickler_sends_error_frame(self):
+        delivered = _run_callback(
+            _DoneFuture(exc=_UnpicklableError("boom")),
+            7,
+            _RaisesBaseExceptionPickler(),
+        )
+
+        self.assertTrue(delivered)
+        msg_header, job_id, data = _recv_msg(io.BytesIO(delivered))
+        self.assertEqual(msg_header, MsgHeader.JOB_ERROR)
+        self.assertEqual(job_id, 7)
+        self.assertEqual(data, b"")
+
+    def test_failed_delivery_terminates_sidecar(self):
+        main = SubprocMain(
+            SubprocPickler(), SubprocKind.FORK, 1, io.BytesIO(), io.BytesIO()
+        )
+        main.pool = _FakePool(_DoneFuture(result=b"result"))
+        with main._inflight_lock:
+            main._inflight[7] = time.monotonic()
+
+        def fail_delivery(*args, **kwargs):
+            self.assertIn(7, main._inflight)
+            raise BrokenPipeError("closed result pipe")
+
+        with patch(
+            "torch._inductor.compile_worker.subproc_pool._send_msg",
+            side_effect=fail_delivery,
+        ):
+            with patch(
+                "torch._inductor.compile_worker.subproc_pool._exit_sidecar"
+            ) as exit_sidecar:
+                main._submit_inner(7, b"")
+
+        exit_sidecar.assert_called_once_with()
+        self.assertIn(7, main._inflight)
+
+    def test_broken_pool_submit_retries_are_bounded(self):
+        write_pipe = io.BytesIO()
+        main = SubprocMain(
+            SubprocPickler(), SubprocKind.FORK, 1, io.BytesIO(), write_pipe
+        )
+        with patch.object(
+            main,
+            "_submit_inner",
+            side_effect=BrokenProcessPool("pool is broken"),
+        ) as submit:
+            main.submit(7, b"")
+
+        self.assertEqual(submit.call_count, 3)
+        msg_header, job_id, data = _recv_msg(io.BytesIO(write_pipe.getvalue()))
+        self.assertEqual(msg_header, MsgHeader.JOB)
+        self.assertEqual(job_id, 7)
+        result = main.pickler.loads(data)
+        self.assertIsInstance(result, _SubprocExceptionInfo)
+        self.assertIn("3 consecutive submit attempts", result.details)
+        self.assertNotIn(7, main._inflight)
+
+
+class TestSubprocPoolResultHandling(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # The job submitted in these tests is one that never finishes, so the
+    # sidecar has no real reply to race the payload injected for it. That lets
+    # the read thread keep running, so the follow-up jobs below are ordinary
+    # round trips through a real pool.
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_bookkeeping_failure_does_not_strand_result(self):
+        class BrokenWaitCounter:
+            def __exit__(self, exc_type=None, exc_value=None, traceback=None):
+                raise SystemExit(3)
+
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            pool.pending_jobs[job_id].waitcounter = BrokenWaitCounter()
+
+            pool._handle_job_result(job_id, pool.pickler.dumps(42))
+            self.assertEqual(fut.result(timeout=60), 42)
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_base_exception_payload_surfaces_as_subproc_exception(self):
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            delivered = _run_callback(
+                _DoneFuture(exc=SystemExit(3)), job_id, SubprocPickler()
+            )
+            _, _, data = _recv_msg(io.BytesIO(delivered))
+
+            pool._handle_job_result(job_id, data)
+            expected_error = "the job raised SystemExit"
+            with self.assertRaisesRegex(SubprocException, expected_error):
+                fut.result(timeout=60)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_failure_payload_surfaces_as_subproc_exception(self):
+        # Join the two halves: the exact bytes SubprocMain sends when its
+        # callback dies, handed to a real parent, must fail that job and leave
+        # the pool usable. Only the pipe between them is stubbed out, and every
+        # other test in this file runs a real one.
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            delivered = _run_callback(
+                _DoneFuture(exc=_UnpicklableError("boom")), job_id, _FailingPickler()
+            )
+            _, _, data = _recv_msg(io.BytesIO(delivered))
+
+            pool._handle_job_result(job_id, data)
+            with self.assertRaisesRegex(
+                SubprocException, "SubprocPool failed to deliver a result"
+            ):
+                fut.result(timeout=60)
+
+            # One failed delivery must not take the pool down.
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_empty_payload_can_be_a_success(self):
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            with patch.object(pool, "pickler", _EmptyTolerantPickler()):
+                pool._handle_job_result(job_id, b"")
+            self.assertIsNone(fut.result(timeout=60))
+
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_error_frame_fails_the_job_without_unpickling(self):
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            with patch.object(pool, "pickler", _EmptyTolerantPickler()):
+                pool._handle_job_result(job_id, b"", failed=True)
+            with self.assertRaisesRegex(
+                SubprocException, "SubprocPool failed to deliver a result"
+            ):
+                fut.result(timeout=60)
+
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_base_exception_from_load_fails_only_that_job(self):
+        pool = SubprocPool(2)
+        try:
+            fut = pool.submit(time.sleep, 600)
+            (job_id,) = pool.pending_jobs
+            with patch.object(pool, "pickler", _RaisesOnBadLoadPickler()):
+                pool._handle_job_result(job_id, b"bad")
+            with self.assertRaisesRegex(SubprocException, "pickler raised SystemExit"):
+                fut.result(timeout=60)
+
+            self.assertEqual(pool.submit(operator.add, 100, 1).result(timeout=60), 101)
+        finally:
+            pool.shutdown()
+
+
+class TestCompileWorkerWatchdog(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def run_watchdog(
+        self, starts, *, kind=SubprocKind.FORK, phases=None, ticks=(10.0,), completed=()
+    ):
+        pickler = SubprocPickler()
+        output = io.BytesIO()
+        main = SubprocMain(pickler, kind, 2, io.BytesIO(), output)
+        main._inflight.update(starts)
+        state = dict(_heartbeat=None, _counter=None, _nprocs=0, _slot=None)
+        stops = [False] * len(ticks) + [True]
+        with (
+            config.patch("compile_worker_watchdog_interval_seconds", 1.0),
+            patch.multiple(watchdog, **state),
+            patch.object(main._watchdog_stop, "wait", side_effect=stops),
+            patch.object(subproc_pool, "time") as clock,
+            patch.object(watchdog, "time") as phase_clock,
+            patch.object(subproc_pool.threading, "Thread") as thread,
+            patch.object(output, "close"),
+        ):
+
+            def run_ticks():
+                clock.monotonic.return_value = 0.0
+                self.complete_jobs(main, completed)
+                phase_times = [8_500_000_000, 9_000_000_000]
+                phase_clock.monotonic_ns.side_effect = phase_times * len(phases or {})
+                for job_id, phase in (phases or {}).items():
+                    watchdog.init_worker_slot()
+                    watchdog.set_current_job(job_id)
+                    watchdog.report_phase(phase)
+                clock.monotonic.side_effect = ticks
+                clock.monotonic_ns.side_effect = [int(t * 1e9) for t in ticks]
+                kwargs = thread.call_args.kwargs
+                kwargs["target"](*kwargs["args"])
+
+            thread.return_value.start.side_effect = run_ticks
+            main.main()
+            thread.return_value.start.assert_called_once_with()
+        wire = io.BytesIO(output.getvalue())
+        output.close()
+        return self.read_watchdog_reports(wire, pickler, completed)
+
+    def complete_jobs(self, main, completed):
+        for job_id in completed:
+            future = Future()
+            main.pool = _FakePool(future)
+            main.submit(job_id, b"")
+            self.assertIn(job_id, main._inflight)
+            future.set_result(main.pickler.dumps(None))
+            self.assertNotIn(job_id, main._inflight)
+        main.pool = None
+
+    def read_watchdog_reports(self, wire, pickler, completed):
+        reports = []
+        results = []
+        while True:
+            header, job_id, data = _recv_msg(wire)
+            if header == MsgHeader.SHUTDOWN:
+                self.assertCountEqual(results, completed)
+                self.assertEqual(wire.read(), b"")
+                return reports
+            if header == MsgHeader.JOB:
+                results.append(job_id)
+                self.assertIn(job_id, completed)
+                self.assertIsNone(pickler.loads(data))
+                continue
+            self.assertEqual(header, MsgHeader.STATUS)
+            report = pickler.loads(data)
+            self.assertEqual(report["job_id"], job_id)
+            reports.append(report)
+
+    @skipIfWindows(msg="fork not supported on Windows.")
+    def test_watchdog_reports_slow_jobs(self):
+        reports = self.run_watchdog({7: 8.0, 8: 9.0, 9: 9.5}, ticks=(10.0, 11.0))
+        observed = sorted((r["job_id"], r["elapsed_s"]) for r in reports)
+        self.assertEqual(observed, [(7, 2.0), (7, 3.0), (8, 1.0), (8, 2.0), (9, 1.5)])
+
+    @skipIfWindows(msg="fork not supported on Windows.")
+    def test_watchdog_silent_for_fast_jobs(self):
+        self.assertEqual(self.run_watchdog({7: 9.5}), [])
+        self.assertEqual(self.run_watchdog({}), [])
+        self.assertEqual(self.run_watchdog({}, completed=(7,)), [])
+
+    @skipIfWindows(msg="fork not supported on Windows.")
+    def test_watchdog_reports_worker_phase(self):
+        reports = self.run_watchdog({7: 8.0}, phases={7: watchdog.Phase.QUERYING_CACHE})
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["phase"], "querying_cache")
+        self.assertEqual(reports[0]["phase_elapsed_s"], 1.0)
+        self.assertEqual(reports[0]["worker_pid"], os.getpid())
+
+    @skipIfWindows(msg="fork not supported on Windows.")
     def test_watchdog_reports_queued_job(self):
-        # A job submitted while every worker is busy sits in the pool queue with
-        # no heartbeat slot, and must be reported with phase="queued".
-        reports = []
-        got_queued = Event()
+        reports = self.run_watchdog(
+            {7: 8.0, 8: 8.0}, phases={7: watchdog.Phase.RUNNING}
+        )
+        by_job = {r["job_id"]: r for r in reports}
+        phases = {job: r["phase"] for job, r in by_job.items()}
+        self.assertEqual(phases, {7: "running", 8: "queued"})
+        self.assertNotIn("worker_pid", by_job[8])
 
-        def fake_trace_structured(name, *args, **kwargs):
-            if name != "artifact":
-                return
-            metadata = kwargs.get("metadata_fn", dict)()
-            if metadata.get("name") != "compile_worker_status":
-                return
-            record = json.loads(kwargs["payload_fn"]())
-            reports.append(record)
-            if record.get("phase") == "queued":
-                got_queued.set()
+    def test_watchdog_duration_only_for_spawn_pool(self):
+        reports = self.run_watchdog({7: 8.0}, kind=SubprocKind.SPAWN)
+        self.assertEqual(reports, [{"job_id": 7, "elapsed_s": 2.0}])
 
-        with patch.dict(
-            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
-        ):
-            with patch(
-                "torch._inductor.compile_worker.subproc_pool.trace_structured",
-                fake_trace_structured,
+
+_WATCHDOG_GATED_JOB = """
+import os
+import select
+from torch._inductor.compile_worker import watchdog
+
+gate = os.open(gate_path, os.O_RDONLY | os.O_NONBLOCK)
+try:
+    ready = os.open(ready_path, os.O_WRONLY | os.O_NONBLOCK)
+    try:
+        os.write(ready, b"x")
+    finally:
+        os.close(ready)
+    watchdog.report_phase(watchdog.Phase.QUERYING_CACHE)
+    readable, _, _ = select.select([gate], [], [], 60)
+    if not readable:
+        raise RuntimeError("watchdog test release timed out")
+    os.read(gate, 1)
+finally:
+    os.close(gate)
+"""
+
+
+@instantiate_parametrized_tests
+class TestCompileWorkerDiagnostics(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @contextmanager
+    def gated_pool(self, kind):
+        env = {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, env):
+            gate_path = os.path.join(directory, "release")
+            ready_path = os.path.join(directory, "ready")
+            os.mkfifo(gate_path)
+            os.mkfifo(ready_path)
+            flags = os.O_RDWR | os.O_NONBLOCK
+            with (
+                os.fdopen(os.open(gate_path, flags), "wb", buffering=0) as gate,
+                os.fdopen(os.open(ready_path, flags), "rb", buffering=0) as ready,
             ):
-                pool = SubprocPool(1)  # single worker so the 2nd job must queue
+                pool = SubprocPool(1, kind=kind)
                 try:
-                    pool.submit(time.sleep, 30)  # occupies the sole worker
-                    pool.submit(time.sleep, 30)  # no free worker -> queued
-                    self.assertTrue(
-                        got_queued.wait(30),
-                        f"no queued-phase report; got {reports}",
-                    )
+                    paths = {"gate_path": gate_path, "ready_path": ready_path}
+                    yield pool, gate, ready, paths
                 finally:
+                    gate.close()
+                    wait = pool.process.wait
+                    deadline = time.monotonic() + 30
+
+                    def bounded_wait(timeout=None):
+                        return wait(timeout=max(0.0, deadline - time.monotonic()))
+
+                    pool.process.wait = bounded_wait
                     pool.shutdown()
 
-    @skipIfWindows(msg="pass_fds not supported on Windows.")
-    def test_watchdog_duration_only_for_spawn_pool(self):
-        # Spawn pools don't get the heartbeat buffer, so the watchdog reports
-        # duration only -- no phase (it can't tell queued from running).
+    @skipIfWindows(msg="mkfifo not supported on Windows.")
+    @parametrize("kind", [SubprocKind.FORK, SubprocKind.SPAWN])
+    def test_watchdog_end_to_end(self, kind):
         reports = []
         got_report = Event()
 
-        def fake_trace_structured(name, *args, **kwargs):
-            if name != "artifact":
-                return
+        def trace_status(name, *args, **kwargs):
             metadata = kwargs.get("metadata_fn", dict)()
-            if metadata.get("name") != "compile_worker_status":
-                return
-            reports.append(json.loads(kwargs["payload_fn"]()))
-            got_report.set()
+            if name == "artifact" and metadata.get("name") == "compile_worker_status":
+                report = json.loads(kwargs["payload_fn"]())
+                is_phase = report.get("phase") == "querying_cache"
+                if kind == SubprocKind.SPAWN or is_phase:
+                    reports.append(report)
+                    got_report.set()
 
-        with patch.dict(
-            os.environ, {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"}
+        with (
+            patch.object(subproc_pool, "trace_structured", trace_status),
+            self.gated_pool(kind) as (pool, gate, ready, paths),
         ):
-            with patch(
-                "torch._inductor.compile_worker.subproc_pool.trace_structured",
-                fake_trace_structured,
-            ):
-                pool = SubprocPool(2, kind=SubprocKind.SPAWN)
-                try:
-                    pool.submit(time.sleep, 30)
-                    self.assertTrue(
-                        got_report.wait(30), f"no watchdog report; got {reports}"
-                    )
-                finally:
-                    pool.shutdown()
-
-        self.assertTrue(reports)
-        self.assertNotIn("phase", reports[-1])
-        self.assertIn("elapsed_s", reports[-1])
+            future = pool.submit(exec, _WATCHDOG_GATED_JOB, paths)
+            readable, _, _ = select.select([ready], [], [], 60)
+            self.assertTrue(readable, "worker did not reach the release gate")
+            self.assertEqual(ready.read(1), b"x")
+            self.assertTrue(got_report.wait(30), f"no watchdog report; got {reports}")
+            self.assertFalse(future.done())
+            if kind == SubprocKind.FORK:
+                self.assertNotEqual(reports[0]["worker_pid"], os.getpid())
+                self.assertIn("phase_elapsed_s", reports[0])
+            else:
+                self.assertNotIn("phase", reports[0])
+                self.assertNotIn("worker_pid", reports[0])
+            gate.write(b"x")
+            self.assertIsNone(future.result(timeout=10))
 
 
 class TestTimer(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basics(self):
         done = Event()
 
@@ -840,6 +1319,7 @@ class TestSubprocessEnv(TestCase):
                 else:
                     os.environ[key] = value
 
+    @unittest.skipIf(not has_triton_package(), "triton not available")
     def test_worker_compile_triton_clears_libdevice_path(self):
         try:
             from triton import knobs
@@ -915,21 +1395,29 @@ class TestSubprocessEnv(TestCase):
 
 
 class TestSetTritonLibdevicePath(TestCase):
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_emulate_precision_casts_sets_libdevice_path(self):
         """Test eager numerics mode sets libdevice path for CUDA libdevice calls."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "eager_numerics.use_pytorch_libdevice": True})
     def test_libdevice_path_no_subprocess(self):
         """Test libdevice path is set with compile_threads=1 (no subprocess)."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch("eager_numerics.use_pytorch_libdevice", True)
     def test_libdevice_path_default_threads(self):
         """Test libdevice path is set with default compile_threads (subprocess)."""
         self._test_libdevice_path_with_compilation()
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch(
         {
             "eager_numerics.use_pytorch_libdevice": True,
@@ -960,6 +1448,8 @@ class TestSetTritonLibdevicePath(TestCase):
         compiled_result = torch.compile(torch.pow)(base, exp)
         self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(CUDA_HOME is None, "CUDA_HOME not set")
     @config.patch({"compile_threads": 1, "emulate_precision_casts": True})
     def test_erf_bitwise_precision_with_emulate_precision_casts(self):
         """Test that erf matches eager bitwise when eager numerics mode is active."""

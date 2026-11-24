@@ -23,7 +23,7 @@ from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
 from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
-from ..xpu.xpu_env import get_xpu_arch, get_xpu_version
+from ..xpu.xpu_env import get_xpu_arch_for_sycl_tla, get_xpu_version
 
 
 log = logging.getLogger(__name__)
@@ -101,12 +101,7 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_dir = (
-        config.xpu.cutlass_dir
-        if torch.xpu._is_compiled()
-        else config.cutlass.cutlass_dir
-    )
-    cutlass_python_path = path_join(cutlass_dir, "python")
+    cutlass_python_path = path_join(config.cutlass.cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(
         torch_root,
@@ -208,7 +203,10 @@ def _normalize_cuda_arch(arch: str) -> str:
         arch_num = int(arch)
 
     if arch_num > 107:
-        log.warning("Detected CUDA architecture > 107: %s. Please file an issue.", arch)
+        if arch_num > 121:
+            log.warning(
+                "Detected CUDA architecture > 121: %s. Please file an issue.", arch
+            )
         return str(arch_num)
     if arch_num >= 107:
         return "107"
@@ -230,7 +228,7 @@ def _normalize_cuda_arch(arch: str) -> str:
 @functools.lru_cache(8)
 def cutlass_arch(device_type: str) -> str:
     if device_type == "xpu":
-        arch = get_xpu_arch()
+        arch = get_xpu_arch_for_sycl_tla()
         return _normalize_xpu_arch(arch)
     else:
         arch = get_cuda_arch()
@@ -243,15 +241,6 @@ def toolkit_version(device_type: str) -> str:
         return get_xpu_version()
     else:
         return get_cuda_version()
-
-
-def get_device_cutlass_config(device_type: str):
-    """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
-    if device_type == "xpu":
-        return config.xpu
-    from ...config import cutlass as inductor_cutlass_config
-
-    return inductor_cutlass_config
 
 
 @dataclass
@@ -307,11 +296,14 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         )
         return {}
 
-    # SM103 and SM107 reuse the SM100 generator, but the CUTLASS manifest must keep
-    # the 103a or 107a feature arch so unsupported arch-conditional kernels are skipped.
+    # Some architectures share generators, but the CUTLASS manifest must keep
+    # their architecture-specific baseline.
     if arch in ("103", "107"):
         gen_arch = "100"
         manifest_arch = f"{arch}a"
+    elif arch == "121":
+        gen_arch = "120"
+        manifest_arch = "121a"
     else:
         gen_arch = manifest_arch = arch
 
@@ -324,6 +316,10 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         device_type=device_type,
     )
     manifest = cutlass_manifest.Manifest(args)
+    if arch == "107":
+        # CUTLASS uses 103a as the SM100-family feature marker for architectures
+        # without INT8 UMMA. Keep the SM107 baseline while sharing that feature.
+        manifest.compute_capabilities_feature_set.append("103a")
 
     start_time = time.time()
     if device_type == "xpu":

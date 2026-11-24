@@ -3,14 +3,15 @@
 """Test examples for NEP 50."""
 
 import itertools
-from unittest import skipIf as skipif, SkipTest
+from contextlib import contextmanager
+from unittest import skip, skipIf as skipif, SkipTest
 
 
 try:
     import numpy as _np
 
     v = _np.__version__.split(".")
-    HAVE_NUMPY = int(v[0]) >= 1 and int(v[1]) >= 24
+    HAVE_NUMPY = (int(v[0]), int(v[1])) >= (1, 24)
 except ImportError:
     HAVE_NUMPY = False
 
@@ -30,6 +31,7 @@ from torch._numpy import (  # noqa: F401
 )
 from torch._numpy.testing import assert_allclose
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -50,6 +52,20 @@ from pytest import raises as assert_raises
 
 
 unchanged = None
+
+
+@contextmanager
+def _promotional_state_cm(state):
+    if hasattr(_np, "_get_promotion_state"):
+        previous_state = _np._get_promotion_state()
+        _np._set_promotion_state(state)
+        try:
+            yield
+        finally:
+            _np._set_promotion_state(previous_state)
+    else:
+        yield
+
 
 # expression    old result   new_result
 examples = {
@@ -162,10 +178,7 @@ class TestCompareToNumpy(TestCase):
     @parametrize("scalar, array, dtype", itertools.product(weaks, non_weaks, dtypes))
     def test_direct_compare(self, scalar, array, dtype):
         # compare to NumPy w/ NEP 50.
-        try:
-            state = _np._get_promotion_state()
-            _np._set_promotion_state("weak")
-
+        with _promotional_state_cm("weak"):
             if dtype is not None:
                 kwargs = {"dtype": dtype}
             try:
@@ -175,7 +188,11 @@ class TestCompareToNumpy(TestCase):
 
             kwargs = {}
             if dtype is not None:
-                kwargs = {"dtype": getattr(tnp, dtype.__name__)}
+                kwargs = {
+                    "dtype": getattr(tnp, dtype.__name__)
+                    if dtype is not _np.bool_
+                    else tnp.bool_
+                }
             result = tnp.add(scalar, array, **kwargs).tensor.numpy()
             if result.dtype != result_numpy.dtype:
                 raise AssertionError(
@@ -184,11 +201,16 @@ class TestCompareToNumpy(TestCase):
             if result != result_numpy:
                 raise AssertionError(f"Expected result == {result_numpy}, got {result}")
 
-        finally:
-            _np._set_promotion_state(state)
-
     @parametrize("name", tnp._ufuncs._binary)
     @parametrize("scalar, array", itertools.product(weaks, non_weaks))
+    @decorateIf(
+        skip("ufunc(..., dtype=array.dtype)"),
+        lambda p: p["name"] in corners
+        and (
+            p["array"].dtype.name in corners[p["name"]]
+            or tnp.asarray(p["scalar"]).dtype.name in corners[p["name"]]
+        ),
+    )
     def test_compare_ufuncs(self, name, scalar, array):
         if name in corners and (
             array.dtype.name in corners[name]
@@ -196,10 +218,7 @@ class TestCompareToNumpy(TestCase):
         ):
             raise SkipTest(f"{name}(..., dtype=array.dtype)")
 
-        try:
-            state = _np._get_promotion_state()
-            _np._set_promotion_state("weak")
-
+        with _promotional_state_cm("weak"):
             if name in ["matmul", "modf", "divmod", "ldexp"]:
                 return
             ufunc = getattr(tnp, name)
@@ -207,7 +226,7 @@ class TestCompareToNumpy(TestCase):
 
             try:
                 result = ufunc(scalar, array)
-            except RuntimeError:
+            except (RuntimeError, TypeError):
                 # RuntimeError: "bitwise_xor_cpu" not implemented for 'ComplexDouble' etc
                 result = None
 
@@ -247,9 +266,6 @@ class TestCompareToNumpy(TestCase):
                 raise AssertionError(
                     f"Expected result numpy dtype == {expected_numpy_dtype}, torch dtype == {expected_torch_dtype}"
                 )
-
-        finally:
-            _np._set_promotion_state(state)
 
 
 if __name__ == "__main__":

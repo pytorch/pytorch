@@ -132,6 +132,11 @@ jobs:
             echo "DOCKER_IMAGE=pytorch-nightly";
             echo "INSTALL_CHANNEL=whl/nightly";
             echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)+$(cut -c -10 .ci/docker/ci_commit_pins/triton.txt)";
+            # One cache per image variant. Lets the unchanged layers of last
+            # night's image (the torch dependencies) be reused, with the same
+            # digests, on a builder whose local cache is empty. Pull requests
+            # only read it; docker.Makefile writes it just when pushing.
+            echo "CACHE_REF=${DOCKER_REGISTRY}/${DOCKER_ORG}/pytorch-nightly:buildcache-${BUILD_IMAGE_TYPE}-cuda${CUDA_VERSION_SHORT}-${BUILD_PLATFORMS//\//-}";
           } >> "${GITHUB_ENV}"
       - name: Run docker build / push
         # docker.Makefile drives the buildx build (USE_BUILDX=1);
@@ -180,5 +185,8 @@ jobs:
     if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
     uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@main
     with:
-      channel: nightly
+      # Must match what `build` above actually pushed, otherwise validate pulls a
+      # tag that was never built: RC tags publish pytorch-test, final release tags
+      # pytorch, and the nightly branch pytorch-nightly.
+      channel: ${{ contains(github.event.ref, '-rc') && 'test' || (startsWith(github.event.ref, 'refs/tags/v') && 'release' || 'nightly') }}
       ref: main

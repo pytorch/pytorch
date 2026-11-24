@@ -61,6 +61,7 @@ RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-r
 # Install XPU Dependencies
 ARG XPU_VERSION
 ARG XPU_DRIVER_TYPE
+ARG OMIX_VERSION
 COPY ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 
@@ -71,8 +72,15 @@ COPY ./common/install_triton.sh install_triton.sh
 COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/triton-xpu.txt triton-xpu.txt
 COPY triton_xpu_version.txt triton_version.txt
-RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
-RUN rm install_triton.sh common_utils.sh triton-xpu.txt triton_version.txt
+# Remove the triton source/build tree, downloaded LLVM and caches in the same
+# layer; otherwise they add ~28GB to the image
+RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi && \
+    rm -rf /var/lib/jenkins/triton /var/lib/jenkins/.triton /var/lib/jenkins/.cache/pip /opt/triton/* && \
+    rm install_triton.sh common_utils.sh triton-xpu.txt triton_version.txt
+
+# Install pyzes, after triton so a pin bump keeps its cached build
+COPY ./common/install_pyzes.sh ./common/common_utils.sh ./
+RUN bash ./install_pyzes.sh && rm install_pyzes.sh common_utils.sh
 
 # Install Rust toolchain (needed to build the torch._rust extension).
 COPY ./common/install_rust.sh install_rust.sh
@@ -84,6 +92,7 @@ RUN bash ./install_rust.sh && rm install_rust.sh rust.txt
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
+COPY ./common/patches /opt/cache/patches
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
 

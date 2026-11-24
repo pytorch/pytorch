@@ -113,6 +113,20 @@ class LazyBackend : public Backend {
     return primary_->endCoalescing();
   }
 
+  bool collectivesTimingEnabled() const override {
+    return primary_->collectivesTimingEnabled();
+  }
+
+  bool supportsTimeEstimation() const override {
+    return primary_->supportsTimeEstimation();
+  }
+  void startTimeEstimate() override {
+    primary_->startTimeEstimate();
+  }
+  float endTimeEstimate() override {
+    return primary_->endTimeEstimate();
+  }
+
   // ---- Collectives: forwarded to the primary comm ----
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
@@ -224,10 +238,20 @@ class LazyBackend : public Backend {
   std::shared_ptr<c10::Allocator> getMemAllocator() override {
     return primary_->getMemAllocator();
   }
+  at::Tensor allocateTensor(long size, at::TensorOptions options) override {
+    return primary_->allocateTensor(size, options);
+  }
+  bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override {
+    return primary_->supportsTensorAlloc(deviceIdx);
+  }
 
   // ---- Lifecycle / fault tolerance: fan out to every comm we own ----
   void eagerConnectSingleDevice(at::Device device) override {
     primary_->eagerConnectSingleDevice(device);
+  }
+  void setBoundDeviceId(std::optional<at::Device> device) override {
+    primary_->setBoundDeviceId(device);
+    Backend::setBoundDeviceId(primary_->getBoundDeviceId());
   }
   void setTimeout(std::chrono::milliseconds timeout) override {
     primary_->setTimeout(timeout);
@@ -332,6 +356,9 @@ class LazyBackend : public Backend {
   // ---- Splitting: split the collective (primary) comm only ----
   bool supportsSplitting() const override {
     return primary_->supportsSplitting();
+  }
+  bool isInitialized() override {
+    return primary_->isInitialized();
   }
   // Split just the primary comm; the child is a bare backend for the subgroup.
   // We deliberately don't split the P2P pair comms: like a reconfigure, they

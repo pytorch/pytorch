@@ -23,7 +23,10 @@ from torch._functorch.partitioners import _extract_fwd_bwd_modules
 from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._inductor.graph import GraphLowering
 from torch._inductor.virtualized import V
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import (
+    allow_non_fake_inputs_temporarily,
+    FakeTensorMode,
+)
 from torch.fx.experimental import _config as fx_config
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -32,6 +35,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
+    preserves_device_selection,
 )
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -942,13 +946,13 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 5|aten.view.default|linear|
 6|aten.t.default|linear|
 7|aten.addmm.default|linear|
-8|aten.view.default|linear|
+8|aten._unsafe_view.default|linear|
 9|aten.sub.Tensor|l1_loss|
 10|aten.abs.default|l1_loss|
 11|aten.mean.default|l1_loss|
 11|aten.ones_like.default||l1_loss
-11|aten.expand.default||l1_loss
 11|aten.div.Scalar||l1_loss
+11|aten.expand.default||l1_loss
 10|aten.sgn.default||l1_loss
 10|aten.mul.Tensor||l1_loss
 8|aten.view.default||linear
@@ -1005,7 +1009,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
             fake_mode = torch._dynamo.utils.detect_fake_mode(sample_inputs)
 
-            with patch.object(fake_mode, "allow_non_fake_inputs", True), fake_mode:
+            with allow_non_fake_inputs_temporarily(fake_mode), fake_mode:
                 return aot_export_joint_simple(gm, sample_inputs, trace_joint=False)
 
         sample_inputs = [torch.rand((3, 4, 5))]
@@ -1912,6 +1916,13 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
 
 class AotAutogradFallbackTestsDevice(torch._inductor.test_case.TestCase):
+    setUp = preserves_device_selection(torch._inductor.test_case.TestCase.setUp)
+    setUpClass = classmethod(
+        preserves_device_selection(
+            torch._inductor.test_case.TestCase.setUpClass.__func__
+        )
+    )
+
     @onlyAccelerator
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     @patch.object(torch._dynamo.config, "capture_dynamic_output_shape_ops", True)

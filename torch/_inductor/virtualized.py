@@ -87,7 +87,7 @@ if TYPE_CHECKING:
     from torch._inductor.ir import ExternKernelNode
     from torch._inductor.loop_body import InterpreterShim
     from torch._inductor.scheduler import SchedulerNode
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 
     from .distributed_autotune import _DistributedAutotuneState
     from .utils import IndentedBuffer, InputType
@@ -222,7 +222,9 @@ _extern_kernel_nodes: Virtualized[list[ExternKernelNode]] = Virtualized(
     "extern_kernel_nodes", NullHandler
 )
 _real_inputs: Virtualized[Sequence[InputType]] = Virtualized("real_inputs", NullHandler)
-_fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
+_fake_mode: Virtualized[FakeTensorMode | CppFakeTensorMode] = Virtualized(
+    "fake_mode", NullHandler
+)
 _kernel: Virtualized[KernelLike] = Virtualized("kernel", NullKernelHandler)
 _debug: Virtualized[DebugContext] = Virtualized("debug", NullHandler)
 _interpreter: Virtualized[InterpreterShim] = Virtualized("interpreter", NullHandler)
@@ -255,12 +257,14 @@ def _choices_default():
     We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
     """
     from torch._inductor import config
-    from torch._inductor.choices import InductorChoices
+    from torch._inductor.choices import create_inductor_choices
+    from torch._inductor.heuristics.template import tlx
 
-    if config.inductor_choices_class is not None:
-        rv = config.inductor_choices_class()
-    else:
-        rv = InductorChoices()
+    # Has to precede the inductor_choices_class read: installing the torchTLX
+    # integration is what sets it.
+    tlx.maybe_install()
+
+    rv = create_inductor_choices(config.inductor_choices_class)
     setattr(threadlocal, _choices._key, rv)
     return rv
 
@@ -409,11 +413,13 @@ class _V:
     )
     get_real_inputs: Callable[[], Sequence[InputType]] = _real_inputs._get_handler
     # Broad param: fake_mode may be installed as None (see compile_fx); the
-    # getter still narrows to FakeTensorMode for the common set-then-read path.
+    # getter returns a fake mode for the common set-then-read path.
     set_fake_mode: Callable[[Any], AbstractContextManager[None]] = (
         _fake_mode._set_handler
     )
-    get_fake_mode: Callable[[], FakeTensorMode] = _fake_mode._get_handler
+    get_fake_mode: Callable[[], FakeTensorMode | CppFakeTensorMode] = (
+        _fake_mode._get_handler
+    )
     set_kernel_handler: Callable[[Any], AbstractContextManager[None]] = (
         _kernel._set_handler
     )
@@ -480,7 +486,7 @@ class _V:
         return _real_inputs._get_handler()
 
     @property
-    def fake_mode(self) -> FakeTensorMode:
+    def fake_mode(self) -> FakeTensorMode | CppFakeTensorMode:
         """The graph currently being generated"""
         return _fake_mode._get_handler()
 
