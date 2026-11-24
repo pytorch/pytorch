@@ -20,10 +20,13 @@ from torch._dynamo.testing import (
 )
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -2424,7 +2427,7 @@ class GraphModule(torch.nn.Module):
             ContextWrappingVariable(target_values={"key": "val"})
 
 
-class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
+class DeviceCtxManagerTests(torch._dynamo.test_case.TestCase):
     def test_cuda_use_mem_pool_fx_cse_preserves_distinct_contexts(self):
         from torch._functorch.compile_utils import fx_graph_cse
 
@@ -2754,22 +2757,22 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             ):
                 torch.compile(fn, backend="eager", fullgraph=True)(pool)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_context_manager1(self):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device_stream_context_manager1(self):
         def fn(x):
-            s = torch.cuda.Stream()
+            s = torch.Stream()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
-            current_stream = torch.cuda.current_stream()
+            current_stream = torch.accelerator.current_stream()
             s.wait_stream(current_stream)
-            with torch.cuda.stream(s):
+            with s:
                 x = torch.relu(x)
             current_stream.wait_stream(s)
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=device_type)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2779,20 +2782,19 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(str(cnts.op_count), """9""")
 
     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_across_graph_break(self):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device_stream_across_graph_break(self):
         def fn(x):
-            s = torch.cuda.Stream()
+            s = torch.Stream()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
 
             print("foo")
 
-            tcs = torch.cuda.stream(s)
-            current_stream = torch.cuda.current_stream()
+            current_stream = torch.accelerator.current_stream()
             s.wait_stream(current_stream)
 
-            with tcs:
+            with s:
                 x = torch.relu(x)
 
             current_stream.wait_stream(s)
@@ -2800,7 +2802,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=device_type)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
@@ -2810,25 +2812,25 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 9)
 
     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_context_manager2(self):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device_stream_context_manager2(self):
         def fn(x, s):
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
 
-            current_stream = torch.cuda.current_stream()
+            current_stream = torch.accelerator.current_stream()
             s.wait_stream(current_stream)
 
-            with torch.cuda.stream(s):
+            with s:
                 x = torch.relu(x)
 
             current_stream.wait_stream(s)
-            with torch.cuda.stream(current_stream):
+            with current_stream:
                 x = torch.relu(x)
 
-            s2 = torch.cuda.Stream()
+            s2 = torch.Stream()
             s2.wait_stream(current_stream)
-            with torch.cuda.stream(s2):
+            with s2:
                 x = torch.relu(x)
 
             current_stream.wait_stream(s2)
@@ -2836,8 +2838,8 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
-        s = torch.cuda.Stream()
+        x = torch.randn((2, 2), device=device_type)
+        s = torch.Stream()
         ref = fn(x, s)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2846,17 +2848,17 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 18)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_method(self):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device_stream_method(self):
         def fn(x):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
 
-            new_stream = torch.cuda.Stream()
-            cur_stream = torch.cuda.current_stream()
+            new_stream = torch.Stream()
+            cur_stream = torch.accelerator.current_stream()
             new_stream.wait_stream(cur_stream)
 
-            with torch.cuda.stream(new_stream):
+            with new_stream:
                 x = torch.sin(x)
                 x = torch.add(x, 3)
 
@@ -2866,7 +2868,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             cur_stream.query()
             cur_stream.synchronize()
 
-            with torch.cuda.stream(new_stream):
+            with new_stream:
                 x = torch.add(x, 5)
             new_stream.synchronize()
 
@@ -2874,7 +2876,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=device_type)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2883,13 +2885,13 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertExpectedInline(str(cnts.op_count), """15""")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_compared_with_constant(self):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device_stream_compared_with_constant(self):
         def fn(x):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
 
-            cur_stream = torch.cuda.current_stream()
+            cur_stream = torch.accelerator.current_stream()
             if cur_stream is not None:
                 return x + 1
             return x - 1
@@ -2898,12 +2900,12 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
 
-            cur_stream = torch.cuda.current_stream()
+            cur_stream = torch.accelerator.current_stream()
             if cur_stream != "const_str":
                 return x + 1
             return x - 1
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=device_type)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2913,16 +2915,16 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(ref, res2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_stream_compared_with_stream(self):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device_stream_compared_with_stream(self):
         def fn(x, s0, s1):
             if s0 == s1:
                 return x + 1
             else:
                 return x - 1
 
-        s0 = torch.cuda.Stream()
-        s1 = torch.cuda.Stream()
+        s0 = torch.Stream()
+        s1 = torch.Stream()
         x = torch.randn(2, 2)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -2951,18 +2953,18 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(ref0, res0)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     @unittest.skip(
         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
     )
-    def test_cuda_event_reconstruct(self):
+    def test_device_event_reconstruct(self):
         def fn(x):
-            e = torch.cuda.Event()
+            e = torch.Event()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
             return x, e
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=device_type)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
@@ -2971,25 +2973,25 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     @unittest.skip(
         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
     )
-    def test_cuda_event_across_graph_break(self):
+    def test_device_event_across_graph_break(self):
         def fn(x):
-            e = torch.cuda.Event()
+            e = torch.Event()
             e.record()
             x = torch.mul(x, 5)
             x = torch.add(x, 2)
 
             print("foo")
 
-            torch.cuda.current_stream().wait_event(e)
+            torch.accelerator.current_stream().wait_event(e)
             x = torch.add(x, 1)
             x = torch.cos(x)
             return x, e
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=device_type)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
@@ -2998,31 +3000,31 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 10)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     @unittest.skip(
         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
     )
-    def test_cuda_event_created_outside_of_graph(self):
-        user_stream = torch.cuda.Stream()
-        event = torch.cuda.Event()
-        foo = torch.empty((2, 2), device="cuda")
+    def test_device_event_created_outside_of_graph(self):
+        user_stream = torch.Stream()
+        event = torch.Event()
+        foo = torch.empty((2, 2), device=device_type)
 
         def func(foo):
             event.wait()
             return foo + 1, event
 
-        x = torch.randn((1024, 1024), device="cuda")
+        x = torch.randn((1024, 1024), device=device_type)
         cnts = torch._dynamo.testing.CompileCounter()
 
         def run_iters(fn, compile=False):
             if compile:
                 fn = torch.compile(fn, backend=cnts)
             for _ in range(10):
-                with torch.cuda.stream(user_stream):
+                with user_stream:
                     torch.mm(x, x, out=foo)
                     event.record()
                 out = fn(foo)
-                torch.cuda.current_stream().synchronize()
+                torch.accelerator.current_stream().synchronize()
             return out
 
         ref = run_iters(func, compile=False)
@@ -3031,11 +3033,11 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 4)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     @unittest.skip(
         "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
     )
-    def test_cuda_event_method_create_stream_outside_of_compile(self):
+    def test_device_event_method_create_stream_outside_of_compile(self):
         def fn(x, cur_stream, new_stream):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
@@ -3046,48 +3048,7 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             event.query()
 
             new_stream.wait_event(event)
-            with torch.cuda.stream(new_stream):
-                x = torch.add(x, 4)
-
-            new_event = torch.cuda.Event()
-            new_event.record(new_stream)
-
-            new_event.wait(cur_stream)
-            x = torch.add(x, 5)
-
-            new_event.synchronize()
-
-            x = torch.relu(x)
-            x = torch.cos(x)
-            return x
-
-        x = torch.randn((2, 2), device="cuda")
-        cur_stream = torch.cuda.current_stream()
-        new_stream = torch.cuda.Stream()
-        ref = fn(x, cur_stream, new_stream)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
-        res = opt_fn(x, cur_stream, new_stream)
-        self.assertEqual(ref, res)
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertExpectedInline(str(cnts.op_count), """16""")
-
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_event_method(self):
-        def fn(x):
-            x = torch.mul(x, 1)
-            x = torch.add(x, 2)
-
-            cur_stream = torch.cuda.current_stream()
-            new_stream = torch.cuda.Stream()
-
-            x = torch.add(x, 3)
-
-            event = cur_stream.record_event()
-            event.query()
-
-            new_stream.wait_event(event)
-            with torch.cuda.stream(new_stream):
+            with new_stream:
                 x = torch.add(x, 4)
 
             new_event = torch.Event()
@@ -3102,7 +3063,48 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.cos(x)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=device_type)
+        cur_stream = torch.accelerator.current_stream()
+        new_stream = torch.Stream()
+        ref = fn(x, cur_stream, new_stream)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x, cur_stream, new_stream)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertExpectedInline(str(cnts.op_count), """16""")
+
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device_event_method(self):
+        def fn(x):
+            x = torch.mul(x, 1)
+            x = torch.add(x, 2)
+
+            cur_stream = torch.accelerator.current_stream()
+            new_stream = torch.Stream()
+
+            x = torch.add(x, 3)
+
+            event = cur_stream.record_event()
+            event.query()
+
+            new_stream.wait_event(event)
+            with new_stream:
+                x = torch.add(x, 4)
+
+            new_event = torch.Event()
+            new_event.record(new_stream)
+
+            new_event.wait(cur_stream)
+            x = torch.add(x, 5)
+
+            new_event.synchronize()
+
+            x = torch.relu(x)
+            x = torch.cos(x)
+            return x
+
+        x = torch.randn((2, 2), device=device_type)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
@@ -3111,42 +3113,44 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertExpectedInline(str(cnts.op_count), """17""")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_device(self):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device_context_manager(self):
         def fn(x):
-            with torch.cuda.device(x.device.index - 1):
+            with torch.accelerator.device_index(x.device.index - 1):
                 x = torch.sin(x + 1)
             return x
 
-        x = torch.randn((2, 2), device="cuda")
+        x = torch.randn((2, 2), device=device_type)
         ref = fn(x)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda__exchange_device_args(self):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device__exchange_device_args(self):
+        device_module = torch.get_device_module(device_type)
+
         @torch.compile(backend="eager", fullgraph=True)
         def fn(args, kwargs):
-            torch.cuda._exchange_device(*args, **kwargs)
+            device_module._exchange_device(*args, **kwargs)
 
-        initial_dev = torch.cuda.current_device()
+        initial_dev = torch.accelerator.current_device_index()
         for args, kwargs in (((), ()), ((0, 0), ()), ((), ("kwarg",))):
             self.assertRaises(torch._dynamo.exc.Unsupported, fn, args, kwargs)
-            self.assertEqual(torch.cuda.current_device(), initial_dev)
+            self.assertEqual(torch.accelerator.current_device_index(), initial_dev)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     def test_autocast(self):
-        if not torch.cuda.is_bf16_supported():
+        if not PLATFORM_SUPPORTS_BF16:
             raise unittest.SkipTest("requires bf16")
 
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-                d_float32 = torch.rand((8, 8), device="cuda")
+                a_float32 = torch.rand((8, 8), device=device_type)
+                b_float32 = torch.rand((8, 8), device=device_type)
+                d_float32 = torch.rand((8, 8), device=device_type)
 
-                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
                     e_float16 = torch.mm(a_float32, b_float32)
                     f_float16 = torch.mm(d_float32, e_float16)
                 return f_float16
@@ -3161,18 +3165,18 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
 
-        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.type, device_type)
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_amp_autocast(self):
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
+    def test_device_amp_autocast(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
+                a_float32 = torch.rand((8, 8), device=device_type)
+                b_float32 = torch.rand((8, 8), device=device_type)
 
-                with torch.autocast(device_type="cuda", dtype=torch.float64):
+                with torch.autocast(device_type=device_type, dtype=torch.float64):
                     c_float64 = torch.mm(a_float32, b_float32)
                 return c_float64
 
@@ -3186,19 +3190,19 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
 
-        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.type, device_type)
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     def test_autocast_float64(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-                d_float32 = torch.rand((8, 8), device="cuda")
+                a_float32 = torch.rand((8, 8), device=device_type)
+                b_float32 = torch.rand((8, 8), device=device_type)
+                d_float32 = torch.rand((8, 8), device=device_type)
 
-                with torch.autocast(device_type="cuda", dtype=torch.float64):
+                with torch.autocast(device_type=device_type, dtype=torch.float64):
                     e_float64 = torch.mm(a_float32, b_float32)
                     f_float64 = torch.mm(d_float32, e_float64)
                 return f_float64
@@ -3216,15 +3220,15 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     def test_autocast_device(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
-                a_float32 = torch.rand((8, 8), device="cuda")
-                b_float32 = torch.rand((8, 8), device="cuda")
-                d_float32 = torch.rand((8, 8), device="cuda")
+                a_float32 = torch.rand((8, 8), device=device_type)
+                b_float32 = torch.rand((8, 8), device=device_type)
+                d_float32 = torch.rand((8, 8), device=device_type)
 
-                with torch.autocast("cuda"):
+                with torch.autocast(device_type):
                     e_float64 = torch.mm(a_float32, b_float32)
                     f_float64 = torch.mm(d_float32, e_float64)
                 return f_float64
@@ -3242,10 +3246,10 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float16)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     def test_autocast_arguments_binding(self):
         def f1(x):
-            with torch.autocast(device_type="cuda", enabled=False):
+            with torch.autocast(device_type=device_type, enabled=False):
                 x = torch.sin(x + 1)
             return x
 
@@ -3264,17 +3268,17 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref1, res1))
         self.assertTrue(same(ref2, res2))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipUnless(torch.accelerator.is_available(), "requires accelerator")
     def test_autocast_decorator(self):
         def autocast_func(orig_func):
-            @torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+            @torch.amp.autocast(device_type=device_type, dtype=torch.float16)
             def new_fwd(*args, **kwargs):
                 return orig_func(*args, **kwargs)
 
             return new_fwd
 
-        def autocast_func_cuda(orig_func):
-            @torch.autocast(device_type="cuda", dtype=torch.float16)
+        def autocast_func_device(orig_func):
+            @torch.autocast(device_type=device_type, dtype=torch.float16)
             def new_fwd(*args, **kwargs):
                 return orig_func(*args, **kwargs)
 
@@ -3291,14 +3295,14 @@ class CUDACtxManagerTests(torch._dynamo.test_case.TestCase):
             return torch.mm(a, b)
 
         mm_float16 = autocast_func(mm)
-        mm_float16_cuda = autocast_func_cuda(mm)
+        mm_float16_device = autocast_func_device(mm)
         mm_float16_cpu = autocast_func_cpu(mm)
 
         def fn(a, b):
-            return mm_float16(a, b), mm_float16_cuda(a, b), mm_float16_cpu(a, b)
+            return mm_float16(a, b), mm_float16_device(a, b), mm_float16_cpu(a, b)
 
-        a_float32 = torch.rand((8, 8), device="cuda")
-        b_float32 = torch.rand((8, 8), device="cuda")
+        a_float32 = torch.rand((8, 8), device=device_type)
+        b_float32 = torch.rand((8, 8), device=device_type)
 
         ref = fn(a_float32, b_float32)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
@@ -3894,9 +3898,9 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_autocast_bf16(self, device):
-        if not torch.cuda.is_bf16_supported():
+        if not PLATFORM_SUPPORTS_BF16:
             raise unittest.SkipTest("requires bf16")
 
         device_type = torch.device(device).type
@@ -3926,8 +3930,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
-    # autocast with float64 not support on XPU
-    @onlyCUDA
+    @onlyAccelerator
     def test_amp_autocast(self, device):
         device_type = torch.device(device).type
 
@@ -3954,7 +3957,7 @@ class CtxManagerTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.float64)
 
-    @onlyCUDA
+    @onlyAccelerator
     def test_autocast_float64(self, device):
         device_type = torch.device(device).type
 
