@@ -5003,8 +5003,13 @@ class InstructionTranslatorBase(
 
         return ctx.enter(self)  # type: ignore[arg-type]
 
-    @staticmethod
-    def unsupported_ctx_graph_break(ctx: VariableTracker) -> NoReturn:
+    def unsupported_ctx_graph_break(self, ctx: VariableTracker) -> NoReturn:
+        if isinstance(ctx, UserDefinedObjectVariable):
+            cls = ctx.python_type()
+            for name in ("__enter__", "__exit__"):
+                if not hasattr(cls, name):
+                    msg = f"'{cls.__name__}' object does not support the context manager protocol (missed {name} method)"
+                    raise_observed_exception(TypeError, self, args=[msg])
         unimplemented(
             gb_type="Unsupported context manager",
             context=f"Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on {ctx}",

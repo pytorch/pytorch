@@ -1317,6 +1317,29 @@ torch.ones(10) * 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    @unittest.skipIf(IS_WINDOWS, "uses libc exit() through ctypes")
+    @parametrize("stop", [False, True])
+    def test_global_profiler_left_running_at_exit(self, stop):
+        # A worker thread keeps dispatching ops while static destructors run.
+        # Without the std::atexit close, its callbacks reach destroyed Kineto
+        # and profiler state.
+        loc = os.path.dirname(os.path.abspath(__file__))
+        cmd = [sys.executable, f"{loc}/global_profiler_exit.py"]
+        if stop:
+            cmd.append("--stop")
+        # run_test.py retries failures with C++ stack traces on, and those make this
+        # script crash at exit even without a profiler.
+        env = {
+            **os.environ,
+            "TORCH_CPP_LOG_LEVEL": "WARNING",
+            "TORCH_SHOW_CPP_STACKTRACES": "0",
+        }
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "True", "worker finished before exit")
+        warning = "Process is exiting without stopping the profiler"
+        self.assertEqual(proc.stderr.count(warning), int(not stop), proc.stderr)
+
     def test_profiler_disable_fwd_bwd_link(self):
         try:
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
@@ -2288,7 +2311,6 @@ torch.ones(10) * 2
             enable_cuda_sync_events=True,
             enable_environment_counters=True,
             enable_graph_dependencies=False,
-            enable_event_node_ids=False,
         )
         p = profile(
             activities=[
@@ -2305,7 +2327,6 @@ torch.ones(10) * 2
                         "enable_cuda_sync_events": False,
                         "enable_environment_counters": True,
                         "enable_graph_dependencies": True,
-                        "enable_event_node_ids": True,
                     }
                 )
             ),
@@ -2331,7 +2352,6 @@ torch.ones(10) * 2
         self.assertTrue(observer.call_args.kwargs["enable_cuda_sync"])
         self.assertTrue(observer.call_args.kwargs["enable_environment_counters"])
         self.assertFalse(observer.call_args.kwargs["enable_graph_dependencies"])
-        self.assertFalse(observer.call_args.kwargs["enable_event_node_ids"])
         self.assertEqual(observer.call_args.kwargs["pm_sampling_interval_ms"], 0.5)
         self.assertEqual(observer.call_args.kwargs["pm_lookback_window_ms"], 2000)
 
@@ -5184,7 +5204,7 @@ class TestPythonChromeTraceExport(TestCase):
 
 
 instantiate_device_type_tests(
-    TestPythonChromeTraceExport, globals(), except_for=("cpu",)
+    TestPythonChromeTraceExport, globals(), except_for=("cpu",), allow_xpu=True
 )
 
 
