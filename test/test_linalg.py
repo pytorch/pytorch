@@ -8727,6 +8727,7 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @slowTest
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @skipIfRocmVersionInRange([10, 2], [10, 3], "rocSOLVER gesvdj fails for batch > 65536, fixed by rocm-libraries#14170")
     @dtypes(*floating_and_complex_types())
     def test_lu_solve_batched_many_batches(self, device, dtype):
         def run_test(A_dims, b_dims):
@@ -9410,6 +9411,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
         finally:
             # disables TunableOp
             torch.cuda.tunable.enable(False)
+            torch.cuda.tunable.record_untuned_enable(False)
             if prev_cublaslt_count is not None:
                 torch.cuda.tunable.set_cublaslt_requested_algo_count(
                     prev_cublaslt_count
@@ -9425,8 +9427,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
             for file in files:
                 try:
                     os.remove(file)
-                # NB: The file is locked on Windows
-                except (FileNotFoundError, PermissionError):
+                except FileNotFoundError:
                     pass
 
             # undo all the environment variables set
@@ -10245,6 +10246,42 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
             # this test. There should be no change in the number of results
             # since tuning is disable.
             self.assertEqual((total_num_results - ref_num_results), 0)
+
+    @dtypes(torch.float)
+    @parametrize("trigger", ["tuning_enable", "enable", "record_untuned_enable", "set_filename"])
+    def test_results_file_closed_when_writes_stop_tunableop(self, device, dtype, trigger):
+        import os
+
+        def tune(n):
+            A = torch.randn(n, n + 1, device=device, dtype=dtype)
+            B = torch.randn(n + 1, n + 2, device=device, dtype=dtype)
+            torch.matmul(A, B)
+
+        with self._tunableop_ctx():
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+            filename = torch.cuda.tunable.get_filename()
+            other_filename = filename.replace(".csv", "_other.csv")
+            setter, stop_arg, resume_arg = {
+                "tuning_enable": (torch.cuda.tunable.tuning_enable, False, True),
+                "enable": (torch.cuda.tunable.enable, False, True),
+                "record_untuned_enable": (torch.cuda.tunable.record_untuned_enable, True, False),
+                "set_filename": (torch.cuda.tunable.set_filename, other_filename, filename),
+            }[trigger]
+
+            tune(19)
+            self.assertTrue(os.path.exists(filename))
+
+            setter(stop_arg)
+            os.remove(filename)
+            setter(resume_arg)
+            tune(23)
+
+            self.assertTrue(os.path.exists(filename))
+            with open(filename) as f:
+                lines = [line for line in f.read().splitlines() if line]
+            validators = [line for line in lines if line.startswith("Validator,")]
+            self.assertEqual(len(validators), len(get_tunableop_validators()))
+            self.assertEqual(len(lines) - len(validators), 1)
 
     @dtypes(torch.float)
     def test_dump_results_on_exit_tunableop(self, device, dtype):

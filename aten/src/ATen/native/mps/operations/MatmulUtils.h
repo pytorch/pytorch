@@ -11,6 +11,11 @@ namespace at::native::mps {
 // out = a * b for float32, float16 and bfloat16. out must not overlap a or b.
 void metal_mm_out(const Tensor& a, const Tensor& b, const Tensor& out);
 
+// Raises NotImplementedError for dtypes that have no matmul kernel on MPS
+// (bool and the barebones unsigned types), instead of failing the kernel
+// lookup.
+void check_matmul_dtype(ScalarType dtype, std::string_view op_name);
+
 template <typename idx_t>
 MatmulParams<idx_t> matmul_params(
     const Tensor& a,
