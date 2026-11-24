@@ -103,7 +103,7 @@ printf '%s\\n' "$@" >> "$DOCKER_LOG"
                     self.assertIn(
                         (
                             "--build-arg",
-                            f"PYTORCH_ROCM_ARCH={matrix.ROCM_PREVIEW_DEVICES}",
+                            f"PYTORCH_ROCM_ARCH={matrix.ROCM_PREVIEW_DEVICES};gfx1250-strict",
                         ),
                         build_args,
                     )
@@ -115,6 +115,7 @@ printf '%s\\n' "$@" >> "$DOCKER_LOG"
         self.assertEqual(stable.returncode, 0, stable.stderr)
         build_args = set(itertools.pairwise(docker_args))
         self.assertIn(("--build-arg", "ROCM_VERSION=10.1"), build_args)
+        self.assertFalse(any("gfx1250-strict" in arg for arg in docker_args))
         self.assertIn(
             (
                 "--build-arg",

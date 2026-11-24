@@ -56,8 +56,10 @@ class RocmPreviewLane(NamedTuple):
 # Preview is a stable channel, not a version; keep its external names together.
 ROCM_PREVIEW = RocmPreviewLane(arch="preview", channel="rocm-preview")
 ROCM_PREVIEW_ARCHES = [ROCM_PREVIEW.arch]
-# Matches PYTORCH_ROCM_ARCH in .ci/docker/manywheel/build.sh. Preview's
-# device-all also pulls targets torch is not built for, e.g. gfx900.
+# Matches PYTORCH_ROCM_ARCH in .ci/docker/manywheel/build.sh, except that the
+# preview build also adds gfx1250-strict, which has no device-* extra (its
+# libraries ship in device-gfx1250). Preview's device-all also pulls targets
+# torch is not built for, e.g. gfx900.
 ROCM_PREVIEW_DEVICES = "gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151;gfx1250"
 
 XPU_ARCHES = ["xpu"]

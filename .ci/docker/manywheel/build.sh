@@ -84,6 +84,9 @@ case ${image} in
         if [[ "${DOCKER_TAG_PREFIX}" == "rocm-preview" ]]; then
             THEROCK_INDEX_URL="https://nightly.repo.amd.com/rocm/core/whl-next/"
             ROCM_VERSION=$(tr -d '[:space:]' < "${TOPDIR}/.ci/docker/ci_commit_pins/rocm-preview.txt")
+            # The 10.3 preview runtime reports gfx1250-strict, a separate offload target
+            # whose libraries ship inside device-gfx1250. Stable 10.1 and 10.2 do not.
+            PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx1250-strict"
             DOCKER_GPU_BUILD_ARG=""
             DOCKER_GPU_BUILD_ARGS=(
                 --build-arg "ROCM_VERSION=${ROCM_VERSION}"
