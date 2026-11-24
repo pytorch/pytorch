@@ -4091,6 +4091,7 @@ if torch.mtia._is_compiled():
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
+make_fallback(aten._upsample_inter_area2d.default)  # CPU only
 
 
 # 3) Difficult
@@ -10176,9 +10177,17 @@ def _to_dtype_rounded(
     src_dtype = x.get_dtype()
     device = x.get_device()
     if device is not None and is_triton(device):
-        # Only CUDA (and ROCm) has an eager kernel to match.
-        supported = device.type == "cuda" and is_triton_fp8_dtype_supported(
-            dtype, device
+        # Only CUDA (and ROCm) has an eager kernel to match. Triton's
+        # conversions to the fnuz dtypes differ from eager's (which give NaN on
+        # overflow), and how ROCm's conversions to the other float8 dtypes
+        # overflow could not be checked.
+        unsupported = (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        if torch.version.hip is not None:
+            unsupported += (torch.float8_e4m3fn, torch.float8_e5m2)
+        supported = (
+            device.type == "cuda"
+            and is_triton_fp8_dtype_supported(dtype, device)
+            and dtype not in unsupported
         )
     else:
         supported = ir.is_cpu(x) and config.cpu_backend == "cpp"
