@@ -5234,6 +5234,16 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                         recompute_scale_factor=recompute_scale_factor,
                     )
 
+def sample_inputs_interpolate_inter_area(op_info, device, dtype, requires_grad, **kwargs):
+    high = 256 if dtype == torch.uint8 else None
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, high=high)
+    # Area weights (non-integer and integer factors), and at most 2 input pixels per output pixel (an axis grows).
+    for input_size, output_size in [((7, 9), (3, 4)), ((6, 6), (3, 2)), ((3, 7), (5, 4))]:
+        yield SampleInput(make_arg((2, 3, *input_size)), size=output_size, mode="inter-area")
+    # scale_factor is used as the interpolation scale; channels-last uint8 takes the AVX2 / NEON kernels.
+    yield SampleInput(make_arg((1, 3, 10, 10), memory_format=torch.channels_last), scale_factor=0.45, mode="inter-area")
+
+
 def reference_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs)
 
@@ -16766,6 +16776,17 @@ op_db: list[OpInfo] = [
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
+           supports_out=False),
+    OpInfo('nn.functional.interpolate',
+           aten_name="interpolate",
+           variant_test_name='inter-area',
+           # CPU only; backward isn't implemented yet.
+           supports_autograd=False,
+           dtypes=floating_types_and(torch.uint8),
+           dtypesIfCUDA=empty_types(),
+           dtypesIfMPS=empty_types(),
+           dtypesIfXPU=empty_types(),
+           sample_inputs_func=sample_inputs_interpolate_inter_area,
            supports_out=False),
     OpInfo('nn.functional.upsample_bilinear',
            supports_autograd=True,
