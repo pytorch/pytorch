@@ -22,6 +22,18 @@ def my_add(self, other, alpha=1.0) -> torch.Tensor:
     return torch.ops.libtorch_agn_2_16.my_add.default(self, other, alpha)
 
 
+def my_cpu_capability_int(key: str) -> int | None:
+    return torch.ops.libtorch_agn_2_16.my_cpu_capability_int.default(key)
+
+
+def my_cpu_capability_bool(key: str) -> bool | None:
+    return torch.ops.libtorch_agn_2_16.my_cpu_capability_bool.default(key)
+
+
+def my_cpu_capability_string(key: str) -> str | None:
+    return torch.ops.libtorch_agn_2_16.my_cpu_capability_string.default(key)
+
+
 def my_is_conj(t: torch.Tensor) -> bool:
     return torch.ops.libtorch_agn_2_16.my_is_conj.default(t)
 

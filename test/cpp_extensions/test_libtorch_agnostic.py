@@ -1302,6 +1302,38 @@ for warning in w:
 
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
+    def test_stable_cpu_capabilities(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        getters = {
+            int: libtorch_agnostic.ops.my_cpu_capability_int,
+            bool: libtorch_agnostic.ops.my_cpu_capability_bool,
+            str: libtorch_agnostic.ops.my_cpu_capability_string,
+        }
+        capabilities = torch.cpu.get_capabilities()
+        for key, value in capabilities.items():
+            with self.subTest(key=key):
+                op = getters[type(value)]
+                self.assertEqual(op(key), value)
+
+        missing_key = "nonexistent_test_cpu_capability"
+        self.assertNotIn(missing_key, capabilities)
+        for kind, op in getters.items():
+            with self.subTest(kind=kind):
+                self.assertIsNone(op(missing_key))
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_stable_cpu_capabilities_wrong_type(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with self.assertRaisesRegex(
+            RuntimeError, "CPU capability 'architecture' has type String, expected Int"
+        ):
+            libtorch_agnostic.ops.my_cpu_capability_int("architecture")
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
     @parametrize("flag", ["conj", "neg", "inference"])
     def test_is_conj_is_neg_is_inference(self, device, flag):
         import libtorch_agn_2_16 as libtorch_agnostic

@@ -339,3 +339,8 @@ in the PyTorch source tree.
 
 ```{doxygenfunction} torch::stable::get_num_threads
 ```
+
+## CPU Capability Queries
+
+```{doxygenfunction} torch::stable::cpu::get_cpu_capability
+```
