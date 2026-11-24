@@ -41,9 +41,22 @@ inline decltype(auto) withSyclErrorTranslation(
 
 static inline sycl::async_handler asyncHandler =
     [](const sycl::exception_list& errors) {
-      for (const auto& error : errors) {
-        std::rethrow_exception(error);
+      auto error_it = errors.begin();
+      if (error_it == errors.end()) {
+        return;
       }
+
+      const auto primary = *error_it;
+      for (++error_it; error_it != errors.end(); ++error_it) {
+        try {
+          std::rethrow_exception(*error_it);
+        } catch (const std::exception& error) {
+          TORCH_WARN("Additional asynchronous SYCL error: ", error.what());
+        } catch (...) {
+          TORCH_WARN("Additional asynchronous SYCL error: unknown exception type");
+        }
+      }
+      std::rethrow_exception(primary);
     };
 
 } // namespace c10::xpu
@@ -51,4 +64,5 @@ static inline sycl::async_handler asyncHandler =
 #define C10_XPU_CHECK(...)                                           \
   ::c10::xpu::withSyclErrorTranslation(                               \
       [&]() -> decltype(auto) { return (__VA_ARGS__); },              \
-      {__func__, __FILE__, static_cast<uint32_t>(__LINE__)})
+      ::c10::SourceLocation::current())
+
