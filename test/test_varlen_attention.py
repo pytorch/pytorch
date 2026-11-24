@@ -703,10 +703,11 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     # flash kernel behind aten::_flash_attention_forward. Reclassifying this as
     # ACCELERATOR needs the planned Capability mechanism, through which each backend
     # reports the flash implementations it supports.
-    # test_varlen_lse_is_not_differentiable and test_batch_invariance also parametrize
-    # over cuDNN: they compare flash against cuDNN rather than being cuDNN-specific, so
-    # they stay here while both classes are CUDA-only. That parameter has to be split
-    # off before this class can go ACCELERATOR.
+    # test_varlen_lse_is_differentiable, test_varlen_lse_gradient_requires_fa4,
+    # test_varlen_lse_gradient_prefers_fa4, and test_batch_invariance also use cuDNN:
+    # they compare flash against cuDNN rather than being cuDNN-specific, so they stay
+    # here while both classes are CUDA-only. That cuDNN use has to be split off before
+    # this class can go ACCELERATOR.
     hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(
@@ -1091,7 +1092,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             or not varlen_attention._should_use_cudnn(torch.device(p["device"]).index)
         ),
     )
-    def test_varlen_lse_is_not_differentiable(self, device, backend):
+    def test_varlen_lse_is_differentiable(self, device, backend):
         if backend == SDPBackend.CUDNN_ATTENTION:
             _check_cudnn_varlen_supported(device)
         q, k, v, cu_seq = _make_causal_varlen_inputs(device, requires_grad=True)
@@ -1111,8 +1112,148 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             )
 
         self.assertTrue(out.requires_grad)
-        self.assertFalse(lse.requires_grad)
+        self.assertTrue(lse.requires_grad)
         torch.autograd.grad(out.sum(), (q, k, v))
+
+    @unittest.skipUnless(
+        "fa4" in _varlen_backends(include_fa4_paged_kv=False), "FA4 not supported"
+    )
+    @parametrize("is_causal", [False, True])
+    @parametrize("compile", [False, True])
+    def test_varlen_lse_gradient(self, device, is_causal, compile):
+        torch.manual_seed(0)
+        q, k, v, cu_seq, max_len = _make_packed_attention_inputs(
+            device, torch.bfloat16, [100, 77, 123], num_heads_q=4, num_heads_kv=2
+        )
+        q, k, v = (t.requires_grad_() for t in (q, k, v))
+        sink = (torch.randn(q.size(1), device=device) + 4).requires_grad_()
+
+        def attention_with_sink(q, k, v, sink):
+            out, lse = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                window_size=(-1, 0) if is_causal else (-1, -1),
+                enable_gqa=True,
+                return_aux=AuxRequest(lse=True),
+            )
+            return _sink_rescale_loss(out, lse, sink)
+
+        fn = (
+            torch.compile(attention_with_sink, fullgraph=True)
+            if compile
+            else attention_with_sink
+        )
+        with _use_backend("fa4"):
+            grads = torch.autograd.grad(fn(q, k, v, sink), (q, k, v, sink))
+
+        _assert_sink_rescale_grads_match_reference(
+            self, grads, q, k, v, sink, cu_seq, is_causal
+        )
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("backend", ["fa2", "cudnn"])
+    @parametrize("compile", [False, True])
+    @decorateIf(
+        unittest.skip("cuDNN varlen attention is not supported on this device"),
+        lambda p: p["backend"] == "cudnn"
+        and (
+            not PLATFORM_SUPPORTS_CUDNN_ATTENTION
+            or not varlen_attention._should_use_cudnn(torch.device(p["device"]).index)
+        ),
+    )
+    def test_varlen_lse_gradient_requires_fa4(self, device, backend, compile):
+        """Backends without a dLSE input accept an unused lse and reject its gradient."""
+        torch.manual_seed(0)
+        q, k, v, cu_seq, max_len = _make_packed_attention_inputs(
+            device, torch.bfloat16, [160, 200], num_heads_q=2, num_heads_kv=2
+        )
+        q, k, v = (t.requires_grad_() for t in (q, k, v))
+
+        def loss_fn(q, k, v, return_lse, use_lse):
+            result = varlen_attn(
+                q,
+                k,
+                v,
+                cu_seq,
+                cu_seq,
+                max_len,
+                max_len,
+                return_aux=AuxRequest(lse=return_lse),
+            )
+            out, lse = result if return_lse else (result, None)
+            loss = out.float().square().sum()
+            return loss + lse.sum() if use_lse else loss
+
+        # Backend selection is baked into compiled graphs, so start each case fresh.
+        torch._dynamo.reset()
+        message = (
+            "not supported by the cuDNN backend"
+            if backend == "cudnn"
+            else "requires the FA4 flash attention implementation"
+        )
+        fn = torch.compile(loss_fn, fullgraph=True) if compile else loss_fn
+        with _use_backend(backend):
+            expected = torch.autograd.grad(loss_fn(q, k, v, False, False), (q, k, v))
+            grads = torch.autograd.grad(fn(q, k, v, True, False), (q, k, v))
+            self.assertEqual(grads, expected)
+            with self.assertRaisesRegex(NotImplementedError, message):
+                torch.autograd.grad(fn(q, k, v, True, True), (q, k, v))
+            if compile:
+                # An unused lse returned from a compiled region gets a zero gradient,
+                # which is rejected without a sync; detaching it in the region avoids it.
+                def region(q, k, v, detach):
+                    out, lse = varlen_attn(
+                        q,
+                        k,
+                        v,
+                        cu_seq,
+                        cu_seq,
+                        max_len,
+                        max_len,
+                        return_aux=AuxRequest(lse=True),
+                    )
+                    return out, lse.detach() if detach else lse
+
+                region = torch.compile(region, fullgraph=True)
+                out, _ = region(q, k, v, False)
+                with self.assertRaisesRegex(NotImplementedError, message):
+                    torch.autograd.grad(out.float().square().sum(), (q, k, v))
+                out, _ = region(q, k, v, True)
+                grads = torch.autograd.grad(out.float().square().sum(), (q, k, v))
+                self.assertEqual(grads, expected)
+
+    @unittest.skipUnless(
+        "fa4" in _varlen_backends(include_fa4_paged_kv=False), "FA4 not supported"
+    )
+    def test_varlen_lse_gradient_prefers_fa4(self, device):
+        """With FA4 active, default selection skips cuDNN for a differentiable lse."""
+        _check_cudnn_varlen_supported(device)
+        q, k, v, cu_seq, max_len = _make_packed_attention_inputs(
+            device, torch.bfloat16, [256], num_heads_q=2, num_heads_kv=2
+        )
+        q.requires_grad_()
+
+        def select(return_lse):
+            return varlen_attention._select_backend(
+                q, k, v, cu_seq, cu_seq, max_len, [-1, -1], return_lse=return_lse
+            )
+
+        self.assertEqual(select(True), SDPBackend.CUDNN_ATTENTION.value)
+        with use_fa4():
+            self.assertEqual(select(False), SDPBackend.CUDNN_ATTENTION.value)
+            self.assertEqual(select(True), SDPBackend.FLASH_ATTENTION.value)
+            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                self.assertEqual(select(True), SDPBackend.CUDNN_ATTENTION.value)
+            explicit = [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION]
+            with sdpa_kernel(explicit, set_priority=True):
+                self.assertEqual(select(True), SDPBackend.CUDNN_ATTENTION.value)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
