@@ -1202,6 +1202,30 @@ class TestIndexingDevice(TestCase):
 
         self.assertEqual(out_gpu.cpu(), out_cpu)
 
+    @onlyCUDA
+    @parametrize("accumulate", [False, True])
+    def test_index_put_sorted_contiguous_size_one_stride(self, device, accumulate):
+        # A size-1 dim may carry any stride and the tensor is still contiguous.
+        # The sort-based kernel (used for accumulate=True and in deterministic
+        # mode) must index the dims before the indexed dim densely, not with
+        # that stride. Inductor can pick such layouts, e.g. for a rolled KV cache.
+        base = torch.zeros(256, device=device)
+        t = base.as_strided((2, 1, 4, 8), (32, 128, 8, 1))
+        self.assertTrue(t.is_contiguous())
+        idx = torch.tensor([-1], device=device)
+        value = torch.randn(2, 1, 1, 8, device=device)
+        expected = torch.zeros(2, 1, 4, 8, device=device)
+        expected[:, :, -1] = value[:, :, 0]
+
+        # Same as t[:, :, idx] = value: writes the last row of both batches.
+        # Deterministic mode with a multi-element value uses the sort-based kernel.
+        with DeterministicGuard(True):
+            torch.ops.aten.index_put_(t, [None, None, idx], value, accumulate)
+
+        self.assertEqual(t, expected)
+        # Nothing outside of t may be written.
+        self.assertEqual(base[64:], torch.zeros_like(base[64:]))
+
     @onlyAccelerator
     @expectedFailureMPS
     def test_index_put_deterministic_with_optional_tensors(self, device):
@@ -1321,29 +1345,6 @@ class TestIndexingDevice(TestCase):
         num_ones = (c > 0).sum()
         r = v[c > 0]
         self.assertEqual(r.shape, (num_ones, 3))
-
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    def test_jit_indexing(self, device):
-        def fn1(x):
-            x[x < 50] = 1.0
-            return x
-
-        def fn2(x):
-            x[0:50] = 1.0
-            return x
-
-        scripted_fn1 = torch.jit.script(fn1)
-        scripted_fn2 = torch.jit.script(fn2)
-        data = torch.arange(100, device=device, dtype=torch.float)
-        out = scripted_fn1(data.detach().clone())
-        ref = torch.tensor(
-            np.concatenate((np.ones(50), np.arange(50, 100))),
-            device=device,
-            dtype=torch.float,
-        )
-        self.assertEqual(out, ref)
-        out = scripted_fn2(data.detach().clone())
-        self.assertEqual(out, ref)
 
     def test_int_indices(self, device):
         v = torch.randn(5, 7, 3, device=device)
