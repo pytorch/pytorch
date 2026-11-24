@@ -15,7 +15,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, overload, Self, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -244,10 +244,20 @@ class SLoc:
             return f"({floc})"
 
 
-class ShapeGuard(NamedTuple):
+class _ShapeGuardFields(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
-    size_oblivious: bool
+
+
+class ShapeGuard(_ShapeGuardFields):
+    __slots__ = ()
+
+    # Pickles from older versions carry extra trailing fields (e.g. the removed
+    # size_oblivious); accept and drop them so saved ShapeEnvs still load.
+    def __new__(
+        cls, expr: sympy.logic.boolalg.Boolean, sloc: SLoc, *_legacy: object
+    ) -> Self:
+        return super().__new__(cls, expr, sloc)
 
 
 @dataclasses.dataclass(slots=True)

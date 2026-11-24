@@ -138,10 +138,13 @@ from torch._subclasses.fake_tensor import (
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
+from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
+    _get_placeholder_expr,
     _ShapeGuardsHelper,
     EqualityConstraint,
+    has_free_unbacked_symbols,
     is_symbolic,
     SYMPY_INTERP,
 )
@@ -1170,7 +1173,15 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
     else:
         if not isinstance(dim, torch.SymInt):
             raise AssertionError(f"Expected torch.SymInt, got {type(dim)}")
-        return dim.node.maybe_as_int()
+        node = dim.node
+        if isinstance(node, SymNode) and node.shape_env is not None:
+            expr = _get_placeholder_expr(node)
+            # An unbacked input dim refined to a constant (e.g. by
+            # torch._check(x.shape[0] == 1)) stays None, so TENSOR_MATCH does not
+            # check it and the runtime assert enforces the value instead.
+            if expr.is_Symbol and has_free_unbacked_symbols(expr):
+                return None
+        return node.maybe_as_int()
 
 
 def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
