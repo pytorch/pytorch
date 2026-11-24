@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 
+import collections
 import enum
 import itertools
 import operator
@@ -9,7 +10,7 @@ import types
 import unittest
 import weakref
 from collections import defaultdict, namedtuple, OrderedDict, UserDict
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from functools import partial
 from typing import Any, NamedTuple
 from unittest.mock import patch
@@ -1768,6 +1769,26 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_mutable_mapping_subclass_custom_new(self):
+        # A custom __new__ must not stop Dynamo from treating this as a dict.
+        # dict.get must not dispatch to the overridden __getitem__.
+        class D(dict, MutableMapping):
+            def __new__(cls, *args, **kwargs):
+                return super().__new__(cls, *args, **kwargs)
+
+            def __getitem__(self, key):
+                return 100
+
+        def fn(x, d):
+            r = x * d.get("a", 3) + len(d) + ("a" in d)
+            return r * d.setdefault("b", 4) * d.pop("a")
+
+        x = torch.randn(2)
+        d_eager, d_compiled = D({"a": 2}), D({"a": 2})
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, d_eager), opt_fn(x, d_compiled))
+        self.assertEqual(dict.copy(d_eager), dict.copy(d_compiled))
+
     def test_dict_order_keys(self):
         def fn(d):
             c = 0
@@ -2383,6 +2404,24 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertTrue(type(res) is types.MappingProxyType)
+
+    def test_mapping_proxy_of_non_dict_mapping(self):
+        def fn(x, m):
+            mp = types.MappingProxyType(m)
+            m["c"] = 4
+            try:
+                types.MappingProxyType([1])
+            except TypeError:
+                x = x + 1
+            return x * mp["a"] + len(mp) + ("c" in mp), mp
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        for make in (UserDict, lambda **kw: collections.ChainMap(kw)):
+            ref, res = fn(x, make(a=2, b=3)), opt_fn(x, make(a=2, b=3))
+            self.assertEqual(ref[0], res[0])
+            self.assertTrue(type(res[1]) is types.MappingProxyType)
+            self.assertEqual(dict(ref[1]), dict(res[1]))
 
     def test_mapping_proxy_for_nonlocal(self):
         d = {"a": 2, "b": 3, "c": 5}

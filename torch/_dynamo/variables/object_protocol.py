@@ -196,6 +196,8 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 
 # Flag Include/object.h
+Py_TPFLAGS_SEQUENCE = 1 << 5
+Py_TPFLAGS_MAPPING = 1 << 6
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
 Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
 Py_TPFLAGS_HEAPTYPE = 1 << 9
@@ -392,6 +394,34 @@ def pysequence_check(obj_type: type) -> bool:
     if issubclass(obj_type, dict):
         return False
     return type_implements_sq_item(obj_type)
+
+
+def pymapping_check(obj: VariableTracker) -> bool:
+    """Implements PyMapping_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c (PyMapping_Check)
+    return obj.tp_as_mapping.mp_subscript is not None
+
+
+def pylist_check(obj: VariableTracker) -> bool:
+    """Implements PyList_Check semantics for VariableTracker objects."""
+    return issubclass(obj.python_type(), list)
+
+
+def pytuple_check(obj: VariableTracker) -> bool:
+    """Implements PyTuple_Check semantics for VariableTracker objects."""
+    return issubclass(obj.python_type(), tuple)
+
+
+def mappingproxy_check_mapping(
+    tx: "InstructionTranslatorBase", mapping: VariableTracker
+) -> None:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c (mappingproxy_check_mapping)
+    if not pymapping_check(mapping) or pylist_check(mapping) or pytuple_check(mapping):
+        raise_type_error(
+            tx,
+            "mappingproxy() argument must be a mapping, not "
+            f"{mapping.python_type_name()}",
+        )
 
 
 def pylong_check(obj_type: type) -> bool:

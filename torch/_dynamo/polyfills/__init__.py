@@ -15,8 +15,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ge, gt, le, lt, ne
-from typing import Any, TYPE_CHECKING, TypeGuard, TypeVar
-from typing_extensions import TypeIs
+from typing import Any, TYPE_CHECKING, TypeVar
 
 import torch
 
@@ -189,14 +188,6 @@ def infer_size(a: Sequence[Any], b: Sequence[Any]) -> torch.Size:
         expanded_sizes[i] = size_b if guard_or_false(size_a == 1) else size_a
 
     return torch.Size(expanded_sizes)
-
-
-def impl_IS_MAPPING(a: object) -> TypeIs[Mapping[Any, Any]]:
-    return isinstance(a, Mapping)
-
-
-def impl_MATCH_SEQUENCE(a: object) -> TypeGuard[Sequence[Any]]:
-    return isinstance(a, Sequence) and not isinstance(a, (str, bytes, bytearray))
 
 
 def _match_class_attr(obj: object, name: str, seen: set[str]) -> object:
@@ -444,13 +435,6 @@ def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
 def getattr_and_trace_no_nested_graph_breaks(*args: Any, **kwargs: Any) -> Any:
     with torch._dynamo.disable_nested_graph_breaks():
         return getattr_and_trace(*args, **kwargs)
-
-
-def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | None:
-    try:
-        return obj.__getitem__(key)
-    except KeyError:
-        return value
 
 
 def unpack_mapping_keys_and_values(
