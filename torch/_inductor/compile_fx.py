@@ -2907,15 +2907,13 @@ def compile_fx_forward(
     model_outputs = None
     user_visible_output_idxs: list[int] = []
     context = torch._guards.TracingContext.try_get()
-    fw_metadata = (
-        context.fw_metadata if context is not None and not is_inference else None
-    )
+    fw_metadata = context.fw_metadata if context is not None else None
     if config.keep_output_stride or clone_live_user_outputs:
         model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
         num_model_outputs = len(model_outputs)
 
         # See Note [User Outputs in the inductor graph]
-        if fw_metadata is not None:
+        if fw_metadata is not None and not is_inference:
             original_output_start_index = fw_metadata.num_mutated_inp_runtime_indices
         else:
             original_output_start_index = 0
@@ -2966,6 +2964,7 @@ def compile_fx_forward(
         )
         alias_of_output = OutputType.alias_of_intermediate_base_is_user_output
         alias_types = (
+            OutputType.alias_of_input,
             OutputType.alias_of_intermediate,
             OutputType.alias_of_intermediate_save_as_output,
             alias_of_output,
