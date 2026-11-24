@@ -8004,22 +8004,24 @@ class TestNNDeviceType(NNTestCase):
             _, dgamma, dbeta = torch.ops.aten.native_layer_norm_backward.default(
                 grad_out, x, [N], mean, rstd, weight, bias, [False, True, True])
 
-            x_cpu, weight_cpu, bias_cpu, grad_out_cpu = (t.cpu() for t in (x, weight, bias, grad_out))
+            # fp64 reference: the fp32 CPU kernel sums M/num_threads rows per
+            # thread in fp32, so its error depends on the host's thread count.
+            x_cpu, weight_cpu, bias_cpu, grad_out_cpu = (t.cpu().double() for t in (x, weight, bias, grad_out))
             _, mean_cpu, rstd_cpu = torch.ops.aten.native_layer_norm.default(
                 x_cpu, [N], weight_cpu, bias_cpu, eps)
             _, dgamma_ref, dbeta_ref = torch.ops.aten.native_layer_norm_backward.default(
                 grad_out_cpu, x_cpu, [N], mean_cpu, rstd_cpu, weight_cpu, bias_cpu, [False, True, True])
 
             # The two-pass path (M >= kGammaBetaTwoPassMinM == 2048) reduces
-            # over all M rows in a different order than the CPU reference,
-            # so fp32 accumulation noise grows with M; its worst case is
+            # over all M rows in a different order than the reference, so
+            # fp32 accumulation noise grows with M; its worst case is
             # M=65535, just below the huge-M switch. Bump the tolerance for
             # the whole two-pass/huge-M range rather than only M > 64*1024.
             atol = 1e-3 if M >= 2048 else 1e-4
             rtol = 1e-3 if M >= 2048 else 1e-4
             msg = f"M={M}"
-            self.assertEqual(dgamma.cpu(), dgamma_ref, msg, atol=atol, rtol=rtol)
-            self.assertEqual(dbeta.cpu(), dbeta_ref, msg, atol=atol, rtol=rtol)
+            self.assertEqual(dgamma.cpu().double(), dgamma_ref, msg, atol=atol, rtol=rtol)
+            self.assertEqual(dbeta.cpu().double(), dbeta_ref, msg, atol=atol, rtol=rtol)
 
 
     @onlyAccelerator
