@@ -3988,7 +3988,7 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @expectedFailureMPS
+
     def test_fishersnedecor_sample(self):
         set_rng_seed(1)  # see note [Randomized statistical tests]
         for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
