@@ -270,12 +270,17 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
             (config.peerCertValue.empty() != config.peerCertPrefix.empty()) &&
             !config.cert.empty() && !config.key.empty() && !config.ca.empty() &&
             config.psk.empty() && pskFile.empty(),
-        "TCPStore TLS: peer certificate policy requires certificate mode, an OID, and exactly one value or prefix; explicit TLS options replace all TLS environment settings");
+        "TCPStore TLS: peer certificate policy requires certificate mode, an OID, and exactly one value or prefix; explicit TLS options replace all TLS environment settings",
+        config.fromEnv ? " (from TORCH_TCPSTORE_TLS_* environment variables)"
+                       : " (from TCPStore options)");
     TORCH_CHECK_WITH(
         DistStoreError,
         config.peerCertValue.find(',') == std::string::npos &&
             config.peerCertPrefix.find(',') == std::string::npos,
-        "TCPStore TLS: peer certificate value or prefix must be a single identity (no comma)");
+        "TCPStore TLS: peer certificate value or prefix must be a single identity (no comma)",
+        config.fromEnv
+            ? " (TORCH_TCPSTORE_TLS_PEER_CERT_VALUE or TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX)"
+            : " (tls_peer_cert_value or tls_peer_cert_prefix)");
   }
   if (!config.enabled() && pskFile.empty()) {
     TORCH_CHECK_WITH(
@@ -536,7 +541,9 @@ std::shared_ptr<TLSContext> TLSContext::fromConfig(
       TORCH_CHECK_WITH(
           DistStoreError,
           identity,
-          "TCPStore TLS: local certificate must contain exactly one identity matching tls_peer_cert_prefix");
+          "TCPStore TLS: local certificate must contain exactly one identity matching ",
+          config.fromEnv ? "TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX"
+                         : "tls_peer_cert_prefix");
       res->peerCertValue_ = *identity;
     }
   }
