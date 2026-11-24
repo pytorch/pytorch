@@ -88,7 +88,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     SM90OrLater,
@@ -16497,8 +16497,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 )
                 return clone
 
-        # DeterministicGuard locks MIOpen's solver choice on gfx950. atol/rtol
-        # cover the fp16 hgemm noise floor on gfx90a. Derivation:
+        # The conv is an aten call on both sides. On ROCm, MIOpen times its
+        # solvers even in deterministic mode and may pick an fp16 Winograd
+        # solver whose error against an fp32 reference exceeds atol, so compare
+        # with an fp16 eager reference that runs the same MIOpen conv.
+        # DeterministicGuard keeps both runs off nondeterministic solvers.
+        # atol/rtol cover the fp16 hgemm noise floor against an fp32 reference:
         # https://github.com/pytorch/pytorch/issues/183581
         with DeterministicGuard(True, warn_only=True):
             self.common(
@@ -16507,6 +16511,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=not is_halide_backend(self.device),
                 atol=2e-3,
                 rtol=2e-3,
+                reference_in_float=not torch.version.hip,
             )
 
     def test_inplace_where_pointwise(self):
@@ -24230,7 +24235,7 @@ if RUN_GPU:
             ).run(code[0])
 
         @unittest.skipIf(
-            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)),
+            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8_GROUPED_GEMM)),
             "no scaled_grouped_mm support",
         )
         def test_respect_scaled_grouped_mm_layout_tag(self):
