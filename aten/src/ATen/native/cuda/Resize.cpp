@@ -15,10 +15,12 @@
 namespace at::native {
 
 namespace {
-// Graph allocators enabled mid-process (torch.cuda.memory._enable_graph_allocators
-// after CUDA is initialized): a storage created before, whose CUDA allocator is
-// no longer the current one (e.g. FSDP2's unsharded parameters, resized inside
-// a captured step), re-allocates from the current one.
+// A storage whose CUDA allocator is no longer the current one re-allocates from
+// the current one. The current CUDA allocator changes around CUDA graph
+// allocator windows (torch/csrc/cuda/CUDAPluggableAllocator.cpp): a storage
+// created before a window (e.g. FSDP2's unsharded parameters, resized inside a
+// captured step) resizes through the window's allocator, and one created during
+// a window resizes through the caching allocator after it.
 c10::Allocator* current_cuda_allocator_for(StorageImpl* storage) {
   auto* allocator = storage->allocator();
   auto* current = c10::cuda::CUDACachingAllocator::get();
@@ -116,7 +118,7 @@ const Tensor& resize_cuda_(
     self_->empty_tensor_restride(memory_format);
   }
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+  if (at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory()) [[unlikely]] {
     at::native::fill_resize_deterministic_(self, static_cast<int64_t>(old_storage_nbytes));
   }
   return self;
