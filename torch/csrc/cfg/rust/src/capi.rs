@@ -4,7 +4,7 @@
 use crate::pyffi::{self, Obj, Shared};
 use pyo3::ffi;
 use std::os::raw::c_char;
-use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicU8, Ordering};
 
 #[repr(C)]
 pub struct TcfgTrace {
@@ -17,6 +17,12 @@ pub struct TcfgSite {
 }
 
 pub const TCFG_MISS: i32 = 1;
+/// The guards of the site hold and a torch function mode keeps it from
+/// standing for the call (see cfg.h).
+pub const TCFG_MODE: i32 = 3;
+/// The kernel raised in a call that was made with torch's device mode
+/// taken off (see cfg.h).
+pub const TCFG_ERROR_OFF: i32 = 4;
 
 pub const TCFG_CALL: i32 = 0;
 pub const TCFG_METHOD: i32 = 1;
@@ -26,8 +32,11 @@ pub const TCFG_UNARY: i32 = 3;
 pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
+/// Under torch's device mode the call may be made with the mode taken off
+/// (see cfg.h).
+pub const TCFG_MODE_DIRECT: u32 = 2;
 
-pub const TCFG_API_VERSION: u32 = 18;
+pub const TCFG_API_VERSION: u32 = 19;
 /// The bits of `call_modes` that say eager runs Python code under the
 /// operations of the thread where gradients are recorded: a saved-tensor
 /// hook is on, a node-creation hook is on, anomaly mode is on.
@@ -187,6 +196,10 @@ pub struct TcfgBackwardApi {
     pub graph_node: unsafe extern "C" fn(Obj, Obj, *mut std::ffi::c_void, Backward, Release) -> i32,
     pub frame_count_kernel: Option<unsafe extern "C" fn() -> u64>,
     pub grad_enabled: unsafe extern "C" fn() -> u32,
+    pub function_modes: unsafe extern "C" fn() -> i32,
+    pub device_set: unsafe extern "C" fn() -> i32,
+    pub mode_off: unsafe extern "C" fn() -> *mut std::ffi::c_void,
+    pub mode_back: unsafe extern "C" fn(*mut std::ffi::c_void),
 }
 
 /// Those entries, once the table of torch._C was handed over.
@@ -270,6 +283,10 @@ pub struct SiteSlot {
     /// What keeps the calls of its sites out of a graph: the SITE_* bits of
     /// every variant.
     traits: AtomicU8,
+    /// A call of one of its sites can be made a second time without
+    /// anything to show for it: the operator neither writes to an
+    /// argument, nor draws random numbers, nor updates statistics.
+    again: AtomicBool,
     pub hits: AtomicU64,
     pub misses: AtomicU64,
 }
@@ -291,6 +308,7 @@ impl SiteSlot {
             variants: Shared::new(Vec::new()),
             descriptions: Shared::new(Vec::new()),
             traits: AtomicU8::new(0),
+            again: AtomicBool::new(true),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
         }
@@ -308,6 +326,10 @@ impl SiteSlot {
     /// Takes ownership of the site.
     pub unsafe fn push(&self, site: *mut TcfgSite) {
         let (description, traits) = describe_site(site);
+        let operator = description.split('[').next().unwrap_or("");
+        if traits & (SITE_WRITES | SITE_RANDOM) != 0 || crate::graph::normalization(operator) {
+            self.again.store(false, Ordering::Relaxed);
+        }
         self.variants.borrow_mut().push(site);
         self.descriptions.borrow_mut().push(description);
         self.traits.fetch_or(traits, Ordering::Relaxed);
@@ -315,6 +337,11 @@ impl SiteSlot {
 
     pub fn traits(&self) -> u8 {
         self.traits.load(Ordering::Relaxed)
+    }
+
+    /// See `again`.
+    pub fn runs_again(&self) -> bool {
+        self.again.load(Ordering::Relaxed)
     }
 
     pub fn describe(&self) -> String {

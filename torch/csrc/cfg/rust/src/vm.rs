@@ -1876,11 +1876,34 @@ unsafe fn take(regs: &mut [Obj], v: V) -> Obj {
     std::mem::replace(regs.get_unchecked_mut(v as usize), null_mut())
 }
 
-/// Whether a torch function mode is on: the dispatcher state word has the
-/// number of them from bit 16 on.
+/// The torch function modes of the thread (`function_modes` of cfg.h): 0
+/// none is on, 1 torch's device mode alone and as torch made it, 2
+/// anything else.
 #[inline(always)]
-unsafe fn modes_on(api: &TcfgApi) -> bool {
-    (api.call_modes)() >> 16 != 0
+unsafe fn function_modes() -> i32 {
+    capi::backward_api().map_or(2, |api| (api.function_modes)())
+}
+
+/// Whether a torch function mode is on that every operation and every
+/// read of a tensor has to go through: any but torch's device mode, alone
+/// and as torch made it, which hands on what is none of its factories.
+#[inline(always)]
+unsafe fn modes_on(_api: &TcfgApi) -> bool {
+    function_modes() == 2
+}
+
+/// Whether the interpreter would run no code of anybody's for an
+/// operation or a read of a tensor that torch's modes are asked about: no
+/// torch function mode is on, or torch's device mode alone, as torch made
+/// it and with the set of factories that torch gave it, which hands such
+/// a call on as it is.
+#[inline(always)]
+unsafe fn modes_hand_on() -> bool {
+    match function_modes() {
+        0 => true,
+        1 => capi::backward_api().is_some_and(|api| (api.device_set)() != 0),
+        _ => false,
+    }
 }
 
 /// The raw content of a register: a Python object, null, or an unboxed
@@ -4788,6 +4811,10 @@ impl Compiled {
         api: &TcfgApi,
     ) -> OpResult {
         let n = slot.len();
+        // Under torch's device mode a call is made with the mode taken off
+        // only where it can be made a second time (see `TCFG_ERROR_OFF`).
+        let flags = flags | if slot.runs_again() { capi::TCFG_MODE_DIRECT } else { 0 };
+        let mut kept = false;
         for i in 0..n {
             let mut status = 0i32;
             let r = (api.site_call)(slot.get(i), ptr, flags, &mut status);
@@ -4798,19 +4825,46 @@ impl Compiled {
                 }
                 return Ok(r);
             }
-            if status != capi::TCFG_MISS {
-                return Err(());
+            match status {
+                capi::TCFG_MISS => {}
+                // The site is the one of these operands, and a mode keeps
+                // it from standing for the call.
+                capi::TCFG_MODE => {
+                    kept = true;
+                    break;
+                }
+                // The kernel raised with torch's device mode taken off:
+                // eager mode raises it under the mode's handler, whose
+                // frame the traceback has. The operation neither writes
+                // nor draws and nothing of the user's ran under it, so it
+                // runs again as it is written and raises there. Not for
+                // what a signal's handler raised, which is not the
+                // kernel's.
+                capi::TCFG_ERROR_OFF if !graph::interrupted() => {
+                    ffi::PyErr_Clear();
+                    if self.unbound.any.get() {
+                        self.bind();
+                    }
+                    return self.exec_op(regs, fallback);
+                }
+                _ => return Err(()),
             }
         }
         // The generic operation can be a call of anything.
         if self.unbound.any.get() {
             self.bind();
         }
-        // No site stands for the call while a torch function mode is on,
-        // which every kernel goes through: that says nothing about the
-        // operands. It is no miss, and no new case to learn.
-        if modes_on(api) {
-            self.met_mode();
+        // No site stands for the call while a torch function mode is on
+        // that every kernel goes through: that says nothing about the
+        // operands. It is no miss, and no new case to learn. Under torch's
+        // device mode a site that the mode keeps from the call is none
+        // either, and the function is not one to leave to the interpreter
+        // for it.
+        let modes = function_modes();
+        if modes == 2 || kept {
+            if modes == 2 {
+                self.met_mode();
+            }
             return self.exec_op(regs, fallback);
         }
         // Nor while a class of tensors reads its attributes with a
@@ -4912,7 +4966,11 @@ impl Compiled {
                     let before = {
                         let mut st = self.state.borrow_mut();
                         let bs = &mut st.blocks[b];
-                        bs.capture_attempts[index] += !moded as u32;
+                        // Nor is a call that torch's device mode does not hand
+                        // on as it is (a factory without a device) an attempt:
+                        // without the mode the instruction has its site.
+                        let kept = site.is_null() && reason.as_deref() == Some("a torch function mode is active");
+                        bs.capture_attempts[index] += !(moded || kept) as u32;
                         if !site.is_null() {
                             let slot = SiteSlot::new(kind);
                             slot.push(site);
@@ -4995,7 +5053,7 @@ impl Compiled {
     /// (`read_again`).
     #[inline(always)]
     unsafe fn reads_quietly(api: Option<&TcfgApi>) -> bool {
-        api.is_some_and(|api| !modes_on(api)) && graph::sizes_are_own()
+        api.is_some() && modes_hand_on() && graph::sizes_are_own()
     }
 
     /// What a read of a size gives (`Op::TensorSize`, `Op::TensorDim`) where

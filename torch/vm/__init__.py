@@ -208,6 +208,51 @@ order and again until no pass changes the block anymore."""
 _runtime: Any = None
 
 
+def _device_mode() -> tuple | None:
+    """What the runtime knows torch's device mode by (``torch.set_default_device``, ``with torch.device(...)``),
+    taken when torch is imported, before anything else can stand in its place: the class of the mode and what it
+    has under ``__torch_function__``; the cached function that gives the set of factories, and what torch's own
+    function behind it gives; ``torch.overrides.handle_torch_function``; the objects whose functions of C the
+    mode's handler is handed as they are; and the line of the handler that calls what it is handed, which is
+    where a warning of a kernel is reported under the mode. None where torch's device mode is not what this
+    expects: the runtime then sees through no mode."""
+    try:
+        import dis
+
+        import torch.utils._device as device
+
+        handler = device.DeviceContext.__dict__["__torch_function__"]
+        calls = [
+            at.positions.lineno
+            for at in dis.get_instructions(handler)
+            if at.opname == "CALL_FUNCTION_EX"
+        ]
+        bindings = (
+            type(torch._C._VariableFunctions),
+            torch._C._nn,
+            torch._C._linalg,
+            torch._C._fft,
+            torch._C._special,
+            torch._C._sparse,
+            torch._C._nested,
+        )
+        factories = device._device_constructors.__wrapped__()
+        return (
+            device.DeviceContext,
+            handler,
+            device._device_constructors,
+            factories,
+            torch.overrides.handle_torch_function,
+            bindings,
+            calls[-1],
+        )
+    except Exception:
+        return None
+
+
+_DEVICE_MODE = _device_mode()
+
+
 def _load_runtime() -> Any:
     global _runtime
     if _runtime is None:
@@ -222,6 +267,8 @@ def _load_runtime() -> Any:
                 "(requires cargo)."
             ) from e
         _cfg_rs.init(torch._C._cfg_c_api())
+        if _DEVICE_MODE is not None:
+            torch._C._cfg_device_mode(*_DEVICE_MODE)
         _cfg_rs.leave_to_interpreter(_compilers())
         _runtime = _cfg_rs
     return _runtime

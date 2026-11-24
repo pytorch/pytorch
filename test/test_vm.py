@@ -902,6 +902,160 @@ class TestVmFrontend(TestCase):
 instantiate_parametrized_tests(TestVmFrontend)
 
 
+VM_DEVICE_LOG = []
+VM_DEVICE_HANDLER = torch.utils._device.DeviceContext.__dict__["__torch_function__"]
+VM_DEVICE_CONSTRUCTORS = torch.utils._device._device_constructors
+
+
+def vm_device_kernels(x, w):
+    h = (x * w + 1.0).sin()
+    h = torch.nn.functional.linear(h, w)
+    n = h.shape[0] + h.dim()
+    return (torch.cos(h) * n).tanh().sum(0)
+
+
+def vm_device_factories(x, w):
+    h = (x[0] * 2).sin() + 1
+    a = torch.arange(4.0)
+    b = torch.zeros(4, device=x.device)
+    c = torch.zeros_like(h)
+    return ((h + a.to(h.device)).cos() * 3).tanh() + b + c, a.device.type, b.device.type
+
+
+def vm_device_switch(what):
+    """Called between two kernels of a function: changes what torch function modes are on."""
+    if what is not None:
+        what()
+    return 0
+
+
+def vm_device_switches(x, w, first, second):
+    h = (x[0] * 2).sin() + 1
+    a = torch.arange(4.0)
+    vm_device_switch(first)
+    b = torch.arange(4.0)
+    k = (h.cos() * 3).tanh()
+    vm_device_switch(second)
+    c = torch.arange(4.0)
+    return k + (k * 2).sin(), a.device.type, b.device.type, c.device.type
+
+
+def vm_device_warns(x, w):
+    h = (x * 2).sin() + 1
+    s = h[0, :1].std()
+    return (h.cos() * 3).tanh().sum() + s.nan_to_num(0.0)
+
+
+def vm_device_raises(x, w):
+    h = (x * 2).sin() + 1
+    return h.view(7, 7)
+
+
+def vm_device_catches(x, w):
+    h = (x * 2).sin() + 1
+    try:
+        return h.view(7, 7)
+    except RuntimeError:
+        return h + 1
+
+
+class VmDeviceLogs(torch.overrides.TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        VM_DEVICE_LOG.append(getattr(func, "__name__", str(func)))
+        return func(*args, **(kwargs or {}))
+
+
+class VmDeviceLoud(torch.utils._device.DeviceContext):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        VM_DEVICE_LOG.append("loud:" + getattr(func, "__name__", str(func)))
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class VmDeviceQuiet(torch.utils._device.DeviceContext):
+    pass
+
+
+def vm_device_logging_handler(self, func, types, args=(), kwargs=None):
+    VM_DEVICE_LOG.append("replaced:" + getattr(func, "__name__", str(func)))
+    return VM_DEVICE_HANDLER(self, func, types, args, kwargs)
+
+
+def vm_device_clean():
+    """No default device, no mode on, torch's handler and torch's set as torch has them."""
+    module = torch.utils._device
+    torch.set_default_device(None)
+    while torch.overrides._len_torch_function_stack():
+        torch.overrides._pop_mode()
+    module.CURRENT_DEVICE = None
+    if module.DeviceContext.__dict__["__torch_function__"] is not VM_DEVICE_HANDLER:
+        module.DeviceContext.__torch_function__ = VM_DEVICE_HANDLER
+    module._device_constructors = VM_DEVICE_CONSTRUCTORS
+    VM_DEVICE_CONSTRUCTORS().add(torch.arange)
+    VM_DEVICE_CONSTRUCTORS().discard(torch.zeros_like)
+
+
+def vm_device_shown(out):
+    if isinstance(out, torch.Tensor):
+        return out.device.type, out.tolist()
+    if isinstance(out, tuple):
+        return tuple(vm_device_shown(item) for item in out)
+    return out
+
+
+def vm_device_calls(run, fn, device, world, around=None, calls=10, more=()):
+    """`calls` calls of `run` on tensors of the CPU; `world(at)` runs in front of each, `around(at)` gives a context
+    manager for it or None. Per call: what came out with the device it is on (or what was raised, with the frames
+    of the traceback from the function on), the warnings by category, file, line and text, what the modes
+    logged, and how many call sites of a compiled function the call ran."""
+    rows = []
+    try:
+        vm_device_clean()
+        for at in range(calls):
+            with torch._C.DisableTorchFunction():
+                torch.manual_seed(at)
+                x, w = torch.randn(4, 4), torch.randn(4, 4)
+            world(at)
+            del VM_DEVICE_LOG[:]
+            hits = run.stats()["site_hits"] if run is not fn else 0
+            try:
+                with warnings.catch_warnings(record=True) as seen:
+                    warnings.simplefilter("always")
+                    if around is not None and around(at) is not None:
+                        with around(at):
+                            said = vm_device_shown(run(x, w, *more))
+                    else:
+                        said = vm_device_shown(run(x, w, *more))
+            except Exception as error:
+                frames = traceback.extract_tb(error.__traceback__)
+                first = next(
+                    i for i, frame in enumerate(frames) if frame.name == fn.__name__
+                )
+                said = (
+                    "raised",
+                    type(error).__name__,
+                    str(error),
+                    [
+                        (os.path.basename(f.filename), f.name, f.lineno)
+                        for f in frames[first:]
+                    ],
+                )
+                seen = []
+            warned = [
+                (
+                    type(w.message).__name__,
+                    os.path.basename(w.filename),
+                    w.lineno,
+                    str(w.message),
+                )
+                for w in seen
+            ]
+            ran = run.stats()["site_hits"] - hits if run is not fn else None
+            rows.append((said, warned, list(VM_DEVICE_LOG), ran))
+    finally:
+        vm_device_clean()
+    return rows
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmDevices(TestCase):
     """Profiling on real tensors and direct kernel calls."""
@@ -1271,6 +1425,412 @@ class TestVmDevices(TestCase):
             self.assertEqual(loss, expected, atol=0, rtol=0)
         for ours, theirs in zip(model.parameters(), twin.parameters()):
             self.assertTrue(torch.equal(ours, theirs))
+
+    def test_torchs_device_mode_hands_a_call_on_and_its_call_site_stands_for_it(
+        self, device
+    ):
+        # `torch.set_default_device` and `with torch.device(...)` put a torch
+        # function mode on the thread, which torch asks at every call and
+        # at every read of a tensor. Its handler adds `device=` to the
+        # calls of a fixed set of factories that came without one and
+        # hands every other call on as it is: for such a call the kernel
+        # runs with the mode taken off, and that is what a call site does
+        # under it. The mode must be on alone and be as torch made it
+        # (exactly its class, torch's handler under the name, nothing of
+        # its own in the object, the set of factories the one torch
+        # gives): in every other state, and for a factory without a
+        # device, the instruction runs as it is written, through the mode.
+        # (Before, no call site stood for its call under a default device:
+        # a function ran at eager's speed there.)
+        def keep(gm, input_types):
+            return gm
+
+        module = torch.utils._device
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES),
+            ("graphs", graphs),
+            ("a pass", (*graphs, keep)),
+        )
+
+        def some(first, last, to=None, back=None):
+            def world(at):
+                if at == 0:
+                    torch.set_default_device(device)
+                if at == first and to is not None:
+                    to()
+                if at == last and back is not None:
+                    back()
+
+            return world
+
+        def context():
+            return torch._GLOBAL_DEVICE_CONTEXT.device_context
+
+        def both(compiled, fn, world, around, msg, calls=10, more=()):
+            got = vm_device_calls(compiled, fn, device, world, around, calls, more)
+            expected = vm_device_calls(fn, fn, device, world, around, calls, more)
+            self.assertEqual(
+                [row[:3] for row in got], [row[:3] for row in expected], msg=msg
+            )
+            return [row[3] for row in got]
+
+        # The device set always, from the fourth call on, in the calls 3
+        # to 5, and by `with torch.device` around those: what comes out and
+        # where it lands is eager's, and under the mode a call runs the
+        # call sites that it runs without one.
+        between = lambda at: torch.device(device) if 3 <= at < 6 else None  # noqa: E731
+        simple = {
+            "always": (some(3, 6), None),
+            "from the fourth call on": (
+                lambda at: torch.set_default_device(device) if at == 3 else None,
+                None,
+            ),
+            "in the calls 3 to 5": (
+                lambda at: torch.set_default_device({3: device, 6: None}[at])
+                if at in (3, 6)
+                else None,
+                None,
+            ),
+            "`with torch.device` around the calls 3 to 5": (lambda at: None, between),
+        }
+        for fn in (vm_device_kernels, vm_device_factories):
+            for way, passes in ways:
+                for demote in (True, False):
+                    for name, (world, around) in simple.items():
+                        msg = f"{fn.__name__}, {way}, measured {demote}, the device {name}"
+                        compiled = torch.vm(
+                            fn, passes=passes, fallback=False, demote=demote
+                        )
+                        ran = both(compiled, fn, world, around, msg)
+                        if name == "always" and demote:
+                            # Nothing is left to the interpreter for the mode.
+                            self.assertEqual(
+                                compiled.stats()["under_modes"], 0, msg=msg
+                            )
+                        if (
+                            name == "in the calls 3 to 5"
+                            and not demote
+                            and way == "the default passes"
+                        ):
+                            # Call 5 under the mode, call 9 without one:
+                            # the same call sites run.
+                            self.assertEqual(ran[5], ran[9], msg=msg)
+                            self.assertGreater(ran[5], 0, msg=msg)
+
+        # What is not the mode as torch made it, in the calls 3 to 5: the
+        # instructions run through whatever is on, and no call site does.
+        def on_the_class(handler):
+            return lambda: setattr(module.DeviceContext, "__torch_function__", handler)
+
+        def on_the_object():
+            context().__torch_function__ = types_module.MethodType(
+                vm_device_logging_handler, context()
+            )
+
+        entered = []
+
+        def enter(klass):
+            return lambda: entered.append(
+                klass(device).__enter__()
+                or torch.overrides._get_current_function_mode_stack()[-1]
+            )
+
+        def leave():
+            entered.pop().__exit__(None, None, None)
+
+        states = {
+            "a mode that logs above it": (
+                None,
+                None,
+                lambda at: VmDeviceLogs() if 3 <= at < 6 else None,
+                False,
+            ),
+            "a class made of the mode's with a handler of its own": (
+                enter(VmDeviceLoud),
+                leave,
+                None,
+                False,
+            ),
+            "a class made of the mode's with nothing of its own": (
+                enter(VmDeviceQuiet),
+                leave,
+                None,
+                False,
+            ),
+            "another handler on the class": (
+                on_the_class(vm_device_logging_handler),
+                on_the_class(VM_DEVICE_HANDLER),
+                None,
+                False,
+            ),
+            "a handler on the object": (
+                on_the_object,
+                lambda: context().__dict__.pop("__torch_function__", None),
+                None,
+                False,
+            ),
+            "a factory taken out of the set": (
+                lambda: VM_DEVICE_CONSTRUCTORS().discard(torch.arange),
+                lambda: VM_DEVICE_CONSTRUCTORS().add(torch.arange),
+                None,
+                False,
+            ),
+            "a function put into the set": (
+                lambda: VM_DEVICE_CONSTRUCTORS().add(torch.zeros_like),
+                lambda: VM_DEVICE_CONSTRUCTORS().discard(torch.zeros_like),
+                None,
+                False,
+            ),
+            "another function for the set": (
+                lambda: setattr(module, "_device_constructors", lambda: {torch.zeros}),
+                lambda: setattr(module, "_device_constructors", VM_DEVICE_CONSTRUCTORS),
+                None,
+                False,
+            ),
+            "another device in the object": (
+                lambda: setattr(context(), "device", torch.device("cpu")),
+                lambda: setattr(context(), "device", torch.device(device)),
+                None,
+                True,
+            ),
+            "torch functions disabled": (
+                None,
+                None,
+                lambda at: torch._C.DisableTorchFunction() if 3 <= at < 6 else None,
+                True,
+            ),
+        }
+        for name, (to, back, around, direct) in states.items():
+            for way, passes in ways:
+                msg = f"{name} in the calls 3 to 5, {way}"
+                compiled = torch.vm(
+                    vm_device_factories, passes=passes, fallback=False, demote=False
+                )
+                ran = both(
+                    compiled, vm_device_factories, some(3, 6, to, back), around, msg
+                )
+                if way == "the default passes":
+                    self.assertEqual(
+                        [count > 0 for count in ran[3:6]], [direct] * 3, msg=msg
+                    )
+                    self.assertGreater(ran[9], 0, msg=msg)
+
+        # The same between two kernels of one call: a function that the
+        # function calls changes what is on, and changes it back.
+        logs = VmDeviceLogs()
+        inside = {
+            "the default device set to the CPU and back": (
+                lambda: torch.set_default_device("cpu"),
+                lambda: torch.set_default_device(device),
+            ),
+            "a mode that logs put above and taken off": (
+                lambda: torch.overrides._push_mode(logs),
+                lambda: torch.overrides._pop_mode(),
+            ),
+            "a factory taken out of the set and put back": (
+                lambda: VM_DEVICE_CONSTRUCTORS().discard(torch.arange),
+                lambda: VM_DEVICE_CONSTRUCTORS().add(torch.arange),
+            ),
+            "a handler put on the object and taken off": (
+                on_the_object,
+                lambda: context().__dict__.pop("__torch_function__", None),
+            ),
+        }
+        for name, (first, second) in inside.items():
+            for way, passes in ways:
+                for demote in (True, False):
+                    msg = f"{name} inside a call, {way}, measured {demote}"
+                    compiled = torch.vm(
+                        vm_device_switches, passes=passes, fallback=False, demote=demote
+                    )
+                    both(
+                        compiled,
+                        vm_device_switches,
+                        some(3, 6),
+                        None,
+                        msg,
+                        more=(first, second),
+                    )
+
+    def test_under_torchs_device_mode_a_kernel_warns_and_raises_where_eager_does(
+        self, device
+    ):
+        # In eager mode a kernel runs under the handler of the device
+        # mode, so a warning it gives is reported for the handler's file
+        # and line, in the registry of the handler's module, and a
+        # traceback of what it raises has the handler's frame. A call site
+        # that runs the kernel with the mode taken off shows the warning
+        # for that place itself, and where the kernel raises the
+        # instruction runs once more as it is written, through the mode,
+        # and raises there. Stated: Python code that shows a warning does
+        # not find the handler's frame above itself, nor does the traceback
+        # of a warning that a filter makes an error.
+        module = torch.utils._device
+
+        def always(at):
+            if at == 0:
+                torch.set_default_device(device)
+
+        for fn in (vm_device_warns, vm_device_raises, vm_device_catches):
+            for demote in (True, False):
+                msg = f"{fn.__name__}, measured {demote}"
+                compiled = torch.vm(fn, fallback=False, demote=demote)
+                got = vm_device_calls(compiled, fn, device, always)
+                expected = vm_device_calls(fn, fn, device, always)
+                self.assertEqual(
+                    [row[:3] for row in got], [row[:3] for row in expected], msg=msg
+                )
+                if fn is vm_device_warns:
+                    place = ("UserWarning", "_device.py", torch.vm._DEVICE_MODE[-1])
+                    self.assertEqual(
+                        [row[1][0][:3] for row in expected], [place] * 10, msg=msg
+                    )
+                if fn is vm_device_raises:
+                    self.assertEqual(
+                        expected[9][0][3][-1][:2],
+                        ("_device.py", "__torch_function__"),
+                        msg=msg,
+                    )
+                if not demote:
+                    # The other kernels ran from their call sites.
+                    self.assertGreater(got[9][3], 0, msg=msg)
+
+        # The filters, and a function of the user's that shows warnings.
+        def filtered(run, action, show=None):
+            vm_device_clean()
+            module.__dict__.pop("__warningregistry__", None)
+            warnings.onceregistry.clear()
+            torch.manual_seed(0)
+            x, w = torch.randn(4, 4), torch.randn(4, 4)
+            shown, rows = [], []
+            torch.set_default_device(device)
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter(action)
+                    if show is not None:
+                        warnings.showwarning = (
+                            lambda message,
+                            category,
+                            filename,
+                            lineno,
+                            file=None,
+                            line=None: shown.append(
+                                (
+                                    str(message),
+                                    category.__name__,
+                                    os.path.basename(filename),
+                                    lineno,
+                                )
+                            )
+                        )
+                    for at in range(8):
+                        try:
+                            with warnings.catch_warnings(record=show is None) as seen:
+                                rows.append(
+                                    (
+                                        run(x, w).tolist(),
+                                        [
+                                            (
+                                                type(w.message).__name__,
+                                                os.path.basename(w.filename),
+                                                w.lineno,
+                                            )
+                                            for w in seen or ()
+                                        ],
+                                    )
+                                )
+                        except UserWarning as error:
+                            frames = traceback.extract_tb(error.__traceback__)
+                            line = [
+                                f.lineno for f in frames if f.name == "vm_device_warns"
+                            ]
+                            rows.append(
+                                ("raised", type(error).__name__, str(error), line)
+                            )
+                registry = sorted(
+                    str(key[:1])
+                    for key in module.__dict__.get("__warningregistry__", {})
+                    if isinstance(key, tuple)
+                )
+            finally:
+                vm_device_clean()
+            return rows, shown, registry
+
+        for action, show in (
+            ("always", None),
+            ("default", None),
+            ("once", None),
+            ("error", None),
+            ("ignore", None),
+            ("always", True),
+            ("default", True),
+        ):
+            for demote in (True, False):
+                msg = f"the filter {action}, shown by a function of the user's {show}, measured {demote}"
+                compiled = torch.vm(vm_device_warns, fallback=False, demote=demote)
+                self.assertEqual(
+                    filtered(compiled, action, show),
+                    filtered(vm_device_warns, action, show),
+                    msg=msg,
+                )
+
+    def test_torchs_device_mode_is_what_the_runtime_knows_it_by(self, device):
+        # The runtime sees through torch's device mode because of what its
+        # handler does, which is these lines. If this fails, torch's
+        # handler has changed: what a call site does under the mode
+        # (`handedOn` and `directUnderMode` in torch/csrc/cfg/cfg.cpp) has to
+        # be read against the new handler before this text is changed.
+        klass, handler, constructors, factories, route, bindings, line = (
+            torch.vm._DEVICE_MODE
+        )
+        import inspect
+
+        source = inspect.getsource(handler)
+        wanted = (
+            "    def __torch_function__(self, func, types, args=(), kwargs=None):\n"
+            "        kwargs = kwargs or {}\n"
+            '        if func in _device_constructors() and kwargs.get("device") is None:\n'
+            '            kwargs["device"] = self.device\n'
+            "        return func(*args, **kwargs)\n"
+        )
+        self.assertEqual(source, wanted)
+        self.assertEqual(line, handler.__code__.co_firstlineno + 4)
+        self.assertIs(klass, torch.utils._device.DeviceContext)
+        self.assertIs(klass.__dict__["__torch_function__"], handler)
+        self.assertIs(constructors, torch.utils._device._device_constructors)
+        self.assertEqual(factories, constructors())
+        self.assertIs(route, torch.overrides.handle_torch_function)
+        # A function of torch's own bindings is handed to the handler as
+        # it is, by the object it is a function of.
+        self.assertIs(bindings[0].add, torch.add)
+        self.assertIs(type(torch._C._VariableFunctions), bindings[0])
+        self.assertIs(torch.nn.functional.linear.__self__, torch._C._nn)
+        self.assertIn(torch._C._nn, bindings)
+        seen = []
+
+        class Notes(torch.overrides.TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                seen.append(func)
+                return func(*args, **(kwargs or {}))
+
+        x = torch.ones(2, 2, device=device)
+        with Notes():
+            _ = (
+                torch.add(x, x),
+                x.add(x),
+                x + x,
+                x.shape,
+                torch.nn.functional.linear(x, x),
+                x[0],
+                torch.zeros(2),
+            )
+        tensor = torch.Tensor
+        self.assertEqual(seen[:3], [torch.add, tensor.add, tensor.add])
+        self.assertEqual(seen[3], tensor.shape.__get__)
+        self.assertEqual(
+            seen[4:], [torch._C._nn.linear, tensor.__getitem__, torch.zeros]
+        )
 
 
 instantiate_device_type_tests(TestVmDevices, globals())
@@ -16104,6 +16664,187 @@ def graph_reads_by_its_own_lookup(x, given):
     return ((h * config.scale).sin() * 2 - (options.get("drop") or 1.0)).sum(), None
 
 
+# What a function makes with a factory, for the tests of what the runtime
+# keeps of a kernel's result while a block is profiled.
+VM_GIVEN_MAKERS = {
+    "zeros_like": lambda v: torch.zeros_like(v),
+    "ones_like": lambda v: torch.ones_like(v),
+    "empty_like": lambda v: torch.empty_like(v).zero_(),
+    "full_like": lambda v: torch.full_like(v, 2.0),
+    "rand_like": lambda v: torch.rand_like(v) * 0,
+    "new_zeros": lambda v: v.new_zeros(4),
+    "zeros": lambda v: torch.zeros(4, device=v.device) + v,
+    "clone": lambda v: v.clone(),
+}
+
+
+def vm_given_function(name):
+    make = VM_GIVEN_MAKERS[name]
+
+    def given(x, v):
+        h = (x * 0.5).cos() + x.sin()
+        return h.sum() * 2.0, make(v)
+
+    return given
+
+
+def vm_given_outcome(call):
+    """What a call gave, as sums, or what it raised."""
+    try:
+        return [round(float(t.sum()), 3) for t in call()]
+    except Exception as error:
+        return f"{type(error).__name__}: {str(error)[:60]}"
+
+
+def vm_given_nodes(run, x, device):
+    """The functions of the graph that `make_fx` traces of a call."""
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    traced = make_fx(lambda a, b: run(a, b), tracing_mode="real")(
+        x, torch.ones(4, device=device)
+    )
+    return [
+        str(getattr(n.target, "__name__", n.target))
+        for n in traced.graph.nodes
+        if n.op == "call_function"
+    ]
+
+
+def vm_given_class(policy):
+    """A class of tensors that wrap a tensor and keep what the dispatcher
+    asks of them, and with `policy` what it asks about their sizes: the
+    class and its log."""
+    asked = []
+    answers = {
+        "aten.dim": lambda e: e.dim(),
+        "aten.sym_size": lambda e: tuple(e.shape),
+        "aten.size": lambda e: tuple(e.shape),
+        "aten.sym_numel": lambda e: e.numel(),
+        "aten.numel": lambda e: e.numel(),
+        "aten.sym_stride": lambda e: tuple(e.stride()),
+        "aten.stride": lambda e: tuple(e.stride()),
+        "aten.is_contiguous": lambda e: e.is_contiguous(),
+        "aten.sym_storage_offset": lambda e: e.storage_offset(),
+        "aten.storage_offset": lambda e: e.storage_offset(),
+        "aten.is_strides_like_format": lambda e: False,
+        "aten.is_non_overlapping_and_dense": lambda e: True,
+    }
+    options = {"dispatch_sizes_strides_policy": policy} if policy else {}
+
+    class Asked(torch.Tensor):
+        @staticmethod
+        def __new__(cls, elem):
+            made = torch.Tensor._make_wrapper_subclass(
+                cls,
+                elem.size(),
+                strides=elem.stride(),
+                storage_offset=elem.storage_offset(),
+                dtype=elem.dtype,
+                layout=elem.layout,
+                device=elem.device,
+                requires_grad=elem.requires_grad,
+                **options,
+            )
+            made.elem = elem
+            return made
+
+        @classmethod
+        def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+            name = ".".join(str(func).split(".")[:2])
+            asked.append(name)
+            if name in answers:
+                return answers[name](args[0].elem)
+
+            def inner(value):
+                return value.elem if isinstance(value, Asked) else value
+
+            out = func(
+                *[inner(a) for a in args],
+                **{k: inner(a) for k, a in (kwargs or {}).items()},
+            )
+            return Asked(out) if isinstance(out, torch.Tensor) else out
+
+    return Asked, asked
+
+
+# Factory functions as a function calls them on plain tensors.
+VM_GIVEN_PLAIN = {
+    "zeros_like": lambda x: torch.zeros_like(x),
+    "ones_like with a dtype": lambda x: torch.ones_like(x, dtype=torch.float64),
+    "zeros_like that requires a gradient": lambda x: torch.zeros_like(
+        x, requires_grad=True
+    ),
+    "zeros": lambda x: torch.zeros(4, device=x.device),
+    "ones that requires a gradient": lambda x: torch.ones(
+        2, 3, device=x.device, requires_grad=True
+    ),
+    "full": lambda x: torch.full((2,), 3.0, device=x.device),
+    "arange": lambda x: torch.arange(4.0, device=x.device),
+    "eye": lambda x: torch.eye(3, device=x.device),
+    "rand_like": lambda x: torch.rand_like(x),
+    "hann_window": lambda x: torch.hann_window(4, device=x.device),
+}
+
+
+def vm_given_plain(name):
+    make = VM_GIVEN_PLAIN[name]
+
+    def plain(x):
+        h = (x * 2).sin() + 1
+        return make(x), h.cos()
+
+    return plain
+
+
+def vm_given_made(run, device, at):
+    """What a factory gave in a call: all that Python can ask of it."""
+    torch.manual_seed(at)
+    made = run(torch.ones(2, 2, device=device) * (at + 1))[0]
+    return (
+        str(made.dtype),
+        made.device.type,
+        made.requires_grad,
+        made.is_leaf,
+        made.grad_fn is None,
+        made._version,
+        made.tolist(),
+    )
+
+
+# What a function does with a tensor of such a class: one expression each.
+VM_GIVEN_USES = {
+    "zeros_like": lambda v: torch.zeros_like(v),
+    "new_zeros": lambda v: v.new_zeros(2),
+    "a loop over it": lambda v: [e for e in v],  # noqa: C416
+    "a write to it": lambda v: v.add_(1.0),
+    "view": lambda v: v.view(-1),
+    "reshape": lambda v: v.reshape(-1),
+    "abs": lambda v: v.abs(),
+}
+
+
+def vm_given_user(name):
+    use = VM_GIVEN_USES[name]
+
+    def used(x, v):
+        h = (x * 0.5).cos() + x.sin()
+        return h.sum() * 2.0, use(v)
+
+    return used
+
+
+def vm_given_asks(run, x, klass, asked):
+    """What a call with a tensor of `klass` gave or raised, as names, and
+    what the class was asked in it."""
+    del asked[:]
+    try:
+        out = run(x, klass(torch.ones(4, 4, device=x.device)))
+        said = [type(part).__name__ for part in out]
+    except Exception as error:
+        said = f"{type(error).__name__}: {str(error)[:60]}"
+    return said, list(asked)
+
+
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
 class TestVmGraphResults(TestCase):
     """What a function computes with graphs: with those the engine runs
@@ -21970,6 +22711,80 @@ print(json.dumps({{"noted": noted, "same": same, "graphs": graphs}}))
                         found = torch.vm.regions(compiled)
                         hits = [r["hits"] for r in found if "ops" in r]
                         self.assertGreater(max(hits), 4, found)
+
+    def test_what_a_kernel_gives_is_its_callers_alone_while_a_block_is_profiled(
+        self, device
+    ):
+        # The caller of a kernel owns what the kernel gave, and some callers
+        # look whether they own it alone: a factory function
+        # (`torch.zeros_like`) copies a result that has another owner, and
+        # the copy is seen: a transform of torch.func refuses it, a tracer
+        # records it, a class with `__torch_dispatch__` is asked for it.
+        # While a block is profiled the runtime notes what a kernel gave.
+        # It notes it without owning it and asks no tensor anything to do
+        # so (whether a tensor stands for a number is a bit of the tensor,
+        # read in front of its rank).
+        # (The note was a second owner: in the first two calls of a
+        # function, inside `vmap`, `torch.zeros_like(v)` raised "accessing
+        # `data` under vmap transform is not allowed" where eager mode
+        # returns; a trace by `make_fx` had a node more; a class that
+        # answers for its sizes was asked once more.)
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (("the default passes", torch.vm.DEFAULT_PASSES), ("graphs", graphs))
+        x = torch.ones(4, 4, device=device)
+        rows = torch.ones(3, 4, device=device)
+        for name in VM_GIVEN_MAKERS:
+            fn = vm_given_function(name)
+            for way, passes in ways:
+                msg = f"{name}, {way}"
+                compiled = torch.vm(fn, passes=passes, fallback=False)
+                for at in range(6):
+                    got = vm_given_outcome(
+                        lambda: torch.func.vmap(lambda row: compiled(x, row))(rows)
+                    )
+                    expected = vm_given_outcome(
+                        lambda: torch.func.vmap(lambda row: fn(x, row))(rows)
+                    )
+                    self.assertEqual(
+                        got, expected, msg=f"{msg}, inside vmap, call {at}"
+                    )
+                compiled = torch.vm(fn, passes=passes, fallback=False)
+                expected = vm_given_nodes(fn, x, device)
+                for at in range(4):
+                    self.assertEqual(
+                        vm_given_nodes(compiled, x, device),
+                        expected,
+                        msg=f"{msg}, traced by make_fx, trace {at}",
+                    )
+        # A factory function runs its kernel under dispatch keys of its own
+        # and makes the result what it hands back (its version counter,
+        # whether it requires a gradient): the kernel alone is not the
+        # instruction, so the instruction has no call site, and what it
+        # gives is eager's in everything Python can ask of it.
+        for name in VM_GIVEN_PLAIN:
+            fn = vm_given_plain(name)
+            for way, passes in ways:
+                compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                for at in range(8):
+                    msg = f"{name}, {way}, call {at}"
+                    self.assertEqual(
+                        vm_given_made(compiled, device, at),
+                        vm_given_made(fn, device, at),
+                        msg=msg,
+                    )
+        for name in VM_GIVEN_USES:
+            fn = vm_given_user(name)
+            for policy in (None, "sizes"):
+                for way, passes in ways:
+                    msg = (
+                        f"{name}, a class that is asked (sizes policy {policy}), {way}"
+                    )
+                    klass, asked = vm_given_class(policy)
+                    compiled = torch.vm(fn, passes=passes, fallback=False)
+                    for at in range(6):
+                        got = vm_given_asks(compiled, x, klass, asked)
+                        expected = vm_given_asks(fn, x, klass, asked)
+                        self.assertEqual(got, expected, msg=f"{msg}, call {at}")
 
 
 instantiate_device_type_tests(TestVmGraphResults, globals())

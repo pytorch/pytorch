@@ -36,6 +36,16 @@ enum TcfgStatus : int32_t {
   TCFG_MISS = 1,
   // The kernel raised. A Python error is set.
   TCFG_ERROR = 2,
+  // The guards of the site hold, and a torch function mode keeps it from
+  // standing for the call: the mode is not torch's device mode as torch
+  // made it, or the call is not one that it hands on as it is. No Python
+  // error is set; the caller runs the operation as it is written.
+  TCFG_MODE = 3,
+  // The kernel raised in a call that was made with torch's device mode taken
+  // off, and gave no warning before. A Python error is set; the same
+  // operation run as it is written raises it with the mode's handler among
+  // the frames.
+  TCFG_ERROR_OFF = 4,
 };
 
 enum TcfgPyOpKind : int32_t {
@@ -53,6 +63,10 @@ enum TcfgPyOpKind : int32_t {
 enum TcfgCallFlags : uint32_t {
   // Return a tensor result unboxed (see above) when it has no Python object.
   TCFG_UNBOXED_RESULT = 1,
+  // Under torch's device mode the call may be made with the mode taken off:
+  // the operator neither writes to an argument nor draws random numbers, so
+  // it can be run a second time where it raises.
+  TCFG_MODE_DIRECT = 2,
 };
 
 enum TcfgPyOpFlags : uint32_t {
@@ -97,7 +111,7 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 18
+#define TCFG_API_VERSION 19
 
 // A node of the autograd graph, as the engine reads it when it takes the
 // backward of a graph down (node_info).
@@ -416,6 +430,23 @@ struct TcfgApi {
   // Whether gradients are enabled on this thread: bit 0 of call_modes, for
   // what asks for nothing else at every call.
   uint32_t (*grad_enabled)();
+
+  // The torch function modes of this thread: 0 none is on (or torch functions
+  // are disabled), 1 torch's device mode alone (`torch.set_default_device`,
+  // `with torch.device(...)`), as torch made it: one mode on the stack, of
+  // exactly torch's class, which gives torch's handler and has nothing of its
+  // own under that name; 2 anything else.
+  int32_t (*function_modes)();
+  // Whether torch's device mode hands on every call that is none of torch's
+  // factories: the module has torch's own cached function for the set of
+  // them, and the set it gives now holds what torch put into it. Calls that
+  // function as the handler does.
+  int32_t (*device_set)();
+  // Takes the topmost torch function mode off this thread, as torch takes it
+  // off around its handler, and puts it back. What mode_off returns goes
+  // to mode_back once.
+  void* (*mode_off)();
+  void (*mode_back)(void* mode);
 };
 
 } // extern "C"

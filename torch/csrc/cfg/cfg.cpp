@@ -15,6 +15,7 @@
 #include <c10/core/GradMode.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
@@ -42,6 +43,7 @@
 #include <dlfcn.h>
 #endif
 
+#include <algorithm>
 #include <cmath>
 #include <condition_variable>
 #include <cstring>
@@ -54,9 +56,92 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
+#include <variant>
 #include <vector>
 
 namespace {
+
+// Torch's device mode (`torch.set_default_device`, `with torch.device(...)`): a
+// torch function mode whose handler adds `device=` to the calls of a fixed
+// set of factories that came without one, and hands every other call on as
+// it is. What the runtime knows it by is handed over once, when `torch.vm`
+// is imported (deviceMode): nothing is looked for by name at a call.
+struct DeviceMode {
+  PyTypeObject* klass = nullptr;
+  // What the class has under `__torch_function__`, and its code.
+  PyObject* handler = nullptr;
+  PyCodeObject* handler_code = nullptr;
+  // The code of `torch.overrides.handle_torch_function`, which calls the
+  // handler for a function of torch that is written in Python.
+  PyCodeObject* python_route = nullptr;
+  // The dict of the handler's module, the cached function it has under
+  // `_device_constructors`, and what torch's own function gives: the
+  // factories (kept alive here, so that an address is one of them for good).
+  PyObject* globals = nullptr;
+  PyObject* constructors = nullptr;
+  std::unordered_set<PyObject*> factories;
+  // The objects whose functions of C hand the handler themselves: torch's
+  // modules of bindings.
+  std::vector<PyObject*> bindings;
+  // Where eager reports a warning that a kernel gives under the mode: the
+  // handler's file, and the line of its call of the function it is handed.
+  PyObject* file = nullptr;
+  int line = 0;
+  PyObject* name_handler = nullptr;
+  PyObject* name_constructors = nullptr;
+  PyObject* name_registry = nullptr;
+  PyObject* name_name = nullptr;
+  // The version of the class at which it was last shown to give the handler
+  // and to read attributes the plain way.
+  unsigned int shown = 0;
+  // The set that the cached function gave when it was last compared with
+  // the factories, and its table as it was then.
+  PyObject* live = nullptr;
+  std::string table;
+};
+DeviceMode device_mode;
+
+int32_t functionModes() {
+  using TLS = at::impl::PythonTorchFunctionTLS;
+  const int64_t on = TLS::stack_len();
+  if (on == 0 ||
+      TLS::get_disabled_state() ==
+          at::impl::TorchFunctionDisabledState::ALL_DISABLED) {
+    return 0;
+  }
+  DeviceMode& d = device_mode;
+  if (on != 1 || d.klass == nullptr) {
+    return 2;
+  }
+  PyObject* mode = TLS::get_stack_at(0)->ptr(getPyInterpreter());
+  PyTypeObject* type = Py_TYPE(mode);
+  if (type != d.klass) {
+    return 2;
+  }
+  const auto tagged = [type]() {
+    return PyType_HasFeature(type, Py_TPFLAGS_VALID_VERSION_TAG);
+  };
+  if (!tagged() || type->tp_version_tag != d.shown) {
+    // What the interpreter finds under the name for an object of the class,
+    // and how it looks for it.
+    if (type->tp_getattro != PyObject_GenericGetAttr ||
+        _PyType_Lookup(type, d.name_handler) != d.handler || !tagged()) {
+      return 2;
+    }
+    d.shown = type->tp_version_tag;
+  }
+  // The object has nothing of its own under the name.
+  PyObject* own = PyObject_GenericGetDict(mode, nullptr);
+  const bool plain =
+      own != nullptr && PyDict_GetItemWithError(own, d.name_handler) == nullptr;
+  Py_XDECREF(own);
+  if (PyErr_Occurred() != nullptr) {
+    PyErr_Clear();
+    return 2;
+  }
+  return plain ? 1 : 2;
+}
 
 // The dispatcher state a kernel resolution depends on besides its arguments.
 struct World {
@@ -64,15 +149,19 @@ struct World {
   uint64_t tls_excluded;
   bool grad_enabled;
   bool torch_function_mode;
+  // The mode that is on is torch's device mode, alone and as torch made it.
+  bool device_mode;
 };
 
 World snapshotWorld() {
   const auto tls = c10::impl::tls_local_dispatch_key_set();
+  const bool moded = at::impl::torch_function_mode_enabled();
   return World{
       tls.included_.raw_repr(),
       tls.excluded_.raw_repr(),
       c10::GradMode::is_enabled(),
-      at::impl::torch_function_mode_enabled()};
+      moded,
+      moded && functionModes() == 1};
 }
 
 struct Record {
@@ -94,7 +183,14 @@ struct Record {
   // site of (siteFromTrace) and may be of anything, a whole model included,
   // whose tensors it must not keep alive.
   std::vector<c10::IValue> inputs;
-  std::vector<c10::IValue> outputs;
+  // What the call gave is kept by weak references: an address stays that of
+  // its tensor until the trace is analyzed, and the capture is no owner of
+  // the tensor. The kernel's caller still has the result in hand when it is
+  // recorded, and an owner beside it is seen: a factory function copies a
+  // result that it does not own alone, which a transform of torch.func
+  // refuses, a tracer records and a class with __torch_dispatch__ is asked
+  // for.
+  std::vector<c10::WeakIValue> outputs;
 };
 
 } // namespace
@@ -154,7 +250,10 @@ class Sink final : public c10::DispatchCaptureSink {
     t.open.pop_back();
     r.threw = threw;
     if (t.open.empty() && !threw && t.top_level == 1) {
-      r.outputs.assign(outputs.begin(), outputs.end());
+      r.outputs.reserve(outputs.size());
+      for (const auto& given : outputs) {
+        r.outputs.emplace_back(given);
+      }
     }
   }
 
@@ -227,6 +326,15 @@ py::list traceDetail(const TcfgTrace& trace) {
     }
     return py::object(std::move(out));
   };
+  // None for a result that nothing holds any more.
+  const auto given = [&values](const Record& r) {
+    std::vector<c10::IValue> held;
+    held.reserve(r.outputs.size());
+    for (const auto& weak : r.outputs) {
+      held.push_back(weak.lock());
+    }
+    return values(r, held);
+  };
   py::list out;
   for (const auto& r : trace.records) {
     py::dict d;
@@ -239,7 +347,7 @@ py::list traceDetail(const TcfgTrace& trace) {
     d["tls_included"] = keys(r.tls_included);
     d["tls_excluded"] = keys(r.tls_excluded);
     d["inputs"] = values(r, r.inputs);
-    d["outputs"] = values(r, r.outputs);
+    d["outputs"] = given(r);
     out.append(std::move(d));
   }
   return out;
@@ -308,6 +416,9 @@ struct TcfgSite {
     for (auto& g : guards) {
       Py_XDECREF(g.identity);
     }
+    Py_XDECREF(binding);
+    Py_XDECREF(bound_name);
+    Py_XDECREF(bound);
   }
 
   c10::OperatorHandle op;
@@ -329,6 +440,13 @@ struct TcfgSite {
   // Null when the operator's signature is not one of the typed ones; the
   // call then goes through the boxed calling convention.
   std::unique_ptr<TypedCall> typed;
+  // Under torch's device mode: whether the mode hands the call on as it is
+  // (handedOn). For a function of a module that can be assigned to: the
+  // module's dict, and the name under which it must still have the function.
+  bool handed_on = false;
+  PyObject* binding = nullptr;
+  PyObject* bound_name = nullptr;
+  PyObject* bound = nullptr;
 };
 
 namespace {
@@ -407,8 +525,10 @@ bool isWrappedNumber(const c10::IValue& v, at::ScalarType dtype) {
     return false;
   }
   const auto& t = v.toTensor();
-  return t.defined() && t.dim() == 0 && t.scalar_type() == dtype &&
-      t.unsafeGetTensorImpl()->is_wrapped_number() && t.device().is_cpu();
+  // The bit first: a tensor that is no wrapped number is asked nothing (its
+  // rank and its device can be answered by Python).
+  return t.defined() && t.unsafeGetTensorImpl()->is_wrapped_number() &&
+      t.dim() == 0 && t.scalar_type() == dtype && t.device().is_cpu();
 }
 
 struct Binder {
@@ -1241,6 +1361,220 @@ std::unique_ptr<TypedCall> makeTypedCall(const TcfgSite& site) {
 
 // Whether a kernel argument is a tensor or a list with a tensor in it, such as
 // the Tensor?[] indices of aten::index.
+// The frames that start while this is alive are a kernel's own (see
+// kernelFrame): torch's own function behind its cache, where it runs.
+struct KernelFrames {
+  KernelFrames();
+  ~KernelFrames();
+  KernelFrames(const KernelFrames&) = delete;
+  KernelFrames& operator=(const KernelFrames&) = delete;
+  KernelFrames(KernelFrames&&) = delete;
+  KernelFrames& operator=(KernelFrames&&) = delete;
+};
+
+int32_t deviceSet() {
+  DeviceMode& d = device_mode;
+  if (d.constructors == nullptr ||
+      PyDict_GetItemWithError(d.globals, d.name_constructors) !=
+          d.constructors) {
+    PyErr_Clear();
+    return 0;
+  }
+  // As the handler asks: a hit of torch's cache, which is C. Where the cache
+  // was cleared, torch's own function makes the set anew.
+  PyObject* live = nullptr;
+  {
+    KernelFrames own;
+    live = PyObject_CallNoArgs(d.constructors);
+  }
+  if (live == nullptr) {
+    PyErr_Clear();
+    return 0;
+  }
+  bool same = false;
+  if (PySet_CheckExact(live)) {
+    auto* set = reinterpret_cast<PySetObject*>(live);
+    const size_t bytes = static_cast<size_t>(set->mask + 1) * sizeof(setentry);
+    if (live == d.live && d.table.size() == bytes &&
+        std::memcmp(set->table, d.table.data(), bytes) == 0) {
+      same = true;
+    } else if (static_cast<size_t>(set->used) == d.factories.size()) {
+      // Every factory is in it, and it holds as many as there are: by
+      // address, without asking a member for its hash or for a comparison.
+      size_t found = 0;
+      for (Py_ssize_t i = 0; i <= set->mask; i++) {
+        PyObject* key = set->table[i].key;
+        found += key != nullptr && d.factories.count(key) != 0 ? 1 : 0;
+      }
+      same = found == d.factories.size();
+      if (same) {
+        Py_INCREF(live);
+        Py_XSETREF(d.live, live);
+        d.table.assign(reinterpret_cast<const char*>(set->table), bytes);
+      }
+    }
+  }
+  Py_DECREF(live);
+  return same ? 1 : 0;
+}
+
+void* modeOff() {
+  return new std::shared_ptr<c10::SafePyObject>(
+      at::impl::PythonTorchFunctionTLS::pop_stack());
+}
+
+void modeBack(void* held) {
+  auto* mode = static_cast<std::shared_ptr<c10::SafePyObject>*>(held);
+  at::impl::PythonTorchFunctionTLS::push_onto_stack(std::move(*mode));
+  delete mode;
+}
+
+// The topmost torch function mode is off the thread while this is alive.
+struct ModeOff {
+  ModeOff() : mode(at::impl::PythonTorchFunctionTLS::pop_stack()) {}
+  ~ModeOff() {
+    at::impl::PythonTorchFunctionTLS::push_onto_stack(std::move(mode));
+  }
+  ModeOff(const ModeOff&) = delete;
+  ModeOff& operator=(const ModeOff&) = delete;
+  ModeOff(ModeOff&&) = delete;
+  ModeOff& operator=(ModeOff&&) = delete;
+  std::shared_ptr<c10::SafePyObject> mode;
+};
+
+// What a kernel warns of while this is alive, kept for showUnderMode.
+struct Collected final : c10::WarningHandler {
+  Collected() : outer(c10::WarningUtils::get_warning_handler()) {
+    c10::WarningUtils::set_warning_handler(this);
+  }
+  ~Collected() override {
+    done();
+  }
+  Collected(const Collected&) = delete;
+  Collected& operator=(const Collected&) = delete;
+  Collected(Collected&&) = delete;
+  Collected& operator=(Collected&&) = delete;
+  void process(const c10::Warning& warning) override {
+    warnings.push_back(warning);
+  }
+  void done() {
+    if (outer != nullptr) {
+      c10::WarningUtils::set_warning_handler(outer);
+      outer = nullptr;
+    }
+  }
+  c10::WarningHandler* outer;
+  std::vector<c10::Warning> warnings;
+};
+
+// Shows what a kernel warned of in a call that was made with torch's device
+// mode taken off, where eager mode shows it: eager's kernel runs under the
+// mode's handler, so a warning is reported for the handler's file, the line
+// of its call of the function it is handed, its module and that module's
+// registry. Everything else is as torch shows a kernel's warning
+// (PyWarningHandler in torch/csrc/Exceptions.cpp). False where showing one
+// raised (a filter that makes it an error); behind a raise of the kernel
+// that is printed and the others are shown, as there.
+bool showUnderMode(const std::vector<c10::Warning>& warnings, bool raised) {
+  const DeviceMode& d = device_mode;
+  PyObject* registry = PyDict_GetItemWithError(d.globals, d.name_registry);
+  py::object made;
+  if (registry == nullptr) {
+    PyErr_Clear();
+    made = py::reinterpret_steal<py::object>(PyDict_New());
+    if (!made || PyDict_SetItem(d.globals, d.name_registry, made.ptr()) < 0) {
+      return false;
+    }
+    registry = made.ptr();
+  }
+  PyObject* module = PyDict_GetItemWithError(d.globals, d.name_name);
+  PyErr_Clear();
+  for (const auto& warning : warnings) {
+    const auto where = warning.source_location();
+    std::string text = torch::processErrorMsg(warning.msg());
+    PyObject* category =
+        std::holds_alternative<c10::DeprecationWarning>(warning.type())
+        ? PyExc_DeprecationWarning
+        : PyExc_UserWarning;
+    int result = 0;
+    if (where.file != nullptr && warning.verbatim()) {
+      result = PyErr_WarnExplicit(
+          category,
+          text.c_str(),
+          where.file,
+          static_cast<int>(where.line),
+          nullptr,
+          nullptr);
+    } else {
+      if (where.file != nullptr) {
+        text += std::string(" (Triggered internally at ") + where.file + ":" +
+            std::to_string(where.line) + ".)";
+      }
+      auto message =
+          py::reinterpret_steal<py::object>(PyUnicode_FromString(text.c_str()));
+      result = !message
+          ? -1
+          : PyErr_WarnExplicitObject(
+                category, message.ptr(), d.file, d.line, module, registry);
+    }
+    if (result < 0) {
+      if (!raised) {
+        return false;
+      }
+      PyErr_Print();
+    }
+  }
+  return true;
+}
+
+// Whether torch's device mode hands the call of an operation on as it is:
+// what its handler is handed for the call is none of the factories, or one
+// that is given a device by keyword. For a method, an operator, a subscript
+// and a getter that is an attribute of `torch.Tensor`, and none of the
+// factories is one; for a function of one of torch's modules of bindings it
+// is the function itself (where the module still has it under its name:
+// asked at every call of a site, see directUnderMode). Anything else (an
+// operator of `torch.ops`, whose packet the handler is handed and calls
+// again in Python) is not known to be handed on.
+bool handedOn(const TcfgPyOp& pyop) {
+  const DeviceMode& d = device_mode;
+  if (d.klass == nullptr) {
+    return false;
+  }
+  if (pyop.kind != TCFG_CALL) {
+    return true;
+  }
+  PyObject* callee = pyop.callee;
+  if (callee == nullptr || !PyCFunction_Check(callee)) {
+    return false;
+  }
+  // What the function is a function of: for one of a class, the class
+  // (PyCFunction_GET_SELF gives nothing for those).
+  PyObject* self = reinterpret_cast<PyCFunctionObject*>(callee)->m_self;
+  if (self != nullptr && THPVariable_Check(self)) {
+    // A method that was bound to a tensor earlier.
+    return true;
+  }
+  if (std::find(d.bindings.begin(), d.bindings.end(), self) ==
+      d.bindings.end()) {
+    return false;
+  }
+  if (d.factories.count(callee) == 0) {
+    return true;
+  }
+  if (pyop.kwnames == nullptr) {
+    return false;
+  }
+  const Py_ssize_t named = PyTuple_GET_SIZE(pyop.kwnames);
+  for (Py_ssize_t i = 0; i < named; i++) {
+    PyObject* name = PyTuple_GET_ITEM(pyop.kwnames, i);
+    if (PyUnicode_CompareWithASCIIString(name, "device") == 0) {
+      return pyop.operands[pyop.n_operands - named + i] != Py_None;
+    }
+  }
+  return false;
+}
+
 bool holdsTensor(const c10::IValue& v) {
   if (v.isTensor()) {
     return true;
@@ -1263,7 +1597,12 @@ TcfgSite* siteFromTraceImpl(
     reason = "not a single dispatcher call";
     return nullptr;
   }
-  if (trace.world.torch_function_mode) {
+  // A trace that was made through a torch function mode is of the call only
+  // where the mode is torch's device mode and hands the call on as it is:
+  // its handler has then called what the code called, with what it was
+  // given.
+  const bool handed = handedOn(pyop);
+  if (trace.world.torch_function_mode && !(trace.world.device_mode && handed)) {
     reason = "a torch function mode is active";
     return nullptr;
   }
@@ -1274,6 +1613,16 @@ TcfgSite* siteFromTraceImpl(
   const Record& call = trace.records[call_index];
   if (call.threw) {
     reason = "the kernel raised";
+    return nullptr;
+  }
+  if (call.tls_included != trace.world.tls_included ||
+      call.tls_excluded != trace.world.tls_excluded) {
+    // The function that called the kernel put dispatch keys of its own
+    // around the call and finishes the result itself: a factory function
+    // runs its kernel below the autograd keys and makes a variable of what
+    // it gave (its version counter, whether it requires a gradient). The
+    // kernel alone is not what the instruction does.
+    reason = "the kernel ran under dispatch keys that its caller set";
     return nullptr;
   }
   if (!call.op.hasSchema()) {
@@ -1315,7 +1664,7 @@ TcfgSite* siteFromTraceImpl(
   }
 
   auto site = std::make_unique<TcfgSite>(call.op);
-  if (!matchResult(call.outputs[0], pyop.result, &site->ret)) {
+  if (!matchResult(call.outputs[0].lock(), pyop.result, &site->ret)) {
     reason = "the result is not the kernel output";
     return nullptr;
   }
@@ -1369,6 +1718,18 @@ TcfgSite* siteFromTraceImpl(
         site->entry_tls.excluded_ | c10::autograd_dispatch_keyset;
   }
   site->world = trace.world;
+  site->handed_on = handed;
+  if (handed && pyop.kind == TCFG_CALL && pyop.callee != nullptr &&
+      PyCFunction_Check(pyop.callee)) {
+    PyObject* self = reinterpret_cast<PyCFunctionObject*>(pyop.callee)->m_self;
+    if (self != nullptr && PyModule_Check(self)) {
+      auto* function = reinterpret_cast<PyCFunctionObject*>(pyop.callee);
+      site->bound_name = PyUnicode_InternFromString(function->m_ml->ml_name);
+      site->binding = Py_XNewRef(PyModule_GetDict(self));
+      site->bound = Py_NewRef(pyop.callee);
+      site->handed_on = site->bound_name != nullptr && site->binding != nullptr;
+    }
+  }
   site->guards = std::move(binder.guards);
   site->args = std::move(binder.args);
   // Ownership of the identity references moved into the site.
@@ -1498,6 +1859,41 @@ bool pushOperand(torch::jit::Stack& stack, PyObject* o, Conv conv) {
   }
 }
 
+// Whether a call of a site, whose guards hold, is made with torch's device
+// mode taken off: the mode is on alone and as torch made it, the operator
+// can be run again where it raises (TCFG_MODE_DIRECT) and nothing of the
+// user's runs under it (a saved-tensor hook, a node-creation hook, anomaly
+// mode and the handler of a dispatch mode find the device mode's handler
+// among the frames above them in eager mode), the mode
+// hands the call on as it is (handedOn; a function of a module that can be
+// assigned to is still what the module has under its name), and the set
+// of factories is torch's.
+bool directUnderMode(const TcfgSite& site, uint32_t flags) {
+  if ((flags & TCFG_MODE_DIRECT) == 0 || !site.handed_on ||
+      functionModes() != 1) {
+    return false;
+  }
+  if (!at::SavedTensorDefaultHooks::get_tls_state().stack.empty() ||
+      !at::impl::NodeCreationHooks::empty() ||
+      torch::autograd::AnomalyMode::is_enabled() ||
+      c10::impl::TorchDispatchModeTLS::any_modes_set()) {
+    return false;
+  }
+  if (site.binding != nullptr &&
+      PyDict_GetItemWithError(site.binding, site.bound_name) != site.bound) {
+    PyErr_Clear();
+    return false;
+  }
+  return deviceSet() != 0;
+}
+
+PyObject* siteKernel(
+    TcfgSite* site,
+    PyObject* const* operands,
+    uint32_t flags,
+    int32_t* status);
+void tensorRelease(PyObject* tagged);
+
 PyObject* siteCall(
     TcfgSite* site,
     PyObject* const* operands,
@@ -1506,8 +1902,7 @@ PyObject* siteCall(
   *status = TCFG_MISS;
   const auto tls = c10::impl::tls_local_dispatch_key_set();
   if (tls.included_.raw_repr() != site->world.tls_included ||
-      tls.excluded_.raw_repr() != site->world.tls_excluded ||
-      at::impl::torch_function_mode_enabled()) {
+      tls.excluded_.raw_repr() != site->world.tls_excluded) {
     return nullptr;
   }
   const bool skips_autograd = site->skips_autograd;
@@ -1568,12 +1963,71 @@ PyObject* siteCall(
     }
   }
 
-  *status = TCFG_ERROR;
-  HANDLE_TH_ERRORS
+  if (!at::impl::torch_function_mode_enabled()) {
+    *status = TCFG_ERROR;
+    HANDLE_TH_ERRORS
+    return siteKernel(site, operands, flags, status);
+    END_HANDLE_TH_ERRORS
+  }
+  // A torch function mode is on. Torch's device mode, where it hands the
+  // call on as it is, would call the kernel with itself taken off and return
+  // what that gives: the kernel is called so. Any other mode, and any other
+  // call, goes through the mode.
+  if (!directUnderMode(*site, flags)) {
+    *status = TCFG_MODE;
+    return nullptr;
+  }
+  *status = TCFG_ERROR_OFF;
+  PyObject* result = nullptr;
+  Collected collected;
+  {
+    ModeOff off;
+    try {
+      result = siteKernel(site, operands, flags, status);
+    } catch (...) {
+      torch::translate_exception_to_python(std::current_exception());
+      result = nullptr;
+    }
+    collected.done();
+    if (!collected.warnings.empty()) {
+      // Shown while the mode is still off, as the handler's call shows them.
+      const bool raised = result == nullptr && *status != TCFG_MISS;
+      PyObject *type = nullptr, *value = nullptr, *traceback = nullptr;
+      if (raised) {
+        PyErr_Fetch(&type, &value, &traceback);
+      }
+      const bool shown = showUnderMode(collected.warnings, raised);
+      if (raised) {
+        // Its warnings are shown: the call is not made a second time.
+        PyErr_Restore(type, value, traceback);
+        *status = TCFG_ERROR;
+      } else if (!shown) {
+        if (result != nullptr) {
+          if (isUnboxed(result)) {
+            tensorRelease(result);
+          } else {
+            Py_DECREF(result);
+          }
+        }
+        result = nullptr;
+        *status = TCFG_ERROR;
+      }
+    }
+  }
+  return result;
+}
+
+// The kernel of a site whose guards hold, on its operands. Throws what the
+// kernel throws.
+PyObject* siteKernel(
+    TcfgSite* site,
+    PyObject* const* operands,
+    uint32_t flags,
+    int32_t* status) {
   // Entering below the kernels that were skipped means entering in the
   // thread-local state they would have set up.
   std::optional<c10::impl::ForceDispatchKeyGuard> tls_guard;
-  if (skips_autograd) {
+  if (site->skips_autograd) {
     tls_guard.emplace(site->entry_tls);
   }
   if (site->typed) {
@@ -1636,7 +2090,6 @@ PyObject* siteCall(
     *status = TCFG_OK;
   }
   return result;
-  END_HANDLE_TH_ERRORS
 }
 
 const char* retName(Ret ret) {
@@ -1758,8 +2211,8 @@ const char* guardName(OperandGuard::Kind kind) {
 py::object constantObject(const c10::Argument& argument, const c10::IValue& v) {
   if (v.isTensor()) {
     const auto& t = v.toTensor();
-    if (t.defined() && t.dim() == 0 &&
-        t.unsafeGetTensorImpl()->is_wrapped_number()) {
+    if (t.defined() && t.unsafeGetTensorImpl()->is_wrapped_number() &&
+        t.dim() == 0) {
       return torch::jit::toPyObject(c10::IValue(t.item()));
     }
   }
@@ -2297,7 +2750,16 @@ PyCodeObject* codeOf(
 // gives is made and shown by the warnings module, at the call that gives it,
 // whatever stands for the operator. Neither is Python code that the caller
 // of the operator enters.
-bool kernelFrame(PyCodeObject* code) {
+bool kernelFrame(PyThreadState* tstate, PyCodeObject* code) {
+  // The handler of torch's device mode, where a function of C calls it:
+  // what it does there is hand the call on to the kernel. Not where
+  // `torch.overrides.handle_torch_function` calls it for a function of torch
+  // that is written in Python, which the handler then calls.
+  if (code == device_mode.handler_code && code != nullptr) {
+    _PyInterpreterFrame* caller = currentFrame(tstate);
+    return caller == nullptr || device_mode.python_route == nullptr ||
+        frameCode(caller) != device_mode.python_route;
+  }
   static PyCodeObject* router = nullptr;
   static PyObject* routes = PyUnicode_InternFromString("eager_router");
   if (code == router || code == hook_warning_made ||
@@ -2347,7 +2809,7 @@ PyObject* evalFrame(
   }
   hook_frames++;
   // The frames of a kernel are the interpreter's: the VM is offered none.
-  const bool enters = kernelFrame(frameCode(frame));
+  const bool enters = kernelFrame(tstate, frameCode(frame));
   if (enters || hook_in_kernel > 0) {
     hook_kernel_frames++;
     hook_in_kernel += enters ? 1 : 0;
@@ -2423,6 +2885,17 @@ uint64_t frameCount() {
 uint64_t frameCountKernel() {
   return hook_kernel_frames;
 }
+
+KernelFrames::KernelFrames() {
+  hook_in_kernel++;
+}
+
+KernelFrames::~KernelFrames() {
+  hook_in_kernel--;
+}
+#else
+KernelFrames::KernelFrames() = default;
+KernelFrames::~KernelFrames() = default;
 #endif
 
 int32_t isTracing() {
@@ -3406,6 +3879,10 @@ const TcfgApi api_table = {
     nullptr,
 #endif
     &gradEnabled,
+    &functionModes,
+    &deviceSet,
+    &modeOff,
+    &modeBack,
 };
 
 } // namespace
@@ -3431,6 +3908,51 @@ void initCfgBindings(PyObject* module) {
     return py::reinterpret_steal<py::object>(
         PyCapsule_New(api, "torch._C._cfg_c_api", nullptr));
   });
+
+  // What the runtime knows torch's device mode by, handed over when
+  // `torch.vm` is imported: the class of the mode and what it has under
+  // `__torch_function__`; the cached function that gives the set of factories
+  // and what torch's own function behind it gives; `handle_torch_function`;
+  // the objects whose functions of C hand the handler themselves; the line
+  // of the handler that calls what it is handed.
+  m.def(
+      "_cfg_device_mode",
+      [](const py::object& klass,
+         const py::object& handler,
+         const py::object& constructors,
+         const py::object& factories,
+         const py::object& python_route,
+         const py::tuple& bindings,
+         int line) {
+        DeviceMode& d = device_mode;
+        TORCH_CHECK_VALUE(d.klass == nullptr, "the device mode is known");
+        TORCH_CHECK_VALUE(
+            PyType_Check(klass.ptr()) && PyFunction_Check(handler.ptr()) &&
+                PyFunction_Check(python_route.ptr()) &&
+                PyAnySet_Check(factories.ptr()),
+            "not what torch's device mode is made of");
+        for (const auto& factory : factories) {
+          d.factories.insert(Py_NewRef(factory.ptr()));
+        }
+        for (const auto& binding : bindings) {
+          d.bindings.push_back(Py_NewRef(binding.ptr()));
+        }
+        auto* code = PyFunction_GET_CODE(handler.ptr());
+        d.handler_code = reinterpret_cast<PyCodeObject*>(Py_NewRef(code));
+        d.python_route = reinterpret_cast<PyCodeObject*>(
+            Py_NewRef(PyFunction_GET_CODE(python_route.ptr())));
+        d.globals = Py_NewRef(PyFunction_GET_GLOBALS(handler.ptr()));
+        d.file = Py_NewRef(d.handler_code->co_filename);
+        d.line = line;
+        d.constructors = Py_NewRef(constructors.ptr());
+        d.handler = Py_NewRef(handler.ptr());
+        d.name_handler = PyUnicode_InternFromString("__torch_function__");
+        d.name_constructors =
+            PyUnicode_InternFromString("_device_constructors");
+        d.name_registry = PyUnicode_InternFromString("__warningregistry__");
+        d.name_name = PyUnicode_InternFromString("__name__");
+        d.klass = reinterpret_cast<PyTypeObject*>(Py_NewRef(klass.ptr()));
+      });
 
   // A workspace for a compiled function (workspace.h), or None if the
   // process has another CPU allocator than PyTorch's default.
@@ -3459,8 +3981,9 @@ void initCfgBindings(PyObject* module) {
   // records lists (op, dispatch key, depth, is_redispatch) for every kernel
   // the dispatcher invoked.
   // With detail, a record is a dict that also has the rest of what the capture
-  // kept about it. A capture keeps the arguments and results of every
-  // top-level call alive until it ends.
+  // kept about it. A capture keeps the arguments of its first top-level call
+  // alive until it ends, and knows the results of that call while something
+  // else holds them.
   m.def(
       "_cfg_dispatch_trace",
       [](const py::object& fn, bool detail) -> py::tuple {
@@ -3510,10 +4033,10 @@ void initCfgBindings(PyObject* module) {
     int32_t status = TCFG_OK;
     auto result = py::reinterpret_steal<py::object>(siteCall(
         &site, PySequence_Fast_ITEMS(operands.ptr()), /*flags=*/0, &status));
-    if (status == TCFG_ERROR) {
+    if (status == TCFG_ERROR || status == TCFG_ERROR_OFF) {
       throw py::error_already_set();
     }
-    return status == TCFG_MISS
+    return status == TCFG_MISS || status == TCFG_MODE
         ? py::reinterpret_borrow<py::object>(Py_NotImplemented)
         : result;
   });
