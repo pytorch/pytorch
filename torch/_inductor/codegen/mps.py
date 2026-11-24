@@ -20,6 +20,7 @@ from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
 from torch.utils._sympy.value_ranges import ValueRanges
 
+from .. import config
 from ..codecache import code_hash, get_path
 from ..scheduler import WhyNoFuse
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata, Placeholder
@@ -1456,6 +1457,12 @@ class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
 
     def __init__(self, scheduler: Scheduler | None) -> None:
+        max_tiles = config.triton.max_tiles
+        if max_tiles is not None and max_tiles > 3:
+            raise RuntimeError(
+                "MPS requires torch._inductor.config.triton.max_tiles <= 3, "
+                f"got {max_tiles}"
+            )
         super().__init__(scheduler)
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
