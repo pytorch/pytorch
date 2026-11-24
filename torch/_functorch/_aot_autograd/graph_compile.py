@@ -39,7 +39,6 @@ from torch._guards import CompileContext, TracingContext
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class_obj
 from torch._logging import getArtifactLogger, trace_structured
-from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake_tensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
@@ -68,6 +67,7 @@ from .descriptors import AOTOutput, ForwardTokenAOTInput, PlainAOTOutput
 from .graph_capture import aot_dispatch_autograd_graph, aot_dispatch_base_graph
 from .logging_utils import track_graph_compiling
 from .runtime_wrappers import (
+    _should_disable_saved_tensors_hooks,
     AOTDedupeWrapper,
     AOTDispatchAutograd,
     AOTDispatchAutogradCompileSpec,
@@ -100,6 +100,7 @@ from .subclass_utils import (
     compute_inner_mutated_inp_indices_from_subclass_meta,
 )
 from .utils import (
+    _get_inner_meta,
     _is_primal,
     contain_metadata_mutation_ops,
     get_default_generator,
@@ -323,18 +324,6 @@ def aot_stage2_export(
             f"expected compiled_fn to be GraphModule, got {type(compiled_fn)}"
         )
     return compiled_fn, aot_state.fw_metadata
-
-
-def _get_inner_meta(
-    maybe_subclass_meta: SubclassMeta | None,
-    fw_metadata: ViewAndMutationMeta,
-) -> ViewAndMutationMeta:
-    """
-    Util to get view and mutation metadata.
-    """
-    return (
-        fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
-    )
 
 
 def _apply_tensorify_python_scalars(module: torch.fx.GraphModule) -> None:
@@ -598,10 +587,10 @@ def _aot_stage2c_make_inference_function(
 
 
 def collect_fw_donated_buffer_idxs(
-    fw_ins: list[FakeTensor | None],
-    user_fw_outs: list[FakeTensor | None],
-    bw_outs: list[FakeTensor | None],
-    saved_tensors: list[FakeTensor | None],
+    fw_ins: list[Tensor | None],
+    user_fw_outs: list[Tensor | None],
+    bw_outs: list[Tensor | None],
+    saved_tensors: list[Tensor | None],
 ) -> list[int]:
     """
     Checks if the saved tensors are donated buffers, which means a saved tensor is not
@@ -2024,11 +2013,13 @@ def _partition_joint_graph_into_fw_bw(
         _canonicalize_joint_graph(fx_g)
 
     with _enable_joint_graph_name_canonicalization(canonicalize_names):
+        # fx_g's primals are the unwrapped inputs, whose static positions are in
+        # inner_meta.
         fw_module, bw_module = partition_fn(
             fx_g,
             joint_inputs,
             num_fwd_outputs=num_inner_fwd_outputs,
-            static_lifetime_input_indices=fw_metadata.static_input_indices,
+            static_lifetime_input_indices=inner_meta.static_input_indices,
         )
 
     rng_states = [
@@ -2098,16 +2089,26 @@ def _is_joint_graph_name_canonicalization_enabled() -> bool:
 
 
 def _maybe_canonicalize_joint_graph_for_sync(graph: torch.fx.Graph) -> None:
-    if not _is_joint_graph_name_canonicalization_enabled():
+    if not (
+        _is_joint_graph_name_canonicalization_enabled()
+        or torch._functorch.config._sync_decision_cross_ranks
+    ):
+        return
+    if (
+        torch._dynamo.compiled_autograd.in_compiled_autograd_region
+        or torch.compiler.is_exporting()
+    ):
         return
     owning_module = graph.owning_module
-    if not isinstance(owning_module, torch.fx.GraphModule):
+    if owning_module is not None and not isinstance(
+        owning_module, torch.fx.GraphModule
+    ):
         raise AssertionError("expected the joint graph to have an owning GraphModule")
-    _canonicalize_joint_graph(owning_module)
+    _canonicalize_joint_graph(graph)
 
 
-def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule) -> None:
-    """Canonicalize final joint-graph order and raw node identity.
+def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule | torch.fx.Graph) -> None:
+    """Canonicalize final joint-graph raw node identity.
 
     A name-only pass uses the unconstrained dataflow order so independent
     compute on opposite sides of a barrier receives the same identity on every
@@ -2122,18 +2123,19 @@ def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule) -> None:
         _stable_target_str,
     )
 
-    graph = fx_g.graph
+    graph = fx_g if isinstance(fx_g, torch.fx.Graph) else fx_g.graph
     downstream_hashes = _joint_graph_downstream_hashes(graph)
     placeholder_ordinals = {
         node: ordinal for ordinal, node in enumerate(graph.find_nodes(op="placeholder"))
     }
+    subgraph_purity: dict[torch.fx.GraphModule, bool] = {}
     barrier_ordinals = {
         node: ordinal
         for ordinal, node in enumerate(
             node
             for node in graph.nodes
             if node.op not in {"placeholder", "get_attr", "output"}
-            and not _is_safe_to_reorder(node)
+            and not _is_safe_to_reorder(node, subgraph_purity=subgraph_purity)
         )
     }
 
@@ -2168,14 +2170,15 @@ def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule) -> None:
     _canonicalize_graph_node_names(
         graph, canonical_key, skip_rename_ops=skip_placeholders
     )
-    fx_g.recompile()
+    owning_module = graph.owning_module
+    if isinstance(owning_module, torch.fx.GraphModule):
+        owning_module.recompile()
 
 
 def _has_source_canonicalized_dynamo_inputs(aot_config: AOTConfig) -> bool:
     sources = aot_config.aot_autograd_arg_pos_to_source
     if (
-        not torch._dynamo.config.canonicalize_output_graph_node_order
-        or not torch._functorch.config._sync_decision_cross_ranks
+        not torch._functorch.config._sync_decision_cross_ranks
         or torch._dynamo.compiled_autograd.in_compiled_autograd_region
         or aot_config.is_export
         or sources is None
@@ -2202,6 +2205,7 @@ def _maybe_unlift_partitioned_effect_tokens(
     fw_module: torch.fx.GraphModule,
     bw_module: torch.fx.GraphModule,
     joint_inputs: list[Any] | tuple[list[Any], list[Any]],
+    inner_meta: ViewAndMutationMeta,
     fw_metadata: ViewAndMutationMeta,
     aot_config: AOTConfig,
     num_inner_fwd_outputs: int,
@@ -2212,7 +2216,9 @@ def _maybe_unlift_partitioned_effect_tokens(
     if config.unlift_effect_tokens and (
         num_tokens > 0 or fw_metadata.num_backward_tokens > 0
     ):
-        unlift_tokens(fw_module, fw_metadata, aot_config, bw_module)
+        unlift_tokens(
+            fw_module, fw_metadata, aot_config, bw_module, inner_meta=inner_meta
+        )
         num_inner_fwd_outputs -= num_tokens
         if isinstance(joint_inputs, tuple):
             joint_inputs = (
@@ -2459,19 +2465,23 @@ def _aot_stage2a_partition(
                     fw_module,
                     bw_module,
                     joint_inputs,
+                    inner_meta,
                     fw_metadata,
                     aot_config,
                     num_inner_fwd_outputs,
                 )
             )
 
+            fw_metadata.disable_saved_tensors_hooks = (
+                _should_disable_saved_tensors_hooks()
+            )
             maybe_inline_graph_saved_tensors_hooks(
                 fw_module,
                 bw_module,
                 num_inner_fwd_outputs,
                 inner_meta,
                 aot_config,
-                fw_metadata.static_input_indices,
+                inner_meta.static_input_indices,
             )
             num_fw_outs_saved_for_bw, num_symints_saved_for_bw = (
                 _categorize_saved_tensors_for_backward(

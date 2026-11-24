@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <functional>
 #include <memory>
 #include <mutex>
 
@@ -69,6 +70,10 @@ static_assert(
 // `ncclDevComm`. See NCCLSymmetricMemory::get_peer_cft_handle.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 2)
 #define NCCL_HAS_HOST_CFT_MODE
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 32, 3)
+#define NCCL_HAS_NVLS_HOST_MODE
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -360,6 +365,13 @@ class NCCLComm {
   // Unique hash for this communicator.
   std::string uniqueHash_;
   bool aborted_{false};
+  // On ROCm, run once at the start of the first abort() or destroy(), while
+  // the handle is still valid. Set by the owner under `mutex_`; must not throw
+  // or call back into the owner, whose locks abort() can run under. Declared on
+  // every platform so the class layout does not depend on USE_ROCM.
+  std::function<void()> preInvalidateHook_;
+  // Caller must hold `mutex_`.
+  void runPreInvalidateHook();
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};
   mutable MutexType mutex_;

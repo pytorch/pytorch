@@ -274,14 +274,15 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # PyObject_GetIter itself falls back to PySequence_GetItem when tp_iter is NULL.
     if hasattr(b, "__iter__"):
         for x in b:
-            if x == a:
+            if x is a or x == a:
                 return True
         return False
     if hasattr(b, "__getitem__"):
         i = 0
         while True:
             try:
-                if b.__getitem__(i) == a:
+                item = b.__getitem__(i)
+                if item is a or item == a:
                     return True
                 i += 1
             except IndexError:
@@ -420,27 +421,17 @@ def dictview_richcompare(
     return all(item in self for item in other)
 
 
+def dictview_isdisjoint(self: Iterable[T], other: Iterable[T]) -> bool:
+    """Mirrors dictviews_isdisjoint in Objects/dictobject.c, without its
+    iterate-the-shorter-operand optimization, which does not change the result.
+    """
+    return not any(item in self for item in other)
+
+
 def assert_dict_equal(
     self_: Any, d1: dict[T, U], d2: dict[T, U], msg: str | None = None
 ) -> None:
     self_.assertTrue(d1 == d2, msg)
-
-
-def assert_multi_line_equal(
-    self_: Any, first: T, second: T, msg: str | None = None
-) -> None:
-    return self_.assertTrue(first == second, msg)
-
-
-# The original impl. uses difflib
-def assert_sequence_equal(
-    self_: Any,
-    seq1: Sequence[T],
-    seq2: Sequence[T],
-    msg: str | None = None,
-    seq_type: type[Any] | None = None,
-) -> None:
-    return self_.assertTrue(seq1 == seq2, msg)
 
 
 def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
@@ -462,6 +453,19 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
         return value
 
 
+def unpack_mapping_keys_and_values(
+    mapping: Mapping[T, U],
+) -> tuple[tuple[T, ...], tuple[U, ...]]:
+    # Snapshot `items()` once to keep keys and values aligned, including overrides.
+    items = list(mapping.items())
+    keys: list[T] = []
+    values: list[U] = []
+    for key, value in items:
+        keys.append(key)
+        values.append(value)
+    return tuple(keys), tuple(values)
+
+
 def instantiate_user_defined_class_object(
     cls: type[T], /, *args: Any, **kwargs: Any
 ) -> T:
@@ -473,7 +477,11 @@ def instantiate_user_defined_class_object(
     # for classes with custom __instancecheck__ (e.g. torch.ByteStorage).
     # Reference: https://github.com/python/cpython/blob/3.12/Objects/typeobject.c#L1670-L1673
     if issubclass(type(obj), cls):
-        obj.__init__(*args, **kwargs)
+        init_result = obj.__init__(*args, **kwargs)
+        if init_result is not None:
+            raise TypeError(
+                f"__init__() should return None, not {type(init_result).__name__!r}"
+            )
     return obj
 
 
@@ -487,7 +495,7 @@ def mutable_mapping_update(
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
             self[key] = value
-    # FIXME: Enabling the `elif`-branch below needs too many `VariableClass.call_obj_hasattr` changes.
+    # FIXME: Enabling the `elif`-branch below needs too many `tp_getattro_impl` changes.
     #   >>> class Foo:
     #   ...     def __init__(self):
     #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method
@@ -526,6 +534,14 @@ def construct_dict(
     self = cls.__new__(cls)
     mutable_mapping_update(self, data, **kwargs)
     return self
+
+
+def dict_fromkeys(cls: Any, /, iterable: Iterable[Any], value: Any = None) -> Any:
+    # Mirrors the subclass path in CPython's _PyDict_FromKeys.
+    result = cls()
+    for key in iterable:
+        result[key] = value
+    return result
 
 
 def foreach_map_fn(*args: Any) -> Any:

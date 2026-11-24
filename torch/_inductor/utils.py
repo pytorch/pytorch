@@ -52,11 +52,18 @@ from typing_extensions import dataclass_transform, ParamSpec, TypeVar
 from unittest import mock
 
 import sympy
+from sympy.polys.polyerrors import BasePolynomialError
 
 import torch
 import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch._inductor.runtime.namedtuple_helpers import namedtuple_type
+from torch._inductor.runtime.tiling import (
+    get_axis_prefix,
+    is_reduction_prefix,
+    is_z_prefix,
+)
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -223,9 +230,10 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
     Max,
+    Mod,
     ModularIndexing,
 )
-from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from . import config
@@ -235,6 +243,12 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
+
+
+# FX metadata marking a compiler-created ``_scaled_mm(..., scale_result=...)``
+# that represents an explicit post-GEMM scalar multiply.  Unlike the public
+# operator argument, this scale must still be applied for BF16 output.
+FOLDED_SCALED_MM_OUTPUT_SCALE = "inductor_folded_scaled_mm_output_scale"
 
 # Scanned exactly once, when this module is imported. Safe because both
 # registration paths precede any import of inductor: autoloaded out-of-tree
@@ -396,6 +410,39 @@ def _constexpr_type_repr_prefix(value: object) -> str | None:
     return None
 
 
+def sanitize_constexpr_for_repr(
+    value: object, *, canonicalize_namedtuples: bool = True
+) -> object:
+    """Prepare constexpr reprs with Enum values and collision-safe NamedTuples."""
+    if isinstance(value, enum.Enum):
+        return sanitize_constexpr_for_repr(
+            value.value, canonicalize_namedtuples=canonicalize_namedtuples
+        )
+    repr_children = get_constexpr_repr_children(value)
+    if repr_children is not None:
+        children = tuple(
+            sanitize_constexpr_for_repr(
+                child, canonicalize_namedtuples=canonicalize_namedtuples
+            )
+            for child in repr_children.values
+        )
+        unchanged = all(
+            child is original for child, original in zip(children, repr_children.values)
+        )
+        if canonicalize_namedtuples and pytree.is_namedtuple_instance(value):
+            cls = cast(type[NamedTuple], type(value))
+            helper_type = namedtuple_type(cls.__name__, tuple(cls._fields))
+            if cls is helper_type and unchanged:
+                return value
+            return helper_type(*children)
+        # Rebuilding arbitrary attrs, pydantic, and container subclasses can
+        # invoke user code, so preserve the original when sanitization is a no-op.
+        if unchanged:
+            return value
+        return repr_children.rebuild(children)
+    return value
+
+
 def _collect_importable_constexpr_types(
     value: object,
     result: dict[str, ImportableConstexprType],
@@ -404,6 +451,16 @@ def _collect_importable_constexpr_types(
     if id(value) in seen:
         return
     seen.add(id(value))
+
+    # NamedTuple tl.constexpr values are reconstructed by
+    # namedtuple_helpers.namedtuple_type (pickle-safe, works for __main__).
+    # Do not emit a user-module import for them.
+    if pytree.is_namedtuple_instance(value):
+        repr_children = get_constexpr_repr_children(value)
+        if repr_children is not None:
+            for child in repr_children.values:
+                _collect_importable_constexpr_types(child, result, seen)
+        return
 
     value_type = type(value)
     type_module = getattr(value_type, "__module__", None)
@@ -441,7 +498,11 @@ def _collect_importable_constexpr_types(
                         "evaluated as a constructor call. Set repr=False or init=True."
                     )
         root_name = type_qualname.split(".", 1)[0]
-        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES:
+        # Structural NamedTuple aliases are emitted before user-type imports.
+        # Reserve their namespace so an import cannot replace an emitted type.
+        if root_name in _TRITON_CONSTEXPR_RESERVED_NAMES or root_name.startswith(
+            "_NamedTuple_"
+        ):
             raise ImportError(
                 "Triton constexpr value type "
                 f"{type_module}.{type_qualname} requires import name {root_name}, "
@@ -607,6 +668,62 @@ class GraphPartitionMap:
     constant_names: list[str]
 
 
+class GraphPartitionMode(enum.Enum):
+    """Whether, and why, a compile is split into partition functions."""
+
+    # One callable: graph_partition is off, unsupported (cpp_wrapper, fx_wrapper,
+    # AOT) or unwanted (subgraph bodies, benchmark-only lowerings).
+    NONE = "none"
+    # config.graph_partition=True.
+    FROM_CONFIG = "from_config"
+
+
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionPlan:
+    """How one compile is split into partitions, and what the partitions are for.
+
+    Decided once before lowering; GraphLowering and CompiledFxGraph carry it
+    instead of reading config.graph_partition. ConstructorMoverPass,
+    the cpp_wrapper/fx_wrapper setup and compile_fx's override_cudagraphs
+    handling still read the config itself, and the scheduler's
+    partition-minimizing reorder requires both it and config.triton.cudagraphs,
+    preserving that optimization's opt-in.
+    """
+
+    mode: GraphPartitionMode = GraphPartitionMode.NONE
+    # The partitions are for CUDA Graphs or a customized partition wrapper: the
+    # scheduler splits off ops that cannot be captured, call() leaves the input
+    # alignment and NaN asserts to the partition functions, and post_compile
+    # captures the partitions instead of the whole graph.
+    cudagraphs_per_partition: bool = False
+
+    def __post_init__(self) -> None:
+        if self.cudagraphs_per_partition and not self.uses_graph_partition:
+            raise ValueError("cudagraphs_per_partition=True requires partitioning")
+
+    @property
+    def uses_graph_partition(self) -> bool:
+        """Whether codegen emits partition functions and a Runner."""
+        return self.mode is not GraphPartitionMode.NONE
+
+    @staticmethod
+    def no_partition() -> GraphPartitionPlan:
+        """One callable whatever config.graph_partition says: subgraph bodies
+        and benchmark-only lowerings."""
+        return GraphPartitionPlan()
+
+    @staticmethod
+    def from_config() -> GraphPartitionPlan:
+        """The plan config.graph_partition and config.triton.cudagraphs imply."""
+        if not config.graph_partition:
+            return GraphPartitionPlan.no_partition()
+        return GraphPartitionPlan(
+            GraphPartitionMode.FROM_CONFIG,
+            cudagraphs_per_partition=config.triton.cudagraphs
+            or _unstable_customized_partition_wrapper.wrapper is not None,
+        )
+
+
 def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
     """
     Returns benchmark results by examining torch profiler events.
@@ -699,14 +816,16 @@ def do_bench_using_profiling(
     # But that's not trivial due to so many call sites in and out of pytorch.
 
     from torch._inductor.runtime.benchmarking import (
+        _triton_benchmarking_context,
         gpu_benchmark_lock,
         may_distort_benchmarking_result,
     )
 
     locked_bench = gpu_benchmark_lock(_do_bench_using_profiling)
-    return may_distort_benchmarking_result(locked_bench)(
-        fn, warmup, rep, is_vetted_benchmarking
-    )
+    with _triton_benchmarking_context()():
+        return may_distort_benchmarking_result(locked_bench)(
+            fn, warmup, rep, is_vetted_benchmarking
+        )
 
 
 def _get_do_bench_profile_result(
@@ -1342,11 +1461,6 @@ def get_fused_kernel_name(
     return name
 
 
-@functools.lru_cache(maxsize=2048)
-def _overloadpacket_str(op: torch._ops.OpOverload) -> str:
-    return str(op._overloadpacket)
-
-
 def get_kernel_metadata(
     node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     wrapper: PythonWrapperCodegen,
@@ -1392,8 +1506,7 @@ def get_kernel_metadata(
             original_aten = node.meta["original_aten"]
             key = None
             if isinstance(original_aten, torch._ops.OpOverload):
-                # Same op, once per node per kernel; ops are singletons.
-                key = _overloadpacket_str(original_aten)
+                key = str(original_aten._overloadpacket)
             elif isinstance(original_aten, torch._ops.HigherOrderOperator):
                 key = str(original_aten.name())
             if key:
@@ -1636,11 +1749,12 @@ def get_bounds_index_expr(index: sympy.Expr) -> ValueRanges[Any]:
 
 
 def prefix_is_reduction(prefix: str) -> bool:
-    return prefix[0] == "r"
+    return is_reduction_prefix(get_axis_prefix(prefix) or "")
 
 
 def prefix_is_pointwise(prefix: str) -> bool:
-    return prefix[0] in ("x", "y", "z")
+    axis = get_axis_prefix(prefix)
+    return axis in ("x", "y") or is_z_prefix(axis or "")
 
 
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
@@ -1679,6 +1793,40 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
     have the same replaced expression integer and nonnegative properties.
     """
     return _sympy_subs(expr, replacements)
+
+
+_SIZE_SYMBOL_TYPES = (SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.UNBACKED_INT)
+
+
+def is_affine_indexing(index: sympy.Expr) -> bool:
+    """
+    True if index is affine in the loop and indirect variables: coefficients
+    may involve size symbols, but there is no ModularIndexing, FloorDiv, Min,
+    Max, Abs or Where of a loop variable and no product of loop variables.
+    """
+    # not simultaneous, which would leave the inner one of nested wrappers
+    index = index.replace(Identity, lambda x: x, simultaneous=False)
+    loop_vars = [
+        sym for sym in index.free_symbols if not symbol_is_type(sym, _SIZE_SYMBOL_TYPES)
+    ]
+    if not loop_vars:
+        return True
+    try:
+        return sympy.Poly(index, *loop_vars).total_degree() <= 1
+    except BasePolynomialError:
+        return False
+
+
+# The constructs InductorChoices.use_modular_indexing decides about.
+ModularIndexingUse = Literal[
+    "view",  # dim-merging view whose inlined loads need it
+    "reduction",  # flat split of a multi-dim reduction
+    "repeat",
+    "roll",
+    "slice_scatter",  # strided slice_scatter
+    "index",  # %, //, abs, clamp of an index tensor folded into the address
+    "reindex",  # loop reindexing and index inversion during fusion
+]
 
 
 def is_symbolic(a: object) -> TypeGuard[torch.SymInt | torch.Tensor]:
@@ -2112,13 +2260,19 @@ class DelayReplaceLine(DeferredLineBase):
         return DelayReplaceLine(self.key, self.value_fn, line)
 
 
-@functools.cache
 def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
         device = torch.device(get_gpu_type(), index_or_device)
 
+    # Resolve the threshold outside of the cache so that changing
+    # config.max_autotune_gemm_min_sms after the first call takes effect.
+    return _is_big_gpu(device, config.max_autotune_gemm_min_sms)
+
+
+@functools.cache
+def _is_big_gpu(device: torch.device, min_sms_override: int | None) -> bool:
     prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
@@ -2131,7 +2285,9 @@ def is_big_gpu(index_or_device: int | torch.device = 0) -> bool:
             return False
         return True
 
-    min_sms = 16 if device.type == "xpu" else 68  # 3080
+    min_sms = min_sms_override
+    if min_sms is None:
+        min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -2199,12 +2355,74 @@ def get_tma_workspace_arg(
     )
 
 
+def kpack_supported() -> bool:
+    """Whether to enable default kpack > 1 for the current ROCm arch.
+
+    Enabled on gfx908 (CDNA1), gfx90a (CDNA2) and gfx942 (CDNA3): the archs whose
+    MFMA K-extents are modeled by the dtype_size-keyed _MFMA_KDIM tables, so a
+    kpack > 1 pack can be checked against block_k for underfill. gfx950 (CDNA4)
+    is excluded because the Triton compiler forces kpack to 1 regardless
+    (triton/backends/amd/compiler.py), so a kpack > 1 default is a no-op.
+    """
+    return rocm_gfx_arch() in ("gfx908", "gfx90a", "gfx942")
+
+
 def get_default_kpack(block_k: int = 16) -> int:
     if not torch.version.hip:
         return 0
-    if "gfx942" in torch.cuda.get_device_properties(0).gcnArchName and block_k <= 16:
+    if rocm_gfx_arch() == "gfx942" and block_k <= 16:
         return 1
-    return 2
+    if kpack_supported() and block_k >= 16:
+        return 2
+    return 1
+
+
+# K-extent (kdim) of the CDNA MFMA instruction Triton selects, keyed by
+# (element_byte_width, matrix_instr_nonkdim).
+_MFMA_KDIM_CDNA3 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 32,  # f8/i8    -> 16x16x32
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 16,  # f8/i8    -> 32x32x16
+}
+
+# CDNA1 (gfx908) and CDNA2 (gfx90a) share this table: every (dtype_size, nonkdim)
+# entry resolves to the same K-extent on both, so they are merged.
+#   - CDNA2 is exact -- its bf16 MFMA (bf16_1k) matches f16 (16x16x16 / 32x32x8)
+#     and int8 is 16x16x16 / 32x32x8.
+#   - CDNA1 is exact for f16/int8/f32, but its bf16 MFMA is smaller (16x16x8 /
+#     32x32x4). dtype_size=2 cannot distinguish bf16 from f16, so it is keyed to
+#     the larger f16 extent: the underfill check stays conservative for CDNA1
+#     bf16 (may over-prune, never under-validate -> no packing garbage).
+# fp8 has no native instruction on either and is emulated with f16, landing on
+# the same K-extent as int8.
+_MFMA_KDIM_CDNA1_CDNA2 = {
+    # nonkdim == 16 : 16x16x{K}
+    (4, 16): 4,  # f32      -> 16x16x4
+    (2, 16): 16,  # f16/bf16 -> 16x16x16
+    (1, 16): 16,  # f8/i8    -> 16x16x16
+    # nonkdim == 32 : 32x32x{K}
+    (4, 32): 2,  # f32      -> 32x32x2
+    (2, 32): 8,  # f16/bf16 -> 32x32x8
+    (1, 32): 8,  # f8/i8    -> 32x32x8
+}
+
+
+def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
+    """MFMA K-extent for the current CDNA arch, None for an unknown
+    (dtype_size, nonkdim) pair. Only gfx908/gfx90a/gfx942 are distinguished since
+    kpack > 1 (the sole consumer) is limited to those archs."""
+    arch = rocm_gfx_arch()
+    if arch in ("gfx908", "gfx90a"):
+        return _MFMA_KDIM_CDNA1_CDNA2.get((dtype_size, matrix_instr_nonkdim))
+    elif arch == "gfx942":
+        return _MFMA_KDIM_CDNA3.get((dtype_size, matrix_instr_nonkdim))
+    else:
+        return None
 
 
 def _use_template_for_gpu(
@@ -2227,6 +2445,17 @@ def _use_autotune_backend(backend: str) -> bool:
     return backend.upper() in [
         x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
     ]
+
+
+def _is_only_autotune_backend(backend: str) -> bool:
+    """Return whether ``backend`` is the only configured GEMM autotune backend."""
+    return OrderedSet(
+        [
+            x.strip()
+            for x in config.max_autotune_gemm_backends.upper().split(",")
+            if x.strip()
+        ]
+    ) == OrderedSet([backend.upper()])
 
 
 def _use_conv_autotune_backend(backend: str) -> bool:
@@ -2292,8 +2521,8 @@ def _bytes_aligned(expr_bytes: _IntLike, alignment: int = TMA_ALIGNMENT) -> bool
 def tma_inner_dim(strides: Sequence[_IntLike]) -> int | None:
     """Index of the single stride-1 ("inner") dim, or None if there is not
     exactly one. TMA requires exactly one contiguous dim, so None means the
-    tensor is not TMA-compatible. `strides` must already be resolved to ints or
-    hinted symbols by the caller.
+    tensor is not TMA-compatible. A symbolic stride only counts as inner when
+    it is statically 1.
     """
     from .virtualized import V
 
@@ -2321,12 +2550,54 @@ def can_use_tma(
       * All "outer" dims have 16-byte aligned strides
       * Inner dim size × itemsize is a multiple of 16
       * For 1-byte dtypes (e.g. FP8), inner dim ≥ 32
+
+    Sizes are never specialized; only these requirements are checked. With
+    ``add_guards=True``, a requirement that depends on a dynamic size is decided
+    from the example inputs. Requirements that held are guarded only once TMA is
+    accepted. If TMA is rejected only by requirements on dynamic sizes, it is
+    guarded that one of them still fails, so an input meeting all of them
+    recompiles (an aligned size after an unaligned one gets TMA); a static
+    failure rejects TMA for every input and guards nothing. Under AOTI, where those guards are not checked at
+    runtime, a requirement must instead be statically provable. With
+    ``add_guards=False``, requirements are decided from size hints and nothing
+    is guarded.
     """
     from torch.utils._triton import has_triton_tma_device
 
     from .virtualized import V
 
-    _aligned = _bytes_aligned
+    # Requirements decided on the hints, guarded only once the outcome is known.
+    # Guarding each as it is checked would leave guards behind that don't
+    # decide the result, recompiling inputs that get the same graph.
+    held: list[sympy.Basic] = []
+    failed: list[sympy.Basic] = []
+
+    def _holds(requirement: sympy.Basic) -> bool:
+        sizevars = V.graph.sizevars
+        # AOTI does not check Inductor's guards at runtime.
+        if add_guards and V.graph.aot_mode:
+            return sizevars.statically_known_true(requirement)
+        hints = {
+            s: sizevars.replace_backed_symbols_with_hints(s)
+            for s in requirement.free_symbols
+        }
+        if not sizevars.statically_known_true(requirement.xreplace(hints)):
+            if (
+                not add_guards
+                or not requirement.free_symbols
+                or free_unbacked_symbols(requirement)
+            ):
+                return False
+            # Fails on the hints but depends on backed sizes: keep checking, as
+            # a later static failure would reject TMA for every input anyway.
+            failed.append(requirement)
+            return True
+        if add_guards and requirement.free_symbols:
+            held.append(requirement)
+        return True
+
+    def _aligned(expr_bytes: _IntLike) -> bool:
+        return _holds(sympy.Eq(Mod(expr_bytes, TMA_ALIGNMENT), 0))
 
     def _is_tma_compatible_layout(layout: Layout | None) -> bool:
         if layout is None:
@@ -2369,35 +2640,24 @@ def can_use_tma(
         if dtype not in _TMA_SUPPORTED_DTYPES:
             return False
 
-        if add_guards:
-            sizes_i = V.graph.sizevars.guard_int_seq(sizes)
-            strides_i = V.graph.sizevars.guard_int_seq(strides)
-        else:
-            sizes_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(s) for s in sizes
-            ]
-            strides_i = [
-                V.graph.sizevars.replace_backed_symbols_with_hints(st) for st in strides
-            ]
-
-        inner_idx = tma_inner_dim(strides_i)
+        inner_idx = tma_inner_dim(strides)
         if inner_idx is None:
             return False
 
         # All "outer" dims must have 16-byte aligned strides
-        for i, st in enumerate(strides_i):
+        for i, st in enumerate(strides):
             if i == inner_idx:
                 continue
             if not _aligned(st * itemsize):
                 return False
 
         # Inner dim byte width must be a multiple of 16 B
-        inner_dim = sizes_i[inner_idx]
+        inner_dim = sizes[inner_idx]
         if not _aligned(inner_dim * itemsize):
             return False
 
         # 1-byte dtypes (FP8 etc.) need inner dim ≥ 32 for tensor core alignment
-        if itemsize == 1 and not V.graph.sizevars.statically_known_geq(inner_dim, 32):
+        if itemsize == 1 and not _holds(sympy.Ge(inner_dim, 32)):
             return False
 
         return True
@@ -2424,11 +2684,20 @@ def can_use_tma(
 
         return True
 
-    return (
+    if not (
         has_triton_tma_device()
         and all(_is_tma_compatible_matrix(m) for m in matrices)
         and _is_tma_compatible_layout(output_layout)
-    )
+    ):
+        return False
+    if failed:
+        # Only dynamic requirements reject TMA: guard that one still fails, so
+        # an input meeting all of them recompiles and gets TMA.
+        V.graph.sizevars.guard_or_false(sympy.Or(*(sympy.Not(r) for r in failed)))
+        return False
+    # Guarded one by one rather than as a single And, so later static checks
+    # (e.g. statically_known_multiple_of) still see each fact.
+    return all(V.graph.sizevars.guard_or_false(r) for r in held)
 
 
 def _descriptor_shapes_fit_in_int32(
@@ -3539,19 +3808,34 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    from .codecache import PyCodeCache
+
     remove_quote = kwargs.pop("remove_quote", False)
-    # pyrefly: ignore [bad-argument-type]
-    result, source_codes = run_and_get_code(fn, *args, **kwargs)
-    kernels = []
+    # A module-level kernel's def is renamed and its benchmark harness cut, so take the
+    # source it is compiled from, which every load of a wrapper passes, cache hits too.
+    # Keyed by wrapper: one wrapper can be loaded more than once.
+    module_level: dict[str, list[str]] = {}
+    orig_load = PyCodeCache.load_by_key_path
+
+    def load(key: str, *load_args: Any, **load_kwargs: Any) -> Any:
+        if kernel_sources := load_kwargs.get("kernel_sources"):
+            module_level[key] = [src.strip() for _, src in kernel_sources.values()]
+        return orig_load(key, *load_args, **load_kwargs)
+
+    with mock.patch.object(PyCodeCache, "load_by_key_path", load):
+        # pyrefly: ignore [bad-argument-type]
+        result, source_codes = run_and_get_code(fn, *args, **kwargs)
+    kernels: list[str] = []
     for code in source_codes:
         if config.cpp_wrapper and config.triton.autotune_at_compile_time is not True:
             # With lazy Triton kernel compilation, kernel sources are embedded
             # inside C++ R"TRITON(...)TRITON" raw strings.
             kernels.extend(re.findall(r'R"TRITON\((.*?)\)TRITON"', code, re.DOTALL))
         else:
-            kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
-        if remove_quote:
-            kernels = [kernel[3:-3] for kernel in kernels]
+            scraped = re.findall(r"'''.*?'''", code, re.DOTALL)
+            kernels.extend(k[3:-3] if remove_quote else k for k in scraped)
+    for sources in module_level.values():
+        kernels.extend(sources)
     return result, kernels
 
 
@@ -4105,6 +4389,44 @@ def is_output_of_multi_outputs_template(
     )
 
 
+def get_collective_config(node: torch.fx.Node) -> dict[str, Any] | None:
+    """A functional collective's per-collective configuration, if any."""
+    target = node.target
+    if (
+        not isinstance(target, torch._ops.OpOverload)
+        or target.namespace != "_c10d_functional"
+    ):
+        return None
+    for index, arg in enumerate(target._schema.arguments):
+        if arg.name == "config":
+            if index < len(node.args):
+                return node.args[index]  # type: ignore[return-value]
+            return node.kwargs.get("config")  # type: ignore[return-value]
+    return None
+
+
+def _config_value_key(value: Any) -> Any:
+    # Types are part of the key so 1, 1.0 and True stay distinct.
+    if isinstance(value, dict):
+        return (
+            dict,
+            tuple(sorted((k, _config_value_key(v)) for k, v in value.items())),
+        )
+    if isinstance(value, (list, tuple)):
+        return (type(value), tuple(_config_value_key(v) for v in value))
+    return (type(value), value)
+
+
+def collective_config_value_key(config: dict[str, Any] | None) -> Any:
+    """A hashable form of a collective configuration."""
+    return None if config is None else _config_value_key(config)
+
+
+def collective_config_key(node: torch.fx.Node) -> Any:
+    """A hashable form of the collective's configuration."""
+    return collective_config_value_key(get_collective_config(node))
+
+
 def is_collective(
     node: Node | Operation | None,
     op: torch._ops.OperatorBase | None = None,
@@ -4322,14 +4644,11 @@ def collect_defined_kernels(kernel_list: list[str]) -> Iterator[None]:
         self: PythonWrapperCodegen,
         kernel_name: str,
         kernel_code: str,
-        metadata: str | None = None,
-        gpu: bool = True,
-        cpp_definition: str | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
         kernel_list.append(kernel_code)
-        return orig_define_kernel(
-            self, kernel_name, kernel_code, metadata, gpu, cpp_definition
-        )
+        return orig_define_kernel(self, kernel_name, kernel_code, *args, **kwargs)
 
     with mock.patch.object(PythonWrapperCodegen, "define_kernel", define_kernel):
         yield
@@ -4427,7 +4746,9 @@ def device_need_guard(device: str) -> bool:
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
-    if dtype == torch.bfloat16 and torch.cuda.is_available():
+    if dtype == torch.bfloat16 and torch.version.hip:
+        return True
+    elif dtype == torch.bfloat16 and torch.cuda.is_available():
         return torch.cuda.get_device_capability() < (9, 0)
     elif dtype == torch.bfloat16 and torch.xpu.is_available():
         return True
@@ -4707,6 +5028,9 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     # (e.g., via ValueRanges) that it is still in bounds
     if V.graph.sizevars.statically_known_true(e <= int_max):
         return True
+
+    if config.avoid_32bit_indexing_guards:
+        return False
 
     # AOTI doesn't guard on < 2**32, so checking hints isn't a viable option,
     # in case the hinted value is < 2**32, but the allowed range is larger.
@@ -5177,13 +5501,6 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     )
 
 
-def is_using_cudagraph_partition() -> bool:
-    return (
-        torch._inductor.config.triton.cudagraphs
-        or _unstable_customized_partition_wrapper.wrapper is not None
-    ) and torch._inductor.config.graph_partition
-
-
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 
@@ -5621,6 +5938,13 @@ def load_template(name: str, template_dir: Path) -> str:
         raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
 
 
+def get_cpp_wrapper_header_device(device: str) -> str:
+    """PrivateUse1 backends register an arbitrary device name, but the runtime
+    headers are shipped under the generic privateuse1 name."""
+    privateuse1 = torch._C._get_privateuse1_backend_name()
+    return "privateuse1" if device == privateuse1 else device
+
+
 def should_fallback_by_default(node: torch.fx.Node) -> bool:
     """Decide whether fallback for a node. This is only used in inductor lite mode."""
     target = node.target
@@ -5721,8 +6045,23 @@ def tlx_only_cuda_options() -> list[str]:
     return _tlx_registry_options("tlx_only_cuda_options")
 
 
+def forwarded_cuda_compile_options() -> list[str]:
+    """CUDA Triton compile options forwarded from kernel configs.
+
+    ``ctas_per_cga`` is also set by Meta autoWS 2CTA templates, so it must be
+    forwarded even when TLX is off.
+    """
+    return list(dict.fromkeys(["ctas_per_cga", *tlx_only_cuda_options()]))
+
+
 def tlx_only_hip_options() -> list[str]:
     return _tlx_registry_options("tlx_only_hip_options")
+
+
+def forwarded_hip_compile_options() -> list[str]:
+    """HIP compiler options forwarded to Triton."""
+    options = ["matrix_instr_nonkdim", "waves_per_eu", "kpack", *tlx_only_hip_options()]
+    return list(dict.fromkeys(options))
 
 
 def _round_up(x: int, y: int) -> int:
@@ -5746,8 +6085,9 @@ def _prefers_swizzle_32_8_cached(mat_dtype: torch.dtype, rocm_version: str) -> b
 
 def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
     """
-    gfx950 hipBLASLt takes 1x32 block scales in the 32x8-tiled layout: MX FP4
-    from ROCm 7.13, MX FP8 from 7.14. Every other arch uses the default layout.
+    gfx950 takes SWIZZLE_32_8 as the 32x8 tile: MX FP4 from ROCm 7.13 and MX
+    FP8 from 7.14. gfx1250 requests SWIZZLE_128; its count is handled by
+    `_gfx1250_scale_swizzle`.
     """
     # is_available() is not stable across a process lifetime, so it must stay
     # outside the cache -- a False from before device init would otherwise be
@@ -5758,6 +6098,33 @@ def _prefers_swizzle_32_8(mat_dtype: torch.dtype) -> bool:
     # was compiled against; torch.version.hip only tracks it on shipped ROCm.
     return _prefers_swizzle_32_8_cached(
         mat_dtype, getattr(torch.version, "rocm", None) or torch.version.hip
+    )
+
+
+@functools.lru_cache
+def _gfx1250_scale_swizzle_cached(rocm_version: str) -> tuple[bool, bool]:
+    """(mx, nvfp4) for gfx1250. nvfp4 implies mx, since ROCm 10 is past 7.14."""
+    try:
+        version = tuple(int(x) for x in rocm_version.split("-")[0].split("."))
+    except ValueError:
+        return False, False
+    arch = _rocm_native_device_arch_name("cuda").split(":", 1)[0]
+    if not arch.startswith("gfx1250"):
+        return False, False
+    return version >= (7, 14), version >= (10, 0)
+
+
+def _gfx1250_scale_swizzle() -> tuple[bool, bool]:
+    """Whether gfx1250 accepts SWIZZLE_128 for MX and for NVFP4.
+
+    The MX count is rows * round_up(K/32, 4). It equals the unswizzled count
+    on some legal shapes, so the caller must test it before NO_SWIZZLE. The
+    NVFP4 count is rows * round_up(K/16, 8).
+    """
+    if not torch.version.hip or not torch.cuda.is_available():
+        return False, False
+    return _gfx1250_scale_swizzle_cached(
+        getattr(torch.version, "rocm", None) or torch.version.hip
     )
 
 
@@ -5814,6 +6181,18 @@ def _infer_scale_swizzle_impl(
                 scale_numel, expected_numel_b
             ):
                 return ScalingType.BlockWise1x16, SwizzleType.NO_SWIZZLE
+        elif _gfx1250_scale_swizzle()[1]:
+            # gfx1250: rows * round_up(K/16, 8).
+            expected_numel_a = mat_size[0] * _round_up(
+                ceildiv(K_multiplier * mat_size[1], 16), 8
+            )
+            expected_numel_b = mat_size[1] * _round_up(
+                ceildiv(K_multiplier * mat_size[0], 16), 8
+            )
+            if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                scale_numel, expected_numel_b
+            ):
+                return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_128
         else:
             # NVIDIA: uses swizzled 32x4x4 layout
             expected_numel_a = _round_up(mat_size[0], 128) * _round_up(
@@ -5842,6 +6221,20 @@ def _infer_scale_swizzle_impl(
             ):
                 return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
         else:
+            # gfx1250 MX is rows * round_up(K/32, 4). On legal shapes that
+            # equals the unswizzled count below, and NO_SWIZZLE is rejected,
+            # so this match has to win the tie.
+            if _gfx1250_scale_swizzle()[0]:
+                expected_numel_a = mat_size[0] * _round_up(
+                    ceildiv(K_multiplier * mat_size[1], 32), 4
+                )
+                expected_numel_b = mat_size[1] * _round_up(
+                    ceildiv(K_multiplier * mat_size[0], 32), 4
+                )
+                if eq_fn(scale_numel, expected_numel_a) or eq_fn(
+                    scale_numel, expected_numel_b
+                ):
+                    return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_128
             # AMD/XPU: no swizzle. Checked before the gfx950 32x8 layout below
             # because the two counts are equal whenever the paddings coincide
             # (M % 32 == 0 and K % 256 == 0), and a tie has to resolve to the
