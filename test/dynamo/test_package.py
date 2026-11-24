@@ -346,6 +346,11 @@ def comprehension_with_a_bound_variable(x):
     i = 0
     ys = [torch._dynamo.graph_break() or x + i for i in range(2)]
     return ys[0] + ys[1]
+
+
+def comprehension_with_an_unbound_variable(x):
+    ys = [torch._dynamo.graph_break() or x + i for i in range(2)]
+    return ys[0] + ys[1]
 """
 
 
@@ -1790,11 +1795,14 @@ def fn(x):
         "fn_name",
         [
             "comprehension_with_a_bound_variable",
+            "comprehension_with_an_unbound_variable",
         ],
     )
     def test_a_comprehension_graph_break_is_served(self, fn_name):
         # The bytecode calls the function Dynamo generated to run the
         # comprehension, by the name it bound it under while tracing.
+        # With an unbound loop variable it also pops a NULL, by calling a nop it
+        # holds as a constant, which saving pickles.
         self._serve_from_a_fresh_import(fn_name)
 
     def test_file_change(self):
