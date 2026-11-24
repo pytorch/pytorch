@@ -80,12 +80,15 @@ class XpuBasicTests(TestCase):
 
         x = torch.randn(16, device="xpu")
         expected = fn(x)
-        with mock.patch.multiple(
-            graph_tree_backend,
-            _registered_device_type=None,
-            _graph_interface=None,
-            _allocator_interface=None,
-            _initialized=False,
+        with (
+            mock.patch.multiple(
+                graph_tree_backend,
+                _registered_device_type=None,
+                _graph_interface=None,
+                _allocator_interface=None,
+                _initialized=False,
+            ),
+            mock.patch.dict(graph_tree_backend._builtin_backends, clear=True),
         ):
             self.assertFalse(graph_tree_backend.is_graph_tree_backend_available())
             with self.assertLogs(cudagraphs_log, level="WARNING") as logs:
