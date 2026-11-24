@@ -280,6 +280,7 @@ class Guard:
 
     stack: CapturedTraceback | None = None
     user_stack: traceback.StackSummary | None = None
+    recompile_hint: str | None = dataclasses.field(default=None, compare=False)
     _hash: int | None = None
     # The local-scope type a TYPE_MATCH or FAKE_SCRIPT_TYPE_MATCH found, if any;
     # serialize_guards refuses it.
