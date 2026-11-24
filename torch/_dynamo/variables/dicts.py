@@ -600,7 +600,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
         # Unhashable key check happens inside HashableTracker (tp_hash_impl → TypeError).
-        return self.getitem_const_raise_exception_if_absent(tx, key)
+        if not hasattr(self.python_type(), "__missing__"):
+            return self.getitem_const_raise_exception_if_absent(tx, key)
+        hashed = self._lookup_key(tx, key)
+        value = self.items.get(hashed)
+        if value is None or istype(value, variables.DeletedVariable):
+            self.install_dict_contains_guard(tx, hashed, key_present=False)
+            return self.call_method(tx, "__missing__", [key], {})
+        return value
 
     def sq_contains_impl(
         self,
@@ -892,6 +899,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
+        "__contains__": Method.from_slot(sq_contains_impl),
+        "__getitem__": Method.from_slot(mp_subscript_impl),
         "items": Method(dict_items),
         "keys": Method(dict_keys),
         "values": Method(dict_values),
@@ -1039,6 +1048,44 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     def python_type(self) -> type:
         return collections.OrderedDict
 
+    def reduce_ex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        from .iter import OrderedDictItemsIterator
+
+        if type(self) is not OrderedDictVariable or not self.is_python_constant():
+            return None
+
+        if self.source and not is_constant_source(self.source):
+            instance_dict = AttrSource(self.source, "__dict__")
+            effects = tx.output.side_effects
+            # A pending write to another input dict could alias self.__dict__
+            # on a cache hit, even if the inputs did not alias during tracing.
+            if tx.output.resolve_source_value(instance_dict) or any(
+                var is not self
+                and isinstance(var, ConstDictVariable)
+                and var.source is not None
+                and effects.is_modified(var)
+                for var in effects.id_to_variable.values()
+            ):
+                unimplemented(
+                    gb_type="Copying an OrderedDict with instance attributes",
+                    context="OrderedDict.__reduce_ex__",
+                    explanation="The OrderedDict has instance attributes, or a pending dictionary write could have modified them. Dynamo cannot preserve this state when tracing the copy.",
+                    hints=["Copy the OrderedDict outside the compiled region."],
+                )
+            install_guard(instance_dict.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            self.install_dict_order_guard(tx)
+
+        reduced = self.as_python_constant().__reduce_ex__(args[0].as_python_constant())
+        return variables.TupleVariable(
+            [VariableTracker.build(tx, item) for item in reduced[:-1]]
+            + [OrderedDictItemsIterator.create(self.items)]
+        )
+
     def move_to_end(
         self: "OrderedDictVariable",
         tx: "InstructionTranslatorBase",
@@ -1090,6 +1137,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
+        "__reduce_ex__": Method(reduce_ex),
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
     }
@@ -1420,6 +1468,18 @@ class DictViewVariable(VariableTracker):
             mutation_type=ValueMutationNew(),
         )
 
+    def isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_isdisjoint
+        ).call_function(tx, [self, *args], kwargs)
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L6992-L6998
     tp_methods = {
         "__reversed__": Method(dict_view_reversed),
@@ -1519,20 +1579,8 @@ class DictKeysVariable(DictViewVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
         return ConstDictVariable.sq_contains_impl(self.dv_dict, tx, item)
 
-    def isdisjoint(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        return SourcelessBuilder.create(
-            tx, polyfills.dictview_isdisjoint
-        ).call_function(tx, [self, *args], kwargs)
-
     tp_methods = {
-        "isdisjoint": Method(isdisjoint),
+        "isdisjoint": Method(DictViewVariable.isdisjoint),
     }
 
     def tp_richcompare_impl(
@@ -1698,6 +1746,10 @@ class DictItemsVariable(DictViewVariable):
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictItemsIterator.create(self.dv_dict.items)
+
+    tp_methods = {
+        "isdisjoint": Method(DictViewVariable.isdisjoint),
+    }
 
 
 kV = HashableTracker | str

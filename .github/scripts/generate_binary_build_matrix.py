@@ -34,6 +34,7 @@ CUDA_STABLE = "13.2"
 CUDA_ARCHES_FULL_VERSION = {
     "13.2": "13.2.2",
     "13.4": "13.4.3",
+    "13.5": "13.5.0",
 }
 # CUDA versions that can only produce the runtime docker image. The devel image
 # apt-installs cuda-toolkit-<major>-<minor> from NVIDIA's repo.
@@ -45,7 +46,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.5": "9",
 }
 
-ROCM_ARCHES = ["10.0", "10.1"]
+ROCM_ARCHES = ["10.1", "10.2"]
 
 
 class RocmPreviewLane(NamedTuple):
@@ -82,7 +83,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
-            "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+            "nvidia-nvshmem-cu13==3.8.0; platform_system == 'Linux'"
         ),
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.2.2; platform_system == 'Windows' and platform_machine == 'AMD64' | "
@@ -101,7 +102,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
             "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
             "nvidia-cusparselt-cu13==0.8.1.post1; platform_system == 'Linux' | "
             "nvidia-nccl-cu13==2.32.3; platform_system == 'Linux' | "
-            "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
+            "nvidia-nvshmem-cu13==3.8.0; platform_system == 'Linux'"
         ),
         "windows": (
             "cuda-toolkit[nvrtc,cudart,cupti,cufft,curand,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.3; platform_system == 'Windows' and platform_machine == 'AMD64' | "
@@ -128,8 +129,8 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         ),
     },
     # dependency on latest patch version for (major, minor)
-    "10.0": ("rocm[libraries,device-all]==10.0.*"),
     "10.1": ("rocm[libraries,device-all]==10.1.*"),
+    "10.2": ("rocm[libraries,device-all]==10.2.*"),
     # binary_populate_env.sh appends ==<pin> at build time, so pin bumps
     # don't change generated workflows.
     ROCM_PREVIEW.arch: (
@@ -141,27 +142,29 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     # .ci/docker/requirements-ci.txt and .ci/wheel/windows/build_install_deps.py (XPU
     # builds only) exist because of this pin (#201218); lift them when XPU moves to 2026.2.
     "xpu": (
-        "intel-cmplr-lib-rt==2026.1.2 | "
-        "intel-cmplr-lib-ur==2026.1.2 | "
-        "intel-cmplr-lic-rt==2026.1.2 | "
-        "intel-sycl-rt==2026.1.2 | "
-        "oneccl-devel==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2022.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "impi-rt==2021.18.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "onemkl-license==2026.1.0 | "
-        "onemkl-sycl-blas==2026.1.0 | "
-        "onemkl-sycl-dft==2026.1.0 | "
-        "onemkl-sycl-lapack==2026.1.0 | "
-        "onemkl-sycl-rng==2026.1.0 | "
-        "onemkl-sycl-sparse==2026.1.0 | "
-        "dpcpp-cpp-rt==2026.1.2 | "
-        "intel-opencl-rt==2026.1.2 | "
-        "mkl==2026.1.0 | "
-        "intel-openmp==2026.1.2 | "
-        "tbb==2023.1.0 | "
-        "tcmlib==1.5.0 | "
-        "umf==1.1.0 | "
-        "intel-pti==1.1.0 | "
+        "intel-cmplr-lib-rt==2026.2.0 | "
+        "intel-cmplr-lib-ur==2026.2.0 | "
+        "intel-cmplr-lic-rt==2026.2.0 | "
+        "intel-sycl-rt==2026.2.0 | "
+        "oneccl-devel==2022.2.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2022.2.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "modified-libfabric==2.6.13; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        # onemkl-license 2026.2.0 ships a win_amd64 wheel only; the Linux mkl
+        # wheel dropped its onemkl-license requirement in 2026.2.
+        "onemkl-license==2026.2.0; platform_system == 'Windows' and platform_machine == 'AMD64' | "
+        "onemkl-sycl-blas==2026.2.0 | "
+        "onemkl-sycl-dft==2026.2.0 | "
+        "onemkl-sycl-lapack==2026.2.0 | "
+        "onemkl-sycl-rng==2026.2.0 | "
+        "onemkl-sycl-sparse==2026.2.0 | "
+        "dpcpp-cpp-rt==2026.2.0 | "
+        "intel-opencl-rt==2026.2.0 | "
+        "mkl==2026.2.0 | "
+        "intel-openmp==2026.2.0 | "
+        "tbb==2023.2.0 | "
+        "tcmlib==1.6.0 | "
+        "umf==1.2.0 | "
+        "intel-pti==1.2.0 | "
         "pyzes==0.1.3; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
 }
