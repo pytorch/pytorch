@@ -5278,6 +5278,15 @@ impl Compiled {
         if modes >> 16 != 0 {
             return PathEnd::Miss;
         }
+        // Nor, where gradients are recorded, while a saved-tensor hook or
+        // anomaly mode is on: eager runs Python code under every operation
+        // that makes a node then, which is handed what the operation saves
+        // or looks at the frame, and may raise there. The instructions
+        // run, each with what eager runs under it, and what that raises
+        // leaves the instruction it ran under.
+        if modes & 1 != 0 && graph::under_operations() {
+            return PathEnd::Miss;
+        }
         let (mut included, mut excluded) = (0u64, 0u64);
         (api.dispatch_keys)(&mut included, &mut excluded);
         let world = (modes, included, excluded);
@@ -6557,9 +6566,15 @@ impl Compiled {
             }
         };
         if result.is_null() {
-            // One that has run before raises what it raises: nothing was
-            // done yet, and the instructions would raise it too. One that
-            // has not is taken back, and the instructions run from then on.
+            // What was made of a graph raised. It ran nothing of the
+            // user's (no graph is entered while Python code runs under
+            // the operations: `enter_graph`), so unless it wrote to a
+            // tensor from outside nothing was done yet, and the
+            // instructions say what the call does: they raise what an
+            // operation raises at the instruction that raises it, with
+            // the frame, the handlers and the stores of the function as
+            // they are there. One that never ran before is taken back as
+            // well, and the instructions run from then on.
             let proven = exported.proven.load(Ordering::Relaxed);
             if graph::interrupted() {
                 // What came between the instructions of the callable and
@@ -6582,20 +6597,15 @@ impl Compiled {
                 leave(own);
                 return Ran::Landed(Landing { block: usize::MAX, code: std::ptr::null(), pc: bc as usize });
             }
-            if proven && path.effects && ffi::PyErr_ExceptionMatches(ffi::PyExc_Exception) != 0 {
-                // The stores in front of what raised are the function's to
-                // do: the instructions run, do them, and raise.
+            if proven {
+                // The stores in front of what raises are the function's
+                // to do, and its handlers are where the instruction is.
                 ffi::PyErr_Clear();
-                leave(own);
-                return Ran::Miss;
+            } else {
+                let reason = graph::raised_text();
+                path.exported.borrow_mut().retain(|other| !Arc::ptr_eq(other, &exported));
+                site.give_up(format!("the compiled graph failed: {}", reason));
             }
-            if proven || ffi::PyErr_ExceptionMatches(ffi::PyExc_Exception) == 0 {
-                leave(own);
-                return Ran::Landed(Landing { block: usize::MAX, code: std::ptr::null(), pc: bc as usize });
-            }
-            let reason = graph::raised_text();
-            path.exported.borrow_mut().retain(|other| !Arc::ptr_eq(other, &exported));
-            site.give_up(format!("the compiled graph failed: {}", reason));
             leave(own);
             return Ran::Miss;
         }

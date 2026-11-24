@@ -9,7 +9,7 @@
 //! saved.
 
 use crate::backward::{is_tensor, site_call, torch, GradMode};
-use crate::pyffi::Obj;
+use crate::pyffi::{self, Obj, Once};
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyTuple};
@@ -120,6 +120,35 @@ pub(crate) fn saved_names(node: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     Ok(names)
 }
 
+/// Whether what a node saved under `name` went through a saved-tensor hook.
+/// Its unpack hook is Python code that runs when the node reads what it
+/// saved (for a checkpoint, the function that is computed again), and eager
+/// compares no version of such a tensor. Asked of the saved tensor itself
+/// (`_raw_saved_...`), which unpacks nothing, through the getter that the
+/// class of saved tensors was made with, found once; what is no tensor has
+/// none.
+fn hooked(node: &Bound<'_, PyAny>, name: &str) -> PyResult<bool> {
+    static GETTER: Once<Py<PyAny>> = Once::new();
+    let py = node.py();
+    if GETTER.get().is_none() {
+        let class = pyffi::of_module(py, c"torch._C._autograd", c"SavedTensor")?;
+        GETTER.set(class.getattr("unpack_hook")?.getattr("fget")?.unbind());
+    }
+    let getter = GETTER.get().expect("kept").bind(py);
+    let Ok(raw) = node.getattr(format!("_raw{name}").as_str()) else {
+        return Ok(false);
+    };
+    if !(raw.is_instance_of::<PyList>() || raw.is_instance_of::<PyTuple>()) {
+        return Ok(!getter.call1((raw,))?.is_none());
+    }
+    for saved in raw.try_iter()? {
+        if !getter.call1((saved?,))?.is_none() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn changed(py: Python<'_>, results: &Bound<'_, PyAny>) -> PyResult<String> {
     if !torch(py)?.call_method0("is_grad_enabled")?.extract::<bool>()? {
         return Ok(String::new());
@@ -144,6 +173,11 @@ fn changed(py: Python<'_>, results: &Bound<'_, PyAny>) -> PyResult<String> {
             return Ok(format!("what autograd saved is not looked at behind {HISTORY} functions"));
         }
         for name in &saved_names(&node)? {
+            // What a hook packed is not looked at: the look would run the
+            // hook, and eager raises for no write to such a tensor.
+            if hooked(&node, name)? {
+                continue;
+            }
             if let Err(error) = node.getattr(name.as_str()) {
                 if !error.is_instance_of::<PyRuntimeError>(py) {
                     return Err(error);

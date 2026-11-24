@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 
 
 # These tests look at which kernels the dispatcher runs; the crossref and
@@ -22888,6 +22889,17 @@ def fed_calls(run, make, way, device, w, calls=10):
             return make(log, device, at)
 
         def seen(step, *more, log=log, steps=steps):
+            # On an accelerator a backward runs on the device's autograd
+            # thread, and what that run still has ends a moment after the
+            # caller has its answer, on that thread, in eager mode too:
+            # the gradients of a `create_graph` backward that are let go
+            # of at once, an error with what it holds. The thread takes
+            # its next task only when it has let go of the last one, so
+            # one small backward on the device in front of a look makes
+            # sure what the look finds.
+            if torch.device(device).type != "cpu":
+                with torch.enable_grad():
+                    (torch.ones((), device=device, requires_grad=True) * 1).backward()
             steps.append((step, tuple(log), *more))
 
         w.grad = None
@@ -22895,7 +22907,7 @@ def fed_calls(run, make, way, device, w, calls=10):
             left = way(run, made, seen, w)
         except Exception as error:
             left = (type(error).__name__, str(error))
-        steps.append(("everything let go of", tuple(log), left))
+        seen("everything let go of", left)
         found.append(steps)
     return found
 
@@ -22907,6 +22919,320 @@ TWO_NODES = ["in parts", "the engine's backward", "the engine's backward"]
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")
+class VmHookedStop(Exception):
+    """What a hook raises to leave the operation it runs under."""
+
+
+class VmHookedBox:
+    def __init__(self):
+        self.calls = 0
+        self.last = None
+
+
+VM_HOOKED_BOX = VmHookedBox()
+
+
+def vm_hooked_plain(h, w):
+    return ((h + w).tanh() * w).sin().exp().sum()
+
+
+def vm_hooked_stores(h, w):
+    a = (h + w).tanh()
+    VM_HOOKED_BOX.calls += 1
+    b = (a * w).sin()
+    VM_HOOKED_BOX.last = tuple(b.shape)
+    return b.exp().sum()
+
+
+def vm_hooked_tries(h, w):
+    a = (h + w).tanh()
+    try:
+        b = (a * w).sin()
+        c = b.exp()
+    finally:
+        VM_HOOKED_BOX.calls += 1
+    return c.sum()
+
+
+def vm_hooked_inner(a, w):
+    b = a.tanh() * w
+    return b.sin()
+
+
+def vm_hooked_callee(h, w):
+    c = vm_hooked_inner(h + w, w)
+    return c.exp().sum()
+
+
+def vm_hooked_loop(h, w):
+    for _ in range(3):
+        h = (h + w).tanh() * w
+    return h.sin().sum()
+
+
+VM_HOOKED_FUNCTIONS = (
+    vm_hooked_plain,
+    vm_hooked_stores,
+    vm_hooked_tries,
+    vm_hooked_callee,
+    vm_hooked_loop,
+)
+
+
+def vm_hooked_enters(h, w, pack):
+    a = ((h + w).tanh() * w).sin().exp()
+    with torch.autograd.graph.saved_tensors_hooks(pack, vm_hooked_same):
+        b = ((a * w).cos() + w).tanh().exp()
+    return (b * w).sin().tanh().exp().sum()
+
+
+def vm_hooked_same(t):
+    return t
+
+
+def vm_hooked_block(h, w):
+    return ((h + w).tanh() * w).sin().exp()
+
+
+def vm_hooked_around(x, w, reentrant):
+    h = (x * 2.0 + w).tanh()
+    h = checkpoint(vm_hooked_block, h, w, use_reentrant=reentrant)
+    return ((h * w).sin() + h).exp().tanh().sum()
+
+
+def vm_hooked_writes(h, w):
+    a = h * w + 1.0
+    a.mul_(2.0)
+    return (a * w).sin().exp().sum()
+
+
+def vm_hooked_catches(x, index, m):
+    y = (x.sin() * 2 + 1).cos()
+    try:
+        z = (y[index] @ torch.linalg.inv(m)).exp().tanh()
+    except (IndexError, RuntimeError):
+        return y.sum() - 1
+    return z.sum()
+
+
+def vm_hooked_guarded(x, index, m):
+    y = (x.sin() * 2 + 1).cos()
+    VM_HOOKED_BOX.calls += 1
+    try:
+        z = (y[index] @ torch.linalg.inv(m)).exp().tanh()
+    except (IndexError, RuntimeError):
+        return y.sum() - 1
+    finally:
+        VM_HOOKED_BOX.last = "left"
+    return z.sum()
+
+
+def vm_hooked_picks(y, index, m):
+    z = (y[index] @ torch.linalg.inv(m)).exp()
+    return z.tanh()
+
+
+def vm_hooked_guards_a_callee(x, index, m):
+    y = (x.sin() * 2 + 1).cos()
+    try:
+        z = vm_hooked_picks(y, index, m)
+    except (IndexError, RuntimeError):
+        return y.sum() - 1
+    return z.sum()
+
+
+def vm_hooked_picks_guarded(y, index, m):
+    try:
+        z = (y[index] @ torch.linalg.inv(m)).exp()
+    except (IndexError, RuntimeError):
+        VM_HOOKED_BOX.last = "caught"
+        return y.sum() - 1
+    finally:
+        VM_HOOKED_BOX.calls += 1
+    return z.tanh().sum()
+
+
+def vm_hooked_calls_what_guards(x, index, m):
+    y = (x.sin() * 2 + 1).cos()
+    return vm_hooked_picks_guarded(y, index, m) * 2
+
+
+def vm_hooked_unguarded(x, index, m):
+    y = (x.sin() * 2 + 1).cos()
+    VM_HOOKED_BOX.calls += 1
+    z = y[index] @ torch.linalg.inv(m)
+    VM_HOOKED_BOX.calls += 1
+    return z.exp().tanh().sum()
+
+
+def vm_hooked_lines(x, index, m):
+    y = (x.sin() * 2 + 1).cos()
+    picked = y[index]
+    z = picked @ torch.linalg.inv(m)
+    return z.exp().tanh().sum()
+
+
+def vm_hooked_rooted(h, w):
+    a = (h + w).tanh()
+    b = a * w
+    c = (b - 100.0).sqrt()
+    d = c.sin()
+    return d.sum()
+
+
+class VmHookedLayer(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.randn(4, 4) / 2)
+
+    def forward(self, x):
+        return ((x @ self.weight).tanh() * 2 + 1).sin().exp()
+
+
+def vm_hooked_leaves(device, at):
+    torch.manual_seed(at)
+    x = torch.randn(3, 4, device=device, requires_grad=True)
+    w = torch.randn(3, 4, device=device, requires_grad=True)
+    return x, w
+
+
+def vm_hooked_where(error, fn):
+    """Where the traceback of `error` stands in `fn`: the line, counted from the first of the function, and the
+    variables its frame has there."""
+    found, at = None, error.__traceback__
+    while at is not None:
+        if at.tb_frame.f_code is fn.__code__:
+            found = (
+                at.tb_lineno - fn.__code__.co_firstlineno,
+                sorted(at.tb_frame.f_locals),
+            )
+        at = at.tb_next
+    return found
+
+
+def vm_hooked_bare(run, fn, device, at):
+    """One call and its backward: the value, the gradients, and what the function stored."""
+    x, w = vm_hooked_leaves(device, at)
+    VM_HOOKED_BOX.calls, VM_HOOKED_BOX.last = 0, None
+    y = run(x * 2.0, w)
+    y.backward()
+    return (
+        y.tolist(),
+        x.grad.tolist(),
+        w.grad.tolist(),
+        VM_HOOKED_BOX.calls,
+        VM_HOOKED_BOX.last,
+    )
+
+
+def vm_hooked_packed(stop_at=0, since=0, graded=True):
+    """A call under a saved-tensor hook that notes what it is handed and raises when it is called for the
+    `stop_at`th time, in the calls from `since` on: what the call gives and leaves, or where the raise stands in
+    the function, and what the hook was handed and the function stored either way."""
+
+    def case(run, fn, device, at):
+        seen = []
+
+        def pack(t):
+            seen.append(tuple(t.shape))
+            if len(seen) == stop_at and at >= since:
+                raise VmHookedStop(stop_at)
+            return t
+
+        def unpack(t):
+            seen.append("unpack")
+            return t
+
+        x, w = vm_hooked_leaves(device, at)
+        VM_HOOKED_BOX.calls, VM_HOOKED_BOX.last = 0, None
+        try:
+            with (
+                torch.autograd.graph.saved_tensors_hooks(pack, unpack),
+                torch.set_grad_enabled(graded),
+            ):
+                y = run(x * 2.0, w)
+        except VmHookedStop as error:
+            return (
+                "raised",
+                vm_hooked_where(error, fn),
+                seen,
+                VM_HOOKED_BOX.calls,
+                VM_HOOKED_BOX.last,
+            )
+        if not graded:
+            return y.tolist(), seen, VM_HOOKED_BOX.calls, VM_HOOKED_BOX.last
+        packed = len(seen)
+        y.backward()
+        return (
+            y.tolist(),
+            x.grad.tolist(),
+            w.grad.tolist(),
+            packed,
+            seen,
+            VM_HOOKED_BOX.calls,
+            VM_HOOKED_BOX.last,
+        )
+
+    return case
+
+
+def vm_hooked_checkpointed(reentrant):
+    """A call through `torch.utils.checkpoint.checkpoint` and its backward."""
+
+    def case(run, fn, device, at):
+        x, w = vm_hooked_leaves(device, at)
+        VM_HOOKED_BOX.calls, VM_HOOKED_BOX.last = 0, None
+        y = checkpoint(run, x * 2.0, w, use_reentrant=reentrant)
+        y.backward()
+        return (
+            y.tolist(),
+            x.grad.tolist(),
+            w.grad.tolist(),
+            VM_HOOKED_BOX.calls,
+            VM_HOOKED_BOX.last,
+        )
+
+    return case
+
+
+def vm_hooked_on_cpu(run, fn, device, at):
+    """A call under `torch.autograd.graph.save_on_cpu` and its backward."""
+    x, w = vm_hooked_leaves(device, at)
+    VM_HOOKED_BOX.calls, VM_HOOKED_BOX.last = 0, None
+    with torch.autograd.graph.save_on_cpu():
+        y = run(x * 2.0, w)
+    y.backward()
+    return (
+        y.tolist(),
+        x.grad.tolist(),
+        w.grad.tolist(),
+        VM_HOOKED_BOX.calls,
+        VM_HOOKED_BOX.last,
+    )
+
+
+def vm_hooked_rows(run, fn, device, case, calls):
+    """What `case` gives for each call, or what the call raised."""
+    rows = []
+    for at in calls:
+        try:
+            rows.append(case(run, fn, device, at))
+        except Exception as error:
+            rows.append((type(error).__name__, str(error)[:120]))
+    return rows
+
+
+def vm_hooked_graphs(compiled):
+    """Per graph of a compiled function: its state, how often what was made of it ran, how often it was entered
+    for nothing, taken down and exported, and its paths."""
+    kept = ("state", "hits", "misses", "taken", "exports", "paths")
+    return [
+        tuple(found.get(key) for key in kept)
+        for found in torch.vm.regions(compiled)
+        if "ops" in found
+    ]
+
+
 class TestVmGraphBackward(TestCase):
     """`Graphs(backward=True)`: the engine derives the backward of a graph
     whose inputs need a gradient."""
@@ -25104,6 +25430,680 @@ class TestVmGraphBackward(TestCase):
         graphs = torch.vm.regions(compiled)
         forms = [form for graph in graphs for form in graph.get("forms", ())]
         self.assertIn("the engine's backward", [form.get("backward") for form in forms])
+
+    def test_no_graph_is_entered_while_a_hook_runs_under_the_operations(self, device):
+        # Where gradients are recorded, a saved-tensor hook is Python code
+        # that eager mode runs inside every operation that saves a tensor
+        # for its backward: it is handed what the operation saves, and it
+        # may raise there. What was made of a graph is no stand-in for the
+        # instructions then. While such a hook is on no graph is entered:
+        # the hook is handed what it is handed in eager mode, as often, and
+        # what it raises leaves the instruction it ran under, with the
+        # frame, the handlers and the stores of the function as eager mode
+        # leaves them. Nothing of a graph is tried, taken down or exported
+        # in such a call, and nothing of that stays when the hook is off.
+        # Without gradients the hook is never called, and the graph runs.
+        # (A hook that raised inside what was made of a graph was taken
+        # for a failure of the graph: the instructions ran again and
+        # called the hook again, and the raise was swallowed.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        tape = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs(backward=False), keep)
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES),
+            ("graphs", graphs),
+            ("a pass", (*graphs, keep)),
+            ("eager's tape and a pass", tape),
+        )
+
+        def both(compiled, fn, case, calls, msg):
+            got = vm_hooked_rows(compiled, fn, device, case, calls)
+            expected = vm_hooked_rows(fn, fn, device, case, calls)
+            self.assertEqual(got, expected, msg=msg)
+            return expected
+
+        for fn in VM_HOOKED_FUNCTIONS:
+            for way, passes in ways:
+                for demote in (True, False):
+                    msg = f"{fn.__name__}, {way}, measured against the interpreter {demote}"
+                    # Under the hook from the first call on.
+                    compiled = torch.vm(
+                        fn, passes=passes, fallback=False, demote=demote
+                    )
+                    rows = both(
+                        compiled,
+                        fn,
+                        vm_hooked_packed(),
+                        range(10),
+                        f"{msg}: from the first call",
+                    )
+                    packs = rows[0][3]
+                    self.assertGreaterEqual(packs, 3, msg=msg)
+                    for found in vm_hooked_graphs(compiled):
+                        self.assertEqual(
+                            found[1:5], (0, 0, 0, 0), msg=f"{msg}: from the first call"
+                        )
+                    # A hook that raises, at each of its calls, from the
+                    # first call of the function on.
+                    for stop_at in range(1, packs + 1):
+                        compiled = torch.vm(
+                            fn, passes=passes, fallback=False, demote=demote
+                        )
+                        rows = both(
+                            compiled,
+                            fn,
+                            vm_hooked_packed(stop_at),
+                            range(4),
+                            f"{msg}: raises at {stop_at}",
+                        )
+                        self.assertEqual(rows[0][0], "raised", msg=msg)
+                    # A warm function: the hook comes on, raises, goes.
+                    compiled = torch.vm(
+                        fn, passes=passes, fallback=False, demote=demote
+                    )
+                    both(compiled, fn, vm_hooked_bare, range(14), f"{msg}: warm")
+                    warm = vm_hooked_graphs(compiled)
+                    if way != "the default passes":
+                        self.assertTrue(
+                            any(found[1] > 0 for found in warm), msg=f"{msg}: {warm}"
+                        )
+                    both(
+                        compiled,
+                        fn,
+                        vm_hooked_packed(),
+                        range(14, 18),
+                        f"{msg}: a warm function under the hook",
+                    )
+                    for stop_at in range(1, packs + 1):
+                        rows = both(
+                            compiled,
+                            fn,
+                            vm_hooked_packed(stop_at),
+                            range(18, 20),
+                            f"{msg}: warm, raises at {stop_at}",
+                        )
+                        self.assertEqual(rows[0][0], "raised", msg=msg)
+                    self.assertEqual(
+                        vm_hooked_graphs(compiled), warm, msg=f"{msg}: under the hook"
+                    )
+                    both(
+                        compiled,
+                        fn,
+                        vm_hooked_bare,
+                        range(20, 30),
+                        f"{msg}: behind the hook",
+                    )
+                    behind = vm_hooked_graphs(compiled)
+                    if way != "the default passes" and not demote:
+                        self.assertTrue(
+                            any(now[1] > was[1] for now, was in zip(behind, warm)),
+                            msg=f"{msg}: {behind}",
+                        )
+                    # Without gradients nothing is saved: the hook is not
+                    # called, and the graph is entered.
+                    rows = both(
+                        compiled,
+                        fn,
+                        vm_hooked_packed(graded=False),
+                        range(30, 36),
+                        f"{msg}: no gradients",
+                    )
+                    self.assertEqual([row[1] for row in rows], [[]] * 6, msg=msg)
+                    if way != "the default passes" and not demote:
+                        entered = [
+                            now[1] + now[2] > was[1] + was[2]
+                            for now, was in zip(vm_hooked_graphs(compiled), behind)
+                        ]
+                        self.assertTrue(any(entered), msg=f"{msg}: no gradients")
+                    # A hook in every other call, from the first call on.
+                    compiled = torch.vm(
+                        fn, passes=passes, fallback=False, demote=demote
+                    )
+                    for at in range(24):
+                        case = (
+                            vm_hooked_packed(3, 12) if at % 2 == 0 else vm_hooked_bare
+                        )
+                        both(
+                            compiled,
+                            fn,
+                            case,
+                            [at],
+                            f"{msg}: every other call, call {at}",
+                        )
+
+        # A function that puts the hook on itself, between its operations:
+        # the graph in front of it and the one behind it run, and the
+        # operations under it run as they are.
+        for way, passes in ways:
+
+            def case(run, fn, device, at):
+                seen = []
+
+                def pack(t):
+                    seen.append(tuple(t.shape))
+                    if len(seen) == 2 and at >= 14 and at % 2 == 0:
+                        raise VmHookedStop(at)
+                    return t
+
+                x, w = vm_hooked_leaves(device, at)
+                try:
+                    y = run(x * 2.0, w, pack)
+                except VmHookedStop as error:
+                    return "raised", vm_hooked_where(error, fn), seen
+                y.backward()
+                return y.tolist(), x.grad.tolist(), w.grad.tolist(), seen
+
+            compiled = torch.vm(
+                vm_hooked_enters, passes=passes, fallback=False, demote=False
+            )
+            rows = both(
+                compiled,
+                vm_hooked_enters,
+                case,
+                range(20),
+                f"a hook that the function puts on, {way}",
+            )
+            self.assertEqual(sum(row[0] == "raised" for row in rows), 3)
+            if way != "the default passes":
+                ran = [found for found in vm_hooked_graphs(compiled) if found[1] > 0]
+                self.assertGreaterEqual(
+                    len(ran), 2, msg=f"{way}: {vm_hooked_graphs(compiled)}"
+                )
+
+    def test_gradient_checkpointing_of_a_compiled_function_is_eagers(self, device):
+        # `torch.utils.checkpoint.checkpoint(..., use_reentrant=False)` puts
+        # a saved-tensor hook on around the function, keeps nothing of what
+        # the operations save, and computes the function again inside the
+        # backward, under a hook that raises from inside the last operation
+        # that saves to end that run. `save_on_cpu` is such a hook as well.
+        # Under them a compiled function runs its operations as they are,
+        # whatever the list of passes makes of its graphs, and in the calls
+        # without them its graphs run. With `use_reentrant=True` there is no
+        # hook: the function runs without gradients in the forward and with
+        # them inside the backward, and its graphs run.
+        # (The recomputation was the first run of what was made of the
+        # graph: the raise was taken for a failure of the graph, the
+        # instructions ran again, and the checkpoint's hook, called once
+        # more than it had counted, raised an AssertionError out of
+        # `backward()`. With `AOTAutograd()` the gradients were wrong.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        tape = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs(backward=False), keep)
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES),
+            ("graphs", graphs),
+            ("a pass", (*graphs, keep)),
+            ("eager's tape and a pass", tape),
+        )
+        # What AOTAutograd traces is a compiler's: its gradients are
+        # eager's to the last bits, not bit for bit.
+        traced = ("AOTAutograd", (*graphs, torch.vm.passes.AOTAutograd()))
+        arounds = (
+            ("checkpoint(use_reentrant=False)", vm_hooked_checkpointed(False), True),
+            ("checkpoint(use_reentrant=True)", vm_hooked_checkpointed(True), False),
+            ("save_on_cpu", vm_hooked_on_cpu, True),
+            ("a hook that counts", vm_hooked_packed(), True),
+        )
+
+        def both(compiled, fn, case, calls, exact, msg):
+            got = vm_hooked_rows(compiled, fn, device, case, calls)
+            expected = vm_hooked_rows(fn, fn, device, case, calls)
+            if exact:
+                self.assertEqual(got, expected, msg=msg)
+            else:
+                for mine, eagers in zip(got, expected):
+                    self.assertEqual(mine, eagers, rtol=1e-5, atol=1e-6, msg=msg)
+            self.assertTrue(
+                all(not isinstance(row[0], str) for row in expected),
+                msg=f"{msg}: {expected[0]}",
+            )
+
+        for name, case, hooked in arounds:
+            for way, passes in (*ways, traced):
+                for fn in (
+                    VM_HOOKED_FUNCTIONS if way != "AOTAutograd" else (vm_hooked_plain,)
+                ):
+                    for demote in (True, False):
+                        msg = f"{fn.__name__}, {name}, {way}, measured against the interpreter {demote}"
+                        exact = way != "AOTAutograd"
+                        # Around the function, from its first call on.
+                        compiled = torch.vm(
+                            fn, passes=passes, fallback=False, demote=demote
+                        )
+                        both(compiled, fn, case, range(12), exact or hooked, msg)
+                        made = vm_hooked_graphs(compiled)
+                        if hooked:
+                            self.assertTrue(
+                                all(found[1:5] == (0, 0, 0, 0) for found in made),
+                                msg=f"{msg}: {made}",
+                            )
+                        # Around a warm function, and behind it: the graph
+                        # that ran in front of those calls runs behind them.
+                        compiled = torch.vm(
+                            fn, passes=passes, fallback=False, demote=demote
+                        )
+                        both(
+                            compiled,
+                            fn,
+                            vm_hooked_bare,
+                            range(12),
+                            exact,
+                            f"{msg}: warm",
+                        )
+                        warm = vm_hooked_graphs(compiled)
+                        both(
+                            compiled,
+                            fn,
+                            case,
+                            range(12, 18),
+                            exact or hooked,
+                            f"{msg}: around a warm function",
+                        )
+                        if hooked:
+                            self.assertEqual(vm_hooked_graphs(compiled), warm, msg=msg)
+                        both(
+                            compiled,
+                            fn,
+                            vm_hooked_bare,
+                            range(18, 26),
+                            exact,
+                            f"{msg}: behind",
+                        )
+                        if way != "the default passes" and not demote:
+                            ran = [
+                                now[1] > was[1]
+                                for now, was in zip(vm_hooked_graphs(compiled), warm)
+                            ]
+                            self.assertTrue(
+                                any(ran), msg=f"{msg}: {vm_hooked_graphs(compiled)}"
+                            )
+                        # In every other call, from the first call on.
+                        compiled = torch.vm(
+                            fn, passes=passes, fallback=False, demote=demote
+                        )
+                        for at in range(20):
+                            around = at % 2 == 0
+                            both(
+                                compiled,
+                                fn,
+                                case if around else vm_hooked_bare,
+                                [at],
+                                exact or (hooked and around),
+                                f"{msg}: call {at}",
+                            )
+        for reentrant in (False, True):
+            for way, passes in ways:
+                msg = f"use_reentrant={reentrant}, {way}"
+
+                # A checkpointed block inside a compiled function.
+                def inside(run, fn, device, at):
+                    x, w = vm_hooked_leaves(device, at)
+                    y = run(x, w, reentrant)
+                    y.backward()
+                    return y.tolist(), x.grad.tolist(), w.grad.tolist()
+
+                compiled = torch.vm(
+                    vm_hooked_around, passes=passes, fallback=False, demote=False
+                )
+                both(
+                    compiled,
+                    vm_hooked_around,
+                    inside,
+                    range(12),
+                    True,
+                    f"{msg}: a block inside",
+                )
+
+                # A compiled function inside a checkpointed block.
+                compiled = torch.vm(
+                    vm_hooked_plain, passes=passes, fallback=False, demote=False
+                )
+
+                def outside(run, fn, device, at):
+                    def block(h, w):
+                        return run(h + 1.0, w) * 2.0
+
+                    x, w = vm_hooked_leaves(device, at)
+                    y = checkpoint(block, x * 2.0, w, use_reentrant=reentrant)
+                    y.backward()
+                    return y.tolist(), x.grad.tolist(), w.grad.tolist()
+
+                both(
+                    compiled,
+                    vm_hooked_plain,
+                    outside,
+                    range(12),
+                    True,
+                    f"{msg}: a function inside",
+                )
+
+                # `checkpoint_sequential` over compiled layers.
+                torch.manual_seed(0)
+                layers = [VmHookedLayer().to(device) for _ in range(4)]
+                compiled = [
+                    torch.vm(layer, passes=passes, fallback=False, demote=False)
+                    for layer in layers
+                ]
+
+                def sequential(run, fn, device, at):
+                    torch.manual_seed(at)
+                    x = torch.randn(3, 4, device=device, requires_grad=True)
+                    for layer in layers:
+                        layer.weight.grad = None
+                    y = checkpoint_sequential(run, 2, x, use_reentrant=reentrant).sum()
+                    y.backward()
+                    return (
+                        [y.tolist()],
+                        x.grad.tolist(),
+                        [layer.weight.grad.tolist() for layer in layers],
+                    )
+
+                got = vm_hooked_rows(compiled, None, device, sequential, range(12))
+                self.assertEqual(
+                    got,
+                    vm_hooked_rows(layers, None, device, sequential, range(12)),
+                    msg=f"{msg}: checkpoint_sequential",
+                )
+                self.assertTrue(
+                    all(len(row) == 3 for row in got), msg=f"{msg}: {got[0]}"
+                )
+
+    def test_a_kernel_that_raises_at_a_later_call_is_caught_where_the_function_catches_it(
+        self, device
+    ):
+        # What was made of a graph runs nothing of the user's, so where it
+        # raises nothing was done yet (a graph that writes to a tensor from
+        # outside is the stated exception), and the instructions say what
+        # the call does. An operation that raises for what its tensors
+        # hold in a call that a form of the graph is for (a matrix that
+        # has no inverse, an index out of range), or for tensors that no
+        # form is for (another size, another dtype), raises at its
+        # instruction: a `try` around it, in the function, in its caller
+        # or in a function that is inlined, catches it, a `finally` runs
+        # once, the stores in front of it are done once, and the traceback
+        # of what leaves the call names the line of the operation and has
+        # the variables that are bound there.
+        # (What a form that had run before raised went out of the call
+        # from the first instruction of the graph: the handlers of the
+        # function around the operation were not asked, and the call
+        # raised where eager mode returns the value of its `except`.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        tape = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs(backward=False), keep)
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES, False),
+            ("graphs", graphs, False),
+            ("a pass", (*graphs, keep), False),
+            ("a gradient", graphs, True),
+            ("a gradient and a pass", (*graphs, keep), True),
+            ("a gradient on eager's tape", tape, True),
+        )
+
+        def rows(at):
+            return torch.tensor([0, 2], device=device)
+
+        def fits(at):
+            return torch.eye(4, device=device) * (2 + at % 3)
+
+        raises = {
+            "a matrix without an inverse": lambda at: (
+                rows(at),
+                torch.zeros(4, 4, device=device),
+            ),
+            "a matrix of another size": lambda at: (
+                rows(at),
+                torch.eye(3, device=device) * 2,
+            ),
+            "a matrix of another dtype": lambda at: (
+                rows(at),
+                torch.eye(4, dtype=torch.int64, device=device),
+            ),
+        }
+        if torch.device(device).type == "cpu":
+            # An accelerator does not raise for an index out of range: it
+            # gives up the context of the device.
+            raises["an index out of range"] = lambda at: (
+                torch.tensor([1, 9]),
+                fits(at),
+            )
+
+        def call(bad, kind, graded):
+            def case(run, fn, device, at):
+                torch.manual_seed(at)
+                x = torch.randn(4, 4, device=device, requires_grad=graded)
+                index, m = raises[kind](at) if at in bad else (rows(at), fits(at))
+                VM_HOOKED_BOX.calls, VM_HOOKED_BOX.last = 0, None
+                try:
+                    out = run(x, index, m)
+                except (IndexError, RuntimeError) as error:
+                    where = vm_hooked_where(error, fn)
+                    return (
+                        "raised",
+                        type(error).__name__,
+                        str(error),
+                        where,
+                        VM_HOOKED_BOX.calls,
+                        VM_HOOKED_BOX.last,
+                    )
+                grad = torch.autograd.grad(out, x)[0].tolist() if graded else None
+                return out.tolist(), grad, VM_HOOKED_BOX.calls, VM_HOOKED_BOX.last
+
+            return case
+
+        caught = (
+            vm_hooked_catches,
+            vm_hooked_guarded,
+            vm_hooked_guards_a_callee,
+            vm_hooked_calls_what_guards,
+        )
+        for fn in (*caught, vm_hooked_unguarded, vm_hooked_lines):
+            for way, passes, graded in ways:
+                for kind in raises:
+                    # In a warm function, in its first calls, and in every
+                    # other call.
+                    for bad in ((12, 14, 15), (0, 1, 2, 3, 5), tuple(range(0, 20, 2))):
+                        msg = f"{fn.__name__}, {way}, {kind} in the calls {bad}"
+                        compiled = torch.vm(
+                            fn, passes=passes, fallback=False, demote=False
+                        )
+                        got = vm_hooked_rows(
+                            compiled, fn, device, call(bad, kind, graded), range(20)
+                        )
+                        expected = vm_hooked_rows(
+                            fn, fn, device, call(bad, kind, graded), range(20)
+                        )
+                        self.assertEqual(got, expected, msg=msg)
+                        raised = [
+                            at for at, row in enumerate(expected) if row[0] == "raised"
+                        ]
+                        self.assertEqual(
+                            raised, [] if fn in caught else list(bad), msg=msg
+                        )
+                        if bad == (12, 14, 15) and (graded or way == "a pass"):
+                            # The graph that ran in front of them runs
+                            # behind them.
+                            before = sum(
+                                found[1] for found in vm_hooked_graphs(compiled)
+                            )
+                            self.assertGreater(before, 0, msg=msg)
+                            more = call((), kind, graded)
+                            self.assertEqual(
+                                vm_hooked_rows(
+                                    compiled, fn, device, more, range(20, 26)
+                                ),
+                                vm_hooked_rows(fn, fn, device, more, range(20, 26)),
+                                msg=msg,
+                            )
+                            self.assertGreater(
+                                sum(found[1] for found in vm_hooked_graphs(compiled)),
+                                before,
+                                msg=msg,
+                            )
+
+    def test_the_look_at_what_autograd_saved_runs_no_hook(self, device):
+        # A path with a write in place is exported only if no tensor that
+        # autograd saved for a derivative was written to: the nodes behind
+        # the results are asked for what they saved. A saved tensor that
+        # went through a saved-tensor hook is not looked at: reading it
+        # calls its unpack hook (for a checkpointed block in front of the
+        # function, the block is computed again), and eager mode compares
+        # no version of such a tensor.
+        # (The look read every saved tensor of the history of the results,
+        # and ran the unpack hooks it met.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("graphs", graphs),
+            ("a pass", (*graphs, keep)),
+            (
+                "eager's tape and a pass",
+                (
+                    *torch.vm.DEFAULT_PASSES,
+                    torch.vm.passes.Graphs(backward=False),
+                    keep,
+                ),
+            ),
+        )
+
+        def checkpointed(run, fn, device, at):
+            ran = []
+
+            def block(t, w):
+                ran.append(at)
+                return (t * w).cos() * w
+
+            x, w = vm_hooked_leaves(device, at)
+            h = checkpoint(block, x * 2.0, w, use_reentrant=False)
+            y = run(h, w)
+            forward = len(ran)
+            y.backward()
+            return y.tolist(), x.grad.tolist(), w.grad.tolist(), forward, len(ran)
+
+        def hooked(run, fn, device, at):
+            seen = []
+
+            def unpack(t):
+                seen.append("unpack")
+                return t
+
+            x, w = vm_hooked_leaves(device, at)
+            with torch.autograd.graph.saved_tensors_hooks(vm_hooked_same, unpack):
+                h = (x * 2.0 * w).cos() * w
+            y = run(h, w)
+            forward = len(seen)
+            y.backward()
+            return y.tolist(), x.grad.tolist(), w.grad.tolist(), forward, len(seen)
+
+        for way, passes in ways:
+            for case in (checkpointed, hooked):
+                msg = f"{case.__name__}, {way}"
+                compiled = torch.vm(
+                    vm_hooked_writes, passes=passes, fallback=False, demote=False
+                )
+                got = vm_hooked_rows(
+                    compiled, vm_hooked_writes, device, case, range(12)
+                )
+                expected = vm_hooked_rows(
+                    vm_hooked_writes, vm_hooked_writes, device, case, range(12)
+                )
+                self.assertEqual(got, expected, msg=msg)
+                self.assertEqual(
+                    [row[3] for row in expected],
+                    [1 if case is checkpointed else 0] * 12,
+                    msg=msg,
+                )
+                ran = [found for found in vm_hooked_graphs(compiled) if found[1] > 0]
+                self.assertTrue(ran, msg=f"{msg}: {vm_hooked_graphs(compiled)}")
+
+    def test_anomaly_mode_finds_the_function_at_the_line_of_each_operation(
+        self, device
+    ):
+        # Anomaly mode keeps, for every node that is made, the stack of the
+        # thread, and a backward that fails shows the stack of the
+        # operation whose node failed. Where gradients are recorded no
+        # graph is entered under it: each operation runs with the frame of
+        # the function at its own line.
+        # (The operations of a graph ran on eager's tape with the frame at
+        # the first line of the graph, which the warning then named.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES),
+            ("graphs", graphs),
+            ("a pass", (*graphs, keep)),
+            (
+                "eager's tape and a pass",
+                (
+                    *torch.vm.DEFAULT_PASSES,
+                    torch.vm.passes.Graphs(backward=False),
+                    keep,
+                ),
+            ),
+        )
+        first = vm_hooked_rooted.__code__.co_firstlineno
+
+        def case(under):
+            def call(run, fn, device, at):
+                x, w = vm_hooked_leaves(device, at)
+                if not under(at):
+                    y = run(x * 2.0, w)
+                    y.backward()
+                    # What is not a number is compared as text.
+                    return repr((y.tolist(), x.grad.tolist(), w.grad.tolist()))
+                with warnings.catch_warnings(record=True) as shown:
+                    warnings.simplefilter("always")
+                    with torch.autograd.detect_anomaly():
+                        y = run(x * 2.0, w)
+                        with self.assertRaisesRegex(
+                            RuntimeError, "returned nan values"
+                        ):
+                            y.backward()
+                texts = [str(one.message) for one in shown]
+                named = [
+                    line
+                    for text in texts
+                    for line in text.split("\n")
+                    if "in vm_hooked_rooted" in line
+                ]
+                return repr(y.tolist()), [
+                    int(line.split(", line ")[1].split(",")[0]) - first
+                    for line in named
+                ]
+
+            return call
+
+        for way, passes in ways:
+            for name, under in (
+                ("every call", lambda at: True),
+                ("a warm function", lambda at: at >= 14),
+                ("every other call", lambda at: at % 2 == 0),
+            ):
+                msg = f"{way}, {name}"
+                compiled = torch.vm(
+                    vm_hooked_rooted, passes=passes, fallback=False, demote=False
+                )
+                got = vm_hooked_rows(
+                    compiled, vm_hooked_rooted, device, case(under), range(20)
+                )
+                expected = vm_hooked_rows(
+                    vm_hooked_rooted, vm_hooked_rooted, device, case(under), range(20)
+                )
+                self.assertEqual(got, expected, msg=msg)
+                lines = [row[1] for at, row in enumerate(expected) if under(at)]
+                self.assertTrue(
+                    lines and all(found == [4] for found in lines),
+                    msg=f"{msg}: {lines[:2]}",
+                )
 
 
 @unittest.skipUnless(HAS_RUNTIME, "torch.vm runtime not built")

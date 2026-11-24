@@ -135,7 +135,13 @@ class Graphs(BuiltinPass):
     is exported in its turn; so is a call under another dtype of autocast,
     or with deterministic algorithms asked for. A call under a torch
     function mode, a dispatch mode or a transform of ``torch.func`` runs the
-    operations as they are, so that those see them. With a pass over graphs
+    operations as they are, so that those see them; so does a call with
+    gradients enabled under a saved-tensor hook
+    (``torch.autograd.graph.saved_tensors_hooks``, ``save_on_cpu``,
+    ``torch.utils.checkpoint.checkpoint(..., use_reentrant=False)``) or in
+    anomaly mode, which run Python code under each operation. Where what
+    was exported raises, the operations run in its place for that call, and
+    raise where the function has them. With a pass over graphs
     in the list and this pass missing, it is taken to be there, in front of
     the first of them.
 

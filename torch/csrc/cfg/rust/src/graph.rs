@@ -4834,6 +4834,44 @@ pub unsafe fn interposed() -> Option<&'static str> {
     }
 }
 
+/// Whether eager runs Python code under the operations of this thread
+/// where gradients are recorded: a saved-tensor hook is on
+/// (`torch.autograd.graph.saved_tensors_hooks`, which `save_on_cpu` and
+/// checkpointing without reentry are made of), whose pack hook runs inside
+/// every operation that saves a tensor for its backward, is handed what the
+/// operation saves and may raise to leave it (a checkpoint ends its
+/// recomputation so); or anomaly mode is, which keeps for every node that
+/// is made the stack of the thread, the function's frame at the line of
+/// the operation. What was made of a graph is no stand-in for the
+/// instructions then: it saves other tensors or none, the frame stands at
+/// the front of the graph while it runs, and behind a raise inside it the
+/// frame, the handlers and the stores of the function are not where the
+/// instructions leave them, while running the instructions again would
+/// run the hooks again. Asked of the two functions of C that read the
+/// thread's stack of hooks and the mode. What cannot be asked is taken to
+/// be on.
+pub unsafe fn under_operations() -> bool {
+    static ASKED: pyffi::Once<[Option<PyObj>; 2]> = pyffi::Once::new();
+    let asked = ASKED.get_or_init(|| {
+        // A function of C: what somebody put there in Python is not called.
+        let found = |module: &std::ffi::CStr, name: &std::ffi::CStr| {
+            let function = pyffi::in_module(pyffi::module(module), name);
+            (!function.is_null() && ffi::PyCFunction_Check(function) != 0).then(|| PyObj::from_borrowed(function))
+        };
+        [found(c"torch._C._autograd", c"_top_saved_tensors_default_hooks"), found(c"torch._C", c"is_anomaly_enabled")]
+    });
+    let (Some(hooks), Some(anomaly)) = (&asked[0], &asked[1]) else {
+        return true;
+    };
+    let top = ffi::PyObject_CallOneArg(hooks.as_ptr(), ffi::Py_True());
+    let mode = ffi::PyObject_CallNoArgs(anomaly.as_ptr());
+    let on = top != ffi::Py_None() || mode != ffi::Py_False();
+    ffi::PyErr_Clear();
+    xdecref(top);
+    xdecref(mode);
+    on
+}
+
 /// The name and the overload of an operator as the dispatcher names it:
 /// (`aten::add_`, `Tensor`) of `aten::add_.Tensor`.
 fn overload_of(name: &str) -> (&str, &str) {
