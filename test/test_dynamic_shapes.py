@@ -7255,7 +7255,7 @@ class TestUnbackedOpsDevice(TestCase):
         self.assertEqual(res.shape, torch.Size([0]))
 
 
-instantiate_device_type_tests(TestUnbackedOpsDevice, globals())
+instantiate_device_type_tests(TestUnbackedOpsDevice, globals(), allow_xpu=True)
 
 
 instantiate_parametrized_tests(TestUnbacked)
