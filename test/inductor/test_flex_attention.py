@@ -4425,9 +4425,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch._logging.set_logs()
 
     @supported_platform
+    @skip_on_cuda
+    @skip_on_xpu
+    @skip_on_mps
     @dtypes(*device_configs["cpu"].dtypes_fast)
-    @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
-    @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     def test_pointwise_epilogue(self, device, dtype):
         def attention_with_epilogue(q, k, v):
             return flex_attention(q, k, v) * 2 + q
