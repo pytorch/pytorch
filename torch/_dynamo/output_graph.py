@@ -44,6 +44,7 @@ from typing import (
     cast,
     Literal,
     NamedTuple,
+    NoReturn,
     NotRequired,
     Optional,
     TYPE_CHECKING,
@@ -61,6 +62,7 @@ import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx, Tensor
 from torch._C._dynamo import guards
+from torch._dynamo import graph_break_hints
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
@@ -73,6 +75,7 @@ from torch._guards import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_custom_class
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     maybe_get_fake_device,
     maybe_get_item_memo,
     maybe_set_fake_device,
@@ -786,6 +789,11 @@ class OutputGraph(OutputGraphCommon):
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
         self.installed_globals: set[str] = set()
+        # Names deleted in this trace, keyed by id() of the globals dict they
+        # were deleted from; the entry keeps the dict alive so the id cannot
+        # be reused. Later module-object or module-__dict__ accesses to those
+        # names graph-break (see check_deleted_global_access).
+        self.deleted_globals_by_dict: dict[int, tuple[Any, set[str]]] = {}
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -1065,6 +1073,27 @@ class OutputGraph(OutputGraphCommon):
 
         self.attr_source_cache: dict[tuple[Source, str], AttrSource] = {}
         self._cached_replayed_side_effect_source_refs: tuple[str, ...] | None = None
+
+    # TODO(follow-up): replace this break with real support, ordering the
+    # module-object access against the replayed global delete.
+    def deleted_global_access_unsupported(self, context: str) -> NoReturn:
+        unimplemented(
+            gb_type="DELETE_GLOBAL with a module namespace access",
+            context=context,
+            explanation=(
+                "A module object or module __dict__ access in the same trace as a "
+                "global delete would race the delete, which is replayed after "
+                "the graph. Eager resume has to order them instead."
+            ),
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+
+    def check_deleted_global_access(self, globals_dict: Any, name: str | None) -> None:
+        """Graph-break if this trace deleted `name` from `globals_dict`; with
+        name=None (a view of the whole dict), if it deleted any name."""
+        entry = self.deleted_globals_by_dict.get(id(globals_dict))
+        if entry is not None and (name is None or name in entry[1]):
+            self.deleted_global_access_unsupported(f"name: {name}")
 
     def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
         self.local_generators.append(gen)
@@ -1711,7 +1740,7 @@ class OutputGraph(OutputGraphCommon):
         return self
 
     @property
-    def fake_mode(self) -> torch._subclasses.FakeTensorMode:
+    def fake_mode(self) -> torch._subclasses.FakeTensorMode | CppFakeTensorMode:
         if self.tracing_context.fake_mode is None:
             raise AssertionError("tracing_context.fake_mode must not be None")
         return self.tracing_context.fake_mode
