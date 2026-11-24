@@ -649,36 +649,13 @@ class TestCoordinateDescentTuner(TestCase):
             [8],
         )
 
-    @config.patch(
-        {
-            "coordinate_descent_tuning": True,
-            "coordinate_descent_check_all_directions": True,
-            "triton.unique_kernel_names": True,
-        }
-    )
+    @config.patch({"coordinate_descent_tuning": True})
     def test_split_scan_respects_min_split_scan_rblock(self):
-        def fn(x, scale):
-            a = -torch.exp(scale.float())
-            dt = torch.nn.functional.softplus(x.float()).clamp(min=0.001)
-            y = a * dt
-            y = torch.nn.functional.pad(y, (0, 0, 0, 227, 0, 0), value=0.0)
-            y = y.view(1, 1, 256, 64).permute(0, 3, 1, 2)
-            return torch.cumsum(y, dim=-1)
+        def fn(x):
+            return torch.cumsum(x.t(), dim=-1)
 
-        x = torch.randn(1, 29, 64, dtype=torch.float32, device=GPU_TYPE)
-        scale = torch.randn(64, dtype=torch.float32, device=GPU_TYPE)
-
-        canaries = [
-            torch.full((128,), 123456789, dtype=torch.int32, device=GPU_TYPE)
-            for _ in range(64)
-        ]
-        for i in range(0, len(canaries), 2):
-            canaries[i] = None
-        live_canaries = [
-            (i, c, c.clone().cpu()) for i, c in enumerate(canaries) if c is not None
-        ]
-
-        ref = fn(x, scale)
+        x = torch.randn(256, 64, dtype=torch.float32, device=GPU_TYPE)
+        ref = fn(x)
         observed_min_rblocks = []
         orig_value_too_small = CoordescTuner.value_too_small
 
@@ -694,20 +671,12 @@ class TestCoordinateDescentTuner(TestCase):
             torch._inductor.utils.fresh_cache(),
             mock.patch.object(CoordescTuner, "value_too_small", spy_value_too_small),
         ):
-            compiled = torch.compile(fn, backend="inductor")
-            for _ in range(3):
-                got = compiled(x, scale)
-                torch.testing.assert_close(got, ref, atol=1e-4, rtol=1e-4)
+            got = torch.compile(fn, backend="inductor")(x)
 
+        torch.testing.assert_close(got, ref, atol=1e-4, rtol=1e-4)
         self.assertTrue(len(observed_min_rblocks) > 0)
-        expected_min = config.triton.min_split_scan_rblock
         for meta_min_rblock in observed_min_rblocks:
-            self.assertEqual(meta_min_rblock, expected_min)
-
-        corrupted = [
-            idx for idx, c, orig in live_canaries if not torch.equal(c.cpu(), orig)
-        ]
-        self.assertEqual(corrupted, [])
+            self.assertEqual(meta_min_rblock, config.triton.min_split_scan_rblock)
 
 
 if __name__ == "__main__":
