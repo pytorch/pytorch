@@ -65,6 +65,7 @@ from ..device_interface import (
     get_registered_device_interfaces,
 )
 from ..exc import (
+    CompileOnOneRankUnsupported,
     raise_observed_exception,
     raise_type_error,
     unimplemented,
@@ -1982,6 +1983,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and tf_state.in_torch_function_mode()
             ):
                 return VariableTracker.build(tx, True)
+            if not tf_state.torch_function_subclass_enabled:
+                return VariableTracker.build(tx, False)
             elems = (
                 unpack_iterable(tx, args[0])
                 if len(args) == 1 and isinstance(args[0], TupleVariable)
@@ -3119,7 +3122,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-                stream_var = tx.symbolic_stream_state.cur_stream(device)
+                stream_var = tx.symbolic_stream_state.cur_stream(device, tx=tx)
                 stream_variable_cls = _get_stream_variable_cls(self.value)
                 if stream_variable_cls is not None and not isinstance(
                     stream_var, stream_variable_cls
@@ -3132,7 +3135,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         source=stream_var.source,
                     )
                 return stream_var
-            except Unsupported:
+            except (CompileOnOneRankUnsupported, Unsupported):
                 raise
             except Exception as e:
                 unimplemented(
