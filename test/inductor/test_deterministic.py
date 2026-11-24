@@ -157,11 +157,16 @@ class DeterministicTest(TestCase):
         ):
             x = torch.randn(16, device=GPU_TYPE)
             _, (code,) = run_and_get_code(torch.compile(lambda x: x * 2 + 1), x)
-        # Deterministic mode alone keeps FMA contraction.
-        self.assertIn(f"'enable_fp_fusion': {fp_fusion}", code)
+        # Deterministic mode also turns off Triton's contraction.
+        triton_fusion = fp_fusion and not deterministic
+        self.assertIn(f"'enable_fp_fusion': {triton_fusion}", code)
 
-    @inductor_config.patch({"deterministic": True, "triton.enable_fp_fusion": False})
-    def test_pointwise_config_numerics(self):
+    @parametrize(
+        "deterministic,fp_fusion",
+        [(True, True), (False, False)],
+        name_fn=lambda d, f: "deterministic" if d else "fp_fusion_off",
+    )
+    def test_pointwise_config_numerics(self, deterministic, fp_fusion):
         # XBLOCK=128 and XBLOCK=256 contract different products into an FMA here.
         def fn(x, buf):
             return x / x.shape[0] * 0.01 + buf * 0.99
@@ -180,6 +185,12 @@ class DeterministicTest(TestCase):
 
             torch._dynamo.reset()
             with (
+                inductor_config.patch(
+                    {
+                        "deterministic": deterministic,
+                        "triton.enable_fp_fusion": fp_fusion,
+                    }
+                ),
                 fresh_cache(),
                 unittest.mock.patch.object(CachingAutotuner, "bench", bench),
             ):
