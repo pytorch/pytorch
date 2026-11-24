@@ -110,7 +110,9 @@ class PrecompileSummary:
             code, so it is served that way rather than through a variant
             missing a guard, and it is listed in neither ``bypassed`` nor
             ``uncovered_frames``.
-        resume_functions: Of those, the graph-break continuations.
+        resume_functions: Of those, the frames a graph break generated: its
+            continuation, and for a comprehension the function that runs it,
+            one for each compile of the frame the comprehension is in.
         guarded_codes: Guarded code objects across all frames.
         backend_graphs: Compiled backend graphs.
         bypassed: The ``co_name`` of each frame the package holds nothing

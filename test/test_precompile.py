@@ -4793,6 +4793,7 @@ class TestPrecompileCapture(TestCase):
 _GOLDEN_MODULE = """
 import collections
 import types
+from itertools import count
 
 import torch
 
@@ -4958,6 +4959,37 @@ def falls_back_around_a_helper(model, x, opaque_layers=0):
     for _ in range(opaque_layers):
         y = opaque(y)
     return tagged_helper(y) + int(torch.compiler.is_compiling())
+
+
+def range_iterator_across_a_break(model, x):
+    steps = iter(range(1, 4))
+    y = model(x)
+    torch._dynamo.graph_break()
+    return y + next(steps)
+
+
+def count_across_a_break(model, x):
+    steps = count(1)
+    y = model(x)
+    torch._dynamo.graph_break()
+    return y + next(steps)
+
+
+def calls_range_iterator_across_a_break(model, x):
+    # Under nested_graph_breaks=False the callee is a frame the entry cannot
+    # reach, so the artifact is installed.
+    return range_iterator_across_a_break(model, x) + 1
+
+
+def comprehension_with_a_bound_variable(model, x):
+    i = 0
+    y = model(x)
+    ys = [torch._dynamo.graph_break() or y + i for i in range(2)]
+    return ys[0] + ys[1]
+
+
+def calls_comprehension_with_a_bound_variable(model, x):
+    return comprehension_with_a_bound_variable(model, x) + 1
 """
 
 _GOLDEN_LOADER = """
@@ -5053,6 +5085,13 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("served", out.stdout)
         return out.stdout
+
+    def _capture_and_serve(self, fn_name, mode="standalone"):
+        fn = getattr(self.mod, fn_name)
+        with self._capture(fn, backend="eager") as cap:
+            y = cap(self.model, self.x2)
+        self.assertEqual(y, fn(self.model, self.x2))
+        self._serve_in_fresh_process([((self.x2,), {}, y)], mode=mode)
 
     def test_capture_takes_pathlike_paths(self):
         import pathlib
@@ -5206,6 +5245,36 @@ class TestPrecompileDynamoCapture(TestCase):
         self._serve_in_fresh_process(
             [((self.x2,), {}, y2), ((self.x3,), {"scale": 0.5}, y3)]
         )
+
+    @skipIfCrossRef
+    @parametrize(
+        "fn_name,mode",
+        [
+            ("range_iterator_across_a_break", "standalone"),
+            ("count_across_a_break", "standalone"),
+            ("calls_range_iterator_across_a_break", "installed"),
+        ],
+    )
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_an_iterator_rebuilt_at_a_graph_break_is_served(self, fn_name, mode):
+        # Rebuilding the iterator calls a builtin or a module attribute, loaded
+        # through a global the serving process has to bind as well.
+        self._capture_and_serve(fn_name, mode)
+
+    @skipIfCrossRef
+    @unittest.skipIf(sys.version_info < (3, 12), "comprehensions are inlined from 3.12")
+    @parametrize(
+        "fn_name,mode",
+        [
+            ("comprehension_with_a_bound_variable", "standalone"),
+            ("calls_comprehension_with_a_bound_variable", "installed"),
+        ],
+    )
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_comprehension_graph_break_is_served(self, fn_name, mode):
+        # The bytecode calls the function Dynamo generated to run the
+        # comprehension, by the name it bound it under while tracing.
+        self._capture_and_serve(fn_name, mode)
 
     @skipIfCrossRef
     def test_a_frame_of_the_scripts_main_module_is_served_installed(self):
@@ -5768,6 +5837,46 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertEqual((factor.guarded_codes, factor.bypassed), ([], False))
         self.assertTrue(mul.guarded_codes)
         self.assertTrue(rendered["factor"]["factor"].guarded_codes)
+
+    @skipIfCrossRef
+    @unittest.skipIf(sys.version_info < (3, 12), "comprehensions are inlined from 3.12")
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_a_frame_that_only_runs_a_comprehension_is_not_served_eagerly(self):
+        # comp() traces no ops and has no continuation, only the function that
+        # runs its comprehension. That function's callee inner() is a frame of
+        # its own, which serving comp() as plain Python would skip as well.
+        from torch._dynamo.precompile_package import default_guard_filter_fn
+
+        def drop_factor(entries):
+            keep = default_guard_filter_fn(entries)
+            return [k and "FACTOR" not in e.name for k, e in zip(keep, entries)]
+
+        name = f"{self.module_name}_comprehension"
+        with open(os.path.join(self.dir, name + ".py"), "w") as f:
+            f.write(
+                "import torch\n\nFACTOR = 2\n\n"
+                "def inner(x):\n    return x.sin()\n\n"
+                "def comp(xs):\n    n, x = FACTOR, None\n"
+                "    return [torch._dynamo.graph_break() or inner(x) * n for x in xs]\n\n"
+                "def step(x):\n    ys = comp([x, x * 2])\n    return ys[0] + ys[1]\n"
+            )
+        self.addCleanup(sys.modules.pop, name, None)
+        importlib.invalidate_caches()
+        mod = importlib.import_module(name)
+        tracer = DynamoTracer(guard_filter_fn=drop_factor, require_no_risky_drops=False)
+        build = mock.patch(
+            "torch._precompile._build_multigraph_artifact",
+            wraps=torch._precompile._build_multigraph_artifact,
+        )
+        capturing = self._capture(mod.step, tracer=tracer, backend="eager")
+        with build as built, capturing as cap:
+            cap(torch.randn(4))
+            summary = cap.summary()
+        codes = {c.python_code.co_name: c for c in built.call_args.args[0].codes}
+        self.assertTrue(codes["comp"].guarded_codes)
+        self.assertIn(("CONSTANT_MATCH", "G['FACTOR']"), summary.risky_dropped_guards)
+        # step, its continuation, comp, the function for its comprehension, inner.
+        self.assertEqual((summary.frames, summary.resume_functions), (5, 2))
 
     @skipIfCrossRef
     @torch._dynamo.config.patch(install_free_tensors=True)

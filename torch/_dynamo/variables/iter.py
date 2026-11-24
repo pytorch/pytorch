@@ -745,9 +745,7 @@ class ZipLongestVariable(IteratorVariable):
                 codegen(it)
             else:
                 codegen.add_push_null(
-                    lambda: codegen.append_output(
-                        codegen.create_load_python_module(iter)  # type: ignore[arg-type]
-                    )
+                    lambda: codegen.load_import_from("builtins", "iter")
                 )
                 codegen.extend_output(
                     [
