@@ -548,7 +548,7 @@ def significant_strides_equal(
         if V.graph.sizevars.statically_known_leq(dim, 1):
             continue
 
-        if not V.graph.sizevars.guard_or_false(sympy.Eq(s1, s2)):
+        if not V.graph.sizevars.statically_known_equals(s1, s2):
             return False
     return True
 
