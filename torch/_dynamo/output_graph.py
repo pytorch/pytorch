@@ -3250,8 +3250,9 @@ class OutputGraph(OutputGraphCommon):
 
             # Placeholders count too: an in-place op on an input, such as
             # `x[idx] = v`, can leave no other node with a grad_fn. The input's fake
-            # has one if it is a non-leaf that requires grad (even if unused, which
-            # over-guards) or if the op made it require grad.
+            # has one if it is a non-leaf that requires grad (even if the graph only
+            # reads it under no_grad, which over-guards) or if the op made it
+            # require grad.
             records_autograd = (
                 not torch._dynamo.compiled_autograd.in_compiled_autograd_region
                 and any(
