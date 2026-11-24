@@ -101,12 +101,7 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_dir = (
-        config.xpu.cutlass_dir
-        if torch.xpu._is_compiled()
-        else config.cutlass.cutlass_dir
-    )
-    cutlass_python_path = path_join(cutlass_dir, "python")
+    cutlass_python_path = path_join(config.cutlass.cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(
         torch_root,
@@ -188,6 +183,24 @@ def try_import_cutlass() -> bool:
     return False
 
 
+def is_cutlass_arch_supported(device_type: str) -> bool:
+    if device_type != "cuda":
+        return device_type == "xpu"
+
+    from ..cuda.compile_utils import _cuda_arch_number
+
+    arch = get_cuda_arch()
+    if arch is None:
+        return False
+    try:
+        capability = _cuda_arch_number(arch)
+    except ValueError:
+        return False
+    # Keys of cc_map; cutlass_cppgen is deprecated, so this set is frozen:
+    # https://github.com/NVIDIA/cutlass/blob/098de2a652cf8f00fd70b2df54051c7eccbb855a/python/cutlass_cppgen/backend/evt/passes/util.py
+    return capability in (80, 86, 89, 90, 100, 101, 103)
+
+
 def _normalize_xpu_arch(arch: str) -> str:
     if arch.startswith("Xe"):
         return arch[2:]
@@ -246,15 +259,6 @@ def toolkit_version(device_type: str) -> str:
         return get_xpu_version()
     else:
         return get_cuda_version()
-
-
-def get_device_cutlass_config(device_type: str):
-    """Get device-specific CUTLASS config (xpu/cuda overrides general cutlass config)."""
-    if device_type == "xpu":
-        return config.xpu
-    from ...config import cutlass as inductor_cutlass_config
-
-    return inductor_cutlass_config
 
 
 @dataclass
