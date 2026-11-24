@@ -4295,7 +4295,7 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("___check_obj_id(lookup_key,", failures[0])
         self.assertIn(
-            "requires a recompile: the NaN-containing key changed identity. Distinct NaN instances can hash differently because CPython uses object identity.",  # noqa: B950
+            "requires a recompile: the NaN-containing key changed identity. Distinct NaN instances can hash differently because CPython uses object identity.",
             failures[0],
         )
 
