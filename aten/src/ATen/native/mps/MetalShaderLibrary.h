@@ -30,6 +30,7 @@ typedef void* MTLBuffer_t;
 
 // Forward declaration of TensorBase and TensorIteratorBase
 namespace at {
+class Tensor;
 class TensorBase;
 struct TensorIteratorBase;
 } // namespace at
@@ -70,6 +71,7 @@ class MetalKernelFunction {
   void startEncoding();
   void setArg(unsigned idx, const at::TensorBase& t);
   void setArg(unsigned idx, const void* ptr, uint64_t size);
+  void setTensorListArg(unsigned idx, c10::ArrayRef<at::Tensor> tensors);
   void setErrorBufferIndex(unsigned idx);
   template <
       typename T,

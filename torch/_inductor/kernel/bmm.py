@@ -331,7 +331,10 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             args = [make_pointwise(_to_dtype)(x) for x in args]
 
         mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(mul_pointwise, 2)
+        # Else bmm(x_bf16, y_bf16, out_dtype=torch.float32) would return bf16.
+        dot_reduction = make_reduction("dot", override_return_dtype=out_dtype)(
+            mul_pointwise, 2
+        )
 
         return dot_reduction
 
@@ -475,17 +478,23 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         template_inp = zero_addmm_input(inp, mat1, mat2)
 
     if use_native_matmul(mat1, mat2):
-        if beta == 0:
-            arg1 = 0
-        else:
-            arg1 = lowerings[aten.mul](beta, inp)
-
         if alpha == 0:
-            arg2 = 0
+            # Skip mat1 @ mat2 but keep its [B, M, N] shape: inp may broadcast.
+            product = lowerings[aten.full](
+                [*mat1.get_size()[:2], mat2.get_size()[2]],
+                0,
+                dtype=mat1.get_dtype(),
+                device=mat1.get_device(),
+            )
         else:
-            arg2 = lowerings[aten.mul](alpha, lowerings[aten.bmm](mat1, mat2))
-
-        return lowerings[aten.add](arg1, arg2)
+            product = lowerings[aten.bmm](mat1, mat2)
+            if alpha != 1:
+                product = lowerings[aten.mul](alpha, product)
+        if beta == 0:
+            return product
+        if beta != 1:
+            inp = lowerings[aten.mul](beta, inp)
+        return lowerings[aten.add](inp, product)
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)

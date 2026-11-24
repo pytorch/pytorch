@@ -492,18 +492,6 @@ class StorageOverlap(GuardEnvExpr):
     non_overlapping_sources: list[Source]
 
 
-@dataclasses.dataclass(frozen=True)
-class StorageOverlapPartition(GuardEnvExpr):
-    input_sources: list[Source]
-    overlapping_indices: tuple[tuple[int, ...], ...]
-
-    def __post_init__(self) -> None:
-        if len(set(self.input_sources)) != len(self.input_sources):
-            raise AssertionError(
-                f"input_sources must be unique, got {self.input_sources}"
-            )
-
-
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
@@ -1149,7 +1137,7 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode: FakeTensorMode | None) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | CppFakeTensorMode | None) -> None:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
@@ -1157,7 +1145,7 @@ class TracingContext:
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
         # Combined cache for inlined code data (instructions, indexof, code_options)
         self.inlined_code_cache: dict[Any, InlinedCodeCache] = dict()
-        self.fake_mode: FakeTensorMode | None = fake_mode
+        self.fake_mode: FakeTensorMode | CppFakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
@@ -1644,31 +1632,3 @@ def active_fake_mode() -> FakeTensorMode | CppFakeTensorMode | None:
     # _get_dispatch_mode(FAKE) falls back to an installed C++ mode's
     # CppFakeTensorMode when that slot is empty.
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-
-
-def require_python_fake_mode(
-    mode: FakeTensorMode | CppFakeTensorMode | None,
-    /,
-) -> FakeTensorMode | None:
-    """
-    Returns mode unchanged if it is a FakeTensorMode or None.
-
-    Use it on a fake mode that must be a Python FakeTensorMode, for example to
-    get Python FakeTensors from it or to pass it on to code typed for
-    FakeTensorMode: a result of detect_fake_mode, active_fake_mode or
-    maybe_get_fake_mode, or a mode the caller was given. Callers narrow the
-    lookups with it so that they keep getting a Python FakeTensorMode when a
-    lookup finds a C++ mode.
-
-    Raises:
-        RuntimeError: if mode is a CppFakeTensorMode, which does not have all of
-            FakeTensorMode's interface.
-    """
-    from torch._subclasses.fake_tensor import CppFakeTensorMode
-
-    if isinstance(mode, CppFakeTensorMode):
-        raise RuntimeError(
-            "This needs a Python torch._subclasses.fake_tensor.FakeTensorMode; "
-            "a CppFakeTensorMode is not supported here yet"
-        )
-    return mode
