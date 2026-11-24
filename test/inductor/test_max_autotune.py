@@ -93,6 +93,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
+    _static_skip_if,
     instantiate_parametrized_tests,
     IS_WINDOWS,
     parametrize,
@@ -229,7 +230,7 @@ class TestMaxAutotune(TestCase):
         for size_hints in (
             {"x": 2048},
             {"x": 128, "y": 256},
-            {"x": 64, "y": 64, "z": 64},
+            {"x": 64, "y": 64, "z0_": 64},
         ):
             with self.subTest(size_hints=size_hints):
                 max_autotune_configs = pointwise(
@@ -2096,6 +2097,30 @@ class TestMaxAutotune(TestCase):
             actual = (opt_f(x, y), x.grad, linear.weight.grad, linear.bias.grad)
             if not same(expect, actual, tol=1e-2):
                 raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
+
+    @config.patch(
+        force_shape_pad=True,
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON,ATEN",
+    )
+    def test_addmm_layout_conflict_extern_fallback(self):
+        """
+        Padding K freezes A at its original row stride, which conflicts with the
+        layout the template expects, so the scheduler falls back to the fastest
+        extern choice. addmm has two extern choices, and only the fastest one
+        has a timing.
+        """
+        M, K, N = 256, 1778, 640
+        a = torch.randn(M * 1792, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, K), (1792, 1)
+        )
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+        bias = torch.randn(N, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, N), (0, 1)
+        )
+
+        out = torch.compile(torch.addmm)(bias, a, b)
+        torch.testing.assert_close(out, torch.addmm(bias, a, b), atol=5e-2, rtol=1e-2)
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
@@ -3999,11 +4024,7 @@ class TestMaxAutotune(TestCase):
         ):
             result = torch.compile(mm, fullgraph=True)(x, w)
 
-        # Loads before the graph input pointer read back 0 on ROCm, so the
-        # negative case computes zeros there and cannot be compared. Same
-        # limitation as test_as_strided_past_input_extent in test_torchinductor.py.
-        if view_offset >= 0 or not TEST_WITH_ROCM:
-            torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
 
         self.assertTrue(autotune_args, "autotuning did not build benchmark inputs")
         # The fake input has to satisfy as_strided with the data pointer placed
@@ -6562,6 +6583,44 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
 
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    @config.patch({"test_configs.autotune_choice_desc_regex": "EVEN_K=False"})
+    @parametrize("prologue", ("cast", "relu_cast"))
+    def test_prologue_masked_k_load_fills_zero(self, prologue):
+        # Only configs whose BLOCK_K does not divide K=48 are admitted, so the last
+        # K step masks lanes of the fused B load. Those lanes feed tl.dot, and
+        # zero-preserving prologues are not re-masked, so the load itself must fill
+        # them with zeros.
+        M, K, N = 64, 48, 128
+
+        def foo(a, b_storage):
+            b = b_storage[:, :K].t()
+            if prologue == "relu_cast":
+                b = b.relu()
+            return a @ b.float()
+
+        a = torch.randn(M, K, device=GPU_TYPE)
+        # Pad every row of B's storage with NaN past column K.
+        b_storage = torch.full(
+            (N, 64), float("nan"), dtype=torch.float16, device=GPU_TYPE
+        )
+        b_storage[:, :K] = torch.randn(N, K, dtype=torch.float16, device=GPU_TYPE)
+
+        out, code = run_and_get_code(torch.compile(foo), a, b_storage)
+        self.assertEqual(out, foo(a, b_storage), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=None, num_deallocs=None)
+        masked_b_loads = [
+            line
+            for line in code[0].splitlines()
+            if "tl.load(" in line and "b_mask" in line
+        ]
+        self.assertTrue(masked_b_loads, "expected a masked prologue load of B")
+        for line in masked_b_loads:
+            self.assertIn("other=", line)
+
 
 def autotune_select_algorithm_wrapper_return_multi():
     def wrapper(*args, **kwargs):
@@ -7156,6 +7215,30 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                         # when get_min_choice() is called during prologue fusion
                         run_and_get_code(compiled_f, a, b)
 
+    def test_fuse_epilogue_zero_unfused_occupancy(self):
+        from torch._inductor.scheduler import _fuse_epilogue
+
+        # 64-wide wavefronts: 200 regs * 8 warps * 64 lanes > 65536 regs per CU
+        device_props = DeviceProperties(
+            type="hip",
+            index=0,
+            multi_processor_count=304,
+            cc=94,
+            regs_per_multiprocessor=65536,
+            warp_size=64,
+        )
+        self.assertFalse(
+            _fuse_epilogue(
+                ms1=0.1,
+                ms2=0.3,
+                unfused_n_regs=200,
+                fused_n_regs=240,
+                fused_n_spills=0,
+                num_warps=8,
+                device_props=device_props,
+            )
+        )
+
 
 class _TDMFakeSizeVars:
     """Sizevars stand-in for the descriptor-checker host tests.
@@ -7196,6 +7279,8 @@ def _tdm_fake_kernel(**overrides):
     analysis into its persistent-reduction and combo-kernel branches and then
     fails on arithmetic against Mock objects.
     """
+    from torch._inductor.codegen.simd import IterationRangesRoot
+
     kernel = mock.Mock(
         no_x_dim=False,
         persistent_reduction=False,
@@ -7204,6 +7289,19 @@ def _tdm_fake_kernel(**overrides):
         fixed_config=None,
         tma_min_block_sizes={},
     )
+    kernel.range_trees = [
+        IterationRangesRoot(
+            "xindex",
+            sympy.Integer(1024),
+            "x",
+            0,
+            kernel,
+            is_loop=False,
+            tensor_dim=0,
+            grid_dim=0,
+            has_zdim=False,
+        )
+    ]
     kernel.max_block.return_value = 1024
     kernel.index_to_str.side_effect = str
     kernel.features.strict_reduction_rblock.return_value = 0
@@ -8381,6 +8479,31 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
 
         with mock.patch.object(AsyncAutotuner, "start", mock_start):
             test_aten_chosen()
+
+
+for _async_test_name in unittest.defaultTestLoader.getTestCaseNames(
+    TestMaxAutotuneAsyncPipelined
+):
+    _async_test = getattr(TestMaxAutotuneAsyncPipelined, _async_test_name)
+    if getattr(_async_test, "__unittest_skip__", False):
+        continue
+    for _skip_name, _skip_reason in TestMaxAutotuneAsyncPipelined.SKIP_TESTS.items():
+        if _skip_name in _async_test_name or TEST_XPU:
+            setattr(
+                TestMaxAutotuneAsyncPipelined,
+                _async_test_name,
+                _static_skip_if(lambda: True, _skip_reason)(_async_test),
+            )
+            break
+    else:
+        setattr(
+            TestMaxAutotuneAsyncPipelined,
+            _async_test_name,
+            _static_skip_if(
+                lambda: config.cpp_wrapper,
+                next(iter(TestMaxAutotuneAsyncPipelined.SKIP_TESTS.values())),
+            )(_async_test),
+        )
 
 
 @unittest.skipUnless(
