@@ -3366,45 +3366,259 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             saved_values = [wt1]
         else:
             saved_values = [wt2]
+        test_graph.output((wt1, wt2))
 
         self._init_process_group()
         saved_values = _sync_decision_cross_ranks(test_graph, saved_values)
         self.assertEqual(saved_values, [wt1])
 
     @skip_if_lt_x_gpu(2)
-    def test_sync_decision_cross_ranks_different_inputs_skips_sync(self):
-        # When ranks have structurally different graphs, has_same_nodes returns
-        # False and the cross-rank sync is skipped, so each rank keeps its own
-        # saved_values instead of converging to a single rank's decision.
-        from torch._functorch.partitioners import _sync_decision_cross_ranks
-
-        test_graph = torch.fx.Graph()
-        node1 = test_graph.placeholder("x")
-        ag = test_graph.create_node(
-            "call_function",
-            torch.ops._c10d_functional.all_gather_into_tensor.default,
-            (node1,),
+    def test_reversed_dict_compile_has_identical_joint_graph(self):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.backends.debugging import boxed_nop
+        from torch._functorch.partitioners import min_cut_rematerialization_partition
+        from torch.fx.passes.canonicalize import (
+            _is_safe_to_reorder,
+            _stable_arg_key,
+            _stable_kwarg_key,
+            _stable_target_str,
         )
-        wt = test_graph.create_node(
-            "call_function", torch.ops._c10d_functional.wait_tensor.default, (ag,)
-        )
-        wt.meta["val"] = torch.randn(10, 10)
-
-        # Diverge the graph structure across ranks so the canonical hashes differ.
-        if self.rank == 0:
-            extra = test_graph.create_node(
-                "call_function", torch.ops.aten.relu.default, (wt,)
-            )
-        else:
-            extra = test_graph.create_node(
-                "call_function", torch.ops.aten.neg.default, (wt,)
-            )
-        extra.meta["val"] = torch.randn(10, 10)
-        test_graph.output((extra,))
 
         self._init_process_group()
-        saved_values = _sync_decision_cross_ranks(test_graph, [extra])
-        self.assertEqual(saved_values, [extra])
+
+        class Model(torch.nn.Module):
+            def forward(self, values):
+                results = {}
+                for key, value in values.items():
+                    if key == "a":
+                        local = value.sin().cos()
+                        reduced = _functional_collectives.all_reduce(
+                            local.detach(), "sum", "default"
+                        )
+                        results[key] = (local, reduced)
+                    else:
+                        results[key] = value.neg()
+                return (
+                    results["a"][1].sum() + results["a"][0].sum() + results["b"].sum()
+                )
+
+        joint_signatures = []
+
+        def partition_fn(gm, joint_inputs, **kwargs):
+            def node_key(input_node):
+                return ("node", input_node.name)
+
+            # Model a downstream joint pass that assigns names in physical
+            # order after AOTAutograd's initial canonicalization.
+            for ordinal, node in enumerate(gm.graph.nodes):
+                if node.op != "placeholder":
+                    node.name = f"late_joint_pass_{ordinal}"
+            gm.recompile()
+
+            result = min_cut_rematerialization_partition(gm, joint_inputs, **kwargs)
+            joint_signatures.append(
+                (
+                    tuple(
+                        (
+                            node.name,
+                            node.op,
+                            _stable_target_str(node.target),
+                            _stable_arg_key(node.args, node_key),
+                            _stable_kwarg_key(node.kwargs, node_key),
+                        )
+                        for node in sorted(gm.graph.nodes, key=lambda node: node.name)
+                    ),
+                    tuple(
+                        node.name
+                        for node in gm.graph.nodes
+                        if node.op not in {"placeholder", "get_attr", "output"}
+                        and not _is_safe_to_reorder(node)
+                    ),
+                )
+            )
+            return result
+
+        backend = aot_autograd(
+            fw_compiler=boxed_nop,
+            bw_compiler=boxed_nop,
+            partition_fn=partition_fn,
+            keep_inference_input_mutations=True,
+        )
+        a = torch.randn(4, 4, device=self.device, requires_grad=True)
+        b = torch.randn(4, 4, device=self.device, requires_grad=True)
+        values = {"a": a, "b": b} if self.rank == 0 else {"b": b, "a": a}
+
+        with (
+            torch._dynamo.config.patch(canonicalize_output_graph_node_order=True),
+            torch._functorch.config.patch(_sync_decision_cross_ranks=True),
+        ):
+            loss = torch.compile(Model(), backend=backend, fullgraph=True)(values)
+            loss.backward()
+
+        self.assertIsNotNone(a.grad)
+        self.assertIsNotNone(b.grad)
+        self.assertEqual(len(joint_signatures), 1)
+        signatures = [None for _ in range(self.world_size)]
+        torch.distributed.all_gather_object(signatures, joint_signatures[0])
+        self.assertEqual(signatures[0], signatures[1])
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_different_inputs_skips_sync(self):
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        self._init_process_group()
+
+        graph = torch.fx.Graph()
+        primal = graph.placeholder("primal")
+        gathered = graph.call_function(
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (primal,),
+        )
+        waited = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, (gathered,)
+        )
+        waited.meta["val"] = torch.randn(10, 8)
+        if self.rank == 0:
+            saved = graph.call_function(torch.ops.aten.relu.default, (waited,))
+        else:
+            value = graph.call_function(torch.ops.aten.neg.default, (waited,))
+            value.meta["val"] = torch.randn(10, 8)
+            saved = graph.call_function(torch.ops.aten.sigmoid.default, (value,))
+        saved.meta["val"] = torch.randn(10, 8)
+        graph.output((saved,))
+
+        result = _sync_decision_cross_ranks(graph, [saved])
+        self.assertEqual(result, [saved])
+
+        graph = torch.fx.Graph()
+        p1 = graph.placeholder("primals_1")
+        p2 = graph.placeholder("primals_2")
+
+        # Both ranks have the same names and targets, but the inputs differ.
+        if self.rank == 0:
+            relu_a = graph.call_function(torch.ops.aten.relu.default, (p1,))
+            relu_b = graph.call_function(torch.ops.aten.relu.default, (p2,))
+        else:
+            relu_a = graph.call_function(torch.ops.aten.relu.default, (p2,))
+            relu_b = graph.call_function(torch.ops.aten.relu.default, (p1,))
+        relu_a.meta["val"] = torch.randn(10, 8)
+        relu_b.meta["val"] = torch.randn(10, 8)
+
+        gathered = graph.call_function(
+            torch.ops._c10d_functional.all_gather_into_tensor.default, (relu_a,)
+        )
+        waited = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, (gathered,)
+        )
+        waited.meta["val"] = torch.randn(10, 8)
+        graph.output((waited, relu_a, relu_b))
+
+        saved_values = [relu_a] if self.rank == 0 else [relu_b]
+        result = _sync_decision_cross_ranks(graph, saved_values)
+        self.assertEqual(result, saved_values)
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_requires_all_ranks_eligible(self):
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+
+        self._init_process_group()
+
+        graph = torch.fx.Graph()
+        primal = graph.placeholder("primal")
+        if self.rank == 0:
+            gathered = graph.call_function(
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (primal,),
+            )
+            saved = graph.call_function(
+                torch.ops._c10d_functional.wait_tensor.default, (gathered,)
+            )
+        else:
+            saved = graph.call_function(torch.ops.aten.relu.default, (primal,))
+        saved.meta["val"] = torch.randn(10, 8)
+        graph.output((saved,))
+
+        with mock.patch.object(
+            torch.distributed,
+            "all_gather_object",
+            side_effect=AssertionError("ineligible graph must not be hashed"),
+        ):
+            result = _sync_decision_cross_ranks(graph, [saved])
+        self.assertEqual(result, [saved])
+
+        graph = torch.fx.Graph()
+        primal = graph.placeholder("primal")
+        if self.rank == 0:
+
+            def local_op(value):
+                return value
+
+            value = graph.call_function(local_op, (primal,))
+        else:
+            value = graph.call_function(torch.ops.aten.relu.default, (primal,))
+        value.meta["val"] = torch.randn(10, 8)
+        gathered = graph.call_function(
+            torch.ops._c10d_functional.all_gather_into_tensor.default,
+            (value,),
+        )
+        waited = graph.call_function(
+            torch.ops._c10d_functional.wait_tensor.default, (gathered,)
+        )
+        waited.meta["val"] = torch.randn(10, 8)
+        graph.output((waited,))
+
+        saved_values = [value] if self.rank == 0 else [waited]
+        with mock.patch.object(
+            torch.distributed,
+            "all_gather_object",
+            side_effect=AssertionError("unstable graph signature must not be hashed"),
+        ):
+            result = _sync_decision_cross_ranks(graph, saved_values)
+        self.assertEqual(result, saved_values)
+
+    @skip_if_lt_x_gpu(2)
+    def test_sync_decision_cross_ranks_barrier_order_mismatch_skips(self):
+        from torch._functorch._aot_autograd.graph_compile import (
+            _canonicalize_joint_graph,
+        )
+        from torch._functorch.partitioners import _sync_decision_cross_ranks
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        graph = torch.fx.Graph()
+        p1 = graph.placeholder("primals_1")
+        p2 = graph.placeholder("primals_2")
+
+        def make_collective(primal):
+            node = graph.call_function(
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                (primal,),
+            )
+            node.meta["val"] = torch.randn(10, 8)
+            return node
+
+        if self.rank == 0:
+            collective1 = make_collective(p1)
+            collective2 = make_collective(p2)
+        else:
+            collective2 = make_collective(p2)
+            collective1 = make_collective(p1)
+        graph.output((collective1, collective2))
+        gm = torch.fx.GraphModule({}, graph)
+        _canonicalize_joint_graph(gm)
+
+        barrier_order = tuple(
+            node.name
+            for node in graph.nodes
+            if node.op == "call_function" and not _is_safe_to_reorder(node)
+        )
+        self._init_process_group()
+        barrier_orders = [None for _ in range(self.world_size)]
+        torch.distributed.all_gather_object(barrier_orders, barrier_order)
+        self.assertNotEqual(barrier_orders[0], barrier_orders[1])
+
+        saved_values = [collective1] if self.rank == 0 else [collective2]
+        result = _sync_decision_cross_ranks(graph, saved_values)
+        self.assertEqual(result, saved_values)
 
     @skip_if_lt_x_gpu(2)
     def test_sync_decision_cross_ranks_different_node_order(self):
@@ -3420,6 +3634,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         # ranks, producing different graph.nodes iteration orders.
         import hashlib
 
+        from torch._functorch._aot_autograd.graph_compile import (
+            _canonicalize_joint_graph,
+        )
         from torch._functorch.partitioners import _sync_decision_cross_ranks
 
         test_graph = torch.fx.Graph()
@@ -3484,7 +3701,10 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         torch.distributed.all_gather_object(all_hashes, local_hash)
         self.assertNotEqual(all_hashes[0], all_hashes[1])
 
-        # Simulate divergent min-cut: rank 0 saves relu, rank 1 saves neg
+        test_gm = torch.fx.GraphModule({}, test_graph)
+        _canonicalize_joint_graph(test_gm)
+
+        # Simulate divergent min-cut: rank 0 saves relu, rank 1 saves neg.
         if self.rank == 0:
             saved_values = [relu_node]
         else:
@@ -3518,6 +3738,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         # on rank 1 that's "relu_1". Name-based sync broadcasts "relu" →
         # rank 1 gets relu(p2) instead → backward extraction fails.
         from torch._functorch._aot_autograd.descriptors import PlainAOTOutput
+        from torch._functorch._aot_autograd.graph_compile import (
+            _canonicalize_joint_graph,
+        )
         from torch._functorch.partitioners import (
             _extract_graph_with_inputs_outputs,
             _sync_decision_cross_ranks,
@@ -3572,6 +3795,8 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         grad.meta["val"] = torch.randn(10, 8)
 
         test_graph.output((wt, relu_b, grad))
+        test_gm = torch.fx.GraphModule({}, test_graph)
+        _canonicalize_joint_graph(test_gm)
 
         self._init_process_group()
 
@@ -4572,6 +4797,103 @@ class TestCompileSyncPgCrossRanks(MultiProcessTestCase):
             timeout=timeout,
         )
 
+    @requires_gloo()
+    @parametrize("canonicalize", (False, True))
+    def test_reversed_dict_sync_converges_saved_plan(self, canonicalize):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch._dynamo.backends.debugging import boxed_nop
+        from torch._functorch.partitioners import (
+            _extract_fwd_bwd_modules,
+            _is_primal,
+            _sync_decision_cross_ranks,
+            is_not_collective,
+        )
+
+        self._init_process_group(timeout=datetime.timedelta(seconds=40))
+
+        def model(values):
+            results = {}
+            for key, value in values.items():
+                local = value.relu()
+                if key == "a":
+                    reduced = _functional_collectives.all_reduce(
+                        local.detach(), "sum", c10d.group.WORLD
+                    )
+                    results[key] = (local, reduced)
+                else:
+                    results[key] = local * 2
+            return results["a"][0].sum() + results["a"][1].sum() + results["b"].sum()
+
+        final_saved_names = []
+        backward_graphs = []
+        dynamo_sources = []
+        relu_target = torch.ops.aten.relu.default
+
+        def partition_fn(gm, joint_inputs, **kwargs):
+            relus = [node for node in gm.graph.nodes if node.target is relu_target]
+            primals = [node for node in gm.graph.nodes if _is_primal(node)]
+            self.assertEqual(len(relus), 2)
+            self.assertEqual(len(primals), 2)
+            selected = relus if self.rank == 0 else primals
+            extract = _extract_fwd_bwd_modules
+            num_fw = kwargs["num_fwd_outputs"]
+            extract(gm, list(selected), saved_sym_nodes=[], num_fwd_outputs=num_fw)
+            physical_order = list(gm.graph.nodes)
+            saved = _sync_decision_cross_ranks(gm.graph, selected)
+            self.assertEqual(list(gm.graph.nodes), physical_order)
+            final_saved_names.extend(node.name for node in saved)
+            fw, bw = extract(gm, saved, saved_sym_nodes=[], num_fwd_outputs=num_fw)
+            for module in (fw, bw):
+                module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
+                module.graph.lint()
+                module.recompile()
+            backward_graphs.append(bw)
+            return fw, bw
+
+        aot_backend = aot_autograd(
+            fw_compiler=boxed_nop,
+            bw_compiler=boxed_nop,
+            partition_fn=partition_fn,
+        )
+
+        def backend(gm, inputs):
+            dynamo_sources.extend(
+                node._dynamo_source.name
+                for node in gm.graph.find_nodes(op="placeholder")
+            )
+            return aot_backend(gm, inputs)
+
+        a = torch.tensor(
+            [[-2, -0.5, 1], [3, 4, 5]], dtype=torch.float64, requires_grad=True
+        )
+        b = torch.tensor(
+            [[1, 2, -3], [-4, 0.5, 6]], dtype=torch.float64, requires_grad=True
+        )
+        values = {"a": a, "b": b} if self.rank == 0 else {"b": b, "a": a}
+        reference = model(values)
+        expected_grads = torch.autograd.grad(reference, (a, b))
+        with (
+            torch._dynamo.config.patch(
+                canonicalize_output_graph_node_order=canonicalize
+            ),
+            torch._functorch.config.patch(_sync_decision_cross_ranks=True),
+        ):
+            loss = torch.compile(model, backend=backend, fullgraph=True)(values)
+            loss.backward()
+
+        saved_names = [None for _ in range(self.world_size)]
+        c10d.all_gather_object(saved_names, final_saved_names)
+        self.assertEqual(saved_names[0], saved_names[1])
+        self.assertEqual(dynamo_sources, ["L['values']['a']", "L['values']['b']"])
+        self.assertEqual(len(final_saved_names), 2)
+        self.assertEqual(len(backward_graphs), 1)
+        self.assertNotIn(
+            relu_target,
+            [node.target for node in backward_graphs[0].graph.nodes],
+        )
+        self.assertEqual(loss, reference)
+        self.assertEqual((a.grad, b.grad), expected_grads)
+
     def test_sync_cache_decision_cross_ranks(self):
         # A cache hit on one rank and a miss on another leaves only the missing rank
         # inside _sync_decision_cross_ranks, which desyncs the process group. The hit
@@ -5016,6 +5338,9 @@ class TestDedupReduceScatter(torch._dynamo.test_case.TestCase):
         dedup_fsdp_reduce_scatter(gm)
 
         self.assertEqual(self._count_ops(gm, rs_target), 2)
+
+
+instantiate_parametrized_tests(TestCompileSyncPgCrossRanks)
 
 
 if __name__ == "__main__":
