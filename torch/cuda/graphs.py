@@ -603,9 +603,6 @@ class CUDAGraph(_CUDAGraph):
         pool: _GraphPool | None = None,
         capture_error_mode: str = "global",
         check_input_liveness: bool = False,
-        allocator: torch.cuda.memory._CUDAAllocator
-        | torch._C._cuda_CUDAAllocator
-        | None = None,
     ) -> None:
         r"""Begin capturing CUDA work on the current stream.
 
@@ -631,19 +628,12 @@ class CUDAGraph(_CUDAGraph):
                 .. note::
                     Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
                     tracked by this mechanism.
-            allocator (torch.cuda.memory.CUDAPluggableAllocator, optional): If supplied, the
-                capture's allocations into its pool are made by this allocator instead of the
-                caching allocator. See the ``allocator`` argument of :class:`~torch.cuda.graph`.
         """
-        if isinstance(allocator, torch.cuda.memory._CUDAAllocator):
-            allocator = allocator.allocator()
         if self._tracker is not None:
             self._tracker.stop()
             self._tracker = None
         super().capture_begin(
-            pool=_get_pool_id(pool),
-            capture_error_mode=capture_error_mode,
-            allocator=allocator,
+            pool=_get_pool_id(pool), capture_error_mode=capture_error_mode
         )
         self._capture_device = torch.cuda.current_device()
         if check_input_liveness:
@@ -1292,22 +1282,6 @@ class graph:
             .. note::
                 Custom CUDA kernels added outside PyTorch (e.g., via cuLaunchKernel or DLPack) are not
                 tracked by this mechanism.
-        allocator (torch.cuda.memory.CUDAPluggableAllocator, optional): If supplied, every allocation that
-            the caching allocator would place into this capture's pool (tensors and ``resize_`` of
-            storages, from any thread) is made by this allocator, e.g. a memory planner, at its exact
-            size, one call per allocation. Everything else keeps using the caching allocator: raw
-            allocations (:func:`~torch.cuda.caching_allocator_alloc`), eager code, other captures, and
-            :func:`~torch.cuda.use_mem_pool` scopes opened inside the capture (:class:`~torch.cuda.MemPool`
-            pools, NCCL and symmetric memory). The allocator gets ``alloc_fn(size, device, stream)``, which
-            must return a 256-byte aligned address (``None`` raises :class:`torch.OutOfMemoryError`), runs
-            in relaxed capture mode and must not allocate CUDA memory through PyTorch, and
-            ``free_fn(ptr, size, device, stream)`` as soon as the allocation dies, in order. The graph keeps
-            using memory freed during the capture, so the allocator must not hand it out outside the graph
-            until the graph is destroyed. :meth:`~torch.Tensor.record_stream` on its memory goes to the
-            allocator. The first capture given an allocator makes a layer over the caching allocator the
-            current CUDA allocator, for the rest of the process; it requires the native caching allocator,
-            and :func:`~torch.cuda.memory.change_current_allocator` raises afterwards. Not supported:
-            conditional nodes, cudagraph trees, and sharing the allocator's memory between processes.
 
     .. note::
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
@@ -1331,9 +1305,6 @@ class graph:
         enable_annotations: bool = False,
         annotation_config: dict[str, typing.Any] | None = None,
         check_input_liveness: bool = False,
-        allocator: torch.cuda.memory._CUDAAllocator
-        | torch._C._cuda_CUDAAllocator
-        | None = None,
     ):
         self._annotation_config = _parse_annotation_config(annotation_config)
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
@@ -1356,7 +1327,6 @@ class graph:
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
         self.check_input_liveness = check_input_liveness
-        self.allocator = allocator
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -1448,9 +1418,9 @@ class graph:
                 )
                 raise RuntimeError(
                     f"{reason} could not register CUPTI node-creation callbacks. "
-                    "This requires cupti-python, CUPTI >= 13.3, and a CUPTI subscription "
-                    "not already held by another profiler (e.g. Kineto or Nsight Systems). "
-                    + fallback
+                    "This requires cupti-python, CUDA >= 13.5, CUPTI >= 13.5, and a CUPTI "
+                    "subscription not already held by another profiler (e.g. Kineto or Nsight "
+                    "Systems). " + fallback
                 )
 
         # Scope annotation recording to this capture: the capture-root stamp and
@@ -1469,8 +1439,6 @@ class graph:
             capture_error_mode=self.capture_error_mode,
             # pyrefly: ignore [bad-keyword-argument]
             check_input_liveness=self.check_input_liveness,
-            # pyrefly: ignore [bad-keyword-argument]
-            allocator=self.allocator,
         )
         # The capture stream is now capturing into the top-level graph, and this is the only
         # point where its id is readable (the cudaGraph_t itself does not exist until
