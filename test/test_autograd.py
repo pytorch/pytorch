@@ -55,6 +55,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfMPS,
+    dtypesIfXPU,
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -91,6 +92,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
+from torch.testing._internal.common_xpu import Xe2_Or_Later
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import (
@@ -13338,6 +13340,58 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @onlyAccelerator
+    def test_forward_traceback_preserves_exception_with_checkpoint(self, device):
+        # Regression test: gatherForwardTraceback() must not clear a pending
+        # Python exception.  See combined_traceback.cpp for the fix.
+        #
+        # Ingredients: (1) memory history recording with context="all"
+        # so allocator callbacks fire on free, (2) a custom library op whose
+        # forward goes through THPFunction_apply (via Generated in
+        # torch._library.autograd), (3) non-reentrant checkpoint.
+        #
+        # During backward recomputation, _StopRecomputationError is raised
+        # from the checkpoint pack_hook inside _save_variables.  The exception
+        # stays pending in Python thread state while C++ stack-unwinds (the
+        # default python_error ctor does not persist).  Destroying the output
+        # THPObjectPtr during unwinding frees the recomputed output tensor's
+        # device storage, triggering the allocator callback ->
+        # CapturedTraceback::gather() -> gatherForwardTraceback().  On
+        # Python < 3.13, without the PyErr_Fetch/PyErr_Restore fix, the
+        # PyDict_GetItemRef compat shim clears the pending exception ->
+        # SystemError.
+        with torch.library._scoped_library("_test_autograd", "FRAGMENT"):
+
+            @torch.library.custom_op("_test_autograd::sin_op", mutates_args=())
+            def sin_op(x: torch.Tensor) -> torch.Tensor:
+                return x.sin()
+
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                return grad * x.cos()
+
+            torch.library.register_autograd(
+                "_test_autograd::sin_op",
+                backward,
+                setup_context=setup_context,
+            )
+
+            def fn(x):
+                return torch.ops._test_autograd.sin_op(x)
+
+            device_module = torch.get_device_module(device)
+            try:
+                device_module.memory._record_memory_history("all", stacks="python")
+                x = torch.randn(4, device=device, requires_grad=True)
+                y = checkpoint(fn, x, use_reentrant=False)
+                y.sum().backward()
+            finally:
+                device_module.memory._record_memory_history(None)
+
     @parametrize("shape,dim", [((0,), None), ((3, 0), 1), ((0, 3), 0)])
     def test_mean_empty_double_backward(self, device, shape, dim):
         x = torch.empty(shape, device=device, requires_grad=True)
@@ -13593,6 +13647,15 @@ class TestAutogradDeviceType(TestCase):
         _test_pyscalar_conversions(lambda x: x.to(device), lambda x: int(x))
 
     @dtypesIfMPS(torch.float32)
+    @dtypesIfXPU(
+        torch.half,
+        torch.float,
+        torch.double,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+    )
     @dtypesIfCUDA(
         torch.half,
         torch.float,
@@ -15686,9 +15749,15 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
     # AttributeError: module 'torch.mps' has no attribute 'default_stream'
     @onlyAccelerator
     @expectedFailureMPS
+    @skipXPUIf(not Xe2_Or_Later, "XPU sleep requires Xe2 or later")
     @skipCUDANonDefaultStreamIf(True)
     def test_consumer_to_single_producer_case_2_correctness(self, device):
-        delay_cycles = _get_sleep_cycles(500)
+        if torch.device(device).type == "xpu":
+            delay_cycles = int(500 * get_cycles_per_ms("xpu"))
+            sleep = torch.xpu._sleep
+        else:
+            delay_cycles = _get_sleep_cycles(500)
+            sleep = _sleep_if_cuda
 
         #                          Device    Stream
         # Consumer (MulBackward):  cuda:0    s0
@@ -15702,7 +15771,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_cuda(delay_cycles)
+                sleep(delay_cycles)
                 out.add_(1)
                 return out
 
@@ -16023,14 +16092,15 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
                 do_test(suppress_warn=suppress_warn, keep_grad_acc=keep_grad_acc)
 
 
-class TestAutogradStreamSynchronizationCudaOnly(_TestAutogradStreamSynchronizationBase):
-    hw_classification = HardwareClassification.CUDA
+class TestAutogradStreamSynchronizationDevice(_TestAutogradStreamSynchronizationBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    # This test may spuriously fail on non-cuda accelerators (since we won't
-    # be calling sleep)
+    @skipXPUIf(not Xe2_Or_Later, "XPU sleep requires Xe2 or later")
     @skipCUDANonDefaultStreamIf(True)
     def test_side_stream_backward_overlap(self, device):
-        delay_cycles = _get_sleep_cycles(500)
+        device_type = torch.device(device).type
+        delay_cycles = int(500 * get_cycles_per_ms(device_type))
+        device_module = torch.get_device_module(device)
 
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
@@ -16073,7 +16143,7 @@ class TestAutogradStreamSynchronizationCudaOnly(_TestAutogradStreamSynchronizati
                 evt.record()
                 events["side_backward_start"] = evt
 
-                _sleep_if_cuda(delay_cycles)
+                device_module._sleep(delay_cycles)
                 result = gO.clone()
 
                 evt = torch.Event(enable_timing=True)
@@ -17689,18 +17759,18 @@ class TestSelectiveActivationCheckpoint(TestCase):
             self.assertEqual(my_count[0], 9)
 
 
-class TestSelectiveActivationCheckpointCudaOnly(TestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestSelectiveActivationCheckpointDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
-    def test_flops_and_mem(self):
+    def test_flops_and_mem(self, device):
         # From https://github.com/pytorch/pytorch/pull/126320
         def get_act_mem(f):
             out = f()
             out.backward()
             # Why do one forward and backward?
-            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            start_mem = torch.accelerator.memory_stats(device)["requested_bytes.all.current"]
             out = f()
-            cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            cur_mem = torch.accelerator.memory_stats(device)["requested_bytes.all.current"]
             act_mem = (cur_mem - start_mem) / (1024 * 1024)
             out.backward()
             return act_mem
@@ -17715,8 +17785,8 @@ class TestSelectiveActivationCheckpointCudaOnly(TestCase):
                 out.backward()
             return mode.get_total_flops() / (512**3 * 2)
 
-        x = torch.randn(512, 512, requires_grad=True, device="cuda")
-        y = torch.randn(512, 512, requires_grad=True, device="cuda")
+        x = torch.randn(512, 512, requires_grad=True, device=device)
+        y = torch.randn(512, 512, requires_grad=True, device=device)
 
         def fn(x, y):
             return torch.mm(x.cos(), y).sin().sum()
@@ -19017,13 +19087,13 @@ class Fanout(Function):
 
 seed = torch.ones((), requires_grad=True)
 getter_output = Getter.apply(seed)
-source = torch.ones((), device="cuda", requires_grad=True)
+source = torch.ones((), device=sys.argv[1], requires_grad=True)
 duplicated = source.clone()
 Fanout.apply(getter_output, duplicated, duplicated).backward()
 """
         try:
             subprocess.check_output(
-                [sys.executable, "-c", script],
+                [sys.executable, "-c", script, device],
                 stderr=subprocess.STDOUT,
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 timeout=20,
@@ -19219,56 +19289,6 @@ class TestAutogradCudaOnly(TestCase):
             with emit_nvtx():
                 a.add(1.0)
 
-    def test_forward_traceback_preserves_exception_with_checkpoint(self, device):
-        # Regression test: gatherForwardTraceback() must not clear a pending
-        # Python exception.  See combined_traceback.cpp for the fix.
-        #
-        # Ingredients: (1) CUDA memory history recording with context="all"
-        # so allocator callbacks fire on free, (2) a custom library op whose
-        # forward goes through THPFunction_apply (via Generated in
-        # torch._library.autograd), (3) non-reentrant checkpoint.
-        #
-        # During backward recomputation, _StopRecomputationError is raised
-        # from the checkpoint pack_hook inside _save_variables.  The exception
-        # stays pending in Python thread state while C++ stack-unwinds (the
-        # default python_error ctor does not persist).  Destroying the output
-        # THPObjectPtr during unwinding frees the recomputed output tensor's
-        # CUDA storage, triggering the allocator callback ->
-        # CapturedTraceback::gather() -> gatherForwardTraceback().  On
-        # Python < 3.13, without the PyErr_Fetch/PyErr_Restore fix, the
-        # PyDict_GetItemRef compat shim clears the pending exception ->
-        # SystemError.
-        with torch.library._scoped_library("_test_autograd", "FRAGMENT"):
-
-            @torch.library.custom_op("_test_autograd::sin_op", mutates_args=())
-            def sin_op(x: torch.Tensor) -> torch.Tensor:
-                return x.sin()
-
-            def setup_context(ctx, inputs, output):
-                (x,) = inputs
-                ctx.save_for_backward(x)
-
-            def backward(ctx, grad):
-                (x,) = ctx.saved_tensors
-                return grad * x.cos()
-
-            torch.library.register_autograd(
-                "_test_autograd::sin_op",
-                backward,
-                setup_context=setup_context,
-            )
-
-            def fn(x):
-                return torch.ops._test_autograd.sin_op(x)
-
-            try:
-                torch.cuda.memory._record_memory_history("all", stacks="python")
-                x = torch.randn(4, device=device, requires_grad=True)
-                y = checkpoint(fn, x, use_reentrant=False)
-                y.sum().backward()
-            finally:
-                torch.cuda.memory._record_memory_history(None)
-
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
@@ -19285,20 +19305,29 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(TestAutogradCudaOnly, globals(), only_for="cuda")
 
 instantiate_device_type_tests(
-    TestMultithreadAutogradDevice, globals(), except_for="cpu"
+    TestMultithreadAutogradDevice, globals(), except_for="cpu", allow_xpu=True
 )
 
-instantiate_device_type_tests(TestSACAmbientSavedTensorsHooksDeviceType, globals())
+instantiate_device_type_tests(
+    TestSACAmbientSavedTensorsHooksDeviceType, globals(), allow_xpu=True
+)
 
 instantiate_device_type_tests(TestAutogradMultipleDispatch, globals(), allow_xpu=True)
-instantiate_device_type_tests(TestAutogradStreamSynchronization, globals())
+instantiate_device_type_tests(TestAutogradStreamSynchronization, globals(), allow_xpu=True)
 instantiate_device_type_tests(
-    TestAutogradStreamSynchronizationCudaOnly, globals(), only_for="cuda"
+    TestAutogradStreamSynchronizationDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(
-    TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
+    TestSelectiveActivationCheckpointDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
 )
-instantiate_device_type_tests(TestInputGradBuffers, globals())
+instantiate_device_type_tests(TestInputGradBuffers, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestDisallowImplicitGradAccumulation, globals())
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
