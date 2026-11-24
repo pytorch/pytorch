@@ -1443,12 +1443,12 @@ class TestMatmulCuda(InductorTestCase):
         def uses_hipblaslt(kernels: set[str]) -> bool:
             return any(HIPBLASLT_HINT in k for k in kernels)
 
-        def run_grouped_mm(equal_k: bool):
+        def run_grouped_mm(equal_k: bool, size=(4, 16, 32, 64)):
             device = "cuda"
             dtype = torch.bfloat16
             if equal_k:
                 # 3d-3d grouped GEMM with identical K for all groups
-                G, M, N, K = 4, 16, 32, 64
+                G, M, N, K = size
                 a = torch.randn(G, M, K, device=device, dtype=dtype)
                 b = torch.randn(G, N, K, device=device, dtype=dtype)
                 return F.grouped_mm(a, b.transpose(-2, -1), out_dtype=dtype)
@@ -1461,14 +1461,14 @@ class TestMatmulCuda(InductorTestCase):
             b = torch.randn(N, K_total, device=device, dtype=dtype)
             return F.grouped_mm(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
 
-        def collect_kernel_names(equal_k: bool):
+        def collect_kernel_names(equal_k: bool, size=(4, 16, 32, 64)):
             kernels = set()
             with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 record_shapes=False,
                 with_stack=False,
             ) as prof:
-                run_grouped_mm(equal_k=equal_k)
+                run_grouped_mm(equal_k=equal_k, size=size)
             for evt in prof.key_averages(group_by_input_shape=False):
                 kernels.add(evt.key)
             return kernels
@@ -1481,6 +1481,14 @@ class TestMatmulCuda(InductorTestCase):
 
             ck_unequal_kernels = collect_kernel_names(equal_k=False)
             self.assertTrue(has_ck_kernel(ck_unequal_kernels, CK_UNEQUAL_K_HINT))
+
+        # Unset, the heuristic picks ck_tile for a small GEMM and hipBLASLt for one above every GPU's threshold
+        if backend == "ck_tile":
+            with rocm_group_gemm_ck_env("0", var=other_env_var), rocm_group_gemm_ck_env(None, var=env_var):
+                self.assertTrue(has_ck_kernel(collect_kernel_names(equal_k=True), CK_EQUAL_K_HINT))
+                large_kernels = collect_kernel_names(equal_k=True, size=(2, 4096, 4096, 4096))
+                self.assertFalse(has_ck_kernel(large_kernels, CK_EQUAL_K_HINT))
+                self.assertTrue(uses_hipblaslt(large_kernels))
 
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
