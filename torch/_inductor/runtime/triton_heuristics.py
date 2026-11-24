@@ -697,6 +697,19 @@ def _resolve_load_device(device: int | None, device_type: str) -> int | None:
     return get_interface_for_device(device_type.replace("hip", "cuda")).current_device()
 
 
+_NO_VARIANT = object()
+# tt.divisibility variants kept per kernel, and runtime value tuples remembered
+# per kernel before the dispatch table is reset.
+_MAX_DIVISIBILITY_VARIANTS = 4
+_MAX_DIVISIBILITY_DISPATCH = 64
+
+
+def _same_binary(a: Any, b: Any) -> bool:
+    """Whether two compile results of one kernel compiled to the same code."""
+    digest = getattr(a, "binary_digest", None)
+    return digest is not None and digest == getattr(b, "binary_digest", None)
+
+
 class CachingAutotuner(KernelInterface):
     """
     Simplified version of Triton autotuner that has no invalidation
@@ -707,6 +720,9 @@ class CachingAutotuner(KernelInterface):
 
     # Set for a pinned kernel: builds it unpinned, for the configs to fall back to.
     fallback: Callable[[], CachingAutotuner] | None = None
+    # Defaults for kernels pickled before tt.divisibility variants existed.
+    _divisibility_variant_args: tuple[int, ...] = ()
+    _divisibility_base_launch = False
     # The state set after __init__ that falling back keeps, rather than taking the
     # unpinned instance's: the held lock, and the launch a lazy precompile from run()
     # is part of.
@@ -846,6 +862,24 @@ class CachingAutotuner(KernelInterface):
         # _cached_profiler_kwargs is read only while _cached_launcher is set.
         self._cached_launcher: LauncherType | None = None
         self._cached_profiler_kwargs: dict[str, Any] = {}
+        # Symbolic size arguments that may be divisible by 16 at runtime (see
+        # config.triton.dynamic_divisibility_variants), and the tt.divisibility
+        # specializations built for the runtime divisibility patterns seen so far.
+        self._divisibility_variant_args: tuple[int, ...] = tuple(
+            self.inductor_meta.get("dynamic_divisibility_variant_args", ())
+        )
+        # Keyed by the divisible arg indices; None = launch this kernel itself.
+        self._divisibility_variants: dict[tuple[int, ...], CachingAutotuner | None] = {}
+        # Runtime values of those args -> variant (or None), so a steady-state
+        # launch costs one itemgetter call and a dict lookup.
+        self._divisibility_dispatch: dict[Any, CachingAutotuner | None] = {}
+        self._divisibility_values = (
+            operator.itemgetter(*self._divisibility_variant_args)
+            if self._divisibility_variant_args
+            else None
+        )
+        # Set while this kernel itself launches for a new divisibility pattern.
+        self._divisibility_base_launch = False
         # Pre-compute static eligibility for launcher caching.  These flags
         # are set once in __init__ and never change, so we avoid re-checking
         # them on every kernel launch.
@@ -1412,6 +1446,8 @@ class CachingAutotuner(KernelInterface):
             "lock": None,
             "_plugins": [],
             "fallback": None,
+            "_divisibility_variants": {},
+            "_divisibility_dispatch": {},
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -1695,9 +1731,16 @@ class CachingAutotuner(KernelInterface):
             result = StaticTritonCompileResult(
                 static_launcher, cfg, compile_meta, self.inductor_meta
             )
-            return result
-
-        return TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
+        else:
+            result = TritonCompileResult(binary, cfg, compile_meta, self.inductor_meta)
+        # Lets a tt.divisibility variant tell whether it compiled to new code; the
+        # static launcher drops its cubin once loaded.
+        asm = getattr(binary, "asm", None)
+        code = (asm.get("cubin") or asm.get("hsaco")) if isinstance(asm, dict) else None
+        result.binary_digest = (
+            hashlib.sha256(code).hexdigest() if isinstance(code, bytes) else None
+        )
+        return result
 
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher."""
@@ -2722,6 +2765,102 @@ class CachingAutotuner(KernelInterface):
             self._debug_call = None
             debug_call.finalize(self.get_device_interface())
 
+    def _build_divisibility_variant(self, key: tuple[int, ...]) -> None:
+        """
+        Compile this kernel with ``tt.divisibility=16`` added for the size
+        arguments in ``key``, pinned to the config this kernel autotuned to, so
+        later launches whose runtime values are divisible take the specialization
+        (Triton's JIT specializes the same way). A specialization that compiles to
+        the same binary gains nothing, so variants are then turned off for this
+        kernel, which also drops the per-launch dispatch. The variant is a plain
+        CachingAutotuner: only plain launches (not benchmark_run) dispatch to it.
+        """
+        from torch.compiler._no_compile import is_compilation_forbidden
+
+        device_module = getattr(
+            torch, self.device_props.type.replace("hip", "cuda"), None
+        )
+        capturing = getattr(device_module, "is_current_stream_capturing", None)
+        if (capturing is not None and capturing()) or is_compilation_forbidden():
+            # Never compile or load a module inside a capture; a later eager
+            # launch with these values builds it.
+            return
+        variants = self._divisibility_variants
+        if len(self.launchers) != 1 or len(variants) >= _MAX_DIVISIBILITY_VARIANTS:
+            variants[key] = None
+            return
+        with self.lock:
+            if key in variants:
+                return
+            variants[key] = None
+            try:
+                variant = self._compile_divisibility_variant(key)
+            except Exception:
+                log.debug(
+                    "%s: tt.divisibility variant %s failed to compile",
+                    self.fn.__name__,
+                    key,
+                    exc_info=True,
+                )
+                return
+            if variant is None:
+                return
+            config = triton_config_to_hashable(variant.launchers[0].config)
+            base = next(
+                (
+                    r
+                    for r in self.compile_results
+                    if triton_config_to_hashable(r.config) == config
+                ),
+                None,
+            )
+            if base is not None and _same_binary(base, variant.compile_results[0]):
+                log.debug("%s: tt.divisibility variant gains nothing", self.fn.__name__)
+                if key == self._divisibility_variant_args:
+                    # Even every arg divisible changes nothing: drop the dispatch.
+                    self._divisibility_variant_args = ()
+                    self._divisibility_dispatch.clear()
+                return
+            variants[key] = variant
+
+    def _compile_divisibility_variant(
+        self, key: tuple[int, ...]
+    ) -> CachingAutotuner | None:
+        # A kernel compiled in a worker drops its JITFunction across the pickle.
+        self._ensure_kernel_loaded()
+        config = self.launchers[0].config
+        attrs = dict(self.triton_meta["configs"][0])
+        for i in key:
+            attrs[(i,)] = [*attrs.get((i,), []), ["tt.divisibility", 16]]
+        inductor_meta = dict(self.inductor_meta)
+        inductor_meta.pop("dynamic_divisibility_variant_args", None)
+        inductor_meta.pop("combo_tuning_groups", None)
+        # Pinned to one config: nothing may add candidates or tune at launch.
+        inductor_meta["dynamic_scale_rblock"] = False
+        inductor_meta["coordinate_descent_tuning"] = False
+        variant = CachingAutotuner(
+            self.fn,
+            triton_meta=cast(
+                TritonMeta,
+                {**self.triton_meta, "device": self.device_props, "configs": [attrs]},
+            ),
+            configs=[config],
+            save_cache_hook=None,
+            mutated_arg_names=self.mutated_arg_names,
+            optimize_mem=self.optimize_mem,
+            heuristic_type=self.heuristic_type,
+            size_hints=self.size_hints,
+            inductor_meta=inductor_meta,
+            custom_kernel=self.custom_kernel,
+            filename=self.filename,
+            reset_to_zero_arg_names=self.reset_to_zero_arg_names,
+        )
+        variant.configs = [config]
+        variant.precompile()
+        if len(variant.launchers) != 1:
+            return None
+        return variant
+
     def run(
         self,
         *args,
@@ -2730,6 +2869,43 @@ class CachingAutotuner(KernelInterface):
         **kwargs,
     ):  # type:ignore[override]
         """Launch triton kernel call and return result."""
+        if (
+            self._divisibility_variant_args
+            and not benchmark_run
+            and not self._divisibility_base_launch
+        ):
+            values = self._divisibility_values(args)  # type: ignore[misc]
+            variant = self._divisibility_dispatch.get(values, _NO_VARIANT)
+            if variant is _NO_VARIANT:
+                key = tuple(
+                    i
+                    for i, v in zip(
+                        self._divisibility_variant_args,
+                        values
+                        if len(self._divisibility_variant_args) > 1
+                        else (values,),
+                    )
+                    if isinstance(v, int) and v % 16 == 0
+                )
+                if key and key not in self._divisibility_variants:
+                    # Launch this kernel (it autotunes on first use), then build
+                    # the specialization for later launches, so it is ready
+                    # before e.g. a CUDA graph capture.
+                    self._divisibility_base_launch = True
+                    try:
+                        result = self.run(*args, stream=stream, **kwargs)
+                    finally:
+                        self._divisibility_base_launch = False
+                    self._build_divisibility_variant(key)
+                    return result
+                variant = self._divisibility_variants.get(key) if key else None
+                if variant is not None or not self.lock.locked():
+                    # (A build in progress on another thread may still fill it in.)
+                    if len(self._divisibility_dispatch) >= _MAX_DIVISIBILITY_DISPATCH:
+                        self._divisibility_dispatch.clear()
+                    self._divisibility_dispatch[values] = variant
+            if variant is not None:
+                return variant.run(*args, stream=stream, **kwargs)
         # --- FAST PATH ---
         # After the first successful launch in steady state, cache the launcher
         # and skip all preamble on subsequent calls (~2µs savings).
