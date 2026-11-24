@@ -1869,8 +1869,61 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
     def finalize(self) -> None:
+        selected = self._constrained_buffers_with_selected_template_users()
         for buf in self.buffers:
-            buf.decide_layout()
+            # Freeze to the layout a selected template was rendered against; if no
+            # template is selected, forcing it only adds copies.
+            name = buf.name
+            if (
+                name is not None
+                and name in selected
+                and isinstance(buf.layout, ir.FlexibleLayout)
+            ):
+                buf.freeze_layout_with_exact_strides(
+                    self.buffer_layout_constraints[name].stride
+                )
+            else:
+                buf.decide_layout()
+
+    def _constrained_buffers_with_selected_template_users(self) -> OrderedSet[str]:
+        """
+        Still-flexible, layout-constrained buffers read by a selected Triton
+        template. A MultiTemplateBuffer counts only if its best unfused choice is a
+        template; otherwise the buffer keeps its default layout, and the scheduler's
+        layout conflict check decides whether a fused template can still be used.
+        """
+        from .distributed_autotune import _DistributedAutotuneBuffer
+        from .select_algorithm import should_use_layout_constraints
+
+        selected: OrderedSet[str] = OrderedSet()
+        if not self.buffer_layout_constraints:
+            return selected
+        for buf in self.buffers:
+            # A placeholder for a kernel autotuned on another rank has no timings
+            # until the scheduler replaces it, and the replacement renders against
+            # the layout chosen here, so it doesn't pin its inputs.
+            if not isinstance(buf, ir.TritonTemplateBuffer) or isinstance(
+                buf, _DistributedAutotuneBuffer
+            ):
+                continue
+            names = OrderedSet(
+                inp.get_name()
+                for inp in buf.inputs
+                if isinstance(inp, ir.IRNode)
+                and should_use_layout_constraints(inp)
+                and isinstance(inp.get_layout(), ir.FlexibleLayout)
+            )
+            if not names or names <= selected:
+                continue
+            if isinstance(buf, ir.MultiTemplateBuffer):
+                # The scheduler forces an extern choice here.
+                if config.test_configs.force_extern_kernel_in_multi_template:
+                    continue
+                choice, _ = buf.get_min_choice()
+                if not isinstance(choice, ir.TritonTemplateCallerBase):
+                    continue
+            selected |= names
+        return selected
 
     @contextmanager
     def set_current_node(self, node: torch.fx.Node):  # type: ignore[no-untyped-def]

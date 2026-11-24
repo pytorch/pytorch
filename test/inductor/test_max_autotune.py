@@ -3559,8 +3559,8 @@ class TestMaxAutotune(TestCase):
             # Not padded at lowering time
             catted_bf16 = catted_b_add.to(torch.bfloat16)
 
-            # bmm1 as output -> no padding occurs, however after fusion
-            # the buffer is padded, layout constraint violated
+            # bmm1 as output -> no padding occurs when the template is
+            # rendered, and the buffer must not be padded afterwards
             bmm1 = torch.bmm(a.to(torch.bfloat16), catted_bf16)
             fused = catted_bf16 - d
             if epilogue:
@@ -3581,6 +3581,10 @@ class TestMaxAutotune(TestCase):
 
         with (
             fresh_cache(),
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
             mock.patch.object(
                 AlgorithmSelectorCache,
                 "benchmark_choice",
@@ -3588,11 +3592,132 @@ class TestMaxAutotune(TestCase):
             ),
         ):
             compiled = torch.compile(mm_with_cat, mode="max-autotune-no-cudagraphs")
-            _, code = run_and_get_code(compiled, a, b1, b2, d)
+            out, code = run_and_get_code(compiled, a, b1, b2, d)
 
-            # Despite Triton being 10x faster in benchmarks, the layout conflict
-            # should force fallback to extern_kernels.bmm
-            FileCheck().check_not("triton_tem").run(code[0])
+            FileCheck().check("triton_tem").run(code[0])
+            self.assertEqual(out, mm_with_cat(a, b1, b2, d))
+
+    @fresh_cache()
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "test_configs.max_mm_configs": 1,
+        }
+    )
+    def test_deferred_layout_constraint_consistent_across_consumers(self):
+        # The graph-output bmm is lowered first with dislike_padding, so h's batch
+        # stride stays 5040; the second template consumer must not re-pad it to 5056.
+        batch, m, k, n = 16, 45, 112, 64
+
+        def fn(x, w1, w2):
+            h = x * 2 + 1
+            return torch.bmm(h, w2), torch.bmm(h, w1) + 1
+
+        # Small integers keep the bmms exact under TF32, so results are bitwise.
+        x = torch.randint(-4, 4, (batch, m, k), device=GPU_TYPE).float()
+        w1 = torch.randint(-4, 4, (batch, k, n), device=GPU_TYPE).float()
+        w2 = torch.randint(-4, 4, (batch, k, n), device=GPU_TYPE).float()
+
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+            mock.patch.object(
+                AlgorithmSelectorCache,
+                "benchmark_choice",
+                mock_benchmark_choice_wrapper(aten_time=1.0, triton_time=0.1),
+            ),
+        ):
+            out, code = run_and_get_code(torch.compile(fn), x, w1, w2)
+
+        self.assertEqual(out, fn(x, w1, w2), atol=0, rtol=0)
+        # The allocation line and the template's stride constants are only
+        # emitted in this form by the Python wrapper and the CUDA bmm templates.
+        if not config.cpp_wrapper:
+            FileCheck().check("buf0 = empty_strided").check_same(
+                "(16, 45, 112), (5040, 112, 1)"
+            ).run(code[0])
+        # Two kernels only because the `+ 1` is fused into the second bmm; without
+        # that fusion both templates have identical source and are emitted once.
+        if torch.version.hip is None:
+            FileCheck().check_count("stride_aq = 5040", 2, exactly=True).run(code[0])
+
+    @fresh_cache()
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "test_configs.max_mm_configs": 1,
+            "benchmark_epilogue_fusion": False,
+        }
+    )
+    @parametrize("operand", ("mat1", "bias"))
+    def test_deferred_layout_constraint_template_loads_use_recorded_layout(
+        self, operand
+    ):
+        # The graph-output addmm records h's row stride unpadded (1100); padding
+        # for the second addmm would make it 1120. The second addmm's benchmark
+        # kernel must address h with the recorded stride, as its inputs do.
+        from torch._inductor import select_algorithm
+
+        m, k, n = 64, 1100, 64
+
+        def fn(x, b, w1, w2, p, q):
+            h = x * 2 + 1
+            second = (
+                torch.addmm(b, h, w2) if operand == "mat1" else torch.addmm(h, p, q)
+            )
+            return torch.addmm(b, h, w1), second.sum(0)
+
+        def rand(*size):
+            return torch.randint(-3, 4, size, device=GPU_TYPE).float()
+
+        args = (rand(m, k), rand(n), rand(k, n), rand(k, n), rand(m, 32), rand(32, k))
+        # VERIFY checks every benchmarked choice against the extern one on random
+        # inputs. Misaddressed rows are off by ~sqrt(k); atol covers TF32 in aten.
+        with mock.patch.object(select_algorithm, "VERIFY", dict(atol=1.0, rtol=0)):
+            out = torch.compile(fn)(*args)
+        self.assertEqual(out, fn(*args), atol=0, rtol=0)
+
+    @unittest.skipIf(
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
+    )
+    def test_deferred_layout_constraint_persistent_tma_operand_order(self):
+        # The template picked A_ROW_MAJOR from z's deferred layout; lowering col_sum
+        # (which keeps z's eager column-major strides) must not refreeze z.
+        m, k, n = 256, 128, 64
+
+        @torch.library.custom_op("test_max_autotune::col_sum", mutates_args=())
+        def col_sum(t: torch.Tensor) -> torch.Tensor:
+            return t.float().sum(0)
+
+        @col_sum.register_fake
+        def _(t):
+            return t.new_empty(t.shape[1], dtype=torch.float32)
+
+        def fn(bias, x, b):
+            z = (x.t() * 2).to(torch.bfloat16)
+            return torch.addmm(bias, z, b), col_sum(z)
+
+        x = torch.randint(-2, 3, (k, m), device=GPU_TYPE).float()
+        b = torch.randint(-2, 3, (k, n), device=GPU_TYPE).bfloat16()
+        bias = torch.randint(-2, 3, (n,), device=GPU_TYPE).bfloat16()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON",
+                "triton.enable_persistent_tma_matmul": True,
+                "benchmark_epilogue_fusion": False,
+                "test_configs.autotune_choice_name_regex": "persistent_tma",
+            }
+        ):
+            out, code = run_and_get_code(torch.compile(fn), bias, x, b)
+
+        FileCheck().check("triton_tem").check("make_tensor_descriptor").run(code[0])
+        self.assertEqual(out, fn(bias, x, b), atol=0, rtol=0)
 
     @parametrize("always_freeze", [True, False])
     def test_mm_layout_freezing_behavior(self, always_freeze):

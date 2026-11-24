@@ -1725,6 +1725,35 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
             print(f"Result from {self.rank} is {f(a, b, c)}")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._dynamo.config, "enable_compiler_collectives", True)
+    @patch.object(torch._inductor.config, "max_autotune_gemm", True)
+    @patch.object(torch._inductor.config, "max_autotune_gemm_backends", "ATEN,TRITON")
+    @patch.object(torch._inductor.config, "distributed_max_autotune_gemm", True)
+    def test_multiproc_autotune_flexible_operand(self):
+        # Each mm reads a single-use intermediate, so its template records a
+        # deferred layout for a FlexibleLayout buffer; mms autotuned on another
+        # rank are placeholders with no timings when the graph is finalized.
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size, rdvz_file=self.file_name
+        ):
+
+            def f(x, w1, w2, w3):
+                return (
+                    torch.sum(torch.relu(x) @ w1)
+                    + torch.sum((x * 2) @ w2)
+                    + torch.sum((x + 1) @ w3)
+                )
+
+            torch.manual_seed(0)
+            x = torch.randint(-2, 3, (256, 256), device=self.rank).float()
+            ws = [
+                torch.randint(-2, 3, (256, 256), device=self.rank).float()
+                for _ in range(3)
+            ]
+            self.assertEqual(torch.compile(f)(x, *ws), f(x, *ws))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @patch.object(torch._dynamo.config, "enable_compiler_collectives", True)
     @patch.object(torch._inductor.config, "max_autotune_gemm", True)
     @patch.object(torch._inductor.config, "distributed_max_autotune_gemm", True)
