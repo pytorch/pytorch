@@ -25,7 +25,6 @@ import types
 import weakref
 from collections.abc import Callable, Iterator
 from typing import Any, cast, TYPE_CHECKING, Union
-from typing_extensions import TypeIs
 
 from torch.utils._pytree import MappingKey
 
@@ -78,6 +77,7 @@ from .constant import ConstantVariable
 from .hashable import HashableTracker, is_hashable
 from .object_protocol import (
     _is_method_type,
+    binary_op,
     generic_getitem,
     generic_hasattr_str,
     generic_is_true,
@@ -85,6 +85,7 @@ from .object_protocol import (
     generic_setitem,
     generic_str,
     mro_lookup,
+    pydict_check,
     pysequence_contains,
     repr_guard,
 )
@@ -126,15 +127,6 @@ def _guard_nan_key(key: VariableTracker) -> None:
     # on their identity, including NaNs nested inside tuple keys.
     if key.source and _contains_nan(_get_literal_key(key)):
         install_guard(key.make_guard(GuardBuilder.ID_MATCH))
-
-
-def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
-    # This is a simplified version of the CPython's PyDict_Check function:
-    return issubclass(obj.python_type(), dict)
-
-
-def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
-    return obj.python_type() is dict
 
 
 def _is_set_or_dictview(obj: VariableTracker) -> bool:
@@ -1319,6 +1311,30 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length_impl(tx)
+
+    def nb_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # mappingproxy_or: unwrap either proxy operand, then PyNumber_Or.
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c (mappingproxy_or)
+        left, right = (other, self) if reverse else (self, other)
+        if isinstance(left, MappingProxyVariable):
+            left = left.dv_dict
+        if isinstance(right, MappingProxyVariable):
+            right = right.dv_dict
+        return binary_op(tx, left, right, "nb_or", "|")
+
+    def nb_inplace_or_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c (mappingproxy_ior)
+        msg = f"'|=' is not supported by {self.python_type_name()}; use '|' instead"
+        raise_type_error(tx, msg)
 
     def _check_class_attr_mutation(self, tx: "InstructionTranslatorBase") -> None:
         # The wrapped mapping is built from the real object, so it does not see

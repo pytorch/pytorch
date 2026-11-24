@@ -47,7 +47,6 @@ import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
-from typing_extensions import TypeIs
 
 import torch
 import torch._logging
@@ -124,12 +123,7 @@ from .output_graph import (
     OutputGraph,
     StackLocalsMetadata,
 )
-from .polyfills import (
-    impl_IS_MAPPING,
-    impl_MATCH_CLASS,
-    impl_MATCH_KEYS,
-    impl_MATCH_SEQUENCE,
-)
+from .polyfills import impl_MATCH_CLASS, impl_MATCH_KEYS
 from .replay_record import ExecutionRecorder
 from .resume_execution import (
     ContinueExecutionCache,
@@ -226,6 +220,10 @@ from .variables.object_protocol import (
     generic_setitem,
     mro_attr_source,
     mro_lookup,
+    Py_TPFLAGS_MAPPING,
+    Py_TPFLAGS_SEQUENCE,
+    pyexception_class_check,
+    pyexception_instance_check,
     pyiter_send,
     pysequence_contains,
     type_is_immutable,
@@ -1353,28 +1351,12 @@ class BytecodeDispatchTableMeta(type):
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
-def pyexception_class_check(val: VariableTracker) -> TypeIs[ExceptionTypes]:
-    # Mirror's CPython PyExceptionClass_Check
-    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L60-L62
-    if isinstance(val, variables.BuiltinVariable):
-        return issubclass(val.fn, BaseException)
-    return isinstance(val, UserDefinedExceptionClassVariable)
-
-
-def pyexception_instance_check(val: VariableTracker) -> TypeIs[ExceptionVals]:
-    # Mirror's CPython PyExceptionInstance_Check
-    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L64-L65
-    return isinstance(
-        val, (variables.ExceptionVariable, UserDefinedExceptionObjectVariable)
-    )
-
-
 def pyerr_given_exception_match(err: VariableTracker, exc: type[BaseException]) -> bool:
     # Mirror's PyErr_GivenExceptionMatch
     if pyexception_class_check(err):
-        return issubclass(err.fn, exc)
+        return issubclass(err.as_python_constant(), exc)
     if pyexception_instance_check(err):
-        return issubclass(err.exc_type, exc)
+        return issubclass(err.python_type(), exc)
     return False
 
 
@@ -2979,7 +2961,7 @@ class InstructionTranslatorBase(
         if (
             value
             and pyexception_instance_check(value)
-            and issubclass(value.exc_type, exception.fn)
+            and issubclass(value.python_type(), exception.as_python_constant())
         ):
             instance = value
         else:
@@ -3151,9 +3133,7 @@ class InstructionTranslatorBase(
         val = self.stack[-1]
         if not pyexception_instance_check(val):
             raise AssertionError("expected _exception_instance_check(val) to be true")
-        typ = SourcelessBuilder.create_internal_builtin(
-            val.exc_type  # type: ignore[attr-defined, union-attr]
-        )
+        typ = SourcelessBuilder.create_internal_builtin(val.python_type())
         tb = val.tp_getattro_impl(
             # pyrefly: ignore[bad-argument-type]
             self,
@@ -3360,7 +3340,7 @@ class InstructionTranslatorBase(
                     "catching classes that do not inherit from BaseException is not allowed",
                 )
             if pyexception_instance_check(exc_instance) and issubclass(
-                exc_instance.exc_type,  # type: ignore[union-attr]
+                exc_instance.python_type(),
                 expected_type.fn,  # type: ignore[attr-defined]
             ):
                 return True
@@ -4619,7 +4599,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 f"expected _exception_instance_check(val) to be true, got {val}"
             )
-        if val.exc_type is StopIteration:  # type: ignore[union-attr]
+        if val.python_type() is StopIteration:
             new_val = VariableTracker.build(self, RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
                 [VariableTracker.build(self, "generator raised StopIteration")],
@@ -4748,29 +4728,15 @@ class InstructionTranslatorBase(
         else:
             self.push(tos.call_method(self, "__len__", [], {}))
 
+    # CPython tests these tp_flags bits, not isinstance. A type inherits only
+    # one of them, from the first base in its MRO that has one.
     def MATCH_MAPPING(self, inst: Instruction) -> None:
-        """
-        If STACK[-1] is an instance of collections.abc.Mapping, push True.
-        Otherwise, push False
-        """
-        tos = self.stack[-1]
-        self.push(
-            self.inline_user_function_return(
-                VariableTracker.build(self, impl_IS_MAPPING),
-                [tos],
-                {},
-            )
-        )
+        flags = self.stack[-1].python_type().__flags__
+        self.push(VariableTracker.build(self, bool(flags & Py_TPFLAGS_MAPPING)))
 
     def MATCH_SEQUENCE(self, inst: Instruction) -> None:
-        tos = self.stack[-1]
-        self.push(
-            self.inline_user_function_return(
-                VariableTracker.build(self, impl_MATCH_SEQUENCE),
-                [tos],
-                {},
-            )
-        )
+        flags = self.stack[-1].python_type().__flags__
+        self.push(VariableTracker.build(self, bool(flags & Py_TPFLAGS_SEQUENCE)))
 
     def MATCH_CLASS(self, inst: Instruction) -> None:
         subject, cls, names = self.popn(3)

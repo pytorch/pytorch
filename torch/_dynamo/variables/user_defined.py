@@ -136,7 +136,7 @@ from .constant import (
     IntConstantVariable,
     StrConstantVariable,
 )
-from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
+from .dicts import ConstDictVariable, OrderedDictVariable
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -145,8 +145,10 @@ from .object_protocol import (
     generic_is_true,
     guard_mro_absent,
     is_nb_not_implemented,
+    mappingproxy_check_mapping,
     mro_attr_source,
     mro_lookup,
+    pydict_check,
     pynumber_as_ssize_t,
     pynumber_index,
     repr_guard,
@@ -2193,12 +2195,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return SourcelessUserDefinedObjectBuilder.create(tx, random_object)
-        elif self.value is types.MappingProxyType and len(args) == 1:
-            # types.MappingProxyType is a read-only proxy of the dict. If the
-            # original dict changes, the changes are reflected in proxy as well.
-            dict_arg = args[0]
-            if isinstance(dict_arg, ConstDictVariable):
-                return variables.MappingProxyVariable(dict_arg)
+        elif self.value is types.MappingProxyType and len(args) == 1 and not kwargs:
+            # mappingproxy_new: a read-only view of any mapping, so changes to
+            # the mapping show through the proxy.
+            # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c (mappingproxy_new)
+            mappingproxy_check_mapping(tx, args[0])
+            return variables.MappingProxyVariable(args[0])
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and (
             self.source or torch._dynamo.config.enable_trace_load_build_class
         ):
@@ -6015,31 +6017,6 @@ class StructSequenceVariable(UserDefinedTupleVariable):
 class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(value, **kwargs)
-
-    def _get(self, tx: "InstructionTranslatorBase") -> "VariableTracker | None":
-        # `.get` backed by the stdlib Mapping/dict implementation resolves to a
-        # traceable polyfill; anything else declines to the generic getattro.
-        if type(self.value).get in (  # type: ignore[attr-defined]
-            collections.abc.Mapping.get,
-            dict.get,
-        ):
-            from .builder import SourcelessBuilder
-
-            fn_vt = SourcelessBuilder.create_internal_user_function(
-                polyfills.mapping_get
-            )
-            return variables.UserMethodVariable(
-                fn_vt,
-                self,
-            )
-        return None
-
-    tp_getset = {"get": GetSet(_get, readonly_setter)}
-
-    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        if self._maybe_get_baseclass_method("__len__") in dict_methods:
-            return VariableTracker.build(tx, len(self.value))  # type: ignore[bad-argument-type]
-        return super().mp_length_impl(tx)
 
 
 class SimpleNamespaceVariable(UserDefinedObjectVariable):

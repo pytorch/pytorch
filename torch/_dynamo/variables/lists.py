@@ -18,7 +18,6 @@ import collections
 import operator
 import sys
 from typing import Any, Optional, TYPE_CHECKING
-from typing_extensions import TypeIs
 
 import torch
 import torch.fx
@@ -80,10 +79,14 @@ from .object_protocol import (
     maybe_get_python_type,
     pyindex_check,
     pyiter_next,
+    pylist_check,
     pylong_as_ssize_t,
     pynumber_as_ssize_t,
     pynumber_index,
+    pyslice_check,
     python_constant_repr_impl,
+    pytuple_check,
+    pytuple_checkexact,
     repr_guard,
     type_implements_nb_index,
     vt_is_iterable,
@@ -95,22 +98,6 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
-
-
-def pytuple_checkexact(obj: VariableTracker) -> bool:
-    return obj.python_type() is tuple
-
-
-def pytuple_check(obj: VariableTracker) -> bool:
-    return issubclass(obj.python_type(), tuple)
-
-
-def pylist_check(obj: VariableTracker) -> bool:
-    return issubclass(obj.python_type(), list)
-
-
-def pylist_checkexact(obj: VariableTracker) -> bool:
-    return obj.python_type() is list
 
 
 def _cpython_has_simple_slice_bug() -> bool:
@@ -3473,10 +3460,6 @@ class SliceVariable(VariableTracker):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/sliceobject.c#L564-L570
     tp_methods = {"indices": Method(indices)}
-
-
-def pyslice_check(obj: VariableTracker) -> TypeIs[SliceVariable]:
-    return isinstance(obj, SliceVariable)
 
 
 class BaseListIteratorVariable(IteratorVariable):

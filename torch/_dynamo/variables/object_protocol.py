@@ -21,6 +21,7 @@ import typing
 from collections.abc import Callable, Generator
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch
 from torch._C._dynamo import (
@@ -77,7 +78,14 @@ from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
-    from ..symbolic_convert import InstructionTranslatorBase
+    from ..symbolic_convert import (
+        ExceptionTypes,
+        ExceptionVals,
+        InstructionTranslatorBase,
+    )
+    from .dicts import ConstDictVariable
+    from .lists import SliceVariable
+    from .sets import BaseSetVariable, SetVariable
 
 
 def vt_identity_compare(
@@ -196,6 +204,8 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 
 # Flag Include/object.h
+Py_TPFLAGS_SEQUENCE = 1 << 5
+Py_TPFLAGS_MAPPING = 1 << 6
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
 Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
 Py_TPFLAGS_HEAPTYPE = 1 << 9
@@ -392,6 +402,84 @@ def pysequence_check(obj_type: type) -> bool:
     if issubclass(obj_type, dict):
         return False
     return type_implements_sq_item(obj_type)
+
+
+def pymapping_check(obj: VariableTracker) -> bool:
+    """Implements PyMapping_Check semantics for VariableTracker objects."""
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/abstract.c (PyMapping_Check)
+    return obj.tp_as_mapping.mp_subscript is not None
+
+
+def pylist_check(obj: VariableTracker) -> bool:
+    """Implements PyList_Check semantics for VariableTracker objects."""
+    return issubclass(obj.python_type(), list)
+
+
+def pytuple_check(obj: VariableTracker) -> bool:
+    """Implements PyTuple_Check semantics for VariableTracker objects."""
+    return issubclass(obj.python_type(), tuple)
+
+
+def pytuple_checkexact(obj: VariableTracker) -> bool:
+    return obj.python_type() is tuple
+
+
+def pylist_checkexact(obj: VariableTracker) -> bool:
+    return obj.python_type() is list
+
+
+def pyslice_check(obj: VariableTracker) -> TypeIs["SliceVariable"]:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/sliceobject.h (PySlice_Check)
+    return obj.python_type() is slice
+
+
+def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
+    # This is a simplified version of the CPython's PyDict_Check function:
+    return issubclass(obj.python_type(), dict)
+
+
+def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
+    return obj.python_type() is dict
+
+
+def pyanyset_check(obj: VariableTracker) -> TypeIs["BaseSetVariable"]:
+    return issubclass(obj.python_type(), (set, frozenset))
+
+
+def pyanyset_checkexact(obj: VariableTracker) -> TypeIs["BaseSetVariable"]:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L28-L29
+    return obj.python_type() in (set, frozenset)
+
+
+def pyset_check(obj: VariableTracker) -> TypeIs["SetVariable"]:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L36-L38
+    return issubclass(obj.python_type(), set)
+
+
+def pyexception_class_check(val: VariableTracker) -> TypeIs["ExceptionTypes"]:
+    # Mirror's CPython PyExceptionClass_Check: PyType_Check(x) && PyType_FastSubclass(x, ...)
+    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L60-L62
+    if not issubclass(maybe_get_python_type(val), type):
+        return False
+    return issubclass(val.as_python_constant(), BaseException)
+
+
+def pyexception_instance_check(val: VariableTracker) -> TypeIs["ExceptionVals"]:
+    # Mirror's CPython PyExceptionInstance_Check: PyType_FastSubclass(Py_TYPE(x), ...)
+    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L64-L65
+    return issubclass(maybe_get_python_type(val), BaseException)
+
+
+def mappingproxy_check_mapping(
+    tx: "InstructionTranslatorBase", mapping: VariableTracker
+) -> None:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c (mappingproxy_check_mapping)
+    if not pymapping_check(mapping) or pylist_check(mapping) or pytuple_check(mapping):
+        raise_type_error(
+            tx,
+            "mappingproxy() argument must be a mapping, not "
+            f"{mapping.python_type_name()}",
+        )
 
 
 def pylong_check(obj_type: type) -> bool:
@@ -723,7 +811,7 @@ def pysequence_delitem(
         raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
 
     raise_type_error(
-        tx, f"'{s.python_type_name()}' object does not support item deletion"
+        tx, f"'{s.python_type_name()}' object doesn't support item deletion"
     )
 
 
@@ -738,16 +826,22 @@ def generic_delitem(
     if mp_ass_subscript is not None:
         return o.mp_ass_subscript_impl(tx, key, None)
 
-    key_type = maybe_get_python_type(key)
-    if pyindex_check(key_type):
-        key_value = key.nb_index_impl(tx)
-        return pysequence_delitem(tx, o, key_value)
-    elif o.tp_as_sequence.sq_ass_item is not None:
-        raise_type_error(
-            tx, f"sequence index must be integer, not {key.python_type_name()}"
-        )
+    # Heap types always get a tp_as_sequence struct; static types only when
+    # they fill one of its slots (int, float, object have none).
+    o_type = maybe_get_python_type(o)
+    is_heap_type = o_type.__flags__ & Py_TPFLAGS_HEAPTYPE
+    if is_heap_type or any(slot is not None for slot in o.tp_as_sequence):
+        if pyindex_check(maybe_get_python_type(key)):
+            key_value = key.nb_index_impl(tx)
+            return pysequence_delitem(tx, o, key_value)
+        elif o.tp_as_sequence.sq_ass_item is not None:
+            raise_type_error(
+                tx, f"sequence index must be integer, not '{key.python_type_name()}'"
+            )
 
-    raise_type_error(tx, f"'{o.python_type_name()}' does not support item deletion")
+    raise_type_error(
+        tx, f"'{o.python_type_name()}' object does not support item deletion"
+    )
 
 
 def pynumber_int(
