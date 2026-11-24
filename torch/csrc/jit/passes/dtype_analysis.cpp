@@ -256,7 +256,6 @@ struct DtypePropagationPass {
         TORCH_INTERNAL_ASSERT(
             false,
             "List Construct and Unpack is not supported in Dtype Propagation");
-        break;
       default:
         if (n->kind().is_aten()) {
           return processAtenOps(n);
@@ -267,7 +266,6 @@ struct DtypePropagationPass {
               "Op is not supported in Dtype Propagation");
         }
     }
-    return false;
   }
 
   bool mergeTensorProperties(

@@ -18,7 +18,6 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 
 from .base import VariableTracker
 from .builtin import (
-    BaseBuiltinVariable,
     BuiltinVariable,
     ByteArrayBuiltinVariable,
     DictBuiltinVariable,
@@ -27,6 +26,7 @@ from .builtin import (
     IterBuiltinVariable,
     ListBuiltinVariable,
     SetAttrBuiltinVariable,
+    TypeVariable,
 )
 from .constant import ConstantVariable
 from .ctx_manager import (
@@ -57,6 +57,19 @@ from .ctx_manager import (
     WithExitFunctionVariable,
     XPUDeviceVariable,
 )
+from .descriptors import (
+    BoundBuiltinMethodVariable,
+    ClassMethodDescriptorVariable,
+    ClassMethodVariable,
+    GetSetDescriptorVariable,
+    MemberDescriptorVariable,
+    MethodDescriptorVariable,
+    MethodWrapperVariable,
+    PropertyVariable,
+    StaticMethodVariable,
+    TupleGetterVariable,
+    WrapperDescriptorVariable,
+)
 from .dicts import (
     ConstDictVariable,
     DictItemsVariable,
@@ -79,36 +92,27 @@ from .exception import (
 )
 from .functions import (
     BaseUserFunctionVariable,
-    BoundBuiltinMethodVariable,
-    ClassMethodDescriptorVariable,
-    ClassMethodVariable,
     CollectionsNamedTupleFunction,
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
+    FunctionWrapperVariable,
     FunctoolsPartialVariable,
-    GetSetDescriptorVariable,
     InspectSignatureVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
-    MemberDescriptorVariable,
-    MethodDescriptorVariable,
-    MethodWrapperVariable,
+    LruCacheWrapperVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
-    PropertyVariable,
     PyTreeGetNodeTypeFunctionVariable,
     PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
     SparseTensorCreationSkipVariable,
-    StaticMethodVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
     TritonSetAllocatorVariable,
-    TupleGetterVariable,
     UserFunctionVariable,
     UserMethodVariable,
-    WrapperDescriptorVariable,
     WrapperUserFunctionVariable,
     WrapperUserMethodVariable,
 )
@@ -158,7 +162,6 @@ from .misc import (
     LambdaVariable,
     NewGlobalVariable,
     NumpyVariable,
-    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -232,8 +235,8 @@ __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
     "BackwardHookVariable",
-    "BaseBuiltinVariable",
     "BaseListVariable",
+    "TypeVariable",
     "BuiltinVariable",
     "ByteArrayBuiltinVariable",
     "ByteArrayIteratorVariable",
