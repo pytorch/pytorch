@@ -1844,15 +1844,9 @@ void dispatchKeys(uint64_t* included, uint64_t* excluded) {
   *excluded = tls.excluded_.raw_repr();
 }
 
-int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
-  const c10::TensorImpl* impl = nullptr;
-  if (isUnboxed(obj)) {
-    impl = unboxedImpl(obj);
-  } else if (THPVariable_CheckExact(obj) && THPVariable_Unpack(obj).defined()) {
-    impl = THPVariable_Unpack(obj).unsafeGetTensorImpl();
-  } else {
-    return 0;
-  }
+// What tensorInfo says of a tensor. Throws where the tensor does not give
+// what is read of it.
+int32_t tensorInfoOf(const c10::TensorImpl* impl, TcfgTensorInfo* out) {
   if (impl->has_symbolic_sizes_strides()) {
     return 0;
   }
@@ -1888,7 +1882,31 @@ int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
   return 1;
 }
 
-int32_t tensorForwardGrad(PyObject* obj) {
+int32_t tensorInfo(PyObject* obj, TcfgTensorInfo* out) {
+  const c10::TensorImpl* impl = nullptr;
+  if (isUnboxed(obj)) {
+    impl = unboxedImpl(obj);
+  } else if (THPVariable_CheckExact(obj) && THPVariable_Unpack(obj).defined()) {
+    impl = THPVariable_Unpack(obj).unsafeGetTensorImpl();
+  } else {
+    return 0;
+  }
+  // This is asked of every tensor that an instruction is handed, before the
+  // runtime knows what kind of tensor it is, and not every kind gives all
+  // that is read (a nested tensor throws for its sizes). One that throws is
+  // none the runtime knows, like a tensor of a class made of Tensor. No
+  // exception may leave: the runtime cannot catch one.
+  try {
+    return tensorInfoOf(impl, out);
+  } catch (...) {
+    if (PyErr_Occurred() != nullptr) {
+      PyErr_Clear();
+    }
+    return 0;
+  }
+}
+
+int32_t forwardGradOf(PyObject* obj) {
   if (isUnboxed(obj)) {
     auto* impl = unboxedImpl(obj);
     return impl->autograd_meta() != nullptr &&
@@ -1904,6 +1922,19 @@ int32_t tensorForwardGrad(PyObject* obj) {
           torch::autograd::isFwGradDefined(t)
       ? 1
       : 0;
+}
+
+// As tensorInfo: nothing leaves but an answer. A tensor that throws here is
+// taken to carry a forward gradient, which closes the form it is in.
+int32_t tensorForwardGrad(PyObject* obj) {
+  try {
+    return forwardGradOf(obj);
+  } catch (...) {
+    if (PyErr_Occurred() != nullptr) {
+      PyErr_Clear();
+    }
+    return 1;
+  }
 }
 
 PyObject* tensorBox(PyObject* tagged) {

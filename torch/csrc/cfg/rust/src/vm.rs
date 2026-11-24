@@ -1340,6 +1340,7 @@ const WARNS: &str = "gave a warning when a path was taken down";
 const CHANGES_KIND: &str = "changes the sizes of a tensor from outside, or whether it requires a gradient";
 const REBASES: &str = "writes in place to a tensor from outside that a gradient is recorded for";
 const DETACHES: &str = "detaches a tensor from outside in place";
+const NOT_DENSE: &str = "is handed a tensor that is not a dense strided one";
 
 /// The kind, sizes and strides of each tensor among some values, as the
 /// forms of a graph check them.
@@ -5513,6 +5514,27 @@ impl Compiled {
             })
     }
 
+    /// Whether every tensor an instruction is handed is a dense strided
+    /// tensor. Any other tensor is more than its sizes, dtype and device
+    /// say, and no form has the rest: a sparse tensor has a number of
+    /// stored elements and is coalesced or not, a quantized one has a
+    /// scale and a zero point.
+    /// The dispatch keys of a tensor say which it is (`graph::dense_key`):
+    /// a sparse tensor of either family, a quantized, an MKLDNN and a
+    /// nested one do not have the key of the dense ones.
+    unsafe fn dense(&self, inst: &Inst, regs: &[Obj], api: &TcfgApi) -> bool {
+        let key = graph::dense_key();
+        let mut taken: Vec<Obj> = Vec::new();
+        inst.op.for_each_use(|v| taken.push(reg(regs, v)));
+        if let Op::Call { callee, .. } | Op::CallEx { callee, .. } = &inst.op {
+            taken.extend(self.bound_tensor(regs, *callee, api).map(|(tensor, ..)| tensor));
+        }
+        flattened(&taken).into_iter().all(|item| {
+            let mut info = TcfgTensorInfo::empty();
+            (api.tensor_info)(item, &mut info) == 0 || info.key_set & key != 0
+        })
+    }
+
     /// Whether an operation writes in place to a tensor that requires a
     /// gradient, in a call that records gradients: the tensor is the
     /// first one it is handed, in the order of the call.
@@ -7627,6 +7649,16 @@ impl Compiled {
         // refused for.
         if kind == Kind::Node && outside.get() && Self::operators_of(inst, operators.as_deref()) == ["aten::detach_"] {
             return Taken::Ends(DETACHES.to_string());
+        }
+        // A form is for dense strided tensors: what else a tensor of
+        // another kind is (how many elements a sparse one has stored and
+        // whether it is coalesced, the scale of a quantized one) is in no
+        // form, the operators on it fail for it and give results whose
+        // sizes follow from it, and what a compiler makes of a graph is
+        // made for the tensor it was shown. An operation that is handed
+        // such a tensor is none of a path.
+        if kind == Kind::Node && !self.dense(inst, regs, api) {
+            return Taken::Ends(NOT_DENSE.to_string());
         }
         // One that gave a warning when it ran for a path of this graph: a
         // warning is shown by Python code, for the place the function is

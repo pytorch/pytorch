@@ -23446,6 +23446,124 @@ VM_TOTAL_OPERATIONS = {
     "detach_ of a view": ("r = v.detach_()", "aten::detach_", vm_total_view, True),
 }
 
+
+def vm_total_stored(bad, at, device):
+    """A sparse tensor of four by four that has four elements stored, or six."""
+    count = 6 if bad else 4
+    places = torch.tensor(
+        [[0, 1, 2, 3, 0, 1][:count], [0, 1, 2, 3, 1, 2][:count]], device=device
+    )
+    return torch.sparse_coo_tensor(
+        places,
+        torch.ones(count, device=device),
+        (4, 4),
+        is_coalesced=True,
+        check_invariants=False,
+    )
+
+
+def vm_total_coalesced(bad, at, device):
+    places = torch.tensor([[0, 1, 2, 3], [0, 1, 2, 3]], device=device)
+    return torch.sparse_coo_tensor(
+        places,
+        torch.ones(4, device=device),
+        (4, 4),
+        is_coalesced=not bad,
+        check_invariants=False,
+    )
+
+
+def vm_total_compressed_rows(bad, at, device):
+    """A sparse tensor of four by four in compressed rows that has four elements stored, or six."""
+    rows, columns = (
+        ([0, 2, 4, 5, 6], [0, 1, 1, 2, 2, 3])
+        if bad
+        else ([0, 1, 2, 3, 4], [0, 1, 2, 3])
+    )
+    values = torch.ones(len(columns), device=device)
+    return torch.sparse_csr_tensor(
+        torch.tensor(rows, device=device),
+        torch.tensor(columns, device=device),
+        values,
+        size=(4, 4),
+        check_invariants=False,
+    )
+
+
+def vm_total_counted(bad, at, device):
+    """A dense tensor of six elements, four of them above zero, or all six."""
+    v = torch.tensor([1.0, 2.0, 3.0, 4.0, -1.0, -2.0], device=device)
+    return v.abs() if bad else v
+
+
+def vm_total_positives(bad, at, device):
+    v = torch.tensor([1.0, 2.0, -1.0, -2.0], device=device)
+    if bad:
+        v[2] = 3.0
+    return v
+
+
+VM_TOTAL_OPERATIONS.update(
+    {
+        # What a sparse tensor is besides its sizes: how many elements it has stored, and whether it is
+        # coalesced. An operation on one is no operation of any graph.
+        "values of a sparse tensor": (
+            "r = v.values().view(4)",
+            "aten::values",
+            vm_total_stored,
+            True,
+        ),
+        "indices of a sparse tensor": (
+            "r = v.indices()",
+            "aten::indices",
+            vm_total_coalesced,
+            True,
+        ),
+        "values of a sparse tensor in compressed rows": (
+            "r = v.values().view(4)",
+            "aten::values",
+            vm_total_compressed_rows,
+            True,
+        ),
+        # A sparse tensor that the function makes of a dense one.
+        "values of a sparse tensor made of a dense one": (
+            "r = v.clamp(min=0).to_sparse().values().view(4)",
+            "aten::values",
+            vm_total_counted,
+            True,
+        ),
+        # A size that follows from what a tensor holds, and an operation that fails for it.
+        "where with one argument": (
+            "r = torch.where(v > 0)[0].reshape(2)",
+            "aten::reshape",
+            vm_total_positives,
+            False,
+        ),
+    }
+)
+
+
+def vm_total_branches(x, w, v):
+    h = ((x * w).sin() * 2 + 1).cos()
+    s = v.values()
+    if s.shape[0] > 4:
+        return (h * 2).tanh().sum() + s.sum() * 2
+    return (h * 3).tanh().sum() + s.sum()
+
+
+def vm_total_made(x, w, v):
+    h = ((x * w).sin() * 2 + 1).cos()
+    return (h * 3).tanh().sum() + v.clamp(min=0).to_sparse().values().shape[0]
+
+
+def vm_total_compressed(x, w, v):
+    h = ((x * w).sin() * 2 + 1).cos()
+    s, starts = v.values(), v.crow_indices()
+    if s.shape[0] > 4:
+        return (h * 2).tanh().sum() + s.sum() * 2 + starts.sum()
+    return (h * 3).tanh().sum() + s.sum() + starts.sum()
+
+
 VM_TOTAL_SHAPES = {
     "caught": """
 def vm_total(x, w, v):
@@ -23538,7 +23656,7 @@ def vm_total_call(operation, bad, graded):
         net, box = VM_TOTAL_BOX.net, VM_TOTAL_BOX
         left = (
             x.tolist(),
-            v.tolist(),
+            (v if v.layout == torch.strided else v.to_dense()).tolist(),
             net.total.tolist(),
             net.norm.running_mean.tolist(),
             net.norm.running_var.tolist(),
@@ -26352,6 +26470,16 @@ class TestVmGraphBackward(TestCase):
                 # What draws is an operation only of a graph that a pass
                 # is handed.
                 return
+            if operation == "where with one argument":
+                # The path that writes ends in front of `where`; what
+                # stands behind it is a graph of its own, which may fail.
+                if effect == "a write to an input" and label in (
+                    "a pass",
+                    "a gradient and a pass",
+                ):
+                    ends = "can fail for what its tensors hold, on a path that writes to a tensor from outside"
+                    self.assertIn(ends, [g["why"] for g in found], msg=msg)
+                return
             if writes or effect in VM_TOTAL_OUTSIDE:
                 # No graph of the function holds the operation, and one
                 # runs in front of it.
@@ -26393,6 +26521,154 @@ class TestVmGraphBackward(TestCase):
                         for bad in (warm, early, every_other):
                             if thorough or (shape, bad) == ("caught", warm):
                                 check(operation, effect, shape, way, bad)
+
+    def test_what_a_tensor_is_besides_its_sizes_is_in_no_graph(self, device):
+        # A form is for the sizes, strides, dtypes and devices of dense
+        # strided tensors. A sparse tensor is more than those: it has a
+        # number of stored elements, and it is coalesced or not. What an
+        # operator gives of one has sizes that follow from that (the values
+        # are as many as are stored), and what a compiler makes of a graph
+        # is made for the tensor it was shown. So an operation that is
+        # handed a tensor that is not dense and strided (sparse of either
+        # family, quantized, MKLDNN, nested) is no operation of a path:
+        # the path ends in front of it, the instruction runs, and what it
+        # gives is a tensor that the next graph is handed, with its sizes
+        # checked at every call.
+        # (A branch on how many values a sparse tensor has was decided
+        # once, where the path was taken down: with a pass over graphs
+        # a call with six stored elements returned what four give.)
+        def keep(gm, input_types):
+            return gm
+
+        graphs = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs())
+        tape = (*torch.vm.DEFAULT_PASSES, torch.vm.passes.Graphs(backward=False), keep)
+        ways = (
+            ("the default passes", torch.vm.DEFAULT_PASSES, False, True),
+            ("graphs", graphs, False, True),
+            ("a pass", (*graphs, keep), False, True),
+            ("AOTAutograd", (*graphs, torch.vm.passes.AOTAutograd()), False, False),
+            ("a gradient", graphs, True, True),
+            ("a gradient and a pass", (*graphs, keep), True, True),
+            ("a gradient on eager's tape", tape, True, True),
+        )
+        cases = (
+            ("values of a sparse tensor", vm_total_branches),
+            ("values of a sparse tensor in compressed rows", vm_total_compressed),
+            # The count handed back, of a sparse tensor that the function
+            # made of a dense one: what a compiler made of the graph gave
+            # 0 for it in every call (its own count of a tensor without
+            # data).
+            ("values of a sparse tensor made of a dense one", vm_total_made),
+        )
+        inductor = ("Inductor", (*graphs, torch.vm.passes.Inductor()), False, False)
+        schedules = (
+            (12, 14, 15),
+            (0, 1, 2, 3, 5),
+            tuple(range(0, 20, 2)),
+            tuple(range(6, 20)),
+        )
+        for operation, fn in cases:
+            for way, passes, graded, exact in (
+                (*ways, inductor) if fn is vm_total_made else ways
+            ):
+                for bad in schedules[:1] if way == "Inductor" else schedules:
+                    msg = (
+                        f"{fn.__name__}, {way}, six elements stored in the calls {bad}"
+                    )
+                    compiled = torch.vm(fn, passes=passes, fallback=False, demote=False)
+                    case = vm_total_call(operation, bad, graded)
+                    got = vm_total_rows(compiled, fn, device, case, range(20))
+                    expected = vm_total_rows(fn, fn, device, case, range(20))
+                    if exact:
+                        self.assertEqual(got, expected, msg=msg)
+                    else:
+                        for mine, eagers in zip(got, expected):
+                            self.assertEqual(
+                                mine, eagers, rtol=1e-4, atol=1e-5, msg=msg
+                            )
+                    if way == "the default passes":
+                        continue
+                    found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+                    self.assertEqual(
+                        [g["ops"] for g in found if "aten::values" in g["operators"]],
+                        [],
+                        msg=msg,
+                    )
+                    self.assertIn(
+                        "is handed a tensor that is not a dense strided one",
+                        [g["why"] for g in found],
+                        msg=msg,
+                    )
+                    if graded or way in ("a pass", "AOTAutograd", "Inductor"):
+                        self.assertTrue(
+                            any(g["hits"] > 0 for g in found), msg=f"{msg}: {found}"
+                        )
+
+    def test_a_tensor_that_gives_no_sizes_is_no_tensor_of_the_runtime(self, device):
+        # A nested tensor throws when it is asked for its sizes. The
+        # runtime asks every tensor that an instruction is handed for
+        # what it is: one that does not give its sizes is none that it
+        # knows, like a tensor of a class made of Tensor. Its operations
+        # have no call site and are in no graph, and the function comes
+        # back with what eager mode gives, whether it was handed the
+        # tensor or made it.
+        # (The exception crossed into the runtime, which ended the
+        # process: a compiled function that was handed a nested tensor
+        # did not come back, whatever its passes.)
+        script = f"""
+import json
+import warnings
+
+import torch
+import torch.vm
+
+warnings.simplefilter("ignore")
+P = torch.vm.passes
+
+
+def keep(gm, input_types):
+    return gm
+
+
+def nests(x, v):
+    h = (x.sin() * 2 + 1).cos()
+    return (h * 3).tanh().sum(), v.abs()
+
+
+def makes(x, v):
+    h = (x.sin() * 2 + 1).cos()
+    w = torch.nested.nested_tensor([h[0], h[1][:2]])
+    return (h * 3).tanh().sum(), w.abs()
+
+
+rows = {{}}
+graphs = (*torch.vm.DEFAULT_PASSES, P.Graphs())
+ways = {{"the default passes": torch.vm.DEFAULT_PASSES, "graphs": graphs, "a pass": (*graphs, keep)}}
+for fn in (nests, makes):
+    for way, passes in ways.items():
+        compiled = torch.vm(fn, passes=passes, fallback=False)
+        same = True
+        for at in range(8):
+            torch.manual_seed(at)
+            x = torch.randn(4, 4, device={device!r})
+            parts = [torch.ones(2, device={device!r}) * at, -torch.ones(3, device={device!r})]
+            v = torch.nested.nested_tensor(parts)
+            (a, b), (c, d) = compiled(x, v), fn(x, v)
+            same &= bool(a == c) and b.is_nested
+            same &= [part.tolist() for part in b.unbind()] == [part.tolist() for part in d.unbind()]
+        found = [g for g in torch.vm.regions(compiled) if "ops" in g]
+        rows[fn.__name__ + ", " + way] = [same, [g["ops"] for g in found if "aten::abs" in g["operators"]]]
+print(json.dumps(rows))
+"""
+        command = [sys.executable, "-c", vm_case_script(script)]
+        ran = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(ran.returncode, 0, msg=ran.stderr[-400:])
+        found = __import__("json").loads(ran.stdout.strip().split("\n")[-1])
+        ways = ("the default passes", "graphs", "a pass")
+        self.assertEqual(
+            found,
+            {f"{fn}, {way}": [True, []] for fn in ("nests", "makes") for way in ways},
+        )
 
     def test_no_graph_is_entered_while_a_node_creation_hook_is_on(self, device):
         # `torch.autograd.graph.node_creation_hook` is Python code that eager

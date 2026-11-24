@@ -4972,6 +4972,24 @@ pub fn composite_operator(name: &str) -> bool {
     composite
 }
 
+/// The dispatch key that the dense strided tensors of every device have
+/// and no other tensor has (not a sparse one of either family, a quantized,
+/// an MKLDNN or a nested one), as a bit of a tensor's key set: asked of
+/// torch once. Zero where it cannot be asked: no tensor is taken for a
+/// dense one then.
+pub fn dense_key() -> u64 {
+    static KEY: pyffi::Once<u64> = pyffi::Once::new();
+    *KEY.get_or_init(|| {
+        let asked = |py: Python<'_>| -> PyResult<u64> {
+            let key = pyffi::of_module(py, c"torch._C", c"DispatchKey")?.getattr("Dense")?;
+            pyffi::of_module(py, c"torch._C", c"DispatchKeySet")?.call1((key,))?.call_method0("raw_repr")?.extract()
+        };
+        let key = unsafe { asked(Python::assume_attached()).unwrap_or(0) };
+        unsafe { ffi::PyErr_Clear() };
+        key
+    })
+}
+
 /// Whether an operator can fail for what its tensors hold, once it has run
 /// on tensors of the same sizes and dtypes with the same other arguments.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -5045,6 +5063,13 @@ const READS_A_NUMBER: [&str; 7] = [
 /// (a copy converts without a check).
 const READS_ACROSS_DEVICES: [&str; 2] = ["aten::fill.Tensor", "aten::fill_.Tensor"];
 
+/// `torch.where` with one argument is `nonzero` by another name: the size of
+/// what it gives follows from what its tensor holds, and an operator that
+/// cannot fail for what its tensors hold can for such a size (a `view` of
+/// it). It is taken as `aten::nonzero` is, which is on no list. (With three
+/// arguments the operator is `aten::where.self`.)
+const SIZED_BY_WHAT_IT_HOLDS: [&str; 1] = ["aten::where"];
+
 /// See `Total`. A view gives its argument seen another way and reads
 /// nothing of it (its schema says that it is one, or its tag that it
 /// makes its argument one); the operators that work element by element,
@@ -5062,7 +5087,7 @@ pub fn total_operator(name: &str) -> Total {
     let base = qualified.rsplit("::").next().unwrap_or(qualified);
     let base = base.strip_suffix('_').filter(|rest| !rest.is_empty()).unwrap_or(base);
     let asked = |py: Python<'_>| -> PyResult<Total> {
-        if MEMORY_BOUND.contains(&base) || READS_A_NUMBER.contains(&name) {
+        if MEMORY_BOUND.contains(&base) || READS_A_NUMBER.contains(&name) || SIZED_BY_WHAT_IT_HOLDS.contains(&name) {
             return Ok(Total::Never);
         }
         if READS_ACROSS_DEVICES.contains(&name) {

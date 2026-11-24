@@ -1908,9 +1908,12 @@ what a tensor holds like any other. `resize_`, `resize_as_`, `set_` and
 either. A path ends in front of the first operation that is not known to be
 unable to fail, an index by a tensor, `gather`, `embedding` and
 `cross_entropy` among them, and a path that already holds such an operation
-does not take a write to a tensor from outside. What stands behind the end
-of the path runs by itself, or starts the next graph, and raises what eager
-mode raises, with everything as eager mode leaves it:
+does not take a write to a tensor from outside. `torch.where` with one
+argument is among them, like `torch.nonzero`, which it is: the size of what
+it gives follows from what a tensor holds, and a `view` of that can fail
+for the size. What stands behind the end of the path runs by itself, or
+starts the next graph, and raises what eager mode raises, with everything
+as eager mode leaves it:
 
 ```python
 import copy
@@ -3733,19 +3736,19 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does, on the code nine steps before
-this commit; none of the nine changes a graph of these models (their graphs,
-operations, runs in a call and hits are the same on all ten): one process a
-row, the median of three turns, on 16 cores under the lock for timed runs,
+which is what the dashboard's runner does, on the code ten steps before this
+commit; none of the ten changes a graph of these models (their graphs,
+operations, runs in a call and hits are the same on all eleven): one process
+a row, the median of three turns, on 16 cores under the lock for timed runs,
 with the load average between 1.8 and 7.5 in front of a row (above 4 in
-front of three of them) and nothing else on the GPU. Taken again on this
-commit's code and on the code one step before it, model by model in one
-window, the 13 rows differ by no more than eager mode and `torch.compile`
-differ between the same two processes (`torch.vm` between 0.95 and 1.01 of
-the row of the step before, and between 0.98 and 1.01 of it against those
-two). The graphs that run are those counted above (DistillGPT2 with the
-operations it has on a GPU; of hf_DistilBert the graph of a layer and the
-one of its feed-forward part run six times each in a call):
+front of three of them) and nothing else on the GPU. Taken again on the code
+one step before this commit and on the code two steps before it, model by
+model in one window, the 13 rows differ by no more than eager mode and
+`torch.compile` differ between the same two processes (`torch.vm` between
+0.95 and 1.01 of the row of the step before, and between 0.98 and 1.01 of it
+against those two). The graphs that run are those counted above (DistillGPT2
+with the operations it has on a GPU; of hf_DistilBert the graph of a layer
+and the one of its feed-forward part run six times each in a call):
 
 | model | eager | `torch.vm` | of eager | `torch.compile` | of eager | `torch.vm` of `torch.compile`'s speed | graphs that run (operations x runs in a call) |
 |---|---|---|---|---|---|---|---|
@@ -3766,7 +3769,7 @@ for five of the models (`python benchmarks/dynamo/torchbench.py
 --performance --inference --bfloat16 --only MODEL` with `--vm` and with
 `--backend inductor`, `timm_models.py` and `huggingface.py` for the models
 of those suites; one run each), which report the speed against eager mode,
-next to what the tool had on the runner's code. That is the code fourteen
+next to what the tool had on the runner's code. That is the code fifteen
 steps before this commit (the one that changed which dicts the engine looks
 a name up in): the runner's lines were taken one after the other with the
 load average between 0.8 and 2.6 in front of a line and nothing else on the
@@ -3807,9 +3810,9 @@ same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the code nine
+The rows of yolov3 and of DistillGPT2's training step are of the code ten
 steps before this commit, measured with the rows of the table in the
-runner's mode (the load average 6.0 and 4.2 in front of them). Fifteen steps
+runner's mode (the load average 6.0 and 4.2 in front of them). Sixteen steps
 before, when a graph gave only what the code behind it reads, another job
 had yolov3 with gradients recorded at 7.67 ms (1.53 times eager's speed) in
 the process that fills the compiler's cache and at 7.73 ms (1.54) with the
@@ -3823,8 +3826,8 @@ DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of whisper-tiny
 7 and 4 where they gave 6 and 3; the graphs of the other models give what
 they gave. With gradients recorded the graph of yolov3 is cut at 28 more of
 its results, those that it also reads ("Writes"). That costs yolov3 nothing
-that two takes of the row tell apart under `torch.no_grad()` (4.31 ms nine
-steps before this commit and 4.48 eleven steps before it, on the same graph,
+that two takes of the row tell apart under `torch.no_grad()` (4.31 ms ten
+steps before this commit and 4.48 twelve steps before it, on the same graph,
 for 4.34) and about a third with gradients recorded (10.47 ms and 9.98 for
 7.67 and 7.73; 9.19 of the 10.34 ms that the tool takes apart are in what
 stands for the graph). The rows of this section with gradients recorded that
@@ -4136,6 +4139,21 @@ What graphs do not do at this stage:
   (its storage, what it is a view of, the node that made it, whether it
   is a leaf) it asks of the class under every tensor, so that a function
   put on `torch.Tensor` under those names is never called for it.
+- A form is for dense strided tensors. A sparse tensor of either family, a
+  quantized, an MKLDNN and a nested one are more than their sizes, dtype
+  and device say (how many elements a sparse tensor has stored and whether
+  it is coalesced, the scale and zero point of a quantized one), and no
+  form has the rest: an operator fails for it (`indices()` of a tensor that
+  is not coalesced), gives a result whose size follows from it (`values()`),
+  and what a compiler makes of a graph is made for the tensor it was shown.
+  So an operation that is handed such a tensor is in no graph: a path ends
+  in front of it, the instruction runs, and what it gives is a tensor like
+  any other for the graph behind it, with its sizes checked at every call.
+  A function that works on such tensors gets graphs for its dense parts
+  only. A tensor that does not give what the runtime reads of every tensor
+  (a nested tensor does not give its sizes) is to the runtime what a
+  tensor of a class made of `Tensor` is: its operations have no call site
+  either.
 - A function that somebody puts on `torch.Tensor` under the name of an
   operator that the compiled function itself uses (`__add__`, `__mul__`) is
   called in the first call in which it is there, and in the calls in which a
@@ -4309,43 +4327,6 @@ What graphs do not do at this stage:
   either: a training graph still ends in front of a loss that can fail
   behind a batch norm's write to its statistics ("Writes"), and the nodes of
   the loss stand in front of `GraphBackward` on eager's tape.
-- A function that is handed a nested tensor (`torch.nested.nested_tensor`)
-  ends the process (`fatal runtime error: Rust cannot catch foreign
-  exceptions, aborting`), with the default passes and with `Graphs()`, a
-  pass over graphs or `AOTAutograd()` behind them. In the first call it does
-  so where the tensor is an argument that an operation takes, that the
-  function hands back or whose `dim()` it reads, an element of a list or an
-  attribute of an object that the function uses; in a later call of a
-  function that ran on dense tensors before, where its sizes are read, and
-  with a pass over graphs or `AOTAutograd()` also where an operation takes
-  it. A nested tensor of the jagged layout (`layout=torch.jagged`) and a
-  list with a nested tensor that is only handed back are as in eager mode.
-- With a pass over graphs or `AOTAutograd()` in the list, the size of what
-  an accessor of a sparse tensor gives (`values()`, `indices()` of a COO
-  tensor, `values()`, `col_indices()` of a CSR tensor,
-  `coalesce().values()`) is taken to follow from the sizes of the tensor,
-  and it is the number of elements that the tensor has stored. A branch on
-  it (`if v.shape[0] > 4:`, `len(v)`, `v.numel()`, the size of something
-  computed of `v`) and a loop up to it go the way of the calls that the
-  graph was made from, and with `AOTAutograd()` the number itself is theirs
-  where it is handed back, used in arithmetic or as the size of a new
-  tensor: in a call with another number of stored elements the function
-  returns another value than eager mode, with no error. For a sparse tensor
-  that the function makes of a dense one (`y.to_sparse().values()`) the same
-  holds with `AOTAutograd()` and with `Inductor()`, and `shape[0]` of it is
-  0 in every call that the compiled function serves. `_nnz()`, the sum of
-  such a tensor and a loop over it are eager's, and so is all of this with
-  the default passes and with `Graphs()` alone.
-- With a pass over graphs, behind a write to a tensor from outside, three
-  kinds of operation stand in the graph that fail for what no form checks,
-  and what they raise leaves the call where a `try` of the function around
-  them would have caught it (the write in front is done once): an accessor
-  of a sparse tensor that the tensor refuses for what it is (`indices()` or
-  `values()` of a tensor that is not coalesced, `crow_indices()` of a CSC
-  tensor where the calls before had a CSR one, which is the same form); a
-  `view` or a `reshape` of what such an accessor gives to a size that fits
-  another number of stored elements; and a `view` or a `reshape` of what
-  `torch.where(condition)` gives to a size that fits another count.
 - With `AOTAutograd()` in the list, `zero_()` of a tensor from outside that
   is expanded from one element (`torch.ones(1).expand(4)`) raises
   `RuntimeError: unsupported operation: more than one element of the
@@ -4353,6 +4334,15 @@ What graphs do not do at this stage:
   the calls that the function AOTAutograd compiled serves, and the tensor is
   not written. The error is that function's: eager's kernel of `zero_`
   writes such a tensor, and eager mode returns.
+- In the first two calls of a compiled function, a factory that takes its
+  sizes from a tensor (`torch.zeros_like`, `ones_like`, `empty_like`,
+  `full_like`) raises ``RuntimeError: accessing `data` under vmap transform
+  is not allowed`` where the function runs inside `torch.func.vmap` and the
+  tensor is one of the transform's; eager mode returns, and from the third
+  call on so does the function. In its first call, what watches the
+  operations of a function (a tracer such as `make_fx`, a class with
+  `__torch_dispatch__`) sees one more operation behind such a factory,
+  `aten::alias`, also behind `rand_like` and `torch.zeros`.
 
 ## API Reference
 
