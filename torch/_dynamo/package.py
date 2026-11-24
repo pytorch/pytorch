@@ -1108,27 +1108,24 @@ class PrecompileCacheEntry:
 
         for code in cache_entry.codes:
             for backend_id in code.backend_ids:
-                if backend_id not in backends:
-                    logger.warning("Backend not found")
-                    debug_str = json.dumps(
-                        {
-                            "entry": cache_entry.debug_info(),
-                            "missing_backend": backend_id,
-                        }
-                    )
-                    torch._logging.trace_structured(
-                        "artifact",
-                        metadata_fn=lambda: {
-                            "name": "dynamo_cache_bypass",
-                            "encoding": "json",
-                        },
-                        payload_fn=lambda: debug_str,
-                        expect_trace_id=False,
-                    )
-                    code.bypassed = True
-                    break
-                else:
+                if backend_id in backends:
                     backend_content[backend_id] = backends[backend_id]
+                    continue
+                logger.warning("Backend not found")
+                debug_str = json.dumps(
+                    {"entry": cache_entry.debug_info(), "missing_backend": backend_id}
+                )
+                torch._logging.trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "dynamo_cache_bypass",
+                        "encoding": "json",
+                    },
+                    payload_fn=lambda: debug_str,
+                    expect_trace_id=False,
+                )
+                code.bypassed = True
+                break
 
         return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
 
