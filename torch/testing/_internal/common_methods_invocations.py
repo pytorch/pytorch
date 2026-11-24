@@ -15412,7 +15412,7 @@ op_db: list[OpInfo] = [
                 toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
                 "TestTorchFunctionRedispatchOpsDevice",
                 "test_redispatch",
-                device_type="cuda",
+                device_type=("cuda", "xpu"),
             ),
         ),
         skips=(

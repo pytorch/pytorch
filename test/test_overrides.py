@@ -2066,11 +2066,6 @@ class TestTorchFunctionRedispatchOpsDevice(TestCase):
         # see https://github.com/intel/torch-xpu-ops/issues/5049
         skip("__rmatmul__", device_type="xpu", dtypes=(torch.int8, torch.uint8)),
         skip("tensordot", device_type="xpu", dtypes=(torch.int8, torch.uint8)),
-        # Flaky numerical precision failure on XPU with float16;
-        # see https://github.com/intel/torch-xpu-ops/issues/5050
-        skip("nn.functional.linear_cross_entropy", device_type="xpu", dtypes=(torch.float16,)),
-        skip("nn.functional.linear_cross_entropy", "chunked", device_type="xpu", dtypes=(torch.float16,)),
-        skip("nn.functional.linear_cross_entropy", "chunked_none", device_type="xpu", dtypes=(torch.float16,)),
     })
     def test_redispatch(self, device, dtype, op):
         if op.has_nondeterministic_output:
