@@ -983,11 +983,7 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
         return self.sq_length_impl(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if "range" in codegen.tx.f_globals:
-            raise AssertionError("'range' must not be shadowed in f_globals")
-        codegen.add_push_null(
-            lambda: codegen.append_output(codegen.create_load_python_module(range))  # type: ignore[arg-type]
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "range"))
         codegen.foreach(self.items)
         codegen.extend_output(create_call_function(3, False))
 
@@ -1729,11 +1725,7 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # To deal with self-referential sets
-        codegen.add_push_null(
-            lambda: codegen.append_output(
-                codegen.create_load_python_module(collections.deque)  # type: ignore[arg-type]
-            )
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("collections", "deque"))
         codegen.append_output(create_instruction("BUILD_LIST", arg=0))
         codegen(self.maxlen)
         codegen.extend_output([*codegen.create_call_function_kw(2, ("maxlen",), False)])
@@ -3057,9 +3049,7 @@ class ByteArrayVariable(VariableTracker):
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        codegen.add_push_null(
-            lambda: codegen.append_output(codegen.create_load_python_module(bytearray))  # type: ignore[arg-type]
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "bytearray"))
         codegen.append_output(codegen.create_load_const(bytes(self.data)))
         codegen.extend_output(create_call_function(1, False))
 
@@ -3564,9 +3554,7 @@ class BaseListIteratorVariable(IteratorVariable):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
-        codegen.add_push_null(
-            lambda: codegen.append_output(codegen.create_load_python_module(iter))  # type: ignore[arg-type]
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "iter"))
         if not self.is_exhausted:
             remaining_items = self.items[self.index :]
         else:
@@ -3677,12 +3665,8 @@ class ByteArrayIteratorVariable(IteratorVariable):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Match ListIteratorVariable: rebuild from remaining items so iterator
         # position survives graph breaks (iter(parent) would restart at index 0).
-        codegen.add_push_null(
-            lambda: codegen.append_output(codegen.create_load_python_module(iter))  # type: ignore[arg-type]
-        )
-        codegen.add_push_null(
-            lambda: codegen.append_output(codegen.create_load_python_module(bytearray))  # type: ignore[arg-type]
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "iter"))
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "bytearray"))
         data = self.parent.data
         if self.is_exhausted or self.index >= len(data):
             remaining = b""
@@ -3870,9 +3854,7 @@ class ListReverseIteratorVariable(IteratorVariable):
                 )
             )
             codegen.add_push_null(
-                lambda: codegen.append_output(
-                    codegen.create_load_python_module(reversed)  # type: ignore[arg-type]
-                )
+                lambda: codegen.load_import_from("builtins", "reversed")
             )
             codegen(self.source_seq)
             codegen.extend_output(create_call_function(1, False))
@@ -3881,9 +3863,7 @@ class ListReverseIteratorVariable(IteratorVariable):
             codegen.extend_output(create_call_function(2, False))
         else:
             codegen.add_push_null(
-                lambda: codegen.append_output(
-                    codegen.create_load_python_module(reversed)  # type: ignore[arg-type]
-                )
+                lambda: codegen.load_import_from("builtins", "reversed")
             )
             codegen(self.source_seq)
             codegen.extend_output(create_call_function(1, False))
@@ -3952,12 +3932,8 @@ class RangeIteratorVariable(IteratorVariable):  # noqa: RVT001
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
-        codegen.add_push_null(
-            lambda: codegen.append_output(codegen.create_load_python_module(iter))  # type: ignore[arg-type]
-        )
-        codegen.add_push_null(
-            lambda: codegen.append_output(codegen.create_load_python_module(range))  # type: ignore[arg-type]
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "iter"))
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "range"))
         codegen.append_output(codegen.create_load_const(self.start))
         codegen.append_output(codegen.create_load_const(self.stop))
         codegen.append_output(codegen.create_load_const(self.step))

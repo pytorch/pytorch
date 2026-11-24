@@ -1622,6 +1622,25 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(*inputs)
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_reloads_a_returned_iterator(self):
+        # The bytecode rebuilds the iterator by calling builtins, which it
+        # loads through an import alias the load binds.
+        def fn(x):
+            return x + 1, iter(range(3))
+
+        x = torch.randn(3)
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager").aot_compile(
+            ((x,), {})
+        )
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            y, steps = compiled_fn(x)
+        self.assertEqual(y, x + 1)
+        self.assertEqual(list(steps), [0, 1, 2])
+
     def test_aot_compile_reloads_a_runtime_env_helper_faithfully(self):
         # A nested helper the compiled function closes over travels in the
         # runtime env and is rebuilt from its code object at load. Its cells,
