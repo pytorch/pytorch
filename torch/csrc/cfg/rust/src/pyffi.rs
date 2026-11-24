@@ -1,0 +1,385 @@
+//! Small helpers over the raw CPython API. Everything here requires the GIL.
+
+use pyo3::ffi;
+use std::os::raw::{c_char, c_int};
+
+pub type Obj = *mut ffi::PyObject;
+
+extern "C" {
+    // Adds a traceback entry for code that has no Python frame.
+    pub fn _PyTraceback_Add(funcname: *const c_char, filename: *const c_char, lineno: c_int);
+    pub fn PyMethod_New(func: Obj, self_: Obj) -> Obj;
+    pub static mut PyMethod_Type: ffi::PyTypeObject;
+    // Borrowed references to the two halves of a bound method.
+    pub fn PyMethod_Function(method: Obj) -> Obj;
+    pub fn PyMethod_Self(method: Obj) -> Obj;
+    pub static mut PyCell_Type: ffi::PyTypeObject;
+    // New reference, or null (without an error) for an empty cell.
+    pub fn PyCell_Get(cell: Obj) -> Obj;
+    // value may be null, for an empty cell.
+    pub fn PyCell_New(value: Obj) -> Obj;
+    pub fn PyCell_Set(cell: Obj, value: Obj) -> std::os::raw::c_int;
+    // New reference to sys.modules[name], or null (with or without an error).
+    pub fn PyImport_GetModule(name: Obj) -> Obj;
+    // The exception being handled: a new reference, or null.
+    pub fn PyErr_GetHandledException() -> Obj;
+    pub fn PyErr_SetHandledException(exc: Obj);
+    // Borrowed reference to what the type's MRO holds for name, or null.
+    pub fn _PyType_Lookup(ty: *mut ffi::PyTypeObject, name: Obj) -> Obj;
+    /// `PyDict_Next` that also gives the hash the dict keeps for the key.
+    #[cfg(not(Py_3_13))]
+    pub fn _PyDict_Next(dict: Obj, at: *mut isize, key: *mut Obj, value: *mut Obj, hash: *mut ffi::Py_hash_t) -> std::ffi::c_int;
+    pub fn PyType_GetDict(ty: *mut ffi::PyTypeObject) -> Obj;
+    // Like getattr, but a method comes back unbound: returns 1 with the
+    // function in *method, to be called with obj as its first argument.
+    pub fn _PyObject_GetMethod(obj: Obj, name: Obj, method: *mut Obj) -> std::os::raw::c_int;
+}
+
+/// An owned reference to a Python object.
+pub struct PyObj(pub Obj);
+
+// PyObj is only created, cloned and dropped with the GIL held.
+unsafe impl Send for PyObj {}
+unsafe impl Sync for PyObj {}
+
+impl PyObj {
+    /// Takes ownership of a new reference.
+    pub unsafe fn from_owned(ptr: Obj) -> PyObj {
+        debug_assert!(!ptr.is_null());
+        PyObj(ptr)
+    }
+
+    pub unsafe fn from_borrowed(ptr: Obj) -> PyObj {
+        ffi::Py_INCREF(ptr);
+        PyObj(ptr)
+    }
+
+    pub fn as_ptr(&self) -> Obj {
+        self.0
+    }
+}
+
+impl Clone for PyObj {
+    fn clone(&self) -> PyObj {
+        unsafe { PyObj::from_borrowed(self.0) }
+    }
+}
+
+impl Drop for PyObj {
+    fn drop(&mut self) {
+        unsafe { ffi::Py_DECREF(self.0) }
+    }
+}
+
+#[inline(always)]
+pub unsafe fn xdecref(o: Obj) {
+    if !o.is_null() {
+        ffi::Py_DECREF(o);
+    }
+}
+
+#[inline(always)]
+pub unsafe fn new_ref(o: Obj) -> Obj {
+    ffi::Py_INCREF(o);
+    o
+}
+
+/// What `super(class, obj)` gives, as C has it: the class the lookup
+/// starts behind, the object, and the class of the object.
+#[repr(C)]
+pub struct SuperObject {
+    pub ob_base: ffi::PyObject,
+    pub this: *mut ffi::PyTypeObject,
+    pub obj: Obj,
+    pub obj_type: *mut ffi::PyTypeObject,
+}
+
+/// A slot wrapper that is bound to an object (`obj.__getattribute__` of
+/// a class written in C), as C has it: the wrapper of the class, and the
+/// object.
+#[repr(C)]
+pub struct WrapperObject {
+    pub ob_base: ffi::PyObject,
+    pub descr: Obj,
+    pub bound: Obj,
+}
+
+#[inline(always)]
+pub unsafe fn py_bool(b: bool) -> Obj {
+    new_ref(if b { ffi::Py_True() } else { ffi::Py_False() })
+}
+
+pub unsafe fn str_to_string(s: Obj) -> String {
+    let mut size: ffi::Py_ssize_t = 0;
+    let data = ffi::PyUnicode_AsUTF8AndSize(s, &mut size);
+    if data.is_null() {
+        ffi::PyErr_Clear();
+        return "<?>".to_string();
+    }
+    let bytes = std::slice::from_raw_parts(data as *const u8, size as usize);
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+extern "C" {
+    pub fn _PyObject_GenericGetAttrWithDict(obj: Obj, name: Obj, dict: Obj, suppress: std::os::raw::c_int) -> Obj;
+    pub fn _PyObject_GetDictPtr(obj: Obj) -> *mut Obj;
+    pub fn _PyDict_MergeEx(mp: Obj, other: Obj, override_: std::os::raw::c_int) -> std::os::raw::c_int;
+    pub fn _PyObject_FunctionStr(x: Obj) -> Obj;
+}
+
+/// A number that is another one once `dict` has changed.
+/// Whether a dict has taken nothing but texts for keys since it was made or
+/// emptied: the interpreter keeps a table for such a dict that compares no
+/// key in Python code. False where that cannot be asked.
+#[cfg(not(Py_3_14))]
+pub unsafe fn text_keys(dict: Obj) -> bool {
+    // The start of `PyDictKeysObject`: a reference count, two sizes and the
+    // kind of the table, which is 0 for one that has taken another key.
+    let keys = (*(dict as *mut ffi::PyDictObject)).ma_keys as *const u8;
+    !keys.is_null() && *keys.add(std::mem::size_of::<isize>() + 2) != 0
+}
+
+#[cfg(Py_3_14)]
+pub unsafe fn text_keys(_dict: Obj) -> bool {
+    false
+}
+
+#[cfg(not(Py_3_14))]
+#[inline(always)]
+#[allow(deprecated)]
+pub unsafe fn dict_version(dict: Obj) -> u64 {
+    (*(dict as *mut ffi::PyDictObject)).ma_version_tag
+}
+
+// From 3.14 on a dict has no version of its own. The dicts that are asked
+// about are watched instead, and share one version, which a change to any
+// of them bumps.
+#[cfg(Py_3_14)]
+static WATCHED_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+/// The bit of our watcher in a dict's watcher tag; 0 until there is one.
+#[cfg(Py_3_14)]
+static WATCHER_BIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(Py_3_14)]
+extern "C" {
+    fn PyDict_AddWatcher(callback: unsafe extern "C" fn(c_int, Obj, Obj, Obj) -> c_int) -> c_int;
+}
+
+#[cfg(Py_3_14)]
+unsafe extern "C" fn watched_dict_changed(_event: c_int, _dict: Obj, _key: Obj, _value: Obj) -> c_int {
+    WATCHED_VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    0
+}
+
+#[cfg(Py_3_14)]
+#[inline(always)]
+pub unsafe fn dict_version(dict: Obj) -> u64 {
+    use std::sync::atomic::Ordering::Relaxed;
+    // The start of PyDictObject; the watchers of a dict are the low bits of
+    // the word that used to be its version.
+    #[repr(C)]
+    struct Head {
+        ob_base: ffi::PyObject,
+        ma_used: ffi::Py_ssize_t,
+        watcher_tag: u64,
+    }
+    if (*(dict as *const Head)).watcher_tag & WATCHER_BIT.load(Relaxed) == 0 {
+        return watch_dict(dict);
+    }
+    WATCHED_VERSION.load(Relaxed)
+}
+
+#[cfg(Py_3_14)]
+#[cold]
+unsafe fn watch_dict(dict: Obj) -> u64 {
+    use std::sync::atomic::Ordering::Relaxed;
+    static WATCHER: Once<c_int> = Once::new();
+    let id = *WATCHER.get_or_init(|| {
+        let id = PyDict_AddWatcher(watched_dict_changed);
+        if id >= 0 {
+            WATCHER_BIT.store(1 << id, Relaxed);
+        }
+        id
+    });
+    if id < 0 || ffi::PyDict_Watch(id, dict) < 0 {
+        // The interpreter has no watcher left to give: a version that is
+        // never seen twice, so nothing is assumed about the dict.
+        ffi::PyErr_Clear();
+        return WATCHED_VERSION.fetch_add(1, Relaxed);
+    }
+    WATCHED_VERSION.load(Relaxed)
+}
+
+/// How the interpreter names a callable in the errors of a call: `f()` or
+/// `module.f()`.
+pub unsafe fn function_str(func: Obj) -> String {
+    let s = _PyObject_FunctionStr(func);
+    if s.is_null() {
+        ffi::PyErr_Clear();
+        return "function".to_string();
+    }
+    let text = str_to_string(s);
+    ffi::Py_DECREF(s);
+    text
+}
+
+pub unsafe fn type_name(o: Obj) -> String {
+    let tp = ffi::Py_TYPE(o);
+    std::ffi::CStr::from_ptr((*tp).tp_name).to_string_lossy().into_owned()
+}
+
+/// `tp_name` of a class.
+pub unsafe fn class_name(class: Obj) -> String {
+    let tp = class as *mut ffi::PyTypeObject;
+    std::ffi::CStr::from_ptr((*tp).tp_name).to_string_lossy().into_owned()
+}
+
+/// `repr(o)`; a question mark if that raises.
+pub unsafe fn repr(o: Obj) -> String {
+    let r = ffi::PyObject_Repr(o);
+    if r.is_null() {
+        ffi::PyErr_Clear();
+        return "?".to_string();
+    }
+    let text = str_to_string(r);
+    ffi::Py_DECREF(r);
+    text
+}
+
+/// What a dict of the interpreter's own holds under a name, borrowed; null
+/// where it holds nothing, or where the read could run code (a table that
+/// took a key that is no text compares keys in their own code).
+unsafe fn held(dict: Obj, name: &std::ffi::CStr) -> Obj {
+    #[cfg(not(Py_3_14))]
+    let plain = |dict: Obj| text_keys(dict);
+    // The kind of the table is not read there (`text_keys`).
+    #[cfg(Py_3_14)]
+    let plain = |_dict: Obj| true;
+    if dict.is_null() || ffi::PyDict_CheckExact(dict) == 0 || !plain(dict) {
+        return std::ptr::null_mut();
+    }
+    ffi::PyDict_GetItemString(dict, name.as_ptr())
+}
+
+/// The module the interpreter keeps under a name (`sys.modules`), borrowed;
+/// null where it keeps none there, or something that is no module. The
+/// engine imports nothing: an import is a call of `builtins.__import__`,
+/// which is the user's to replace, and runs the finders and the module.
+pub unsafe fn module(name: &std::ffi::CStr) -> Obj {
+    let found = held(ffi::PyImport_GetModuleDict(), name);
+    if found.is_null() || ffi::PyModule_Check(found) == 0 {
+        return std::ptr::null_mut();
+    }
+    found
+}
+
+/// What a module has under a name in its own dict, borrowed; null where it
+/// has nothing there (a `__getattr__` of the module is not asked), or
+/// `module` is null.
+pub unsafe fn in_module(module: Obj, name: &std::ffi::CStr) -> Obj {
+    if module.is_null() || ffi::PyModule_Check(module) == 0 {
+        return std::ptr::null_mut();
+    }
+    held(ffi::PyModule_GetDict(module), name)
+}
+
+/// The function of C that the module `builtins` was made with under a
+/// name, borrowed; null where the module has something else there.
+pub unsafe fn builtin(name: &std::ffi::CStr) -> Obj {
+    let builtins = module(c"builtins");
+    let found = in_module(builtins, name);
+    if found.is_null() || ffi::PyCFunction_Check(found) == 0 {
+        return std::ptr::null_mut();
+    }
+    let fields = found as *mut ffi::PyCFunctionObject;
+    let own = (*fields).m_self == builtins && std::ffi::CStr::from_ptr((*(*fields).m_ml).ml_name) == name;
+    if own { found } else { std::ptr::null_mut() }
+}
+
+/// `module.name` of a module that was imported, as `module` and
+/// `in_module` read it; an error where there is none.
+pub fn of_module<'py>(py: pyo3::Python<'py>, name: &std::ffi::CStr, has: &std::ffi::CStr) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+    unsafe {
+        let found = in_module(module(name), has);
+        if found.is_null() {
+            let text = format!("torch.vm: {}.{} is not there", name.to_string_lossy(), has.to_string_lossy());
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(text));
+        }
+        Ok(pyo3::Bound::from_borrowed_ptr(py, found))
+    }
+}
+
+/// A value the engine finds once and keeps, with the GIL held. Nothing
+/// waits for it: where what finds it comes to ask for it again (Python
+/// code it runs calls a compiled function, or lets another thread run one),
+/// it is found a second time, and the one that was kept first stays. What
+/// finds it is the engine's own work (`vm::own`): a frame the interpreter
+/// starts meanwhile is the interpreter's.
+pub struct Once<T>(std::cell::UnsafeCell<Option<T>>);
+
+unsafe impl<T> Send for Once<T> {}
+unsafe impl<T> Sync for Once<T> {}
+
+impl<T> Once<T> {
+    pub const fn new() -> Once<T> {
+        Once(std::cell::UnsafeCell::new(None))
+    }
+
+    #[inline(always)]
+    pub fn get(&self) -> Option<&T> {
+        unsafe { (*self.0.get()).as_ref() }
+    }
+
+    #[inline(always)]
+    pub fn get_or_init(&self, find: impl FnOnce() -> T) -> &T {
+        match self.get() {
+            Some(found) => found,
+            None => self.keep(find),
+        }
+    }
+
+    /// Keeps what was found elsewhere, unless something is kept.
+    pub fn set(&self, found: T) {
+        unsafe {
+            let slot = self.0.get();
+            if (*slot).is_none() {
+                slot.write(Some(found));
+            }
+        }
+    }
+
+    #[cold]
+    fn keep(&self, find: impl FnOnce() -> T) -> &T {
+        let found = crate::vm::own(find);
+        unsafe {
+            let slot = self.0.get();
+            // Nothing refers to an empty slot.
+            if (*slot).is_none() {
+                slot.write(Some(found));
+            }
+            (*slot).as_ref().unwrap_unchecked()
+        }
+    }
+}
+
+/// A cell for state that is only touched with the GIL held. Borrows must not
+/// be held across calls into Python: those can re-enter the compiled function
+/// or let another thread run it.
+pub struct Shared<T>(std::cell::RefCell<T>);
+
+unsafe impl<T> Send for Shared<T> {}
+unsafe impl<T> Sync for Shared<T> {}
+
+impl<T> Shared<T> {
+    pub fn new(value: T) -> Shared<T> {
+        Shared(std::cell::RefCell::new(value))
+    }
+
+    pub fn borrow(&self) -> std::cell::Ref<'_, T> {
+        self.0.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> std::cell::RefMut<'_, T> {
+        self.0.borrow_mut()
+    }
+}

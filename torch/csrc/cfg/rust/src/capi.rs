@@ -1,0 +1,445 @@
+//! The C function table exported by torch/csrc/cfg/cfg.h, plus the owner of
+//! the prepared call sites it hands out.
+
+use crate::pyffi::{self, Obj, Shared};
+use pyo3::ffi;
+use std::os::raw::c_char;
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicU8, Ordering};
+
+#[repr(C)]
+pub struct TcfgTrace {
+    _private: [u8; 0],
+}
+
+#[repr(C)]
+pub struct TcfgSite {
+    _private: [u8; 0],
+}
+
+pub const TCFG_MISS: i32 = 1;
+/// The guards of the site hold and a torch function mode keeps it from
+/// standing for the call (see cfg.h).
+pub const TCFG_MODE: i32 = 3;
+/// The kernel raised in a call that was made with torch's device mode
+/// taken off (see cfg.h).
+pub const TCFG_ERROR_OFF: i32 = 4;
+
+pub const TCFG_CALL: i32 = 0;
+pub const TCFG_METHOD: i32 = 1;
+pub const TCFG_BINARY: i32 = 2;
+pub const TCFG_UNARY: i32 = 3;
+
+pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
+
+pub const TCFG_UNBOXED_RESULT: u32 = 1;
+/// Under torch's device mode the call may be made with the mode taken off
+/// (see cfg.h).
+pub const TCFG_MODE_DIRECT: u32 = 2;
+
+pub const TCFG_API_VERSION: u32 = 19;
+/// The bits of `call_modes` that say eager runs Python code under the
+/// operations of the thread where gradients are recorded: a saved-tensor
+/// hook is on, a node-creation hook is on, anomaly mode is on.
+pub const MODE_SAVES_HOOKED: u64 = 0x10;
+pub const MODE_NODES_HOOKED: u64 = 0x20;
+pub const MODE_ANOMALY: u64 = 0x40;
+pub const MODES_UNDER_OPERATIONS: u64 = MODE_SAVES_HOOKED | MODE_NODES_HOOKED | MODE_ANOMALY;
+
+#[repr(C)]
+pub struct TcfgPyOp {
+    pub kind: i32,
+    pub n_operands: i32,
+    pub operands: *const Obj,
+    pub is_const: *const u8,
+    pub kwnames: Obj,
+    pub callee: Obj,
+    pub result: Obj,
+    pub flags: u32,
+}
+
+#[repr(C)]
+pub struct TcfgTensorInfo {
+    pub ndim: i32,
+    pub requires_grad: i32,
+    pub sizes: *const i64,
+    pub key_set: u64,
+    pub strides: *const i64,
+    pub storage_offset: i64,
+    pub dtype: i32,
+    pub device: i32,
+    pub data: *const std::ffi::c_void,
+    pub version: u64,
+}
+
+pub const TCFG_NO_VERSION: u64 = u64::MAX;
+
+impl TcfgTensorInfo {
+    pub fn empty() -> TcfgTensorInfo {
+        TcfgTensorInfo {
+            ndim: 0,
+            requires_grad: 0,
+            sizes: std::ptr::null(),
+            key_set: 0,
+            strides: std::ptr::null(),
+            storage_offset: 0,
+            data: std::ptr::null(),
+            version: 0,
+            dtype: 0,
+            device: 0,
+        }
+    }
+
+    /// The size of dimension `dim` (negative counts from the end), if it
+    /// exists.
+    pub unsafe fn size(&self, dim: i64) -> Option<i64> {
+        let d = if dim < 0 { dim + self.ndim as i64 } else { dim };
+        if d < 0 || d >= self.ndim as i64 {
+            return None;
+        }
+        Some(*self.sizes.offset(d as isize))
+    }
+}
+
+/// What the interpreter's frame hook offers a frame to (see cfg.h).
+pub type TakeFrame = unsafe extern "C" fn(Obj, *mut std::ffi::c_void, *mut Obj) -> i32;
+
+#[repr(C)]
+pub struct TcfgApi {
+    pub version: u32,
+    pub capture_begin: unsafe extern "C" fn(),
+    pub capture_end: unsafe extern "C" fn() -> *mut TcfgTrace,
+    pub trace_free: unsafe extern "C" fn(*mut TcfgTrace),
+    pub trace_records: unsafe extern "C" fn(*const TcfgTrace) -> Obj,
+    pub site_from_trace:
+        unsafe extern "C" fn(*const TcfgTrace, *const TcfgPyOp, *mut c_char, usize) -> *mut TcfgSite,
+    pub site_free: unsafe extern "C" fn(*mut TcfgSite),
+    pub site_call: unsafe extern "C" fn(*mut TcfgSite, *const Obj, u32, *mut i32) -> Obj,
+    pub site_info: unsafe extern "C" fn(*const TcfgSite) -> Obj,
+    pub tensor_info: unsafe extern "C" fn(Obj, *mut TcfgTensorInfo) -> i32,
+    pub tensor_box: unsafe extern "C" fn(Obj) -> Obj,
+    pub tensor_retain: unsafe extern "C" fn(Obj),
+    pub tensor_release: unsafe extern "C" fn(Obj),
+    pub frame_push: Option<
+        unsafe extern "C" fn(
+            Obj,
+            *mut *mut *mut u16,
+            *mut *mut u16,
+            *mut *mut Obj,
+            *mut *mut Obj,
+        ) -> *mut std::ffi::c_void,
+    >,
+    pub frame_pop: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
+    pub frame_held: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> i32>,
+    pub frame_swap: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void>,
+    pub frame_traced: Option<unsafe extern "C" fn() -> i32>,
+    pub frame_hook: Option<unsafe extern "C" fn(TakeFrame)>,
+    pub frame_want: Option<unsafe extern "C" fn(i32)>,
+    pub frame_adopt: Option<
+        unsafe extern "C" fn(
+            *mut std::ffi::c_void,
+            *mut *mut *mut u16,
+            *mut *mut u16,
+            *mut *mut Obj,
+            *mut *mut Obj,
+        ) -> i32,
+    >,
+    pub frame_interpret: Option<unsafe extern "C" fn(*mut std::ffi::c_void) -> Obj>,
+    pub frame_returns: Option<unsafe extern "C" fn(*mut std::ffi::c_void, Obj) -> i32>,
+    pub is_tracing: unsafe extern "C" fn() -> i32,
+    pub workspace_enter: unsafe extern "C" fn(*mut std::ffi::c_void) -> *mut std::ffi::c_void,
+    pub workspace_leave: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),
+    pub call_modes: unsafe extern "C" fn() -> u64,
+    pub site_export: unsafe extern "C" fn(*const TcfgSite) -> Obj,
+    pub trace_calls: unsafe extern "C" fn(*const TcfgTrace) -> i32,
+    pub dispatch_keys: unsafe extern "C" fn(*mut u64, *mut u64),
+    pub frame_count: Option<unsafe extern "C" fn() -> u64>,
+    pub tensor_forward_grad: unsafe extern "C" fn(Obj) -> i32,
+}
+
+/// A node of the autograd graph (see cfg.h).
+#[repr(C)]
+pub struct TcfgNodeInfo {
+    pub name: *const c_char,
+    pub sequence_nr: u64,
+    pub n_inputs: u32,
+    pub n_edges: u32,
+    pub flags: u32,
+}
+
+pub const TCFG_NODE_PYTHON: u32 = 1;
+pub const TCFG_NODE_LEAF: u32 = 2;
+pub const TCFG_RUN_BELOW_AUTOGRAD: u32 = 1;
+pub const TCFG_RUN_ON_TAPE: u32 = 2;
+
+/// What the node of a graph calls when it is handed gradients, and when
+/// what a backward kept is let go (see cfg.h).
+pub type Backward = unsafe extern "C" fn(*mut std::ffi::c_void, *const Obj, u32, *mut Obj, u32, *const u8, u32) -> i32;
+pub type Release = unsafe extern "C" fn(*mut std::ffi::c_void, i32);
+
+/// The entries that follow those of `TcfgApi` in the table: the tape,
+/// eager's nodes, operators by their schema, straight-line programs, the
+/// node of a graph, and what is asked at every call (see cfg.h).
+#[repr(C)]
+pub struct TcfgBackwardApi {
+    pub tape_begin: unsafe extern "C" fn(),
+    pub tape_end: unsafe extern "C" fn() -> Obj,
+    pub node_of: unsafe extern "C" fn(Obj, *mut u32) -> Obj,
+    pub node_info: unsafe extern "C" fn(Obj, *mut TcfgNodeInfo) -> i32,
+    pub node_next: unsafe extern "C" fn(Obj, u32, *mut u32) -> Obj,
+    pub node_call: unsafe extern "C" fn(Obj, Obj, u32) -> Obj,
+    pub op_find: unsafe extern "C" fn(*const c_char, *const c_char) -> Obj,
+    pub op_call: unsafe extern "C" fn(Obj, Obj, u32) -> Obj,
+    pub program_new: unsafe extern "C" fn(Obj, u32, *mut c_char, usize) -> *mut std::ffi::c_void,
+    pub program_free: unsafe extern "C" fn(*mut std::ffi::c_void),
+    pub program_run:
+        unsafe extern "C" fn(*mut std::ffi::c_void, *const Obj, *const u32, u32, *const u32, u32, u32) -> Obj,
+    pub graph_node: unsafe extern "C" fn(Obj, Obj, *mut std::ffi::c_void, Backward, Release) -> i32,
+    pub frame_count_kernel: Option<unsafe extern "C" fn() -> u64>,
+    pub grad_enabled: unsafe extern "C" fn() -> u32,
+    pub function_modes: unsafe extern "C" fn() -> i32,
+    pub device_set: unsafe extern "C" fn() -> i32,
+    pub mode_off: unsafe extern "C" fn() -> *mut std::ffi::c_void,
+    pub mode_back: unsafe extern "C" fn(*mut std::ffi::c_void),
+}
+
+/// Those entries, once the table of torch._C was handed over.
+pub fn backward_api() -> Option<&'static TcfgBackwardApi> {
+    let api = api()?;
+    // The table is one struct of pointers: they start where those of
+    // `TcfgApi` end.
+    let behind = unsafe { (api as *const TcfgApi).add(1) } as *const TcfgBackwardApi;
+    Some(unsafe { &*behind })
+}
+
+/// Whether compiled functions run under an interpreter frame of their own.
+pub fn has_frames() -> bool {
+    api().is_some_and(|api| api.frame_push.is_some() && api.frame_pop.is_some())
+}
+
+/// Whether the thread has a trace function (`sys.settrace`), which is told
+/// about the frames the interpreter enters and the lines it runs in them.
+#[inline(always)]
+pub unsafe fn traced() -> bool {
+    api().and_then(|api| api.frame_traced).is_some_and(|traced| traced() != 0)
+}
+
+static API: AtomicPtr<TcfgApi> = AtomicPtr::new(std::ptr::null_mut());
+
+pub fn set_api(api: *mut TcfgApi) {
+    API.store(api, Ordering::Release);
+}
+
+#[inline(always)]
+pub fn api() -> Option<&'static TcfgApi> {
+    let ptr = API.load(Ordering::Relaxed);
+    if ptr.is_null() {
+        None
+    } else {
+        Some(unsafe { &*ptr })
+    }
+}
+
+/// Whether a register holds an unboxed tensor (TensorImpl* | 1, an owned
+/// reference) rather than a Python object. Kernel results stay in this form
+/// until something needs them as Python objects.
+#[inline(always)]
+pub fn is_unboxed(o: Obj) -> bool {
+    (o as usize) & 1 != 0
+}
+
+/// Drops the reference a register holds, whatever its form.
+#[inline(always)]
+pub unsafe fn release(o: Obj) {
+    if o.is_null() {
+        return;
+    }
+    if is_unboxed(o) {
+        (api().unwrap_unchecked().tensor_release)(o);
+    } else {
+        ffi::Py_DECREF(o);
+    }
+}
+
+/// Takes another reference to what a register holds, whatever its form.
+#[inline(always)]
+pub unsafe fn retain(o: Obj) {
+    if o.is_null() {
+        return;
+    }
+    if is_unboxed(o) {
+        (api().unwrap_unchecked().tensor_retain)(o);
+    } else {
+        ffi::Py_INCREF(o);
+    }
+}
+
+/// The call sites of one instruction: a small polymorphic inline cache of
+/// prepared kernel calls. Each variant was captured under one combination of
+/// dispatch keys; a call tries them in order.
+pub struct SiteSlot {
+    pub kind: i32,
+    variants: Shared<Vec<*mut TcfgSite>>,
+    descriptions: Shared<Vec<String>>,
+    /// What keeps the calls of its sites out of a graph: the SITE_* bits of
+    /// every variant.
+    traits: AtomicU8,
+    /// A call of one of its sites can be made a second time without
+    /// anything to show for it: the operator neither writes to an
+    /// argument, nor draws random numbers, nor updates statistics.
+    again: AtomicBool,
+    pub hits: AtomicU64,
+    pub misses: AtomicU64,
+}
+
+/// The site returns a number or a bool, read from the data of a tensor.
+pub const SITE_SCALAR: u8 = 1;
+/// The operator writes to one of its arguments.
+pub const SITE_WRITES: u8 = 2;
+/// The operator draws random numbers.
+pub const SITE_RANDOM: u8 = 4;
+
+unsafe impl Send for SiteSlot {}
+unsafe impl Sync for SiteSlot {}
+
+impl SiteSlot {
+    pub fn new(kind: i32) -> SiteSlot {
+        SiteSlot {
+            kind,
+            variants: Shared::new(Vec::new()),
+            descriptions: Shared::new(Vec::new()),
+            traits: AtomicU8::new(0),
+            again: AtomicBool::new(true),
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.variants.borrow().len()
+    }
+
+    #[inline(always)]
+    pub fn get(&self, i: usize) -> *mut TcfgSite {
+        self.variants.borrow()[i]
+    }
+
+    /// Takes ownership of the site.
+    pub unsafe fn push(&self, site: *mut TcfgSite) {
+        let (description, traits) = describe_site(site);
+        let operator = description.split('[').next().unwrap_or("");
+        if traits & (SITE_WRITES | SITE_RANDOM) != 0 || crate::graph::normalization(operator) {
+            self.again.store(false, Ordering::Relaxed);
+        }
+        self.variants.borrow_mut().push(site);
+        self.descriptions.borrow_mut().push(description);
+        self.traits.fetch_or(traits, Ordering::Relaxed);
+    }
+
+    pub fn traits(&self) -> u8 {
+        self.traits.load(Ordering::Relaxed)
+    }
+
+    /// See `again`.
+    pub fn runs_again(&self) -> bool {
+        self.again.load(Ordering::Relaxed)
+    }
+
+    pub fn describe(&self) -> String {
+        self.descriptions.borrow().join(" | ")
+    }
+
+    /// The operator the first site calls, as the dispatcher names it
+    /// (`aten::mul.Tensor`).
+    pub unsafe fn operator(&self) -> Option<String> {
+        if self.len() == 0 {
+            return None;
+        }
+        let info = (api()?.site_info)(self.get(0));
+        if info.is_null() {
+            ffi::PyErr_Clear();
+            return None;
+        }
+        let op = ffi::PyDict_GetItemString(info, c"op".as_ptr());
+        let name = (!op.is_null()).then(|| pyffi::str_to_string(op));
+        ffi::Py_DECREF(info);
+        name
+    }
+
+    /// New reference to a list with one info dict per variant.
+    pub unsafe fn info(&self) -> Obj {
+        let list = ffi::PyList_New(0);
+        if let Some(api) = api() {
+            let n = self.len();
+            for i in 0..n {
+                let info = (api.site_info)(self.get(i));
+                if info.is_null() {
+                    ffi::PyErr_Clear();
+                    continue;
+                }
+                ffi::PyList_Append(list, info);
+                ffi::Py_DECREF(info);
+            }
+        }
+        list
+    }
+}
+
+impl Drop for SiteSlot {
+    fn drop(&mut self) {
+        if let Some(api) = api() {
+            for site in self.variants.borrow().iter() {
+                unsafe { (api.site_free)(*site) };
+            }
+        }
+    }
+}
+
+/// The text of a site for dumps, and its SITE_* bits.
+unsafe fn describe_site(site: *mut TcfgSite) -> (String, u8) {
+    let Some(api) = api() else {
+        return ("?".to_string(), 0);
+    };
+    let info = (api.site_info)(site);
+    if info.is_null() {
+        ffi::PyErr_Clear();
+        return ("?".to_string(), 0);
+    }
+    let get = |key: &str| -> Obj {
+        let k = std::ffi::CString::new(key).unwrap();
+        ffi::PyDict_GetItemString(info, k.as_ptr())
+    };
+    let op = get("op");
+    let key = get("key");
+    let chain = get("chain");
+    let level = get("entry_level");
+    let mut text = format!(
+        "{}[{}]",
+        if op.is_null() { "?".to_string() } else { pyffi::str_to_string(op) },
+        if key.is_null() { "?".to_string() } else { pyffi::str_to_string(key) }
+    );
+    if !chain.is_null() && !level.is_null() {
+        let level = ffi::PyLong_AsLong(level);
+        let mut skipped = Vec::new();
+        for i in 0..level {
+            skipped.push(pyffi::str_to_string(ffi::PyList_GetItem(chain, i as isize)));
+        }
+        if !skipped.is_empty() {
+            text.push_str(&format!(" skipping {}", skipped.join(", ")));
+        } else if get("skips_autograd") == ffi::Py_True() {
+            text.push_str(" with autograd excluded");
+        }
+    }
+    let returns = get("returns");
+    let mut traits = 0;
+    if !returns.is_null() && pyffi::str_to_string(returns) != "tensor" {
+        traits |= SITE_SCALAR;
+    }
+    if get("writes") == ffi::Py_True() {
+        traits |= SITE_WRITES;
+    }
+    if get("random") == ffi::Py_True() {
+        traits |= SITE_RANDOM;
+    }
+    ffi::Py_DECREF(info);
+    (text, traits)
+}
