@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -89,6 +90,11 @@ class WorkNCCL : public c10d::Work {
   std::exception_ptr exception() const override;
   bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
   void synchronize() override;
+  // Work::blockCurrentStream() releases the stream from a future callback, and
+  // getFuture() completes the future before the collective ends.
+  void blockCurrentStream() override {
+    synchronize();
+  }
   std::vector<at::Tensor> result() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
   c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
@@ -104,6 +110,12 @@ class WorkNCCL : public c10d::Work {
   // Output tensors for result()/getFuture(). Set by the backend after issuing.
   void setOutputs(std::vector<at::Tensor> outputs) {
     outputs_ = std::move(outputs);
+  }
+  // Stream that wrote outputs_ after the collective, when not the work's own
+  // stream. getFuture() completes on it, so set it before the first call.
+  void setOutputsStream(at::cuda::CUDAStream stream) {
+    TORCH_INTERNAL_ASSERT(!future_, "setOutputsStream() after getFuture()");
+    outputsStream_ = stream;
   }
   void setChildren(std::vector<c10::intrusive_ptr<WorkNCCL>> children);
   // Makes getDuration() measure from where first's duration starts.
@@ -121,7 +133,11 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(std::string_view coll_name);
+  // Records the start event and opens a "nccl:<coll_name>" profiler event.
+  // `inputs` supply its shapes; empty falls back to the retained inputs.
+  void recordStart(
+      std::string_view coll_name,
+      at::ArrayRef<at::Tensor> inputs = {});
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -147,7 +163,9 @@ class WorkNCCL : public c10d::Work {
 
     WorkStatus status() const;
     std::exception_ptr exception() const;
-    bool setTerminalStatus(WorkStatus status);
+    bool setTerminalStatus(
+        WorkStatus status,
+        const std::optional<std::string>& message = std::nullopt);
     // Returns ownedEphemeralTimeout to the comm, at most once.
     void releaseEphemeralTimeout();
     WorkStatus checkStatus(
@@ -177,6 +195,7 @@ class WorkNCCL : public c10d::Work {
     c10::intrusive_ptr<c10::ivalue::Future> futureWorkResult;
     std::atomic<bool> resultPublished{false};
     bool hostBlocking{false};
+    std::atomic<bool> cancelledByReconfigure{false};
   };
   struct TrackedWork {
     std::shared_ptr<State> state;
@@ -186,7 +205,9 @@ class WorkNCCL : public c10d::Work {
   // Poll the CUDA events, advance status and publish the result once terminal.
   WorkStatus checkStatus(
       std::optional<std::chrono::milliseconds> timeout = std::nullopt);
-  void recordFunctionStart(std::string_view coll_name);
+  void recordFunctionStart(
+      std::string_view coll_name,
+      at::ArrayRef<at::Tensor> inputs);
   // Make the current stream wait on the work's end event (the c10d "wait"
   // semantics for CUDA work: order subsequent current-stream ops after this).
   void synchronizeInternal();
@@ -196,6 +217,7 @@ class WorkNCCL : public c10d::Work {
   std::vector<at::Tensor> outputs_;
   std::optional<at::RecordFunction> recordFunction_;
   c10::intrusive_ptr<c10::ivalue::Future> future_;
+  std::optional<at::cuda::CUDAStream> outputsStream_;
 };
 
 class WorkNCCLQueue {
@@ -206,6 +228,8 @@ class WorkNCCLQueue {
   WorkNCCL::WorkStatus garbageCollect();
   // Finalize function can only be called from the main thread
   WorkNCCL::WorkStatus finalize();
+  // Cancels the queued work that has not completed; finalize() dequeues it.
+  void cancelPending();
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
