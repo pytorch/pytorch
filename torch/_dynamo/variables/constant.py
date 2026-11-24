@@ -20,7 +20,7 @@ from torch._dynamo.source import GetItemSource
 
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, unimplemented
-from ..utils import common_constant_types, np, unpack_iterable
+from ..utils import common_constant_types, is_safe_constant, np, unpack_iterable
 from .base import (
     GetSet,
     Member,
@@ -33,6 +33,7 @@ from .base import (
 
 
 if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
@@ -283,6 +284,13 @@ class ConstantVariable(VariableTracker):
 
     def as_python_constant(self) -> Any:
         return self.value
+
+    def can_reconstruct_value(
+        self, codegen: PyCodegen, *, visiting: set[int]
+    ) -> bool | None:
+        if not ConstantVariable.is_constant_vt(self):
+            return super().can_reconstruct_value(codegen, visiting=visiting)
+        return True if is_safe_constant(self.value) else None
 
     def is_python_constant(self) -> Literal[True]:
         return True
