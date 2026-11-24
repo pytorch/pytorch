@@ -2701,6 +2701,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Skip decompose_k splits whose chunk (K // split) exceeds this: fp32 accumulation
+    # error in each partial grows with the chunk length. 0 disables. Not applied when
+    # K is symbolic.
+    decompose_k_max_k_per_split = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_MAX_K_PER_SPLIT", "16384")
+    )
+
     # decompose_k_threshold for fp32 matmuls that use TF32 on B200 (SM 10.0)
     # and whose 128x128 output tiles fill less than one wave (the
     # smaller of the two thresholds applies). Such a GEMM benefits from
