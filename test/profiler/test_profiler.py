@@ -4272,7 +4272,9 @@ class TestProfilerDeviceStopped(TestCase):
         self.assertGreater(event_counts[1], 0, "Cycle 2 trace should contain events")
 
 
-instantiate_device_type_tests(TestProfilerDeviceStopped, globals(), except_for=("cpu",))
+instantiate_device_type_tests(
+    TestProfilerDeviceStopped, globals(), except_for=("cpu",), allow_xpu=True
+)
 
 
 @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -4617,7 +4619,7 @@ class TestProfilerEventsParityDevice(TestCase):
 
 
 instantiate_device_type_tests(
-    TestProfilerEventsParityDevice, globals(), except_for=("cpu",)
+    TestProfilerEventsParityDevice, globals(), except_for=("cpu",), allow_xpu=True
 )
 
 
