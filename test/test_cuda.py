@@ -6690,6 +6690,103 @@ torch._C._cuda_setCheckpointPoolState(device, state, [], [])
         graph.replay()
 
     @unittest.skipIf(
+        not TEST_CUDA_GRAPH or TEST_WITH_ROCM, "NVIDIA CUDA graphs required"
+    )
+    @requires_cuda_python_bindings
+    @parametrize("hook_raises", [False, True])
+    def test_cuda_graph_set_raw_graph_exec(self, hook_raises):
+        import cuda.bindings.runtime as cudart
+
+        from torch.cuda._utils import _check_cuda_bindings
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True, num_rng_states=0)
+        instantiate_flags = (
+            cudart.cudaGraphInstantiateFlags.cudaGraphInstantiateFlagAutoFreeOnLaunch.value
+            | cudart.cudaGraphInstantiateFlags.cudaGraphInstantiateFlagUseNodePriority.value
+        )
+        x = torch.zeros(64, device="cuda")
+        x.add_(0)
+        torch.cuda.synchronize()
+        with torch.cuda.graph(graph):
+            x.add_(1)
+        observed = []
+
+        def hook(g):
+            observed.append(g.raw_cuda_graph_exec())
+            if hook_raises:
+                raise RuntimeError("setter hook failure")
+
+        hook_handle = graph.register_post_instantiate_hook(hook)
+        executables = set()
+        expected_execs = []
+        try:
+            for expected in (1, 2):
+                old_exec = graph.raw_cuda_graph_exec() if graph._has_graph_exec else 0
+                new_exec = int(
+                    _check_cuda_bindings(
+                        cudart.cudaGraphInstantiateWithFlags(
+                            graph.raw_cuda_graph(), instantiate_flags
+                        )
+                    )
+                )
+                executables.add(new_exec)
+                expected_execs.append(new_exec)
+                if hook_raises:
+                    with self.assertRaisesRegex(RuntimeError, "setter hook failure"):
+                        graph.set_raw_cuda_graph_exec(graph_exec=new_exec)
+                else:
+                    graph.set_raw_cuda_graph_exec(graph_exec=new_exec)
+                self.assertEqual(graph.raw_cuda_graph_exec(), new_exec)
+                if old_exec:
+                    # Installing a replacement must leave the old exec alive.
+                    _check_cuda_bindings(cudart.cudaGraphExecGetFlags(old_exec))
+                    _check_cuda_bindings(cudart.cudaGraphExecDestroy(old_exec))
+                    executables.remove(old_exec)
+                graph.replay()
+                torch.cuda.synchronize()
+                self.assertEqual(x, torch.full_like(x, expected))
+
+            self.assertEqual(observed, expected_execs)
+            graph.set_raw_cuda_graph_exec(0)
+            self.assertFalse(graph._has_graph_exec)
+            _check_cuda_bindings(cudart.cudaGraphExecGetFlags(new_exec))
+            _check_cuda_bindings(cudart.cudaGraphExecDestroy(new_exec))
+            executables.remove(new_exec)
+            self.assertEqual(len(observed), 2)
+            hook_handle.remove()
+            graph.instantiate()
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(x, torch.full_like(x, 3))
+        finally:
+            torch.cuda.synchronize()
+            installed = graph.raw_cuda_graph_exec() if graph._has_graph_exec else 0
+            for graph_exec in executables - {installed}:
+                _check_cuda_bindings(cudart.cudaGraphExecDestroy(graph_exec))
+            graph.reset()
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA graphs required")
+    def test_cuda_graph_set_raw_graph_exec_preconditions(self):
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        with self.assertRaisesRegex(RuntimeError, "capture_end"):
+            graph.set_raw_cuda_graph_exec(0)
+        graph = torch.cuda.CUDAGraph()
+        x = torch.zeros(64, device="cuda")
+        with torch.cuda.graph(graph):
+            x.add_(1)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "keep_graph=True"):
+                graph.set_raw_cuda_graph_exec(0)
+            graph.enable_debug_mode()
+            with self.assertRaisesRegex(RuntimeError, r"retained (cuda|hip)Graph_t"):
+                graph.set_raw_cuda_graph_exec(0)
+            graph.replay()
+            torch.cuda.synchronize()
+            self.assertEqual(x, torch.ones_like(x))
+        finally:
+            graph.reset()
+
+    @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     def test_cuda_graph_raw_graph_reset_and_recapture(self):
@@ -10553,6 +10650,30 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
             self.assertEqual(
                 torch.cuda.host_memory_stats()["num_host_free"], num_host_free + 1
             )
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_free_during_global_capture_on_other_thread(self, use_cuda_host_register):
+        # Another thread's empty_cache() frees a block while this thread
+        # captures in global mode, which forbids unsafe calls on every thread.
+        # The free runs in relaxed mode, so it neither fails nor invalidates
+        # the capture.
+        x = torch.zeros(1, device="cuda")
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            # So that data is a new block, allocated in this mode.
+            torch.cuda.synchronize()
+            torch._C._host_emptyCache()
+            data = torch.empty(1024, pin_memory=True)
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g, capture_error_mode="global"):
+                x.add_(1)
+                del data
+                with ThreadPoolExecutor(1) as executor:
+                    executor.submit(torch._C._host_emptyCache).result()
+            g.replay()
+            self.assertEqual(x.item(), 1)
 
     def test_unpinned_memory_use(self):
         # Copying between CPU and CUDA tensors during graph capture
@@ -16324,6 +16445,52 @@ raise RuntimeError("localized pool shutdown")
         unittest.skip("requires CUDA 13.4 and a multi-domain GPU"),
         lambda p: not torch.cuda.green_contexts._is_locality_software_supported(),
     )
+    def test_pool_destruction_without_deadlock(self, device: str) -> None:
+        self._require_localization(device)
+        # empty_cache() destroys the freeable pool under the allocator mutex, with
+        # the GIL released, while the other thread holds the GIL and waits for the
+        # mutex. The pool must not destroy the native allocator's Python callbacks.
+        code = """
+import sys
+import threading
+import torch
+
+device = torch.device(sys.argv[1])
+torch.cuda.set_device(device)
+stop = False
+
+def query_stats():
+    while not stop:
+        torch.cuda.memory_stats(device)
+
+thread = threading.Thread(target=query_stats, daemon=True)
+thread.start()
+for _ in range(10):
+    allocator = torch.cuda.LocalizedAllocator(0, device=device)
+    pool = torch.cuda.MemPool(allocator.allocator())
+    del allocator
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, pool=pool.id):
+        pass
+    del pool
+    graph.reset()
+    torch.cuda.empty_cache()
+stop = True
+thread.join()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code, device],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @serialTest()
+    @decorateIf(
+        unittest.skip("requires CUDA 13.4 and a multi-domain GPU"),
+        lambda p: not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
     def test_tensor_outlives_pool_and_allocator(self, device: str) -> None:
         self._require_localization(device)
         allocator = torch.cuda.LocalizedAllocator(0, device=device)
@@ -16409,6 +16576,62 @@ raise RuntimeError("localized pool shutdown")
             stream.synchronize()
             torch._C._accelerator_setAllocatorSettings(config)
 
+    @serialTest()
+    @decorateIf(
+        unittest.skip("requires CUDA 13.4 and a multi-domain GPU"),
+        lambda p: not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
+    def test_concurrent_allocation(self, device: str) -> None:
+        self._require_localization(device)
+        allocator = torch.cuda.LocalizedAllocator(0, device=device)
+
+        def work(index: int) -> None:
+            with torch.cuda.device(allocator.device_id):
+                pool = torch.cuda.MemPool(allocator.allocator())
+            for size in range(1, 21):
+                with torch.cuda.use_mem_pool(pool, device=device):
+                    value = torch.full(((index + size) << 18,), index, device=device)
+                # TestCase.assertEqual is not usable off the main thread.
+                if not bool((value == index).all()):
+                    raise AssertionError(f"wrong values: thread {index}, size {size}")
+                del value
+                torch.cuda.empty_cache()
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            for future in [executor.submit(work, i) for i in range(8)]:
+                future.result(timeout=120)
+
+    @serialTest()
+    @decorateIf(
+        unittest.skip("requires CUDA 13.4 and a multi-domain GPU"),
+        lambda p: not torch.cuda.green_contexts._is_locality_software_supported(),
+    )
+    def test_graph_capture(self, device: str) -> None:
+        from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
+
+        self._require_localization(device)
+        allocator = torch.cuda.LocalizedAllocator(1, device=device)
+        value = torch.ones(1024, device=device)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.device(device):
+            pool = torch.cuda.MemPool(allocator.allocator())
+            with torch.cuda.graph(graph, pool=pool.id):
+                result = value * 2
+        value.fill_(3)
+        graph.replay()
+        self.assertEqual(result, torch.full_like(result, 6))
+        ptr = result.data_ptr()
+        handle = _check_cuda_bindings(drv.cuMemRetainAllocationHandle(ptr))
+        try:
+            prop = _check_cuda_bindings(
+                drv.cuMemGetAllocationPropertiesFromHandle(handle)
+            )
+            self.assertEqual(prop.location.localized.localityDomainId, 1)
+        finally:
+            _check_cuda_bindings(drv.cuMemRelease(handle))
+        del graph, result
+        torch.cuda.synchronize(device)
+
 
 class TestLocalizedAllocatorCallbacks(TestCase):
     @parametrize("domain", [False, True, 0.0, 1.5, "0", None])
@@ -16436,10 +16659,9 @@ class TestLocalizedAllocatorCallbacks(TestCase):
             ),
             patch.object(memory, "get_num_locality_domains", return_value=2),
             patch.dict(memory._LOCALITY_ALLOCATORS, clear=True),
-            patch.object(memory._LocalizedAllocatorOwner, "cuda_allocator"),
+            patch.object(torch._C, "_cuda_createPythonAllocator", create=True),
             patch.object(memory, "_drv"),
             patch.object(memory, "_check_cuda_bindings", side_effect=lambda x: x),
-            patch.object(memory.ctypes.pythonapi, "Py_IncRef"),
         ):
             allocator = memory.LocalizedAllocator(1, device=0)
         self.assertEqual(order, ["init", "query"])
@@ -16454,15 +16676,16 @@ class TestLocalizedAllocatorCallbacks(TestCase):
 
         with (
             patch.object(memory, "_drv") as driver,
+            patch.object(torch._C, "_cuda_createPythonAllocator", create=True),
             patch.object(memory, "is_localization_supported", return_value=True),
             patch.object(memory, "get_num_locality_domains", return_value=2),
             patch.object(
                 memory, "_check_cuda_bindings", side_effect=lambda result: result
             ),
         ):
-            allocator = memory._LocalizedAllocatorOwner(1, 0)
+            allocator = memory._LocalizedSegmentAllocator(1, 0)
             driver.cuMemGetAllocationGranularity.return_value = 64
-            driver.cuMemCreate.return_value = 11
+            driver.cuMemCreate.return_value = (driver.CUresult.CUDA_SUCCESS, 11)
             driver.cuMemAddressReserve.return_value = 1024
             if fail_at is not None:
                 getattr(driver, fail_at).side_effect = RuntimeError("allocation failed")
@@ -16499,10 +16722,36 @@ class TestLocalizedAllocatorCallbacks(TestCase):
             else:
                 driver.cuMemRelease.assert_not_called()
 
+    def test_out_of_memory_and_errors(self) -> None:
+        from torch.cuda import memory
+
+        with (
+            patch.object(memory, "_drv") as driver,
+            patch.object(torch._C, "_cuda_createPythonAllocator", create=True),
+            patch.object(memory, "is_localization_supported", return_value=True),
+            patch.object(memory, "get_num_locality_domains", return_value=2),
+            patch.object(
+                memory, "_check_cuda_bindings", side_effect=lambda result: result
+            ),
+        ):
+            allocator = memory._LocalizedSegmentAllocator(1, 0)
+            driver.cuMemGetAllocationGranularity.return_value = 64
+            oom = driver.CUresult.CUDA_ERROR_OUT_OF_MEMORY
+            driver.cuMemCreate.return_value = (oom, None)
+            # Out of memory fails the allocation so the caching allocator can retry.
+            self.assertEqual(allocator._alloc_callback(65, 0, None), 0)
+            driver.cuMemAddressReserve.assert_not_called()
+            driver.cuMemRelease.assert_not_called()
+            # Other errors propagate instead of being reported as out of memory.
+            driver.cuMemCreate.side_effect = RuntimeError("CUDA error")
+            with self.assertRaisesRegex(RuntimeError, "CUDA error"):
+                allocator._alloc_callback(65, 0, None)
+            self.assertEqual(allocator._records, {})
+
     def test_wrong_device_and_empty_allocation(self) -> None:
         from torch.cuda import memory
 
-        allocator = object.__new__(memory._LocalizedAllocatorOwner)
+        allocator = object.__new__(memory._LocalizedSegmentAllocator)
         allocator.device_id = 0
         with patch.object(memory, "_drv") as driver:
             self.assertEqual(allocator.allocate(0, 0, None), 0)
