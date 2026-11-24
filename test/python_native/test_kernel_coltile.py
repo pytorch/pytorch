@@ -769,7 +769,8 @@ class TestOrderedColDevice(TestCase):
         with mock.patch.object(ct, "_INT32_LIMIT", 129):
             got = ct.reduce_ordered_col(trait, key, x, f32, 1, allow_split=True)
         # Key slot 6 is _OrderedColReduce.cache_sig's wide flag.
-        self.assertEqual({k[6] for k in ct._CACHE if k[1] == key}, {True})
+        (wide,) = [k[6] for k in ct._CACHE if k[1] == key]
+        self.assertIs(wide, True)
         reference = kg._try_indexed_itree(
             trait,
             key + "_ref",
