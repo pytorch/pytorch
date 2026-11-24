@@ -1,5 +1,6 @@
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/util/Exception.h>
+#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUFunctions.h>
 
 #include <vector>
@@ -123,11 +124,12 @@ inline void initGlobalDevicePoolState() {
   // series).
   namespace syclex = sycl::ext::oneapi::experimental;
   for (const auto& device : gDevicePool.devices) {
-    auto architecture = device->get_info<syclex::info::device::architecture>();
+    auto architecture =
+      C10_XPU_CHECK(device->get_info<syclex::info::device::architecture>());
     if (architecture < syclex::architecture::intel_gpu_acm_g10) {
       TORCH_WARN(
           "The detected GPU (",
-          device->get_info<sycl::info::device::name>(),
+          C10_XPU_CHECK(device->get_info<sycl::info::device::name>()),
           ") is not officially supported by PyTorch XPU. Running workloads on this device may result in unexpected behavior.\n",
           "For stable and fully supported execution, please use GPUs based on Intel Arc (Alchemist) series or newer.\n",
           "Refer to the hardware prerequisites for more information: ",
@@ -137,9 +139,9 @@ inline void initGlobalDevicePoolState() {
 
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
-  const auto& platform = gDevicePool.devices[0]->get_platform();
-  gDevicePool.context =
-      std::make_unique<sycl::context>(platform.khr_get_default_context());
+    const auto& platform = C10_XPU_CHECK(gDevicePool.devices[0]->get_platform());
+    gDevicePool.context = C10_XPU_CHECK(
+      std::make_unique<sycl::context>(platform.khr_get_default_context()));
 }
 
 inline void initDevicePoolCallOnce() {
@@ -232,17 +234,18 @@ void get_device_properties(DeviceProp* device_prop, DeviceIndex device) {
   initDevicePoolCallOnce();
   TORCH_CHECK(device_prop, "device_prop is an invalid pointer.");
   check_device_index(device);
-  initDeviceProperties(device_prop, device);
+  C10_XPU_CHECK(initDeviceProperties(device_prop, device));
 }
 
 DeviceIndex get_device_idx_from_pointer(void* ptr) {
   initDevicePoolCallOnce();
   TORCH_CHECK(ptr, "ptr is an invalid pointer.");
-  auto type = sycl::get_pointer_type(ptr, get_device_context());
+  auto type = C10_XPU_CHECK(sycl::get_pointer_type(ptr, get_device_context()));
   TORCH_CHECK(
       type == sycl::usm::alloc::device, "ptr is not a device type pointer.");
 
-  sycl::device raw_device = sycl::get_pointer_device(ptr, get_device_context());
+  sycl::device raw_device =
+      C10_XPU_CHECK(sycl::get_pointer_device(ptr, get_device_context()));
   auto match_device = [raw_device](const auto& device) -> bool {
     return raw_device == *device;
   };
@@ -301,7 +304,7 @@ void device_synchronize(c10::DeviceIndex device) {
     device = c10::xpu::current_device();
   }
   check_device_index(device);
-  get_raw_device(device).ext_oneapi_wait_and_throw();
+  C10_XPU_CHECK(get_raw_device(device).ext_oneapi_wait_and_throw());
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_device_synchronization(c10::kXPU);

@@ -1,4 +1,5 @@
 #include <torch/csrc/xpu/XPUPluggableAllocator.h>
+#include <c10/xpu/XPUException.h>
 
 namespace torch::xpu::XPUPluggableAllocator {
 
@@ -69,7 +70,7 @@ void XPUPluggableAllocator::copy_data(
     void* dest,
     const void* src,
     std::size_t count) const {
-  c10::xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
+  C10_XPU_CHECK(c10::xpu::getCurrentXPUStream().queue().memcpy(dest, src, count));
 }
 
 void XPUPluggableAllocator::recordStream(

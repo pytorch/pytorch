@@ -3,6 +3,7 @@
 #include <ATen/xpu/MemPool.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGraph.h>
+#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUFunctions.h>
 
 #include <cstddef>
@@ -96,7 +97,7 @@ void XPUGraphImpl::capture_begin(
   auto filter = [this](sycl::queue* queue) {
     // Compare queue pointers rather than queue objects to avoid expensive queue
     // comparison operations.
-    return queue->ext_oneapi_get_state() == queue_state::recording &&
+    return C10_XPU_CHECK(queue->ext_oneapi_get_state()) == queue_state::recording &&
         queue == &capture_stream_.queue();
   };
 
@@ -125,12 +126,12 @@ void XPUGraphImpl::capture_begin(
   }
 #endif
 
-  auto graph_impl = xpuGraph_t(capture_stream_.queue(), sycl_property);
+    auto graph_impl = C10_XPU_CHECK(xpuGraph_t(capture_stream_.queue(), sycl_property));
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
-  graph_->begin_recording(capture_stream_.queue());
+    C10_XPU_CHECK(graph_->begin_recording(capture_stream_.queue()));
 
   TORCH_INTERNAL_ASSERT(
-      capture_stream_.queue().ext_oneapi_get_state() == queue_state::recording);
+      C10_XPU_CHECK(capture_stream_.queue().ext_oneapi_get_state()) == queue_state::recording);
 
   c10::xpu::XPUCachingAllocator::markCaptureBegin(capture_dev_);
 }
@@ -142,7 +143,7 @@ void XPUGraphImpl::capture_end() {
       stream == capture_stream_,
       "Capture must end on the same stream it began on.");
 
-  graph_->end_recording();
+  C10_XPU_CHECK(graph_->end_recording());
 
   c10::xpu::XPUCachingAllocator::markCaptureEnd(capture_dev_);
 
@@ -155,9 +156,9 @@ void XPUGraphImpl::capture_end() {
   }
 
 #if SYCL_COMPILER_VERSION >= 20260100
-  const bool graph_is_empty = graph_->empty();
+  const bool graph_is_empty = C10_XPU_CHECK(graph_->empty());
 #else
-  const bool graph_is_empty = (graph_->get_nodes().size() == 0);
+  const bool graph_is_empty = C10_XPU_CHECK(graph_->get_nodes()).empty();
 #endif
   if (graph_is_empty) {
     TORCH_WARN(
@@ -187,7 +188,7 @@ void XPUGraphImpl::instantiate() {
         "instantiate() is intended to be called by the user only when keep_graph=true");
     graph_exec_.reset();
   }
-  auto graph_exec_impl = graph_->finalize();
+  auto graph_exec_impl = C10_XPU_CHECK(graph_->finalize());
   graph_exec_ = std::make_unique<xpuGraphExec_t>(std::move(graph_exec_impl));
   has_graph_exec_ = true;
 }
@@ -212,7 +213,7 @@ void XPUGraphImpl::replay() {
   }
 
   auto& queue = at::xpu::getCurrentXPUStream().queue();
-  queue.ext_oneapi_graph(*graph_exec_);
+  C10_XPU_CHECK(queue.ext_oneapi_graph(*graph_exec_));
 }
 
 void XPUGraphImpl::reset() {
@@ -246,7 +247,7 @@ void XPUGraphImpl::debug_dump(const std::string& debug_path) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {
       TORCH_WARN("DEBUG: calling print_graph(verbose=1) to ", debug_path);
-      graph_->print_graph(debug_path, /* verbose = */ 1);
+      C10_XPU_CHECK(graph_->print_graph(debug_path, /* verbose = */ 1));
       if (!keep_graph_) {
         graph_.reset();
         has_graph_ = false;

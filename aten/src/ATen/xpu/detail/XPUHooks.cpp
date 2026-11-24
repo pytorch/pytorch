@@ -9,6 +9,7 @@
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/util/Logging.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/XPUException.h>
 
 namespace at::xpu::detail {
 
@@ -74,7 +75,7 @@ bool XPUHooks::isPinnedPtr(const void* data) const {
   }
 
   return sycl::usm::alloc::host ==
-      sycl::get_pointer_type(data, c10::xpu::get_device_context());
+      C10_XPU_CHECK(sycl::get_pointer_type(data, c10::xpu::get_device_context()));
 }
 
 bool XPUHooks::isAvailable() const {

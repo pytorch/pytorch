@@ -6,13 +6,68 @@
 #include <c10/xpu/XPUStream.h>
 #include <c10/xpu/test/impl/XPUTest.h>
 
+#include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
+#include <system_error>
 
 #include <thread>
 #include <unordered_set>
 
 static bool has_xpu() {
   return c10::xpu::device_count() > 0;
+}
+
+TEST(XPUStreamTest, SyclErrorTranslation) {
+  for (const auto error_kind :
+      {sycl::errc::runtime,
+       sycl::errc::invalid,
+       sycl::errc::memory_allocation}) {
+    const auto code = sycl::make_error_code(error_kind);
+    const sycl::exception original(code, "synchronous test error");
+    const auto line = __LINE__ + 2;
+    try {
+      C10_XPU_CHECK(throw original);
+      FAIL() << "Expected AcceleratorError";
+    } catch (const c10::AcceleratorError& error) {
+      EXPECT_EQ(error.get_error_code(), code.value());
+      const std::string message = error.what_without_backtrace();
+      EXPECT_NE(
+          message.find(
+              std::string("SYCL error [") + code.category().name() + ":" +
+              std::to_string(code.value()) + "]: " + original.what()),
+          std::string::npos);
+      const c10::SourceLocation location{
+          __func__, __FILE__, static_cast<uint32_t>(line)};
+      const auto expected = c10::str("Exception raised from ", location, " (most recent call first):");
+      EXPECT_NE(std::string(error.what()).find(expected), std::string::npos);
+    }
+  }
+  EXPECT_THROW(
+      C10_XPU_CHECK(throw std::runtime_error("host error")),
+      std::runtime_error);
+}
+
+TEST(XPUStreamTest, AsyncStreamErrorTranslation) {
+  if (!has_xpu()) {
+    return;
+  }
+
+  auto stream = c10::xpu::getStreamFromPool();
+  const auto code = sycl::make_error_code(sycl::errc::runtime);
+  stream.queue().submit([&](sycl::handler& handler) {
+    handler.host_task([code] { throw sycl::exception(code, "stream task failed"); });
+  });
+  try {
+    stream.synchronize();
+    FAIL() << "Expected AcceleratorError";
+  } catch (const c10::AcceleratorError& error) {
+    EXPECT_EQ(error.get_error_code(), code.value());
+    EXPECT_NE(std::string(error.what_without_backtrace()).find("stream task failed"), std::string::npos);
+    EXPECT_NE(std::string(error.what()).find("Exception raised from synchronize"), std::string::npos);
+  }
+  EXPECT_NO_THROW(stream.synchronize());
 }
 
 TEST(XPUStreamTest, CopyAndMoveTest) {

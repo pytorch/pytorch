@@ -59,11 +59,11 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     // users can call is_bf16_supported() to check for native hardware support.
     cap.capability_data.capability_bits |= (1ULL << kIndex_BFloat16);
     auto& device = c10::xpu::get_raw_device(d.index());
-    if (device.has(sycl::aspect::fp16)) {
+    if (C10_XPU_CHECK(device.has(sycl::aspect::fp16))) {
       cap.capability_data.capability_bits |= (1ULL << kIndex_Half);
       cap.capability_data.capability_bits |= (1ULL << kIndex_ComplexHalf);
     }
-    if (device.has(sycl::aspect::fp64)) {
+    if (C10_XPU_CHECK(device.has(sycl::aspect::fp64))) {
       cap.capability_data.capability_bits |= (1ULL << kIndex_Double);
       cap.capability_data.capability_bits |= (1ULL << kIndex_ComplexDouble);
     }
@@ -112,13 +112,13 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     TORCH_CHECK(
         !(flag & EventFlag::TIMING) || !(flag & EventFlag::INTERPROCESS),
         "Cannot create IPC event with timing enabled.");
-    *xpu_event = new sycl::event(syclex::make_event(
+    *xpu_event = new sycl::event(C10_XPU_CHECK(syclex::make_event(
         c10::xpu::get_device_context(),
         syclex::properties{
             syclex::enable_ipc{flag & EventFlag::INTERPROCESS},
             syclex::enable_profiling {
               flag & EventFlag::TIMING
-            }}));
+            }})));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_creation(
@@ -165,7 +165,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (reusable) {
       auto& device = c10::xpu::get_raw_device(stream.device_index());
       TORCH_CHECK(
-          device.has(sycl::aspect::ext_oneapi_ipc_event),
+          C10_XPU_CHECK(device.has(sycl::aspect::ext_oneapi_ipc_event)),
           "Requires the ext_oneapi_ipc_event extension, "
           "which is not supported on this device. ",
           "Please upgrade to a newer driver.");
@@ -180,8 +180,8 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       if (!xpu_event) {
         createEvent(&xpu_event, flag);
       }
-      sycl::ext::oneapi::experimental::enqueue_signal_event(
-          xpu_stream.queue(), *xpu_event);
+        C10_XPU_CHECK(sycl::ext::oneapi::experimental::enqueue_signal_event(
+          xpu_stream.queue(), *xpu_event));
 #endif
     } else {
       // Delete the event previously recorded.
@@ -191,11 +191,11 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       if (flag & EventFlag::TIMING) {
         // Use the profiling tag to record the event to enable timing feature.
         xpu_event = new sycl::event(
-            sycl::ext::oneapi::experimental::submit_profiling_tag(
-                xpu_stream.queue()));
+            C10_XPU_CHECK(sycl::ext::oneapi::experimental::submit_profiling_tag(
+              xpu_stream.queue())));
       } else {
-        xpu_event =
-            new sycl::event(xpu_stream.queue().ext_oneapi_submit_barrier());
+        xpu_event = new sycl::event(
+          C10_XPU_CHECK(xpu_stream.queue().ext_oneapi_submit_barrier()));
       }
     }
     *event = reinterpret_cast<void*>(xpu_event);
@@ -215,7 +215,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
     std::vector<sycl::event> event_list{*xpu_event};
     const XPUStream xpu_stream(stream);
-    xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
+    C10_XPU_CHECK(xpu_stream.queue().ext_oneapi_submit_barrier(event_list));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_event_wait(
@@ -230,7 +230,8 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     if (!event)
       return true;
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
-    return xpu_event->get_info<event::command_execution_status>() ==
+    return C10_XPU_CHECK(
+           xpu_event->get_info<event::command_execution_status>()) ==
         event_command_status::complete;
   }
 
@@ -246,8 +247,10 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     using namespace sycl::info::event_profiling;
     // Block until both of the recorded events are completed.
-    uint64_t end_time_ns = xpu_end_event->get_profiling_info<command_end>();
-    uint64_t start_time_ns = xpu_start_event->get_profiling_info<command_end>();
+    uint64_t end_time_ns =
+      C10_XPU_CHECK(xpu_end_event->get_profiling_info<command_end>());
+    uint64_t start_time_ns =
+      C10_XPU_CHECK(xpu_start_event->get_profiling_info<command_end>());
     // Return the eplased time in milliseconds.
     return 1e-6 *
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
@@ -263,15 +266,16 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 #if SYCL_COMPILER_VERSION >= 20260200
     auto& device = c10::xpu::get_raw_device(device_index);
     // IPC is only supported for reusable events.
-    bool reusable = device.has(sycl::aspect::ext_oneapi_ipc_event);
+    bool reusable = C10_XPU_CHECK(device.has(sycl::aspect::ext_oneapi_ipc_event));
     TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
     sycl::event* xpu_event = reinterpret_cast<sycl::event*>(*event);
     if (!xpu_event) {
       createEvent(&xpu_event, flag);
       *event = reinterpret_cast<void*>(xpu_event);
     }
-    auto handle_data =
-        sycl::ext::oneapi::experimental::ipc::event::get(*xpu_event).data();
+    auto handle = C10_XPU_CHECK(
+      sycl::ext::oneapi::experimental::ipc::event::get(*xpu_event));
+    auto handle_data = handle.data();
     std::string handle_string(
         reinterpret_cast<const char*>(handle_data.data()), handle_data.size());
     return handle_string;
@@ -290,15 +294,15 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 #endif
     auto& device = c10::xpu::get_raw_device(device_index);
     // IPC is only supported for reusable events.
-    bool reusable = device.has(sycl::aspect::ext_oneapi_ipc_event);
+    bool reusable = C10_XPU_CHECK(device.has(sycl::aspect::ext_oneapi_ipc_event));
     TORCH_CHECK(reusable, "Event must be reusable to support IPC.");
     const auto* data = reinterpret_cast<const std::byte*>(handle_string.data());
     sycl::ext::oneapi::experimental::ipc::handle_data_t handle_data(
         data, data + handle_string.size());
 
-    sycl::event* xpu_event =
-        new sycl::event(sycl::ext::oneapi::experimental::ipc::event::open(
-            handle_data, c10::xpu::get_device_context()));
+    sycl::event* xpu_event = new sycl::event(
+      C10_XPU_CHECK(sycl::ext::oneapi::experimental::ipc::event::open(
+        handle_data, c10::xpu::get_device_context())));
     *event = reinterpret_cast<void*>(xpu_event);
 #else
     TORCH_CHECK(false, "Event IPC requires SYCL compiler 2026.2 or later.");
@@ -330,7 +334,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       (*interp)->trace_gpu_event_synchronization(
           c10::kXPU, reinterpret_cast<uintptr_t>(xpu_event));
     }
-    xpu_event->wait_and_throw();
+    C10_XPU_CHECK(xpu_event->wait_and_throw());
   }
 
   void synchronizeDevice(const c10::DeviceIndex device_index) const override {

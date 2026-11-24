@@ -20,6 +20,7 @@
 #include <ATen/Context.h>
 #include <ATen/xpu/level_zero_stub/ATenLevelZero.h>
 #include <c10/core/DeviceGuard.h>
+#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUStream.h>
 #include <torch/csrc/inductor/static_launcher/common.h>
 #include <torch/csrc/inductor/static_launcher/xpu.h>
@@ -97,7 +98,7 @@ syclDevicePtr_t getPointer(
     return data_ptr;
 
   auto context = queuePtr->get_context();
-  auto handle = sycl::get_native<sycl::backend::ext_oneapi_level_zero>(context);
+  auto handle = C10_XPU_CHECK(sycl::get_native<sycl::backend::ext_oneapi_level_zero>(context));
   ze_memory_allocation_properties_t prop;
   prop.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
   prop.pNext = nullptr;
@@ -243,9 +244,9 @@ inline ZeModulePtr _createModule(
       c10::xpu::get_raw_device(static_cast<c10::DeviceIndex>(device_idx));
   auto& syclContext = c10::xpu::get_device_context();
   auto device =
-      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclDevice);
+      C10_XPU_CHECK(sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclDevice));
   auto context =
-      sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclContext);
+      C10_XPU_CHECK(sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclContext));
 
   const char* buildFlags = "";
   const ze_module_format_t format = ZE_MODULE_FORMAT_NATIVE;
@@ -296,11 +297,11 @@ inline LoadedKernel _createKernel(
   // so the bundle has to be declared ahead of the kernel guard to be torn down
   // after it when anything below throws.
   ze_module_handle_t rawModule = module.get();
-  auto mod = sycl::make_kernel_bundle<
+    auto mod = C10_XPU_CHECK(sycl::make_kernel_bundle<
       sycl::backend::ext_oneapi_level_zero,
       sycl::bundle_state::executable>(
       {rawModule, sycl::ext::oneapi::level_zero::ownership::transfer},
-      syclContext);
+      syclContext));
   module.release();
 
   ze_kernel_handle_t rawKernel = nullptr;
@@ -334,9 +335,9 @@ inline LoadedKernel _createKernel(
       requiredSimd != 0 ? requiredSimd : props.maxSubgroupSize;
   nSpills = spillSimd != 0 ? props.spillMemSize / (4 * spillSimd)
                            : props.spillMemSize;
-  auto fun = sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
+    auto fun = C10_XPU_CHECK(sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
       {mod, kernel.get(), sycl::ext::oneapi::level_zero::ownership::transfer},
-      syclContext);
+      syclContext));
   kernel.release();
   return LoadedKernel{std::move(fun), threadsPerWarp, props.numKernelArgs};
 }
@@ -453,7 +454,7 @@ void launchKernel(
       cgh.parallel_for(parallelWorkSize, kernel);
     }
   };
-  queuePtr->submit(cgf);
+  C10_XPU_CHECK(queuePtr->submit(cgf));
 }
 
 /* Load the kernel into memory (called during torch.compile), and

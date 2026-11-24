@@ -2,6 +2,7 @@
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <c10/xpu/XPUException.h>
 
 #include <deque>
 #include <functional>
@@ -150,16 +151,17 @@ struct ExpandableSegment {
         queue_(queue),
         // 2MB for small pool, 20MB for large pool
         segment_size_(segment_size) {
-    const auto device_total =
-        c10::xpu::get_raw_device(device)
-            .get_info<sycl::info::device::global_mem_size>();
+    const auto device_total = C10_XPU_CHECK(
+      c10::xpu::get_raw_device(device)
+        .get_info<sycl::info::device::global_mem_size>());
     // The extra 1/8 allows flexibility for remapping or moving pages within the
     // segment when unmapping earlier regions.
     constexpr float kVirtualMemOversubscriptFactor = 1.125f; // 1 + 1/8
-    auto min_granularity = sycl::ext::oneapi::experimental::get_mem_granularity(
+    auto min_granularity = C10_XPU_CHECK(
+      sycl::ext::oneapi::experimental::get_mem_granularity(
         c10::xpu::get_raw_device(device),
         c10::xpu::get_device_context(),
-        sycl::ext::oneapi::experimental::granularity_mode::minimum);
+        sycl::ext::oneapi::experimental::granularity_mode::minimum));
     TORCH_CHECK(
         segment_size_ % min_granularity == 0,
         "segment_size (",
@@ -169,8 +171,8 @@ struct ExpandableSegment {
         ")");
     max_handles_ = numSegments(static_cast<size_t>(
         static_cast<float>(device_total) * kVirtualMemOversubscriptFactor));
-    ptr_ = sycl::ext::oneapi::experimental::reserve_virtual_mem(
-        segment_size_ * max_handles_, xpu::get_device_context());
+    ptr_ = C10_XPU_CHECK(sycl::ext::oneapi::experimental::reserve_virtual_mem(
+      segment_size_ * max_handles_, xpu::get_device_context()));
     TORCH_CHECK(
         ptr_ != 0,
         "Failed to reserve virtual memory of size ",
@@ -282,8 +284,9 @@ struct ExpandableSegment {
       auto& maybe_handle = handles_.at(i);
       TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
       if (!maybe_handle->shareable_handle) {
-        maybe_handle->shareable_handle =
-            syclex::ipc::physical_memory::get(maybe_handle->handle).data();
+        auto handle = C10_XPU_CHECK(
+            syclex::ipc::physical_memory::get(maybe_handle->handle));
+        maybe_handle->shareable_handle = handle.data();
       }
       return *maybe_handle->shareable_handle;
     };
@@ -337,12 +340,12 @@ struct ExpandableSegment {
           reinterpret_cast<char*>(data.data()),
           static_cast<std::streamsize>(header.handle_size));
       syclex::ipc::handle_data_t handle_data(data.begin(), data.end());
-      syclex::physical_mem mem = syclex::ipc::physical_memory::open(
-          handle_data, xpu::get_device_context(), xpu::get_raw_device(device));
-      mem.map(
+        syclex::physical_mem mem = C10_XPU_CHECK(syclex::ipc::physical_memory::open(
+          handle_data, xpu::get_device_context(), xpu::get_raw_device(device)));
+        C10_XPU_CHECK(mem.map(
           segment->ptr_ + i * segment->segment_size_,
           segment->segment_size_,
-          syclex::address_access_mode::read_write);
+          syclex::address_access_mode::read_write));
       segment->handles_.emplace_back(Handle{.handle = std::move(mem)});
     }
     return segment;
@@ -553,7 +556,7 @@ void deletePrimitive(void* ptr, BlockPool* pool) {
   if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
     pool->owner_PrivatePool->allocator()->raw_delete(ptr);
   } else {
-    sycl::free(ptr, xpu::get_device_context());
+    C10_XPU_CHECK(sycl::free(ptr, xpu::get_device_context()));
   }
 }
 
@@ -863,7 +866,7 @@ class DeviceCachingAllocator {
         auto& e = it->second.front();
         auto event = e.first;
         auto* block = e.second;
-        if (event.get_info<event::command_execution_status>() !=
+        if (C10_XPU_CHECK(event.get_info<event::command_execution_status>()) !=
             event_command_status::complete) {
           break;
         }
@@ -1194,7 +1197,7 @@ class DeviceCachingAllocator {
         if (pool && block->pool->owner_PrivatePool != pool) {
           continue;
         }
-        event.wait();
+        C10_XPU_CHECK(event.wait());
         block->event_count--;
         if (block->event_count == 0) {
           free_block(block, context);
@@ -1559,7 +1562,7 @@ class DeviceCachingAllocator {
     for (auto& stream : streams) {
       block->event_count++;
       xpu_events[stream].emplace_back(
-          stream.queue().ext_oneapi_submit_barrier(), block);
+          C10_XPU_CHECK(stream.queue().ext_oneapi_submit_barrier()), block);
     }
   }
 
@@ -2227,17 +2230,17 @@ class DeviceCachingAllocator {
       return 1.0;
     }
 
-    const auto device_total =
-        xpu::get_raw_device(device_index)
-            .get_info<sycl::info::device::global_mem_size>();
+    const auto device_total = C10_XPU_CHECK(
+      xpu::get_raw_device(device_index)
+        .get_info<sycl::info::device::global_mem_size>());
     return static_cast<double>(allowed_memory_maximum) /
         static_cast<double>(device_total);
   }
 
   void setMemoryFraction(double fraction) {
-    const auto device_total =
-        xpu::get_raw_device(device_index)
-            .get_info<sycl::info::device::global_mem_size>();
+    const auto device_total = C10_XPU_CHECK(
+      xpu::get_raw_device(device_index)
+        .get_info<sycl::info::device::global_mem_size>());
     allowed_memory_maximum =
         static_cast<size_t>(fraction * static_cast<double>(device_total));
     set_fraction = true;
@@ -2292,9 +2295,9 @@ class DeviceCachingAllocator {
       }
       offset = static_cast<const char*>(block->ptr) -
           static_cast<const char*>(base_block->ptr);
-      sycl_ipc::handle_data_t handle_data =
-          sycl_ipc_memory::get(base_block->ptr, c10::xpu::get_device_context())
-              .data();
+        auto handle = C10_XPU_CHECK(sycl_ipc_memory::get(
+          base_block->ptr, c10::xpu::get_device_context()));
+        sycl_ipc::handle_data_t handle_data = handle.data();
       TORCH_INTERNAL_ASSERT(
           handle_data.size() <= std::numeric_limits<char>::max(),
           "IPC handle size exceeds maximum allowed size.");
@@ -2432,10 +2435,10 @@ class NativeCachingAllocator : public XPUAllocator {
         ss.read(
             reinterpret_cast<char*>(handle_data.data()),
             static_cast<std::streamsize>(handle_size));
-        xpu_ipc_ptr = sycl_ipc_memory::open(
+        xpu_ipc_ptr = C10_XPU_CHECK(sycl_ipc_memory::open(
             handle_data,
             c10::xpu::get_device_context(),
-            c10::xpu::get_raw_device(device));
+            c10::xpu::get_raw_device(device)));
       } else if (type == SHAREABLE_XPU_EXPANDABLE_SEGMENT) {
         expandable_segment =
             ExpandableSegment::fromShared(device, ss).release();
@@ -2450,7 +2453,8 @@ class NativeCachingAllocator : public XPUAllocator {
     // has already shut down during process exit.
     void clear() {
       if (xpu_ipc_ptr) {
-        sycl_ipc_memory::close(xpu_ipc_ptr, c10::xpu::get_device_context());
+        C10_XPU_CHECK(
+          sycl_ipc_memory::close(xpu_ipc_ptr, c10::xpu::get_device_context()));
         xpu_ipc_ptr = nullptr;
       }
       if (expandable_segment) {
@@ -2614,7 +2618,7 @@ class NativeCachingAllocator : public XPUAllocator {
   }
 
   void copy_data(void* dest, const void* src, std::size_t count) const final {
-    xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
+    C10_XPU_CHECK(xpu::getCurrentXPUStream().queue().memcpy(dest, src, count));
   }
 
   DeviceStats getDeviceStats(DeviceIndex device) override {
@@ -2705,8 +2709,8 @@ class NativeCachingAllocator : public XPUAllocator {
   void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
     assertValidDevice(dev);
     assertValidDevice(dev_to_access);
-    c10::xpu::get_raw_device(dev).ext_oneapi_enable_peer_access(
-        c10::xpu::get_raw_device(dev_to_access));
+    C10_XPU_CHECK(c10::xpu::get_raw_device(dev).ext_oneapi_enable_peer_access(
+      c10::xpu::get_raw_device(dev_to_access)));
   }
 
   double getMemoryFraction(DeviceIndex device) {

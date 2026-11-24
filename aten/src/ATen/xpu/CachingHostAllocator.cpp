@@ -1,4 +1,5 @@
 #include <ATen/xpu/CachingHostAllocator.h>
+#include <c10/xpu/XPUException.h>
 #include <c10/xpu/XPUGraphsC10Utils.h>
 
 namespace at::xpu {
@@ -12,8 +13,8 @@ struct XPUCachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<XPUStream, XPUEvent> {
   /* These following functions are runtime-related. */
   void allocate_host_memory(size_t size, void** ptr) override {
-    *ptr = sycl::aligned_alloc_host(
-        kHostAlignment, size, c10::xpu::get_device_context());
+    *ptr = C10_XPU_CHECK(sycl::aligned_alloc_host(
+      kHostAlignment, size, c10::xpu::get_device_context()));
     TORCH_CHECK(
         *ptr != nullptr,
         "Failed to allocate ",
@@ -22,7 +23,7 @@ struct XPUCachingHostAllocatorImpl
   }
 
   void free_block(Block* block) override {
-    sycl::free(block->ptr_, c10::xpu::get_device_context());
+    C10_XPU_CHECK(sycl::free(block->ptr_, c10::xpu::get_device_context()));
   }
 
   void record_stream(

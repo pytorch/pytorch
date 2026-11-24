@@ -146,11 +146,11 @@ void initDeviceStreamState(DeviceIndex device) {
   for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
     for (const auto i : c10::irange(kStreamsPerPool)) {
       auto& stream = streams[device][p][i];
-      stream = std::make_unique<sycl::queue>(sycl::queue(
+      stream = C10_XPU_CHECK(std::make_unique<sycl::queue>(sycl::queue(
           c10::xpu::get_device_context(),
           c10::xpu::get_raw_device(device),
           c10::xpu::asyncHandler,
-          properties[p]));
+          properties[p])));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
         (*interp)->trace_gpu_stream_creation(
@@ -319,12 +319,14 @@ XPUStream getStreamFromExternal(
 
   TORCH_CHECK(ext_queue, "External sycl::queue* must not be a nullptr.");
   TORCH_CHECK(
-      ext_queue->is_in_order(), "External SYCL queue must be in-order.");
+      C10_XPU_CHECK(ext_queue->is_in_order()),
+      "External SYCL queue must be in-order.");
   TORCH_CHECK(
-      ext_queue->get_context() == c10::xpu::get_device_context(),
+      C10_XPU_CHECK(ext_queue->get_context()) == c10::xpu::get_device_context(),
       "External SYCL queue must be created with the same context as the PyTorch XPU used.");
   TORCH_CHECK(
-      ext_queue->get_device() == c10::xpu::get_raw_device(device_index),
+        C10_XPU_CHECK(ext_queue->get_device()) ==
+          c10::xpu::get_raw_device(device_index),
       "External SYCL queue doesn't match the given device index.");
   StreamId stream_id = reinterpret_cast<StreamId>(ext_queue);
   TORCH_CHECK(
@@ -374,7 +376,7 @@ std::ostream& operator<<(std::ostream& stream, const XPUStream& s) {
  *     https://github.com/pytorch/pytorch/issues/197520.
  *     On Linux, it is unrestricted.
  *  2. Legacy path (otherwise): walk every reserved queue in each priority
- *     pool and `wait()` on it. This only drains queues we own; SYCL queues
+ *     pool and `wait_and_throw()` on it. This only drains queues we own; SYCL queues
  *     outside our pools are unaffected.
  */
 
@@ -391,12 +393,12 @@ void syncStreamsOnDevice(DeviceIndex device) {
 #if SYCL_COMPILER_VERSION >= 20260100
   const auto& raw_device = c10::xpu::get_raw_device(device);
   bool use_device_wide_wait =
-      raw_device.has(sycl::aspect::ext_oneapi_device_wait);
+      C10_XPU_CHECK(raw_device.has(sycl::aspect::ext_oneapi_device_wait));
 
 #ifdef _WIN32
   namespace syclex = sycl::ext::oneapi::experimental;
   use_device_wide_wait &=
-      raw_device.get_info<syclex::info::device::architecture>() >=
+      C10_XPU_CHECK(raw_device.get_info<syclex::info::device::architecture>()) >=
       syclex::architecture::intel_gpu_bmg_g21;
 #endif
 
@@ -413,7 +415,7 @@ void syncStreamsOnDevice(DeviceIndex device) {
     // kStreamsPerPool (32) reserved queues per priority for each device.
     for (const auto p : c10::irange(max_compile_time_stream_priorities)) {
       for (const auto i : c10::irange(kStreamsPerPool)) {
-        streams[device][p][i]->wait();
+        C10_XPU_CHECK(streams[device][p][i]->wait_and_throw());
       }
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
