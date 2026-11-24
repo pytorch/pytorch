@@ -69,9 +69,10 @@ which will handle all the rough edges of the C API for the user.
   or a subclass; overridden `__class__` attributes are ignored, as in
   `tensor_from_pyobject`
 
-The dtype, device, layout and memory format helpers translate through the
-stable enum mappings, which cover a subset of all dtypes and device types;
-converting a valid `torch.dtype` or `torch.device` outside that subset raises.
+The helpers above that translate through the stable enum mappings
+(e.g., dtype, device and layout), can only cover the subset of types that
+have stable encodings. E.g., converting a valid `torch.dtype` or
+`torch.device` outside that subset would raise an error.
 
 Like the rest of the stable ABI, an extension using them can just link
 `libtorch`.
