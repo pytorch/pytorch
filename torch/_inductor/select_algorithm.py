@@ -1180,7 +1180,7 @@ class TritonTemplateKernel(TritonKernel):
 
             arg_name = self.args.input_buffers[input_node.get_name()]
             offset = input_node.get_layout().offset
-            if offset == 0:
+            if not self._has_storage_offset(input_node):
                 renames.writeline(f"{name} = {arg_name}")
             else:
                 self._record_negative_offset(input_node.get_name(), offset)
@@ -1299,6 +1299,10 @@ class TritonTemplateKernel(TritonKernel):
                 + [node_stride[d] for d in dim_order]
             ]
             launch_args = self._host_tma_launch_args(dims)
+            # def_kernel offsets the input's pointer in the kernel (A = arg_A + offset),
+            # but a host descriptor's base is data_ptr(), which already includes it.
+            if self._has_storage_offset(node):
+                launch_args = None
             # def_kernel merges operands that view one buffer into a single arg,
             # and the launcher would hand that arg to all of them as one
             # TensorDescriptor. Views with dynamic dims have differing shapes, so
@@ -1339,6 +1343,19 @@ class TritonTemplateKernel(TritonKernel):
                 # The kernel's size args these dims read; the launcher evaluates
                 # the rendered expressions over them at each launch.
                 desc["launch_args"] = sorted(launch_args)
+                if V.graph.cpp_wrapper:
+                    from .codegen.cpp_utils import cexpr
+
+                    # Python's // floors where C++'s / truncates, so the C++
+                    # wrapper takes its own rendering rather than the launcher's.
+                    cpp_rendered = [
+                        int(d)
+                        if d.is_number
+                        else cexpr(self.rename_indexing(d), simplify=False)
+                        for d in map(V.graph.sizevars.simplify, dims)
+                    ]
+                    desc["cpp_shape"] = cpp_rendered[: len(dim_order)]
+                    desc["cpp_strides"] = cpp_rendered[len(dim_order) :]
             prev = self.host_tma_descriptor_args.get(arg_name)
             if prev is not None and prev != desc:
                 # def_kernel dedupes operands that alias one buffer into a single
@@ -1361,19 +1378,19 @@ class TritonTemplateKernel(TritonKernel):
         A dim can be read at launch when it is an integer expression whose free
         symbols are all graph sizes (dynamic shapes), which become the kernel's
         size args (ks0), built only from operations that pexpr prints as plain
-        Python (see _host_tma_plain_dim). The C++ wrapper builds descriptors from
-        the tensor's own sizes, so there every dim must be a compile-time integer.
+        Python (see _host_tma_plain_dim). The C++ wrapper's kernel call wrapper
+        takes those size args as parameters and builds the descriptor from them
+        (cpp_wrapper_gpu._host_tma_cpp_dim), but only for kernels autotuned at
+        compile time.
         """
         launch_args: OrderedSet[str] = OrderedSet()
         for dim in dims:
             dim = V.graph.sizevars.simplify(dim)
             if not dim.free_symbols:
                 continue
-            if (
-                V.graph.cpp_wrapper
-                or not dim.is_integer
-                or not self._host_tma_plain_dim(dim)
-            ):
+            if not dim.is_integer or not self._host_tma_plain_dim(dim):
+                return None
+            if V.graph.cpp_wrapper and config.triton.autotune_at_compile_time is False:
                 return None
             if not all(
                 symbol_is_type(sym, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
@@ -1384,6 +1401,10 @@ class TritonTemplateKernel(TritonKernel):
                 str(self.rename_indexing(sym)) for sym in dim.free_symbols
             )
         return launch_args
+
+    @staticmethod
+    def _has_storage_offset(node: ir.IRNode) -> bool:
+        return not V.graph.sizevars.statically_known_equals(node.get_layout().offset, 0)
 
     @staticmethod
     def _host_tma_plain_dim(dim: sympy.Expr) -> bool:
@@ -1655,9 +1676,7 @@ class TritonTemplateKernel(TritonKernel):
             # in def_kernel above we define the inputs with the storage offset adjusted
             # creating the load in input_node.make_indexer() will also adjust by storage offset
             # so subtract here to not double increment
-            if not V.graph.sizevars.statically_known_equals(
-                input_node.layout.offset, 0
-            ):
+            if self._has_storage_offset(input_node):
                 output_index = output_index - self.rename_indexing(
                     input_node.get_layout().offset
                 )

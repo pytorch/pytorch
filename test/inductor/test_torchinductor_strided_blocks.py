@@ -3121,6 +3121,27 @@ class HostTMAHelperTest(InductorTestCase):
         self.assertEqual(cloned.data_ptr() % 16, 0)
         self.assertTrue(torch.equal(cloned, misaligned))
 
+    def test_host_tma_cpp_dim_floors(self):
+        # Python's // floors where C++'s / truncates: at ks0 = 2 this stride is
+        # 32 * (-1 + 3) = 64, while truncating division would give 96.
+        import sympy
+
+        from torch._inductor.codegen.cpp_utils import cexpr
+        from torch._inductor.codegen.cpp_wrapper_gpu import _host_tma_cpp_dim
+        from torch.utils._ordered_set import OrderedSet
+        from torch.utils._sympy.functions import FloorDiv
+
+        ks0 = sympy.Symbol("ks0", integer=True, positive=True)
+        rendered = cexpr(32 * (FloorDiv(ks0 - 3, 2) + 3), simplify=False)
+        self.assertIn("c10::div_floor_integer", rendered)
+        self.assertEqual(
+            _host_tma_cpp_dim(rendered, ["ks0"], OrderedSet(["ks0"]), {}), rendered
+        )
+        specialized = _host_tma_cpp_dim(rendered, ["ks0"], OrderedSet(), {"ks0": 2})
+        self.assertNotIn("ks0", specialized)
+        with self.assertRaises(NotImplementedError):
+            _host_tma_cpp_dim(rendered, ["ks0"], OrderedSet(), {})
+
 
 @unittest.skipUnless(
     platform_supports_tensor_descriptor(), "requires CUDA tensor descriptor support"
