@@ -3431,8 +3431,8 @@ class TestTorchDeviceType(TestCase):
     @runOnRocmArch(MI350_ARCH + MI450_ARCH)
     @dtypes(torch.half, torch.bfloat16)
     def test_cumsum_alignment_independent(self, device, dtype):
-        # These rows run the chunked last-dim path. A misaligned input switches it to scalar loads,
-        # which must give the same bits as the vector loads, as must reruns. (CUB and hipCUB scan
+        # These rows run the chunked last-dim path. A misaligned input switches it from vector to
+        # dword-aligned accesses, which must give the same bits, as must reruns. (CUB and hipCUB scan
         # 1-D inputs with a look-back that can group partial sums differently from run to run.)
         for shape in ((100_000,), (2_000_000,), (3, 200_000), (1, 16_777_216)):
             x = torch.randn(shape, dtype=dtype, device=device)

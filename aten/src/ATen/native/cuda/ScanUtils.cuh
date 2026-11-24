@@ -1234,7 +1234,8 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   if (self.numel() == self.size(dim)) {
 #if defined(USE_ROCM)
     if constexpr (inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp) {
-      // The chunked row scan is as fast as or faster than hipCUB at every length, and deterministic.
+      // 1-D inputs take the row scan at every length: it is deterministic, and as fast as or faster than
+      // hipCUB except for f64 of about 6,000 to 32,000 elements on gfx1250.
       const int64_t n = self.numel();
       if (inner_scan::supported_device() && n <= std::numeric_limits<uint32_t>::max()) {
         inner_scan::launch<scalar_t>(
