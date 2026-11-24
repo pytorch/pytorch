@@ -1,0 +1,387 @@
+"""The passes of the engine of torch.vm: what its list of passes, ``passes=``, is made of.
+
+A pass says what it is over. One over the control-flow graph of a function
+(``kind`` is ``"cfg"``) rewrites the function once, before it runs. One over a
+basic block (``"block"``) rewrites a block once its first runs were watched, in
+the order of the list, and again until no pass changes the block anymore. One
+over a graph (``"graph"``) is given the ``torch.fx.GraphModule`` of a graph
+that :class:`Graphs` made, and returns what runs in its place.
+:data:`torch.vm.DEFAULT_PASSES` is the default list.
+"""
+
+import dataclasses
+from typing import Any, ClassVar
+
+
+__all__ = [
+    "AOTAutograd",
+    "BuiltinPass",
+    "DCE",
+    "Fold",
+    "Graphs",
+    "Inductor",
+    "Inline",
+    "MethodCalls",
+    "ModuleShortcuts",
+    "NarrowDims",
+    "ResolveDispatch",
+    "TensorAccessors",
+    "Unroll",
+]
+
+
+class BuiltinPass:
+    """A pass of the engine. What it was made with are its fields."""
+
+    # The name it goes by in the engine.
+    engine: ClassVar[str]
+    # What it is over: the control-flow graph of the function, once; one
+    # basic block after it was profiled; or a graph of the tensor work of a
+    # block.
+    kind: ClassVar[str] = "block"
+    # A pass of the engine leaves every result what the interpreter computes.
+    exact: ClassVar[bool] = True
+
+    def __repr__(self) -> str:
+        fields = dataclasses.fields(self)  # type: ignore[arg-type]
+        made = [f for f in fields if getattr(self, f.name) != f.default]
+        inner = ", ".join(f"{f.name}={getattr(self, f.name)!r}" for f in made)
+        return f"torch.vm.passes.{type(self).__name__}({inner})"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class Inline(BuiltinPass):
+    """Calls of Python functions defined in the same module are replaced by their
+    graph, under a guard on the callee; the call itself stays as the other side
+    of that guard."""
+
+    engine: ClassVar[str] = "inline"
+    kind: ClassVar[str] = "cfg"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class Unroll(BuiltinPass):
+    """``for i in range(k)`` with a constant ``k`` of at most ``max_trip_count``
+    is replaced by ``k`` copies of its body, under a guard on ``range``. A loop
+    whose copies would come to more than 600 instructions is left as it is.
+    Applied after :class:`Inline`."""
+
+    engine: ClassVar[str] = "unroll"
+    kind: ClassVar[str] = "cfg"
+
+    max_trip_count: int = 8
+
+    def __post_init__(self) -> None:
+        most = self.max_trip_count
+        if isinstance(most, bool) or not isinstance(most, int):
+            raise TypeError(
+                f"Unroll takes a number of iterations, not {type(most).__name__}"
+            )
+        if most < 1:
+            raise ValueError(
+                f"Unroll({most}): at least one iteration; to unroll nothing, leave the pass out of the list"
+            )
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class ModuleShortcuts(BuiltinPass):
+    """The code of ``nn.Module`` in front of every call of a module and every read
+    of a parameter, buffer or submodule is skipped whenever a few checks show
+    what it would do: a call of a module without hooks goes straight to its
+    ``forward``, and the three dicts are looked at without calling
+    ``Module.__getattr__``. ``Module.__call__`` then does not appear on the
+    stack."""
+
+    engine: ClassVar[str] = "shortcuts"
+    kind: ClassVar[str] = "cfg"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class Graphs(BuiltinPass):
+    """Makes graphs of the tensor work of a function.
+
+    A graph starts at an operation that the engine calls directly
+    (:class:`ResolveDispatch`), or with the function, and goes on along the
+    way a call takes through the function: through the branches as they go,
+    round the loops as often as they go round, with what sits between the
+    operations (reads of globals and attributes, constants, arithmetic on
+    sizes, lists that the function fills). Each way a branch went is checked
+    on later calls; a call that goes another way gets a path of its own. A
+    graph ends in front of everything else: a call of a Python function, an
+    operation that writes to one of its arguments or draws random numbers, a
+    number read from a tensor and the branch on it, a store into an object.
+    ``torch.vm.regions(fn)`` reports the graphs, and what was left out of
+    them with the reason. Graphs start in one's own code and in the code of
+    models in torch (``torch.nn``, ``torch.nn.functional``, ``torch.optim``),
+    not in the rest of the library.
+
+    The engine runs a graph itself: the same kernels, on the same values, in
+    the same order. With this pass alone a function computes what it computes
+    without it, bit for bit, and leaves the gradients that eager leaves: the
+    engine derives the backward of a graph whose tensors need a gradient
+    (``backward``).
+
+    A graph leaves the engine only for a pass over graphs, which stands behind
+    this one in the list: a function ``pass_(gm, input_types) -> gm`` of
+    one's own, :class:`AOTAutograd` or :class:`Inductor`. The graph is then
+    exported as a ``torch.fx.GraphModule`` of the operators the function
+    called (``torch.ops.aten.linear.default``, not what a kernel decomposes
+    into; a loop is as many copies of its operations as it went round), for
+    the tensors of one call of it. The passes are applied in the
+    order of the list, and what the last one returns runs in place of the
+    operations for every call whose tensors have the dtypes, devices, sizes,
+    strides and ``requires_grad`` of that one, with the same modes, and with
+    the same numbers and objects where the operations take any. Another call
+    is exported in its turn; so is a call under another dtype of autocast,
+    or with deterministic algorithms asked for. A call under a torch
+    function mode, a dispatch mode or a transform of ``torch.func`` runs the
+    operations as they are, so that those see them; so does a call with
+    gradients enabled under a saved-tensor hook
+    (``torch.autograd.graph.saved_tensors_hooks``, ``save_on_cpu``,
+    ``torch.utils.checkpoint.checkpoint(..., use_reentrant=False)``) or in
+    anomaly mode, and a call under ``torch.autograd.graph.node_creation_hook``,
+    which run Python code under each operation. Where what
+    was exported raises, the operations run in its place for that call, and
+    raise where the function has them. With a pass over graphs
+    in the list and this pass missing, it is taken to be there, in front of
+    the first of them.
+
+    What an operation takes of the values the function reads (a number kept
+    by a module, a global, a variable of an enclosing function) is checked
+    on every call, where the graph takes it: a call that finds another
+    value is not run by what was exported for the old one. A number that is
+    another on every call (a rate on a schedule) is exported three times and
+    no more: the calls of that kind then run the operations as they are. What the
+    function does between its operations runs in front of what was exported
+    or behind it only where that runs no Python code; a read that would call
+    a property or a ``__getattr__`` leaves the graph to the engine.
+
+    Args:
+        min_ops: a path with fewer operations than this is no graph: it is
+            not reported as one, and not exported.
+        max_variants: how many exported forms a graph has, one per kind of
+            call; the form that ran last is tried first. The calls of
+            further kinds run its operations as they are.
+        backward: the engine derives the backward of a graph whose inputs
+            need a gradient. Such a graph runs on eager's tape for its first
+            calls, and each is taken down: the kernels of the forward, and
+            what eager's own autograd nodes run when they are called behind
+            it. Once two calls came out the same, and what the nodes gave
+            was what the autograd engine gives, the graph runs without a
+            tape and its results go through one node (``GraphBackward``), whose
+            gradients are eager's bit for bit; a pass over graphs then gets
+            a forward graph and a backward graph with nothing left to
+            derive. A graph that cannot be taken down (an operation of its
+            backward looks at what a tensor holds, say) keeps eager's tape.
+            So does a graph through which eager mode goes backward a
+            second time behind a backward that did not retain it (two
+            results, or one result twice, that share no node which saved
+            a tensor): the one node raises at every such backward.
+            A graph that gives a tensor and also computes something of it
+            (a hidden state and a loss, say) is cut in front of the first
+            operation that reads the tensor, into parts with a node each:
+            the gradient of what is computed of the tensor then comes to it
+            through its own gradient function, as in eager mode, so asking
+            for the gradient at it (``torch.autograd.grad``,
+            ``retain_grad``) and a hook on it see and change what eager's
+            would. This holds for whatever the caller can hold of the graph
+            when the call goes on: what the function returns, in a tuple, a
+            list or a dict or by itself, what it stores into an object and
+            what a variable holds; not for a tensor that is only asked for
+            its sizes or its type.
+            With ``False`` every such graph keeps eager's tape: a pass of
+            one's own over graphs is handed the one graph with tensors
+            that need a gradient, as with :class:`AOTAutograd` in the list,
+            and :class:`Inductor` by itself is not handed it.
+
+            Where it is not eager's: the ``grad_fn`` of what a graph gives
+            is a node of the graph's. A backward that raises (a tensor it
+            needs was written to in place, or it is a second backward
+            behind one that did not retain the graph) raises eager's error with
+            eager's text, but before it has added anything to the ``.grad``
+            of an input of the graph, where eager has by then added up the
+            gradients of the leaves whose nodes all ran before the one
+            that raises. With ``create_graph=True`` the gradient is eager's
+            bit for bit; what a second backward computes through it is
+            eager's value, and can differ from it in the last bits (the
+            gradients that meet there are not always added in eager's
+            order), and for a graph that draws random numbers or writes to
+            a tensor from outside, or one an input of which was written to
+            in place since the call, or one of whose inputs that the node
+            holds itself (below) was given other data (``t.data = ...``),
+            such a backward raises and says so.
+            The node of a graph holds an input for as long as eager's
+            nodes hold it (a leaf that a gradient goes to, what a node
+            saved) and of every other input the memory, not the tensor:
+            what only such an input holds ends where the caller lets go
+            of it, its storage when the node ends or a backward releases
+            it. Where a gradient goes to such an input, what the node
+            holds in its memory has the history of the input as well,
+            and a backward with ``create_graph=True`` goes through that.
+
+            While a graph is taken down, twice per form, cuDNN's benchmark
+            mode is off and its deterministic mode is on for the whole
+            process (other threads' convolutions included), and both are
+            as they were when the call returns. In benchmark mode cuDNN
+            picks the algorithm of a convolution per thread, by what it
+            measured there, and eager's own gradients are not the same bits
+            on two threads: what a graph's gradients are then is what the
+            same kernels give for the same arguments in the same order.
+    """
+
+    engine: ClassVar[str] = "graphs"
+
+    min_ops: int = 4
+    max_variants: int = 8
+    backward: bool = True
+
+    def __post_init__(self) -> None:
+        for name, least in (("min_ops", 1), ("max_variants", 0)):
+            given = getattr(self, name)
+            if isinstance(given, bool) or not isinstance(given, int):
+                kind = type(given).__name__
+                raise TypeError(
+                    f"Graphs takes {name} as a number, not {kind}: what compiles "
+                    "its graphs is a pass of its own, behind it in the list "
+                    "(torch.vm.passes.Inductor())"
+                )
+            if given < least:
+                raise ValueError(f"Graphs({name}={given}): at least {least}")
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class AOTAutograd(BuiltinPass):
+    """A pass over a graph: AOTAutograd traces the graph and its backward ahead
+    of time, and the eager kernels run both. With gradients enabled, the
+    tensors a graph returns have one compiled autograd function as their
+    ``grad_fn``.
+
+    It is called as every pass over a graph is, ``pass_(gm, input_types)``,
+    and returns a graph whose forward calls what it compiled. It compiles
+    for the tensors of the call the graph was exported on. A pass that
+    compiles is the last pass over a graph in the list, and there is one at
+    most, but for this one in front of :class:`Inductor`, which then
+    compiles what this one traced. ``torch._functorch.aot_autograd`` is
+    imported when the pass first runs.
+
+    The gradients are what ``torch.compile`` gives, which is not eager's
+    where a graph gives a tensor and also computes something of it (a
+    hidden state and a loss): the one compiled function has the gradient
+    of both, so nothing of the loss arrives at the tensor's own gradient
+    function. ``torch.autograd.grad(loss, [hidden])`` then says the tensor
+    was not used, ``retain_grad`` keeps nothing, and a hook on the tensor
+    is handed None and changes nothing of what reaches the inputs. Without
+    this pass in the list the engine's own backward cuts such a graph at
+    the tensor (:class:`Graphs`), and all of that is eager's.
+    """
+
+    engine: ClassVar[str] = "aot_autograd"
+    kind: ClassVar[str] = "graph"
+    # What it runs is a trace of the operations, decomposed.
+    exact: ClassVar[bool] = False
+    compiles: ClassVar[bool] = True
+
+    def __call__(self, gm: Any, input_types: list[Any]) -> Any:
+        from torch._dynamo.backends.debugging import boxed_nop
+        from torch._functorch.aot_autograd import aot_module_simplified
+
+        from . import _export
+
+        # What the graph writes to its inputs is written back behind it,
+        # once: kept in the graph, the write moves the version counter of
+        # an input twice.
+        compiled = aot_module_simplified(
+            gm,
+            _export.examples(input_types),
+            fw_compiler=boxed_nop,
+            keep_inference_input_mutations=False,
+        )
+        return _export.calling(gm, compiled)
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class Inductor(BuiltinPass):
+    """A pass over a graph: Inductor compiles the graph. A graph whose
+    tensors need a gradient reaches it as two graphs whose tensors need
+    none, its forward and its backward, which the engine derived
+    (:class:`Graphs`): nothing is traced for a derivative. With
+    :class:`AOTAutograd` in front of it in the list, AOTAutograd derives the
+    backward instead, and Inductor compiles what it traced.
+
+    This is the pass that makes a function faster than its kernels allow, and
+    one that may change its numerics: what a graph compiler makes of the
+    operations is not what eager runs. It is called as every pass over a
+    graph is, ``pass_(gm, input_types)``, and returns a graph whose forward
+    calls what it compiled. It compiles for the tensors of the call the graph
+    was exported on. A pass that compiles is the last pass over a graph in
+    the list, and there is one at most, but for :class:`AOTAutograd` in
+    front of this one. ``torch._inductor`` is imported when the pass first
+    runs.
+    """
+
+    engine: ClassVar[str] = "inductor"
+    kind: ClassVar[str] = "graph"
+    # The kernels of a graph compiler are not the ones eager runs.
+    exact: ClassVar[bool] = False
+    compiles: ClassVar[bool] = True
+
+    def __call__(self, gm: Any, input_types: list[Any]) -> Any:
+        import torch._inductor
+
+        from . import _export
+
+        compiled = torch._inductor.compile(gm, _export.examples(input_types))
+        return _export.calling(gm, compiled)
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class ResolveDispatch(BuiltinPass):
+    """Operations the profile found to be a single dispatcher call become direct
+    calls of the post-dispatch kernel."""
+
+    engine: ClassVar[str] = "resolve_dispatch"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class TensorAccessors(BuiltinPass):
+    """``x.shape[i]``, ``x.size(i)``, ``x.dim()`` and ``x.ndim`` on tensors become
+    plain SSA integers, in a block that is specialized for tensors of exactly
+    ``Tensor`` or ``Parameter`` of a rank. Such a read is valid only where the
+    interpreter would run no Python code at it: it asks, at every run, that no
+    ``TorchFunctionMode`` is on and that the tensor classes have their own
+    getters and methods under these names, and otherwise runs the instructions
+    it stands for as they are written."""
+
+    engine: ClassVar[str] = "tensor_accessors"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class MethodCalls(BuiltinPass):
+    """``x.f(...)`` calls that stay generic are made without creating a bound
+    method object."""
+
+    engine: ClassVar[str] = "method_calls"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class NarrowDims(BuiltinPass):
+    """A comparison of a dimension with a constant is folded to the outcome last
+    observed, under a guard that pins the dimension to the range of sizes with
+    that outcome, asked where the comparison is, with what a read of
+    :class:`TensorAccessors` asks. In front of :class:`Fold`; not a default."""
+
+    engine: ClassVar[str] = "narrow_dims"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class Fold(BuiltinPass):
+    """Folds truthiness tests and branches on constants."""
+
+    engine: ClassVar[str] = "fold"
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class DCE(BuiltinPass):
+    """Drops instructions whose result is not needed."""
+
+    engine: ClassVar[str] = "dce"
