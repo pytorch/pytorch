@@ -7,7 +7,6 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/cuda/CUDAGraph.h>
-#include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 
 // Cargo culted partially from csrc/distributed/c10d/init.cpp
 // and partially from csrc/cuda/Stream.cpp.
@@ -35,9 +34,7 @@ void THCPGraph_init(PyObject* module) {
           "capture_begin",
           [](::at::cuda::CUDAGraph& self,
              std::optional<c10::cuda::MempoolId_t> pool_opt,
-             const std::string& capture_error_mode,
-             std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
-                 allocator) {
+             const std::string& capture_error_mode) {
             cudaStreamCaptureMode capture_mode{};
             c10::cuda::MempoolId_t pool = pool_opt.has_value()
                 ? pool_opt.value()
@@ -54,14 +51,10 @@ void THCPGraph_init(PyObject* module) {
                   "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
                   capture_error_mode);
             }
-            if (allocator) {
-              torch::cuda::CUDAPluggableAllocator::enableGraphAllocators();
-            }
-            return self.capture_begin(pool, capture_mode, std::move(allocator));
+            return self.capture_begin(pool, capture_mode);
           },
           py::arg("pool"),
           py::arg("capture_error_mode"),
-          py::arg("allocator") = nullptr,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "capture_end",

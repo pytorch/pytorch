@@ -1663,6 +1663,10 @@ from . import config
 for name in _allowed_config_patches:
     if not hasattr(config, name):
         raise AssertionError(f"nonexistent config: {name}")
+    # DynamoConfigPatchVariable saves the entry's raw override, which an alias
+    # entry never has.
+    if config._config[name].alias:  # type: ignore[attr-defined]
+        raise AssertionError(f"aliased config cannot be patched: {name}")
 del config
 
 
