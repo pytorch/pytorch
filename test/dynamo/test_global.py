@@ -966,7 +966,16 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     @parametrize(
-        "shape", ("hasattr", "attr", "contains", "getattr", "getattr_default", "dir")
+        "shape",
+        (
+            "hasattr",
+            "attr",
+            "contains",
+            "getattr",
+            "getattr_default",
+            "getattr_dict",
+            "dir",
+        ),
     )
     def test_delete_global_module_read_after(self, shape):
         me = sys.modules[__name__]
@@ -1007,12 +1016,18 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             del _dg_a
             return x + (1 if "_dg_a" in dir(me) else 0)
 
+        def fn_getattr_dict(x):
+            global _dg_a
+            del _dg_a
+            return x + (1 if "_dg_a" in getattr(me, "__dict__") else 0)  # noqa: B009
+
         fn, expected = {
             "hasattr": (fn_hasattr, lambda x: x),
             "attr": (fn_attr, lambda x: x - 1),
             "contains": (fn_contains, lambda x: x),
             "getattr": (fn_getattr, lambda x: x - 1),
             "getattr_default": (fn_getattr_default, lambda x: x),
+            "getattr_dict": (fn_getattr_dict, lambda x: x),
             "dir": (fn_dir, lambda x: x),
         }[shape]
         with mock.patch.dict(globals(), {"_dg_a": 1}):
