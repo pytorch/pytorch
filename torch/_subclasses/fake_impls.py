@@ -2541,8 +2541,8 @@ def make_fast_binary_impl(
             type_promotion_kind == ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL
             and torch.fx.experimental._config.backed_size_oblivious
         ):
-            # Comparisons must preserve the reference implementation's handling
-            # of backed dimensions whose hints are one when broadcasting.
+            # Workaround for https://github.com/pytorch/pytorch/issues/206411;
+            # remove once infer_size handles backed size-1 broadcasts.
             return slow("backed size oblivious")
 
         # Fast path (based off of TensorIterator fast path).
