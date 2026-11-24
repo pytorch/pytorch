@@ -4156,7 +4156,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 gb_type="Instance lookup of a class attribute deleted in the same frame",
                 context=f"del {owner_name}.{name}; instance.{name}",
                 explanation="Dynamo cannot resolve an attribute that is no longer on "
-                "its class and is not in the instance __dict__.",
+                "its class, or that is written again later in the MRO in this "
+                "frame, and is not in the instance __dict__.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
 

@@ -7447,7 +7447,7 @@
     {
       "Gb_type": "Instance lookup of a class attribute deleted in the same frame",
       "Context": "del {owner_name}.{name}; instance.{name}",
-      "Explanation": "Dynamo cannot resolve an attribute that is no longer on its class and is not in the instance __dict__.",
+      "Explanation": "Dynamo cannot resolve an attribute that is no longer on its class, or that is written again later in the MRO in this frame, and is not in the instance __dict__.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
