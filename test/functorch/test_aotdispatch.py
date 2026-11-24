@@ -5024,6 +5024,65 @@ def forward(self, tangents_1):
 class TestAOTAutogradDevice(_TestAOTAutogradBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @parametrize(
+        "case",
+        ["raw", "symbolic_replay", "inference", "concrete_replay", "keep_stride"],
+    )
+    @torch._dynamo.config.patch(suppress_errors=False)
+    def test_output_aliases_input_layout_optimization(self, device, case):
+        dynamic = case == "symbolic_replay"
+        training = case != "inference"
+        replay = case in ("concrete_replay", "symbolic_replay")
+
+        def f(conv, x):
+            v = x[: x.shape[0] // 2] if dynamic else x[:1]
+            return v, conv(v)
+
+        dtype = torch.float32
+        conv = nn.Conv2d(16, 16, 3, padding=1, device=device, dtype=dtype)
+        shape = (4 if dynamic else 2, 16, 16, 16)
+        x = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+        conv_ref = copy.deepcopy(conv).cpu().double()
+        ref_x = x.detach().cpu().double().requires_grad_()
+        with (
+            torch._functorch.config.patch(view_replay_for_aliased_outputs=replay),
+            torch._inductor.config.patch(
+                layout_optimization=True,
+                force_layout_optimization=True,
+                keep_output_stride=case == "keep_stride",
+            ),
+            tf32_off(),
+            nullcontext() if training else torch.no_grad(),
+        ):
+            ref = f(conv_ref, ref_x)
+            ref_grads = ()
+            if training:
+                ref_grads = torch.autograd.grad(
+                    ref[0].sum(-1).square().mean() * 0.37 + ref[1].square().mean(),
+                    (ref_x, *conv_ref.parameters()),
+                )
+            compiled = torch.compile(f, fullgraph=True, dynamic=dynamic)
+            for fn in (f, compiled):
+                view, output = fn(conv, x)
+                grads = ()
+                if training:
+                    grads = torch.autograd.grad(
+                        view.cpu().double().sum(-1).square().mean() * 0.37
+                        + output.cpu().double().square().mean(),
+                        (x, *conv.parameters()),
+                    )
+                self.assertEqual(view.cpu().double(), ref[0], atol=0, rtol=0)
+                self.assertTensorMetadataEqual(view, ref[0])
+                self.assertEqual(view.requires_grad, ref[0].requires_grad)
+                self.assertIs(view._base, x)
+                self.assertEqual(
+                    view.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+                )
+                self.assertEqual(output.cpu().double(), ref[1], atol=2e-6, rtol=1e-5)
+                for actual, expected in zip(grads, ref_grads):
+                    actual = actual.cpu().double()
+                    self.assertEqual(actual, expected, atol=2e-6, rtol=1e-4)
+
     @parametrize("case", ["hidden_base", "returned_base", "symbolic_view_replay"])
     @parametrize("dense", [False, True])
     @torch._dynamo.config.patch(suppress_errors=False)
