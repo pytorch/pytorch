@@ -267,7 +267,8 @@ def check_out_and_grad(
     if any(type(values) not in (tuple, list) or len(values) != 3 for values, _ in checks):
         return _check_out_and_grad_legacy(*arguments)
     golden = out_tuple[0]
-    if type(golden) is not torch.Tensor or golden.dtype not in (torch.float32, torch.float64):
+    if (type(golden) is not torch.Tensor or golden.device.type not in ("cuda", "xpu")
+            or golden.dtype not in (torch.float32, torch.float64)):
         return _check_out_and_grad_legacy(*arguments)
     allowed = (torch.float16, torch.bfloat16, torch.float32) + ((torch.float64,) if golden.dtype == torch.float64 else ())
     for values, name in checks:
@@ -275,7 +276,7 @@ def check_out_and_grad(
         factor = factors.get(name, 5.0)
         if (type(factor) not in (int, float) or (type(factor) is int and not -(2**63) <= factor < 2**63)
                 or any(type(tensor) is not torch.Tensor or tensor.is_nested or tensor.layout != torch.strided
-                       or not tensor.is_cuda or tensor.device != golden.device or tensor.shape != gold.shape
+                       or tensor.device != golden.device or tensor.shape != gold.shape
                        or not tensor.numel() or tensor.dtype not in allowed for tensor in values)
                 or gold.dtype != golden.dtype):
             return _check_out_and_grad_legacy(*arguments)
@@ -288,7 +289,7 @@ def check_out_and_grad(
         host = torch.stack(errors).cpu().tolist()
         atol = default_atol[torch.float32]
         if golden.dtype == torch.float32:
-            # Match the scalar promotion in the original CUDA comparison.
+            # Match the scalar promotion in the legacy comparison.
             atol = struct.unpack("f", struct.pack("f", atol))[0]
         for index, (values, name) in enumerate(checks):
             test_error, ref_error, scaled_ref_error = host[3 * index:3 * index + 3]
@@ -6627,7 +6628,6 @@ class TestSDPAAccelerator(NNTestCase):
         self.assertFalse(torch.isinf(out).any().item())
         _check_equal(golden, lp_ref, out, 4.0, "out")
 
-    @onlyCUDA
     @parametrize("gold_dtype", [torch.float32, torch.float64])
     @parametrize("masked", [False, True])
     def test_check_out_and_grad_batched_dispatch(self, device, gold_dtype, masked):
