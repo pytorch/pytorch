@@ -27,6 +27,7 @@ It consists of
 - torch/csrc/stable/library.h: Provides a stable version of TORCH_LIBRARY and similar macros.
 - torch/csrc/stable/tensor.h: Provides torch::stable::Tensor, a stable version of at::Tensor.
 - torch/csrc/stable/device.h: Provides torch::stable::Device, a stable version of c10::Device.
+- torch/csrc/stable/generator.h: Provides torch::stable::Generator, a stable version of at::Generator.
 - torch/csrc/stable/ops.h: Provides a stable interface for calling ATen ops from `native_functions.yaml`.
 - torch/csrc/stable/cpublas.h: Provides stable C++ wrappers for CPU BLAS BRGEMM, GEMM dispatch, and packing capability checks.
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
