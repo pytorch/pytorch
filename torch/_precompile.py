@@ -2657,7 +2657,8 @@ def _multigraph_frames(entry: Any) -> list[dict[str, Any]]:
     """One record per Dynamo frame, in the form the driver rebuilds from.
 
     A standalone artifact can reach exactly two kinds of frame: the ENTRY frame,
-    which the caller invokes, and a continuation, which the frame ahead of it
+    which the caller invokes, and a frame a graph break generated (a continuation,
+    or the function that runs a comprehension), which the frame ahead of it
     reaches by LOAD_GLOBAL on the name capture minted. Anything else Dynamo
     compiled is entered by an ordinary Python call that only the frame evaluator
     intercepts, so it has no place in a source artifact.

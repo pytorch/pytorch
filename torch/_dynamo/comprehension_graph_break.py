@@ -675,6 +675,8 @@ def _build_comprehension_fn(
 
     # Install as global
     tx.output.install_resume_function_global(fn_name, new_code, tx.f_globals)
+    if tx.package is not None:
+        tx.package.add_resume_function(new_code, tx.f_globals["__name__"], fn_name)
 
     return new_code, fn_name
 
