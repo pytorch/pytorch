@@ -794,16 +794,22 @@ struct ScaledMMBlockwiseRowLoader {
     return valid && k + step <= k_size;
   }
 
-  // k is a multiple of step, so a whole step is aligned for vector loads
+  // k is a multiple of step, so a whole step is as aligned as data: 16 bytes,
+  // except that an NVFP4 group of K of a 2d x 2d product may start at an odd
+  // block, 8 bytes past it. NVFP4 loads 8-byte halves, which is no slower.
   void fetch(uint k) thread {
     if (!whole(k)) {
       return;
     }
-    const auto src =
-        reinterpret_cast<device const uint4*>(data + k / F::values_per_byte);
+    const auto src = data + k / F::values_per_byte;
 #pragma unroll
     for (uint i = 0; i < step / F::values_per_byte / 16; ++i) {
-      raw[i] = src[i];
+      if IF_CONSTEXPR (F::values_per_byte == 2) {
+        const auto halves = reinterpret_cast<device const uint2*>(src);
+        raw[i] = uint4(halves[2 * i], halves[2 * i + 1]);
+      } else {
+        raw[i] = reinterpret_cast<device const uint4*>(src)[i];
+      }
     }
 #pragma unroll
     for (uint i = 0; i < step / F::block; ++i) {

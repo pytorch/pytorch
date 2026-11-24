@@ -296,8 +296,7 @@ void scaled_grouped_mm_out(const Tensor& mat_a,
   // launch mostly empty tiles
   const bool few_rows = jagged_rows && m <= std::min<int64_t>(kGroupedMMFewRowsMax, groups) && k_contiguous &&
       (blockwise ? k % scaled_mm_blockwise_chunk == 0 : true) && aligned(scaled_mm_few_rows_load_bytes);
-  // NVFP4 groups of K start at multiples of 8 bytes, short of the MPP kernel's 16-byte loads
-  const bool mpp = has_mpp() && (!blockwise || (aligned(scaled_mm_alignment) && !(nvfp4 && jagged_k)));
+  const bool mpp = has_mpp() && (!blockwise || aligned(scaled_mm_alignment));
   // As in _scaled_mm, Metal 4.1 multiplies K-contiguous fp8 operands natively, with int32 MPP strides
   const bool native = !blockwise && !few_rows && k_contiguous && has_metal_4_1() &&
       std::in_range<int32_t>(params.mm.a_row_stride) && std::in_range<int32_t>(params.mm.b_col_stride);

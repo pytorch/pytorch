@@ -1143,8 +1143,10 @@ class TestFP8MatmulDevice(TestCase, _TestFP8MatmulMixin):
         torch.manual_seed(42)
 
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
+        # On MPS, NVFP4 groups of K may start at any block, half of them 8 bytes past a 16-byte boundary
+        multiple_of = 16 if format == "nvfp4" and torch.device(device).type == "mps" else 32
         input_group_end_offsets = generate_jagged_offs(
-            G, total_K, multiple_of=32, device=device
+            G, total_K, multiple_of=multiple_of, device=device
         )
         X = torch.randn((M, total_K), dtype=torch.bfloat16, device=device) * 0.1
         W = torch.randn((N, total_K), dtype=torch.bfloat16, device=device) * 0.01
