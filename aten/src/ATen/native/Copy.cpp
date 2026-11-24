@@ -31,7 +31,6 @@
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_foreach_copy_native.h>
-#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/expand_copy.h>
 #endif
@@ -66,18 +65,10 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
       self.numel() >= MIN_SZ;
 }
 
-#if !defined(C10_MOBILE)
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
         AT_DISPATCH_V2(                             \
             TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kBComplex32, kHalf, kBool, kBFloat16, \
             AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
-#else
-#define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(    \
-            kComplexHalf, kBComplex32, kHalf,      \
-            kBool, kBFloat16, TYPE, NAME,          \
-            __VA_ARGS__)
-#endif
 
 // special case copy where tensor is contiguous and src is a transposed matrix
 // This can be generalized to most copies, but it's trickier
@@ -90,7 +81,6 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     BLOCK_SZ = 60;
   }
-  Tensor buf = empty({BLOCK_SZ, BLOCK_SZ}, self.options());
 
   // The code below is implemented with the assumption that sizes are equal
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
@@ -98,12 +88,21 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   _AT_DISPATCH_CP_TYPES(self.scalar_type(), "copy_", [&] {
     const scalar_t* sp = src.const_data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
-    scalar_t* bp = buf.data_ptr<scalar_t>();
 
     int64_t NR = src.size(0);
     int64_t NC = src.size(1);
-    for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
-      for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
+    // Blocks write disjoint parts of self, so threads can take ranges of them
+    // (in row-major block order); each range needs its own buffer.
+    int64_t row_blocks = (NR + BLOCK_SZ - 1) / BLOCK_SZ;
+    int64_t col_blocks = (NC + BLOCK_SZ - 1) / BLOCK_SZ;
+    int64_t grain_size =
+        std::max<int64_t>(1, at::internal::GRAIN_SIZE / (BLOCK_SZ * BLOCK_SZ));
+    at::parallel_for(0, row_blocks * col_blocks, grain_size, [&](int64_t first, int64_t last) {
+      auto buf = std::make_unique<scalar_t[]>(BLOCK_SZ * BLOCK_SZ);
+      scalar_t* bp = buf.get();
+      for (const auto b : c10::irange(first, last)) {
+        int64_t R = b / col_blocks * BLOCK_SZ;
+        int64_t C = b % col_blocks * BLOCK_SZ;
         const scalar_t* spo = sp + R + C * NR;
         scalar_t* rpo = rp + C + R * NC;
 
@@ -132,7 +131,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
           memcpy(rpo + r * NC, bp + r * BLOCK_SZ, nc * sizeof(scalar_t));
         }
       }
-    }
+    });
   });
 }
 
@@ -142,6 +141,10 @@ bool is_supported_device(Device device) {
   DeviceType device_type = device.type();
   return device_type == kCPU || device_type == kCUDA || device_type == kHIP || device_type == kVulkan || device_type == kMetal || device_type == kMPS || device_type == kXPU;
 }
+
+} // namespace
+
+namespace at::native {
 
 // Shell dtypes have no defined value conversion. Rejecting casts on the host
 // keeps every backend consistent with tracing; on CUDA they would otherwise
@@ -179,10 +182,6 @@ void check_shell_dtype_cast(ScalarType src, ScalarType dst) {
       " is a shell dtype with no defined conversions. Use .view() to "
       "reinterpret the bytes as a same-size integer dtype instead.");
 }
-
-} // namespace
-
-namespace at::native {
 
 static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: this should be handled during dispatch, but that's missing...

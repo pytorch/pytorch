@@ -26,8 +26,8 @@
 #   as a set) appears on exactly one "# label:" line. When a list extends a
 #   sibling's, the shared labels come first and the distinguishing label last.
 # - A label line leaves out an oncall label when one of its module labels
-#   implies it; .github/label_to_label.yml records which modules imply which
-#   oncall.
+#   implies it; label_parents in OWNERSHIP.yaml records which labels imply
+#   which.
 # - Labels planned but not yet created on GitHub (issues can't be routed to
 #   them until they exist): module: tvm, module: operator benchmarks, module: mobile delegates, module: hipify, module: headeronly, module: github automation
 #
@@ -384,6 +384,7 @@
 # /torch/csrc/Exceptions.cpp
 # /torch/csrc/Exceptions.h
 # /torch/csrc/Export.h
+# /torch/csrc/FakeFallbackKernel.cpp
 # /torch/csrc/FakeTensorMode.cpp
 # /torch/csrc/FakeTensorMode.h
 # /torch/csrc/Generator.cpp
@@ -507,6 +508,7 @@
 # /test/simulate_nccl_errors.py
 # /test/slow_tests.json
 # /test/test_accelerator.py
+# /test/test_stream.py
 # /test/test_ao_sparsity.py
 # /test/test_appending_byte_serializer.py
 # /test/test_as_strided.py
@@ -577,6 +579,7 @@
 # /test/test_pytree.py
 # /test/test_reductions.py
 # /test/test_rename_privateuse1_to_existing_device.py
+# /test/test_rounded_conversion.py
 # /test/test_scatter_gather_ops.py
 # /test/test_schema_check.py
 # /test/test_segment_reductions.py
@@ -760,11 +763,12 @@
 # /torch/utils/
 /torch/_vendor/quack/ @slayton58 @drisspg
 # label: module: dsl-native-ops
-# owner: @drisspg @pearu @slayton58
+# owner: @drisspg @pearu @slayton58 @vkuzo
 /torch/_native/ @slayton58 @drisspg
 /torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
 /test/python_native/test_lce_fused_grad_logits_kernel.py @slayton58 @pearu
 /test/python_native/test_linear_cross_entropy_override.py @slayton58 @pearu
+/torch/utils/_quantize_tensor_validation.py @vkuzo @slayton58
 # label: module: complex
 # owner: @amjames @hameerabbasi
 /torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
@@ -790,7 +794,7 @@
 # owner: @albanD @jbschlosser
 /torch/nn/ @albanD @jbschlosser
 # label: module: dsl-native-ops, module: nn
-# owner: @drisspg @pearu @slayton58
+# owner: @drisspg @pearu @slayton58 @vkuzo
 /torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
 # label: module: nn, module: nn.utils.parametrize
 # owner: @lezcano
@@ -915,15 +919,15 @@
 #
 # [profiler]
 # label: oncall: profiler
-# owner: @ryanzhang22 @scotts
+# owner: @ryanzhang22 @scotts @thomasywang
 # /test/cpp/profiler/test_profiler_collection.cpp
 # /test/profiler/
 # /test/test_throughput_benchmark.py
-/torch/autograd/profiler* @scotts @ryanzhang22
+/torch/autograd/profiler* @scotts @ryanzhang22 @thomasywang
 # /torch/autograd/profiler.py
 # /torch/autograd/profiler_legacy.py
 # /torch/autograd/profiler_util.py
-/torch/csrc/autograd/profiler* @scotts @ryanzhang22
+/torch/csrc/autograd/profiler* @scotts @ryanzhang22 @thomasywang
 # /torch/csrc/autograd/profiler.h
 # /torch/csrc/autograd/profiler_kineto.cpp
 # /torch/csrc/autograd/profiler_kineto.h
@@ -931,8 +935,8 @@
 # /torch/csrc/autograd/profiler_legacy.h
 # /torch/csrc/autograd/profiler_python.cpp
 # /torch/csrc/autograd/profiler_python.h
-/torch/csrc/profiler/ @scotts @ryanzhang22
-/torch/profiler/ @scotts @ryanzhang22
+/torch/csrc/profiler/ @scotts @ryanzhang22 @thomasywang
+/torch/profiler/ @scotts @ryanzhang22 @thomasywang
 #
 # [mobile_runtime]
 # label: oncall: mobile
@@ -957,30 +961,153 @@
 #
 # [infra_ci]
 # label: module: ci
-# owner: @pytorch/pytorch-dev-infra
-/.ci/ @pytorch/pytorch-dev-infra
+# owner: @atalman @huydhn @malfet @zklaus
+/.ci/ @huydhn @atalman
+/.ci/pytorch/build.sh @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/common-build.sh @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/macos-build.sh @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/win-arm64-build.ps1 @huydhn @atalman @malfet @zklaus
+/.ci/pytorch/win-build.sh @huydhn @atalman @malfet @zklaus
+# label: module: ci, module: docker
+# owner: @atalman @huydhn @malfet
+/.ci/docker/ @atalman @huydhn @malfet
+# label: module: ci, module: inductor
+# owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony @atalman @njriasan @warrendeng
+/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony @atalman @njriasan @warrendeng
+#
+# [infra_github_automation]
+# label: module: ci, module: github automation
+# owner: @atalman @drisspg @huydhn @izaitsevfb @jeanschmidt
+/.github/ @huydhn @atalman
+/.github/actions/ @huydhn @jeanschmidt @atalman
+/.github/actions/auto-pr-triage/ @drisspg @izaitsevfb
+/.github/auto-pr-triage/ @drisspg @izaitsevfb
+/.github/workflows/auto-pr-triage.yml @drisspg @izaitsevfb
+/.github/ISSUE_TEMPLATE/ @huydhn
+/.github/ISSUE_TEMPLATE/disable-autorevert.md @jeanschmidt @izaitsevfb
+/.github/ISSUE_TEMPLATE/release-feature-request.yml @atalman
+/.github/auto_request_review.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/label_to_label.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/labeler.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/pytorch-probot.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/cherry_pick.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/delete_old_branches.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/export_pytorch_labels.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/gitutils.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/gql_mocks.json.gz @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/greenlight_* @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/label_utils.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/mergebot_status.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/native_stack.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_cherry_pick.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_delete_old_branches.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_gitutils.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_greenlight_* @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_label_utils.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_mergebot_status.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_native_stack.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_trymerge.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/test_tryrebase.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/trymerge.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/trymerge_explainer.py @izaitsevfb @jeanschmidt @huydhn
+/.github/scripts/tryrebase.py @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/auto_request_review.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/check_mergeability_ghstack.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/cherry-pick.yml @izaitsevfb @jeanschmidt @huydhn @atalman
+/.github/workflows/delete_old_branches.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/revert.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/stale.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/trunk-tagging.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/trymerge.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/tryrebase.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/update-viablestrict.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/update_pytorch_labels.yml @izaitsevfb @jeanschmidt @huydhn
+/.github/workflows/hardened-pr-review-run.yml @izaitsevfb
+/.github/workflows/hardened-pr-review.yml @izaitsevfb
+/.github/workflows/pr-review-scripts-test.yml @izaitsevfb
+# label: module: ci, module: infra
+# owner: @atalman @huydhn @zxiiro
+/.github/arc.yaml @huydhn @atalman @zxiiro
+/.github/scripts/runner_determinator.py @huydhn @atalman @zxiiro
+/.github/scripts/test_runner_determinator.py @huydhn @atalman @zxiiro
+/.github/workflows/_runner-determinator.yml @huydhn @atalman @zxiiro
+/.github/workflows/_select-release-runner.yml @huydhn @atalman @zxiiro
+/.github/workflows/release-runner-groups-refresh.yml @huydhn @atalman @zxiiro
+#
+# [infra_build_packaging]
+# label: module: ci, module: binaries
+# owner: @atalman @huydhn @malfet @zklaus
+/.ci/docker/almalinux/ @atalman @huydhn @malfet @zklaus
+/.ci/docker/manywheel/ @atalman @huydhn @malfet @zklaus
+/.ci/flash-attention/ @atalman @huydhn @malfet @zklaus
+/.ci/libtorch/ @atalman @huydhn @malfet @zklaus
+/.ci/magma/ @atalman @huydhn @malfet @zklaus
+/.ci/pytorch/binary_* @atalman @huydhn @malfet @zklaus
+/.ci/pytorch/check_binary.sh @atalman @huydhn @malfet @zklaus
+/.ci/pytorch/check_wheel_soabi.py @atalman @huydhn @malfet @zklaus
+/.ci/pytorch/smoke_test/ @atalman @huydhn @malfet @zklaus
+/.ci/pytorch/test_example_code/ @atalman @huydhn @malfet @zklaus
+/.ci/wheel/ @atalman @huydhn @malfet @zklaus
+/.github/actions/binary-docker-build/ @atalman @huydhn @malfet @zklaus
+/.github/actions/test-pytorch-binary/ @atalman @huydhn @malfet @zklaus
+/.github/regenerate.sh @atalman @huydhn @malfet @zklaus
+/.github/scripts/build_triton_wheel.py @atalman @huydhn @malfet @zklaus
+/.github/scripts/generate_binary_build_matrix.py @atalman @huydhn @malfet @zklaus
+/.github/scripts/generate_ci_workflows.py @atalman @huydhn @malfet @zklaus
+/.github/scripts/generate_docker_release_matrix.py @atalman @huydhn @malfet @zklaus
+/.github/scripts/windows/ @atalman @huydhn @malfet @zklaus
+/.github/templates/ @atalman @huydhn @malfet @zklaus
+/.github/workflows/_binary-* @atalman @huydhn @malfet @zklaus
+/.github/workflows/_build-triton-wheel-linux.yml @atalman @huydhn @malfet @zklaus
+/.github/workflows/_upload-triton-wheel.yml @atalman @huydhn @malfet @zklaus
+/.github/workflows/build-almalinux-images.yml @atalman @huydhn @malfet @zklaus
+/.github/workflows/build-magma-* @atalman @huydhn @malfet @zklaus
+/.github/workflows/build-manywheel-images* @atalman @huydhn @malfet @zklaus
+/.github/workflows/build-triton-wheel.yml @atalman @huydhn @malfet @zklaus
+/.github/workflows/create_release.yml @atalman @huydhn @malfet @zklaus
+/.github/workflows/docker-builds.yml @atalman @huydhn @malfet @zklaus
+/.github/workflows/docker-release.yml @atalman @huydhn @malfet @zklaus
+/.github/workflows/generated-* @atalman @huydhn @malfet @zklaus
+/.github/workflows/nightly-s3-uploads.yml @atalman @huydhn @malfet @zklaus
+/.github/workflows/test-check-binary.yml @atalman @huydhn @malfet @zklaus
 # label: module: ci, module: rocm
 # owner: @jeffdaily
 /.ci/docker/ubuntu-rocm/ @jeffdaily
 /.ci/docker/common/install_roc*.sh @jeffdaily
 /.ci/docker/common/install_amdsmi.sh @jeffdaily
 /.ci/docker/ci_commit_pins/rocm-*.txt @jeffdaily
-# label: module: ci, module: inductor
-# owner: @Chillee @desertfire @eellison @jataylo @jeffdaily @jithunnair-amd @pruthvistony
-/.ci/docker/ci_commit_pins/triton.txt @desertfire @Chillee @eellison @jeffdaily @jataylo @jithunnair-amd @pruthvistony
+/.ci/pytorch/rocm_preflight.py @jeffdaily
+/.ci/pytorch/rocm_utils.sh @jeffdaily
+/.github/actions/setup-rocm/ @jeffdaily
+/.github/actions/teardown-rocm/ @jeffdaily
+/.github/ci_commit_pins/fbgemm_rocm.txt @jeffdaily
+/.github/scripts/amd/ @jeffdaily
+/.github/workflows/_binary-test-rocm-linux.yml @jeffdaily
+/.github/workflows/_rocm-test-no-dind.yml @jeffdaily
+/.github/workflows/_rocm-test.yml @jeffdaily
+/.github/workflows/docker-cache-rocm.yml @jeffdaily
+/.github/workflows/inductor-perf-test-nightly-rocm-* @jeffdaily
+/.github/workflows/inductor-rocm-* @jeffdaily
+/.github/workflows/periodic-rocm-* @jeffdaily
+/.github/workflows/rocm-* @jeffdaily
+/.github/workflows/slow-rocm-mi200.yml @jeffdaily
+/.github/workflows/trunk-rocm-sandbox.yml @jeffdaily
 # label: module: ci, module: xpu
 # owner: @EikanWang @gujinghui
 /.ci/docker/ci_commit_pins/triton-xpu.txt @EikanWang @gujinghui
-#
-# [infra_github_automation]
-# label: module: ci, module: github automation
-# owner: @pytorch/pytorch-dev-infra
-/.github/ @pytorch/pytorch-dev-infra
-#
-# [infra_build_packaging]
+/.ci/docker/common/install_xpu.sh @EikanWang @gujinghui
+/.ci/docker/triton_xpu_version.txt @EikanWang @gujinghui
+/.ci/docker/ubuntu-xpu/ @EikanWang @gujinghui
+/.ci/pytorch/windows/internal/xpu_install.bat @EikanWang @gujinghui
+/.github/actions/setup-xpu/ @EikanWang @gujinghui
+/.github/actions/teardown-xpu/ @EikanWang @gujinghui
+/.github/ci_commit_pins/sycl-tla.txt @EikanWang @gujinghui
+/.github/workflows/_binary-test-xpu-linux.yml @EikanWang @gujinghui
+/.github/workflows/_xpu-test.yml @EikanWang @gujinghui
+/.github/workflows/inductor-perf-test-nightly-xpu.yml @EikanWang @gujinghui
+/.github/workflows/xpu.yml @EikanWang @gujinghui
 # label: module: build
-# owner: none
-# /.ci/wheel/
+# owner: @atalman @huydhn @malfet @zklaus
 # /.coveragerc
 # /.ctags.d/
 # /.dockerignore
@@ -1023,7 +1150,6 @@
 # [third_party_backend_deps]
 # label: module: third_party
 # owner: none
-# /third_party/NNPACK
 # /third_party/VulkanMemoryAllocator
 # /third_party/XNNPACK
 # /third_party/aiter
@@ -1042,8 +1168,8 @@
 # /third_party/xnnpack_src_defs.bzl
 # /third_party/xnnpack_wrapper_defs.bzl
 # label: oncall: profiler, module: third_party
-# owner: @ryanzhang22 @scotts
-/third_party/dynolog_headers/ @scotts @ryanzhang22
+# owner: @ryanzhang22 @scotts @thomasywang
+/third_party/dynolog_headers/ @scotts @ryanzhang22 @thomasywang
 # label: module: third_party, module: xpu
 # owner: @EikanWang @gujinghui
 /third_party/xpu.txt @EikanWang @gujinghui
@@ -1084,6 +1210,13 @@
 /torch/csrc/distributed/c10d/Backend.* @kwen2501
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 /torch/distributed/distributed_c10d.py @d4l3k @fduwjj @kapilsh
+# label: oncall: distributed infra
+# owner: @d4l3k
+/test/distributed/checkpoint/test_pg_transport.py @d4l3k
+/test/distributed/test_transport_* @d4l3k
+/test/distributed/transport_test_utils.py @d4l3k
+/torch/distributed/_transport/ @d4l3k
+/torch/distributed/checkpoint/_pg_transport.py @d4l3k
 # label: module: fsdp
 # owner: @weifengpy
 /torch/csrc/distributed/fsdp/ @weifengpy
@@ -1114,7 +1247,7 @@
 #
 # [infra_linting]
 # label: module: lint
-# owner: none
+# owner: @atalman @huydhn
 # /.bc-linter.yml
 # /.clang-format
 # /.clang-tidy
@@ -1135,8 +1268,8 @@
 # /scripts/codeowners/
 # /scripts/lint_urls.sh
 # /scripts/lint_xrefs.sh
-# /scripts/lintrunner.py
-# /tools/linter/
+/scripts/lintrunner.py @huydhn @atalman
+/tools/linter/ @huydhn @atalman
 #
 # [infra_codegen]
 # label: module: codegen, module: autograd
@@ -1150,6 +1283,7 @@
 # /test/benchmark_utils/
 # /test/hw_classification_testdata/
 # /test/junit_xml_testdata/
+# /test/prune_skips_testdata/
 # /test/scripts/
 # /test/spincli/
 # /test/strobelight/
@@ -1159,18 +1293,50 @@
 # /test/test_utils.py
 # /test/test_utils_config_module.py
 # /test/test_utils_filelock.py
-# /test/torchci/
 # /tools/test/
-# /tools/testing/
 # /torch/_logging/
 # /torch/testing/
 # /torch/utils/benchmark/
 # label: module: testing
-# owner: @pytorch/pytorch-dev-infra
-/torch/testing/_internal/common_utils.py @pytorch/pytorch-dev-infra
+# owner: @georgehong @huydhn @jathu
+/torch/testing/_internal/common_utils.py @huydhn @georgehong @jathu
 # /torch/testing/_internal/common_methods_invocations.py
 # /torch/testing/_internal/common_device_type.py
-/test/run_test.py @pytorch/pytorch-dev-infra
+/test/run_test.py @huydhn @georgehong @jathu
+/tools/testing/ @huydhn @georgehong @jathu
+# label: module: ci, module: testing
+# owner: @georgehong @huydhn @jathu @jeanschmidt
+/.github/actions/download-td-artifacts/ @jeanschmidt @georgehong
+/.github/actions/filter-test-configs/ @georgehong
+/.github/actions/pytest-cache-download/ @georgehong
+/.github/actions/pytest-cache-upload/ @georgehong
+/.github/actions/upload-sccache-stats/ @georgehong @jathu
+/.github/actions/upload-utilization-stats/ @georgehong @jathu
+/.github/scripts/filter_test_configs.py @georgehong
+/.github/scripts/pytest_cache.py @georgehong
+/.github/scripts/pytest_caching_utils.py @georgehong
+/.github/scripts/test_filter_test_configs.py @georgehong
+/.github/scripts/test_pytest_caching_utils.py @georgehong
+/.github/workflows/llm_td_retrieval.yml @jeanschmidt @georgehong
+/.github/workflows/populate-clickhouse-owners.yml @georgehong @jathu
+/.github/workflows/target-determination-indexer.yml @jeanschmidt @georgehong
+/.github/workflows/target_determination.yml @jeanschmidt @georgehong
+/.github/workflows/td-holdout-unstable.yml @jeanschmidt @georgehong
+/.github/workflows/upload-test-stats-while-running.yml @georgehong @jathu
+/.github/workflows/upload-test-stats.yml @georgehong @jathu
+/.github/workflows/upload-torch-dynamo-perf-stats.yml @georgehong @jathu
+/.github/workflows/upload_test_stats_intermediate.yml @georgehong @jathu
+/tools/stats/ @georgehong @jathu
+/tools/test/test_upload_stats_lib.py @georgehong @jathu
+/tools/test/test_upload_test_stats.py @georgehong @jathu
+/tools/test/heuristics/ @jeanschmidt @georgehong
+/tools/testing/clickhouse.py @georgehong @jathu
+/tools/testing/do_target_determination_for_s3.py @jeanschmidt @georgehong
+/tools/testing/target_determination/ @jeanschmidt @georgehong
+/test/torchci/ @huydhn
+/test/torchci/test_populate_clickhouse_owners.py @georgehong @jathu
+/torch/testing/_internal/torchci/ @georgehong @jathu
+/tools/alerts/ @huydhn
 # label: module: testing, module: higher order operators
 # owner: @aorenste @bohnstingl @tugsbayasgalan @ydwu4
 /torch/testing/_internal/hop_db.py @tugsbayasgalan @ydwu4 @aorenste @bohnstingl
@@ -1325,6 +1491,8 @@
 # /AGENTS.md
 # /AI_POLICY.md
 # /CLAUDE.md
+/scripts/auto_pr_triage/ @drisspg @izaitsevfb
+/scripts/pr_review/ @izaitsevfb
 # /torch/_dynamo/CLAUDE.md
 /torch/REVIEW.md @albanD
 #
@@ -1357,5 +1525,5 @@
 # Keep these rules last so they override broader patterns.
 /CODEOWNERS @albanD @malfet
 /OWNERSHIP.yaml @albanD @malfet
-/.github/merge_rules.yaml @pytorch/pytorch-dev-infra @albanD @malfet
+/.github/merge_rules.yaml @izaitsevfb @jeanschmidt @huydhn @albanD @malfet
 #

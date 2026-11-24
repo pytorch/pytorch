@@ -229,16 +229,18 @@ def is_available() -> bool:
     """
     if not _is_compiled():
         return False
-    if _nvml_based_avail():
-        # The user has set an env variable to request this availability check that attempts to avoid fork poisoning by
-        # using NVML at the cost of a weaker CUDA availability assessment. Note that if NVML discovery/initialization
-        # fails, this assessment falls back to the default CUDA Runtime API assessment (`cudaGetDeviceCount`)
-        return device_count() > 0
-    else:
-        # The default availability inspection never throws and returns 0 if the driver is missing or can't
-        # be initialized. This uses the CUDA Runtime API `cudaGetDeviceCount` which in turn initializes the CUDA Driver
-        # API via `cuInit`
-        return torch._C._cuda_getDeviceCount() > 0
+    counter = torch._C._monitor._WaitCounter("pytorch.wait_counter.cuda.is_available")
+    with counter.guard():
+        if _nvml_based_avail():
+            # The user has set an env variable to request this availability check that attempts to avoid fork poisoning by
+            # using NVML at the cost of a weaker CUDA availability assessment. Note that if NVML discovery/initialization
+            # fails, this assessment falls back to the default CUDA Runtime API assessment (`cudaGetDeviceCount`)
+            return device_count() > 0
+        else:
+            # The default availability inspection never throws and returns 0 if the driver is missing or can't
+            # be initialized. This uses the CUDA Runtime API `cudaGetDeviceCount` which in turn initializes the CUDA Driver
+            # API via `cuInit`
+            return torch._C._cuda_getDeviceCount() > 0
 
 
 def is_bf16_supported(including_emulation: bool = True):
@@ -400,6 +402,10 @@ PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
         "aarch64": {80, 90, 100, 110, 120},
     },
     "13.4": {
+        "x86_64": {75, 80, 86, 90, 100, 120},
+        "aarch64": {80, 90, 100, 110, 120},
+    },
+    "13.5": {
         "x86_64": {75, 80, 86, 90, 100, 120},
         "aarch64": {80, 90, 100, 110, 120},
     },
