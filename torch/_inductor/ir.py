@@ -6751,6 +6751,9 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
         self.failed: bool = False
+        # ms a fusion this choice enables is modeled to save; autotuning
+        # selects on benchmarked time minus this credit.
+        self.fusion_credit_ms: float = 0.0
         # When True, benchmark using CUDA graph capture/replay
         self._benchmark_with_cudagraphs: bool = False
         # A place to store annotations that can be read post benchmarking

@@ -109,7 +109,11 @@
                 unfused_load="a_desc.load([offs_am, offs_k])" if A_ROW_MAJOR else "a_desc.load([offs_k, offs_am]).T",
                 prologue_descriptor_offsets=("offs_am", "offs_k"),
                 prologue_descriptor_block_shape=("BLOCK_M", "BLOCK_K"),
-                prologue_reuse=(-1, "BLOCK_N", -2, "BLOCK_M"),
+                prologue_reuse_counts=(
+                    (LOGICAL_N + BLOCK_N - 1) // BLOCK_N,
+                    BATCH_SIZE * ((LOGICAL_M + BLOCK_M - 1) // BLOCK_M),
+                    K_BATCH_OFFSET,
+                ),
             )}}
             {%- else %}
             a_b = batch + tl.arange(0, 1)[:, None, None]
@@ -161,6 +165,11 @@
                 prologue_descriptor_offsets=("offs_k", "offs_bn") if not TWO_CTAS else None,
                 prologue_descriptor_block_shape=("BLOCK_K", "BLOCK_N") if not TWO_CTAS else None,
                 prologue_descriptor_cat2=(B_ROW_MAJOR and LOGICAL_N == 128 and BLOCK_N == 128),
+                prologue_reuse_counts=(
+                    (LOGICAL_M + BLOCK_M - 1) // BLOCK_M,
+                    BATCH_SIZE * ((LOGICAL_N + BLOCK_N - 1) // BLOCK_N),
+                    K_BATCH_OFFSET,
+                ),
             )}}
             {%- else %}
             b_b = batch + tl.arange(0, 1)[:, None, None]

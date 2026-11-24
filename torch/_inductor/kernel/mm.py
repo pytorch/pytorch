@@ -831,12 +831,24 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         return box
 
+    # A subgraph choice that inlines after autotuning (e.g. decompose-K with a
+    # fusable producer) must be selected now, with its fusion credit, rather
+    # than deferred behind a MultiTemplateBuffer that keeps the subgraph opaque.
+    inline_kwargs = (
+        {"return_multi_template": False}
+        if any(
+            isinstance(choice, SubgraphChoiceCaller) and choice.inline_after_autotune
+            for choice in choices
+        )
+        else {}
+    )
     node, _ = autotune_select_algorithm(
         name,
         choices,
         kernel_inputs.nodes(),
         layout,
         best_config_future=best_config_future,
+        **inline_kwargs,
     )
     return node
 

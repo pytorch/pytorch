@@ -1513,6 +1513,7 @@ class TritonTemplateKernel(TritonKernel):
         prologue_descriptor_block_shape: tuple[str, ...] | None = None,
         prologue_descriptor_cat2: bool = False,
         prologue_reuse: tuple[int, str, int, str] | None = None,
+        prologue_reuse_counts: tuple[int, int, int] | None = None,
     ):
         """Loads an input and applies any necessary preprocessing or masking.
 
@@ -1534,6 +1535,9 @@ class TritonTemplateKernel(TritonKernel):
                 cdiv(out[reuse_dim], reuse_block) output tiles, and the operand
                 has cdiv(out[tile_dim], tile_block) tiles per batch. Recorded
                 for the prologue fusion cost model.
+            prologue_reuse_counts: (reuse, tiles, contraction length) given
+                directly, for templates whose output dims don't map to the
+                operand's tiles (e.g. decompose-K's flattened partials).
         """
 
         if (prologue_descriptor_offsets is None) != (
@@ -1563,7 +1567,18 @@ class TritonTemplateKernel(TritonKernel):
                 input_name
             )
             self._producer_fusion_allowed_input_indices.add(named_input_index)
-        if prologue_reuse is not None and prologue_descriptor_offsets is not None:
+        if prologue_reuse_counts is not None and prologue_descriptor_offsets is not None:
+            reuse, tiles, k = prologue_reuse_counts
+            self.load_input_reuse[input_node.get_name()] = PrologueReuse(
+                reuse=int(reuse),
+                tiles=int(tiles),
+                tile_elems=math.prod(
+                    int(self.meta.get(b, b)) for b in prologue_descriptor_block_shape
+                ),
+                num_stages=self.num_stages,
+                k=int(k),
+            )
+        elif prologue_reuse is not None and prologue_descriptor_offsets is not None:
             reuse_dim, reuse_block, tile_dim, tile_block = prologue_reuse
             out_size = [
                 V.graph.sizevars.optimization_hint(s, fallback=1)
@@ -5066,9 +5081,18 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             return node, choice
 
-        # if we got any timings at all, pick the best of those
-        best_choice = min(timings, key=timings.__getitem__)
+        # if we got any timings at all, pick the best of those, net of the time
+        # a fusion the choice enables is expected to save (fusion_credit_ms)
+        best_choice = min(timings, key=lambda c: timings[c] - c.fusion_credit_ms)
         best_time = timings[best_choice]
+        if best_choice.fusion_credit_ms:
+            log.debug(
+                "%s: picked %s at %.4f ms less a %.4f ms fusion credit",
+                name,
+                best_choice.name,
+                best_time,
+                best_choice.fusion_credit_ms,
+            )
 
         # All benchmarks failed; fall back to ATen if available (#171094)
         if math.isinf(best_time):
