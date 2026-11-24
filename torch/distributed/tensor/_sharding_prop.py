@@ -19,6 +19,9 @@ from torch.distributed.tensor._decompositions import DecompShardingStrategy
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, ShardOrder, TensorMeta
 from torch.distributed.tensor._op_schema import (
     _mesh_free_schema_key,
+    _rebuild_schema_from_cache,
+    _SchemaSkeleton,
+    _split_schema_for_cache,
     OpInfo,
     OpSchema,
     OpSpec,
@@ -207,6 +210,7 @@ class _CachedSpec:
 @dataclass
 class _CachedOutputSharding:
     output_spec: _CachedSpec | tuple[_CachedSpec | None, ...] | None
+    redistribute: tuple[_SchemaSkeleton, tuple[_CachedSpec, ...]] | None
     needs_redistribute: bool
     use_val_from_redistribute_schema: bool
 
@@ -214,12 +218,24 @@ class _CachedOutputSharding:
     def from_output_sharding(
         cls, out: OutputSharding, meshes: list[DeviceMesh]
     ) -> "_CachedOutputSharding | None":
-        if out.redistribute_schema is not None:
-            return None
-
         def cache_one(spec):
             slot = cls._slot_of(spec.mesh, meshes)
             return None if slot is None else _CachedSpec.from_spec(spec, slot)
+
+        if out.redistribute_schema is None:
+            redistribute = None
+        else:
+            split = _split_schema_for_cache(out.redistribute_schema)
+            if split is None:
+                return None
+            skeleton, specs = split
+            cached_specs = []
+            for s in specs:
+                one = cache_one(s)
+                if one is None:
+                    return None
+                cached_specs.append(one)
+            redistribute = (skeleton, tuple(cached_specs))
 
         spec = out.output_spec
         if spec is None:
@@ -241,7 +257,12 @@ class _CachedOutputSharding:
             cached = tuple(items)
         else:
             return None
-        return cls(cached, out.needs_redistribute, out.use_val_from_redistribute_schema)
+        return cls(
+            cached,
+            redistribute,
+            out.needs_redistribute,
+            out.use_val_from_redistribute_schema,
+        )
 
     def to_output_sharding(self, meshes: list[DeviceMesh]) -> OutputSharding:
         spec = self.output_spec
@@ -252,9 +273,17 @@ class _CachedOutputSharding:
         else:
             rebuilt = tuple(e.to_spec(meshes) if e is not None else None for e in spec)
 
+        if self.redistribute is None:
+            redistribute_schema = None
+        else:
+            skeleton, cached_specs = self.redistribute
+            redistribute_schema = _rebuild_schema_from_cache(
+                skeleton, [cs.to_spec(meshes) for cs in cached_specs]
+            )
+
         return OutputSharding(
             output_spec=rebuilt,
-            redistribute_schema=None,
+            redistribute_schema=redistribute_schema,
             needs_redistribute=self.needs_redistribute,
             use_val_from_redistribute_schema=self.use_val_from_redistribute_schema,
         )
