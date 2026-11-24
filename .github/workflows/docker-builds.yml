@@ -22,8 +22,13 @@ concurrency:
 
 env:
   ECR_REGISTRY: 308535385114.dkr.ecr.us-east-1.amazonaws.com
+  # PR (ciflow/docker) builds push to these. Builds in the docker-build
+  # environment (main and release) push to the trusted repos instead, which
+  # only they can write, and copy the images here for PR jobs.
   ECR_REPOSITORY: pytorch/ci-image
   GHCR_REPOSITORY: ghcr.io/pytorch/ci-image
+  ECR_TRUSTED_REPOSITORY: pytorch/trusted/ci-image
+  GHCR_TRUSTED_REPOSITORY: ghcr.io/pytorch/ci-image-trusted
   AWS_DEFAULT_REGION: us-east-1
 
 permissions:
@@ -38,11 +43,14 @@ jobs:
   docker-build:
     needs: check-ci
     if: github.repository_owner == 'pytorch'
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     permissions:
       id-token: write
       contents: read
       packages: write
+    env:
+      # Same condition as `environment` above
+      TRUSTED_BUILD: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.event.ref, 'refs/tags/v')) && 'true' || 'false' }}
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -123,7 +131,7 @@ jobs:
       - name: Login to ECR
         uses: pytorch/pytorch/.github/actions/ecr-login@main
         with:
-          aws-role-to-assume: arn:aws:iam::308535385114:role/arc
+          aws-role-to-assume: ${{ env.TRUSTED_BUILD == 'true' && 'arn:aws:iam::308535385114:role/ci-image-trusted-push' || 'arn:aws:iam::308535385114:role/arc' }}
 
       - name: Login to GHCR
         if: github.event_name == 'push' && github.ref_type == 'branch'
@@ -163,9 +171,17 @@ jobs:
         run: |
           set -ex
           DOCKER_TAG=$(git rev-parse HEAD:.ci/docker)
-          DOCKER_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}"
-          echo "docker-tag=${DOCKER_TAG}" >> "${GITHUB_OUTPUT}"
-          echo "docker-image=${DOCKER_IMAGE}" >> "${GITHUB_OUTPUT}"
+          PR_DOCKER_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}"
+          if [[ "${TRUSTED_BUILD}" == "true" ]]; then
+            DOCKER_IMAGE="${ECR_REGISTRY}/${ECR_TRUSTED_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}"
+          else
+            DOCKER_IMAGE="${PR_DOCKER_IMAGE}"
+          fi
+          {
+            echo "docker-tag=${DOCKER_TAG}"
+            echo "docker-image=${DOCKER_IMAGE}"
+            echo "pr-docker-image=${PR_DOCKER_IMAGE}"
+          } >> "${GITHUB_OUTPUT}"
 
       # The tag is the .ci/docker tree hash, so an existing tag already holds a
       # build of these sources. Rebuilding it (the cron, a revert that restores
@@ -210,6 +226,18 @@ jobs:
           set -ex
           ./build.sh "${{ matrix.docker-image-name }}" -t "${DOCKER_IMAGE}"
 
+      # PR jobs pull from pytorch/ci-image. This also replaces any image a PR
+      # pushed under this tag.
+      - name: Copy the trusted image for PR jobs
+        if: env.TRUSTED_BUILD == 'true'
+        env:
+          DOCKER_IMAGE: ${{ steps.tag.outputs.docker-image }}
+          PR_DOCKER_IMAGE: ${{ steps.tag.outputs.pr-docker-image }}
+        shell: bash
+        run: |
+          set -ex
+          docker buildx imagetools create -t "${PR_DOCKER_IMAGE}" "${DOCKER_IMAGE}"
+
       - name: Mirror image to GHCR
         if: github.event_name == 'push'
         env:
@@ -219,9 +247,14 @@ jobs:
         run: |
           set -ex
           tags=(-t "${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}")
-          # Only main/release move the floating tag, never a ciflow/docker PR
-          if [[ "${{ github.ref_type }}" == "branch" ]]; then
-            tags+=(-t "${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}")
+          # Only main/release move the floating tag and write the trusted
+          # package, never a ciflow/docker PR
+          if [[ "${TRUSTED_BUILD}" == "true" ]]; then
+            tags+=(
+              -t "${GHCR_REPOSITORY}:${{ matrix.docker-image-name }}"
+              -t "${GHCR_TRUSTED_REPOSITORY}:${{ matrix.docker-image-name }}-${DOCKER_TAG}"
+              -t "${GHCR_TRUSTED_REPOSITORY}:${{ matrix.docker-image-name }}"
+            )
           fi
           # `buildx imagetools create` does a server-side cross-registry copy,
           # so we don't need a local pull/push round-trip.
@@ -231,7 +264,7 @@ jobs:
         if: contains(matrix.docker-image-name, 'rocm')
         run: |
           docker_image_name="${{ matrix.docker-image-name }}"
-          docker_image_tag="${{ steps.tag.outputs.docker-image }}"
+          docker_image_tag="${{ steps.tag.outputs.pr-docker-image }}"
           echo "${docker_image_name}=${docker_image_tag}" >> "docker-builds-output-${docker_image_name}.txt"
 
       - name: Upload artifacts
