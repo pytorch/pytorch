@@ -97,7 +97,7 @@ struct TcfgTensorInfo {
 
 #define TCFG_NO_VERSION UINT64_MAX
 
-#define TCFG_API_VERSION 17
+#define TCFG_API_VERSION 18
 
 // A node of the autograd graph, as the engine reads it when it takes the
 // backward of a graph down (node_info).
@@ -288,7 +288,10 @@ struct TcfgApi {
   // The modes of the thread that a graph depends on, as one number: whether
   // gradients are recorded (bit 0), inference mode (1), autocast for CUDA
   // (2) and for the CPU (3), the default dtype (bits 8 to 15) and, from bit
-  // 16, how many torch function modes are active.
+  // 16, how many torch function modes are active. Bits 4 to 6: what runs
+  // Python code under the operations of the thread where gradients are
+  // recorded: a saved-tensor hook is on (4), a node-creation hook is on (5),
+  // anomaly mode is on (6).
   uint64_t (*call_modes)();
 
   // New reference: what a graph that has the call of a site as a node is

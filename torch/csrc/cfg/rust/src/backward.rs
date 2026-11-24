@@ -374,7 +374,10 @@ impl Drop for Steady<'_> {
 /// backward does not serve: looked at at every call of a form.
 fn needs_tape(py: Python<'_>) -> PyResult<Option<&'static str>> {
     let torch = torch(py)?;
-    if torch.call_method0("is_anomaly_enabled")?.extract()? {
+    // What runs under the operations is read off the modes of the thread,
+    // as at the entry of a graph: no function of torch is asked by name.
+    let modes = capi::api().map_or(capi::MODES_UNDER_OPERATIONS, |api| unsafe { (api.call_modes)() });
+    if modes & capi::MODE_ANOMALY != 0 {
         return Ok(Some("anomaly mode"));
     }
     let c = torch.getattr("_C")?;
@@ -385,8 +388,11 @@ fn needs_tape(py: Python<'_>) -> PyResult<Option<&'static str>> {
     if level >= 0 {
         return Ok(Some("a forward-mode level"));
     }
-    if !c.getattr("_autograd")?.call_method1("_top_saved_tensors_default_hooks", (true,))?.is_none() {
+    if modes & capi::MODE_SAVES_HOOKED != 0 {
         return Ok(Some("saved-tensor hooks"));
+    }
+    if modes & capi::MODE_NODES_HOOKED != 0 {
+        return Ok(Some("a node-creation hook"));
     }
     Ok(None)
 }

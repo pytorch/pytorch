@@ -3684,16 +3684,16 @@ in eager mode, under `torch.vm` with `Graphs(), Inductor()`, and under
 times, and the figures are the median of the three medians. At inference the
 runner has `torch.no_grad()` around the calls of a model, and the
 `forward_pass` of the huggingface suite enters it itself. Measured that way,
-which is what the dashboard's runner does, on the code seven steps before
-this commit; none of the seven changes a graph of these models (their
-graphs, operations, runs in a call and hits are the same on all eight): one
+which is what the dashboard's runner does, on the code eight steps before
+this commit; none of the eight changes a graph of these models (their
+graphs, operations, runs in a call and hits are the same on all nine): one
 process a row, the median of three turns, on 16 cores under the lock for
 timed runs, with the load average between 1.8 and 7.5 in front of a row
 (above 4 in front of three of them) and nothing else on the GPU. Taken again
 on this commit's code and on the code one step before it, model by model in
 one window, the 13 rows differ by no more than eager mode and
 `torch.compile` differ between the same two processes (`torch.vm` between
-0.96 and 1.04 of the row of the step before, and between 0.98 and 1.02 of it
+0.93 and 1.03 of the row of the step before, and between 0.97 and 1.02 of it
 against those two). The graphs that run are those counted above (DistillGPT2
 with the operations it has on a GPU; of hf_DistilBert the graph of a layer
 and the one of its feed-forward part run six times each in a call):
@@ -3717,7 +3717,7 @@ for five of the models (`python benchmarks/dynamo/torchbench.py
 --performance --inference --bfloat16 --only MODEL` with `--vm` and with
 `--backend inductor`, `timm_models.py` and `huggingface.py` for the models
 of those suites; one run each), which report the speed against eager mode,
-next to what the tool had on the runner's code. That is the code twelve
+next to what the tool had on the runner's code. That is the code thirteen
 steps before this commit (the one that changed which dicts the engine looks
 a name up in): the runner's lines were taken one after the other with the
 load average between 0.8 and 2.6 in front of a line and nothing else on the
@@ -3758,9 +3758,9 @@ same tool on the same code as the rows of this job (the Rust of its build is
 that tree's byte for byte), on 16 cores, with the load average between 5 and
 6 and nothing else on the GPU. With gradients recorded only 2 small graphs
 of hf_DistilBert run (6 x1, 4 x1), and its call takes what eager's takes.
-The rows of yolov3 and of DistillGPT2's training step are of the code seven
+The rows of yolov3 and of DistillGPT2's training step are of the code eight
 steps before this commit, measured with the rows of the table in the
-runner's mode (the load average 6.0 and 4.2 in front of them). Thirteen
+runner's mode (the load average 6.0 and 4.2 in front of them). Fourteen
 steps before, when a graph gave only what the code behind it reads, another
 job had yolov3 with gradients recorded at 7.67 ms (1.53 times eager's speed)
 in the process that fills the compiler's cache and at 7.73 ms (1.54) with
@@ -3774,8 +3774,8 @@ DistillGPT2 6 and 3 where they gave 3 and 1, and two graphs of whisper-tiny
 7 and 4 where they gave 6 and 3; the graphs of the other models give what
 they gave. With gradients recorded the graph of yolov3 is cut at 28 more of
 its results, those that it also reads ("Writes"). That costs yolov3 nothing
-that two takes of the row tell apart under `torch.no_grad()` (4.31 ms seven
-steps before this commit and 4.48 nine steps before it, on the same graph,
+that two takes of the row tell apart under `torch.no_grad()` (4.31 ms eight
+steps before this commit and 4.48 ten steps before it, on the same graph,
 for 4.34) and about a third with gradients recorded (10.47 ms and 9.98 for
 7.67 and 7.73; 9.19 of the 10.34 ms that the tool takes apart are in what
 stands for the graph). The rows of this section with gradients recorded that
@@ -4104,26 +4104,27 @@ What graphs do not do at this stage:
   code that eager mode runs inside every operation that saves a tensor for
   its backward. It is handed what the operation saves, and it may raise
   there: a checkpoint ends the run that computes its function again that
-  way. Anomaly mode (`torch.autograd.detect_anomaly`) keeps, for every node
-  that is made, the stack of the function at the line of the operation.
-  While one of them is on no graph is made or run, whatever the list of
-  passes: the operations of the function run as they are, each with what
-  eager mode runs under it, and what a hook raises leaves the instruction it
-  ran under. A function under gradient checkpointing without reentry
-  therefore runs at eager's speed, no faster: a step of a function of eight
-  kernels on small tensors takes 530 us for eager's 536, and 1.14 times
-  eager's time with `demote=False`, where the Python code of the
-  checkpoint's hook runs compiled as well. That is asked at every entry of a
-  graph, where gradients are enabled, and nothing of it stays: a function
-  that is checkpointed in some of its calls runs its graphs in the others,
-  and with `use_reentrant=True`, which puts no hook on, its graphs run.
-  Without gradients such a hook is never called, and the graphs run under
-  it. The question is two calls of functions of C, about 65 ns together when
-  they are asked from Python, which do not show in a call of a small graph
-  with its backward (128.0 us on the code one step before this commit, 128.4
-  with the question, where three rounds of one build differ by 2). The
-  measurement against the interpreter (`demote`) takes a call under a hook
-  as a sample like any other.
+  way. A node-creation hook (`torch.autograd.graph.node_creation_hook`) is
+  called for every node that an operation makes, and may raise as well.
+  Anomaly mode (`torch.autograd.detect_anomaly`) keeps, for every node that
+  is made, the stack of the function at the line of the operation. While one
+  of them is on no graph is made or run, whatever the list of passes: the
+  operations of the function run as they are, each with what eager mode runs
+  under it, and what a hook raises leaves the instruction it ran under. A
+  function under gradient checkpointing without reentry therefore runs at
+  eager's speed, no faster: a step of a function of eight kernels on small
+  tensors takes 530 us for eager's 536, and 1.14 times eager's time with
+  `demote=False`, where the Python code of the checkpoint's hook runs
+  compiled as well. That is asked at every entry of a graph, where gradients
+  are enabled, and nothing of it stays: a function that is checkpointed in
+  some of its calls runs its graphs in the others, and with
+  `use_reentrant=True`, which puts no hook on, its graphs run. Without
+  gradients a saved-tensor hook is never called, and the graphs run under
+  it; a node-creation hook keeps a graph out there as well, since what a
+  compiler makes of a graph makes nodes where eager mode makes none. The
+  question is read off the modes of the thread with the others, at every
+  entry of a graph. The measurement against the interpreter (`demote`) takes
+  a call under a hook as a sample like any other.
 - With gradients recorded, a graph has a backward of its own only if eager's
   nodes for its operations give nothing when they are handed no gradient and
   the same bits when they are run twice. The cuDNN kernel that
@@ -4199,8 +4200,8 @@ What graphs do not do at this stage:
   the graph. A `TorchDispatchMode` that is on around a backward with
   `create_graph=True` sees the kernels of the forward once more, which that
   backward runs again on the tape; a saved-tensor hook or a node-creation
-  hook that is on only around such a backward is called for them once more
-  as well.
+  hook that is on around such a backward (and was not on around the call) is
+  called for what those kernels save and for their nodes as well.
 - With several results, what only the nodes of one result keep of an
   input lives until the last of the results ends or a backward releases
   it, where in eager mode it ends with that result: a graph has one node
@@ -4220,14 +4221,6 @@ What graphs do not do at this stage:
   written to in place since the call (eager kept what it needs of it), or
   one of whose inputs that the node holds itself was given other data
   (`t.data = ...`) since the call.
-- `torch.autograd.graph.node_creation_hook` is not known to the engine,
-  which cannot ask whether one is on. With the engine's backward such a
-  hook is called for the nodes the engine makes (the node of a graph, and
-  that of an input it stands for), not for eager's node of each
-  operation. And a hook that raises once under a graph that keeps eager's
-  tape (`Graphs(backward=False)` and a pass) is not raised: what was made
-  of the graph is taken to have run nothing, the instructions run, and the
-  hook is called again for their nodes.
 - On an accelerator a backward runs on the device's autograd thread, and
   what that run still has ends a moment after the caller has its answer, on
   that thread: the gradients of a `torch.autograd.grad(...,

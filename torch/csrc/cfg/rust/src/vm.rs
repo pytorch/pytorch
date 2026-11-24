@@ -5278,15 +5278,29 @@ impl Compiled {
         if modes >> 16 != 0 {
             return PathEnd::Miss;
         }
-        // Nor, where gradients are recorded, while a saved-tensor hook or
-        // anomaly mode is on: eager runs Python code under every operation
-        // that makes a node then, which is handed what the operation saves
-        // or looks at the frame, and may raise there. The instructions
-        // run, each with what eager runs under it, and what that raises
-        // leaves the instruction it ran under.
-        if modes & 1 != 0 && graph::under_operations() {
+        // Nor, where gradients are recorded, while a saved-tensor hook, a
+        // node-creation hook or anomaly mode is on: eager runs Python code
+        // under every operation that makes a node then, which is handed
+        // what the operation saves or the node it made, or looks at the
+        // frame, and may raise there. What was made of a graph is no
+        // stand-in for the instructions then: it saves other tensors and
+        // makes other nodes or none, the frame stands at the front of the
+        // graph while it runs, and behind a raise inside it the frame,
+        // the handlers and the stores of the function are not where the
+        // instructions leave them, while running the instructions again
+        // would run the hooks again. The instructions run, each with
+        // what eager runs under it, and what that raises leaves the
+        // instruction it ran under.
+        // Without gradients nothing is saved and anomaly mode keeps no
+        // stack; a node-creation hook is called for every node that is
+        // made on the thread, also for those that what a compiler made of
+        // a graph makes where eager makes none, and by what a pass traces.
+        let under = if modes & 1 != 0 { capi::MODES_UNDER_OPERATIONS } else { capi::MODE_NODES_HOOKED };
+        if modes & under != 0 {
             return PathEnd::Miss;
         }
+        // A form is for the calls with and without them alike.
+        let modes = modes & !capi::MODES_UNDER_OPERATIONS;
         let (mut included, mut excluded) = (0u64, 0u64);
         (api.dispatch_keys)(&mut included, &mut excluded);
         let world = (modes, included, excluded);

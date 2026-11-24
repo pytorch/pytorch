@@ -25,9 +25,12 @@ pub fn init(capsule: &Bound<'_, PyCapsule>) -> PyResult<()> {
     let api = capsule.pointer_checked(Some(c"torch._C._cfg_c_api"))?.as_ptr() as *mut TcfgApi;
     let version = unsafe { (*api).version };
     if version != TCFG_API_VERSION {
-        return Err(PyRuntimeError::new_err(
-            "torch._C and the torch.vm runtime were built from different sources",
-        ));
+        // A table of another version has other entries: nothing of it is
+        // called, and the table the runtime has, if any, stays.
+        let text = format!(
+            "torch.vm: torch._C has version {version} of the C API of the runtime and torch._cfg_rs has version {TCFG_API_VERSION}: the two were built from different sources"
+        );
+        return Err(PyRuntimeError::new_err(text));
     }
     capi::set_api(api);
     if let Some(hook) = unsafe { (*api).frame_hook } {

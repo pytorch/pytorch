@@ -139,7 +139,8 @@ class Graphs(BuiltinPass):
     gradients enabled under a saved-tensor hook
     (``torch.autograd.graph.saved_tensors_hooks``, ``save_on_cpu``,
     ``torch.utils.checkpoint.checkpoint(..., use_reentrant=False)``) or in
-    anomaly mode, which run Python code under each operation. Where what
+    anomaly mode, and a call under ``torch.autograd.graph.node_creation_hook``,
+    which run Python code under each operation. Where what
     was exported raises, the operations run in its place for that call, and
     raise where the function has them. With a pass over graphs
     in the list and this pass missing, it is taken to be there, in front of

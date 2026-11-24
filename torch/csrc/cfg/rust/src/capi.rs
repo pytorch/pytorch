@@ -27,7 +27,14 @@ pub const TCFG_ALLOW_SKIP_AUTOGRAD: u32 = 1;
 
 pub const TCFG_UNBOXED_RESULT: u32 = 1;
 
-pub const TCFG_API_VERSION: u32 = 17;
+pub const TCFG_API_VERSION: u32 = 18;
+/// The bits of `call_modes` that say eager runs Python code under the
+/// operations of the thread where gradients are recorded: a saved-tensor
+/// hook is on, a node-creation hook is on, anomaly mode is on.
+pub const MODE_SAVES_HOOKED: u64 = 0x10;
+pub const MODE_NODES_HOOKED: u64 = 0x20;
+pub const MODE_ANOMALY: u64 = 0x40;
+pub const MODES_UNDER_OPERATIONS: u64 = MODE_SAVES_HOOKED | MODE_NODES_HOOKED | MODE_ANOMALY;
 
 #[repr(C)]
 pub struct TcfgPyOp {

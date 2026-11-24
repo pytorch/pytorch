@@ -1,7 +1,9 @@
 #include <torch/csrc/cfg/cfg.h>
 #include <torch/csrc/cfg/workspace.h>
 
+#include <ATen/NodeCreationHooks.h>
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/SavedTensorHooks.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/ThreadLocalState.h>
 #include <ATen/autocast_mode.h>
@@ -19,6 +21,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/utils.h>
@@ -2404,6 +2407,9 @@ uint64_t callModes() {
   modes |= c10::InferenceMode::is_enabled() ? 2 : 0;
   modes |= at::autocast::is_autocast_enabled(at::kCUDA) ? 4 : 0;
   modes |= at::autocast::is_autocast_enabled(at::kCPU) ? 8 : 0;
+  modes |= at::SavedTensorDefaultHooks::get_tls_state().stack.empty() ? 0 : 16;
+  modes |= at::impl::NodeCreationHooks::empty() ? 0 : 32;
+  modes |= torch::autograd::AnomalyMode::is_enabled() ? 64 : 0;
   modes |= static_cast<uint64_t>(c10::get_default_dtype_as_scalartype()) << 8;
   modes |= static_cast<uint64_t>(at::impl::PythonTorchFunctionTLS::stack_len())
       << 16;
