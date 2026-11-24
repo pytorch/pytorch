@@ -506,6 +506,7 @@ PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
       return obj.release();
     }
   }
-  // obj is destroyed after the mutex is released, since its dealloc locks it.
+  // Return cached and let the unused obj be destroyed after the mutex is
+  // released, since obj's deallocator acquires the same mutex.
   return cached;
 }
