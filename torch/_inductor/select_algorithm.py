@@ -3669,8 +3669,11 @@ class BlackwellWSTemplateKernel(TritonTemplateKernel):
         """autoWS loop-header kwarg for large epilogue staging slots."""
 
         def hook() -> str:
+            from .autows_utils import has_smem_operand_ring_first
+
             meta = self.meta
-            if meta.get("TWO_CTAS"):
+            # Triton builds without the option reject the kwarg outright.
+            if meta.get("TWO_CTAS") or not has_smem_operand_ring_first():
                 return ""
             buffers = {**self.args.output_buffers, **self.args.inplace_buffers}
             names = [

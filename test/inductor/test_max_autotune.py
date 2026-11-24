@@ -1128,10 +1128,14 @@ class TestMaxAutotune(TestCase):
         not has_datacenter_blackwell_tma_device(), "Need data-center Blackwell TMA"
     )
     def test_blackwell_ws_operand_ring_first_large_staging(self):
+        from torch._inductor.autows_utils import has_smem_operand_ring_first
         from torch._inductor.heuristics.template.triton import USE_META_WS
 
         if not USE_META_WS:
             raise unittest.SkipTest("Needs Meta autoWS")
+        # Without the tl.range option the kwarg must not be emitted, and the
+        # compile must still succeed.
+        supported = has_smem_operand_ring_first()
 
         a = torch.randn(4096, 512, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(512, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
@@ -1141,7 +1145,10 @@ class TestMaxAutotune(TestCase):
             r"(?=.*BLOCK_M=256)(?=.*BLOCK_N=256)(?=.*DATA_PARTITION_FACTOR=2)"
             r"(?=.*EPILOGUE_SUBTILE=8)(?=.*TWO_CTAS=False)"
         )
-        for fn, expected in ((lambda a, b: (a @ b).float(), True), (torch.mm, False)):
+        for fn, expected in (
+            (lambda a, b: (a @ b).float(), supported),
+            (torch.mm, False),
+        ):
             torch._dynamo.reset()
             with config.patch(
                 {
@@ -1151,6 +1158,8 @@ class TestMaxAutotune(TestCase):
                     "triton.enable_template_autows": True,
                     "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                     "test_configs.autotune_choice_desc_regex": desc,
+                    # The async-pipelined suite caps max_mm_configs at 1.
+                    "test_configs.max_mm_configs": None,
                 }
             ):
                 out, code = run_and_get_code(torch.compile(fn), a, b)
