@@ -2724,8 +2724,8 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
         == "1"
     )
-    # If set to true, will skip some non-critical checks in the mix order reduction
-    # this could be helpful to avoid recompilations in some cases
+    # If set to true, mix order reductions add no size guards, rejecting only
+    # workloads statically known to be too small, to avoid recompilations.
     mix_order_reduction_non_strict_mode = False
 
     # Maximum external read buffers (loads) in a mix-order reduction

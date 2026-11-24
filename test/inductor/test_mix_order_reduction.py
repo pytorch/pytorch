@@ -1152,8 +1152,8 @@ class MixOrderReductionTest(TestBase):
         mock_is_split_reduction: mock.Mock,
     ):
         """
-        This tests whether we can skip some non-critical checks
-        when non_strict mode is on
+        Non-strict mode fuses rows that strict mode cannot prove large enough,
+        but not split row reductions.
         """
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
@@ -1181,14 +1181,6 @@ class MixOrderReductionTest(TestBase):
 
         mock_has_mix_reduction_orders.return_value = True
         mock_get_common_read.return_value = "common_read"
-        from sympy import Integer
-
-        mock_get_numel_rnumel.side_effect = [
-            (Integer(2), Integer(1)),
-            (Integer(1), Integer(2)),
-            (Integer(2), Integer(1)),
-            (Integer(1), Integer(2)),
-        ]
         mock_is_split_reduction.return_value = False
 
         mock_node_1.read_writes = mock.Mock()
@@ -1201,6 +1193,15 @@ class MixOrderReductionTest(TestBase):
 
         gm = make_fx(lambda: torch.zeros(2, 3))()
         graph = GraphLowering(gm)
+        # Strict mode cannot prove the size thresholds for data-dependent rows,
+        # and non-strict mode cannot rule them out.
+        from sympy import Integer
+
+        nrow = graph.sizevars.shape_env.create_unbacked_symint().node.expr
+        ncol = Integer(128)
+        mock_get_numel_rnumel.side_effect = lambda node: (
+            (nrow, ncol) if node is mock_node_1 else (ncol, nrow)
+        )
 
         with (
             V.set_graph_handler(graph),
@@ -1218,6 +1219,9 @@ class MixOrderReductionTest(TestBase):
             ),
         ):
             self.assertTrue(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
+            # a split row reduction is factored differently by codegen
+            mock_is_split_reduction.return_value = True
+            self.assertFalse(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
 
     @patch("torch._inductor.scheduler.MixOrderReduction.is_split_reduction")
     @patch("torch._inductor.scheduler.MixOrderReduction.get_numel_rnumel")
@@ -1492,7 +1496,8 @@ class MixOrderReductionTest(TestBase):
         For example, fusion might see (13, 8472) but codegen sees (26, 4236) after
         the reduction split optimization adds a factor of 2 to the pointwise dimensions.
 
-        We skip fusing split reductions for node1 in this case.
+        Non-strict mode rejects this static shape as too small, so M is marked
+        dynamic to keep testing the fused kernel.
         """
 
         if not inductor_config.triton.mix_order_reduction:
@@ -1527,12 +1532,13 @@ class MixOrderReductionTest(TestBase):
         dy = torch.randn_like(x)
         eps = 1e-5
 
+        torch._dynamo.mark_dynamic(x, 0)
         opt_f = torch.compile(f)
 
         ref = fwd_bwd(f)
         act = fwd_bwd(opt_f)
         torch.testing.assert_close(ref, act, atol=1e-3, rtol=1e-3)
-        self.assertGreaterEqual(metrics.codegen_mix_order_reduction, 0)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
 
     def test_keepdim_shape_mismatch(self):
         """
@@ -1618,6 +1624,19 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(list(act[0].shape), list(ref[0].shape))
         self.assertEqual(list(act[1].shape), list(ref[1].shape))
         self.assertTrue(same(ref, act, tol=1e-3))
+
+    @parametrize("shape", ((4096, 1024), (2048, 4096)))
+    @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
+    def test_non_strict_mode_skips_static_small_workloads(self, shape):
+        # Too few elements, or too few rows: not fused, as in strict mode.
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        torch.compile(f)(torch.randn(shape, device=GPU_TYPE))
+        self.assertEqual(0, metrics.codegen_mix_order_reduction)
 
 
 class OverFusionTest(TestBase):

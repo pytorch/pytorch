@@ -512,21 +512,20 @@ class MixOrderReduction:
         g1 = cls.get_numel_rnumel(contiguous_node)
         nrow, ncol = g1
 
-        # in non strict mode, we will skip the non-critical checks
-        if not config.triton.mix_order_reduction_non_strict_mode:
-            # the fused version has worse perf than non-fused version for
-            # small workload. When a workload is small enough, data can be
-            # fully cached by L2
-            size_thres = 5 * 2**20
-
-            # Don't use hint directly since hint can be non-representative.
-            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow * ncol, size_thres)):
+        # Fusion is slower for small workloads, which L2 caches anyway, and for
+        # too few rows to split. Non-strict mode adds no guards.
+        size_thres = 5 * 2**20
+        min_rows = 4096
+        sizevars = V.graph.sizevars
+        if config.triton.mix_order_reduction_non_strict_mode:
+            small = sizevars.statically_known_lt(nrow * ncol, size_thres)
+            if small or sizevars.statically_known_lt(nrow, min_rows):
                 return False
-
-            # Need enough rows to split the other reduction across; too few
-            # gives insufficient parallelism to justify the fusion overhead.
-            if not V.graph.sizevars.guard_or_false(sympy.Ge(nrow, 4096)):
-                return False
+        elif not (
+            sizevars.guard_or_false(sympy.Ge(nrow * ncol, size_thres))
+            and sizevars.guard_or_false(sympy.Ge(nrow, min_rows))
+        ):
+            return False
 
         # Equal groups can be true square inner+outer reductions, but also
         # same-order reductions where an unrelated read makes one node look
