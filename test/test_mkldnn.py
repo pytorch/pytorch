@@ -18,12 +18,12 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 import torch
 import torch.nn.functional as F
 import torch.backends.mkldnn
+from torch.testing import FileCheck
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
     run_tests, gradcheck, gradgradcheck, IS_WINDOWS, \
     skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision, \
-    parametrize, instantiate_parametrized_tests, HardwareClassification, \
-    expectedIfCppFakeTensor
+    parametrize, instantiate_parametrized_tests, HardwareClassification
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -823,7 +823,7 @@ class TestMkldnn(TestCase):
                 self.assertEqual(y1, y2.to_dense())
 
     # https://github.com/pytorch/pytorch/issues/127111
-    @expectedIfCppFakeTensor(lambda fn: fn, xfailIfTorchDynamo)
+    @xfailIfTorchDynamo
     def test_max_pool_unsupported(self):
         # OneDNN not support dilation max_pooling, will be avilabled in v2.0.
         N = torch.randint(3, 10, (1,)).item()
@@ -1021,6 +1021,23 @@ class TestMkldnn(TestCase):
         C = torch.randint(3, 100, (1,)).item()
         x = torch.randn(N, C, 30, 30, 30, dtype=torch.float32) * 10
         self._test_batch_norm_base(dim=3, channels=C, input=x)
+
+    @skipIfTorchDynamo("TorchScript graph pass")
+    def test_mkldnn_layer_norm(self):
+        # prim::MKLDNNLayerNorm is only emitted by the frozen-graph MKLDNN pass.
+        mod = torch.nn.Sequential(
+            torch.nn.Conv2d(8, 8, 1), torch.nn.LayerNorm(8), torch.nn.Conv2d(8, 8, 1)
+        ).eval()
+        # Non-default scale and shift, so dropping either changes the output.
+        with torch.no_grad():
+            mod[1].weight.uniform_(0.5, 1.5)
+            mod[1].bias.uniform_(-0.5, 0.5)
+        scripted_mod = torch.jit._freeze.freeze(torch.jit._script.script(mod))
+        torch._C._jit_pass_convert_frozen_ops_to_mkldnn(scripted_mod.graph)
+        FileCheck().check("prim::MKLDNNLayerNorm").run(scripted_mod.graph)
+
+        inp = torch.rand([1, 8, 8, 8])
+        self.assertEqual(scripted_mod(inp), mod(inp))
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def _test_batch_norm_bf16_base(self, dim, channels, input):
@@ -1394,13 +1411,34 @@ class TestMkldnn(TestCase):
         self.assertEqual(x1.size(), x2.to_dense().size())
         self.assertEqual(x1.dtype, x2.to_dense().dtype)
 
-    def test_zero_(self):
-        x1 = torch.randn(4, 5, dtype=torch.float32) * 10
-        x2 = x1.clone().to_mkldnn()
-        self.assertEqual(
-            x1.zero_(),
-            x2.zero_().to_dense(),
+    @parametrize("dtype", types + [torch.int8, torch.uint8])
+    @parametrize("shape", [(0,), (1,), (63,), (64,), (65,), (4, 5), (2, 17, 3, 3), (16385,)])
+    def test_zero_(self, dtype, shape):
+        x = torch.full(shape, 1, dtype=dtype)
+        mkldnn_x = x.to_mkldnn()
+        self.assertIs(mkldnn_x.zero_(), mkldnn_x)
+        self.assertTrue(mkldnn_x.is_mkldnn)
+        self.assertEqual(mkldnn_x.dtype, dtype)
+        self.assertEqual(mkldnn_x.to_dense(), torch.zeros_like(x))
+
+    @parametrize("dtype", types)
+    def test_zero_padded_weights(self, dtype):
+        lowp_support = {
+            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+            torch.half: torch.ops.mkldnn._is_mkldnn_fp16_supported,
+        }
+        if dtype in lowp_support and not lowp_support[dtype]():
+            self.skipTest("CPU does not support this low-precision weight reorder")
+
+        weight = torch.ones(17, 17, 3, 3, dtype=dtype)
+        packed = torch._C._nn.mkldnn_reorder_conv2d_weight(
+            weight.to_mkldnn(), (1, 1), (1, 1), (1, 1), 1,
         )
+        if torch.ops.mkldnn._nbytes(packed) == weight.numel() * weight.element_size():
+            self.skipTest("Selected oneDNN weight format does not use padding")
+
+        self.assertIs(packed.zero_(), packed)
+        self.assertEqual(packed.to_dense(), torch.zeros_like(weight))
 
     def test_is_mkldnn(self):
         x = torch.randn(1, dtype=torch.float32)
