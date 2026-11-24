@@ -320,7 +320,7 @@ def _registered_module_for_globals(
     return None
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(slots=True)
 class SpeculationEntry:
     filename: str
     lineno: int
@@ -398,9 +398,12 @@ class SpeculationLog:
         RestartAnalysis calls.  Args are used only for debug checks.
         """
         if len(self.entries) == self.index:
-            self.entries.append(
-                SpeculationEntry(filename, lineno, instruction_pointer, inst)
-            )
+            entry = SpeculationEntry(filename, lineno, instruction_pointer, inst)
+            self.entries.append(entry)
+            # Preserve the equality check for str subclasses used as filenames.
+            if type(filename) is str:
+                self.index += 1
+                return entry
         entry = self.entries[self.index]
         if not (
             entry.instruction_pointer == instruction_pointer
@@ -1560,6 +1563,10 @@ class ExceptionStack:
         return f"{self._exc_stack=} - {self._current_exception=}"
 
     __repr__ = __str__
+
+
+def _return_true() -> bool:
+    return True
 
 
 class InstructionTranslatorBase(
@@ -4202,7 +4209,7 @@ class InstructionTranslatorBase(
         # TOS: resume 1, [remaining resumes, frames, *(frame 1 stack + locals)]
         cg.extend_output(create_call_function_ex(False, True))
 
-    def should_compile_partial_graph(self) -> bool:
+    def _can_compile_partial_graph(self) -> bool:
         # Do not compile if current instruction's block is not the top with block
         entry = self.current_instruction.exn_tab_entry
         if entry and (
@@ -4217,7 +4224,12 @@ class InstructionTranslatorBase(
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
             and not self.skip_one_hop_torch_function_depth
-            # Do not allow nested graph breaks in HOPs
+        )
+
+    def should_compile_partial_graph(self) -> bool:
+        # Do not allow graph breaks inside a higher-order operator's subgraph.
+        return (
+            self._can_compile_partial_graph()
             and self.output.current_tracer.parent is None
         )
 
@@ -5387,14 +5399,32 @@ class InstructionTranslatorBase(
         self.push(VariableTracker.build(self, self._common_constants[inst.arg]))
 
     def is_non_empty_graph(self) -> bool:
-        calls = 0
-        for node in self.output.graph.nodes:
+        tracer = self.output.current_tracer
+        graph = tracer.graph
+        # A new translator can reuse these calls while both are live in its graph.
+        pair = tracer._non_empty_graph_calls
+        if pair is not None:
+            first, second = pair
+            if (
+                first.graph is graph
+                and second.graph is graph
+                and not first._erased
+                and not second._erased
+                and "call" in first.op
+                and "call" in second.op
+            ):
+                self.is_non_empty_graph = _return_true  # type: ignore[method-assign]
+                return True
+            tracer._non_empty_graph_calls = None
+
+        first: torch.fx.Node | None = None
+        for node in graph.nodes:
             if "call" in node.op:
-                calls += 1
-                if calls > 1:
-                    # perf optimization only
-                    self.is_non_empty_graph = lambda: True  # type: ignore[method-assign]
+                if first is not None:
+                    tracer._non_empty_graph_calls = (first, node)
+                    self.is_non_empty_graph = _return_true  # type: ignore[method-assign]
                     return True
+                first = node
         return False
 
     def format_frame_summary(
@@ -6620,26 +6650,33 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         check for this frame; maybe_setup_comprehension_speculation does that check at
         the comprehension's first prefix instruction instead.
         """
-        if not config.nested_graph_breaks:
-            return False
-        if not self._allow_nested_graph_breaks:
-            return False
-        if not self.funcvar.should_allow_nested_graph_breaks():
-            return False
-        if not self.parent.should_compile_partial_graph():
-            return False
-        return True
+        return (
+            config.nested_graph_breaks
+            and self._allow_nested_graph_breaks
+            and self.funcvar.should_allow_nested_graph_breaks()
+            and self._can_compile_inline_stack(self.parent)
+            and self.output.current_tracer.parent is None
+        )
+
+    @staticmethod
+    def _can_compile_inline_stack(tx: InstructionTranslatorBase) -> bool:
+        while isinstance(tx, InliningInstructionTranslator):
+            if (
+                not tx._allow_nested_graph_breaks
+                or not tx.funcvar.should_allow_nested_graph_breaks()
+                or not tx._can_compile_partial_graph()
+            ):
+                return False
+            tx = tx.parent
+        return tx._can_compile_partial_graph()
 
     def should_compile_partial_graph(self) -> bool:
-        if config.nested_graph_breaks:
-            if not self._allow_nested_graph_breaks:
-                return False
-            if not self.funcvar.should_allow_nested_graph_breaks():
-                return False
-            if not self.parent.should_compile_partial_graph():
-                return False
-            return super().should_compile_partial_graph()
-        return False  # inlining functions is all-or-nothing
+        # Both the config and the output tracer apply to the full inline stack.
+        return (
+            config.nested_graph_breaks
+            and self.output.current_tracer.parent is None
+            and self._can_compile_inline_stack(self)
+        )
 
     def create_call_resume_at(
         self,
@@ -6818,6 +6855,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def should_compile_partial_graph(self) -> bool:
         # resuming on graph break on inlined generator not supported
         return False
+
+    _can_compile_partial_graph = should_compile_partial_graph
 
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()
