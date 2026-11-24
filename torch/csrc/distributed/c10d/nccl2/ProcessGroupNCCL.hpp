@@ -31,13 +31,16 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/MemPool.h>
 #include <c10/core/GeneratorImpl.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime.h>
 #include <nccl.h>
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/NCCLCommon.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
@@ -62,6 +65,13 @@ TORCH_API void waitForNcclCompletion(
     NcclApi& nccl_api,
     ncclComm_t comm,
     ncclResult_t status,
+    std::chrono::milliseconds timeout,
+    std::string_view operation);
+
+// Aborts comm and logs, rather than throws, on failure.
+TORCH_API void abortCommIgnoringErrors(
+    NcclApi& nccl_api,
+    ncclComm_t comm,
     std::chrono::milliseconds timeout,
     std::string_view operation);
 
@@ -125,7 +135,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
  public:
   static constexpr std::string_view kBackendName = "nccl2";
 
-  using Options = ::c10d::ProcessGroupNCCL::Options;
+  using Options = ::c10d::NCCLOptions;
 
   // c10d-style constructor. Communicator initialization happens when c10d
   // binds the backend to a device via setBoundDeviceId().
