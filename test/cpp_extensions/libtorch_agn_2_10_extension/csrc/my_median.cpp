@@ -6,7 +6,7 @@ using MedianResult = std::tuple<Tensor, Tensor>;
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
-      "my_median(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)");
+      "my_median(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)");
   m.def("my_median_default(Tensor self) -> Tensor");
 }
 

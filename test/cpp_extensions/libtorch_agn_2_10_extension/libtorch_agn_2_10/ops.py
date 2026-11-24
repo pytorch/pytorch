@@ -195,9 +195,9 @@ def my_roll(self, shifts, dims=()) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_roll.default(self, shifts, dims)
 
 
-def my_repeat_interleave(self, repeats, dim=None, output_size=None) -> Tensor:
+def my_repeat_interleave(self, repeats, dim=None, *, output_size=None) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_repeat_interleave.default(
-        self, repeats, dim, output_size
+        self, repeats, dim, output_size=output_size
     )
 
 
@@ -209,8 +209,8 @@ def my_nonzero(self) -> Tensor:
     return torch.ops.libtorch_agn_2_10.my_nonzero.default(self)
 
 
-def my_expand(self, size, implicit=False) -> Tensor:
-    return torch.ops.libtorch_agn_2_10.my_expand.default(self, size, implicit)
+def my_expand(self, size, *, implicit=False) -> Tensor:
+    return torch.ops.libtorch_agn_2_10.my_expand.default(self, size, implicit=implicit)
 
 
 def my_all(self) -> Tensor:

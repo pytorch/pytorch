@@ -9,7 +9,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
       "my_all_dim(Tensor self, int dim, bool keepdim=False) -> Tensor");
   m.def(
-      "my_all_dims(Tensor self, int[]? dim, bool keepdim=False) -> Tensor");
+      "my_all_dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {

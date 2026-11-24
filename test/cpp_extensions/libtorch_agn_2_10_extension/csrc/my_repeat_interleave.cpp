@@ -5,11 +5,11 @@ using torch::stable::Tensor;
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
-      "my_repeat_interleave(Tensor self, int repeats, int? dim=None, int? output_size=None) -> Tensor");
+      "my_repeat_interleave(Tensor self, int repeats, int? dim=None, *, int? output_size=None) -> Tensor");
   m.def(
-      "my_repeat_interleave_tensor(Tensor repeats, int? output_size=None) -> Tensor");
+      "my_repeat_interleave_tensor(Tensor repeats, *, int? output_size=None) -> Tensor");
   m.def(
-      "my_repeat_interleave_self_tensor(Tensor self, Tensor repeats, int? dim=None, int? output_size=None) -> Tensor");
+      "my_repeat_interleave_self_tensor(Tensor self, Tensor repeats, int? dim=None, *, int? output_size=None) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {

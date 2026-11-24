@@ -1538,20 +1538,20 @@ for warning in w:
         libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
 
         x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
-        actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, 6)
+        actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, output_size=6)
         self.assertEqual(actual, x.repeat_interleave(2, dim=1, output_size=6))
         actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2)
         self.assertEqual(actual, x.repeat_interleave(2))
         with self.assertRaisesRegex(RuntimeError, "Invalid output_size"):
-            libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, 5)
+            libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, output_size=5)
         ops = libtorch_agnostic.ops
         repeats = torch.tensor([1, 3, 0], device=device)
         self.assertEqual(
-            ops.my_repeat_interleave_tensor(repeats, 4),
+            ops.my_repeat_interleave_tensor(repeats, output_size=4),
             torch.repeat_interleave(repeats, output_size=4),
         )
         self.assertEqual(
-            ops.my_repeat_interleave_self_tensor(x, repeats, -1, 4),
+            ops.my_repeat_interleave_self_tensor(x, repeats, -1, output_size=4),
             x.repeat_interleave(repeats, dim=-1, output_size=4),
         )
 
@@ -1628,7 +1628,8 @@ for warning in w:
         ops = libtorch_agnostic.ops
         x = torch.tensor([[True, False], [True, True]], device=device)
         self.assertEqual(ops.my_all_dim(x, 0, True), x.all(0, keepdim=True))
-        self.assertEqual(ops.my_all_dims(x, [0, 1], True), x.all((0, 1), keepdim=True))
+        self.assertEqual(ops.my_all_dims(x, [1], True), x.all((1,), keepdim=True))
+        self.assertEqual(ops.my_all_dims(x, None), x.all())
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize(

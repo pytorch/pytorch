@@ -1709,6 +1709,10 @@ inline torch::stable::Tensor from_file(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
 /// @param self The input tensor.
 /// @param shifts The shifts to apply.
 /// @param dims The dimensions to roll. An empty list rolls the flattened
@@ -1746,6 +1750,9 @@ inline torch::stable::Tensor roll(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
 ///
 /// @param repeats The repeat counts.
 /// @param output_size The optional total output size.
@@ -1775,6 +1782,9 @@ inline torch::stable::Tensor repeat_interleave(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
 ///
 /// @param self The input tensor.
 /// @param repeats The repeat counts.
@@ -1817,6 +1827,10 @@ inline torch::stable::Tensor repeat_interleave(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
 /// @param self The input tensor.
 /// @param repeats The number of repeats per element.
 /// @param dim The dimension to repeat. Defaults to the flattened input.
@@ -1855,6 +1869,10 @@ inline torch::stable::Tensor repeat_interleave(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
 /// @param self The input tensor.
 /// @param other The tensor to compare with self.
 /// @return Whether the tensors are equal.
@@ -1882,6 +1900,10 @@ inline bool equal(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
 /// @param self The input tensor.
 /// @return A tensor of nonzero indices.
 inline torch::stable::Tensor nonzero(const torch::stable::Tensor& self) {
@@ -1904,6 +1926,10 @@ inline torch::stable::Tensor nonzero(const torch::stable::Tensor& self) {
 ///
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
 ///
 /// @param self The input tensor.
 /// @param size The target sizes.
@@ -1940,6 +1966,9 @@ inline torch::stable::Tensor expand(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
 ///
 /// @param self The input tensor.
 /// @param dim The dimension to reduce.
@@ -1972,6 +2001,9 @@ inline torch::stable::Tensor all(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
 ///
 /// @param self The input tensor.
 /// @param dim The dimensions to reduce. Nullopt reduces every dimension.
@@ -2009,6 +2041,10 @@ inline torch::stable::Tensor all(
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
 /// @param self The input tensor.
 /// @return The scalar result tensor.
 inline torch::stable::Tensor all(const torch::stable::Tensor& self) {
@@ -2031,6 +2067,9 @@ inline torch::stable::Tensor all(const torch::stable::Tensor& self) {
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
 ///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
 ///
 /// @param self The input tensor.
 /// @return The result tensor.
@@ -2053,6 +2092,10 @@ inline torch::stable::Tensor median(const torch::stable::Tensor& self) {
 ///
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
 ///
 /// @param self The input tensor.
 /// @param dim The dimension to reduce.
@@ -2084,17 +2127,20 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> median(
 
 /// Stable version of the index_fill_.int_Tensor op.
 ///
-/// Fills indexed positions along a dimension in place. The stable API
-/// takes a mutable tensor reference, as with other stable in-place ops.
+/// Fills indexed positions along a dimension in place.
 ///
 /// Minimum compatible version: PyTorch 2.10.
 /// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
 ///
 /// @param self The tensor to modify.
 /// @param dim The dimension to index.
 /// @param index The indices to fill.
 /// @param value The zero-dimensional tensor containing the fill value.
-/// @return The modified input tensor.
+/// @return A reference to the modified input tensor.
 inline torch::stable::Tensor& index_fill_(
     torch::stable::Tensor& self,
     int64_t dim,
@@ -2134,7 +2180,7 @@ inline torch::stable::Tensor& index_fill_(
 /// @param dim The dimension to index.
 /// @param index The indices to fill.
 /// @param value The real fill value.
-/// @return The modified input tensor.
+/// @return A reference to the modified input tensor.
 inline torch::stable::Tensor& index_fill_(
     torch::stable::Tensor& self,
     int64_t dim,

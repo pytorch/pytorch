@@ -3,7 +3,7 @@
 
 STABLE_TORCH_LIBRARY_FRAGMENT(STABLE_LIB_NAME, m) {
   m.def(
-      "my_expand(Tensor(a) self, int[] size, bool implicit=False) -> Tensor(a)");
+      "my_expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(STABLE_LIB_NAME, CompositeExplicitAutograd, m) {
