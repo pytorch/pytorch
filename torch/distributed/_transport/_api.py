@@ -1,21 +1,70 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
+import contextlib
+import numbers
+import operator
 from abc import ABC, abstractmethod
+from datetime import timedelta
 from functools import partial
-from typing import Any, cast, Literal, Protocol, runtime_checkable, TYPE_CHECKING
-from typing_extensions import Self
+from typing import (
+    Any,
+    cast,
+    Literal,
+    NamedTuple,
+    Protocol,
+    runtime_checkable,
+    Self,
+    TYPE_CHECKING,
+)
 
 import torch
+import torch.distributed as dist
 from torch.distributed import Work
 
 from ._work import _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
-    import builtins
-
     from ._cuda_stream import _CudaStreamOrdering
+
+
+# TCPStore polls with an int millisecond timeout.
+_MAX_STORE_TIMEOUT = (2**31 - 1) / 1000
+
+
+# Shared by backends so every view and descriptor implements the slice contract
+# below with the same bounds and error messages.
+def _subrange(
+    size: int, offset: int | None, length: int | None, name: str = "registered memory"
+) -> tuple[int, int]:
+    offset = 0 if offset is None else operator.index(offset)
+    if offset < 0 or offset > size:
+        raise ValueError(f"offset is outside the {name}")
+    length = size - offset if length is None else operator.index(length)
+    if length < 0 or length > size - offset:
+        raise ValueError(f"range exceeds the {name}")
+    return offset, length
+
+
+PeerId = str
+
+
+class Notification(NamedTuple):
+    """A message from ``peer``, as returned by ``Transport.wait_notifications``."""
+
+    peer: PeerId
+    payload: bytes
+
+
+def _slice_range(size: int, key: builtins.slice) -> tuple[int, int]:
+    if not isinstance(key, builtins.slice):
+        raise TypeError("expected a slice such as [a:b]")
+    start, stop, step = key.indices(size)
+    if step != 1:
+        raise ValueError("slice step must be 1")
+    return start, max(stop - start, 0)
 
 
 @runtime_checkable
@@ -60,6 +109,11 @@ class RemoteBuffer(Protocol):
     version without executing code or importing classes named by the payload.
     Descriptors grant memory access: exchange them only with authorized peers.
     """
+
+    @property
+    def peer_id(self) -> PeerId:
+        """The peer that registered this memory, as addressed by notifications."""
+        ...
 
     def serialize(self) -> bytes: ...
 
@@ -140,6 +194,17 @@ class Transport(ABC):
     while the transfer is in flight, and can be captured in CUDA graphs.
     Transfer failures terminate the process, since consumers may already be
     enqueued. Ordinary ``read`` and ``write`` do not interact with CUDA streams.
+
+    Backends with a nonzero ``max_notification_size`` exchange small byte
+    messages with peers. ``send_notification`` sends one to a connected peer;
+    ``notification=`` on ``write``/``read`` sends one to the remote buffer's
+    peer once the transfer succeeds, so a written range is visible in the
+    destination's host memory when its notification arrives. Receivers see
+    messages from all senders, including peers they never connected to.
+    Messages are not duplicated or ordered with each other or with unrelated
+    transfers. A successful send does not guarantee delivery: backends may drop
+    messages a receiver leaves undrained (see each backend). Peer ids are
+    asserted by the sender, not authenticated.
     """
 
     def __init__(self, device: torch.device | str | None = None) -> None:
@@ -161,7 +226,12 @@ class Transport(ABC):
 
     @abstractmethod
     def bind(self, *, timeout: float | None = None) -> bytes:
-        """Bind the endpoint and return its opaque connection URL."""
+        """Bind the endpoint and return its opaque connection URL.
+
+        Implementations must support repeated calls on an open transport,
+        returning its current connection bytes; ``connect_rank`` binds on each
+        call.
+        """
 
     @abstractmethod
     def connect(self, peer_url: bytes, *, timeout: float | None = None) -> int:
@@ -172,13 +242,181 @@ class Transport(ABC):
         disconnect; ``close`` releases all peers. Transfers to descriptors naming
         an unconnected peer raise ``ValueError``.
 
-        Rank-to-endpoint lookup belongs in a separate application control-plane
-        adapter; this interface addresses peers using opaque connection bytes.
+        Peers are addressed by opaque connection bytes; ``connect_rank``
+        exchanges them through a Store by rank.
         """
+
+    def connect_rank(
+        self,
+        peer_rank: int,
+        *,
+        store: dist.Store | None = None,
+        rank: int | None = None,
+        tag: str,
+        timeout: float | timedelta | None = None,
+    ) -> int:
+        """Connect to the peer identified by ``peer_rank`` through a Store.
+
+        Both peers call this with each other's identity. It binds, exchanges
+        connection bytes through the Store, connects, and returns zero on
+        success. It blocks until the peer makes the matching call or a timeout
+        expires.
+
+        Args:
+            peer_rank: Nonnegative integer identifying the peer in this Store namespace.
+            store: Trusted rendezvous Store, such as ``torch.distributed.TCPStore``;
+                defaults to the default process group's Store. No collectives are
+                performed. ``bind()`` bytes may describe registered memory, such
+                as NIXL agent metadata; each peer deletes the peer bytes it reads,
+                best effort. Per-pair attempt counters persist, as can endpoint
+                bytes and small markers after timeouts and other failures. The
+                Store must implement an atomic ``compare_set``.
+            rank: Local identity; defaults to ``torch.distributed.get_rank()``. An
+                explicit override requires no initialized process group. Identities
+                need not be contiguous, but must be distinct for the two peers.
+            tag: Rendezvous namespace; both peers must pass the same tag. Use
+                a distinct tag for each component connecting the same rank pair.
+            timeout: Timeout for each of bind, the Store wait, and connect, in
+                seconds or as a ``timedelta``, from 1 ms to about 24.8 days (Store
+                waits use 32-bit milliseconds). ``None`` uses the transport's
+                default timeout, such as NIXL's constructor ``timeout``, which must
+                then be in this range. Without one, the backend's and the Store's
+                timeouts apply; with ``store=None``, the wait then holds the
+                default Store's client, shared with the default process group, for
+                up to the Store's timeout.
+
+        Calls are matched in order per rank pair and tag: the Nth call on each
+        peer connects to the other's Nth call, including calls that failed after
+        validating their arguments. When connecting to several peers, call in a
+        consistent order on all ranks, such as ascending peer rank, or from
+        separate threads if the backend's ``bind`` and ``connect`` are
+        thread-safe, as NIXL's are. Give each thread its own Store client, such
+        as ``store.clone()``: a ``TCPStore`` client blocks other calls while it
+        waits, and ``store=None`` shares the default Store's client. Cyclic
+        waits time out. A call whose wait fails, such as by timing out, claims
+        the peer's slot, so the peer's matching call fails too, unless the peer
+        already published and both proceed. Other failures, such as in
+        ``connect``, do not imply that the peer's call failed.
+        """
+        if type(tag) is not str:
+            raise TypeError("tag must be a string")
+        timeout = self._default_timeout if timeout is None else timeout
+        wait = None
+        if timeout is not None:
+            if isinstance(timeout, timedelta):
+                timeout = timeout.total_seconds()
+            if isinstance(timeout, bool) or not isinstance(timeout, numbers.Real):
+                raise TypeError("timeout must be seconds or a timedelta")
+            timeout = float(timeout)
+            if not 0.001 <= timeout <= _MAX_STORE_TIMEOUT:
+                raise ValueError(
+                    f"timeout must be in [1 ms, 2**31 - 1 ms], got {timeout} s"
+                )
+            wait = timedelta(seconds=timeout)
+        rank = dist.get_rank() if rank is None else rank
+        store = dist.distributed_c10d._get_default_store() if store is None else store
+        if type(rank) is not int or rank < 0:
+            raise ValueError("rank must be a nonnegative integer")
+        if type(peer_rank) is not int or peer_rank < 0:
+            raise ValueError("peer_rank must be a nonnegative integer")
+        if peer_rank == rank:
+            raise ValueError("peer_rank must differ from the local rank")
+        pair = f"transport_connect_rank/{tag}/{min(rank, peer_rank)}/{max(rank, peer_rank)}"
+        attempt = store.add(f"{pair}/attempts/{rank}", 1)
+        root, store = store, dist.PrefixStore(f"{pair}/{attempt}", store)
+        url = b"\x01" + self.bind(timeout=timeout)
+
+        def discard(*keys):
+            # Best effort: some Stores do not implement delete_key or raise
+            # for missing keys, and PrefixStore's deleteKey does not reach
+            # Python overrides.
+            for key in keys:
+                with contextlib.suppress(Exception):
+                    root.delete_key(f"{pair}/{attempt}/{key}")
+
+        # compare_set decides whether our bytes or the b"\x00" of a peer that
+        # stopped waiting land; the prefix keeps them distinct. Waiters wait on
+        # a separate flag: not every Store's compare_set wakes them.
+        # pyrefly: ignore [bad-argument-type]
+        if store.compare_set(str(rank), b"", url) != url:
+            discard(rank)
+            raise RuntimeError(f"peer {peer_rank} stopped waiting for this call")
+        store.set(f"{rank}/ready", "1")
+        try:
+            store.wait([f"{peer_rank}/ready"], *([] if wait is None else [wait]))
+        except Exception:
+            # Fail the peer's late call too, keeping attempts matched.
+            # pyrefly: ignore [bad-argument-type]
+            peer_url = store.compare_set(str(peer_rank), b"", b"\x00")
+            if peer_url == b"\x00":
+                discard(rank, f"{rank}/ready")
+                raise
+        else:
+            peer_url = store.get(str(peer_rank))
+        # Only this call reads the peer's bytes; later calls use new attempts.
+        discard(peer_rank, f"{peer_rank}/ready")
+        return self.connect(peer_url[1:], timeout=timeout)
 
     @abstractmethod
     def connected(self) -> bool:
         """Return whether the endpoint is connected to any peer."""
+
+    @property
+    def peer_id(self) -> PeerId:
+        """This endpoint's id, as peers see it in notifications and descriptors."""
+        raise NotImplementedError("transport does not support notifications")
+
+    def max_notification_size(self) -> int:
+        """Return the largest notification payload in bytes; 0 if unsupported."""
+        return 0
+
+    def send_notification(
+        self, peer: PeerId, payload: bytes, *, timeout: float | None = None
+    ) -> Work:
+        """Send a nonempty ``payload`` to the connected ``peer``.
+
+        The Work completes once the backend accepted the message, not when the
+        peer receives it. Raises ``ValueError`` for an unconnected peer.
+        """
+        raise NotImplementedError("transport does not support notifications")
+
+    def wait_notifications(self, *, timeout: float | None = None) -> list[Notification]:
+        """Return received notifications, waiting up to ``timeout`` for one.
+
+        Each notification is returned to exactly one caller. Returns an empty
+        list on timeout; ``timeout=0`` returns without waiting. Raises
+        ``RuntimeError`` if the transport closes.
+        """
+        raise NotImplementedError("transport does not support notifications")
+
+    async def wait_notifications_async(
+        self, *, timeout: float | None = None
+    ) -> list[Notification]:
+        """Like ``wait_notifications``, yielding to asyncio while waiting.
+
+        Cancellation loses no notifications.
+        """
+        _validate_timeout(timeout)
+        timeout = self._default_timeout if timeout is None else timeout
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + timeout
+        delay = 1e-6
+        while True:
+            received = self.wait_notifications(timeout=0)
+            if received or (deadline is not None and loop.time() >= deadline):
+                return received
+            # Backends cannot signal arrivals to the loop, so poll with backoff.
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 1e-3)
+
+    def _check_notification(self, payload: bytes) -> None:
+        limit = self.max_notification_size()
+        if not limit:
+            raise NotImplementedError("transport does not support notifications")
+        if not isinstance(payload, bytes):
+            raise TypeError("notification payload must be bytes")
+        if not 0 < len(payload) <= limit:
+            raise ValueError(f"notification payload must be 1 to {limit} bytes")
 
     @abstractmethod
     def register_memory(
@@ -211,8 +449,13 @@ class Transport(ABC):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
-        """Write a local view; return Work for async_op=True, otherwise zero."""
+        """Write a local view; return Work for async_op=True, otherwise zero.
+
+        A ``notification`` is sent to the destination after the write succeeds;
+        the transfer completes once it has been sent.
+        """
 
     @abstractmethod
     def read(
@@ -222,8 +465,13 @@ class Transport(ABC):
         *,
         async_op: bool = False,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> int | Work:
-        """Read into a local view; return Work for async_op=True, otherwise zero."""
+        """Read into a local view; return Work for async_op=True, otherwise zero.
+
+        A ``notification`` is sent to the source after the read succeeds; the
+        transfer completes once it has been sent.
+        """
 
     def write_stream(
         self,
@@ -296,6 +544,7 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Write a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
@@ -303,7 +552,13 @@ class Transport(ABC):
         started = asyncio.get_running_loop().time()
         work = cast(
             Work,
-            self.write(local_buffer, remote_buffer, async_op=True, timeout=timeout),
+            self.write(
+                local_buffer,
+                remote_buffer,
+                async_op=True,
+                timeout=timeout,
+                notification=notification,
+            ),
         )
         remaining = (
             None
@@ -318,6 +573,7 @@ class Transport(ABC):
         remote_buffer: RemoteBuffer,
         *,
         timeout: float | None = None,
+        notification: bytes | None = None,
     ) -> None:
         """Read into a local view, yielding to asyncio until the transfer finishes."""
         _validate_timeout(timeout)
@@ -325,7 +581,13 @@ class Transport(ABC):
         started = asyncio.get_running_loop().time()
         work = cast(
             Work,
-            self.read(local_buffer, remote_buffer, async_op=True, timeout=timeout),
+            self.read(
+                local_buffer,
+                remote_buffer,
+                async_op=True,
+                timeout=timeout,
+                notification=notification,
+            ),
         )
         remaining = (
             None

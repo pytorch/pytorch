@@ -4,8 +4,7 @@
 // Tile of outputs computed by each thread of max_pool2d_s1_nchw
 C10_METAL_CONSTEXPR int32_t max_pool2d_s1_tile_cols = 8;
 C10_METAL_CONSTEXPR int32_t max_pool2d_s1_tile_rows = 2;
-// grad_input columns computed by each thread of the 2D pooling backward
-// kernels, which share the gradients and divisors of their covering outputs
+// grad_input columns computed by each thread of avg_pool2d_backward
 C10_METAL_CONSTEXPR int32_t pool2d_backward_tile_cols = 4;
 
 // N is the maximum allowed number of dimensions in the input and outputs. The
