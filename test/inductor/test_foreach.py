@@ -418,6 +418,23 @@ class ForeachTests(TestCase):
             copied_indices=[0, 1], num_inputs=2, aliased_inputs=True
         )
 
+        parent = next(iter(graph.find_nodes(
+            op="call_function",
+            target=torch.ops.aten._foreach_mul.Scalar,
+        )))
+
+        # Independent producer inputs isolate destination aliasing
+        # from cross-lane dependency rejection.
+        independent_inputs = []
+        with graph.inserting_before(parent):
+            for index in range(2):
+                node = graph.placeholder(f"independent_{index}")
+                node.meta["val"] = torch.ones(2)
+                independent_inputs.append(node)
+
+        parent.args = (independent_inputs, *parent.args[1:])
+        graph.lint()
+
         fold_foreach_input_mutation_ops(graph)
 
         self.assertEqual(
@@ -468,8 +485,13 @@ class ForeachTests(TestCase):
         )
         self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 2)
 
+    @decorateIf(
+        unittest.skip("requires GPU"),
+        lambda params: params["device"] != "cpu" and not HAS_GPU,
+    )
+    @parametrize("device", ("cpu", GPU_TYPE))
     @parametrize("indirect", [False, True])
-    def test_foreach_input_mutation_cross_lane_e2e(self, indirect):
+    def test_foreach_input_mutation_cross_lane_e2e(self, device, indirect):
         def fn(a, b):
             sources = [b, a * 2] if indirect else [b, a]
             outputs = torch._foreach_neg(sources)
@@ -477,26 +499,21 @@ class ForeachTests(TestCase):
             b.copy_(outputs[1])
             return a, b
 
-        devices = ["cpu"]
-        if HAS_GPU:
-            devices.append(GPU_TYPE)
         compiled = torch.compile(fn, fullgraph=True)
-        for device in devices:
-            with self.subTest(device=device):
-                a = torch.tensor([2.0, -3.0], device=device)
-                b = torch.tensor([5.0, 7.0], device=device)
-                expected_a = -b.clone()
-                expected_b = -a.clone() * (2 if indirect else 1)
-                result_a, result_b = compiled(a, b)
-                self.assertEqual(result_a, expected_a)
-                self.assertEqual(result_b, expected_b)
-                self.assertEqual(a, expected_a)
-                self.assertEqual(b, expected_b)
+        a = torch.tensor([2.0, -3.0], device=device)
+        b = torch.tensor([5.0, 7.0], device=device)
+        expected_a = -b.clone()
+        expected_b = -a.clone() * (2 if indirect else 1)
+        result_a, result_b = compiled(a, b)
+        self.assertEqual(result_a, expected_a)
+        self.assertEqual(result_b, expected_b)
+        self.assertEqual(a, expected_a)
+        self.assertEqual(b, expected_b)
 
+
+    @requires_gpu
     @parametrize("reader", ("add", "sin"))
     def test_foreach_input_mutation_pending_reader(self, reader):
-        if not torch.cuda.is_available():
-            self.skipTest("requires CUDA")
 
         def fn(a, b, c):
             if reader == "add":
@@ -507,17 +524,26 @@ class ForeachTests(TestCase):
             return a, b, c
 
         inputs = [
-            torch.randn(1024, device="cuda") for _ in range(3)
+            torch.randn(1024, device=GPU_TYPE) for _ in range(3)
         ]
         reference_inputs = [x.clone() for x in inputs]
 
         expected = fn(*reference_inputs)
-        actual = torch.compile(fn, fullgraph=True)(*inputs)
+        pass_counts, track_fold = self._track_foreach_fold()
+        torch._dynamo.reset()
+        with config.patch({"fx_graph_cache": False}), track_fold:
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertTrue(
+            any(after < before and folded > 0
+                for before, after, folded in pass_counts),
+            "Expected foreach copy epilogue folding",
+        )
 
         self.assertEqual(actual, expected)
         self.assertEqual(inputs, reference_inputs)
 
-    def test_foreach_input_mutation_inductor_prefers_reinplace(self):
+    def _track_foreach_fold(self):
         pass_counts = []
         orig_fold = fx_passes.post_grad.fold_foreach_input_mutation_ops
 
@@ -531,6 +557,15 @@ class ForeachTests(TestCase):
                     self._count_nodes(graph, torch.ops.aten._foreach_copy_.default),
                 )
             )
+
+        return pass_counts, mock.patch.object(
+            fx_passes.post_grad,
+            "fold_foreach_input_mutation_ops",
+            counting_fold,
+        )
+
+    def test_foreach_input_mutation_inductor_prefers_reinplace(self):
+        pass_counts, track_fold = self._track_foreach_fold()
 
         def fn(args):
             torch._foreach_mul_(args, 2)
@@ -539,32 +574,17 @@ class ForeachTests(TestCase):
         torch._dynamo.reset()
         with (
             config.patch({"fx_graph_cache": False}),
-            mock.patch.object(
-                fx_passes.post_grad, "fold_foreach_input_mutation_ops", counting_fold
-            ),
+            track_fold,
         ):
-            _, code = run_and_get_code(torch.compile(fn, fullgraph=True), inps)
+            run_and_get_code(torch.compile(fn, fullgraph=True), inps)
 
         for inp in inps:
             self.assertEqual(inp, torch.full((13,), 2.0))
         self.assertIn((0, 0, 0), pass_counts)
         self.assertNotIn((len(inps), 0, 1), pass_counts)
-        self.assertTrue(code)
 
     def test_foreach_input_mutation_fold_handles_unregistered_op(self):
-        pass_counts = []
-        orig_fold = fx_passes.post_grad.fold_foreach_input_mutation_ops
-
-        def counting_fold(graph):
-            before_copy = self._count_nodes(graph, torch.ops.aten.copy_.default)
-            orig_fold(graph)
-            pass_counts.append(
-                (
-                    before_copy,
-                    self._count_nodes(graph, torch.ops.aten.copy_.default),
-                    self._count_nodes(graph, torch.ops.aten._foreach_copy_.default),
-                )
-            )
+        pass_counts, track_fold = self._track_foreach_fold()
 
         def fn(args):
             torch._foreach_sub_(args, 2)
@@ -573,9 +593,7 @@ class ForeachTests(TestCase):
         torch._dynamo.reset()
         with (
             config.patch({"fx_graph_cache": False}),
-            mock.patch.object(
-                fx_passes.post_grad, "fold_foreach_input_mutation_ops", counting_fold
-            ),
+            track_fold,
         ):
             _, code = run_and_get_code(torch.compile(fn, fullgraph=True), inps)
 

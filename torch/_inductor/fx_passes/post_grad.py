@@ -400,7 +400,9 @@ def _is_foreach_op(node: torch.fx.Node) -> bool:
 
 
 def _get_foreach_copy_candidate(
-    node: torch.fx.Node, mutation_targets: OrderedSet[torch.fx.Node]
+    node: torch.fx.Node,
+    mutation_targets: OrderedSet[torch.fx.Node],
+    is_foreach_op: Callable[[torch.fx.Node], bool],
 ) -> _ForeachCopyCandidate | None:
     if (
         node.op != "call_function"
@@ -424,7 +426,7 @@ def _get_foreach_copy_candidate(
     parent, index = src.args
     if not (isinstance(parent, torch.fx.Node) and isinstance(index, int)):
         return None
-    if not _is_foreach_op(parent):
+    if not is_foreach_op(parent):
         return None
 
     return _ForeachCopyCandidate(node, parent, dst, src, index)
@@ -446,21 +448,18 @@ def _device(node: torch.fx.Node) -> torch.device | None:
     return val.device
 
 
-def _can_fold_foreach_copy_group(group: list[_ForeachCopyCandidate]) -> bool:
+def _can_fold_foreach_copy_group(
+    group: list[_ForeachCopyCandidate],
+    is_foreach_op: Callable[[torch.fx.Node], bool],
+) -> bool:
     parent = group[0].parent
 
-    def execution_context(node: torch.fx.Node) -> tuple[Any, ...]:
-        custom = node.meta.get("custom", {})
-        return (
-            custom.get("stream", 0),
-            custom.get("mempool"),
-            custom.get("mempool_device"),
-        )
+    from ..pattern_matcher import _execution_context
 
-    context = execution_context(group[0].copy_node)
+    context = _execution_context(group[0].copy_node)
     if any(
-        execution_context(item.copy_node) != context
-        for item in group
+        _execution_context(item.copy_node) != context
+        for item in group[1:]
     ):
         return False
 
@@ -510,7 +509,7 @@ def _can_fold_foreach_copy_group(group: list[_ForeachCopyCandidate]) -> bool:
             if (
                 isinstance(producer, torch.fx.Node)
                 and isinstance(index, int)
-                and _is_foreach_op(producer)
+                and is_foreach_op(producer)
             ):
                 count = _foreach_input_count(producer)
                 if count is not None and 0 <= index < count:
@@ -587,7 +586,9 @@ def _can_fold_foreach_copy_group(group: list[_ForeachCopyCandidate]) -> bool:
 
 
 def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
-    """Fold a complete, contiguous foreach copy_ epilogue into _foreach_copy_.
+    """Fold a complete foreach copy_ epilogue into _foreach_copy_.
+
+    Copies must be consecutive in graph order.
 
     Reject used copy results, partial or interleaved groups, unknown metadata,
     overlapping destinations, and cross-lane (including indirect) reads from
@@ -598,6 +599,8 @@ def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
     ):
         return
 
+    is_foreach_op = functools.cache(_is_foreach_op)
+
     mutation_targets = OrderedSet(
         node for node in graph.nodes if node.op in ("placeholder", "get_attr")
     )
@@ -607,13 +610,13 @@ def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
 
     def flush() -> None:
         nonlocal current_key
-        if len(current_group) > 1 and _can_fold_foreach_copy_group(current_group):
+        if len(current_group) > 1 and _can_fold_foreach_copy_group(current_group, is_foreach_op):
             groups.append(current_group.copy())
         current_group.clear()
         current_key = None
 
     for node in graph.nodes:
-        candidate = _get_foreach_copy_candidate(node, mutation_targets)
+        candidate = _get_foreach_copy_candidate(node, mutation_targets, is_foreach_op)
         if candidate is None:
             # All getitem sources must precede the first folded copy.
             flush()

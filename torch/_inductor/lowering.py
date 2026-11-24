@@ -1032,7 +1032,18 @@ def make_foreach_pointwise(
             else:
                 return pw_fn(*args)
 
-        return foreach_group_loop(groups, len(a_list_input), apply_fn, realize_outputs)
+        mutation_targets = (
+            inputs[0]
+            if V.graph.current_node.target in inplace_foreach_ops
+            else None
+        )
+        return foreach_group_loop(
+            groups,
+            len(a_list_input),
+            apply_fn,
+            realize_outputs,
+            mutation_targets=mutation_targets,
+        )
 
     return inner
 
@@ -1042,6 +1053,7 @@ def foreach_group_loop(
     num_outputs: int,
     apply_fn: Callable[..., foreach_node_t],
     realize_outputs: bool,
+    mutation_targets: Sequence[TensorBox] | None = None,
 ) -> list[foreach_node_t]:
     """
     Common loop over grouped foreach arguments.
@@ -1064,6 +1076,12 @@ def foreach_group_loop(
                 and use_foreach
                 and realize_outputs
             ):
+                # Preserve pending reads before registering
+                # the output that will mutate this destination.
+                if mutation_targets is not None:
+                    name = mutation_targets[output_ind].maybe_get_name()
+                    if name is not None:
+                        V.graph.mark_buffer_mutated(name)
                 output.realize()
                 operation_list.append(output.get_operation_name())
 
@@ -9338,17 +9356,6 @@ def register_foreach_inplace(aten_op, outplace_aten_op, outplace_op):
     inplace_foreach_ops.add(aten_op)
 
     def fn(*args, **kwargs):
-        # Realize pending readers of the old destination values before
-        # the foreach lowering registers any mutation buffers.
-        for arg in args[0]:
-            if not V.graph.has_feature(
-                arg.get_device(), BackendFeature.FOREACH
-            ):
-                continue
-            name = arg.maybe_get_name()
-            if name is not None:
-                V.graph.mark_buffer_mutated(name)
-
         results = outplace_op(*args, **kwargs)
         mut_results = []
         for arg, result in zip(args[0], results):
