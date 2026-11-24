@@ -675,10 +675,10 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(len(converted), 4 if compile_only else 3)
 
     def test_precompile_flydsl_template(self):
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         def kernel(mat1, bias, output, stream):
-            self.assertIsInstance(mat1, FakeTensor)
+            self.assertTrue(is_fake_tensor(mat1))
             self.assertEqual(mat1.shape, (2, 3))
             self.assertEqual(bias.dtype, torch.float32)
             self.assertEqual(output.stride(), (3, 1))
@@ -765,12 +765,12 @@ class TestFlyDSLTemplate(TestCase):
     @parametrize("raises", (False, True))
     def test_precompile_flydsl_restores_environment(self, raises):
         from torch._inductor.runtime.flydsl_cache import precompile_flydsl
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         seen = []
 
         def kernel(*, mat1, output, stream, compile_only):
-            self.assertIsInstance(mat1, FakeTensor)
+            self.assertTrue(is_fake_tensor(mat1))
             self.assertEqual(mat1.shape, (2, 3))
             self.assertEqual(mat1.stride(), (4, 1))
             self.assertEqual(output.dtype, torch.bfloat16)
