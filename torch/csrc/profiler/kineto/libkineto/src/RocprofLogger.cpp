@@ -692,6 +692,7 @@ void RocprofLogger::clearLogs() {
   {
     std::lock_guard<std::mutex> lock(rowsMutex_);
     rows_.clear();
+    processedRows_ = 0;
   }
   {
     std::lock_guard<std::mutex> lock(externalCorrelationsMutex_);
@@ -752,10 +753,11 @@ void RocprofLogger::insert_row_to_buffer(rocprofBase* row) {
   if (!dis->perThreadBuffers_.load(std::memory_order_relaxed) ||
       t_threadExiting) {
     std::lock_guard<std::mutex> lock(dis->rowsMutex_);
-    if (dis->rows_.size() >= dis->maxBufferSize_) {
+    const auto rowCount = dis->processedRows_ + dis->rows_.size();
+    if (rowCount >= dis->maxBufferSize_) {
       LOG_FIRST_N(WARNING, 10)
-          << "Exceeded max GPU buffer count (" << dis->rows_.size() << " > "
-          << dis->maxBufferSize_ << ") - terminating tracing";
+          << "Exceeded max GPU buffer count (" << rowCount
+          << " >= " << dis->maxBufferSize_ << ") - terminating tracing";
       return;
     }
     dis->rows_.push_back(row);

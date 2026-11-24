@@ -23,6 +23,7 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -123,9 +124,9 @@ static void dispatch_index_kernel(TensorIteratorBase& iter,
                                              0};
     for (uint32_t idx = 0; idx < num_indices; idx++) {
       const auto& indexTensor = iter.tensor_base(idx + 2);
-      indexAB.push_back(getMTLBufferStorage(indexTensor).gpuAddress + iter_tensor_offset(iter, idx + 2));
       TORCH_CHECK(indexTensor.scalar_type() == ScalarType::Long, "index(): Expected dtype int64 for Index");
-      [computeEncoder useResource:getMTLBufferStorage(indexTensor) usage:MTLResourceUsageRead];
+      indexAB.push_back(
+          mtl_useBufferAddress(computeEncoder, indexTensor, iter_tensor_offset(iter, idx + 2), MTLResourceUsageRead));
     }
     [computeEncoder setComputePipelineState:indexSelectPSO];
     bind_iter_tensors(computeEncoder, iter, 2);
@@ -507,7 +508,7 @@ static void flip_kernel_mps(TensorIterator& iter, const bool quantized) {
   }
 
   const auto input = iter.input(0);
-  const auto ndim = safe_downcast<uint32_t, int64_t>(iter.ndim());
+  const auto ndim = c10::safe_conv<uint32_t, int64_t>(iter.ndim(), "uint32_t");
   const bool use_direct_grid = ndim > 0 && ndim <= 3;
   const auto bit_size = getBitSizeString(input);
   const auto kernel_name = use_direct_grid ? fmt::format("flip_direct_{}", bit_size) : fmt::format("flip_{}", bit_size);
