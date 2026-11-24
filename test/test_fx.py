@@ -3562,6 +3562,17 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
         gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         self.assertEqual(gm(), None)
 
+    def test_placeholder_only_graph_codegen(self):
+        # A graph whose only nodes are placeholders used to generate
+        # `def forward(self, x):` with an empty body -> IndentationError
+        graph = torch.fx.Graph()
+        graph.placeholder("x")
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(gm(torch.ones(2)), None)
+        self.assertIn("pass", gm.code)
+        # the verbose codegen path (used by print_readable) must also be valid
+        gm.print_readable(print_output=False)
+
     def test_complex_constant_codegen_preserves_signed_zero(self):
         values = [
             complex(-0.0, -1e-28),

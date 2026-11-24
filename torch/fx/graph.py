@@ -1072,9 +1072,10 @@ class CodeGen:
         if record_func:
             body.append("_rf.__exit__(None, None, None)\n")
 
-        if len(body) == 0:
-            # If the Graph has no non-placeholder nodes, no lines for the body
-            # have been emitted. To continue to have valid Python code, emit a
+        if not any(line.strip() and not line.startswith("#") for line in body):
+            # If the Graph has no non-placeholder nodes, no code lines for the
+            # body have been emitted (only the `# COUNTER` comments, which are
+            # stripped below). To continue to have valid Python code, emit a
             # single pass statement
             body.append("pass\n")
 
