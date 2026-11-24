@@ -704,7 +704,7 @@ Tensor _weight_int8pack_mm_xpu(
   // Weight-only (fp activation x s8 weight) matmul. It must not go through
   // quantized_matmul: that builds an int8-activation primitive (src/dst scales,
   // no int fpmath), which oneDNN can only serve with the ocl:ref:any reference
-  // kernel, 25-150x slower than a bf16 GEMM.
+  // kernel, which is orders of magnitude slower than a bf16 GEMM.
   at::native::onednn::woq_matmul_int8(C, A.contiguous(), B, scales);
 
   return C;
