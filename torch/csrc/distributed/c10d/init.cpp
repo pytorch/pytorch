@@ -2472,11 +2472,16 @@ Arguments:
     multi_tenant (bool, optional): If True, all ``TCPStore`` instances in the current process with the same host/port will use the same underlying ``TCPServer``. Default is False.
     master_listen_fd (int, optional): If specified, the underlying ``TCPServer`` will listen on this file descriptor, which must be a socket already bound to ``port``. To bind an ephemeral port we recommend setting the port to 0 and reading ``.port``. Default is None (meaning the server creates a new socket and attempts to bind it to ``port``).
     use_libuv (bool, optional): Deprecated since 2.16 and ignored; ``TCPServer`` always uses libuv. ``False`` emits a ``FutureWarning``. Default is True.
-    tls_cert (str, optional): Path to a PEM certificate (chain). Enables TLS with mutual certificate authentication, which requires ``tls_cert``, ``tls_key`` and ``tls_ca`` and must be enabled on both client and server. If no ``tls_*`` option is set, the ``TORCH_TCPSTORE_TLS_CERT``, ``TORCH_TCPSTORE_TLS_KEY``, ``TORCH_TCPSTORE_TLS_CA``, ``TORCH_TCPSTORE_TLS_PSK`` and ``TORCH_TCPSTORE_TLS_PSK_FILE`` environment variables are used instead; TLS is disabled when all selected settings are empty or unset unless ``TORCH_TCPSTORE_TLS_REQUIRE=1`` is set; the require switch accepts only ``0`` or ``1`` and also applies to clones; otherwise empty values and paths containing NUL bytes raise an error. ``clone()`` preserves the resolved configuration, including disabled TLS, regardless of later environment changes. Certificate files are reloaded from the resolved paths, so prefer absolute paths; replacing them affects later clones. Reusing a ``multi_tenant`` server with a different TLS configuration raises. Keep the TLS environment variables stable while constructing stores. Fresh stores created internally, including by ``init_process_group`` with ``env://``, torchrun/the elastic agent, distributed debug, and the asynchronous checkpoint prefix-store helper, only enable TLS through the environment variables; explicit options on another store do not configure them. 64-bit Linux only; loads OpenSSL >= 1.1.1 (``libssl.so.3`` or ``libssl.so.1.1``) at runtime. TLS 1.2 permits only ECDHE with AEAD ciphers; TLS 1.3 uses its standard cipher suites. The server closes connections that do not finish their TLS handshake within 10 seconds. This protects only the TCPStore control channel, not Gloo/NCCL data traffic or other listeners. Any certificate signed by the CA is accepted; the hostname and subject are not checked, so use a dedicated CA. A certificate may be used for both server and client connections (rank 0 runs both), so it needs both the serverAuth and clientAuth extended key usages, or none; any extended key usage on CA certificates in the chain must also include both. Default is None.
-    tls_key (str, optional): Path to the unencrypted PEM private key, which may be the same file as ``tls_cert``. Default is None.
-    tls_ca (str, optional): Path to the PEM CA bundle used to verify the peer certificate. Default is None.
-    tls_psk (str, optional): The pre-shared key value, not a filename. An empty value disables TLS only if all selected TLS settings are empty or unset. Used verbatim as UTF-8 bytes (32 to 256 bytes, no NUL); no hex or base64 decoding is performed. Enables TLS 1.3 with pre-shared key authentication instead of certificates; it cannot be combined with ``tls_cert``, ``tls_key``, ``tls_ca`` or ``tls_psk_file``. Client and server must use the same key. Use a fresh key for each job and separate keys for different protocols (for example, derive them using HKDF with distinct context labels). The key must be random, with at least 128 bits of entropy, not a passphrase: a captured handshake allows offline guessing. For example, generate a value with ``secrets.token_hex(32)`` without printing it. The environment variable ``TORCH_TCPSTORE_TLS_PSK`` also contains the value directly; prefer ``tls_psk_file``/``TORCH_TCPSTORE_TLS_PSK_FILE`` when available. Secret values remain in process memory and may appear in core dumps. ``clone()`` reuses the resolved value, independent of later environment changes. 64-bit Linux only; the OpenSSL and internal-store notes for ``tls_cert`` apply. Any holder of the key can impersonate either endpoint and gets full read/write access to every key. Keep the value secret; avoid shell tracing and command-line arguments that expose it. Distribution is up to the user. Constructor ``TypeError`` diagnostics omit all argument values, including for plaintext stores; the original message, exception subtype, notes, and chaining are not preserved. This does not prevent user-defined conversion or representation methods from exposing values. Default is None.
-    tls_psk_file (str, optional): Preferred PSK source: an owner-only regular file containing the raw 32 to 256 key bytes. The file must be owned by the effective user, have no group or other permissions, and must not be a symlink. Contents are not stripped or decoded; NUL bytes are rejected. It is exclusive with all other TLS settings. If no ``tls_*`` option is set, ``TORCH_TCPSTORE_TLS_PSK_FILE`` supplies the path. The file is read once during construction; clones retain the resolved key. An empty path disables TLS only if all selected settings are empty or unset. Default is None.
+    tls_cert (str, optional): Path to a PEM certificate chain. Mutual TLS requires ``tls_cert``, ``tls_key`` and ``tls_ca`` on both peers. Certificates must allow both server and client authentication. Hostnames are not checked; use a dedicated CA or the peer-identity options below. Default is None.
+    tls_key (str, optional): Path to an unencrypted PEM private key; may be the same file as ``tls_cert``. Default is None.
+    tls_ca (str, optional): Path to the PEM CA bundle used to verify peer certificates. Default is None.
+    tls_psk (str, optional): Shared random key value (not a filename) for TLS 1.3 instead of certificates. Use a fresh key per job, for example ``secrets.token_hex(32)``. The value is used as UTF-8 bytes without decoding and must contain 32 to 256 bytes with no NUL. Both peers must use the same key. Cannot be combined with certificate options or ``tls_psk_file``. Default is None.
+    tls_psk_file (str, optional): Preferred PSK source: a regular file owned by the effective user, with no group/other permissions or symlink. Contains the raw 32 to 256 key bytes, with no NUL; contents are not stripped or decoded. Exclusive with all other TLS settings. Default is None.
+    tls_peer_cert_oid (str, optional): Numeric OID of a required non-critical leaf-certificate extension containing one DER UTF8String. Requires certificate mode and exactly one of ``tls_peer_cert_value`` or ``tls_peer_cert_prefix``. Each configured store checks its peer in addition to CA verification; set the policy on every rank, including the server's own client. Default is None.
+    tls_peer_cert_value (str, optional): Exact, case-sensitive identity in that extension, either the whole string or exactly one complete comma-separated token. Must be nonempty and contain no comma. The issuing CA must enforce the extension's identity and delimiter rules. This does not check hostname or endpoint role. Default is None.
+    tls_peer_cert_prefix (str, optional): Instead of an explicit value, select exactly one comma-separated identity beginning with this prefix from the local certificate. The prefix must be nonempty and contain no comma; a bare-prefix token is rejected. Require the peer to have exactly one identity with that prefix and the same full value. The local certificate is read on construction, including clones. Default is None.
+
+.. note:: TLS requires 64-bit Linux and OpenSSL >= 1.1.1 at runtime. The server allows 10 seconds for the TLS handshake. It protects only TCPStore traffic, not Gloo/NCCL data traffic. If no ``tls_*`` argument is set, the corresponding ``TORCH_TCPSTORE_TLS_*`` environment variables are used; use these for stores created internally by ``torchrun`` or ``init_process_group``. The identity variables are ``TORCH_TCPSTORE_TLS_PEER_CERT_OID``, ``TORCH_TCPSTORE_TLS_PEER_CERT_VALUE`` and ``TORCH_TCPSTORE_TLS_PEER_CERT_PREFIX``; older versions may ignore them. All-empty/unset settings disable TLS; partial configurations and NUL bytes are rejected. Set ``TORCH_TCPSTORE_TLS_REQUIRE=1`` to forbid plaintext (the default is ``0``). ``clone()`` retains the resolved settings, and a shared ``multi_tenant`` server requires identical settings.
 
 .. note:: The server limits keys (including any prefix) to 8 KiB, values to 8 MiB per request and multi-key requests to 128K keys; it disconnects clients that exceed them.
 
@@ -2505,7 +2510,10 @@ Example::
                       std::optional<std::string> tlsKey,
                       std::optional<std::string> tlsCa,
                       std::optional<std::string> tlsPsk,
-                      std::optional<std::string> tlsPskFile) {
+                      std::optional<std::string> tlsPskFile,
+                      std::optional<std::string> tlsPeerCertOid,
+                      std::optional<std::string> tlsPeerCertValue,
+                      std::optional<std::string> tlsPeerCertPrefix) {
             if (!useLibUV) {
               static std::atomic<bool> warned{false};
               if (!warned.load() || c10::WarningUtils::get_warnAlways()) {
@@ -2544,7 +2552,10 @@ Example::
                 .tlsKey = std::move(tlsKey),
                 .tlsCa = std::move(tlsCa),
                 .tlsPsk = std::move(tlsPsk),
-                .tlsPskFile = std::move(tlsPskFile)};
+                .tlsPskFile = std::move(tlsPskFile),
+                .tlsPeerCertOid = std::move(tlsPeerCertOid),
+                .tlsPeerCertValue = std::move(tlsPeerCertValue),
+                .tlsPeerCertPrefix = std::move(tlsPeerCertPrefix)};
 
             return c10::make_intrusive<::c10d::TCPStore>(host, opts);
           }),
@@ -2566,6 +2577,9 @@ Example::
           py::arg("tls_ca") = py::none(),
           py::arg("tls_psk") = py::none(),
           py::arg("tls_psk_file") = py::none(),
+          py::arg("tls_peer_cert_oid") = py::none(),
+          py::arg("tls_peer_cert_value") = py::none(),
+          py::arg("tls_peer_cert_prefix") = py::none(),
           R"(Creates a new TCPStore.)")
       .def_property_readonly(
           "host",

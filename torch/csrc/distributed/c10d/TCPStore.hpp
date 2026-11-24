@@ -66,7 +66,8 @@ struct TCPStoreOptions {
   // private key and CA bundle, all three required. Alternatively, TLS 1.3 with
   // a pre-shared key value of 32 to 256 random bytes, which cannot
   // be combined with the certificate options. If no tls* option is set, the
-  // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK,PSK_FILE} environment
+  // matching TORCH_TCPSTORE_TLS_{CERT,KEY,CA,PSK,PSK_FILE,PEER_CERT_OID,
+  // PEER_CERT_VALUE,PEER_CERT_PREFIX} environment
   // variables are used instead. All empty/unset settings disable TLS; otherwise
   // empty values are rejected. TORCH_TCPSTORE_TLS_REQUIRE=1 forbids disabled
   // TLS. NUL bytes are rejected. Never log the PSK value.
@@ -76,6 +77,11 @@ struct TCPStoreOptions {
   std::optional<std::string> tlsPsk = std::nullopt;
   // Owner-only regular file containing the raw PSK; exclusive with tlsPsk.
   std::optional<std::string> tlsPskFile = std::nullopt;
+  // Optional peer identity in a DER UTF8String certificate extension.
+  std::optional<std::string> tlsPeerCertOid = std::nullopt;
+  std::optional<std::string> tlsPeerCertValue = std::nullopt;
+  // Derive exactly one matching identity from the local certificate.
+  std::optional<std::string> tlsPeerCertPrefix = std::nullopt;
 };
 
 class TORCH_API TCPStore : public Store {
@@ -180,10 +186,15 @@ class TORCH_API TCPStore : public Store {
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
-  std::optional<std::string> tlsCert_;
-  std::optional<std::string> tlsKey_;
-  std::optional<std::string> tlsCa_;
-  std::optional<std::string> tlsPsk_;
+  struct ResolvedTLSOptions {
+    std::optional<std::string> cert;
+    std::optional<std::string> key;
+    std::optional<std::string> ca;
+    std::optional<std::string> psk;
+    std::optional<std::string> peerCertOid;
+    std::optional<std::string> peerCertValue;
+    std::optional<std::string> peerCertPrefix;
+  } tls_;
 };
 
 } // namespace c10d
