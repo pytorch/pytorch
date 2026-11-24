@@ -333,3 +333,11 @@ in the PyTorch source tree.
 
 ```{doxygenfunction} torch::stable::get_num_threads
 ```
+
+## CPU Cache Size Queries
+
+```{doxygenfunction} torch::stable::cpu::get_l1d_cache_size
+```
+
+```{doxygenfunction} torch::stable::cpu::get_l2_cache_size
+```
