@@ -54,7 +54,8 @@ struct TLSConfig {
   }
 };
 
-// Explicit TLS options replace all TORCH_TCPSTORE_TLS_* environment settings.
+// Explicit TLS options replace TORCH_TCPSTORE_TLS_* environment settings,
+// except TORCH_TCPSTORE_TLS_REQUIRE.
 // Otherwise resolve CERT, KEY, CA, PSK, PSK_FILE, PEER_CERT_OID,
 // PEER_CERT_VALUE and PEER_CERT_PREFIX from the environment. Invalid or mixed
 // modes fail closed.

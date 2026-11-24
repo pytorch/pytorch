@@ -270,7 +270,7 @@ TLSConfig tlsConfig(const TCPStoreOptions& opts) {
             (config.peerCert.value.empty() != config.peerCert.prefix.empty()) &&
             !config.cert.empty() && !config.key.empty() && !config.ca.empty() &&
             config.psk.empty() && pskFile.empty(),
-        "TCPStore TLS: peer certificate policy requires certificate mode, an OID, and exactly one value or prefix; explicit TLS options replace all TLS environment settings",
+        "TCPStore TLS: peer certificate policy requires certificate mode, an OID, and exactly one value or prefix; explicit TLS options replace TLS environment settings except TORCH_TCPSTORE_TLS_REQUIRE",
         config.fromEnv ? " (from TORCH_TCPSTORE_TLS_* environment variables)"
                        : " (from TCPStore options)");
     TORCH_CHECK_WITH(
@@ -397,7 +397,8 @@ std::optional<std::string_view> uniqueIdentity(
   while (true) {
     const auto comma = remaining.find(',');
     const auto token = remaining.substr(0, comma);
-    if (prefix ? token.starts_with(selector) : token == selector) {
+    if (prefix ? token.size() > selector.size() && token.starts_with(selector)
+               : token == selector) {
       if (found) {
         return std::nullopt;
       }

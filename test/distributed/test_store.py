@@ -970,6 +970,7 @@ class TCPStoreTLSTest(TestCase):
         "extension",
         [
             "ASN1:UTF8String:task:1",
+            "ASN1:UTF8String:job:",
             "ASN1:UTF8String:job:123,job:456",
             "ASN1:UTF8String:job:123,job:123",
             "ASN1:IA5STRING:job:123",
@@ -1037,6 +1038,7 @@ class TCPStoreTLSTest(TestCase):
         "extension",
         [
             "ASN1:UTF8String:job:1234",
+            "DER:0C:09:6A:6F:62:3A:31:32:33:2C:00",
             "ASN1:UTF8String:job:123,job:123",
             "ASN1:UTF8String:xjob:123",
             "ASN1:UTF8String:JOB:123",
