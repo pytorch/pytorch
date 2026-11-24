@@ -1614,8 +1614,19 @@ class TritonTemplateKernel(TritonKernel):
             if isinstance(input_node.layout, ir.FlexibleLayout):
                 # This will set a layout constraint on the template
                 self.get_stride_and_maybe_freeze_layout(input_node)
-                with patch.object(ir.FlexibleLayout, "allow_indexing", True):
-                    output_index = input_node.make_indexer()(index_symbols)
+                constraint = V.graph.buffer_layout_constraints.get(
+                    input_node.get_name()
+                )
+                if (
+                    isinstance(input_node.layout, ir.FlexibleLayout)
+                    and constraint is not None
+                ):
+                    # Index with the recorded layout, as stride() does: the live
+                    # layout's as_fixed() can pad differently for this FX node.
+                    output_index = constraint.make_indexer()(index_symbols)
+                else:
+                    with patch.object(ir.FlexibleLayout, "allow_indexing", True):
+                        output_index = input_node.make_indexer()(index_symbols)
             else:
                 output_index = input_node.make_indexer()(index_symbols)
 
@@ -1994,7 +2005,15 @@ class TritonTemplateKernel(TritonKernel):
                 self.input_nodes[: self.prefix_args],
                 self.input_nodes[len(self.input_nodes) - self.suffix_args :],
             ):
-                input_node.freeze_layout()
+                if should_use_layout_constraints(input_node) and isinstance(
+                    input_node.get_layout(), ir.FlexibleLayout
+                ):
+                    # Freeze to the layout another template already recorded.
+                    input_node.freeze_layout_with_exact_strides(
+                        get_strides_with_layout_constraints(input_node)
+                    )
+                else:
+                    input_node.freeze_layout()
                 input_name = input_node.get_name()
                 if input_name in self.store_output_input_producer_groups:
                     input_value = store_output_capture.captured_values[input_name]

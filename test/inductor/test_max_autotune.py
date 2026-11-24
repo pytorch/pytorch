@@ -3644,6 +3644,43 @@ class TestMaxAutotune(TestCase):
         if torch.version.hip is None:
             FileCheck().check_count("stride_aq = 5040", 2, exactly=True).run(code[0])
 
+    @fresh_cache()
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "test_configs.max_mm_configs": 1,
+            "benchmark_epilogue_fusion": False,
+        }
+    )
+    @parametrize("operand", ("mat1", "bias"))
+    def test_deferred_layout_constraint_template_loads_use_recorded_layout(
+        self, operand
+    ):
+        # The graph-output addmm records h's row stride unpadded (1100); padding
+        # for the second addmm would make it 1120. The second addmm's benchmark
+        # kernel must address h with the recorded stride, as its inputs do.
+        from torch._inductor import select_algorithm
+
+        m, k, n = 64, 1100, 64
+
+        def fn(x, b, w1, w2, p, q):
+            h = x * 2 + 1
+            second = (
+                torch.addmm(b, h, w2) if operand == "mat1" else torch.addmm(h, p, q)
+            )
+            return torch.addmm(b, h, w1), second.sum(0)
+
+        def rand(*size):
+            return torch.randint(-3, 4, size, device=GPU_TYPE).float()
+
+        args = (rand(m, k), rand(n), rand(k, n), rand(k, n), rand(m, 32), rand(32, k))
+        # VERIFY checks every benchmarked choice against the extern one on random
+        # inputs. Misaddressed rows are off by ~sqrt(k); atol covers TF32 in aten.
+        with mock.patch.object(select_algorithm, "VERIFY", dict(atol=1.0, rtol=0)):
+            out = torch.compile(fn)(*args)
+        self.assertEqual(out, fn(*args), atol=0, rtol=0)
+
     @unittest.skipIf(
         not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )

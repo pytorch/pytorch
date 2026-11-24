@@ -1889,8 +1889,8 @@ class GraphLowering(torch.fx.Interpreter):
         """
         Still-flexible, layout-constrained buffers read by a selected Triton
         template. A MultiTemplateBuffer counts only if its best unfused choice is a
-        template; otherwise the buffer keeps its default layout and the extern
-        choice runs.
+        template; otherwise the buffer keeps its default layout, and the scheduler's
+        layout conflict check decides whether a fused template can still be used.
         """
         from .distributed_autotune import _DistributedAutotuneBuffer
         from .select_algorithm import should_use_layout_constraints
@@ -1916,7 +1916,7 @@ class GraphLowering(torch.fx.Interpreter):
             if not names or names <= selected:
                 continue
             if isinstance(buf, ir.MultiTemplateBuffer):
-                # The scheduler forces the extern choice without benchmarking.
+                # The scheduler forces an extern choice here.
                 if config.test_configs.force_extern_kernel_in_multi_template:
                     continue
                 choice, _ = buf.get_min_choice()
