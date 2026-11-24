@@ -3,7 +3,7 @@
 # fixed DAGs preserve order. Reuse avoids prior 3.7x unwidened and 3x alignment losses.
 
 import math
-from typing import Any, TYPE_CHECKING
+from typing import Any, get_args, Literal, TYPE_CHECKING
 
 import cutlass
 import cutlass.cute as cute
@@ -321,7 +321,8 @@ def uniform_tree_ok(trait, count, threads_per_block, npairs_red):
     return issue is None
 
 
-UNIFORM_COMBINE_MODES = ("off", "counts", "weights")
+UniformCombineMode = Literal["off", "counts", "weights"]
+UNIFORM_COMBINE_MODES = get_args(UniformCombineMode)
 
 
 def check_uniform_combine_mode(mode: str) -> None:
@@ -732,7 +733,7 @@ def fold_row_aligned(
     # at different indices can split differently between edges and vectors, fold in a
     # different order and round apart.
     prefix = Int32((-Int64(r) * Int64(mX.stride[0])) & Int64(vec - 1))
-    prefix = n if prefix > n else prefix  # noqa: FURB136 -- no DSL builtin min
+    prefix = cutlass.min(prefix, n)
     groups = (n - prefix) // Int32(vec)
     tail = prefix + groups * Int32(vec)
     # Both edges are under vec long. Lane i folds prefix element i and tail element i;

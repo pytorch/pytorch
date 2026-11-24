@@ -1225,8 +1225,8 @@ def _reduce_col_tile(
         ordered = reduce_ordered_col(trait, trait_key, x, out_dtypes, nouts, cc=cc)
         if ordered is not None:
             return ordered
-        # Declined views (e.g. pitched ones) take the shape's measured linear rule. The
-        # re-select only changes the config on B200: SM107 rules ignore itree.
+        # On B200, declined views (e.g. pitched ones) take the shape's measured linear
+        # rule. SM107 rules ignore itree, so there they keep the config's geometry.
         cfg = select(itree=False)
     # A default vec narrows to the row pitch; an explicit one must divide it.
     pitch_vec = math.gcd(cfg.vec, rows.stride(0)) if vec is None else cfg.vec
