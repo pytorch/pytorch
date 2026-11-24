@@ -73,6 +73,7 @@ from .descriptors import (
 from .functional_utils import gen_alias_from_base
 from .graph_capture_wrappers import aot_dispatch_subclass
 from .input_output_analysis import (
+    add_input_mutation_storage_overlap_partition_guard,
     compute_overlapping_inputs,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
@@ -2418,6 +2419,9 @@ def merge_view_inputs(
             # We store just enough info here so that we can regenerate the view later.
             # Regeneration: curr_view._view_func(args[base_idx])
             inner_calling_convention_meta[curr_view_idx] = (base_idx, curr_view)
+    add_input_mutation_storage_overlap_partition_guard(
+        aot_config, fwd_inputs, mutated_input_info
+    )
     if len(base_args) == 0:
         if len(other_args) != len(fwd_inputs):
             raise AssertionError(
