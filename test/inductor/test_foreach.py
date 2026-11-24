@@ -296,8 +296,11 @@ class ForeachTests(TestCase):
             inp.meta["val"] = value
         if indirect_input is not None:
             indirect_input.meta["val"] = torch.ones(2)
-        for getitem in getitems.values():
-            getitem.meta["val"] = torch.ones(2)
+        foreach_mul.meta["val"] = [
+            torch.ones(2) for _ in range(num_inputs)
+        ]
+        for index, getitem in getitems.items():
+            getitem.meta["val"] = foreach_mul.meta["val"][index]
         for copy_node in copies:
             copy_node.meta["val"] = copy_node.args[0].meta["val"]
 
@@ -326,6 +329,77 @@ class ForeachTests(TestCase):
         self.assertEqual([dst.name for dst in dsts], ["x0", "x1"])
         self.assertEqual([src.args[1] for src in srcs], [0, 1])
         graph.lint()
+
+    def test_fold_foreach_input_mutation_ops_chained(self):
+        graph = self._make_foreach_copy_graph(
+            copied_indices=[0, 1], num_inputs=2
+        )
+        parent = next(
+            iter(graph.find_nodes(
+                op="call_function",
+                target=torch.ops.aten._foreach_mul.Scalar,
+            ))
+        )
+        inputs = list(parent.args[0])
+
+        with graph.inserting_before(parent):
+            producer = graph.call_function(
+                torch.ops.aten._foreach_mul.Scalar,
+                args=(inputs, 3),
+            )
+            producer.meta["val"] = [
+                torch.ones(2) for _ in inputs
+            ]
+
+            lanes = []
+            for index in range(len(inputs)):
+                lane = graph.call_function(
+                    operator.getitem, args=(producer, index)
+                )
+                lane.meta["val"] = producer.meta["val"][index]
+                lanes.append(lane)
+
+        parent.args = (lanes, 2)
+        graph.lint()
+
+        fold_foreach_input_mutation_ops(graph)
+        graph.lint()
+
+        self.assertEqual(
+            self._count_nodes(
+                graph, torch.ops.aten._foreach_copy_.default
+            ),
+            1,
+        )
+        self.assertEqual(
+            self._count_nodes(graph, torch.ops.aten.copy_.default),
+            0,
+        )
+
+    def test_fold_foreach_input_mutation_ops_different_streams(self):
+        graph = self._make_foreach_copy_graph(
+            copied_indices=[0, 1], num_inputs=2
+        )
+        copies = list(graph.find_nodes(
+            op="call_function",
+            target=torch.ops.aten.copy_.default,
+        ))
+        copies[0].meta["custom"] = {"stream": 1}
+        copies[1].meta["custom"] = {"stream": 2}
+
+        fold_foreach_input_mutation_ops(graph)
+        graph.lint()
+
+        self.assertEqual(
+            self._count_nodes(
+                graph, torch.ops.aten._foreach_copy_.default
+            ),
+            0,
+        )
+        self.assertEqual(
+            self._count_nodes(graph, torch.ops.aten.copy_.default),
+            2,
+        )
 
     def test_fold_foreach_input_mutation_ops_keeps_used_copy_result(self):
         graph = self._make_foreach_copy_graph(
@@ -418,6 +492,30 @@ class ForeachTests(TestCase):
                 self.assertEqual(result_b, expected_b)
                 self.assertEqual(a, expected_a)
                 self.assertEqual(b, expected_b)
+
+    @parametrize("reader", ("add", "sin"))
+    def test_foreach_input_mutation_pending_reader(self, reader):
+        if not torch.cuda.is_available():
+            self.skipTest("requires CUDA")
+
+        def fn(a, b, c):
+            if reader == "add":
+                c.add_(a)
+            else:
+                c.copy_(a.sin())
+            torch._foreach_sub_([a, b], 1)
+            return a, b, c
+
+        inputs = [
+            torch.randn(1024, device="cuda") for _ in range(3)
+        ]
+        reference_inputs = [x.clone() for x in inputs]
+
+        expected = fn(*reference_inputs)
+        actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(inputs, reference_inputs)
 
     def test_foreach_input_mutation_inductor_prefers_reinplace(self):
         pass_counts = []

@@ -205,14 +205,25 @@ def get_mutating_use_stack_trace_from_node(
     placeholder_node: torch.fx.Node,
 ) -> str | None:
     def stack_trace_of(use: torch.fx.Node) -> str | None:
-        if stack_trace := use.meta.get("stack_trace", None):
+        if use.target is torch.ops.aten._foreach_copy_.default:
+            destinations, sources = use.args[:2]
+            if isinstance(destinations, (list, tuple)) and isinstance(
+                sources, (list, tuple)
+            ):
+                for dst, src in zip(destinations, sources):
+                    if dst is placeholder_node:
+                        if isinstance(src, torch.fx.Node):
+                            return src.meta.get("stack_trace")
+                        return None
+            return None
+
+        if stack_trace := use.meta.get("stack_trace"):
             return stack_trace
-        # Functionalization's write-back copy_ has no stack trace, but the op
-        # whose result it copies does.
+
         if use.target is torch.ops.aten.copy_.default:
             src = use.args[1]
             if isinstance(src, torch.fx.Node):
-                return src.meta.get("stack_trace", None)
+                return src.meta.get("stack_trace")
         return None
 
     # reinplaced uses might have a single, non-copy_ use

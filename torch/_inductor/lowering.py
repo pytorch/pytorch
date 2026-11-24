@@ -9338,6 +9338,17 @@ def register_foreach_inplace(aten_op, outplace_aten_op, outplace_op):
     inplace_foreach_ops.add(aten_op)
 
     def fn(*args, **kwargs):
+        # Realize pending readers of the old destination values before
+        # the foreach lowering registers any mutation buffers.
+        for arg in args[0]:
+            if not V.graph.has_feature(
+                arg.get_device(), BackendFeature.FOREACH
+            ):
+                continue
+            name = arg.maybe_get_name()
+            if name is not None:
+                V.graph.mark_buffer_mutated(name)
+
         results = outplace_op(*args, **kwargs)
         mut_results = []
         for arg, result in zip(args[0], results):

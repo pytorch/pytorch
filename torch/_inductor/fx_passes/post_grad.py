@@ -52,10 +52,10 @@ from ..fx_utils import (
     same_tensor_meta,
 )
 from ..kernel.symmetric_mm import quack_symmetric_mm
+from ..lowering import foreach_ops, inplace_foreach_ops
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
-    _transfer_meta,
     Arg,
     CallFunction,
     CallFunctionVarArgs,
@@ -387,7 +387,15 @@ def _is_foreach_op(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
         and isinstance(node.target, torch._ops.OpOverload)
+        and node.target in foreach_ops
+        and node.target not in inplace_foreach_ops
+        and not node.target._schema.is_mutable
         and node.target.name().startswith("aten::_foreach_")
+        and isinstance(node.meta.get("val"), (list, tuple))
+        and all(
+            isinstance(value, torch.Tensor)
+            for value in node.meta["val"]
+        )
     )
 
 
@@ -440,6 +448,22 @@ def _device(node: torch.fx.Node) -> torch.device | None:
 
 def _can_fold_foreach_copy_group(group: list[_ForeachCopyCandidate]) -> bool:
     parent = group[0].parent
+
+    def execution_context(node: torch.fx.Node) -> tuple[Any, ...]:
+        custom = node.meta.get("custom", {})
+        return (
+            custom.get("stream", 0),
+            custom.get("mempool"),
+            custom.get("mempool_device"),
+        )
+
+    context = execution_context(group[0].copy_node)
+    if any(
+        execution_context(item.copy_node) != context
+        for item in group
+    ):
+        return False
+
     foreach_input_count = _foreach_input_count(parent)
     # Only fold a complete, ordered epilogue. Partial lists have different
     # scheduler semantics and must retain their original copy_ nodes.
@@ -474,23 +498,76 @@ def _can_fold_foreach_copy_group(group: list[_ForeachCopyCandidate]) -> bool:
     }
     ancestor_cache: dict[torch.fx.Node, OrderedSet[int]] = {}
 
+    def input_dependencies(node: torch.fx.Node) -> list[torch.fx.Node]:
+        # A foreach getitem consumes only its corresponding lane,
+        # rather than every input of the list-producing operation.
+        if (
+            node.op == "call_function"
+            and node.target is operator.getitem
+            and len(node.args) == 2
+        ):
+            producer, index = node.args
+            if (
+                isinstance(producer, torch.fx.Node)
+                and isinstance(index, int)
+                and _is_foreach_op(producer)
+            ):
+                count = _foreach_input_count(producer)
+                if count is not None and 0 <= index < count:
+                    operands = [
+                        operand[index]
+                        if isinstance(operand, (list, tuple))
+                        and len(operand) == count
+                        else operand
+                        for operand in producer.args
+                    ]
+                    return [
+                        leaf
+                        for leaf in pytree.tree_leaves(
+                            (operands, producer.kwargs)
+                        )
+                        if isinstance(leaf, torch.fx.Node)
+                    ]
+
+        return node.all_input_nodes
+
+    def ancestor_node_destinations(
+        root: torch.fx.Node,
+    ) -> OrderedSet[int]:
+        stack = [(root, False)]
+        while stack:
+            node, expanded = stack.pop()
+            if node in ancestor_cache:
+                continue
+
+            dependencies = input_dependencies(node)
+
+            if not expanded:
+                stack.append((node, True))
+                stack.extend(
+                    (dependency, False)
+                    for dependency in dependencies
+                    if dependency not in ancestor_cache
+                )
+                continue
+
+            hits: OrderedSet[int] = OrderedSet()
+            storage = get_node_storage(node)
+            if storage in destination_by_storage:
+                hits.add(destination_by_storage[storage])
+
+            for dependency in dependencies:
+                hits.update(ancestor_cache[dependency])
+
+            ancestor_cache[node] = hits
+
+        return ancestor_cache[root]
+
     def ancestor_destinations(value: Any) -> OrderedSet[int]:
         hits: OrderedSet[int] = OrderedSet()
         for leaf in pytree.tree_leaves(value):
-            if not isinstance(leaf, torch.fx.Node):
-                continue
-            hits.update(ancestor_node_destinations(leaf))
-        return hits
-
-    def ancestor_node_destinations(node: torch.fx.Node) -> OrderedSet[int]:
-        if node in ancestor_cache:
-            return ancestor_cache[node]
-        hits: OrderedSet[int] = OrderedSet()
-        storage = get_node_storage(node)
-        if storage in destination_by_storage:
-            hits.add(destination_by_storage[storage])
-        hits.update(ancestor_destinations((node.args, node.kwargs)))
-        ancestor_cache[node] = hits
+            if isinstance(leaf, torch.fx.Node):
+                hits.update(ancestor_node_destinations(leaf))
         return hits
 
     for operand in parent.args:
@@ -516,6 +593,11 @@ def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
     overlapping destinations, and cross-lane (including indirect) reads from
     any destination. Run only after reinplace_inplaceable_ops.
     """
+    if not graph.find_nodes(
+        op="call_function", target=aten.copy_.default
+    ):
+        return
+
     mutation_targets = OrderedSet(
         node for node in graph.nodes if node.op in ("placeholder", "get_attr")
     )
@@ -556,27 +638,33 @@ def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
                 aten._foreach_copy_.default, args=(dsts, srcs)
             )
 
-        # Keep the transform observer's CREATE provenance, append a REPLACE
-        # record for every removed copy, and retain the source call sites for
-        # cudagraph mutation diagnostics.
+        # Preserve the first copy's metadata. In particular, never replace
+        # its execution context with metadata from a different lane.
         foreach_copy.meta.update(
             (key, value)
             for key, value in first_copy.meta.items()
-            if key not in ("from_node", "stack_trace", "val", "tensor_meta")
+            if key not in ("from_node", "stack_trace")
         )
-        traces: list[str] = []
-        for candidate in group:
-            copy_node = candidate.copy_node
-            _transfer_meta(
-                foreach_copy.meta, copy_node, "fold_foreach_input_mutation_ops"
-            )
-            trace = copy_node.meta.get("stack_trace")
-            if trace and trace not in traces:
-                traces.append(trace)
-        if traces:
-            foreach_copy.meta["stack_trace"] = "\n".join(traces)
-        foreach_copy.meta["val"] = None
+        foreach_copy.meta.pop("val", None)
         foreach_copy.meta.pop("tensor_meta", None)
+
+        # Track all replaced nodes without overwriting metadata repeatedly.
+        if config.effective_provenance_tracking_level() == 1:
+            from torch.fx.traceback import NodeSource, NodeSourceAction
+
+            from_nodes = list(foreach_copy.meta.get("from_node", []))
+            for candidate in group:
+                from_nodes.append(
+                    NodeSource(
+                        candidate.copy_node,
+                        "fold_foreach_input_mutation_ops",
+                        NodeSourceAction.REPLACE,
+                    )
+                )
+            foreach_copy.meta["from_node"] = from_nodes
+
+        # The output is a list, not the tensor described by first_copy.
+        foreach_copy.meta["val"] = None
         foreach_copy.meta["original_aten"] = aten._foreach_copy_.default
 
         for candidate in group:
