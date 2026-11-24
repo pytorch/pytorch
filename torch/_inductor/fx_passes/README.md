@@ -9,7 +9,8 @@ The invariant about mutation we have is:
 
 **After AOTDispatch tracing, we have no mutation in our graph, except for a
 copy_ epilogue at the end of the graph, until the final post-grad passes
-described below.**
+described below. The final passes may replace contiguous copy_ epilogues with
+_foreach_copy_.**
 
 For example, most passes operating on the joint_graph and post_grad graph do
 not need to worry about mutation.
@@ -40,10 +41,9 @@ storages of the input and the storages of the output have any overlap. See
 
 The final post-grad passes are exceptions: `slice_scatter_chunking_pass` may
 replace a fully overwriting functional chain with writes into a fresh base,
-then `reinplace_inplaceable_ops` may introduce further mutation. These passes
-must run in that order *just before Inductor lowering*, as otherwise this breaks
-our invariant.
-
-Additionally, we do have a few passes that *do* introduce mutation, such as
-`reinplace_inplaceable_ops` and `fold_foreach_input_mutation_ops`. These passes
-must run *just before Inductor lowering*, as otherwise this breaks our invariant.
+then `reinplace_inplaceable_ops` may introduce mutation. After reinplacement,
+`fold_foreach_input_mutation_ops` can combine complete, alias-safe copy_
+epilogues into `_foreach_copy_` without changing observable outputs.
+The latter must run **after** reinplacement, which only recognizes individual
+`aten.copy_.default` epilogues. All three passes run in this order immediately
+before Inductor lowering, where the mutation invariant is deliberately relaxed.
