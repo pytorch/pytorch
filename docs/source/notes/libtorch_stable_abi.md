@@ -28,6 +28,7 @@ It consists of
 - torch/csrc/stable/tensor.h: Provides torch::stable::Tensor, a stable version of at::Tensor.
 - torch/csrc/stable/device.h: Provides torch::stable::Device, a stable version of c10::Device.
 - torch/csrc/stable/ops.h: Provides a stable interface for calling ATen ops from `native_functions.yaml`.
+- torch/csrc/stable/cpublas.h: Provides stable C++ wrappers for CPU BLAS BRGEMM, GEMM dispatch, and packing capability checks.
 - torch/csrc/stable/accelerator.h: Provides a stable interface for device-generic objects and APIs
 (e.g. `getCurrentStream`, `DeviceGuard`).
 - torch/csrc/stable/pyobject.h: Provides conversions between Python objects and their `torch::stable` equivalents, such as `tensor_from_pyobject` / `tensor_to_pyobject` for a Python `torch.Tensor`. To access these APIs, you still need to only link `libtorch`, but `libtorch_python` must be loaded at runtime; see the Python interop shims section below.
