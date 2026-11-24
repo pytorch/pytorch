@@ -111,7 +111,7 @@ struct TrivialOffsetCalculator {
 
 // Make an OffsetCalculator with byte offsets
 template<int N, bool signed_strides = false>
-static OffsetCalculator<N, uint32_t, signed_strides> make_offset_calculator(const at::TensorIteratorBase& iter) {
+OffsetCalculator<N, uint32_t, signed_strides> make_offset_calculator(const at::TensorIteratorBase& iter) {
   TORCH_INTERNAL_ASSERT(N <= iter.ntensors());
   std::array<const int64_t*, N> strides;
   for (int i = 0; i < N; i++) {
