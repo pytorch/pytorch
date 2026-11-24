@@ -1105,10 +1105,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             x = torch.ones(12800, 12800, device=self.device) + self.rank
             self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
 
-            # NOTE: We run for 10 iterations each, to ensure that the GPU execution is way behind CPU
-            # and that `y * y` on CPU side will be issued before `all_reduce(y)` on GPU side is done,
-            # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
-            # thus will produce the wrong result that fails the unit test.
+            # NOTE: The cases that use _run_loop_collective_wait run 10 iterations each, so that GPU execution
+            # falls well behind the CPU: if `wait_tensor()` did not wait, `y * y` would run in parallel with
+            # `all_reduce(y)` and the result would not match eager. The failure case at the end orders the ranks
+            # through the store instead and does not depend on this timing.
 
             def _run_loop_collective_wait(x, wait_fn, expected_registry_size):
                 for _ in range(10):
