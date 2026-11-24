@@ -102,7 +102,9 @@ A {class}`torch.dtype` is an object that represents the data type of a
     24-bit word, and value `i` occupies bits `[6i, 6i + 6)` of it (the first
     value is in the low 6 bits of the first byte). As with `torch.float4_e2m1fn_x2`,
     operations which modify the shape/strides of a tensor operate on whole 3-byte
-    elements and will **not** unpack/repack the 6-bit values.
+    elements and will **not** unpack/repack the 6-bit values. DLPack exchanges it
+    as `kDLFloat6_e2m3fn` with `bits=6, lanes=4`, so shapes and strides count
+    3-byte elements; importing `lanes=1` or padded sub-byte tensors raises.
 
 **Note**: legacy constructors such as `torch.*.FloatTensor`, `torch.*.DoubleTensor`, `torch.*.HalfTensor`,
 `torch.*.BFloat16Tensor`, `torch.*.ByteTensor`, `torch.*.CharTensor`, `torch.*.ShortTensor`, `torch.*.IntTensor`,
