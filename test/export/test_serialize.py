@@ -1474,6 +1474,21 @@ class TestDeserialize(_DeserializeGraphMixin, TestCase):
         f = Module()
         self.check_graph(f, (torch.ones(1), torch.ones(3)))
 
+    def test_sym_bool_output_spec(self):
+        # A SymBool returned as a graph output is recorded as a SymBoolArgument in
+        # the output spec, which exercises (de)serialize_argument_spec. Before the
+        # SymBoolArgument branch was added there, this raised AssertionError("TODO").
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x + 1, x.shape[0] > 4
+
+        dim0 = torch.export.Dim("dim0")
+        self.check_graph(
+            Module(),
+            (torch.ones(6),),
+            dynamic_shapes={"x": {0: dim0}},
+        )
+
     def test_sym_bool_torch_check_equal(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2022,6 +2037,32 @@ class TestSchemaVersioning(TestCase):
 unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kwargs)
 
 
+class _EmptyAutocastInNoGrad(torch.nn.Module):
+    def forward(self, x):
+        with torch.no_grad():
+            y = x * 2
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                pass
+        return y
+
+
+class _StepCounter(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("steps", torch.zeros(()))
+
+    def forward(self, x):
+        with torch.no_grad():
+            self.steps.add_(1)
+        return x * 2
+
+
+class _EmptyCond(torch.nn.Module):
+    def forward(self, x):
+        torch.cond(x.sum() > 0, lambda x: (), lambda x: (), (x,))
+        return x * 2
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -2049,6 +2090,35 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
+
+    @parametrize(
+        "module_cls",
+        [_EmptyAutocastInNoGrad, _StepCounter, _EmptyCond],
+        name_fn=lambda cls: cls.__name__.lstrip("_"),
+    )
+    def test_save_load_region_without_outputs(self, module_cls):
+        def has_region_without_outputs(ep):
+            return any(
+                isinstance(node.target, torch._ops.HigherOrderOperator)
+                and node.meta.get("val") == ()
+                for gm in ep.graph_module.modules()
+                if isinstance(gm, torch.fx.GraphModule)
+                for node in gm.graph.nodes
+            )
+
+        m = module_cls()
+        x = torch.randn(4, 4)
+        ep = export(m, (x,))
+        self.assertTrue(has_region_without_outputs(ep))
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertTrue(has_region_without_outputs(loaded_ep))
+        loaded = loaded_ep.module()
+        self.assertEqual(loaded(x), m(x))
+        self.assertEqual(loaded.state_dict(), m.state_dict())
+        save(loaded_ep, io.BytesIO())
 
     def test_deserialize_torch_artifact_dict(self):
         data = {"key": torch.tensor([1, 2, 3])}
@@ -2344,6 +2414,9 @@ class TestSaveLoad(TestCase):
                         self.assertEqual(
                             node_source_orig.to_dict(), node_source_loaded.to_dict()
                         )
+
+
+instantiate_parametrized_tests(TestSaveLoad)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
