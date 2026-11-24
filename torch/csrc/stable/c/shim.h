@@ -420,6 +420,60 @@ torch_is_neg(AtenTensorHandle tensor, bool* ret_is_neg);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_is_inference(AtenTensorHandle tensor, bool* ret_is_inference);
 
+// Return the runtime's at::native::TransposeType encodings.
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_no_transpose();
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_transpose();
+AOTI_TORCH_EXPORT int32_t torch_transpose_type_conj_transpose();
+
+// Calls the matching at::native::cpublas::brgemm overload. dtype_a, dtype_b,
+// and dtype_c use the runtime's c10::ScalarType values.
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    int32_t dtype_a,
+    int32_t dtype_b,
+    int32_t dtype_c,
+    bool add_C,
+    const void* A,
+    const void* B,
+    void* C,
+    bool is_vnni);
+
+// Calls at::native::cpublas::brgemm_release, which releases the BRGEMM hardware
+// context when is_vnni is true.
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_brgemm_release(bool is_vnni);
+
+// Calls at::native::cpublas::gemm_no_downcast_stub. device_type, dtype, and
+// transa/transb use the runtime's DeviceType, ScalarType, and TransposeType
+// encodings. Only CPU has a registered kernel.
+// alpha and beta are doubles; for Half/BFloat16/Float8 inputs, c points to a
+// float output buffer.
+AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_float64(
+    int32_t device_type,
+    int32_t dtype,
+    int32_t transa,
+    int32_t transb,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    double alpha,
+    const void* a,
+    int64_t lda,
+    const void* b,
+    int64_t ldb,
+    double beta,
+    void* c,
+    int64_t ldc);
+
+// Calls at::native::cpublas::could_pack to report whether packing the given
+// ScalarType is supported and enabled on this CPU; writes the result to ret.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cpublas_could_pack(int32_t dtype, bool* ret);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 #ifdef __cplusplus
