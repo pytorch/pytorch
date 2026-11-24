@@ -3616,6 +3616,79 @@ torch.cuda.synchronize()
                 self.assertTrue(s.is_capturing())
                 g.capture_end()
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize("pool_kind", ["native", "python"])
+    @decorateIf(
+        requires_cuda_python_bindings, lambda params: params["pool_kind"] == "python"
+    )
+    def test_graph_capture_oom_keeps_cached_segments(self, pool_kind):
+        # https://github.com/pytorch/pytorch/issues/159594: running out of memory
+        # during capture must not free the pool's oversize cached segment, because
+        # cudaFree or a custom allocator's free invalidates the capture.
+        # Use a subprocess, because a regression leaves an invalid capture open.
+        script = """
+import json
+import sys
+import torch
+
+MiB = 1 << 20
+state = {"capturing": False, "fail_alloc": False, "frees_during_capture": 0}
+if sys.argv[1] == "python":
+    from cuda.bindings import runtime
+
+    def alloc(size, device, stream):
+        if state["fail_alloc"]:
+            return None
+        err, ptr = runtime.cudaMalloc(size)
+        return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
+
+    def free(ptr, size, device, stream):
+        state["frees_during_capture"] += state["capturing"]
+        runtime.cudaFree(ptr)
+
+    pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
+else:
+    # Allows the 40 MiB segment, but not another 20 MiB.
+    total = torch.cuda.get_device_properties(0).total_memory
+    limit = torch.cuda.memory_reserved() + 50 * MiB
+    torch.cuda.set_per_process_memory_fraction(limit / total)
+    pool = torch.cuda.MemPool()
+stream = torch.cuda.Stream()
+with torch.cuda.stream(stream), torch.cuda.use_mem_pool(pool):
+    # Larger than max_split_size, so the 20 MiB request cannot reuse it.
+    cached = torch.empty(40 * MiB, dtype=torch.uint8, device="cuda")
+del cached
+stream.synchronize()
+graph = torch.cuda.CUDAGraph()
+state["capturing"] = state["fail_alloc"] = True
+try:
+    with torch.cuda.graph(graph, pool=pool.id, stream=stream):
+        torch.empty(20 * MiB, dtype=torch.uint8, device="cuda")
+    result = "allocated"
+except torch.OutOfMemoryError:
+    result = "out of memory"
+except Exception as error:
+    result = type(error).__name__
+state["capturing"] = False
+segments = [s["total_size"] for s in pool.snapshot()]
+print(json.dumps({**state, "result": result, "segments_kept": segments == [40 * MiB]}))
+"""
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
+        proc = subprocess.run(
+            [sys.executable, "-c", script, pool_kind],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["result"], "out of memory", proc.stderr)
+        self.assertEqual(result["frees_during_capture"], 0)
+        self.assertTrue(result["segments_kept"])
+
     def _allocate_graph_temporary(self, state, value):
         temporary = torch.empty(LARGE_BUFFER // 4, device="cuda")
         temporary.fill_(value)

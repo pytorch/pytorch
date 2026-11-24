@@ -4568,6 +4568,11 @@ class DeviceCachingAllocator {
     if (AcceleratorAllocatorConfig::max_split_size() ==
         std::numeric_limits<size_t>::max())
       return false;
+    // Like release_cached_blocks, not during graph capture. The pool is then
+    // the capture's private pool, whose memory captured work can use, and
+    // cudaFree is not permitted during capture.
+    if (C10_UNLIKELY(is_capture_context()))
+      return false;
     BlockPool& pool = *p.pool;
 
     // because of std::unique_ptr, block cannot be trivially copied
