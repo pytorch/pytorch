@@ -353,6 +353,105 @@ def uniform(
     return uniform_(key, result, low=low, high=high)
 
 
+def shard_normal_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    global_shape: Sequence[int | torch.SymInt],
+    global_offset: Sequence[int | torch.SymInt],
+    *,
+    mean: float = 0.0,
+    std: float = 1.0,
+) -> torch.Tensor:
+    r"""Fill ``result`` in-place with its region of a global normal tensor.
+
+    ``result`` is treated as the region at ``global_offset`` of a tensor of
+    shape ``global_shape`` (e.g. a shard of a parameter), and is filled with
+    exactly the values that
+    ``normal(key, global_shape, mean=mean, std=std, dtype=result.dtype)``
+    would produce there, without generating the rest of the global tensor.
+
+    ``result`` must be a single rectangular region of the global tensor. For a
+    placement that gives a rank several separate chunks (e.g. a strided shard),
+    call this once per chunk.
+
+    Args:
+        key (Tensor): An unbatched PRNG key returned by :func:`key`,
+            :func:`split`, or :func:`fold_in`.
+        result (Tensor): The output tensor to fill in-place.
+        global_shape (sequence of int): Shape of the global tensor.
+        global_offset (sequence of int): Index of ``result``'s first element
+            within the global tensor, one entry per dim.
+        mean (float): Mean of the normal distribution. Default: ``0.0``.
+        std (float): Standard deviation of the normal distribution.
+            Default: ``1.0``.
+
+    Returns:
+        ``result``, filled with normal random values.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> # Rows 512:1024 of a (1024, 4096) parameter.
+        >>> shard = torch.empty(512, 4096, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.shard_normal_(  # doctest: +SKIP
+        ...     key, shard, (1024, 4096), (512, 0)
+        ... )
+    """
+    return torch.ops.aten._philox_normal_shard_(
+        result, key, global_shape, global_offset, mean, std
+    )
+
+
+def shard_uniform_(
+    key: torch.Tensor,
+    result: torch.Tensor,
+    global_shape: Sequence[int | torch.SymInt],
+    global_offset: Sequence[int | torch.SymInt],
+    *,
+    low: float = 0.0,
+    high: float = 1.0,
+) -> torch.Tensor:
+    r"""Fill ``result`` in-place with its region of a global uniform tensor.
+
+    ``result`` is treated as the region at ``global_offset`` of a tensor of
+    shape ``global_shape`` (e.g. a shard of a parameter), and is filled with
+    exactly the values that
+    ``uniform(key, global_shape, low=low, high=high, dtype=result.dtype)``
+    would produce there, without generating the rest of the global tensor.
+
+    ``result`` must be a single rectangular region of the global tensor. For a
+    placement that gives a rank several separate chunks (e.g. a strided shard),
+    call this once per chunk.
+
+    Args:
+        key (Tensor): An unbatched PRNG key returned by :func:`key`,
+            :func:`split`, or :func:`fold_in`.
+        result (Tensor): The output tensor to fill in-place.
+        global_shape (sequence of int): Shape of the global tensor.
+        global_offset (sequence of int): Index of ``result``'s first element
+            within the global tensor, one entry per dim.
+        low (float): Lower bound (inclusive) of the uniform distribution.
+            Default: ``0.0``.
+        high (float): Upper bound (exclusive) of the uniform distribution.
+            Default: ``1.0``.
+
+    Returns:
+        ``result``, filled with uniform random values.
+
+    Example::
+
+        >>> key = torch.func._random.key(42, device="cuda")  # doctest: +SKIP
+        >>> # Columns 2048:4096 of a (1024, 4096) parameter.
+        >>> shard = torch.empty(1024, 2048, device="cuda")  # doctest: +SKIP
+        >>> torch.func._random.shard_uniform_(  # doctest: +SKIP
+        ...     key, shard, (1024, 4096), (0, 2048)
+        ... )
+    """
+    return torch.ops.aten._philox_uniform_shard_(
+        result, key, global_shape, global_offset, low, high
+    )
+
+
 def randint_(
     key: torch.Tensor,
     result: torch.Tensor,

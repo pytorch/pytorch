@@ -786,6 +786,54 @@ def meta_philox_normal_tensor_(self, key, mean, std):
     return self
 
 
+def _check_philox_shard_args(op_name, self, key, global_shape, global_offset):
+    # Before the shared checks, whose batched-key errors don't apply here.
+    torch._check(
+        key.shape == (2,),
+        lambda: f"{op_name}: key must have shape (2,), got shape {key.shape}",
+    )
+    _check_philox_distribution_args(op_name, self, key)
+    torch._check(
+        len(global_shape) == self.dim() and len(global_offset) == self.dim(),
+        lambda: (
+            f"{op_name}: global_shape and global_offset must have one entry per "
+            f"output dim, got {global_shape} and {global_offset} for output shape "
+            f"{self.shape}"
+        ),
+    )
+
+    def msg():
+        return (
+            f"{op_name}: output of shape {self.shape} at global_offset "
+            f"{global_offset} does not fit in global_shape {global_shape}"
+        )
+
+    # Check each bound separately so symbolic sizes aren't forced to guard.
+    for s, g, o in zip(self.shape, global_shape, global_offset):
+        torch._check(o >= 0, msg)
+        torch._check(o + s <= g, msg)
+
+
+@register_meta(aten._philox_normal_shard_.default)
+def meta_philox_normal_shard_(
+    self, key, global_shape, global_offset, mean=0.0, std=1.0
+):
+    _check_philox_shard_args(
+        "_philox_normal_shard_", self, key, global_shape, global_offset
+    )
+    return self
+
+
+@register_meta(aten._philox_uniform_shard_.default)
+def meta_philox_uniform_shard_(
+    self, key, global_shape, global_offset, low=0.0, high=1.0
+):
+    _check_philox_shard_args(
+        "_philox_uniform_shard_", self, key, global_shape, global_offset
+    )
+    return self
+
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int):

@@ -595,6 +595,81 @@ class TestStatelessRNGDistribution(TestCase):
         self.assertEqual(result.shape, (3, 0))
         self.assertEqual(result.dtype, dtype)
 
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    @parametrize("key_offset", [0, (1 << 64) - 3])
+    @dtypes(*all_floating_dtypes)
+    def test_shard_matches_global(self, device, dtype, gen_fn_name, key_offset):
+        # Every shard of an uneven split along each dim, plus a box in every dim,
+        # matches the corresponding region of the global tensor. Odd sizes put
+        # run starts at every position within a Philox call.
+        key = torch.tensor([42, key_offset], dtype=torch.uint64, device=device)
+        shard_ = getattr(random, f"shard_{gen_fn_name}_")
+        names = ("mean", "std") if gen_fn_name == "normal" else ("low", "high")
+        params = dict(zip(names, (-2.0, 3.0)))
+        for global_shape in [(101,), (37, 29), (6, 5, 7), (4, 3, 5, 6)]:
+            full = self._gen(gen_fn_name, key, global_shape, dtype=dtype, **params)
+            regions = []
+            for dim, size in enumerate(global_shape):
+                for start in range(0, size, -(-size // 3)):
+                    offset = [0] * len(global_shape)
+                    offset[dim] = start
+                    shape = list(global_shape)
+                    shape[dim] = min(-(-size // 3), size - start)
+                    regions.append((shape, offset))
+            regions.append(([s - 2 for s in global_shape], [1] * len(global_shape)))
+            for shape, offset in regions:
+                region = tuple(slice(o, o + s) for s, o in zip(shape, offset))
+                shard = torch.empty(shape, dtype=dtype, device=device)
+                shard_(key, shard, global_shape, offset, **params)
+                self.assertEqual(shard, full[region], atol=0, rtol=0)
+
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    @dtypes(*all_floating_dtypes)
+    def test_shard_noncontiguous_and_empty(self, device, dtype, gen_fn_name):
+        key = random.key(42, device=device)
+        inplace = getattr(random, f"shard_{gen_fn_name}_")
+        full = self._gen(gen_fn_name, key, (13, 11), dtype=dtype)
+        shard = torch.empty(8, 5, dtype=dtype, device=device).t()
+        inplace(key, shard, (13, 11), (2, 3))
+        self.assertEqual(shard, full[2:7, 3:11], atol=0, rtol=0)
+        empty = torch.empty(0, 11, dtype=dtype, device=device)
+        inplace(key, empty, (13, 11), (13, 0))
+        scalar = torch.empty((), dtype=dtype, device=device)
+        inplace(key, scalar, (), ())
+        self.assertEqual(scalar, self._gen(gen_fn_name, key, (), dtype=dtype))
+        # An 8-byte-aligned key must give the same values as an aligned copy.
+        misaligned = random.split(key, 2).view(-1)[1:3]
+        opts, region = {"dtype": dtype, "device": device}, ((13, 11), (2, 3))
+        expected = inplace(misaligned.clone(), torch.empty(5, 8, **opts), *region)
+        actual = inplace(misaligned, torch.empty(5, 8, **opts), *region)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    def test_shard_errors(self, device, gen_fn_name):
+        inplace = getattr(random, f"shard_{gen_fn_name}_")
+        for mode in (contextlib.nullcontext(), FakeTensorMode()):
+            with mode:
+                key = random.key(42, device=device)
+                out = torch.empty(4, 5, device=device)
+                for bad_key in (key.expand(4, 1, 2), random.split(key, 3)):
+                    with self.assertRaisesRegex(RuntimeError, r"shape \(2,\)"):
+                        inplace(bad_key, out, (8, 5), (0, 0))
+                with self.assertRaisesRegex(RuntimeError, "one entry per output dim"):
+                    inplace(key, out, (8, 5), (0,))
+                # The last offset would overflow int64 if added to the size.
+                for offset in ((5, 0), (-1, 0), (2**63 - 1, 0)):
+                    with self.assertRaisesRegex(RuntimeError, "does not fit"):
+                        inplace(key, out, (8, 5), offset)
+                overlapping = torch.empty(1, 5, device=device).expand(4, 5)
+                with self.assertRaisesRegex(RuntimeError, "single memory location"):
+                    inplace(key, overlapping, (8, 5), (0, 0))
+
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    def test_shard_opcheck(self, device, gen_fn_name):
+        op = getattr(torch.ops.aten, f"_philox_{gen_fn_name}_shard_").default
+        out, key = torch.empty(4, 7, device=device), random.key(42, device=device)
+        torch.library.opcheck(op, (out, key, [13, 7], [2, 0]))
+
     # Distribution-specific tests
 
     @dtypes(*all_floating_dtypes)
@@ -978,6 +1053,23 @@ class TestStatelessRNGCompile(TestCase):
 
         self.assertEqual(f(key), random.uniform(random.fold_in(key, 3), (100,)))
 
+    @parametrize("gen_fn_name", ["normal", "uniform"])
+    @parametrize("dynamic", [False, True])
+    def test_shard_fullgraph(self, device, gen_fn_name, dynamic):
+        # In-place init of a shard; dynamic makes the sizes and offsets symbolic.
+        shard_ = getattr(random, f"shard_{gen_fn_name}_")
+        key = random.key(42, device=device)
+
+        @torch.compile(backend="aot_eager", fullgraph=True, dynamic=dynamic)
+        def f(key, out, global_shape, global_offset):
+            return shard_(key, out, global_shape, global_offset)
+
+        for rows, start in ((4, 2), (6, 5)):
+            region = ((13, 7), (start, 0))
+            actual = f(key, torch.empty(rows, 7, device=device), *region)
+            expected = shard_(key, torch.empty(rows, 7, device=device), *region)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
     def test_randint_fullgraph(self, device):
         key = random.key(42, device=device)
 
@@ -1000,8 +1092,9 @@ class TestStatelessRNGCompile(TestCase):
 
     @onlyAccelerator
     @parametrize("tensor_bounds", [False, True])
+    @parametrize("shard", [False, True])
     @parametrize("op", ["uniform", "normal", "randint"])
-    def test_generation_no_extra_clone(self, device, op, tensor_bounds):
+    def test_generation_no_extra_clone(self, device, op, tensor_bounds, shard):
         # Out-of-place generation fully overwrites its output; ensure generation
         # in torch.compile doesn't allocate an extra full-size buffer (i.e.
         # ensure peak ~= output size).
@@ -1009,8 +1102,21 @@ class TestStatelessRNGCompile(TestCase):
             self.skipTest("CUDA inductor codegen requires triton")
         if tensor_bounds and op not in ("uniform", "normal"):
             self.skipTest(f"{op} doesn't support tensor bounds yet")
+        if shard and (tensor_bounds or op == "randint"):
+            self.skipTest("shard ops only cover uniform/normal with scalar bounds")
         shape = (2048, 2048)  # 16 MiB fp32; an extra clone would ~double peak
-        gen_fn = getattr(random, op)
+        if shard:
+            # Filling a fresh buffer exercises reinplacing the shard op.
+            shard_ = getattr(random, f"shard_{op}_")
+
+            def gen_fn(key, shape, **bounds):
+                # The bottom half of a global tensor with twice as many rows.
+                rows, cols = shape
+                out = torch.empty(shape, device=device)
+                return shard_(key, out, (2 * rows, cols), (rows, 0), **bounds)
+
+        else:
+            gen_fn = getattr(random, op)
         bounds = {
             "uniform": {"low": 0.0, "high": 1.0},
             "normal": {"mean": 0.0, "std": 1.0},
