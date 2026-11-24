@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Literal, TypeAlias
+from typing_extensions import deprecated
 
 from torch._C import device, dtype, layout
 
@@ -60,7 +61,6 @@ class _ExperimentalConfig:
         verbose: bool = ...,
         performance_events: list[str] = ...,
         enable_cuda_sync_events: bool = ...,
-        adjust_profiler_step: bool = ...,
         disable_external_correlation: bool = ...,
         profile_all_threads: bool = ...,
         capture_overload_names: bool = ...,
@@ -71,8 +71,6 @@ class _ExperimentalConfig:
         trace_only: bool = ...,
     ) -> None: ...
     trace_only: bool
-    # Deprecated no-op; retained only so the Python layer can detect and warn.
-    adjust_profiler_step: bool
 
 class ProfilerConfig:
     def __init__(
@@ -156,8 +154,13 @@ Input: TypeAlias = _TensorMetadata | list[_TensorMetadata] | Scalar | None
 class _ExtraFields_TorchOp:
     name: str
     sequence_number: int
-    allow_tf32_cublas: bool
-
+    @property
+    @deprecated(
+        "allow_tf32_cublas is deprecated as of PyTorch 2.16 and will be removed "
+        "in 2.18. Read torch.backends.cuda.matmul.fp32_precision instead.",
+        category=None,
+    )
+    def allow_tf32_cublas(self) -> bool: ...
     @property
     def inputs(self) -> list[Input]: ...
     @property
@@ -326,6 +329,7 @@ class _CuspyModule:
         render: tuple | None = None,
         counters: tuple | None = None,
         compression_level: int = 1,
+        metadata: list[tuple[str, str]] = ...,
     ) -> bytes: ...
 
 _cuspy: _CuspyModule

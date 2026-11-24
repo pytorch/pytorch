@@ -175,7 +175,7 @@ CUDAPluggableAllocator::getExpandableSegmentSizes(c10::DeviceIndex device) {
 void CUDAPluggableAllocator::emptyCache(
     /*unused*/ c10::cuda::MempoolId_t mempool_id) {
   if (reset_fn_) {
-    return reset_fn_();
+    reset_fn_();
   }
 }
 
@@ -365,8 +365,12 @@ void CUDAPluggableAllocator::copy_data(
     void* dest,
     const void* src,
     std::size_t count) const {
-  C10_CUDA_CHECK(
-      cudaMemcpy(dest, src, count, cudaMemcpyKind::cudaMemcpyDeviceToDevice));
+  C10_CUDA_CHECK(cudaMemcpyAsync(
+      dest,
+      src,
+      count,
+      cudaMemcpyDeviceToDevice,
+      c10::cuda::getCurrentCUDAStream()));
 }
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
@@ -395,6 +399,9 @@ void changeCurrentAllocator(
       !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");
   c10::cuda::CUDACachingAllocator::allocator.store(allocator.get());
+  // Use priority >= 1 to override the native allocator registered at priority 1
+  // by BackendStaticInitializer in c10/cuda/CUDACachingAllocator.cpp.
+  c10::SetAllocator(c10::kCUDA, allocator.get(), /*priority=*/1);
   current_custom_allocator = allocator;
 }
 
