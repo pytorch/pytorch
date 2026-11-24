@@ -1772,9 +1772,15 @@ class _CapturePackage(CompilePackage):
             yield
 
     def add_guarded_code(
-        self, guards_state: bytes, dynamo_code: types.CodeType
+        self,
+        guards_state: bytes,
+        dynamo_code: types.CodeType,
+        *,
+        compile_on_one_rank: bool = False,
     ) -> None:
-        super().add_guarded_code(guards_state, dynamo_code)
+        super().add_guarded_code(
+            guards_state, dynamo_code, compile_on_one_rank=compile_on_one_rank
+        )
         self.graph_break_op_names |= self._compile_graph_break_op_names
         self.graph_break_op_devices |= self._compile_graph_break_op_devices
 

@@ -375,6 +375,65 @@ class TestPackage(torch._inductor.test_case.TestCase):
         torch._dynamo.reset()
         PrecompileContext.clear()
 
+    @parametrize("saved_mode", (False, True))
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_precompile_cache_compile_on_one_rank(self, saved_mode):
+        def fn(x):
+            return x.sin()
+
+        x = torch.ones(4)
+        with torch.compiler.config.patch(compile_on_one_rank=saved_mode):
+            self.assertEqual(torch.compile(fn, backend="inductor")(x), fn(x))
+            self._save_and_reload(expected_backends=1, expected_dynamo=1)
+            stats = torch._dynamo.utils.counters["stats"]
+            graphs = stats["unique_graphs"]
+            with torch.compiler.set_stance("fail_on_recompile"):
+                self.assertEqual(torch.compile(fn, backend="inductor")(x), fn(x))
+
+        torch._dynamo.reset()
+        PrecompileContext.clear()
+        with torch.compiler.config.patch(compile_on_one_rank=not saved_mode):
+            self.assertIsNone(DynamoCache.load(fn))
+            self.assertEqual(torch.compile(fn, backend="inductor")(x), fn(x))
+            self.assertGreater(stats["unique_graphs"], graphs)
+            self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        with (
+            torch.compiler.config.patch(compile_on_one_rank=saved_mode),
+            torch.compiler.set_stance("fail_on_recompile"),
+        ):
+            self.assertEqual(torch.compile(fn, backend="inductor")(x), fn(x))
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_package_rank_mode_follows_guarded_code(self):
+        def fn(x):
+            return x.sin()
+
+        package = CompilePackage(fn)
+        compiled = torch._dynamo.optimize("inductor", package=package)(fn)
+        x = torch.ones(4)
+        with torch.compiler.config.patch(compile_on_one_rank=True):
+            compiled(x)
+            portable_key = package.source_id
+            PrecompileContext.save_to_dynamo_cache()
+        with torch.compiler.config.patch(compile_on_one_rank=False):
+            self.assertEqual(package.source_id, portable_key)
+            package.cache_entry().check_versions()
+            compiled(x.double())
+            self.assertNotEqual(package.source_id, portable_key)
+            store = DiskDynamoStore()
+            path = self.path()
+            store.save_package(package, path)
+            # Flushes both recorded keys; the earlier portable entry must still
+            # be a snapshot unmutated by the False-mode recompile above.
+            PrecompileContext.save_to_dynamo_cache()
+        with torch.compiler.config.patch(compile_on_one_rank=True):
+            with self.assertRaisesRegex(RuntimeError, "compile_on_one_rank=False"):
+                store.load_package(fn, path)
+            torch._dynamo.reset()
+            with torch.compiler.set_stance("fail_on_recompile"):
+                self.assertEqual(torch.compile(fn, backend="inductor")(x), fn(x))
+
     def test_collapse_device_types_prefers_an_accelerator(self):
         # The single string both callers record. Among several accelerators
         # one SystemInfo.check_compatibility checks wins: alphabetical order
@@ -959,6 +1018,7 @@ print(eval(f"bbmod.{name}.{path}") is code)
             package.add_guarded_code(b"", code)
             # A bypass used to stick to the entry and suppress this too.
             package.add_inlined_source([fn.__code__])
+        entry = package.cache_entry().codes[0]
         self.assertFalse(entry.bypassed)
         self.assertEqual(entry.backend_ids, [backend_id])
         self.assertTrue(package.cache_entry().source_info.inlined_sources)

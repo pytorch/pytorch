@@ -2010,7 +2010,11 @@ def _compile(
         if output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
-            output.package.add_guarded_code(check_fn.guards_state, out_code)
+            output.package.add_guarded_code(
+                check_fn.guards_state,
+                out_code,
+                compile_on_one_rank=output.compile_on_one_rank,
+            )
             output.package.add_inlined_source(output.tracing_context.traced_code)
             output.package.update_device_type(output.current_tracer.graph)
 
