@@ -82,6 +82,7 @@ from torch._subclasses.fake_tensor import (
     maybe_get_fake_mode,
     maybe_get_item_memo,
     unset_fake_temporarily,
+    UnsupportedFakeTensorException,
 )
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
 from torch.fx.experimental._backward_state import BackwardState
@@ -123,7 +124,13 @@ from torch.utils.weak import TensorWeakRef
 
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
-from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented
+from ..exc import (
+    InputRealizationFailure,
+    InternalTorchDynamoError,
+    raise_observed_exception,
+    unimplemented,
+    Unsupported,
+)
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..pgo import (
     auto_dynamic,
@@ -151,6 +158,7 @@ from ..source import (
     is_from_attr_proxy_source,
     is_from_closure_source,
     is_from_global_source,
+    is_from_local_source,
     is_from_nonlocal_source,
     is_from_optimizer_source,
     is_from_unspecialized_nn_module_source,
@@ -1027,6 +1035,25 @@ def _build_dict_items(
     for _, key, _ in entries:
         items.move_to_end(key)
     return items
+
+
+def _tensor_input_realization_failure(
+    value: object, source: Source, member: str, guard: Callable[..., Any]
+) -> InputRealizationFailure | None:
+    if (
+        type(value) is not torch.Tensor
+        or type(source) not in (LocalSource, GetItemSource)
+        or not is_from_local_source(source, only_allow_input=True)
+    ):
+        return None
+    return InputRealizationFailure(
+        source,
+        value,
+        (
+            source.make_guard(GuardBuilder.TYPE_MATCH),
+            AttrSource(source, member).make_guard(guard),
+        ),
+    )
 
 
 class VariableBuilder:
@@ -3562,6 +3589,9 @@ class VariableBuilder:
                 context="",
                 explanation="torch.compile does not support sparse Tensors",
                 hints=[*graph_break_hints.SPARSE_TENSOR],
+                input_realization_failure=_tensor_input_realization_failure(
+                    value, source, "layout", GuardBuilder.ID_MATCH
+                ),
             )
 
         if (
@@ -5704,13 +5734,26 @@ def _wrap_to_fake_tensor_and_record_impl(
         with enable_python_dispatcher():
             if tx.fake_mode is None:
                 raise AssertionError("tx.fake_mode must not be None")
-            fake_e = wrap_fake_exception(
-                lambda: tx.fake_mode.from_tensor(
-                    e,  # type: ignore[arg-type]
-                    source=source,
-                    symbolic_context=symbolic_context,
+            try:
+                fake_e = wrap_fake_exception(
+                    lambda: tx.fake_mode.from_tensor(
+                        e,  # type: ignore[arg-type]
+                        source=source,
+                        symbolic_context=symbolic_context,
+                    )
                 )
-            )
+            except Unsupported as error:
+                cause = error.__cause__
+                if (
+                    isinstance(cause, UnsupportedFakeTensorException)
+                    and cause.quantized_input
+                    and type(e) is torch.Tensor
+                    and e.is_quantized
+                ):
+                    error.input_realization_failure = _tensor_input_realization_failure(
+                        e, source, "is_quantized", GuardBuilder.CONSTANT_MATCH
+                    )
+                raise
         if tensor_spec is not None:
             _wire_tensor_spec_dims(tensor_spec, fake_e)
         if source is not None and (sym_val := maybe_get_item_memo(fake_e)) is not None:

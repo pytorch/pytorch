@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import abc
+import contextlib
 import itertools
 import operator
 import unittest
@@ -73,6 +74,43 @@ class GraphBreakingInt(int):
 @instantiate_parametrized_tests
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_eager_nested_resume_retries_when_input_becomes_traceable(self):
+        sparse = True
+
+        @torch.compiler.disable
+        def make_input(x):
+            return x.to_sparse() if sparse else x
+
+        def child(x):
+            return torch.relu(make_input(x.sin())).to_dense()
+
+        def fn(x):
+            with contextlib.nullcontext():
+                return child(x)
+
+        recorder = torch._dynamo.testing.EagerAndRecordGraphs()
+        compiled = torch.compile(fn, backend=recorder)
+        x = torch.linspace(-1, 1, 5)
+        with torch.no_grad():
+            self.assertEqual(compiled(x), fn(x))
+            before = len(recorder.graphs)
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(recorder.graphs), before)
+
+            sparse = False
+            self.assertEqual(compiled(x), fn(x))
+            self.assertTrue(
+                any(
+                    node.target is torch.relu
+                    for gm in recorder.graphs[before:]
+                    for node in gm.graph.nodes
+                )
+            )
+            after = len(recorder.graphs)
+            sparse = True
+            self.assertEqual(compiled(x), fn(x))
+            self.assertEqual(len(recorder.graphs), after)
 
     @parametrize("depth", [1, 4, 8])
     @parametrize("tensor_branch", [False, True])
