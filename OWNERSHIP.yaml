@@ -510,6 +510,7 @@ ownership:
       - /test/cpp/jit/test_save_load.cpp
       - /test/jit_hooks/
       - /test/jit/test_hooks_modules.py
+      - /test/jit/test_interface_schema.py
       - /torch/csrc/jit/
       - /torch/jit/
       - /torch/csrc/jit/python/init.cpp

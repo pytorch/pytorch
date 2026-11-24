@@ -426,41 +426,8 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
     return true;
   }
   // to improve performance, this check can be cached
-  if (auto iface = rhs.cast<InterfaceType>()) {
-    // ClassType is not a subtype of InterfaceType if the InterfaceType is a
-    // Module Interface Type but the Class Type is not a Module Class Type
-    if (!is_module() && iface->is_module()) {
-      if (why_not) {
-        *why_not << "Class '" << repr_str() << "' is not a subtype of "
-                 << "the module interface '" << rhs.repr_str()
-                 << "' , only ScriptModule class can be subtype of module"
-                 << " interface.\n";
-      }
-      return false;
-    }
-    for (const FunctionSchema& schema : iface->methods()) {
-      auto self_method = findMethod(schema.name());
-      if (!self_method) {
-        if (why_not) {
-          *why_not << "Class '" << repr_str() << "' does not have method '"
-                   << schema.name() << "' but '" << rhs.repr_str()
-                   << "' does.\n";
-        }
-        return false;
-      }
-      if (!self_method->getSchema().isSubtypeOf(
-              schema, /*as_method=*/true, why_not)) {
-        if (why_not) {
-          *why_not << "Method on class '" << repr_str()
-                   << "' (1) is not compatible with interface '"
-                   << rhs.repr_str() << "' (2)\n"
-                   << "  (1) " << self_method->getSchema() << '\n'
-                   << "  (2) " << schema << '\n';
-        }
-        return false;
-      }
-    }
-    return true;
+  if (const auto* iface = rhs.castRaw<InterfaceType>()) {
+    return iface->isImplementedBy(*this, why_not);
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
