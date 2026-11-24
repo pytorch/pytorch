@@ -196,6 +196,8 @@ def type_implements_mp_slot(obj_type: type, slot: int) -> bool:
 
 
 # Flag Include/object.h
+Py_TPFLAGS_SEQUENCE = 1 << 5
+Py_TPFLAGS_MAPPING = 1 << 6
 Py_TPFLAGS_DISALLOW_INSTANTIATION = 1 << 7
 Py_TPFLAGS_IMMUTABLETYPE = 1 << 8
 Py_TPFLAGS_HEAPTYPE = 1 << 9
