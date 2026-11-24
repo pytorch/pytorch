@@ -26,7 +26,7 @@ basic_gnn_edgecnn,pass,0,55,0
 
 
 
-basic_gnn_gcn,pass,6,57,1
+basic_gnn_gcn,pass,4,57,1
 
 
 
@@ -42,7 +42,7 @@ dcgan,pass,0,13,0
 
 
 
-demucs,pass,4,65,0
+demucs,pass,1,65,0
 
 
 
@@ -98,11 +98,11 @@ dlrm,pass,0,36,0
 
 
 
-doctr_det_predictor,pass,3,219,0
+doctr_det_predictor,pass,2,219,0
 
 
 
-doctr_reco_predictor,pass,4,49,0
+doctr_reco_predictor,pass,3,49,0
 
 
 
@@ -110,7 +110,7 @@ drq,pass,0,58,0
 
 
 
-fastNLP_Bert,pass,4,440,1
+fastNLP_Bert,pass,2,440,1
 
 
 
@@ -162,7 +162,7 @@ mobilenet_v3_large,pass,0,187,0
 
 
 
-moco,pass,7,877,2
+moco,pass,7,877,0
 
 
 
@@ -246,7 +246,7 @@ soft_actor_critic,pass,0,16,0
 
 
 
-speech_transformer,pass,10,1454,1
+speech_transformer,pass,3,1454,1
 
 
 
@@ -262,7 +262,7 @@ torchrec_dlrm,eager_fail_to_run,0,0,0
 
 
 
-tts_angular,pass,5,7,0
+tts_angular,pass,4,7,0
 
 
 
@@ -270,7 +270,7 @@ vgg16,pass,0,40,0
 
 
 
-vision_maskrcnn,fail_to_run,15,1613,6
+vision_maskrcnn,fail_to_run,13,1613,5
 
 
 
