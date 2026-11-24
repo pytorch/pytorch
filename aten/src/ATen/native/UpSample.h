@@ -64,15 +64,14 @@ inline std::optional<double> get_scale_value(std::optional<c10::ArrayRef<double>
   return scales->at(idx);
 }
 
-// Memory format for the output of a forward bilinear, bicubic or lanczos upsampling op.
-// suggest_memory_format() also requires the stride of a size-1 batch dimension to fit the layout, so
-// e.g. `hwc_image.permute(2, 0, 1)[None]` would be reported as contiguous when really it's channels-last.
-// Only for uint8 CPU inputs, whose AVX2 / NEON kernels need a channels-last output; for other dtypes,
-// other modes and other devices, a channels-last output is slower for these inputs.
-inline c10::MemoryFormat output_memory_format(const Tensor& input) {
+// Preserve channels-last layout for CPU uint8 views with a size-1 batch dimension.
+// suggest_memory_format() requires the batch stride to fit the layout even when N == 1,
+// so an HWC image converted with hwc_image.permute(2, 0, 1)[None] may look contiguous.
+inline c10::MemoryFormat output_memory_format(
+    const Tensor& input, bool allow_single_channel = true) {
   auto memory_format = input.suggest_memory_format();
   if (memory_format != c10::MemoryFormat::Contiguous || !input.is_cpu() || input.scalar_type() != at::kByte ||
-      input.dim() != 4 || input.size(0) != 1) {
+      input.dim() != 4 || input.size(0) != 1 || (!allow_single_channel && input.size(1) == 1)) {
     return memory_format;
   }
   auto sizes = input.sizes();

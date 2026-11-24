@@ -10548,6 +10548,29 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(exported.module()(other), resize(other))
 
     @onlyCPU
+    @parametrize_test("batch_size,dtype,decoder_view", [
+        (1, torch.float32, False), (2, torch.uint8, False), (1, torch.uint8, True),
+    ])
+    def test_upsamplingInterArea2d_dynamic_channels(self, device, batch_size, dtype, decoder_view):
+        class Resize(torch.nn.Module):
+            def forward(self, x):
+                return F.interpolate(x, size=(4, 6), mode="inter-area")
+
+        def make_input(c):
+            if decoder_view:
+                return torch.ones(8, 12, c, dtype=dtype, device=device).permute(2, 0, 1)[None]
+            return torch.ones(batch_size, c, 8, 12, dtype=dtype, device=device)
+
+        resize = Resize()
+        channels = torch.export.Dim("channels", min=2, max=6)
+        exported = torch.export.export(resize, (make_input(3),), dynamic_shapes=({1: channels},))
+        for c in (3, 5):
+            x = make_input(c)
+            actual, expected = exported.module()(x), resize(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual.stride(), expected.stride())
+
+    @onlyCPU
     def test_upsamplingInterArea2d_inconsistent_scales(self, device):
         op = torch.ops.aten._upsample_inter_area2d.default
         x = torch.empty(1, 3, 10, 10, device=device)
