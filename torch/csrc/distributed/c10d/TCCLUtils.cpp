@@ -577,6 +577,26 @@ void TCCLConnection::transitionToRTS() {
       ret);
 }
 
+void TCCLConnection::abort() noexcept {
+  if (qp_ == nullptr) {
+    return;
+  }
+  ibv_qp_attr attr{};
+  attr.qp_state = IBV_QPS_ERR;
+  try {
+    // Best effort: the caller is already handling a failure.
+    const int ret =
+        TCCLIBVWrapper::instance().modify_qp(qp_, &attr, IBV_QP_STATE);
+    if (ret != 0) {
+      TORCH_WARN(
+          "TCCL: could not move a QP to the error state (errno=",
+          ret,
+          "); work it still has posted may complete later.");
+    }
+  } catch (...) {
+  }
+}
+
 // TCCLConnection data-path methods
 
 void TCCLConnection::postSend(

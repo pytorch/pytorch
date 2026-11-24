@@ -1078,6 +1078,43 @@ class ProcessGroupTcclContractTest(TcclTestBase):
                 c10d.scatter(out, scatter_list=None, src=0)
 
 
+@requires_tccl()
+class ProcessGroupTcclErrorTest(TcclTestBase):
+    """A failed operation must break the group: it refuses new work, and what
+    the failed operation left posted is never delivered. Its own class, since it
+    leaves the process group broken."""
+
+    hw_classification = HardwareClassification.MPS
+    timeout = timedelta(seconds=10)  # how long the send and recv below wait
+
+    def test_timed_out_send_is_dropped_and_group_refuses_work(self):
+        store = c10d.distributed_c10d._get_default_store()
+        dev, wait = self.device, timedelta(seconds=60)
+        try:
+            if self.rank == 0:
+                try:
+                    # Rank 1 is not receiving yet, so this send times out.
+                    with self.assertRaises(c10d.DistBackendError):
+                        c10d.send(torch.full((1024,), 7.0, device=dev), dst=1)
+                finally:
+                    store.set("send_failed", "1")
+                with self.assertRaisesRegex(c10d.DistBackendError, "refuses new work"):
+                    c10d.send(torch.full((1024,), 8.0, device=dev), dst=1)
+            elif self.rank == 1:
+                try:
+                    store.wait(["send_failed"], wait)
+                    buf = torch.zeros(1024, device=dev)
+                    with self.assertRaises(c10d.DistBackendError):
+                        c10d.recv(buf, src=0)
+                    self.assertEqual(buf, torch.zeros_like(buf))
+                finally:
+                    store.set("recv_done", "1")
+        finally:
+            # All ranks leave together, so the teardown barrier does not wait
+            # out the two timeouts above.
+            store.wait(["recv_done"], wait)
+
+
 instantiate_parametrized_tests(ProcessGroupTcclCorrectnessTest)
 instantiate_parametrized_tests(ProcessGroupTcclIntegrationTest)
 

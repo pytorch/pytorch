@@ -638,23 +638,51 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueCollective(
     OpType opType,
     std::vector<at::Tensor> outputs,
     std::function<void()> fn) {
+  const auto refused = [this]() {
+    return "TCCL: an earlier operation on this process group failed (" +
+        brokenReason_ +
+        "), so the group refuses new work. Destroy it and create a new one.";
+  };
+  TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refused());
   const uint32_t mpsEventId = mpsEventRecord();
   const uint64_t mySeq = ++seq_;
   auto work = c10::make_intrusive<TCCLWork>(opType, mySeq, std::move(outputs));
   {
     std::lock_guard<std::mutex> lock(workMutex_);
-    workQueue_.push_back([mpsEventId, fn = std::move(fn), work]() mutable {
-      std::exception_ptr ep;
-      try {
-        // Block only this worker until the GPU flushes writes to the inputs
-        mpsEventWait(mpsEventId);
-        fn();
-      } catch (...) {
-        ep = std::current_exception();
-      }
-      // Store any exception and wake threads blocked on Work::wait().
-      work->finishWork(ep);
-    });
+    workQueue_.push_back(
+        [this, mpsEventId, fn = std::move(fn), work, refused]() mutable {
+          std::exception_ptr ep;
+          try {
+            // Block only this worker until the GPU flushes writes to the inputs
+            mpsEventWait(mpsEventId);
+            // The group may have broken while this work was queued.
+            TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refused());
+            fn();
+          } catch (...) {
+            ep = std::current_exception();
+            if (!broken_.load()) {
+              try {
+                std::rethrow_exception(ep);
+              } catch (const c10::Error& e) {
+                brokenReason_ = e.what_without_backtrace();
+              } catch (const std::exception& e) {
+                brokenReason_ = e.what();
+              } catch (...) {
+                brokenReason_ = "unknown error";
+              }
+              // Flush whatever the failed operation left posted, so a peer
+              // cannot receive it later.
+              for (auto& connection : connections_) {
+                if (connection) {
+                  connection->abort();
+                }
+              }
+              broken_.store(true);
+            }
+          }
+          // Store any exception and wake threads blocked on Work::wait().
+          work->finishWork(ep);
+        });
   }
   workCV_.notify_one();
   return work;

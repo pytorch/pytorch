@@ -136,6 +136,11 @@ class TORCH_API TCCLConnection {
   // Transition our QP to RTS using our locally chosen PSN.
   void transitionToRTS();
 
+  // Move our QP to the error state, which flushes every posted work request so
+  // none can complete later. For after a failed operation; the Connection is
+  // unusable afterwards.
+  void abort() noexcept;
+
   // Data-path methods
   // Post a send WR referencing `length` bytes of `buf`'s storage. Caller is
   // responsible for buf having been registered to this Connection's PD via

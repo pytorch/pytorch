@@ -225,6 +225,12 @@ class TORCH_API ProcessGroupTCCL : public Backend {
   std::condition_variable workCV_;
   std::atomic<bool> stop_{false};
 
+  // Set by the worker when an operation fails. The failure can leave work
+  // requests posted, so the queue pairs are moved to the error state and the
+  // group refuses new work. brokenReason_ is written once, before broken_.
+  std::atomic<bool> broken_{false};
+  std::string brokenReason_;
+
   // Shared async scaffold. Records an MPS event so the worker waits for the GPU
   // to flush writes to the inputs, enqueues `fn`, and returns a TCCLWork whose
   // Future completes with `outputs` when `fn` returns. `fn` does the
