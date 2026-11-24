@@ -798,13 +798,12 @@ them directly via `torch.ops.symm_mem.<op_name>`.
         multiplication results.
 
 
-.. py:function:: fused_all_gather_scaled_matmul(A_shard: Tensor, Bs: list[Tensor], A_scale: Tensor, B_scales: list[Tensor], gather_dim: int, group_name: str, biases: list[Tensor | None], result_scales: list[Tensor | None], out_dtypes: list[dtype | None], use_fast_accum: list[bool]) -> tuple[Tensor, list[Tensor]]
+.. py:function:: fused_all_gather_scaled_matmul(A_shard: Tensor, Bs: list[Tensor], A_scale: Tensor, B_scales: list[Tensor], gather_dim: int, group_name: str, biases: list[Tensor | None], out_dtypes: list[dtype | None], use_fast_accum: list[bool]) -> tuple[Tensor, list[Tensor]]
 
     Scaled-matrix-multiplication variant of
     :func:`fused_all_gather_matmul`. Each entry of ``B_scales``, ``biases``,
-    ``result_scales``, ``out_dtypes``, and ``use_fast_accum`` corresponds to
-    the entry at the same position in ``Bs`` and is forwarded to
-    ``aten._scaled_mm``.
+    ``out_dtypes``, and ``use_fast_accum`` corresponds to the entry at the
+    same position in ``Bs`` and is forwarded to ``aten._scaled_mm``.
 
     ``A_scale`` may be a tensor-wise scalar, a row-wise scale sharded like
     ``A_shard``, or a row-wise scale for the fully gathered tensor. The exact
@@ -841,7 +840,7 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     :param str group_name: Name of the process group.
 
 
-.. py:function:: fused_scaled_matmul_reduce_scatter(A: Tensor, B: Tensor, A_scale: Tensor, B_scale: Tensor, reduce_op: str, orig_scatter_dim: int, scatter_dim_after_maybe_reshape: int, group_name: str, output_shape: list[int], bias: Tensor | None = None, result_scale: Tensor | None = None, out_dtype: dtype | None = None, use_fast_accum: bool = False) -> Tensor
+.. py:function:: fused_scaled_matmul_reduce_scatter(A: Tensor, B: Tensor, A_scale: Tensor, B_scale: Tensor, reduce_op: str, orig_scatter_dim: int, scatter_dim_after_maybe_reshape: int, group_name: str, output_shape: list[int], bias: Tensor | None = None, out_dtype: dtype | None = None, use_fast_accum: bool = False) -> Tensor
 
     Scaled-matrix-multiplication variant of
     :func:`fused_matmul_reduce_scatter`. The two scatter dimensions and
