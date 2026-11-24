@@ -7229,6 +7229,7 @@ def meta__flash_attention_backward(
     scale: float | None = None,
     window_size_left: int | None = None,
     window_size_right: int | None = None,
+    grad_logsumexp: Tensor | None = None,
 ):
     grad_query = torch.empty_like(query)
     grad_key = torch.empty_like(key)

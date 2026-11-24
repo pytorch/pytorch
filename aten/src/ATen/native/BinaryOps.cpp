@@ -1514,12 +1514,12 @@ static bool compare_as_element_bytes(
 #define CREATE_EQUALITY_SCALAR_TENSOR_IMPL_FUNC(func, reduce_bytes)    \
   TORCH_IMPL_FUNC(func##_Tensor_out)                                   \
   (const Tensor& self, const Tensor& other, const Tensor& result) {    \
+    TORCH_CHECK_NOT_IMPLEMENTED(                                       \
+        !isPackedShellFloatType(result.scalar_type()),                 \
+        #func "(): cannot write the result to a ",                     \
+        result.scalar_type(),                                          \
+        " tensor, which has no conversion from Bool");                 \
     if (compare_as_element_bytes(self, other, result)) {               \
-      TORCH_CHECK_NOT_IMPLEMENTED(                                     \
-          result.scalar_type() != self.scalar_type(),                  \
-          #func "(): cannot write the result to a ",                   \
-          self.scalar_type(),                                          \
-          " tensor, which has no conversion from Bool");               \
       auto bytes_on_result_device = [&](const Tensor& t) {             \
         return as_element_bytes(                                       \
             is_cpu_scalar_of(t, result) ? t.to(result.device()) : t);  \

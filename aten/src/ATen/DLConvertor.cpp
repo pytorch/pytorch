@@ -1,5 +1,6 @@
 #include <ATen/DLConvertor.h>
 #include <memory>
+#include <type_traits>
 
 using namespace std;
 namespace at {
@@ -475,6 +476,14 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
   Device device = dlDeviceToTorchDevice(
       dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
   ScalarType stype = toScalarType(dl_tensor.dtype);
+  if constexpr (std::is_same_v<T, DLManagedTensorVersioned>) {
+    TORCH_CHECK_BUFFER(
+        dl_tensor.dtype.bits >= 8 ||
+            !(src->flags & DLPACK_FLAG_BITMASK_IS_SUBBYTE_TYPE_PADDED),
+        "Padded sub-byte DLPack tensors are not supported; ",
+        toString(stype),
+        " expects packed values");
+  }
 
   if (!dl_tensor.strides) {
     TORCH_CHECK_VALUE(dl_tensor.byte_offset == 0, "Expected zero byte_offset");

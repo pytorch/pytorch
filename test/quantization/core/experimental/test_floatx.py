@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import copy
+import ctypes
 import math
 import struct
 import unittest
@@ -945,7 +946,15 @@ class TestFloat6E2M3FNx4(TestCase):
             out = copy_(
                 torch.empty(src.shape, dtype=self.dtype, device=device), src, tiled
             )
-            ref = _as_bytes(src).cpu().contiguous()
+            # Build the reference from a plain byte copy of the whole storage:
+            # copying the strided CUDA view itself could run the kernel under test.
+            storage = torch.empty(0, dtype=torch.uint8, device=device)
+            storage = storage.set_(src.untyped_storage()).cpu()
+            ref = storage.as_strided(
+                (*src.shape, 3),
+                (*(3 * s for s in src.stride()), 1),
+                3 * src.storage_offset(),
+            )
             self.assertEqual(_as_bytes(out).cpu(), ref)
 
         for shape in ((256, 512), (260, 516), (1, 512, 520)):
@@ -1040,6 +1049,43 @@ class TestFloat6E2M3FNx4(TestCase):
         self.assertEqual(y.data_ptr(), x.data_ptr())
         z = torch.from_dlpack(x[:, 1:5])
         self.assertEqual(_as_bytes(z), _as_bytes(x[:, 1:5]))
+
+    def test_dlpack_rejects_padded(self, device):
+        capsule = self._random(4, 8, device=device).__dlpack__(max_version=(1, 0))
+        get = ctypes.pythonapi.PyCapsule_GetPointer
+        get.restype = ctypes.c_void_p
+        get.argtypes = [ctypes.py_object, ctypes.c_char_p]
+
+        class Header(ctypes.Structure):
+            # leading fields of DLManagedTensorVersioned
+            _fields_ = [
+                ("version", ctypes.c_uint32 * 2),
+                ("manager_ctx", ctypes.c_void_p),
+                ("deleter", ctypes.c_void_p),
+                ("flags", ctypes.c_uint64),
+            ]
+
+        header = Header.from_address(get(capsule, b"dltensor_versioned"))
+        header.flags |= 1 << 2  # DLPACK_FLAG_BITMASK_IS_SUBBYTE_TYPE_PADDED
+        with self.assertRaisesRegex(BufferError, "Padded sub-byte DLPack"):
+            torch.from_dlpack(capsule)
+
+    def test_promotion_raises(self, device):
+        for other in (torch.float32, torch.float4_e2m1fn_x2):
+            with self.assertRaisesRegex(
+                RuntimeError, "Promotion for packed sub-byte float types"
+            ):
+                torch.promote_types(self.dtype, other)
+
+    def test_deterministic_fill(self, device):
+        x = self._random(4, 8, device=device)
+        with DeterministicGuard(True, fill_uninitialized_memory=True):
+            # no NaN encoding, so uninitialized memory is filled with 0xFF
+            empty = torch.empty(4, 8, dtype=self.dtype, device=device)
+            self.assertTrue((empty.view(torch.uint8) == 0xFF).all())
+            zeros = torch.zeros(4, 8, dtype=self.dtype, device=device)
+            self.assertEqual(zeros.view(torch.uint8).count_nonzero().item(), 0)
+            self.assertEqual(_as_bytes(x.t().clone()), _as_bytes(x).transpose(0, 1))
 
 
 instantiate_device_type_tests(TestFloat6E2M3FNx4, globals(), except_for="mps")
@@ -1198,9 +1244,62 @@ class TestPackedFloatShellOps(TestCase):
             out = torch.empty(0, dtype=torch.bool, device=device)
             torch.ne(x, y, out=out)
             self.assertEqual(out, (xb != yb).any(-1))
-        if dtype == torch.float6_e2m3fn_x4:
-            with self.assertRaisesRegex(NotImplementedError, r"eq\(\): cannot write"):
-                x.clone().eq_(x)
+        # Bool results cannot be stored in these dtypes. fp4x2 used to abort on
+        # CUDA and write meaningless bytes on CPU.
+        for name in ("eq", "ne"):
+            with self.assertRaisesRegex(
+                NotImplementedError, rf"{name}\(\): cannot write"
+            ):
+                getattr(x.clone(), f"{name}_")(x)
+            with self.assertRaisesRegex(
+                NotImplementedError, rf"{name}\(\): cannot write"
+            ):
+                getattr(torch, name)(x, x, out=torch.empty_like(x))
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_index_select_bad_index_keeps_out(self, device, dtype):
+        x = self._random(dtype, 4, 5, device=device)
+        out = torch.empty(0, dtype=dtype, device=device)
+        index = torch.zeros(2, 2, dtype=torch.long, device=device)
+        with self.assertRaisesRegex(IndexError, "Index is supposed to be a vector"):
+            torch.index_select(x, 0, index, out=out)
+        self.assertEqual(out.shape, (0,))
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_duplicate_indices_write_whole_elements(self, device, dtype):
+        # Colliding writes pick one source element; they must not mix its bytes.
+        # The CPU index_put_ kernel writes in parallel without ordering, so its
+        # duplicate-index result stays undefined.
+        x = self._random(dtype, 8, 16, device=device)
+        src = self._random(dtype, 4096, 16, device=device)
+        index = torch.zeros(4096, 16, dtype=torch.long, device=device)
+        results = [
+            x.scatter(0, index, src),
+            x.scatter(0, index[:, :1].expand(4096, 16), src),
+        ]
+        if torch.device(device).type == "cuda":
+            results.append(x.index_put((index[:, 0],), src))
+        for result in results:
+            # [1, 16, itemsize] row 0 against every [4096, 16, itemsize] source
+            matches = (_as_bytes(src) == _as_bytes(result)[:1]).all(-1)
+            self.assertTrue(matches.any(0).all())
+            self.assertEqual(_as_bytes(result)[1:], _as_bytes(x)[1:])
+        # a 0-dim self takes one whole source element
+        result = x[0, 0].scatter(0, index[:, 0], src[:, 0])
+        self.assertTrue((_as_bytes(src[:, 0]) == _as_bytes(result)).all(-1).any())
+
+    @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)
+    def test_scatter_index_expanded_over_part_of_dim(self, device, dtype):
+        x = self._random(dtype, 8, 16, device=device)
+        src = self._random(dtype, 2, 16, device=device)
+        for index in (
+            torch.tensor([2, 5], device=device)[:, None].expand(2, 4),
+            torch.tensor(2, device=device).expand(1, 1),
+        ):
+            expected = _as_bytes(x).scatter(
+                0, self._expand_index(index, dtype), _as_bytes(src)
+            )
+            self.assertEqual(_as_bytes(x.scatter(0, index, src)), expected)
 
     @onlyCUDA
     @dtypes(torch.float4_e2m1fn_x2, torch.float6_e2m3fn_x4)

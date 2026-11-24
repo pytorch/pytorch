@@ -1024,6 +1024,32 @@ Tensor& _index_put_impl_(
     auto value_bytes =
         as_element_bytes(value.dim() == 0 ? value.to(self.device()) : value);
     auto self_bytes = as_element_bytes(self);
+    const auto device = self.device().type();
+    if (hasNonPowerOfTwoElementSize(self.scalar_type()) &&
+        (device == DeviceType::CUDA || device == DeviceType::XPU) &&
+        at::has_internal_overlap(self) != MemOverlap::Yes) {
+      // The unsorted kernel writes every byte independently, so duplicate
+      // indices could leave an element with bytes from different values. The
+      // sorted kernel writes each indexed element whole. The device list
+      // matches the scatter path below. CPU writes stay unordered, so
+      // duplicate indices are undefined there as documented.
+      TORCH_CHECK(
+          value_bytes.device() == self.device(),
+          "expected device ",
+          self.device(),
+          " but got device ",
+          value_bytes.device(),
+          " for value tensor");
+      at::assert_no_overlap(self, value);
+      for (const std::optional<Tensor>& index : indices) {
+        if (index.has_value()) {
+          at::assert_no_overlap(self, *index);
+        }
+      }
+      index_put_with_sort_stub(
+          device, self_bytes, indices, value_bytes, accumulate, unsafe);
+      return self;
+    }
     at::_index_put_impl_(self_bytes, indices, value_bytes, accumulate, unsafe);
     return self;
   }
@@ -1973,6 +1999,8 @@ Tensor& index_select_out_as_bytes(
     index_select_out_as_bytes(self.view({1}), dim, index, result_1d);
     return result;
   }
+  TORCH_CHECK_INDEX(
+      index.dim() <= 1, "index_select(): Index is supposed to be a vector");
   auto result_size = self.sizes().vec();
   result_size[dim] = index.numel();
   at::native::resize_output(result, result_size);
@@ -2294,15 +2322,16 @@ static void _scatter_via_index_put(
     const Tensor& src,
     const Tensor& mut_out,
     bool accumulate) {
-  // If index is expanded with zero strides across non-scatter dimensions,
-  // advanced indexing with the index tensor alone achieves the desired
-  // semantics and avoids creating large intermediate tensors.
+  // If index is expanded with zero strides across the full extent of every
+  // non-scatter dimension, advanced indexing with the index tensor alone
+  // achieves the desired semantics and avoids creating large intermediate
+  // tensors.
   bool broadcast_index = true;
   for (const auto i : c10::irange(index.dim())) {
     if (i == dim) {
       continue;
     }
-    if (index.stride(i) != 0) {
+    if (index.stride(i) != 0 || index.size(i) != self.size(i)) {
       broadcast_index = false;
       break;
     }
@@ -2413,6 +2442,29 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& src,
  const Tensor& out) {
   if (isPackedShellFloatType(self.scalar_type())) {
+    const auto device = self.device().type();
+    if (hasNonPowerOfTwoElementSize(self.scalar_type()) &&
+        (device == DeviceType::CUDA || device == DeviceType::XPU)) {
+      // A byte scatter could combine the bytes of different src elements
+      // that collide on one index; index_put_ writes each element whole.
+      auto mut_out = const_cast<Tensor&>(out);
+      if (!self.is_same(out)) {
+        mut_out.copy_(self);
+      }
+      if (index.numel() > 0) {
+        auto atleast_1d = [](const Tensor& t) {
+          return t.dim() == 0 ? t.view({1}) : t;
+        };
+        _scatter_via_index_put(
+            atleast_1d(self),
+            at::maybe_wrap_dim(dim, self.dim()),
+            atleast_1d(index),
+            atleast_1d(src),
+            atleast_1d(mut_out),
+            /*accumulate=*/false);
+      }
+      return;
+    }
     auto out_bytes = element_bytes_atleast_1d(out);
     at::scatter_out(
         out_bytes,

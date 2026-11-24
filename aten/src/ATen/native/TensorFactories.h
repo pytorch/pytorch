@@ -116,7 +116,12 @@ inline void check_supported_max_int_with_precision(
 // fill the tensor with NaN if it is floating point or complex type, or fill
 // with max value if it is integer type
 inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
-  if (tensor.is_floating_point() || tensor.is_complex()) {
+  if (tensor.scalar_type() == kFloat4_e2m1fn_x2 ||
+      tensor.scalar_type() == kFloat6_e2m3fn_x4) {
+    // These packed formats have no NaN encoding, so set every bit instead:
+    // each value becomes the most negative finite value.
+    tensor.unsqueeze(-1).view(kByte).fill_(0xFF);
+  } else if (tensor.is_floating_point() || tensor.is_complex()) {
     AT_DISPATCH_V2(
         tensor.scalar_type(),
         "fill_empty_deterministic_",
