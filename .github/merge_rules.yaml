@@ -809,6 +809,7 @@
   - '**sycl**'
   - '**SYCL**'
   - torch/_C/__init__.pyi.in
+  - test/test_transformers.py
   approved_by:
   - EikanWang
   - gujinghui
