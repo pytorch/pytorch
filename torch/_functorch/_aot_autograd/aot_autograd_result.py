@@ -716,7 +716,7 @@ def deserialize_bundled_cache_entry(
     # in case it needs to be serialized again
     serializable_copy = deepcopy(entry)
 
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     context = torch._guards.TracingContext.try_get()
