@@ -34,7 +34,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .ops_handler import DefaultHandler
 from .sizevars import statically_known_true
-from .utils import generate_assert
+from .utils import generate_assert, is_affine_indexing, sympy_product
 from .virtualized import V
 
 
@@ -106,8 +106,11 @@ class SymPyOps:
         value: TypedExpr,
         dtype: torch.dtype,
         src_dtype: torch.dtype | None = None,
-        use_compute_types: bool = False,
+        use_compute_types: bool = True,
     ) -> TypedExpr:
+        if not use_compute_types and dtype in (torch.float16, torch.bfloat16):
+            # Keep explicit rounding instead of folding it into a compute-type expression.
+            return NotImplemented
         return TypedExpr(value.expr, dtype)
 
     @staticmethod
@@ -217,8 +220,13 @@ class IndexPropagation(DefaultHandler):
         inner: Any,
         iter_ranges: dict[sympy.Symbol, sympy.Expr],
         indirect_var_ranges: dict[sympy.Symbol, sympy.Expr],
+        device: torch.device | None = None,
     ) -> None:
         self._inner = inner
+        # the device whose backend decides whether %, // of an index may be
+        # folded into the address (InductorChoices.use_modular_indexing)
+        self.device = device
+        self.iter_ranges = iter_ranges
         self.shape_env = V.graph.sizevars.shape_env
 
         var_to_range = {
@@ -358,7 +366,7 @@ class IndexPropagation(DefaultHandler):
         if isinstance(index, IndexPropVar) and index.is_symbolic:
             # If we find something we can convert into a direct indexing we do so
             # We still need to (perhaps) wrap the expression and add bound checks
-            # We want to do this "constant folding", as we don't allow to fuse
+            # We want to do this "constant folding", as we don't allow fusing
             # kernels into indirect indexing
 
             expr = sympy.sympify(index.value.expr)
@@ -380,13 +388,21 @@ class IndexPropagation(DefaultHandler):
             can_prove_upper = self.statically_true(expr < size)
             if wrap_neg:
                 expr = wrap_expr(expr)
-            if generate_assert(check):
-                self.fallback(
-                    "check_bounds",
-                    (expr, size),
-                    dict(lower=not can_prove_lower, upper=not can_prove_upper),
-                )
-            return expr
+            if V.choices.use_modular_indexing(
+                self.device,
+                numel=sympy_product(self.iter_ranges.values()),
+                kind="index",
+            ) or is_affine_indexing(expr):
+                if generate_assert(check):
+                    self.fallback(
+                        "check_bounds",
+                        (expr, size),
+                        dict(lower=not can_prove_lower, upper=not can_prove_upper),
+                    )
+                return expr
+            # Keep %, //, abs, clamp and negative wrapping of the index as a
+            # value computation; the load then goes through an indirect
+            # variable so its address stays affine.
 
         indirect_var = self.fallback(
             "indirect_indexing", (index, size, check, wrap_neg), {}

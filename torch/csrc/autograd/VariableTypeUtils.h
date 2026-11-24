@@ -69,7 +69,8 @@ inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
     case can_mutate_inplace_result::success:
       return;
     case can_mutate_inplace_result::non_default_backward_view: {
-      return handle_view_on_rebase(impl::get_view_autograd_meta(tensor));
+      handle_view_on_rebase(impl::get_view_autograd_meta(tensor));
+      return;
     }
     case can_mutate_inplace_result::view_of_leaf:
       TORCH_CHECK(
@@ -401,7 +402,7 @@ namespace impl {
 namespace {
 
 // If run_jit_decomposition were not a member function, we would be able
-// to pass this as a template parameter to c10::Boxedkernel::makeFromFunction.
+// to pass this as a template parameter to c10::BoxedKernel::makeFromFunction.
 // However, member functions cannot be passed this way - instead we wrap our
 // call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
 class WrapperFunctor final : public c10::OperatorKernel {

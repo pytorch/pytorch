@@ -49,6 +49,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     create_read_items_for_chunk_list,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -103,6 +104,8 @@ def create_sharded_tensor(rank, world_size, shards_per_rank, shard_size=8):
 
 
 class TestCheckpointableTensorDistributed(DTensorTestBase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self) -> int:
         return 4
@@ -165,7 +168,38 @@ class TestCheckpointableTensorDistributed(DTensorTestBase):
         self.assertEqual(expected, loaded)
 
 
+class TestTensorPropertiesStrides(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_create_from_tensor_populates_strides(self):
+        tensor = torch.rand(4, 8)  # shape [4, 8], strides (8, 1)
+        props = TensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (8, 1))
+
+    def test_create_from_tensor_non_contiguous_strides(self):
+        tensor = torch.rand(5, 10).t()  # shape [10, 5], strides (1, 10)
+        props = TensorProperties.create_from_tensor(tensor)
+        self.assertEqual(props.strides, (1, 10))
+
+    def test_create_from_tensor_transposed_strides(self):
+        tensor = torch.rand(2, 1).t()  # shape [1, 2], strides (1, 1)
+        self.assertEqual(tensor.shape, (1, 2))
+        self.assertEqual(tensor.stride(), (1, 1))
+
+        props = TensorProperties.create_from_tensor(tensor)
+        # Test that even though (2, 1) is a valid stride,
+        # but we still retain the original strides (1, 1)
+        self.assertEqual(props.strides, tensor.stride())
+        self.assertNotEqual(props.strides, (2, 1))
+
+    def test_strides_default_none(self):
+        props = TensorProperties(dtype=torch.float32)
+        self.assertIsNone(props.strides)
+
+
 class TestSavePlan(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_fake_comms(rank=1, world_size=4)
     def test_local_plan(self):
         tensor = torch.rand(10)
@@ -620,6 +654,8 @@ class TestSavePlan(TestCase):
 
 
 class TestPlannerHelpers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_create_read_item_from_chunks(self):
         tensor_md = TensorStorageMetadata(
             properties=TensorProperties.create_from_tensor(torch.empty([16])),
@@ -713,6 +749,8 @@ class TestPlannerHelpers(TestCase):
 
 
 class TestValidateGlobalPlan(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _make_metadata(self, chunks, size):
         storage = TensorStorageMetadata(
             properties=TensorProperties(dtype=torch.float32),
@@ -739,6 +777,8 @@ class TestValidateGlobalPlan(TestCase):
 
 
 class TestLoadPlanner(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @with_temp_dir
     def test_strict(self):
         original_module = nn.Linear(2, 2)

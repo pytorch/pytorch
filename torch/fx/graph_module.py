@@ -230,10 +230,10 @@ def _deserialize_graph_module(
     # Try to retrieve the forward source in a backward-compatible way
     _CodeOnlyModule.forward = forward
 
+    from ._symbolic_trace import Tracer
+
     tracer_cls = body.get("_tracer_cls")
     if tracer_cls is None:
-        from ._symbolic_trace import Tracer
-
         tracer_cls = Tracer
 
     graphmodule_cls_name = body.get("_graphmodule_cls_name", "GraphModule")
@@ -251,7 +251,8 @@ def _deserialize_graph_module(
     com = _CodeOnlyModule(body)
 
     tracer_extras = body.get("_tracer_extras", {})
-    graph = KeepModules().trace(com, **tracer_extras)
+    tracer = KeepModules._graph_module_deserialization_tracer(com)
+    graph = tracer.trace(com, **tracer_extras)
 
     # Recover node.meta["stack_trace"] after re-tracing
     node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace")
@@ -361,8 +362,8 @@ def _has_attr(model: torch.nn.Module, attr_name: str) -> bool:
     *prefix, field = attr_name.split(".")
     t = model
     for item in prefix:
-        t = hasattr(t, item)  # type: ignore[assignment]
-        if t is False:
+        t = getattr(t, item, None)  # type: ignore[assignment]
+        if t is None:
             return False
 
     return hasattr(t, field)
@@ -861,9 +862,12 @@ class {module_name}(torch.nn.Module):
         A Module is considered "used" if any one of the following is
         true:
         1. It has children that are used
-        2. Its forward is called directly via a ``call_module`` node
+        2. Its forward is called directly via a ``call_module`` node, or a
+        ``get_attr`` node reads it, as for the body of a higher order op
         3. It has a non-Module attribute that is used from a
         ``get_attr`` node
+
+        The submodules of a module that a node calls or reads are used too.
 
         This method can be called to clean up an ``nn.Module`` without
         manually calling ``delete_submodule`` on each unused submodule.
@@ -889,20 +893,19 @@ class {module_name}(torch.nn.Module):
                 # `foo.bar.baz` to the set.
                 used.update(itertools.accumulate(fullpath, join_fn))
 
-                # For a `call_module` node, also register all recursive submodules
-                # as used
-                if node.op == "call_module":
-                    try:
-                        str_target = cast(str, node.target)
-                        submod = self.get_submodule(str_target)
+                # A submodule that a node calls or reads keeps all of its own
+                # submodules, which run with it.
+                try:
+                    str_target = cast(str, node.target)
+                    submod = self.get_submodule(str_target)
 
-                        for submod_name, _ in submod.named_modules():
-                            if submod_name != "":
-                                used.add(".".join([str_target, submod_name]))
-                    except AttributeError:
-                        # Node referenced nonexistent submodule, don't need to
-                        # worry about GCing anything
-                        pass
+                    for submod_name, _ in submod.named_modules():
+                        if submod_name != "":
+                            used.add(".".join([str_target, submod_name]))
+                except AttributeError:
+                    # Node referenced nonexistent submodule, or a parameter, buffer
+                    # or other attribute, don't need to worry about GCing anything
+                    pass
 
         to_delete = [name for name, _ in self.named_modules() if name not in used]
 

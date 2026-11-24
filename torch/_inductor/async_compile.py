@@ -56,7 +56,9 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_pycodecache_kernel,
     _worker_compile_triton,
+    _worker_compile_triton_thread,
 )
+from torch._inductor.runtime.runtime_utils import triton_cache_dir
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
 from torch._utils_internal import log_triton_builds
@@ -66,7 +68,7 @@ from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
@@ -84,6 +86,9 @@ _triton_kernel_metrics: dict[str, dict[str, Any]] | None = None
 size_hints_regex = re.compile(
     r"size_hints=(\{.*?\})",
 )
+
+# The device type of a kernel whose triton_meta device has no index.
+indexless_device_regex = re.compile(r"DeviceProperties\(type='(\w+)', index=None")
 
 
 def _pycodecache_kernel_compile_env() -> dict[str, str | None]:
@@ -195,6 +200,7 @@ def after_fork():
     _pool_set.clear()
     AsyncCompile._ready_future = None
     AsyncCompile.process_pool.cache_clear()
+    AsyncCompile.thread_pool.cache_clear()
 
 
 try:
@@ -222,6 +228,21 @@ def _process_pool_allowed() -> bool:
         config.worker_start_method == "subprocess"
         or not multiprocessing.current_process().daemon
     )
+
+
+@clear_on_fresh_cache
+class FrozenTritonKernels:
+    """
+    The precompile runtime cache's frozen Triton kernels. They outlive
+    CompiledTritonKernels.cache_clear(), which runs on every compile, and are
+    only dropped when fresh_cache() / clear_caches() resets Inductor's caches.
+    """
+
+    @staticmethod
+    def cache_clear() -> None:
+        from torch.compiler._runtime_cache import clear_triton_kernels
+
+        clear_triton_kernels()
 
 
 @clear_on_fresh_cache
@@ -335,6 +356,7 @@ class AsyncCompile:
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
                 os.environ["TORCH_WARM_POOL"] = "0"
+            # Only need pre-fork setup for process pools, not thread pools
             pre_fork_setup()
             ctx = multiprocessing.get_context(config.worker_start_method)
             pool = TrackedProcessPoolExecutor(
@@ -352,6 +374,54 @@ class AsyncCompile:
         _pool_set.add(pool)
         return pool
 
+    @staticmethod
+    @functools.lru_cache(1)
+    def thread_pool() -> ThreadPoolExecutor:
+        """
+        Thread pool for Triton compilation in nogil mode.
+
+        Separate from pool() to allow different sizing/configuration
+        for CPU-intensive Triton compilation workloads.
+        """
+        if get_compile_threads() <= 1:
+            raise AssertionError(
+                f"expected get_compile_threads() > 1, got {get_compile_threads()}"
+            )
+        log.info(
+            "Creating thread pool with %d workers for nogil Triton compilation",
+            get_compile_threads(),
+        )
+        pool = ThreadPoolExecutor(
+            get_compile_threads(),
+            thread_name_prefix="triton_compile_",
+        )
+        _pool_set.add(pool)
+        return pool
+
+    @classmethod
+    def should_use_thread_workers(cls) -> bool:
+        """
+        Determine if thread workers should be used instead of process workers.
+
+        Returns True when running free-threaded Python or when explicitly
+        configured via compile_worker_mode.
+        """
+        from torch._inductor.utils import should_use_thread_workers
+
+        return should_use_thread_workers()
+
+    @classmethod
+    def get_worker_pool(cls) -> ThreadPoolExecutor | AnyPool:
+        """
+        Get the appropriate worker pool based on configuration.
+
+        Returns thread pool for nogil mode, process pool otherwise.
+        """
+        if cls.should_use_thread_workers():
+            return cls.thread_pool()
+        else:
+            return cls.process_pool()
+
     @classmethod
     def warm_pool(cls) -> None:
         if get_compile_threads() <= 1 or not _process_pool_allowed():
@@ -360,7 +430,11 @@ class AsyncCompile:
         # Pool is created on first access. Note for a SubprocPool, the sidecar process starts,
         # but its ProcessPoolExecutor does not initialize until a wakeup() call or the first
         # job is submitted.
-        cls.process_pool()
+        # For thread pools, this is a no-op since thread pool creation is very cheap.
+        if cls.should_use_thread_workers():
+            cls.thread_pool()
+        else:
+            cls.process_pool()
         _compile_end()
 
     @classmethod
@@ -459,7 +533,7 @@ class AsyncCompile:
           cases, like coordesc tuning and dynamic_scale_rblock, require us to reload the function
           in the parent lazily when we require it.
         - The AutotuneCache, if enabled, is constructed on each worker per triton config
-          and pickled by to us via `CachingAutotuner.save_cache_hook`.
+          and pickled to us via `CachingAutotuner.save_cache_hook`.
         """
         load_kernel = functools.partial(
             _load_triton_kernel_from_source, kernel_name, source_code
@@ -480,11 +554,28 @@ class AsyncCompile:
                 torch._inductor.codecache.PyCodeCache.load(source_code), kernel_name
             )
 
-        is_parallel = self.use_process_pool()
+        from torch.compiler._no_compile import (
+            check_compilation_allowed,
+            is_compilation_forbidden,
+        )
+        from torch.compiler._runtime_cache import (
+            load_triton_kernel,
+            record_triton_kernel,
+        )
+
+        is_parallel = not is_compilation_forbidden() and self.use_process_pool()
         set_feature_use("parallel_compile_post_warmup", is_parallel)
 
         compile_id = torch._guards.CompileContext.current_compile_id()
         is_backward = getattr(V.graph, "is_backward", False)
+
+        source_key = CompiledTritonKernels.key(source_code)
+        if (kernel := load_triton_kernel(source_key)) is not None:
+            counters["inductor"]["async_compile_cache_hit"] += 1
+            kernel.set_compile_info(compile_id, is_backward)
+            kernel._reload_kernel = reload_kernel_in_parent
+            record_triton_kernel(source_key, kernel)
+            return kernel
 
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
@@ -493,15 +584,36 @@ class AsyncCompile:
                 # Remove the future now that we've cache hit
                 CompiledTritonKernels.remove_future(source_code)
                 future.reload_kernel_from_src = reload_kernel_in_parent
+                record_triton_kernel(source_key, future.static_autotuner)
             if is_parallel:
                 return future
             else:
                 return future.result()
 
         # Cache miss
+        check_compilation_allowed(
+            "Triton kernel cache miss",
+            "no_compilation() only serves Triton kernels already in Inductor's "
+            "in-process kernel cache (statically launchable ones restored from a "
+            "cache bundle); loading a kernel through triton.compile, even from "
+            "Triton's on-disk cache, counts as compilation.",
+        )
         if is_parallel:
             # Ensure libdevice path is set in os.environ before passing to workers
             _set_triton_libdevice_path()
+            # A GPU kernel without a device index (compile_on_one_rank) defaults
+            # TRITON_CACHE_DIR from the current device, which a compile worker forked
+            # after CUDA initialization can't query. Set it in this process, not only
+            # for the workers, so that lookups here (e.g. TritonBundler.put) resolve
+            # the directory the workers wrote to.
+            m = indexless_device_regex.search(source_code)
+            if m and os.environ.get("TRITON_CACHE_DIR") is None:
+                from torch._inductor.runtime.triton_heuristics import (
+                    _resolve_load_device,
+                )
+
+                if (device := _resolve_load_device(None, m.group(1))) is not None:
+                    os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(device)
             # We want to support changing these env vars after (and while) the
             # process pool is running, so pass them to the subprocess to reset.
             env_vars = [
@@ -511,7 +623,10 @@ class AsyncCompile:
             ]
             extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
-                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
+                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher,
+                "static_launch_user_defined_triton_kernels": (
+                    torch._inductor.config.static_launch_user_defined_triton_kernels
+                ),
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
@@ -535,8 +650,16 @@ class AsyncCompile:
                         fn_hash: torch._inductor.config.autotune_lookup_table[fn_hash]
                     }
 
-            task = self.process_pool().submit(
-                _worker_compile_triton,
+            # Select appropriate pool and worker function based on mode
+            pool = self.get_worker_pool()
+            worker_fn = (
+                _worker_compile_triton_thread
+                if self.should_use_thread_workers()
+                else _worker_compile_triton
+            )
+
+            task = pool.submit(
+                worker_fn,
                 load_kernel,
                 extra_env,
                 extra_config,
@@ -553,13 +676,17 @@ class AsyncCompile:
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
 
-                kernel.restore_after_unpickle(old_values=None)
+                # Only restore after unpickle in process mode
+                # Thread mode doesn't pickle, so kernel is already in correct state
+                if not self.should_use_thread_workers():
+                    kernel.restore_after_unpickle(old_values=None)
 
                 kernel.precompile(
                     warm_cache_only=False,
                     reload_kernel=reload_kernel_in_parent,
                     static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                 )
+                record_triton_kernel(source_key, kernel)
                 _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                 return kernel
 
@@ -585,6 +712,7 @@ class AsyncCompile:
                         warm_cache_only=False,
                         static_triton_bundle_key=CompiledTritonKernels.key(source_code),
                     )
+                    record_triton_kernel(source_key, kernel)
                     elapsed_us = (time_ns() - start_ns) // 1000
                     _emit_triton_kernel_compile_metric(kernel, kernel_name, elapsed_us)
                     return kernel
@@ -926,6 +1054,7 @@ class AsyncCompile:
         swizzle_type_a=None,
         swizzle_type_b=None,
         has_bias_epilogue=False,
+        has_output_scale=False,
         swap_ab=False,
         metadata=None,
     ):
@@ -956,6 +1085,7 @@ class AsyncCompile:
             swizzle_type_a,
             swizzle_type_b,
             has_bias_epilogue,
+            has_output_scale,
             swap_ab,
             metadata,
         )
@@ -976,6 +1106,7 @@ class AsyncCompile:
                 waitcounter_name_override="compile_triton",
             ):
                 self._wait_futures(scope)
+                self._precompile_module_level_kernels(scope)
 
         if self._metal_sources:
             from torch._inductor.runtime.runtime_utils import compile_mps_shaders
@@ -985,12 +1116,49 @@ class AsyncCompile:
 
         _compile_end()
 
+    def _precompile_module_level_kernels(self, scope: dict[str, Any]) -> None:
+        # A module-level kernel def builds an uncompiled CachingAutotuner when the wrapper
+        # runs outside the compile that produced it (e.g. `python wrapper.py`); compile
+        # those here, concurrently, rather than serially at each kernel's first launch.
+        # They compile in process, on threads: JITFunction.cache_key hashes the def's
+        # source and starting line, which a process worker compiling the kernel's own
+        # string-form module does not reproduce. As with _worker_compile_triton_thread,
+        # only the Triton compile runs on the threads; launchers load on this thread.
+        # The interpreter leaves even string-form kernels uncompiled; keep it that way.
+        if os.environ.get("TRITON_INTERPRET", "0") == "1":
+            return
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        pending = {
+            key: value
+            for key, value in scope.items()
+            if isinstance(value, CachingAutotuner)
+            and not value.compile_results
+            and not value.launchers
+        }
+        if not pending:
+            return
+        _set_triton_ptxas_path()
+        _set_triton_libdevice_path()
+        pool = self.thread_pool()
+        warm = partial(CachingAutotuner.precompile, warm_cache_only=True)
+        futures: dict[str, Future[Any] | CodeCacheFuture] = {
+            k: pool.submit(warm, v) for k, v in pending.items()
+        }
+        for key, _ in self._results(futures):
+            pending[key].precompile()
+
     def _wait_futures(self, scope: dict[str, Any]) -> None:
         kernels = {
             key: value
             for key, value in scope.items()
             if isinstance(value, (Future, CodeCacheFuture))
         }
+        scope.update(self._results(kernels))
+
+    def _results(
+        self, kernels: dict[str, Future[Any] | CodeCacheFuture]
+    ) -> Iterator[tuple[str, Any]]:
         pbar = tqdm(
             total=len(kernels),
             desc="Inductor Compilation",
@@ -1006,7 +1174,6 @@ class AsyncCompile:
                 pbar.set_postfix_str(key)
             try:
                 kernel = result.result(timeout=wait_timeout)
-                scope[key] = kernel
             except FuturesTimeoutError as e:
                 # concurrent.futures.TimeoutError became an alias of the
                 # builtin TimeoutError in Python 3.11; on 3.10 it is a
@@ -1024,6 +1191,7 @@ class AsyncCompile:
                     "to cause compilation to occur in the main process."
                 ) from e
             pbar.update(1)
+            yield key, kernel
 
 
 def maybe_warm_pool() -> None:

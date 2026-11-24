@@ -8,7 +8,7 @@ import weakref
 from collections import namedtuple, OrderedDict
 from collections.abc import Callable, Iterator, Mapping
 from typing import Any, Optional, overload, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import Self  # noqa: UP035
 
 import torch
 from torch import device, dtype, memory_format, Tensor
@@ -932,8 +932,9 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
-        # _apply is traced by dynamo at the bytecode level, and torch._subclasses
-        # is in dynamo's MOD_SKIPLIST, revisit later for c++
+        # Python FakeTensor needs its wrapper state preserved across conversion.
+        # Native fakes carry that state in TensorImpl and support the usual
+        # set_data path.
         from torch._subclasses.fake_tensor import FakeTensor
 
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
@@ -1789,7 +1790,7 @@ class Module:
     # torchrec tests the code consistency with the following code
     # fmt: off
     def _call_impl(self, *args, **kwargs):
-        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        forward_call = (self._slow_forward if torch._C._is_tracing() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks

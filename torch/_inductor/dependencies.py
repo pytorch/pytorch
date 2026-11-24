@@ -4,8 +4,7 @@ import itertools
 import logging
 import re
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, TypeVar
-from typing_extensions import Self
+from typing import Any, Self, TypeVar
 from unittest.mock import patch
 
 import sympy
@@ -15,7 +14,7 @@ from torch._inductor.utils import get_free_symbols
 from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils._sympy.symbol import make_symbol, SymT
+from ..utils._sympy.symbol import make_symbol, symbol_is_type, SymT
 from .codegen.common import index_prevent_reordering
 from .ops_handler import DefaultHandler
 from .utils import (
@@ -335,6 +334,33 @@ class MemoryDep(Dep):
         if isinstance(self.index, sympy.Integer):
             return True
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
+
+    def is_non_overlapping(self) -> bool:
+        """Prove disjoint affine accesses, allowing gaps in storage."""
+        # An indirect offset varies per iteration, so it is not a constant shift.
+        if any(
+            symbol_is_type(s, (SymT.TMP, SymT.INDIRECT))
+            for s in self.index.free_symbols
+        ):
+            return False
+        sizevars = V.graph.sizevars
+        strides = sizevars.stride_vars(self.index, self.var_names)
+        affine = self.get_offset() + sum(
+            stride * var for stride, var in zip(strides, self.var_names)
+        )
+        if not sizevars.statically_known_equals(self.index, affine):
+            return False
+        # Hints choose an order; symbolic inequalities establish its safety.
+        hints = [sizevars.optimization_hint(stride, fallback=1) for stride in strides]
+        span = sympy.S.One
+        for axis in sorted(range(len(strides)), key=hints.__getitem__):
+            stride, size = strides[axis], self.size[axis]
+            if not sizevars.statically_known_gt(size, 0) or not (
+                sizevars.statically_known_geq(stride, span)
+            ):
+                return False
+            span += (size - 1) * stride
+        return True
 
     def stride1_for_last_dim(self, result_for_complex_expression: bool = True) -> bool:
         """
@@ -888,14 +914,16 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         self.symbols = OrderedSet()
         self.get_symbols = free_unbacked_symbols if unbacked_only else free_symbols
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         for a in itertools.chain(args, kwargs.values()):
             if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
                 self.symbols |= self.get_symbols(a)
 
     def indirect_indexing(
         self,
-        index_var: Any,
+        index_var: object,
         size: int | sympy.Expr,
         check: bool = True,
         wrap_neg: bool = True,
@@ -907,16 +935,23 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         self.symbols |= self.get_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
-    def frexp(self, x: Any) -> tuple[None, ...]:
+    def frexp(self, x: object) -> tuple[None, ...]:
         return (None,) * 2
 
     def scan(
-        self, dtypes: Any, combine_fn: Any, values: Sequence[Any]
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        combine_fn: object,
+        values: Sequence[object],
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 
     def sort(
-        self, dtypes: Any, values: Sequence[Any], stable: Any, descending: Any
+        self,
+        dtypes: tuple[torch.dtype, ...],
+        values: Sequence[object],
+        stable: bool,
+        descending: bool,
     ) -> tuple[None, ...]:
         return (None,) * len(values)
 
@@ -930,7 +965,7 @@ class FreeSymbolsOpsHandler(DefaultHandler):
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
 
-    def masked(self, mask: Any, body: Callable[..., Any], other: Any) -> None:
+    def masked(self, mask: object, body: Callable[[], object], other: object) -> None:
         if not callable(body):
             raise AssertionError("masked body must always be callable.")
         # The body can make additional calls, for e.g. ops.indirect_indexing
@@ -964,7 +999,9 @@ class SymbolUsageCollectorOpsHandler(DefaultHandler):
         self.symbol = symbol
         self.usages = OrderedSet()
 
-    def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+    def _default(
+        self, name: str, args: tuple[object, ...], kwargs: dict[str, object]
+    ) -> Any:
         used_here = self.symbol in args or self.symbol in kwargs.values()
         if used_here:
             self.usages.add(name)

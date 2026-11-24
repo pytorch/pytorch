@@ -18,6 +18,7 @@ from .. import ir
 from ..dependencies import Dep, extract_loop_body_with_args, MemoryDep
 from ..runtime.hints import ReductionHint
 from ..runtime.runtime_utils import next_power_of_2
+from ..runtime.tiling import get_pointwise_prefixes
 from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
@@ -41,7 +42,7 @@ def tiling_scores_suggest_inner_reduction(
     sizevars = V.graph.sizevars
     non_reduction_score = sum(
         sizevars.optimization_hint(tiling_scores.get(dim, 0), fallback=0)
-        for dim in ("x", "y", "z")
+        for dim in get_pointwise_prefixes(tiling_scores)
     )
     non_reduction_score = max(non_reduction_score, 1)
     r_score = sizevars.optimization_hint(tiling_scores["r0_"], fallback=0)
@@ -186,7 +187,7 @@ class SIMDKernelFeatures:
     def buf_accesses(self) -> dict[str, list[Dep]]:
         """only needed for config.benchmark_kernel"""
         buf_accesses = collections.defaultdict(list)
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for access in node.read_writes.reads | node.read_writes.writes:
                 buf_accesses[access.name].append(access)
         return buf_accesses
@@ -204,7 +205,7 @@ class SIMDKernelFeatures:
 
     def get_mutations(self) -> OrderedSet[str]:
         mutations: OrderedSet[str] = OrderedSet()
-        for node in self.scheduler_nodes():
+        for node in self.indexing_scheduler_nodes():
             for buf in node.get_outputs():
                 mutations.update(buf.get_mutations())
         return mutations
@@ -418,7 +419,7 @@ class MemoryEstimator:
         self.groups = groups
         self.symbols = [make_symbol(SymT.INDEX, i) for i in range(len(groups))]
         # We are doing two estimates simultaneously:
-        # 1) the first is a for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
+        # 1) the first is for a non-persistent (aka looped) reduction, using self.outside_loop/self.loops
         # we add an item to loops each corresponding to each reduction loop in the kernel
         # outside_loop is only used for broadcasting or point-wise ops that don't use the reduction dimension
         # 2) the second is for a persistent kernel, using self.persistent

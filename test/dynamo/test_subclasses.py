@@ -27,10 +27,12 @@ from torch.nested._internal.nested_tensor import (
     nested_view_from_values_offsets,
 )
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     instantiate_parametrized_tests,
     make_dynamo_test,
     NestedTensorTestCase,
     parametrize,
+    skipIfCppFakeTensor,
     subtest,
 )
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
@@ -1226,6 +1228,138 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(res_exp, res_act)
         self.assertEqual(x0, x1)
 
+    # https://github.com/pytorch/pytorch/issues/193932
+    @torch._functorch.config.patch(check_custom_op_aliasing=True)
+    def test_bare_subclass_matmul(self):
+        # matmul lowers to an extern kernel, so the compiled code re-enters
+        # dispatch with the subclass input still wrapped.
+        class Bare(torch.Tensor):
+            pass
+
+        def fn(t):
+            return t @ t.t()
+
+        x = torch.randn(4, 4)
+        res_exp = fn(x.as_subclass(Bare))
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res_act = opt_fn(x.as_subclass(Bare))
+        self.assertEqual(res_exp, res_act)
+        self.assertIsInstance(res_act, Bare)
+
+    # https://github.com/pytorch/pytorch/issues/193932
+    @torch._functorch.config.patch(check_custom_op_aliasing=True)
+    def test_bare_subclass_matmul_aot_eager(self):
+        # Same failure without inductor: aten.t.default re-enters dispatch under
+        # AOTAutograd's runtime wrapper.
+        class Bare(torch.Tensor):
+            pass
+
+        def fn(t):
+            return t @ t.t()
+
+        x = torch.randn(4, 4)
+        res_exp = fn(x.as_subclass(Bare))
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res_act = opt_fn(x.as_subclass(Bare))
+        self.assertEqual(res_exp, res_act)
+        self.assertIsInstance(res_act, Bare)
+
+    def test_analyze_custom_op_mode_subclass_deferral(self):
+        # Pins the deferral predicate directly, so the coverage does not depend on a
+        # backend lowering to an op that re-enters dispatch.
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            _AnalyzeCustomOpInputOutputMode,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode, is_fake_tensor
+
+        class Bare(torch.Tensor):
+            pass
+
+        x = torch.randn(4, 4)
+        bare_inp = x.as_subclass(Bare)
+        two_inp = TwoTensor(x, torch.randn(4, 4))
+        with _AnalyzeCustomOpInputOutputMode():
+            # No __torch_dispatch__ to defer to, so the mode has to handle this itself.
+            bare_out = torch.ops.aten.add.Tensor(bare_inp, 1)
+            # A subclass that has one must still be deferred to.
+            two_out = torch.ops.aten.add.Tensor(two_inp, 1)
+        self.assertIsInstance(bare_out, Bare)
+        self.assertIsInstance(two_out, TwoTensor)
+        # Deferral is the mode returning NotImplemented, which the assertion above
+        # cannot tell apart from the mode handling the op itself.
+        self.assertIs(
+            _AnalyzeCustomOpInputOutputMode().__torch_dispatch__(
+                torch.ops.aten.add.Tensor, (TwoTensor,), (two_inp, 1)
+            ),
+            NotImplemented,
+        )
+        # A fake tensor must be handled here, not deferred to: FakeTensor returns
+        # NotImplemented itself while its own mode is on the stack.
+        with FakeTensorMode() as fake_mode:
+            fake_inp = fake_mode.from_tensor(x)
+            with _AnalyzeCustomOpInputOutputMode():
+                fake_out = torch.ops.aten.add.Tensor(fake_inp, 1)
+        self.assertTrue(is_fake_tensor(fake_out))
+
+    def test_inplace_op_preserves_subclass_type(self):
+        # An inplace op resyncs the VariableTracker metadata from the fake tensor,
+        # which no longer carries a non-traceable subclass type.
+        class MySubclass(torch.Tensor):
+            pass
+
+        def fn(x):
+            y = torch.empty_like(x)
+            y.copy_(x)
+            return y
+
+        x = torch.randn(2, 2).as_subclass(MySubclass)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertIsInstance(res_act, MySubclass)
+        self.assertEqual(res_exp, res_act)
+
+        # The wrong class is also observable inside the graph, where it silently
+        # takes the other branch instead of raising.
+        def observe_intermediate(x):
+            y = torch.empty_like(x)
+            y.copy_(x)
+            return isinstance(y, MySubclass)
+
+        def observe_input(x):
+            x.add_(1)
+            return isinstance(x, MySubclass)
+
+        self.assertTrue(compile_full_eager(observe_intermediate)(x))
+        self.assertTrue(compile_full_eager(observe_input)(x.clone()))
+
+    def test_comparison_with_torch_function_disabled(self):
+        # A subclass that disables __torch_function__ does not intercept the
+        # comparison, so the result is a plain tensor and must be modelled as one.
+        class DisabledTF(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return x > 0
+
+        def fn_inplace(x):
+            x.add_(1)
+            return x > 0
+
+        base = torch.randn(2, 2)
+        for cls in (DisabledTF, MyParam):
+            for f in (fn, fn_inplace):
+                res_exp = f(base.clone().as_subclass(cls))
+                res_act = compile_full_eager(f)(base.clone().as_subclass(cls))
+                self.assertIs(type(res_exp), torch.Tensor)
+                self.assertIs(type(res_act), torch.Tensor)
+                self.assertEqual(res_exp, res_act)
+
     # ACT (AsyncCollectiveTensor) can be constructed directly, so the guard
     # relaxation for ACT inputs is exercised here on CPU without a process group.
     # The end-to-end path with a real collective + inductor is covered by
@@ -1527,6 +1661,82 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
 
+    @parametrize("prebound", (False, True))
+    def test_raw_tensor_descriptor_bypasses_subclass_override(self, prebound):
+        class S(torch.Tensor):
+            def add(self, other):
+                return self * 0 - 777
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        x = torch.ones(2).as_subclass(S)
+        descriptor = torch.Tensor.add
+        if prebound:
+            bound = descriptor.__get__(x, S)
+
+            def fn():
+                return bound(1)
+
+            args = ()
+        else:
+
+            def fn(x):
+                return descriptor(x, 1)
+
+            args = (x,)
+
+        expected = fn(*args)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(*args)
+        self.assertEqual(actual, expected)
+        self.assertIsInstance(actual, S)
+
+    @parametrize("override", (False, True))
+    @parametrize("prebound", (False, True))
+    def test_raw_tensor_inplace_view_descriptor_unsupported(self, prebound, override):
+        class S(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        if override:
+            S.unsqueeze_ = lambda self, dim: self
+
+        descriptor = torch.Tensor.unsqueeze_
+
+        def run(x, compile_fn):
+            if prebound:
+                bound = descriptor.__get__(x, S)
+
+                def fn():
+                    return bound(0) + 1
+
+                return compile_fn(fn)()
+
+            def fn(x):
+                return descriptor(x, 0) + 1
+
+            return compile_fn(fn)(x)
+
+        fullgraph_x = torch.ones(2).as_subclass(S)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "inplace view op on input tensor"
+        ):
+            run(
+                fullgraph_x,
+                partial(torch.compile, backend="eager", fullgraph=True),
+            )
+        self.assertEqual(fullgraph_x.shape, (2,))
+
+        eager_x = torch.ones(2).as_subclass(S)
+        expected = run(eager_x, lambda fn: fn)
+
+        compiled_x = torch.ones(2).as_subclass(S)
+        actual = run(compiled_x, partial(torch.compile, backend="eager"))
+        self.assertEqual(actual, expected)
+        self.assertEqual(compiled_x, eager_x)
+
     def test_subclass_dont_invoke_torch_function_on_overridden_attr(self):
         from types import MethodWrapperType
 
@@ -1567,6 +1777,18 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         res_exp = fn(x)
         res_act = fn_opt(x)
         self.assertEqual(res_exp, res_act)
+
+    def test_construct_parameter_subclass(self):
+        class MyParam(torch.nn.Parameter):
+            pass
+
+        def fn(x):
+            return MyParam(x, requires_grad=False)
+
+        x = torch.randn(2)
+        out = compile_full_eager(fn)(x)
+        self.assertIs(type(out), MyParam)
+        self.assertEqual(out, x)
 
     def test_subclass_with_disabled_torch_function(self):
         class MySubclass(torch.Tensor):
@@ -1688,6 +1910,16 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
         self.assertEqual(result, torch.tensor([3.0]))
         self.assertFalse(torch._C._peek_should_skip_torch_function())
 
+    def test_has_torch_function_under_disable_torch_function_subclass(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            with torch._C.DisableTorchFunctionSubclass():
+                inner = torch.overrides.has_torch_function_unary(x)
+            return inner, torch.overrides.has_torch_function_unary(x)
+
+        x = torch.ones(1).as_subclass(BaseTorchFunction)
+        self.assertEqual(fn(x), (False, True))
+
     def test_parameter_subclass_custom_torch_func_and_dynamic_attr(self):
         # This is a slight variation of
         # https://github.com/huggingface/diffusers/blob/fbf6b856cc61fd22ad8635547bff4aafe05723f3/src/diffusers/quantizers/gguf/utils.py#L398-L435
@@ -1776,6 +2008,38 @@ class SubclassTests(_SubclassCompileCheckMixin, torch._dynamo.test_case.TestCase
 
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
+
+    @parametrize("op", ("linear", "module", "matmul"))
+    @parametrize("property_first", (False, True))
+    def test_constructed_subclass_method_descriptor_guard(self, op, property_first):
+        class MySubclass(torch.Tensor):
+            def __init__(self, data):
+                super().__init__()
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        weight = torch.randn(3, 4)
+        linear = torch.nn.Linear(4, 3)
+
+        def fn(x):
+            x = MySubclass(x)
+            if op == "linear":
+                t = torch.nn.functional.linear(x, weight)
+            elif op == "module":
+                t = linear(x)
+            else:
+                t = x @ weight.T
+            if property_first:
+                return t.shape, t.dtype, t.device, t.numel(), t.dim(), t.is_complex()
+            return t.numel(), t.dtype, t.dim(), t.is_complex(), t.shape, t.device
+
+        x = torch.randn(2, 4)
+        opt_fn = torch.compile(fn, backend="eager")
+        expected = fn(x)
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(opt_fn(x), expected)
 
     def test_as_subclass_attr_mutation(self):
         # Make sure the attribute mutation for newly constructed tensor subclass
@@ -2229,6 +2493,57 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(ref0, res0)
             self.assertEqual(ref1, res1)
 
+    def test_is_pinned_respects_torch_dispatch(self):
+        class PinnedOverrideTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @staticmethod
+            def __new__(cls, elem):
+                out = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.shape,
+                    strides=elem.stride(),
+                    storage_offset=elem.storage_offset(),
+                    dtype=elem.dtype,
+                    layout=elem.layout,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                )
+                out.elem = elem
+                return out
+
+            def __tensor_flatten__(self):
+                return ["elem"], None
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
+                return PinnedOverrideTensor(inner_tensors["elem"])
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.is_pinned.default:
+                    return True
+
+                def unwrap(x):
+                    return x.elem if isinstance(x, cls) else x
+
+                kwargs = {} if kwargs is None else kwargs
+                out = func(
+                    *pytree.tree_map(unwrap, args),
+                    **pytree.tree_map(unwrap, kwargs),
+                )
+                return pytree.tree_map(
+                    lambda x: cls(x) if isinstance(x, torch.Tensor) else x,
+                    out,
+                )
+
+        def fn(x):
+            return x.is_pinned()
+
+        x = PinnedOverrideTensor(torch.randn(2, device="meta"))
+        self.assertTrue(fn(x))
+        self.assertTrue(torch.compile(fn, backend="eager")(x))
+
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.
         # Also adds additional guards on the inner tensor's sizes.
@@ -2420,6 +2735,44 @@ s50 > 3""",
         x3 = CtxSubclassTensor(torch.ones(2), 4)
         _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
         _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
+
+    @parametrize("custom_guard", [False, True])
+    def test_tensor_subclass_metadata_recompile_hint(self, custom_guard):
+        class CustomGuardTensor(CtxSubclassTensor):
+            @classmethod
+            def __metadata_guard__(cls, original, current):
+                return original == current
+
+        tensor_type = CustomGuardTensor if custom_guard else CtxSubclassTensor
+        failures = []
+        compiled = torch._dynamo.optimize(
+            backend="eager",
+            nopython=True,
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(lambda x: x * x)
+
+        compiled(tensor_type(torch.ones(2), 3))
+        compiled(tensor_type(torch.ones(2), 3))
+        self.assertEqual(failures, [])
+        compiled(tensor_type(torch.ones(2), 2))
+
+        self.assertEqual(len(failures), 1)
+        class_name = f"{tensor_type.__module__}.{tensor_type.__qualname__}"
+        if custom_guard:
+            expected_hint = (
+                f"(HINT: {class_name}.__metadata_guard__() rejected the metadata "
+                "for x. Keep the metadata stable or change the check "
+                "if this difference is safe.)"
+            )
+        else:
+            expected_hint = (
+                f"(HINT: Metadata from {class_name}.__tensor_flatten__() for "
+                "x no longer matches what Dynamo saw during compilation. "
+                "This metadata can affect tensor subclass behavior; keep it stable "
+                "or define __metadata_guard__() if some differences are safe.)"
+            )
+        self.assertIn("___check_metadata_", failures[0])
+        self.assertIn(expected_hint, failures[0])
 
     def test_tensor_subclass_ctx_recursive_guards(self):
         x0 = torch.ones(2, 2)
@@ -2830,6 +3183,32 @@ class GraphModule(torch.nn.Module):
         out_ref = f(x)
         out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(out_ref, out_test)
+
+    @parametrize("nested_graph_breaks", (False, True))
+    def test_hasattr_wrapper_subclass_method_after_graph_break(
+        self, nested_graph_breaks
+    ):
+        def fn(x):
+            wrapped = TwoTensor(x, x + 1)
+            torch._dynamo.graph_break()
+            has_flatten = hasattr(wrapped, "__tensor_flatten__")
+            flatten = getattr(wrapped, "__tensor_flatten__", None)
+            return x + 1 if has_flatten and flatten is not None else x - 1
+
+        x = torch.ones(2)
+        with torch._dynamo.config.patch(nested_graph_breaks=nested_graph_breaks):
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_hasattr_wrapper_subclass_method_on_input(self):
+        def fn(t, y):
+            if hasattr(t, "__tensor_flatten__") and not hasattr(t, "missing"):
+                return y + 1
+            return y - 1
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for t in (TwoTensor(x, x), x):
+            self.assertEqual(opt_fn(t, x), fn(t, x))
 
     def test_support_bases(self):
         import torch.fx._symbolic_trace
@@ -3622,7 +4001,41 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[1].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_1: "f32[3, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a')
+        primals_2: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=1)
+        primals_3: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_4: "f32[3, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b')
+        primals_5: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=1)
+        primals_6: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_7: "Sym(s16)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=1)
+        primals_8: "Sym(s16)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_9: "Sym(s16)",  # PlainAOTInput(idx=1)
+    ):
+        clone: "f32[3, s16]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
+
+        view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
+        view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
+        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_numel_default_1: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone_1)
+        return (
+            clone,  # PlainAOTOutput(idx=0)
+            view,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a')
+            sym_numel_default,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a'), idx=0)
+            view_1,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b')
+            sym_numel_default_1,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b'), idx=0)
+            sym_numel_default,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=1), idx=0)
+            clone_1,  # PlainAOTOutput(idx=2)
+            primals_9,  # SavedForBackwardsAOTOutput(idx=0)
+            primals_2,  # SavedForBackwardsAOTOutput(idx=1)
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3655,6 +4068,7 @@ class GraphModule(torch.nn.Module):
             primals_2,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
@@ -3723,7 +4137,41 @@ class GraphModule(torch.nn.Module):
 
         self.assertExpectedInline(
             normalize_gm(fw[0].print_readable(print_output=False, expanded_def=True)),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(
+        self,
+        primals_1: "f32[3, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a')
+        primals_2: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=1)
+        primals_3: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='a'), idx=0)
+        primals_4: "f32[3, s16]",  # SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b')
+        primals_5: "Sym(s16)",  # SubclassSizeAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=1)
+        primals_6: "Sym(s16)",  # SubclassStrideAOTInput(base=SubclassGetAttrAOTInput(base=PlainAOTInput(idx=0), attr='b'), idx=0)
+        primals_7: "Sym(s16)",  # SubclassSizeAOTInput(base=PlainAOTInput(idx=0), idx=1)
+        primals_8: "Sym(s16)",  # SubclassStrideAOTInput(base=PlainAOTInput(idx=0), idx=0)
+        primals_9: "Sym(s16)",  # PlainAOTInput(idx=1)
+    ):
+        clone: "f32[3, s16]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
+        clone_1: "f32[3, s16]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
+
+        view: "f32[3*s16]" = torch.ops.aten.view.default(clone, [-1])
+        view_1: "f32[3*s16]" = torch.ops.aten.view.default(clone_1, [-1])
+        sym_numel_default: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone)
+        sym_numel_default_1: "Sym(3*s16)" = torch.ops.aten.sym_numel.default(clone_1)
+        return (
+            clone,  # PlainAOTOutput(idx=0)
+            view,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a')
+            sym_numel_default,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='a'), idx=0)
+            view_1,  # SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b')
+            sym_numel_default_1,  # SubclassSizeAOTOutput(base=SubclassGetAttrAOTOutput(base=PlainAOTOutput(idx=1), attr='b'), idx=0)
+            sym_numel_default,  # SubclassSizeAOTOutput(base=PlainAOTOutput(idx=1), idx=0)
+            clone_1,  # PlainAOTOutput(idx=2)
+            primals_9,  # SavedForBackwardsAOTOutput(idx=0)
+            primals_2,  # SavedForBackwardsAOTOutput(idx=1)
+        )
+""",
+                """\
 class GraphModule(torch.nn.Module):
     def forward(
         self,
@@ -3756,6 +4204,7 @@ class GraphModule(torch.nn.Module):
             primals_2,  # SavedForBackwardsAOTOutput(idx=1)
         )
 """,
+            ),
         )
 
         self.assertExpectedInline(
@@ -4239,6 +4688,7 @@ class TestIssubclass(torch._dynamo.test_case.TestCase):
         self.assertEqual(result_eager, result_compiled)
 
 
+@skipIfCppFakeTensor("no nested tensor support")
 class TestNestedTensor(
     _SubclassCompileCheckMixin,
     torch._dynamo.test_case.TestCase,
@@ -4569,6 +5019,17 @@ class GraphModule(torch.nn.Module):
 
         self._validate_compile(fn, arg_fn=lambda: (values, offsets, offsets))
 
+    def test_in_graph_keepdim_reduction_binary_op(self):
+        # AOTAutograd used to emit an unguardable ephemeral nested-int guard
+        # while tracing the backward for this broadcast.
+        def fn(values, offsets):
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            return (nt - nt.mean(-1, keepdim=True)).values().sum()
+
+        values = torch.randn(15, 8, requires_grad=True)
+        offsets = torch.tensor([0, 5, 10, 15], dtype=torch.int64)
+        self._validate_compile(fn, arg_fn=lambda: (values, offsets))
+
     def test_in_graph_construction_from_input_4(self):
         # The offsets is taken from an NJT input
         def fn(nt, other_values):
@@ -4677,8 +5138,6 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
-    # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
-    @unittest.expectedFailure
     def test_in_graph_construction_from_intermediate_5(self):
         # non-shared intermediate
         def fn(values):

@@ -12,6 +12,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/int_mm_kernel.h>
+#include <ATen/native/cpu/SumKernel.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
@@ -52,6 +53,7 @@
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argsort.h>
+#include <ATen/ops/as_strided_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm.h>
 #include <ATen/ops/bmm_native.h>
@@ -1721,6 +1723,30 @@ static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const T
 // optimization, it likely depends on the characteristics of the CPU, MKL will be different from non-MKL etc.,
 // but this seems to be a first starting point.
 
+// Dispatch-free equivalent of `t.select(0, index)` (`t` must have dim >= 1).
+static inline Tensor select_batch_dim0(const Tensor& t, size_t index) {
+  const auto sizes = t.sizes();
+  const auto strides = t.strides();
+  const auto signed_index = static_cast<int64_t>(index);
+  return at::native::as_strided_tensorimpl(
+      t,
+      sizes.slice(1),
+      strides.slice(1),
+      t.storage_offset() + signed_index * strides[0]);
+}
+
+// Repoint a dim-0 batch view (from select_batch_dim0) at batch `index` by
+// updating only its storage offset; sizes/strides are identical across batch
+// elements. `index` is in [0, bs) by construction, so no bounds check is needed.
+static inline void rebind_batch_dim0(
+    const Tensor& view,
+    const Tensor& base,
+    size_t index) {
+  const auto signed_index = static_cast<int64_t>(index);
+  view.unsafeGetTensorImpl()->set_storage_offset(
+      base.storage_offset() + signed_index * base.strides()[0]);
+}
+
 static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm_out) {
   // is_bmm_out: true for bmm_out, false for baddbmm_
   // self_or_result is "self" for baddbmm_ and "result" for bmm_out
@@ -1817,28 +1843,42 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
       if (enable_multithreaded_bmm) {
         auto bmm_out_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
+          auto r = select_batch_dim0(self_or_result, 0);
+          auto m1v = select_batch_dim0(batch1, 0);
+          auto m2v = select_batch_dim0(batch2, 0);
           for (const auto b : c10::irange(start, end)) {
-            auto r = self_or_result.select(0, b);
-            addmm_impl_cpu_(
-                r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+            rebind_batch_dim0(r, self_or_result, b);
+            rebind_batch_dim0(m1v, batch1, b);
+            rebind_batch_dim0(m2v, batch2, b);
+            addmm_impl_cpu_(r, r, m1v, m2v, 0, 1);
           }
         };
         // Materialize if COW, since we cannot do so during parallel_for
         self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_out_fn);
       } else {
+        auto r = select_batch_dim0(self_or_result, 0);
+        auto m1v = select_batch_dim0(batch1, 0);
+        auto m2v = select_batch_dim0(batch2, 0);
         for (const auto b : c10::irange(bs)) {
-          auto r = self_or_result.select(0, b);
-          addmm_impl_cpu_(r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
+          rebind_batch_dim0(r, self_or_result, b);
+          rebind_batch_dim0(m1v, batch1, b);
+          rebind_batch_dim0(m2v, batch2, b);
+          addmm_impl_cpu_(r, r, m1v, m2v, 0, 1);
         }
       }
     } else {
       if (enable_multithreaded_bmm) {
         auto bmm_fn = [&](uint64_t start, uint64_t end) {
           c10::InferenceMode guard;
+          auto r = select_batch_dim0(self_or_result, 0);
+          auto m1v = select_batch_dim0(batch1, 0);
+          auto m2v = select_batch_dim0(batch2, 0);
           for (const auto b : c10::irange(start, end)) {
-            self_or_result.select(0, b).addmm_(
-                batch1.select(0, b), batch2.select(0, b), beta, alpha);
+            rebind_batch_dim0(r, self_or_result, b);
+            rebind_batch_dim0(m1v, batch1, b);
+            rebind_batch_dim0(m2v, batch2, b);
+            r.addmm_(m1v, m2v, beta, alpha);
           }
         };
         // Materialize if COW, since we cannot do so during parallel_for
@@ -1846,8 +1886,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
         at::parallel_for(0, bs, 1, bmm_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
-          self_or_result.select(0, b).addmm_(
-              batch1.select(0, b), batch2.select(0, b), beta, alpha);
+          select_batch_dim0(self_or_result, b).addmm_(
+              select_batch_dim0(batch1, b), select_batch_dim0(batch2, b), beta, alpha);
         }
       }
     }
@@ -2389,7 +2429,7 @@ Tensor compute_T8(const Tensor& A) {
   constexpr scalar_t x4 = (-271. + 29. * sqrt_177) / (315. * x3);
   constexpr scalar_t x5 = (-11. + 11. * sqrt_177) / (1260. * x3);
   constexpr scalar_t x6 = (-99. + 11. * sqrt_177) / (5040. * x3);
-  constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3);
+  constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3 * x3);
   constexpr scalar_t y2 = (857. - 58. * sqrt_177) / 630.;
 
   auto As = _allocate_buffer(A, 5);
@@ -2621,8 +2661,8 @@ Tensor compute_T18_scale_square(
   std::vector<Tensor> output_pieces;
   output_pieces.reserve(section_numel);
   auto acc = mexp_scaled.index_select(0, sorted_s_inds);
-  for (int64_t i = 0; i < section_numel; ++i) {
-    for (int64_t j = 0; j < pts[i]; j++) {
+  for (const auto i : c10::irange(section_numel)) {
+    for ([[maybe_unused]] const auto _ : c10::irange(pts[i])) {
       // To avoid AMP autocasting caused by at::matmul
       auto acc_out = at::empty_like(acc);
       acc = at::matmul_out(acc_out, acc, acc);
@@ -2671,7 +2711,7 @@ Tensor mexp_impl(
       compute_T8<scalar_t>, compute_T12<scalar_t>
     };
 
-    for (int i = 0; i < total_n_degs - 1; ++i) {
+    for (const auto i : c10::irange(total_n_degs - 1)) {
       auto norm_lower_bound = (i == 0) ? static_cast<scalar_t>(-1) : thetas[i - 1];
       auto norm_upper_bound = thetas[i];
       // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
@@ -2848,6 +2888,27 @@ Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
   );
 }
 
+// The CPU cascade summation (cpu/SumKernel.h) can add partial sums into its
+// output, so reduce half and bfloat16 into a float temporary and round once at
+// the end. A single-element result is written once and needs no temporary.
+static bool cpu_powsum_in_float(const char* name, const Tensor& result, const Tensor& self,
+                                OptionalIntArrayRef dim, bool keepdim, double ord, bool is_norm) {
+  const auto in_dtype = self.scalar_type();
+  if (!self.is_cpu() || !isReducedFloatingType(in_dtype) || result.scalar_type() != in_dtype ||
+      result.numel() == 1 || !cascade_powsum_supports(ord, is_norm)) {
+    return false;
+  }
+  Tensor result_float = at::empty({0}, result.options().dtype(kFloat));
+  auto iter = make_reduction(name, result_float, self, dim, keepdim, in_dtype, kFloat);
+  if (is_norm) {
+    norm_stub(iter.device_type(), iter, ord);
+  } else {
+    powsum_stub(iter.device_type(), iter, ord);
+  }
+  result.copy_(result_float);
+  return true;
+}
+
 TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, const Tensor& result) {
   // Casting a large integer to a double will just introduce an error for
   // values larger than 10^53 (same for negative numbers), so that's fine.
@@ -2910,6 +2971,10 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     self_ = self;
   }
 
+  if (cpu_powsum_in_float("vector_norm", result, self_, dim, keepdim, ord, /*is_norm=*/true)) {
+    return;
+  }
+
   auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
   norm_stub(iter.device_type(), iter, ord);
 }
@@ -2965,6 +3030,10 @@ Tensor linalg__powsum(
     self_ = self.to(*opt_dtype);
   } else {
     self_ = self;
+  }
+
+  if (cpu_powsum_in_float("powsum", result, self_, dim, keepdim, ord, /*is_norm=*/false)) {
+    return result;
   }
 
   auto iter = make_reduction("powsum", result, self_, dim, keepdim, result.scalar_type());
@@ -3749,7 +3818,13 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   }
 
   bool dispatched = false;
-  if (at::globalContext().userEnabledMkldnn() && at::cpu::is_avx512_vnni_supported()) {
+#if defined(__aarch64__)
+  // On AArch64, oneDNN selects jit:int8 when SVE + I8MM is available.
+  const bool use_mkldnn = true;
+#else
+  const bool use_mkldnn = at::cpu::is_avx512_vnni_supported();
+#endif
+  if (at::globalContext().userEnabledMkldnn() && use_mkldnn) {
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;

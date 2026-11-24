@@ -1,12 +1,12 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
 
@@ -33,7 +33,9 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
         "Cannot query detailed XPU version without ATen_xpu library.");
   }
 
-  virtual int32_t getGlobalIdxFromDevice(const Device& device) const {
+  C10_DEPRECATED_MESSAGE(
+      "XPUHooksInterface::getGlobalIdxFromDevice() is deprecated since 2.16 and will be removed in 2.18. The SYCL index within the platform equals the torch device index, so use the torch device index instead. See https://github.com/pytorch/pytorch/issues/204019")
+  virtual int32_t getGlobalIdxFromDevice(const Device& /*device*/) const {
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
@@ -68,11 +70,11 @@ struct TORCH_API XPUHooksInterface : AcceleratorHooksInterface{
     TORCH_CHECK(false, "Cannot get XPU pinned memory allocator without ATen_xpu library.");
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/) const override {
     return false;
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
     TORCH_CHECK(false, "Cannot query primary context without ATen_xpu library.");
   }
 
@@ -92,4 +94,3 @@ namespace detail {
 TORCH_API const XPUHooksInterface& getXPUHooks();
 } // namespace detail
 } // namespace at
-C10_DIAGNOSTIC_POP()

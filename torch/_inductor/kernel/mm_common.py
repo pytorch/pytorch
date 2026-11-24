@@ -7,12 +7,11 @@ from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import get_current_backend, sympy_product
+from torch._inductor.utils import is_bf16x9_matmul, sympy_product
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 from .. import config
-from ..codegen.triton_utils import use_block_ptr_enabled
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import _IntLike, Layout, TensorBox
 from ..utils import load_template, triton_type
@@ -37,6 +36,23 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
         1,
         1,
     )
+
+
+@SymbolicGridFn
+def blackwell_persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
+    """Like persistent_mm_grid, with cluster-aligned 2CTA tiles and launch grid.
+
+    The heuristic also rounds ``NUM_SMS`` down to even because the template uses
+    it as the persistent-loop stride.
+    """
+    num_pid_m = cdiv(M, meta["BLOCK_M"])
+    if meta.get("TWO_CTAS", False):
+        num_pid_m = (num_pid_m + 1) // 2 * 2
+    num_tiles = num_pid_m * cdiv(N, meta["BLOCK_N"])
+    grid_size = min(meta["NUM_SMS"], num_tiles)
+    if meta.get("TWO_CTAS", False):
+        grid_size = (grid_size // 2) * 2
+    return (grid_size, 1, 1)
 
 
 @SymbolicGridFn
@@ -96,6 +112,28 @@ def mm_args(
     return [m, n, k, layout, mat1, mat2, *others]
 
 
+def zero_addmm_input(inp, mat1, mat2):
+    """
+    addmm and baddbmm ignore their input when beta == 0, NaN and inf included,
+    but GEMM templates compute beta * input, so the lowerings give them zeros
+    instead. Each choice still scales its accumulator by alpha as eager does,
+    whereas alpha * mm rounds to fp16 first and can overflow.
+    """
+    from ..lowering import lowerings
+
+    torch._check(
+        inp.get_dtype() == mat1.get_dtype() and inp.get_dtype() == mat2.get_dtype(),
+        lambda: "input dtypes must be the same",
+    )
+    torch._check(
+        inp.get_device() == mat1.get_device() and inp.get_device() == mat2.get_device(),
+        lambda: "all inputs must be on the same device",
+    )
+    return lowerings[torch.ops.aten.full](
+        [mat2.get_size()[-1]], 0, dtype=mat1.get_dtype(), device=mat1.get_device()
+    )
+
+
 def addmm_epilogue(dtype, alpha, beta):
     def epilogue(acc, bias):
         if alpha != 1:
@@ -136,39 +174,8 @@ def scale_mm_epilogue():
 
 
 def use_native_matmul(mat1, mat2):
-    if not config.triton.native_matmul:
-        return False
-
-    # If tma matmul is on, don't do native matmul
-    if (
-        config.triton.enable_persistent_tma_matmul
-        and torch.utils._triton.has_triton_tma_device()
-    ):
-        raise AssertionError("native matmul doesn't support tma codegen yet")
-
-    # Currently only enable native matmul for default indexing.
-    # TODO: support block ptr
-    if use_block_ptr_enabled():
-        raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-
-    # Currently only enable native matmul for triton on GPU.
     device_type = mat1.get_device().type
-    if not (
-        device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
-    ):
-        return False
-
-    # Currently, tl.dot only supports following dtypes
-    triton_supported_dtype = [
-        torch.int8,
-        torch.uint8,
-        torch.float16,
-        torch.bfloat16,
-        torch.float32,
-    ]
-    if mat1.dtype not in triton_supported_dtype:
-        return False
-    if mat2.dtype not in triton_supported_dtype:
+    if is_bf16x9_matmul(device_type, mat1.get_dtype()):
         return False
 
     # (..., M, K) @ (..., K, N)
@@ -183,16 +190,7 @@ def use_native_matmul(mat1, mat2):
     if any(map(has_free_unbacked_symbols, [m, k, n])):
         return False
 
-    # Consider the shape (m,k,n) > 1
-    # TODO : support when size = 1
-    if (
-        V.graph.sizevars.statically_known_leq(m, 1)
-        or V.graph.sizevars.statically_known_leq(k, 1)
-        or V.graph.sizevars.statically_known_leq(n, 1)
-    ):
-        return False
-
-    return True
+    return V.choices.use_native_matmul(mat1, mat2)
 
 
 def _use_small_mm_pointwise(
@@ -219,6 +217,22 @@ def _use_small_mm_pointwise(
         return False
     skt = statically_known_true or V.graph.sizevars.statically_known_true
     return skt(m >= 64) and skt(k < 5) and skt(n < 5)
+
+
+def _fits_int32_buffer_span(
+    rows: int, row_stride: int | None, cols: int, itemsize: int
+) -> bool:
+    # Descriptor fields are signed int32, but AMD buffer voffset is an unsigned
+    # 32-bit byte offset.
+    int32_max = (1 << 31) - 1
+    uint32_max = (1 << 32) - 1
+    return (
+        0 < rows <= int32_max
+        and 0 < cols <= int32_max
+        and row_stride is not None
+        and 0 <= row_stride <= int32_max
+        and ((rows - 1) * row_stride + cols) * itemsize <= uint32_max
+    )
 
 
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:

@@ -14,7 +14,7 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
@@ -52,8 +52,14 @@ uint32_t valueBase(int src, int dst, int size) {
 // with an unconditional `#undef NCCL_CFT_ENABLE`, so it always reads as 0 in
 // consumer code and would silently compile the put away. Replicate NCCL's
 // arch condition instead (nccl_device/impl/cft__funcs.h).
-#define CFT_DEVICE_SUPPORTED \
-  (defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000 && CUDART_VERSION >= 13030)
+// Not `#define CFT_DEVICE_SUPPORTED (defined(...) && ...)`: `defined` inside
+// a macro expansion is undefined behavior and clang rejects it under
+// -Werror,-Wexpansion-to-defined.
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 1000 && CUDART_VERSION >= 13030
+#define CFT_DEVICE_SUPPORTED 1
+#else
+#define CFT_DEVICE_SUPPORTED 0
+#endif
 
 __global__ void cftPutKernel(uint32_t leId, size_t leOffset, uint32_t base) {
 #if CFT_DEVICE_SUPPORTED
@@ -126,11 +132,11 @@ RankFixture setUpRank(const std::string& path, int rank, int size) {
   c10::cuda::CUDAGuard guard(device);
 
   auto store = c10::make_intrusive<c10d::FileStore>(path, size);
-  auto opts = c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
+  auto opts = c10::make_intrusive<c10d::NCCLOptions>();
   opts->group_name = kGroupName;
   opts->config.hostCftMode = ncclHostCftFallback;
-  auto backend =
-      c10::make_intrusive<c10d::ProcessGroupNCCL>(store, rank, size, opts);
+  auto backend = c10::make_intrusive<c10d::nccl2::ProcessGroupNCCL>(
+      store, rank, size, opts);
 
   auto pg = c10::make_intrusive<c10d::ProcessGroup>(store, rank, size);
   pg->setDefaultBackend(c10d::ProcessGroup::BackendType::NCCL);
@@ -217,9 +223,11 @@ void testDevicePutCft(
     for (const auto w : c10::irange(kSlotWords)) {
       const auto got = static_cast<uint32_t>(data[src * kSlotWords + w]);
       // Nobody writes into their own slot, so it must still read zero.
-      const uint32_t want =
-          src == rank ? 0u : valueBase(src, rank, size) + static_cast<uint32_t>(w);
-      ASSERT_EQ(got, want) << "rank " << rank << " slot " << src << " word " << w;
+      const uint32_t want = src == rank
+          ? 0u
+          : valueBase(src, rank, size) + static_cast<uint32_t>(w);
+      ASSERT_EQ(got, want) << "rank " << rank << " slot " << src << " word "
+                           << w;
     }
   }
 
@@ -254,7 +262,26 @@ class NCCLSymmetricMemoryCftDeviceTest : public ::testing::Test {
       LOG(INFO) << "Need at least 2 ranks, skipping test";
       return true;
     }
-    return false;
+    // cftPutKernel compiles to a no-op unless CFT_DEVICE_SUPPORTED held, and
+    // the host-side queries can still succeed then (they only need the driver
+    // and NCCL), so the readback would fail confusingly instead of skipping.
+    // ptxVersion is the virtual arch the loaded kernel variant was compiled
+    // for, i.e. its __CUDA_ARCH__/10; CUDART_VERSION is shared with the
+    // device pass of this TU.
+#if CUDART_VERSION >= 13030
+    cudaFuncAttributes attr{};
+    AT_CUDA_CHECK(cudaFuncGetAttributes(&attr, cftPutKernel));
+    if (attr.ptxVersion >= 100) {
+      return false;
+    }
+    LOG(INFO) << "cftPutKernel variant compiled for sm_" << attr.ptxVersion
+              << " with CUDART " << CUDART_VERSION
+              << ", needs sm_100+ and CUDA >= 13.3; skipping test";
+#else
+    LOG(INFO) << "cftPutKernel compiled with CUDART " << CUDART_VERSION
+              << ", needs CUDA >= 13.3; skipping test";
+#endif
+    return true;
   }
 
   int size_{1};
@@ -263,6 +290,23 @@ class NCCLSymmetricMemoryCftDeviceTest : public ::testing::Test {
 TEST_F(NCCLSymmetricMemoryCftDeviceTest, testDevicePutCft) {
   if (skipTest()) {
     return;
+  }
+  // cftPutKernel compiles to a no-op unless CFT_DEVICE_SUPPORTED held, and
+  // the host-side queries can still succeed then (they only need the driver
+  // and NCCL), so the readback would fail confusingly instead of skipping.
+  // ptxVersion is the virtual arch the loaded kernel variant was compiled
+  // for, i.e. its __CUDA_ARCH__/10; CUDART_VERSION is shared with the device
+  // pass of this TU.
+#if CUDART_VERSION >= 13030
+  cudaFuncAttributes attr{};
+  AT_CUDA_CHECK(cudaFuncGetAttributes(&attr, cftPutKernel));
+  const bool cftCompiled = attr.ptxVersion >= 100;
+#else
+  const bool cftCompiled = false;
+#endif
+  if (!cftCompiled) {
+    GTEST_SKIP() << "cftPutKernel compiled without CFT device support "
+                 << "(needs sm_100+ code and CUDA >= 13.3)";
   }
   c10d::test::TemporaryFile file;
   ThreadBarrier barrier(size_);

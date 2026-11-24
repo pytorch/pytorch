@@ -4,6 +4,7 @@
 #include <ATen/ops/from_blob.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/error.h>
+#include <c10/util/safe_numerics.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/serialization.h>
 
@@ -333,7 +334,14 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     torch::utils::THP_decodeBuffer(
         &size, reinterpret_cast<const uint8_t*>(&tsize), true, 1);
   }
-  size_t nbytes = element_size * size;
+  TORCH_CHECK(size >= 0, "invalid storage size: ", size);
+  uint64_t nbytes = 0;
+  TORCH_CHECK(
+      !c10::mul_overflows(element_size, static_cast<uint64_t>(size), &nbytes),
+      "storage size overflows: ",
+      size,
+      " elements of size ",
+      element_size);
   if (!storage.defined()) {
     storage = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
@@ -344,8 +352,9 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     size_t _storage_nbytes = storage->nbytes();
     TORCH_CHECK(
         _storage_nbytes == nbytes,
-        "storage has wrong byte size: expected %ld got %ld",
+        "storage has wrong byte size: expected ",
         nbytes,
+        " got ",
         _storage_nbytes);
   }
 

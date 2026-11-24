@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
 SUSPEND_RESUME_BACKENDS = [
-    ("nccl-legacy", "cuda", False),
     ("nccl2", "cuda", False),
     ("nccl-lazy", "cuda", True),
 ]
@@ -73,6 +72,7 @@ class AbstractSuspendResumeTest:
         self.assertEqual(recv_tensor, torch.full_like(recv_tensor, float(peer)))
 
     def _init_pg(self):
+        os.environ["LOCAL_RANK"] = str(self.rank)
         if self.device_type == "cuda":
             torch.cuda.set_device(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)
@@ -129,12 +129,13 @@ class AbstractSuspendResumeTest:
 
 def _make_suspend_resume_test_class(backend_name, device_type, create_pair_channel):
     class SuspendResumeTest(AbstractSuspendResumeTest, MultiProcessTestCase):
-        pass
+        @property
+        def device_type(self) -> str:
+            return device_type
 
     class_name = backend_name.replace("-", " ").title().replace(" ", "")
     class_name = f"{class_name}SuspendResumeTest"
     SuspendResumeTest.backend_name = backend_name
-    SuspendResumeTest.device_type = device_type
     SuspendResumeTest.create_pair_channel = create_pair_channel
     SuspendResumeTest.__name__ = class_name
     SuspendResumeTest.__qualname__ = SuspendResumeTest.__name__
@@ -155,6 +156,8 @@ for backend_name, device_type, create_pair_channel in SUSPEND_RESUME_BACKENDS:
         backend_name, device_type, create_pair_channel
     )
     globals()[test_class.__name__] = test_class
+# Unbound so the last class isn't collected a second time as `test_class`.
+del test_class
 
 
 if __name__ == "__main__":
