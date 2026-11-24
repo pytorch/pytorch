@@ -51,6 +51,10 @@ class RocprofActivityApi {
   void setPerThreadBuffers(bool enabled);
   void setDispatchRecordWait(std::chrono::milliseconds wait);
 
+  // Consume pending rows and correlations as a self-contained batch. Production
+  // calls this once per trace; classification and stream mappings do not carry
+  // over between calls. Later records remain pending until another call or
+  // clearActivities().
   virtual int processActivities(
       std::function<void(const rocprofBase*)> handler,
       std::function<void(uint64_t, uint64_t, RocLogger::CorrelationDomain)>
@@ -61,6 +65,8 @@ class RocprofActivityApi {
   std::atomic_bool stopCollection{false};
 
  private:
+  friend class RocprofActivityApiTest;
+
   bool registered_{false};
   timestamp_t toffset_{0};
 

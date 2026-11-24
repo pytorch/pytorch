@@ -172,6 +172,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_MULTIGPU,
     HAS_TPU,
     IS_BIG_GPU,
+    platform_supports_tensor_descriptor,
     requires_block_ptr,
     requires_gpu,
     RUN_CPU,
@@ -16031,7 +16032,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    def test_index_dynamic_shapes(self):
+    @parametrize("prefer_nd_tiling", [False, True])
+    def test_index_dynamic_shapes(self, prefer_nd_tiling):
+        if prefer_nd_tiling and not is_triton_backend(self.device):
+            self.skipTest("prefer_nd_tiling requires a Triton backend")
+
         # Repro from vision_maskrcnn
         def fn(arg0_1):
             unsqueeze = arg0_1.unsqueeze(0)
@@ -16088,10 +16093,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (select,)
 
         x = torch.randn(15, 20, 3)
-        self.common(
-            fn,
-            [x],
-        )
+        with config.patch({"triton.prefer_nd_tiling": prefer_nd_tiling}):
+            self.common(
+                fn,
+                [x],
+            )
 
     @skip_if_halide  # log2 not yet implemented
     @skip_if_triton_cpu  # log2 implemented only in Dec 2024
@@ -24387,16 +24393,25 @@ if RUN_GPU:
                 "triton.prefer_nd_tiling": True,
                 "triton.max_tiles": 3,
                 "triton.tile_reductions": True,
+                "assume_aligned_inputs": True,
             }
         )
-        def test_3d_reduction_respects_tensor_rank_limit(self):
-            """Keep three reduction tiles while limiting total tensor rank to five.
-
-            max_tiles=3 applies independently to the pointwise and reduction
-            tilings. With R0/R1/R2 present, the three pointwise dimensions must
-            therefore collapse to Y/X rather than producing a sixth tensor axis.
-            """
-
+        @parametrize(
+            "tensor_descriptor",
+            [
+                False,
+                subtest(
+                    True,
+                    decorators=[
+                        unittest.skipUnless(
+                            platform_supports_tensor_descriptor(),
+                            "requires CUDA tensor descriptor support",
+                        )
+                    ],
+                ),
+            ],
+        )
+        def test_3d_pointwise_and_reduction_tiling(self, tensor_descriptor):
             def reduce_3d(x):
                 return torch.sum(x, dim=(3, 4, 5))
 
@@ -24406,13 +24421,25 @@ if RUN_GPU:
                 device=GPU_TYPE,
             ).normal_()
 
-            actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
+            with config.patch({"triton.use_tensor_descriptor": tensor_descriptor}):
+                actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
 
             torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
-            for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
+            for block_arg in (
+                "Z0_BLOCK",
+                "YBLOCK",
+                "XBLOCK",
+                "R0_BLOCK",
+                "R1_BLOCK",
+                "R2_BLOCK",
+            ):
                 self.assertIn(block_arg, code[0])
-            self.assertNotIn("Z0_BLOCK", code[0])
-            self.assertIn("tl.load", code[0])
+            self.assertIn("tl.load(in_ptr0", code[0])
+            self.assertNotIn("tl.make_tensor_descriptor(in_ptr0", code[0])
+            if tensor_descriptor:
+                self.assertIn("tl.make_tensor_descriptor(out_ptr0", code[0])
+            else:
+                self.assertIn("tl.store(out_ptr0", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_median_decompose_sort_ops(self):
