@@ -640,67 +640,15 @@ Vectorized<c10::BFloat16> inline fmadd(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
-#if BF16_ARITHMETIC_SUPPORTED()
-  bfloat16x8_t x = a;
-  bfloat16x8_t y = b;
-  bfloat16x8_t z = c;
-  return x * y + z;
-#else
-  // NOTE [BF16 FMA]: There isn't an FMA that accumulates into BF16!  Also,
-  // vbfmlalbq_f32 and vbfmlaltq_f32 take the even and odd-numbered
-  // elements, not the bottom and top half, so they don't seem
-  // particularly useful here. Ideally we would include dot product in
-  // the Vectorized interface...
-  return a * b + c;
-#endif
-}
-
-template <>
-Vectorized<c10::BFloat16> inline fnmadd(
-    const Vectorized<c10::BFloat16>& a,
-    const Vectorized<c10::BFloat16>& b,
-    const Vectorized<c10::BFloat16>& c) {
-#if BF16_ARITHMETIC_SUPPORTED()
-  bfloat16x8_t x = a;
-  bfloat16x8_t y = b;
-  bfloat16x8_t z = c;
-  return (-x) * y + z;
-#else
-  // See NOTE [BF16 FMA] above.
-  return -a * b + c;
-#endif
-}
-
-template <>
-Vectorized<c10::BFloat16> inline fmsub(
-    const Vectorized<c10::BFloat16>& a,
-    const Vectorized<c10::BFloat16>& b,
-    const Vectorized<c10::BFloat16>& c) {
-#if BF16_ARITHMETIC_SUPPORTED()
-  bfloat16x8_t x = a;
-  bfloat16x8_t y = b;
-  bfloat16x8_t z = c;
-  return x * y - z;
-#else
-  // See NOTE [BF16 FMA] above.
-  return a * b - c;
-#endif
-}
-
-template <>
-Vectorized<c10::BFloat16> inline fnmsub(
-    const Vectorized<c10::BFloat16>& a,
-    const Vectorized<c10::BFloat16>& b,
-    const Vectorized<c10::BFloat16>& c) {
-#if BF16_ARITHMETIC_SUPPORTED()
-  bfloat16x8_t x = a;
-  bfloat16x8_t y = b;
-  bfloat16x8_t z = c;
-  return (-x) * y - z;
-#else
-  // See NOTE [BF16 FMA] above.
-  return -a * b - c;
-#endif
+  // There is no FMA that accumulates into BF16, and BF16 arithmetic would
+  // round the product: compute in float, where the product is exact (unless
+  // it overflows or underflows).
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);
+  return convert_float_bfloat16(
+      fmadd(a_float_low, b_float_low, c_float_low),
+      fmadd(a_float_high, b_float_high, c_float_high));
 }
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)

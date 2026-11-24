@@ -90,7 +90,7 @@ class TORCH_API ProcessGroupXCCL : public ::c10d::Backend {
  public:
   static constexpr std::string_view kBackendName = "xccl2";
 
-  // Unlike nccl2 -- which reuses ::c10d::ProcessGroupNCCL::Options because that
+  // Unlike nccl2 -- which reuses ::c10d::NCCLOptions because that
   // type already exists in core -- there is no core-side XCCL options type to
   // reuse (the torch-xpu-ops backend does not define one), so the backend
   // carries its own. `hints` is the c10d spelling of torchcomms' CommOptions
