@@ -1,6 +1,7 @@
 #include <Python.h>
 
 #include <torch/csrc/stable/pyobject.h>
+#include <torch/csrc/stable/tensor.h>
 
 #include <exception>
 
@@ -30,6 +31,13 @@ PyObject* layout_roundtrip(PyObject* /*self*/, PyObject* obj) {
   return call([&] {
     return torch::stable::layout_to_pyobject(
         torch::stable::layout_from_pyobject(obj));
+  });
+}
+
+PyObject* tensor_layout(PyObject* /*self*/, PyObject* obj) {
+  return call([&] {
+    auto tensor = torch::stable::tensor_from_pyobject(obj);
+    return torch::stable::layout_to_pyobject(tensor.layout());
   });
 }
 
@@ -70,6 +78,7 @@ PyObject* string_roundtrip(PyObject* /*self*/, PyObject* obj) {
 
 PyMethodDef methods[] = {
     {"layout_roundtrip", layout_roundtrip, METH_O, nullptr},
+    {"tensor_layout", tensor_layout, METH_O, nullptr},
     {"memory_format_roundtrip", memory_format_roundtrip, METH_O, nullptr},
     {"bool_roundtrip", bool_roundtrip, METH_O, nullptr},
     {"int64_roundtrip", int64_roundtrip, METH_O, nullptr},
