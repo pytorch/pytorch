@@ -191,7 +191,10 @@ void initModule(PyObject* module) {
   // Accelerator Graph class binding
   py::class_<at::accelerator::Graph, std::shared_ptr<at::accelerator::Graph>>(
       m, "_acceleratorGraph")
-      .def(py::init<bool>(), py::arg("keep_graph") = false)
+      .def(
+          py::init<bool, int64_t>(),
+          py::arg("keep_graph") = false,
+          py::arg("num_rng_states") = 8)
       .def(
           "capture_begin",
           [](at::accelerator::Graph& self,
@@ -231,6 +234,10 @@ void initModule(PyObject* module) {
       .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::accelerator::Graph::replay))
+      .def(
+          "_get_rng_state_buffers",
+          torch::wrap_pybind_function_no_gil(
+              &at::accelerator::Graph::get_rng_state_buffers))
       .def(
           "reset",
           torch::wrap_pybind_function_no_gil(&at::accelerator::Graph::reset))

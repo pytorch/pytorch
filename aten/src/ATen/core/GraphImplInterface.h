@@ -1,8 +1,11 @@
 #pragma once
 #include <c10/core/Allocator.h>
 #include <c10/util/Registry.h>
+#include <vector>
 
 namespace at {
+
+class Tensor;
 
 enum class GraphCaptureMode : int8_t {
   // Backend-defined default capture behavior.
@@ -26,6 +29,7 @@ enum class GraphCaptureMode : int8_t {
 struct TORCH_API GraphImplArgs {
   // Whether to keep the underlying raw graph after capture is complete.
   bool keep_graph = false;
+  int64_t num_rng_states = 8;
 };
 
 // A lightweight, backend-agnostic interface that provides a unified API for
@@ -56,6 +60,8 @@ struct TORCH_API GraphImplInterface {
 
   // Replay the previously captured graph.
   virtual void replay() = 0;
+
+  virtual std::vector<at::Tensor> get_rng_state_buffers() const;
 
   // Reset internal state and release any backend-specific resources.
   // After reset(), the instance may be reused for a new capture.
