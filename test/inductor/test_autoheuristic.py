@@ -24,26 +24,6 @@ class AutoHeuristicTest(TestCase):
         """pad_mm set to None; with deterministic=True, use_autoheuristic should return True."""
         self.assertTrue(inductor_config.use_autoheuristic("pad_mm"))
 
-    def test_autoheuristic_init_no_accel(self):
-        """AutoHeuristic.__init__ must not crash in non-CUDA environments."""
-
-        def fallback():
-            return "fallback"
-
-        context = AHContext()
-        context.add_feature("x", 1)
-
-        with (
-            patch("torch.accelerator.is_available", return_value=False),
-            patch(
-                "torch._inductor.autoheuristic.autoheuristic.get_gpu_shared_memory",
-                return_value=0,
-            ),
-        ):
-            ah = AutoHeuristic(fallback, ["a", "b"], None, context, "test_no_accel")
-
-        self.assertEqual(ah.metadata.device_capa, (0, 0))
-
 
 class AutoHeuristicTestBase(TestCase):
     def run_mm(self, device):
@@ -104,7 +84,10 @@ class AutoHeuristicTestDevice(AutoHeuristicTestBase):
         # this test ensures that data is collected for pad_mm when autoheuristic_collect.pad_mm=True
         self.assert_autoheuristic_collected_data(device)
 
-    @skipIfXpu(msg="AutoHeuristic doesn't currently work on the XPU stack")
+
+class AutoHeuristicTestCuda(AutoHeuristicTestBase):
+    hw_classification = HardwareClassification.CUDA
+
     @patch.dict(os.environ, {"TORCHINDUCTOR_AUTOHEURISTIC_COLLECT": "test"})
     def test_autoheuristic(self, device):
         # test basic functionality of autoheuristic
@@ -141,7 +124,7 @@ class AutoHeuristicTestDevice(AutoHeuristicTestBase):
         self.assertEqual(num_lines, 5)
 
         shared_memory = get_gpu_shared_memory()
-        device_capa = list(torch.get_device_module(device).get_device_capability())
+        device_capa = list(torch.cuda.get_device_capability())
 
         with open(path) as file:
             lines = file.readlines()
@@ -154,10 +137,6 @@ class AutoHeuristicTestDevice(AutoHeuristicTestBase):
             self.assertEqual("5,a,1", lines[2].rstrip())
             self.assertEqual("5,b,2", lines[3].rstrip())
             self.assertEqual("5,c,3", lines[4].rstrip())
-
-
-class AutoHeuristicTestCuda(AutoHeuristicTestBase):
-    hw_classification = HardwareClassification.CUDA
 
     @unittest.skipIf(not IS_A100, "heuristic only run on A100")
     @inductor_config.patch("autoheuristic_use.pad_mm", True)
@@ -201,6 +180,26 @@ class AutoHeuristicTestCuda(AutoHeuristicTestBase):
         # we should not do any benchmarking (pad_mm_bench should stay 0)
         # because AutoHeuristics makes the decision without benchmarking
         self.assertEqual(counters["inductor"]["pad_mm_bench"], 0)
+
+    def test_autoheuristic_init_no_cuda(self, device):
+        """AutoHeuristic.__init__ must not crash in non-CUDA environments."""
+
+        def fallback():
+            return "fallback"
+
+        context = AHContext()
+        context.add_feature("x", 1)
+
+        with (
+            patch("torch.cuda.is_available", return_value=False),
+            patch(
+                "torch._inductor.autoheuristic.autoheuristic.get_gpu_shared_memory",
+                return_value=0,
+            ),
+        ):
+            ah = AutoHeuristic(fallback, ["a", "b"], None, context, "test_no_cuda")
+
+        self.assertEqual(ah.metadata.device_capa, (0, 0))
 
 
 instantiate_device_type_tests(
