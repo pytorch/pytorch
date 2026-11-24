@@ -68,16 +68,24 @@ DEFINE_DISPATCH(histogram_select_outer_bin_edges_stub);
 
 namespace {
 
+void histogram_meta_check_dtype(const Tensor& input) {
+    const auto dtype = input.scalar_type();
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        dtype == kDouble || dtype == kFloat || dtype == kHalf || dtype == kBFloat16,
+        "histogramdd not implemented for '", dtype, "'");
+}
+
 /* Checks properties of input tensors input, bins, and weight.
  */
 void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const std::optional<Tensor>& weight) {
     TORCH_CHECK(input.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions, but got ",
                 input.dim());
 
-    const int64_t N = input.size(-1);
+    const int64_t N = bins.size();
+    const auto input_dim = input.sym_size(-1);
 
-    TORCH_CHECK(static_cast<int64_t>(bins.size()) == N, "torch.histogramdd: expected ", N, " sequences of bin edges for a ", N,
-                "-dimensional histogram but got ", bins.size());
+    TORCH_SYM_CHECK(input_dim.sym_eq(N), "torch.histogramdd: expected ", input_dim, " sequences of bin edges for a ",
+            input_dim, "-dimensional histogram but got ", bins.size());
 
     auto input_dtype = input.dtype();
     for (const auto dim : c10::irange(N)) {
@@ -117,12 +125,12 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
         TORCH_CHECK(input_sizes.size() == weight_sizes.size(),
             "torch.histogramdd: if weight tensor is provided it should have"
             " the same shape as the input tensor excluding its innermost dimension, but got input with shape ",
-            input.sizes(), " and weight with shape ", weight.value().sizes());
+            input.sym_sizes(), " and weight with shape ", weight.value().sym_sizes());
         for (const auto dim : c10::irange(input_sizes.size())) {
             TORCH_SYM_CHECK(input_sizes[dim].sym_eq(weight_sizes[dim]),
                 "torch.histogramdd: if weight tensor is provided it should have"
                 " the same shape as the input tensor excluding its innermost dimension, but got input with shape ",
-                input.sizes(), " and weight with shape ", weight.value().sizes());
+                                input.sym_sizes(), " and weight with shape ", weight.value().sym_sizes());
         }
     }
 }
@@ -131,7 +139,7 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
  */
 void histogramdd_prepare_out(const Tensor& input, const std::vector<int64_t>& bin_ct,
         const Tensor& hist, const TensorList& bin_edges) {
-    const int64_t N = input.size(-1);
+    const int64_t N = bin_ct.size();
 
     TORCH_INTERNAL_ASSERT((int64_t)bin_ct.size() == N);
     TORCH_INTERNAL_ASSERT((int64_t)bin_edges.size() == N);
@@ -164,9 +172,8 @@ void histogramdd_prepare_out(const Tensor& input, TensorList bins,
  * assumes that input has already been reshaped to (M, N).
  */
 std::pair<std::vector<double>, std::vector<double>>
-select_outer_bin_edges(const Tensor& input, std::optional<c10::ArrayRef<double>> range) {
+select_outer_bin_edges(const Tensor& input, std::optional<c10::ArrayRef<double>> range, int64_t N) {
     TORCH_INTERNAL_ASSERT(input.dim() == 2, "expected input to have shape (M, N)");
-    const int64_t N = input.size(-1);
 
     // Default ranges for empty input matching numpy.histogram's default
     std::vector<double> leftmost_edges(N, 0.);
@@ -326,7 +333,7 @@ static std::vector<Tensor>& histogramdd_bin_edges_out(const Tensor& self, IntArr
             static_cast<int64_t>(1), std::multiplies<int64_t>());
     Tensor reshaped_self = self.reshape({ M, N });
 
-    auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
+    auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range, N);
 
     const int64_t bin_size = bin_ct.size();
     TORCH_CHECK(
@@ -401,9 +408,10 @@ histogram_meta(const Tensor& self, const Tensor& bins,
         ? weight.value().reshape_symint({ weight.value().sym_numel() }) : weight;
     TensorList bins_in = bins;
     histogramdd_check_inputs(reshaped_self, bins_in, reshaped_weight);
-        TORCH_SYM_CHECK(bins.sym_numel().sym_gt(1),
+    TORCH_SYM_CHECK(bins.sym_numel().sym_gt(1),
             "torch.histogram(): bins must be > 0, but got ", bins.sym_numel() - 1,
             " for dimension 0");
+    histogram_meta_check_dtype(self);
 
     Tensor hist = at::empty_symint({bins.sym_numel() - 1}, self.options(), MemoryFormat::Contiguous);
     Tensor bin_edges = at::empty_symint({bins.sym_numel()}, bins.options(), MemoryFormat::Contiguous);
@@ -424,9 +432,10 @@ histogram_bin_ct_meta(const Tensor& self, int64_t bin_ct,
     TensorList bins = bin_edges;
     histogramdd_prepare_out(reshaped_self, std::vector<int64_t>{bin_ct}, hist, bins);
     if (range.has_value()) {
-        select_outer_bin_edges(reshaped_self, range);
+        select_outer_bin_edges(reshaped_self, range, 1);
     }
     histogramdd_check_inputs(reshaped_self, bins, reshaped_weight);
+    histogram_meta_check_dtype(self);
 
     return std::make_tuple(std::move(hist), std::move(bin_edges));
 }
@@ -485,7 +494,7 @@ histogram_out(const Tensor& self, int64_t bin_ct, std::optional<c10::ArrayRef<do
     TensorList bins_out = bin_edges;
 
     histogramdd_prepare_out(reshaped_self, std::vector<int64_t>{bin_ct}, hist, bins_out);
-    auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
+    auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range, 1);
     at::linspace_out(bin_edges, outer_bin_edges.first[0], outer_bin_edges.second[0], bin_ct + 1);
 
     histogramdd_check_inputs(reshaped_self, bins_in, reshaped_weight);
