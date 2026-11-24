@@ -539,6 +539,9 @@ class BackendFeature(Enum):
     TRITON_TEMPLATES = auto()
     REDUCE_TO_SINGLE_ELEMENT = auto()
     INDIRECT_INDEXING = auto()
+    # The backend wants load/store indices affine in the loop variables, so
+    # Inductor avoids ModularIndexing/FloorDiv (InductorChoices.use_modular_indexing).
+    PREFER_AFFINE_INDEXING = auto()
 
 
 def get_backend_features(
@@ -670,7 +673,7 @@ def _init_builtin_backend_registration() -> None:
     from .mps import MetalScheduling
     from .pallas import PallasScheduling
     from .python_wrapper_mtia import PythonWrapperMtia
-    from .triton import TritonScheduling
+    from .triton import MTIATritonScheduling, TritonScheduling
     from .wrapper import PythonWrapperCodegen
     from .wrapper_fxir import WrapperFxCodegen
     from .xpu.xpu_combined_scheduling import XPUCombinedScheduling
@@ -746,10 +749,12 @@ def _init_builtin_backend_registration() -> None:
             WrapperFxCodegen,
         )
 
+    # a stack that registers its own MTIA scheduling first declares
+    # PREFER_AFFINE_INDEXING itself
     if get_scheduling_for_device("mtia") is None:
         register_backend_for_device(
             "mtia",
-            TritonScheduling,
+            MTIATritonScheduling,
             PythonWrapperMtia,
             CppWrapperGpu,
             WrapperFxCodegen,

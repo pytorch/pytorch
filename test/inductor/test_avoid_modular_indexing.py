@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import dataclasses
 import math
 import re
 from unittest import mock
@@ -14,7 +15,7 @@ from torch._inductor.exc import InductorError, NonAffineIndexingError
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_affine_indexing, run_and_get_triton_code
-from torch._inductor.virtualized import V
+from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -23,6 +24,7 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, Min, ModularIndexing, Where
 from torch.utils._sympy.symbol import make_symbol, SymT
 
@@ -82,6 +84,115 @@ class ModularIndexingDecisionTest(TestCase):
                         V.choices.use_modular_indexing(device, numel=8, kind=kind),
                         not avoid,
                     )
+
+    def test_config_overrides_backend(self):
+        with config.patch(avoid_modular_indexing=True):
+            self.assertFalse(
+                V.choices.use_modular_indexing("cpu", numel=8, kind="view")
+            )
+            self.assertFalse(V.choices.use_modular_indexing("cuda", kind="reindex"))
+            # index arithmetic has no affine form without indirect indexing,
+            # so forcing the option leaves it inlined there
+            with config.patch(cpu_backend="pallas"):
+                self.assertTrue(V.choices.use_modular_indexing("cpu", kind="index"))
+        with config.patch(avoid_modular_indexing=False):
+            self.assertTrue(
+                V.choices.use_modular_indexing("mtia", numel=8, kind="view")
+            )
+
+    @parametrize("kind", ["view", "reduction", "slice_scatter", "repeat", "reindex"])
+    @config.patch(avoid_modular_indexing=None)
+    def test_cpp_backend_inlines(self, kind):
+        self.assertTrue(V.choices.use_modular_indexing("cpu", numel=2**30, kind=kind))
+
+    @config.patch(avoid_modular_indexing=None)
+    def test_affine_backends(self):
+        # backends declaring PREFER_AFFINE_INDEXING keep load/store indices
+        # affine; a scheduling that declares nothing inlines unless it is a
+        # Triton GPU backend (test_triton_gpu_avoids)
+        for kind in ("view", "view_linear", "index", "reindex"):
+            self.assertFalse(V.choices.use_modular_indexing("mtia", numel=8, kind=kind))
+        with config.patch(cpu_backend="pallas"):
+            self.assertFalse(
+                V.choices.use_modular_indexing("cpu", numel=8, kind="reduction")
+            )
+            # index arithmetic can only move behind an indirect variable where
+            # the backend supports indirect indexing
+            self.assertTrue(
+                V.choices.use_modular_indexing("cpu", numel=8, kind="index")
+            )
+
+    @parametrize("kind", ["reduction", "slice_scatter"])
+    @config.patch(avoid_modular_indexing=None)
+    def test_triton_gpu_avoids(self, kind):
+        self.assertFalse(V.choices.use_modular_indexing("cuda", numel=8, kind=kind))
+
+    @parametrize(
+        "kind",
+        ["repeat", "roll", "index", "reindex", "view_linear", "view_copy", "view_pass"],
+    )
+    @config.patch(avoid_modular_indexing=None)
+    def test_triton_gpu_inlines(self, kind):
+        self.assertTrue(V.choices.use_modular_indexing("cuda", numel=2**30, kind=kind))
+
+    @config.patch(avoid_modular_indexing=None, batch_invariant=True)
+    def test_triton_gpu_batch_invariant_keeps_flat_split(self):
+        # the dim-aligned split is not stable across batch sizes everywhere
+        # the flat one is; where affine indices are required it still applies
+        self.assertTrue(
+            V.choices.use_modular_indexing("cuda", numel=8, kind="reduction")
+        )
+        self.assertFalse(
+            V.choices.use_modular_indexing("mtia", numel=8, kind="reduction")
+        )
+        with config.patch(avoid_modular_indexing=True):
+            self.assertFalse(
+                V.choices.use_modular_indexing("cuda", numel=8, kind="reduction")
+            )
+
+    @config.patch(avoid_modular_indexing=None, realize_modular_view_min_numel=1024)
+    def test_triton_gpu_view_threshold(self):
+        self.assertTrue(V.choices.use_modular_indexing("cuda", numel=1023, kind="view"))
+        self.assertFalse(
+            V.choices.use_modular_indexing("cuda", numel=1024, kind="view")
+        )
+        self.assertTrue(V.choices.use_modular_indexing("cuda", kind="view"))
+        self.assertFalse(
+            V.choices.use_modular_indexing("cuda", numel=1024, kind=lambda: "view")
+        )
+
+    @config.patch(avoid_modular_indexing=None)
+    def test_unknown_device_inlines(self):
+        # no Inductor backend or no device: inline as before
+        self.assertTrue(
+            V.choices.use_modular_indexing("meta", numel=8, kind="reduction")
+        )
+        self.assertTrue(V.choices.use_modular_indexing(None, numel=8, kind="reduction"))
+
+    def test_view_classification_is_lazy(self):
+        def classify():
+            raise AssertionError("classified where the answer does not need it")
+
+        with config.patch(avoid_modular_indexing=None):
+            self.assertTrue(
+                V.choices.use_modular_indexing("cpu", numel=2**30, kind=classify)
+            )
+            self.assertFalse(
+                V.choices.use_modular_indexing("mtia", numel=2**30, kind=classify)
+            )
+            # below the realization threshold every view kind inlines
+            with config.patch(realize_modular_view_min_numel=1024):
+                self.assertTrue(
+                    V.choices.use_modular_indexing("cuda", numel=1023, kind=classify)
+                )
+        with config.patch(avoid_modular_indexing=True):
+            self.assertFalse(
+                V.choices.use_modular_indexing("cuda", numel=2**30, kind=classify)
+            )
+        with config.patch(avoid_modular_indexing=False):
+            self.assertTrue(
+                V.choices.use_modular_indexing("cuda", numel=2**30, kind=classify)
+            )
 
     def test_choices_override(self):
         # a backend can replace the whole decision, config check included
@@ -519,6 +630,15 @@ class AvoidModularIndexingTest(TestCase):
         x = torch.randn(4, 12, device=device)
         src = torch.randn(4, len(range(start, end, step)), device=device)
         self.check(fn, x, src, modular_without_option=True)
+        # backends whose default avoids the modular slice_scatter take the
+        # split-space lowering in automatic mode too, and the realized split
+        # result keeps the consumer's index affine
+        with config.patch(avoid_modular_indexing=None):
+            if not V.choices.use_modular_indexing(
+                device, numel=48, kind="slice_scatter"
+            ):
+                torch._dynamo.reset()
+                self.check(fn, x, src)
 
     def test_strided_slice_backward(self, device):
         # gpt-j rotate_every_two: the backward is a slice_scatter with step 2
@@ -586,6 +706,270 @@ class AvoidModularIndexingTest(TestCase):
         actual = torch.autograd.grad(torch.compile(fn)(x), x)
         self.assertEqual(actual, expected)
 
+    def test_auto_mode_inlines_row_major_merge_into_cat(self, device):
+        # flatten(2) of the conv-bias add is a row-major merge, so the view
+        # itself is affine and inlined at any threshold; the ModularIndexing
+        # only appears once the cat offsets the index, which the automatic
+        # mode accepts rather than realizing the merge (no extra kernel)
+        def fn(x, cls_tok, w, b):
+            y = (x + b.view(1, -1, 1, 1)).flatten(2).transpose(1, 2)
+            y = torch.cat((cls_tok.expand(x.shape[0], -1, -1), y), dim=1)
+            return torch.nn.functional.layer_norm(y, (y.shape[-1],), w, None)
+
+        x = torch.randn(2, 8, 4, 4, device=device)
+        cls_tok = torch.randn(1, 1, 8, device=device)
+        w = torch.randn(8, device=device)
+        b = torch.randn(8, device=device)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": False,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            if V.choices.use_modular_indexing(device, numel=256, kind="view_linear"):
+                self.check(fn, x, cls_tok, w, b, kernel_count=1)
+            else:
+                self.check(fn, x, cls_tok, w, b)
+
+    def check_view_threshold(self, fn, x):
+        # a merge of 512 elements of fresh compute with modular loads, whose
+        # realization costs no pass of its own, is realized on Triton GPU
+        # backends once it reaches realize_modular_view_min_numel; below that
+        # (and on other backends) it is inlined
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": True,
+            }
+        ):
+            for threshold in (1024, 512):
+                torch._dynamo.reset()
+                with config.patch(realize_modular_view_min_numel=threshold):
+                    if V.choices.use_modular_indexing(x.device, numel=512, kind="view"):
+                        with self.assertRaises(InductorError) as cm:
+                            torch.compile(fn)(x)
+                        self.assertIsInstance(
+                            cm.exception.inner_exception, NonAffineIndexingError
+                        )
+                    else:
+                        self.check(fn, x)
+
+    def test_auto_mode_view_threshold_shared(self, device):
+        # the merged compute has two users: realized, it is computed once
+        def fn(x):
+            y = (x[:, :, 1:] + 1).reshape(x.shape[0], -1)
+            return y * 2, y.sum(1)
+
+        self.check_view_threshold(fn, torch.randn(4, 8, 17, device=device))
+
+    def test_auto_mode_view_threshold_after_reduction(self, device):
+        # the merged compute reads a reduction's result in the reduction's
+        # loop order: realized, the reduction's kernel stores it
+        def fn(x):
+            return torch.softmax(x[:, :, 1:], dim=-1).reshape(x.shape[0], -1) * 2
+
+        self.check_view_threshold(fn, torch.randn(4, 8, 17, device=device))
+
+    def test_merge_classification(self, device):
+        # what View._merge_kind hands the decision for fresh compute whose
+        # inlined loads need modular indexing; the heuristic only asks for it
+        # on Triton GPUs above the threshold, an override on any device
+        kinds = []
+
+        class Recording(InductorChoices):
+            def use_modular_indexing(
+                self, device, *, numel=None, reduction_numel=None, kind
+            ):
+                if callable(kind):
+                    kinds.append(kind())
+                return True
+
+        def shared(x):
+            y = (x[:, :, 1:] + 1).reshape(x.shape[0], -1)
+            return y * 2, y + 1
+
+        def single_use(x):
+            return (x[:, :, 1:] + 1).reshape(x.shape[0], -1) * 2
+
+        def after_reduction(x):
+            y = x[:, :, 1:]
+            return (y - y.amax(-1, keepdim=True)).reshape(x.shape[0], -1) * 2
+
+        def after_unrelated_reduction(x):
+            return (x[:, :, 1:] + x.sum()).reshape(x.shape[0], -1) * 2
+
+        def shared_flipped(x):
+            y = (x[:, :, 1:].flip(0) + 1).reshape(x.shape[0], -1)
+            return y * 2, y + 1
+
+        def shared_permuted(x):
+            y = (x[:, :, 1:].permute(0, 2, 1) + 1).reshape(x.shape[0], -1)
+            return y * 2, y + 1
+
+        x = torch.randn(4, 8, 17, device=device)
+        expected = {
+            shared: "view",
+            single_use: "view_pass",
+            after_reduction: "view",
+            after_unrelated_reduction: "view_pass",
+            shared_flipped: "view",
+            shared_permuted: "view_pass",
+        }
+        with (
+            V.set_choices_handler(Recording()),
+            config.patch({"test_configs.raise_on_modular_indexing": False}),
+        ):
+            for fn, kind in expected.items():
+                kinds.clear()
+                torch._dynamo.reset()
+                self.check(fn, x)
+                self.assertEqual(kinds, [kind], msg=fn.__name__)
+
+    def check_merge_stays_inlined(self, kind, fn, *args, ir_nodes=1):
+        # merged views that backends inlining modular indexing at all keep
+        # inlined above the size threshold: realizing a realized buffer or a
+        # load/cast of one only writes a copy (view_copy), and realizing
+        # compute that nothing shares and no kernel upstream can store, or
+        # that reads its inputs out of order, adds a pass over it (view_pass)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": False,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            x = args[0]
+            if V.choices.use_modular_indexing(x.device, numel=x.numel(), kind=kind):
+                self.check(fn, *args, kernel_count=1)
+                self.assertEqual(metrics.ir_nodes_pre_fusion, ir_nodes)
+            else:
+                self.check(fn, *args)
+        self.assert_modular_without_option(fn, *args)
+
+    def test_auto_mode_keeps_cast_merge_inlined(self, device):
+        # a float32 cast of a permuted bf16 buffer, merged
+        def fn(x):
+            return x.permute(0, 2, 1).float().reshape(x.shape[0], -1) * 2
+
+        x = torch.randn(2, 8, 64, device=device, dtype=torch.bfloat16)
+        self.check_merge_stays_inlined("view_copy", fn, x)
+
+    def test_auto_mode_keeps_realized_merge_inlined(self, device):
+        # a view chain over a realized buffer (the permuted input)
+        def fn(x):
+            return x.permute(0, 2, 1).reshape(x.shape[0], -1) * 2
+
+        x = torch.randn(2, 8, 64, device=device)
+        self.check_merge_stays_inlined("view_copy", fn, x)
+
+    def test_auto_mode_keeps_single_use_merge_inlined(self, device):
+        # fresh compute with one user and no reduction to store it
+        def fn(x):
+            return (x[:, :, 1:] + 1).reshape(x.shape[0], -1) * 2
+
+        x = torch.randn(4, 8, 17, device=device)
+        self.check_merge_stays_inlined("view_pass", fn, x)
+
+    def test_auto_mode_keeps_permuted_merge_inlined(self, device):
+        # two users, but the compute reads its inputs out of row-major
+        # order: the realized buffer would need a transposing kernel
+        def fn(a, b):
+            y = (a.permute(0, 2, 1) + b).reshape(a.shape[0], -1)
+            return y * 2, y + 1
+
+        a = torch.randn(4, 8, 16, device=device)
+        b = torch.randn(4, 16, 8, device=device)
+        self.check_merge_stays_inlined("view_pass", fn, a, b, ir_nodes=2)
+
+    def test_auto_mode_dynamic_merged_dims(self, device):
+        # symbolic merged dims skip the footprint rule, so the merge of shared
+        # fresh compute is classified as a view and realized above the
+        # threshold on the backends that realize views; the copy has a
+        # symbolic shape
+        def fn(x):
+            y = (x[:, :, 1:] + 1).reshape(x.shape[0], -1)
+            return y * 2, y + 1
+
+        x = torch.randn(3, 8, 7, device=device)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": False,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            if V.choices.use_modular_indexing(device, numel=x.numel(), kind="view"):
+                self.check(fn, x)
+            else:
+                # realized: the kernel indices stay affine
+                with config.patch({"test_configs.raise_on_modular_indexing": True}):
+                    self.check(fn, x)
+
+    def test_affine_backend_auto_mode(self, device):
+        # a backend declaring PREFER_AFFINE_INDEXING gets affine indices in
+        # automatic mode end to end: the merged view, the index arithmetic,
+        # the split reduction and the loop reindexing that fusion would apply
+        # all consult the device of the buffer being lowered or fused
+        from torch._inductor.codegen.common import (
+            BackendFeature,
+            device_codegens,
+            init_backend_registration,
+        )
+
+        init_backend_registration()
+        device_type = torch.device(device).type
+        codegen = device_codegens[device_type]
+        # the registered constructor is a lambda picking the configured
+        # backend; subclass what it builds
+        scheduling_cls = type(codegen.scheduling(None))
+
+        class AffineScheduling(scheduling_cls):  # type: ignore[misc,valid-type]
+            def get_backend_features(self, device):
+                return OrderedSet(
+                    [
+                        *super().get_backend_features(device),
+                        BackendFeature.PREFER_AFFINE_INDEXING,
+                    ]
+                )
+
+        def merge_and_gather(a, b):
+            i = torch.arange(32, device=a.device)
+            y = (a.permute(0, 2, 1) + b).reshape(a.shape[0], -1)
+            return y[:, i % 8].sum(0) + y.sum()
+
+        def rms(x, b, w):
+            h = (x + b[:, None]).view(-1, 128)
+            var = (h * h).mean(-1, keepdim=True)
+            return h * torch.rsqrt(var + 1e-6) * w
+
+        def split(x, y):
+            return (x * y).sum()
+
+        a = torch.randn(4, 8, 16, device=device)
+        b = torch.randn(4, 16, 8, device=device)
+        x = torch.randn(256, 8192, device=device)
+        bias = torch.randn(256, device=device)
+        w = torch.randn(128, device=device)
+        xs = torch.randn(1000, 3, 65, device=device)
+        ys = torch.randn(1000, 1, 1, device=device)
+        affine = dataclasses.replace(codegen, scheduling=AffineScheduling)
+        with (
+            mock.patch.dict(device_codegens, {device_type: affine}),
+            config.patch(
+                {
+                    "avoid_modular_indexing": None,
+                    "test_configs.raise_on_modular_indexing": True,
+                }
+            ),
+        ):
+            self.assertFalse(V.choices.use_modular_indexing(device, kind="view"))
+            self.check(merge_and_gather, a, b)
+            self.check(rms, x, bias, w)
+            self.check_split_reduction(split, xs, ys)
+
     def test_choices_override_realizes_merge(self, device):
         class AlwaysAffine(InductorChoices):
             def use_modular_indexing(
@@ -622,7 +1006,7 @@ class AvoidModularIndexingTest(TestCase):
                 sizes = tuple(
                     None if n is None else int(n) for n in (numel, reduction_numel)
                 )
-                calls.setdefault(kind, set()).add(sizes)
+                calls.setdefault("view" if callable(kind) else kind, set()).add(sizes)
                 return super().use_modular_indexing(
                     device, numel=numel, reduction_numel=reduction_numel, kind=kind
                 )
@@ -659,7 +1043,141 @@ class AvoidModularIndexingTest(TestCase):
             # the CPU backend neither splits reductions nor reindexes loops
             reduction_sizes = {(x.numel(), x[0].numel())}
             self.assertEqual(calls["reduction"], reduction_sizes)
+            self.assertEqual(calls["reduction_linear"], reduction_sizes)
             self.assertEqual(calls["reindex"], {(h.numel(), None)})
+
+    def test_auto_mode_keeps_broadcast_merge_inlined(self, device):
+        # the only modular load is the table broadcast over the batch (the
+        # labels in the causal-LM loss backward, position embeddings): its
+        # index arithmetic is negligible next to the affine traffic, so the
+        # merge is inlined even above the size threshold
+        def fn(a, p):
+            return (a + p[None]).view(-1, a.shape[-1]) * 2
+
+        a = torch.randn(8, 8, 16, device=device)
+        p = torch.randn(8, 16, device=device)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": False,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            if V.choices.use_modular_indexing(device, numel=1024, kind="view_linear"):
+                self.check(fn, a, p, kernel_count=1)
+                self.assertEqual(metrics.ir_nodes_pre_fusion, 1)
+            else:
+                self.check(fn, a, p)
+
+    def test_auto_mode_keeps_row_major_merge_inlined(self, device):
+        # a row-major merge of fresh compute: the loads are affine once
+        # inlined, so there is nothing to gain from realizing it even above
+        # the size threshold
+        def fn(a, b):
+            return torch.nn.functional.gelu(a + b).view(-1, a.shape[-1]) * 2
+
+        a = torch.randn(4, 8, 16, device=device)
+        b = torch.randn(4, 8, 16, device=device)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": True,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            if V.choices.use_modular_indexing(device, numel=512, kind="view_linear"):
+                self.check(fn, a, b, kernel_count=1)
+                self.assertEqual(metrics.ir_nodes_pre_fusion, 1)
+            else:
+                self.check(fn, a, b)
+
+    def test_auto_mode_keeps_dynamic_flatten_inlined(self, device):
+        # the merged dim's size is its own symbol, equal to the product of the
+        # dims it merges only through the view's guard: still a row-major
+        # merge, which stays inlined above the size threshold
+        def fn(x, y):
+            return (x + 1).view(y.shape) + y
+
+        # five merged dims: the shape guard is not turned into a replacement
+        x = torch.randn(2, 3, 4, 5, 8, device=device)
+        y = torch.randn(960, device=device)
+        for i in range(x.dim()):
+            torch._dynamo.mark_dynamic(x, i)
+        torch._dynamo.mark_dynamic(y, 0)
+        with config.patch(
+            {
+                "avoid_modular_indexing": None,
+                "test_configs.raise_on_modular_indexing": False,
+                "realize_modular_view_min_numel": 1,
+            }
+        ):
+            if V.choices.use_modular_indexing(device, numel=960, kind="view_linear"):
+                self.check(fn, x, y, kernel_count=1)
+                self.assertEqual(metrics.ir_nodes_pre_fusion, 1)
+            else:
+                self.check(fn, x, y)
+
+    def test_auto_mode_row_major_reduction_keeps_flat_split(self, device):
+        # reduced dims that are row-major contiguous in every operand keep
+        # the flat split where the backend decides (the kernels are those of
+        # the option being off); an operand broadcast over the last dim makes
+        # the flat split index it with a FloorDiv, which the heuristic avoids
+        def fn(x):
+            return x.sum((1, 2))
+
+        def fn_broadcast(x, y):
+            return (x * y).sum((1, 2))
+
+        x = torch.randn(4, 64, 4097, device=device)
+        y = torch.randn(4, 64, 1, device=device)
+        with config.patch(avoid_modular_indexing=None):
+            if device == "cpu" or not V.choices.use_modular_indexing(
+                device, kind="reduction_linear"
+            ):
+                self.check(fn, x)
+                return
+            codes = []
+            for avoid in (False, None):
+                torch._dynamo.reset()
+                with config.patch(
+                    {
+                        "avoid_modular_indexing": avoid,
+                        "test_configs.raise_on_modular_indexing": False,
+                    }
+                ):
+                    code = run_and_get_triton_code(torch.compile(fn), x)
+                codes.append(re.sub(r"# AOT ID: .*", "", code))
+            self.assertEqual(*codes)
+            torch._dynamo.reset()
+            if not V.choices.use_modular_indexing(device, kind="reduction"):
+                self.check(fn_broadcast, x, y, kernel_count=2)
+
+    def test_auto_mode_sibling_reductions_split_alike(self, device):
+        # x.sum keeps the flat split on its own (row-major operand) and the
+        # sum with an operand broadcast over the last dim gets the
+        # dim-aligned one; in one graph both follow the first one lowered,
+        # so their first stages still fuse as they do with the option off
+        def aligned_first(x, y):
+            return (x * y).sum((1, 2)), x.sum((1, 2))
+
+        def flat_first(x, y):
+            return x.sum((1, 2)), (x * y).sum((1, 2))
+
+        x = torch.randn(4, 64, 4097, device=device)
+        y = torch.randn(4, 64, 1, device=device)
+        for fn in (aligned_first, flat_first):
+            kernel_counts = []
+            for avoid in (False, None):
+                torch._dynamo.reset()
+                with config.patch(
+                    {
+                        "avoid_modular_indexing": avoid,
+                        "test_configs.raise_on_modular_indexing": False,
+                    }
+                ):
+                    self.check(fn, x, y)
+                kernel_counts.append(metrics.generated_kernel_count)
+            self.assertEqual(*kernel_counts)
 
     def test_avg_pool2d_backward_with_padding(self, device):
         # the window bounds are FloorDiv/Min of the output index and reach the
@@ -677,9 +1195,15 @@ instantiate_device_type_tests(AvoidModularIndexingTest, globals())
 
 
 class _SizeVarsGraph:
-    """Enough of a graph for AlignedSplit.map_index to pick the mask's dtype."""
+    """
+    Enough of a graph for AlignedSplit.map_index to pick the mask's dtype and
+    for Reduction._split_reduction_ranges to record its decisions.
+    """
 
     sizevars = SizeVarAllocator()
+
+    def __init__(self):
+        self.reductions_keeping_flat_split = {}
 
 
 class _IndexOps:
@@ -692,13 +1216,26 @@ class _IndexOps:
         return sympy.Lt(a, b)
 
 
+def _load_broadcast_operand(index, reduction_index):
+    """
+    The loader of an operand broadcast over the trailing reduction dims: the
+    flat split indexes it with a FloorDiv of the flattened reduction index.
+    """
+    return ops.load("y", reduction_index[0])
+
+
 class SplitReductionRangesTest(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def aligned_split(self, reduction_ranges, split, device="cpu"):
-        return ir.Reduction._split_reduction_ranges(
-            torch.device(device), [], reduction_ranges, split
-        )
+    def aligned_split(self, reduction_ranges, split, load=None, device="cpu"):
+        with V.set_graph_handler(_SizeVarsGraph()):
+            return ir.Reduction._split_reduction_ranges(
+                torch.device(device),
+                [load] if load is not None else [],
+                [],
+                reduction_ranges,
+                split,
+            )
 
     @parametrize(
         "reduction_ranges,split",
@@ -751,10 +1288,68 @@ class SplitReductionRangesTest(TestCase):
         with config.patch(avoid_modular_indexing=False):
             self.assertIsNone(self.aligned_split((1000, 4), 900))
 
+    @config.patch(avoid_modular_indexing=None)
+    def test_batch_invariant_keeps_flat_split(self):
+        def aligned():
+            return self.aligned_split((64, 4097), 33, _load_broadcast_operand, "cuda")
+
+        self.assertIsNotNone(aligned())
+        with config.patch(batch_invariant=True):
+            self.assertIsNone(aligned())
+
     @config.patch(avoid_modular_indexing=True)
     def test_one_reduction_dim_keeps_flat_split(self):
         self.assertIsNone(self.aligned_split((100003,), 13))
         self.assertIsNone(self.aligned_split((1, 100003, 1), 13))
+
+    @config.patch(avoid_modular_indexing=None)
+    def test_row_major_reduction_keeps_flat_split(self):
+        # reduced dims that are row-major contiguous in the operand: the flat
+        # split leaves only the modulus of its masked tail, which Triton GPUs
+        # keep and a forced option does not
+        def load_row_major(index, reduction_index):
+            return ops.load("x", 4097 * reduction_index[0] + reduction_index[1])
+
+        self.assertIsNone(self.aligned_split((64, 4097), 33, load_row_major, "cuda"))
+        with config.patch(avoid_modular_indexing=True):
+            self.assertIsNotNone(
+                self.aligned_split((64, 4097), 33, load_row_major, "cuda")
+            )
+
+    @config.patch(avoid_modular_indexing=None)
+    def test_reductions_over_the_same_ranges_split_alike(self):
+        # the first reduction of a graph decides for the later ones over the
+        # same ranges that read one of its buffers, whose first stages could
+        # not fuse with it otherwise
+        cuda = torch.device("cuda")
+
+        def split(load, reduction_ranges=(64, 4097), ranges=()):
+            args = (cuda, [load], list(ranges), reduction_ranges, 33)
+            return ir.Reduction._split_reduction_ranges(*args)
+
+        def row_major(name, width=4097):
+            def load(index, reduction_index):
+                return ops.load(name, width * reduction_index[0] + reduction_index[1])
+
+            return load
+
+        def x_times_broadcast(index, reduction_index):
+            y = _load_broadcast_operand(index, reduction_index)
+            return ops.mul(row_major("x")(index, reduction_index), y)
+
+        with V.set_graph_handler(_SizeVarsGraph()):
+            self.assertIsNotNone(split(x_times_broadcast))
+            self.assertIsNotNone(split(row_major("x")))
+            # no common buffer, other reduction ranges, other ranges
+            self.assertIsNone(split(row_major("z")))
+            self.assertIsNone(split(row_major("x", 8194), (32, 8194)))
+            self.assertIsNone(split(row_major("x"), ranges=[sympy.Integer(4)]))
+        with V.set_graph_handler(_SizeVarsGraph()):
+            self.assertIsNone(split(row_major("x")))
+            self.assertIsNone(split(x_times_broadcast))
+            # y is read by a reduction that kept the flat split, w by none
+            self.assertIsNone(split(_load_broadcast_operand))
+            self.assertIsNotNone(split(lambda index, rindex: ops.load("w", rindex[0])))
 
 
 instantiate_parametrized_tests(SplitReductionRangesTest)
