@@ -61,6 +61,26 @@ class SubgraphCompileError(RuntimeError):
     """The benchmark module for a subgraph choice failed to compile."""
 
 
+def _is_kernel_compile_failure(e: BaseException) -> bool:
+    """Whether e is a kernel failing to compile, not a bug in lowering or codegen.
+
+    A kernel compiled in a pool worker fails with SubprocException; one compiled
+    in process fails with a Triton CompilationError or OutOfResources. Anything
+    else (e.g. an AssertionError or KeyError in the subgraph's lowering) is a
+    bug and should still fail the compile.
+    """
+    from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+    if isinstance(e, SubprocException):
+        return True
+    try:
+        from triton.compiler.errors import CompilationError
+        from triton.runtime.errors import OutOfResources
+    except ImportError:
+        return False
+    return isinstance(e, (CompilationError, OutOfResources))
+
+
 class SubgraphChoiceCaller(ir.ChoiceCaller):
     """
     Represents a Subgraph Autotuning choice, and the subgraph can be any arbitrary
@@ -271,7 +291,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
     def _ensure_compiled(self) -> None:
         """Ensure the module is compiled. Used for lazy compilation in non-async path.
 
-        A compile failure drops this choice, like a template that fails to precompile.
+        A kernel compile failure drops this choice, like a template that fails to
+        precompile. Other errors propagate.
         """
         if self._compiled_module is not None:
             return
@@ -280,11 +301,15 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         try:
             self._compiled_module = self._compile_for_benchmarking()
         except Exception as e:
-            if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
+            if (
+                config.triton.disallow_failing_autotune_kernels_TESTING_ONLY
+                or not _is_kernel_compile_failure(e)
+            ):
                 raise
             # Keep only the message: the traceback would pin the failed lowering.
             self._compile_error = (
-                f"failed to compile benchmark module for {self.name}: {e}"
+                f"failed to compile benchmark module for {self.name}: "
+                f"{type(e).__name__}: {e}"
             )
             raise SubgraphCompileError(self._compile_error) from e
 

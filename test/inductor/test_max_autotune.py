@@ -2141,6 +2141,38 @@ class TestMaxAutotune(TestCase):
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
+    @config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "comprehensive_padding": False,
+            "shape_padding": False,
+            "triton.num_decompose_k_splits": 10,
+        }
+    )
+    def test_max_autotune_decompose_k_lowering_bug_propagates(self):
+        # Only kernel compile failures drop a subgraph choice; a bug in its
+        # lowering still fails the compile.
+        from torch._inductor.codegen.subgraph import SubgraphChoiceCaller
+
+        a, b = self._make_matrices(
+            32, 32768, 32, dtype=torch.float32, device=GPU_TYPE, requires_grad=False
+        )
+        with mock.patch.object(
+            SubgraphChoiceCaller,
+            "_compile_for_benchmarking",
+            side_effect=KeyError("injected lowering bug"),
+        ):
+            with self.assertRaisesRegex(Exception, "injected lowering bug"):
+                torch.compile(lambda a, b: a @ b)(a, b)
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
     @parametrize("dynamic", (True, False))
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     @parametrize("sizes", ((32, 32, 32768), (64, 128, 200000), (64, 64, 177147)))

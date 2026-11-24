@@ -5866,7 +5866,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except SubgraphCompileError:
-                log.exception("Ignoring choice %s.", choice)
+                log.exception(
+                    "Subgraph benchmark compile failed during autotuning for %s. "
+                    "Ignoring this choice.",
+                    choice,
+                )
                 timing = float("inf")
             except RuntimeError as e:
                 msg = str(e)
