@@ -121,21 +121,22 @@ def _group_edge_input(
     only the two bins beside it, with small low bytes, so ties reach the low
     byte pass.
     """
-    row = torch.arange(rows)
-    keep = torch.tensor([k - 1, k, k + 1])[(row // 2) % 3]
-    rank = torch.rand(rows, n).argsort(dim=1).argsort(dim=1)
+    dev = "cuda"
+    row = torch.arange(rows, device=dev)
+    keep = torch.tensor([k - 1, k, k + 1], device=dev)[(row // 2) % 3]
+    rank = torch.rand(rows, n, device=dev).argsort(dim=1).argsort(dim=1)
     keep_mask = rank < keep[:, None]
     above = keep_mask if largest else ~keep_mask  # True: bin >= edge
     exact = (row % 2 == 1)[:, None]
-    up = torch.where(exact, 0, torch.randint(0, 16, (rows, n)))
-    down = torch.where(exact, 0, torch.randint(0, 16, (rows, n)))
+    up = torch.where(exact, 0, torch.randint(0, 16, (rows, n), device=dev))
+    down = torch.where(exact, 0, torch.randint(0, 16, (rows, n), device=dev))
     low = torch.where(
         exact,
-        torch.randint(0, 4, (rows, n)),
-        torch.randint(0, 1 << 24, (rows, n)),
+        torch.randint(0, 4, (rows, n), device=dev),
+        torch.randint(0, 1 << 24, (rows, n), device=dev),
     )
     bin_ = torch.where(above, edge + up, edge - 1 - down)
-    return ((bin_ - 128) * (1 << 24) + low).to(torch.int32).cuda()
+    return ((bin_ - 128) * (1 << 24) + low).to(torch.int32)
 
 
 @skipIfNoFlyDSL
@@ -218,15 +219,21 @@ class TestFlyDSLTopK(TestCase):
         # Radix scan groups are 16 bins. Each row puts the K-th element on one
         # side or the other of a group edge, resolved in the top byte pass or
         # the low byte pass, for both largest modes.
+        from torch._native.ops.topk.flydsl_kernels import topk_cache_info
+
         n = _test_n(k, torch.int32)
-        self.assertEqual(_expected_kernel(k, n, torch.int32), "radix")
+        kernel = _expected_kernel(k, n, torch.int32)
+        self.assertEqual(kernel, "radix")
         torch.manual_seed(0)
         rows = _test_m(k, torch.int32)
+        misses = topk_cache_info(kernel).misses
         for largest in (True, False):
             for edge in (16, 128, 240):
                 with self.subTest(k=k, largest=largest, edge=edge):
                     x = _group_edge_input(rows, n, k, edge, largest)
                     self._assert_topk_matches_aten(x, k, largest=largest)
+        # One radix compile per `largest`, so the FlyDSL kernel ran.
+        self.assertEqual(topk_cache_info(kernel).misses, misses + 2)
 
     def test_register_correctness_with_odd_rows(self):
         # Register kernel packs two rows per CTA; odd M leaves a tail

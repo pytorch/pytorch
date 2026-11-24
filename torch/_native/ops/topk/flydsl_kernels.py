@@ -314,7 +314,8 @@ def _find_from_top(arr, top, size, k_rem, base):
     Precondition: `k_rem` is reachable, i.e. ``base + sum(entries) >= k_rem``.
     Otherwise every entry is below `k_rem` and ``idx`` ends at ``top - size``,
     outside the walked range. ``topk_radix_out`` guarantees it for the whole
-    kernel by rejecting any ``k`` outside ``1 <= k <= n``.
+    kernel by rejecting ``k > n``. It also rejects ``k < 1``, which the walk
+    itself tolerates, since the kernel would write nothing for it.
     """
     cum = base
     above = base
@@ -1006,8 +1007,9 @@ def topk_radix_out(
 ) -> None:
     rows_m = input_2d.shape[0]
     n = input_2d.shape[1]
-    # _find_from_top assumes k is reachable (k <= n), so reject anything else
-    # before the kernel can read outside the walked range.
+    # Reject k outside 1 <= k <= n. k > n breaks _find_from_top's reachability
+    # precondition and would let its index run below the walked range. k < 1 is
+    # defensive: the walk copes, but there is nothing to select.
     if not 1 <= k <= n:
         raise ValueError(f"topk_radix_out needs 1 <= k <= n, got k={k}, n={n}")
     device_index = input_2d.device.index
