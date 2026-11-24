@@ -17,6 +17,7 @@ from torch._inductor.codegen.wrapper import pexpr
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.sizevars import (
+    join_dimensions,
     simplify_index_in_vec_range,
     SizeVarAllocator,
     stride_at_vec_range,
@@ -63,6 +64,7 @@ DENSE_X_INDEX_LOAD = r"tl\.load\([^\n]*tl\.broadcast_to\(x\d+, \[XBLOCK, R0_BLOC
 REDUCTION_DEPENDENT_LOAD = r"tl\.load\([^\n]*r0_"
 
 
+@instantiate_parametrized_tests
 class TestIndexingSimplification(InductorTestCase):
     def test_simplify_index_in_vec_range(self):
         i = sympy.Symbol("i", integer=True, nonnegative=True)
@@ -92,6 +94,31 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertIsNotNone(result)
         result2 = stride_at_vec_range(index, i, 16)
         self.assertIsNotNone(result2)
+
+    def test_simplify_index_in_vec_range_skips_full_simplify(self):
+        """Regression test for https://github.com/pytorch/pytorch/issues/133734"""
+        i = sympy.Symbol("i", integer=True, nonnegative=True)
+        s0 = sympy.Symbol("s0", integer=True, positive=True)
+        s1 = sympy.Symbol("s1", integer=True, positive=True)
+        base = 2 * s0 + 3 * s1
+        deep_expr = base
+        for k in range(1, 5):
+            deep_expr = FloorDiv((k + 3) * deep_expr * (base + k), k + 5)
+
+        index = deep_expr + ModularIndexing(i, 1, 16)
+        expected = deep_expr + i + sympy.Symbol("i_mod_c0")
+        original_simplify = sympy.simplify
+
+        def fail_simplify(expr):
+            raise AssertionError(f"unexpected sympy.simplify({expr})")
+
+        simplify_index_in_vec_range.cache_clear()
+        try:
+            sympy.simplify = fail_simplify
+            self.assertEqual(simplify_index_in_vec_range(index, i, 16), expected)
+        finally:
+            sympy.simplify = original_simplify
+            simplify_index_in_vec_range.cache_clear()
 
     def test_analyze_lane_contiguity(self):
         sizevars = SizeVarAllocator()
@@ -397,6 +424,17 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(simplified, FloorDiv(i0, 3))
         self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
+        # terms without ModularIndexing or FloorDiv are left alone
+        expr7 = expr1 + 7 * i1 + 3
+        self.assertEqual(
+            join_dimensions(expr7), ModularIndexing(i0, 1, 128) + 7 * i1 + 3
+        )
+
+        # the FloorDiv pattern can simplify away: FloorDiv(64 * i0, 64) is i0, so
+        # the matching term has no FloorDiv
+        expr8 = ModularIndexing(64 * i0, 1, 64, evaluate=False) + 64 * i0
+        self.assertEqual(join_dimensions(expr8), 64 * i0)
+
     def test_modular_indexing_pairs_merged(self):
         sizevars = SizeVarAllocator()
         x = sympy.Symbol("x", integer=True, positive=True)
@@ -421,6 +459,64 @@ class TestIndexingSimplification(InductorTestCase):
         actual = sizevars.combine_modular_indexing_pairs(expr2)
         self.assertEqual(expr2, actual)
         self.assertNotEqual(ModularIndexing(x, 1, b), actual)
+
+    def test_modular_indexing_symbolic_whole_period(self):
+        w = sympy.Symbol("w", integer=True, positive=True)
+        self.assertEqual(ModularIndexing(w, 1, w), 0)
+
+    @parametrize("divisor", [2, 3])
+    def test_modular_indexing_factored_period(self, divisor):
+        s, x, y = sympy.symbols("s x y", integer=True, positive=True)
+        expr = ModularIndexing(divisor * x * (s + 1) + y, divisor, s + 1)
+
+        self.assertEqual(expr, ModularIndexing(y, divisor, s + 1))
+
+    def test_modular_indexing_cancel_fractional_period(self):
+        s, x = sympy.symbols("s x", integer=True, positive=True)
+        expr = ModularIndexing(x * (s**2 + s) / 2, 1, s + 1)
+
+        self.assertEqual(expr.subs({x: 1, s: 3}), 2)
+
+    def test_modular_indexing_cancel_fractional_even_period(self):
+        s = sympy.Symbol("s", integer=True, positive=True)
+        e = sympy.Symbol("e", even=True, positive=True)
+        expr = ModularIndexing(e * (s**2 + 2 * s + 1) / 18, 1, s + 1)
+
+        self.assertEqual(expr.subs({s: 2, e: 2}), 1)
+
+    def test_modular_indexing_fractional_period(self):
+        w = sympy.Symbol("w", integer=True, positive=True)
+        expr = ModularIndexing(w * (w + 1) / 2 + 1, 1, w)
+
+        self.assertEqual(expr.subs(w, 4), 3)
+
+    @parametrize("value", [2, 4, 22, 44])
+    @parametrize("offset", [0, 1])
+    def test_modular_indexing_fractional_even_period(self, value, offset):
+        w = sympy.Symbol("w", integer=True, positive=True)
+        e = sympy.Symbol("e", even=True, positive=True)
+        expr = ModularIndexing(w * e / 22 + offset, 1, w)
+
+        self.assertEqual(expr.subs({w: 22, e: value}), (value + offset) % 22)
+
+    @parametrize("divisor", [1, 2])
+    @parametrize("whole_period", [False, True])
+    def test_modular_indexing_piecewise_base(self, divisor, whole_period):
+        x = sympy.Symbol("x", integer=True, positive=True)
+        scale = 1024 * divisor if whole_period else 1
+        base = scale * sympy.Piecewise((x, x < 10), (x + 1, True))
+        expr = ModularIndexing(base, divisor, 1024)
+
+        self.assertEqual(expr.subs(x, 5), (scale * 5 // divisor) % 1024)
+        self.assertEqual(expr.subs(x, 15), (scale * 16 // divisor) % 1024)
+
+    def test_modular_indexing_piecewise_modulus(self):
+        x = sympy.Symbol("x", integer=True, positive=True)
+        modulus = sympy.Piecewise((x, x < 10), (x + 1, True)) + 1
+        expr = ModularIndexing(x * modulus + 1, 1, modulus)
+
+        self.assertEqual(expr.subs(x, 5), 1)
+        self.assertEqual(expr.subs(x, 15), 1)
 
     def test_modular_indexing_positive(self):
         x = sympy.Symbol("x", integer=True, positive=True)
@@ -615,7 +711,7 @@ class ExprPrinterTests(InductorTestCase):
                 self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
                 self.assertExpectedInline(
                     texpr(expr),
-                    """libdevice.floor((1/2)*s1).to(tl.int64)""",
+                    """triton_helpers.rounding_to_int((1/2)*s1, tl.int64, 'floor')""",
                 )
                 self.assertExpectedInline(cexpr(expr), """std::floor((1.0/2.0)*s1)""")
 

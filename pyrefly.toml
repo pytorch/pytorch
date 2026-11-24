@@ -7,7 +7,6 @@ project-includes = [
     "caffe2",
     "tools",
     "test/test_bundled_images.py",
-    "test/test_bundled_inputs.py",
     "test/test_complex.py",
     "test/test_datapipe.py",
     "test/test_futures.py",
@@ -103,8 +102,9 @@ ignore-missing-imports = [
     "usort.*",
     "cutlass.*",
     "cutlass_library.*",
-    "cutlass_api.*",
     "flydsl.*",
+    # cuda-python ships with cutlass but is absent from the linter image.
+    "cuda.bindings.*",
     "deeplearning.*",
     "einops.*",
     "libfb.*",
