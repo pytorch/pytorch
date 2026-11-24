@@ -4895,6 +4895,42 @@ def run_and_get_cpp_code(
     return result, s
 
 
+def strict_constraint_symbols(shape_env: ShapeEnv) -> OrderedSet[sympy.Symbol]:
+    """Symbols of input dims under a strict user min/max (``mark_dynamic(min=, max=)``).
+
+    The shape env doesn't record which ranges came from the user (a min-only
+    ``min=2`` range equals the default), so read the constraints Dynamo kept in
+    the tracing context; produce_guards raises if a guard narrows them.
+    warn_only constraints (``maybe_mark_dynamic``) only log, so they're skipped.
+    """
+    from torch._dynamo.source import TensorProperty, TensorPropertySource
+    from torch._guards import TracingContext
+    from torch.fx.experimental.symbolic_shapes import (
+        StatefulSymbolicContext,
+        StrictMinMaxConstraint,
+    )
+
+    syms: OrderedSet[sympy.Symbol] = OrderedSet()
+    tracing_context = TracingContext.try_get()
+    if tracing_context is None:
+        return syms
+    for ctx in tracing_context.tensor_to_context.values():
+        if not isinstance(ctx, StatefulSymbolicContext):
+            continue
+        for idx, constraint in enumerate(ctx.constraint_sizes or ()):
+            if (
+                not isinstance(constraint, StrictMinMaxConstraint)
+                or constraint.warn_only
+            ):
+                continue
+            name = TensorPropertySource(
+                ctx.tensor_source, TensorProperty.SIZE, idx
+            ).name
+            if (sym := shape_env.source_to_var.get(name)) is not None:
+                syms.update(shape_env.replace(sym).free_symbols)
+    return syms
+
+
 def shape_env_from_inputs(inputs: Sequence[InputType]) -> ShapeEnv | None:
     fake_mode = detect_fake_mode(inputs)
 
