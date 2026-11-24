@@ -32,6 +32,10 @@ namespace at::xpu {
 // ATen/xpu/level_zero_stub/ATenLevelZero.h and edit
 // ATen/xpu/detail/LazyLevelZero.cpp accordingly (e.g., via one of the stub
 // macros).
+//
+// Not every entry has a caller in this repository: zeContextMakeMemoryResident
+// is used by XPU symmetric memory in torch-xpu-ops
+// (src/xccl/XPUSymmetricMemory.cpp) to make IPC-imported peer memory resident.
 
 #define AT_FORALL_ZE(_)          \
   _(zeModuleCreate)              \
