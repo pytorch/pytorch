@@ -3,7 +3,7 @@ import math
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager, nullcontext
-from itertools import pairwise
+from itertools import accumulate, pairwise
 from unittest.mock import patch
 
 import torch
@@ -317,6 +317,59 @@ def pack_sequences(seqs, device):
     max_len = seq_lens.max().item()
 
     return x_packed, cu_seq, max_len
+
+
+def _make_packed_attention_inputs(
+    device, dtype, seq_lens, num_heads_q, num_heads_kv, head_dim=64
+):
+    q = torch.randn(sum(seq_lens), num_heads_q, head_dim, device=device, dtype=dtype)
+    k = torch.randn(sum(seq_lens), num_heads_kv, head_dim, device=device, dtype=dtype)
+    v = torch.randn_like(k)
+    cu_seq = torch.tensor([0, *accumulate(seq_lens)], device=device, dtype=torch.int32)
+    return q, k, v, cu_seq, max(seq_lens)
+
+
+def _reference_varlen_attention(q, k, v, cu_seq, is_causal):
+    """Per-sequence attention returning out (T, Hq, D) and lse (Hq, T)."""
+    group = q.size(1) // k.size(1)
+    k, v = (t.repeat_interleave(group, dim=1) for t in (k, v))
+    outs, lses = [], []
+    for start, end in pairwise(cu_seq.tolist()):
+        scores = torch.einsum("qhd,khd->hqk", q[start:end], k[start:end])
+        scores = scores * q.size(-1) ** -0.5
+        if is_causal:
+            mask = torch.ones_like(scores, dtype=torch.bool).triu(1)
+            scores = scores.masked_fill(mask, float("-inf"))
+        lse = scores.logsumexp(-1)
+        probs = (scores - lse.unsqueeze(-1)).exp()
+        outs.append(torch.einsum("hqk,khd->qhd", probs, v[start:end]))
+        lses.append(lse)
+    return torch.cat(outs), torch.cat(lses, dim=-1)
+
+
+def _sink_rescale_loss(out, lse, sink):
+    """GPT-OSS attention-sink rescale, whose loss depends on lse."""
+    rescale = torch.sigmoid(lse - sink.unsqueeze(-1)).T.unsqueeze(-1)
+    return (out * rescale).float().square().sum()
+
+
+def _assert_sink_rescale_grads_match_reference(
+    test, grads, q, k, v, sink, cu_seq, is_causal
+):
+    """Compare (dq, dk, dv, dsink) with an fp32 reference by relative L2 error.
+
+    dsink comes from autograd outside the attention backward; dq, dk, and dv are the
+    gradients that exercise the lse gradient.
+    """
+    leaves = [t.detach().float().requires_grad_() for t in (q, k, v)]
+    sink_leaf = sink.detach().clone().requires_grad_()
+    out, lse = _reference_varlen_attention(*leaves, cu_seq, is_causal)
+    ref_grads = torch.autograd.grad(
+        _sink_rescale_loss(out, lse, sink_leaf), (*leaves, sink_leaf)
+    )
+    for name, got, ref in zip(("dq", "dk", "dv", "dsink"), grads, ref_grads):
+        error = ((got.float() - ref).norm() / ref.norm()).item()
+        test.assertLessEqual(error, 1e-2, f"{name}: relative L2 error {error:.2e}")
 
 
 def gather_paged_cache(cache: torch.Tensor, block_table: torch.Tensor) -> torch.Tensor:
@@ -941,6 +994,90 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
             _should_use_cudnn=False,
             sdpa_backend=sdpa_backend,
         )
+
+    @unittest.skipUnless(
+        "fa4" in _varlen_backends(include_fa4_paged_kv=False), "FA4 not supported"
+    )
+    @parametrize("is_causal", [False, True])
+    @parametrize("dense", [False, True])
+    def test_flash_attention_backward_grad_logsumexp(self, device, is_causal, dense):
+        torch.manual_seed(0)
+        seq_lens = [128, 128] if dense else [100, 77, 123]
+        q, k, v, cu_seq, max_len = _make_packed_attention_inputs(
+            device, torch.bfloat16, seq_lens, num_heads_q=4, num_heads_kv=2
+        )
+        # Near typical lse values, so the rescale (and grad_lse) is far from saturated.
+        sink = (torch.randn(q.size(1), device=device) + 4).requires_grad_()
+        if dense:
+            # Equal-length sequences as a (B, S, H, D) batch with lse (B, H, S).
+            batch = len(seq_lens)
+            inputs = [t.view(batch, max_len, *t.shape[1:]) for t in (q, k, v)]
+            cu_seq_arg = None
+        else:
+            inputs, cu_seq_arg = [q, k, v], cu_seq
+        flash_args = (cu_seq_arg, cu_seq_arg, max_len, max_len, 0.0, is_causal)
+
+        with _use_backend("fa4"):
+            out, lse, *_ = torch.ops.aten._flash_attention_forward(
+                *inputs, *flash_args, False
+            )
+            out, lse = (t.detach().requires_grad_() for t in (out, lse))
+            packed_out = out.flatten(0, 1) if dense else out
+            packed_lse = lse.transpose(0, 1).flatten(1) if dense else lse
+            grad_out, grad_lse, dsink = torch.autograd.grad(
+                _sink_rescale_loss(packed_out, packed_lse, sink), (out, lse, sink)
+            )
+            rng_state = torch.zeros(2, dtype=torch.uint64, device=device)
+            grads = torch.ops.aten._flash_attention_backward(
+                grad_out,
+                *inputs,
+                out,
+                lse,
+                *flash_args,
+                rng_state,
+                torch.empty(0, device=device),
+                grad_logsumexp=grad_lse,
+            )
+
+        dq, dk, dv = (g.flatten(0, 1) if dense else g for g in grads)
+        _assert_sink_rescale_grads_match_reference(
+            self, (dq, dk, dv, dsink), q, k, v, sink, cu_seq, is_causal
+        )
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize(
+        "backend",
+        [b for b in _varlen_backends(include_fa4_paged_kv=False) if b != "fa4"],
+    )
+    def test_flash_attention_backward_grad_logsumexp_requires_fa4(
+        self, device, backend
+    ):
+        q, k, v, cu_seq = _make_causal_varlen_inputs(device)
+        seq_len = q.size(0)
+        flash_args = (cu_seq, cu_seq, seq_len, seq_len, 0.0, True)
+        with _use_backend(backend):
+            out, lse, *_ = torch.ops.aten._flash_attention_forward(
+                q, k, v, *flash_args, False
+            )
+            backward_args = (
+                torch.randn_like(out),
+                q,
+                k,
+                v,
+                out,
+                lse,
+                *flash_args,
+                torch.zeros(2, dtype=torch.uint64, device=device),
+                torch.empty(0, device=device),
+            )
+            torch.ops.aten._flash_attention_backward(*backward_args)
+            message = "not supported on ROCm" if TEST_WITH_ROCM else "requires the FA4"
+            with self.assertRaisesRegex(NotImplementedError, message):
+                torch.ops.aten._flash_attention_backward(
+                    *backward_args, grad_logsumexp=torch.zeros_like(lse)
+                )
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
