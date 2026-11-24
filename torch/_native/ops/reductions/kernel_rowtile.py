@@ -123,7 +123,7 @@ def one_thread_row_ok(
 # use it; `strict` raises instead, as an explicit order= argument does.
 _INNER_TREE_STRICT = "strict"
 # Reasons a dispatcher cannot serve an inner-tree request.
-_INNER_TREE_WIDE = "inner-tree reduction requires 32-bit logical extents"
+_INNER_TREE_WIDE = "inner-tree reduction requires extents a batch clear of Int32"
 _INNER_TREE_GEOMETRY = "inner-tree reduction cannot serve this geometry"
 # Block size for both one-thread-per-row shapes and fixed multirow carry cap.
 _MULTIROW_ROWS_PER_BLOCK = 128

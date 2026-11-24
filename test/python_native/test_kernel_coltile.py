@@ -922,7 +922,7 @@ class TestOrderedColDevice(TestCase):
     )
     def test_plan_matches_the_indexed_tree(self, device, op, in_dtype, shape, split):
         """Preserve each row's inner-tree DAG across plans, fields, ranks, and partials."""
-        x = torch.randn(shape, device=device).to(in_dtype)
+        x = torch.randn(shape, device=device, dtype=in_dtype)
         rows, columns = x.shape[-2:]
         batches = x.numel() // (rows * columns)
         kept = [(columns, 1)] + ([(batches, rows * columns)] if x.dim() == 3 else [])
@@ -984,6 +984,8 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNone(got)
         with mock.patch.object(ct, "_INT32_LIMIT", 129):
             got = ct.reduce_ordered_col(trait, key, x, f32, 1, config=_FIXED)
+        wide = {_ordered_fields(k)["wide"] for k in ct._CACHE if k[1] == key}
+        self.assertEqual(wide, {True})
         reference = kg._try_indexed_itree(
             trait,
             key + "_ref",

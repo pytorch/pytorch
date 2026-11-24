@@ -1168,10 +1168,10 @@ class TileReduce:
             if uniform:
                 issue = _uniform_combine_issue(trait, itree.split, mode)
                 if issue is not None:
-                    raise ValueError(f"uniform combine counts need {issue}")
+                    raise ValueError(f"uniform_combine={mode!r} needs {issue}")
             if uniform and (itree.shape != "combine" or not itree.combine_tile):
                 raise ValueError(
-                    f"uniform combine counts need a staged combine plan, got {itree.shape=} {itree.combine_tile=}"
+                    f"uniform_combine={mode!r} needs a staged combine plan, got {itree.shape=} {itree.combine_tile=}"
                 )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
