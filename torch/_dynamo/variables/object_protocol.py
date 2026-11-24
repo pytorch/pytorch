@@ -753,7 +753,7 @@ def pysequence_delitem(
         raise_type_error(tx, f"'{s.python_type_name()}' is not a sequence")
 
     raise_type_error(
-        tx, f"'{s.python_type_name()}' object does not support item deletion"
+        tx, f"'{s.python_type_name()}' object doesn't support item deletion"
     )
 
 
@@ -768,16 +768,22 @@ def generic_delitem(
     if mp_ass_subscript is not None:
         return o.mp_ass_subscript_impl(tx, key, None)
 
-    key_type = maybe_get_python_type(key)
-    if pyindex_check(key_type):
-        key_value = key.nb_index_impl(tx)
-        return pysequence_delitem(tx, o, key_value)
-    elif o.tp_as_sequence.sq_ass_item is not None:
-        raise_type_error(
-            tx, f"sequence index must be integer, not {key.python_type_name()}"
-        )
+    # Heap types always get a tp_as_sequence struct; static types only when
+    # they fill one of its slots (int, float, object have none).
+    o_type = maybe_get_python_type(o)
+    is_heap_type = o_type.__flags__ & Py_TPFLAGS_HEAPTYPE
+    if is_heap_type or any(slot is not None for slot in o.tp_as_sequence):
+        if pyindex_check(maybe_get_python_type(key)):
+            key_value = key.nb_index_impl(tx)
+            return pysequence_delitem(tx, o, key_value)
+        elif o.tp_as_sequence.sq_ass_item is not None:
+            raise_type_error(
+                tx, f"sequence index must be integer, not '{key.python_type_name()}'"
+            )
 
-    raise_type_error(tx, f"'{o.python_type_name()}' does not support item deletion")
+    raise_type_error(
+        tx, f"'{o.python_type_name()}' object does not support item deletion"
+    )
 
 
 def pynumber_int(

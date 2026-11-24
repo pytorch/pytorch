@@ -1417,6 +1417,37 @@ class SetDelItemTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(self._compile(fn, torch.zeros(1)), fn(torch.zeros(1)))
 
+    def test_delitem_unsupported_type_error(self):
+        class A:
+            pass
+
+        def fn(x, o, key):
+            try:
+                del o[key]
+            except TypeError as e:
+                return x, str(e)
+            return x, "no error"
+
+        # PyObject_DelItem takes the sequence path only for types with a
+        # tp_as_sequence struct, and PySequence_DelItem words its error
+        # differently ("doesn't" vs "does not").
+        cases = [
+            (3, 0),
+            (object(), "k"),
+            (A(), 0),
+            (A(), "k"),
+            ((1,), 0),
+            ("ab", "k"),
+            (types.MappingProxyType({}), 0),
+            (types.MappingProxyType({}), "k"),
+            (collections.deque([1]), "k"),
+        ]
+        for o, key in cases:
+            with self.subTest(o=o, key=key):
+                torch._dynamo.reset()
+                x = torch.zeros(1)
+                self.assertEqual(self._compile(fn, x, o, key), fn(x, o, key))
+
     def test_tensor_setitem(self):
         def fn(t):
             t = t.clone()
