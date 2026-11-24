@@ -22,8 +22,8 @@ from collections import defaultdict
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (decorateIf, parametrize, preserves_unittest_skip_marks, run_tests, TestCase, MACOS_VERSION, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
+    (decorateIf, parametrize, preserves_unittest_skip_marks, run_tests, TestCase, IS_CI,
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -1409,13 +1409,18 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(torch.sinh(a).imag, zero)
         self.assertEqual(torch.cosh(a).imag, zero)
 
-    @xfailIf(MACOS_VERSION > 15.0)
-    def test_conv_raises_error(self, device='mps', dtype=torch.float):
-        conv = nn.Conv2d(1, 65537, 3, padding=1).to('mps')
-
-        x = torch.ones([1, 1, 3, 3])
-        with self.assertRaises(NotImplementedError):
-            y = conv(x.to("mps"))
+    @parametrize("in_channels,kernel_size", [(16, 1), (4, 3)])
+    def test_conv2d_high_channel_size(self, in_channels, kernel_size):
+        # MPSGraph miscomputes once output channels exceed 2**16 (#129207), e.g. for 1x1 kernels with 16 input
+        # channels even on macOS 27, so those are split into chunks; integer inputs keep results exact
+        C = 2**16 + 1
+        x = torch.randint(-2, 3, (2, in_channels, 5, 5), dtype=torch.float)
+        y = torch.randint(-2, 3, (2, C, 5, 5), dtype=torch.float)
+        w = torch.randint(-2, 3, (C, in_channels, kernel_size, kernel_size), dtype=torch.float)
+        b = torch.randint(-2, 3, (C,), dtype=torch.float)
+        padding = kernel_size // 2
+        for fn, args in ((F.conv2d, (x, w, b)), (F.conv_transpose2d, (y, w))):
+            self.assertEqual(fn(*args, padding=padding), fn(*[a.to("mps") for a in args], padding=padding))
 
     def test_conv_high_channel_size(self):
         out_channels = 65537

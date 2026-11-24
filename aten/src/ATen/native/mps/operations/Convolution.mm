@@ -833,8 +833,19 @@ static bool mpsgraph_depthwise_overflows(const Tensor& input,
   });
 }
 
-// MPSGraph 2D/3D convolutions miscompute once the batch reaches 2^16 (#96225, #200935); callers split the batch.
-constexpr int64_t kMPSGraphConvMaxBatch = std::numeric_limits<uint16_t>::max();
+// MPSGraph convolutions miscompute once the batch reaches 2^16 (#96225, #200935), and on macOS 15.0 also once the
+// output channels exceed 2^16 (#129207); callers split both into chunks of at most this size.
+constexpr int64_t kMPSGraphConvMaxChunk = std::numeric_limits<uint16_t>::max();
+
+static void check_mps_graph_conv_dims(IntArrayRef sizes) {
+  if (is_macos_at_least(MacOSVersion::MACOS_15_1)) {
+    return;
+  }
+  for (auto elem : sizes) {
+    TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16),
+                                "Convolution dimensions > 65536 are not supported by MPS on macOS 15.0");
+  }
+}
 
 static void mps_graph_conv2d(const Tensor& input_t,
                              const Tensor& weight_t,
@@ -849,12 +860,19 @@ static void mps_graph_conv2d(const Tensor& input_t,
   constexpr auto kContiguous = MemoryFormat::Contiguous;
   const bool bias_defined = bias_opt ? bias_opt->defined() : false;
 
-  if (!is_macos_at_least(MacOSVersion::MACOS_15_1)) {
-    // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
-    for (auto elem : output_t.sizes()) {
-      TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
+  if (groups == 1 && weight_t.size(0) > kMPSGraphConvMaxChunk) {
+    const auto weights = weight_t.split(kMPSGraphConvMaxChunk);
+    const auto biases = bias_defined ? bias_opt->split(kMPSGraphConvMaxChunk) : std::vector<Tensor>(weights.size());
+    const auto outputs = output_t.split(kMPSGraphConvMaxChunk, /*dim=*/1);
+    for (const auto i : c10::irange(weights.size())) {
+      // Channel slices are strided, so compute each into a dense buffer first
+      auto output = at::empty(outputs[i].sizes(), output_t.options(), output_t.suggest_memory_format());
+      mps_graph_conv2d(input_t, weights[i], biases[i], padding, stride, dilation, groups, output);
+      outputs[i].copy_(output);
     }
+    return;
   }
+  check_mps_graph_conv_dims(output_t.sizes());
 
   const bool is_cl_input = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true) == kChannelsLast;
   const auto input_suggested_layout = is_cl_input ? kChannelsLast : kContiguous;
@@ -1037,8 +1055,8 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     conv1d_metal_forward(input_t, weight_t, bias_opt, padding[1], stride[1], dilation[1], groups, output_t);
     return output_t;
   }
-  const auto inputs = input_t.split(kMPSGraphConvMaxBatch);
-  const auto outputs = output_t.split(kMPSGraphConvMaxBatch);
+  const auto inputs = input_t.split(kMPSGraphConvMaxChunk);
+  const auto outputs = output_t.split(kMPSGraphConvMaxChunk);
   for (const auto i : c10::irange(inputs.size())) {
     mps_graph_conv2d(inputs[i], weight_t, bias_opt, padding, stride, dilation, groups, outputs[i]);
   }
@@ -1065,14 +1083,29 @@ static void mps_graph_conv_backward_input(const Tensor& grad_output_t,
                                           const Tensor& grad_input_t) {
   using namespace at::native::mps;
   using namespace mps;
+  if (groups == 1 && weight_t.size(0) > kMPSGraphConvMaxChunk) {
+    const auto grad_outputs = grad_output_t.split(kMPSGraphConvMaxChunk, /*dim=*/1);
+    const auto weights = weight_t.split(kMPSGraphConvMaxChunk);
+    const auto partial = at::empty_like(grad_input_t);
+    for (const auto i : c10::irange(weights.size())) {
+      mps_graph_conv_backward_input(grad_outputs[i],
+                                    weights[i],
+                                    padding,
+                                    stride,
+                                    dilation,
+                                    groups,
+                                    output_memory_format,
+                                    i == 0 ? grad_input_t : partial);
+      if (i > 0) {
+        grad_input_t.add_(partial);
+      }
+    }
+    return;
+  }
+  check_mps_graph_conv_dims(grad_output_t.sizes());
+
   const bool is3DConv = grad_output_t.dim() == 5;
   const auto input_size = grad_input_t.sizes();
-  if (!is_macos_at_least(MacOSVersion::MACOS_15_1)) {
-    // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
-    for (auto elem : grad_output_t.sizes()) {
-      TORCH_CHECK_NOT_IMPLEMENTED(elem <= (1 << 16), "Output channels > 65536 not supported at the MPS device. ");
-    }
-  }
 
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = at::MemoryFormat::ChannelsLast3d;
@@ -1245,7 +1278,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   TensorArg grad_input{grad_input_t, "result", 0};
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
   // 3D data gradient is not affected by the MPSGraph batch bug
-  const auto max_batch = is3DConv ? std::numeric_limits<int64_t>::max() : kMPSGraphConvMaxBatch;
+  const auto max_batch = is3DConv ? std::numeric_limits<int64_t>::max() : kMPSGraphConvMaxChunk;
   const auto grad_outputs = grad_output_t.split(max_batch);
   const auto grad_inputs = grad_input_t.split(max_batch);
   for (const auto i : c10::irange(grad_outputs.size())) {
@@ -1284,12 +1317,12 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   // stays contiguous OIDHW (the graph already transposes DHWIO -> OIDHW).
   const bool allocate_grad_weight_cl = output_memory_format == kChannelsLast && !is3DConv;
 
-  // Weight gradients are summed over batch chunks, see kMPSGraphConvMaxBatch
-  if (input_t.size(0) > kMPSGraphConvMaxBatch) {
+  // Weight gradients are summed over batch chunks, see kMPSGraphConvMaxChunk
+  if (input_t.size(0) > kMPSGraphConvMaxChunk) {
     const int64_t N = input_t.size(0);
     auto acc = at::zeros(weight_size, grad_output_t.options());
-    for (int64_t i = 0; i < N; i += kMPSGraphConvMaxBatch) {
-      int64_t end = std::min(i + kMPSGraphConvMaxBatch, N);
+    for (int64_t i = 0; i < N; i += kMPSGraphConvMaxChunk) {
+      int64_t end = std::min(i + kMPSGraphConvMaxChunk, N);
       acc += mps_convolution_backward_weights(weight_size,
                                               grad_output_t.narrow(0, i, end - i),
                                               input_t.narrow(0, i, end - i),
