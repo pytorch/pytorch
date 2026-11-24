@@ -21,9 +21,9 @@ static bool has_xpu() {
 
 TEST(XPUStreamTest, SyclErrorTranslation) {
   for (const auto error_kind :
-      {sycl::errc::runtime,
-       sycl::errc::invalid,
-       sycl::errc::memory_allocation}) {
+       {sycl::errc::runtime,
+        sycl::errc::invalid,
+        sycl::errc::memory_allocation}) {
     const auto code = sycl::make_error_code(error_kind);
     const sycl::exception original(code, "synchronous test error");
     const auto line = __LINE__ + 2;
@@ -36,11 +36,16 @@ TEST(XPUStreamTest, SyclErrorTranslation) {
       EXPECT_NE(
           message.find(
               std::string("SYCL error [") + code.category().name() + ":" +
-              std::to_string(code.value()) + "]: " + original.what()),
+                  std::to_string(code.value()) + "]: " + original.what()),
           std::string::npos);
-      const c10::SourceLocation location{
-          __func__, __FILE__, static_cast<uint32_t>(line)};
-      const auto expected = c10::str("Exception raised from ", location, " (most recent call first):");
+      const auto expected = c10::str(
+          "Exception raised from ",
+          __func__,
+          " at ",
+          __FILE__,
+          ':',
+          line,
+          " (most recent call first):");
       EXPECT_NE(std::string(error.what()).find(expected), std::string::npos);
     }
   }

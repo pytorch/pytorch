@@ -34,7 +34,7 @@ struct XPUEvent {
         "XPUEvent reconstructed from an IPC handle must be reusable.");
     event_ = std::make_unique<sycl::event>(
         C10_XPU_CHECK(sycl::ext::oneapi::experimental::ipc::event::open(
-          handle_data, c10::xpu::get_device_context())));
+            handle_data, c10::xpu::get_device_context())));
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (interp) [[unlikely]] {
       (*interp)->trace_gpu_event_creation(
@@ -117,7 +117,7 @@ struct XPUEvent {
 
     if (reusable_) {
 #if SYCL_COMPILER_VERSION >= 20260200
-        C10_XPU_CHECK(sycl::ext::oneapi::experimental::enqueue_signal_event(
+      C10_XPU_CHECK(sycl::ext::oneapi::experimental::enqueue_signal_event(
           stream.queue(), *event_));
 #endif
     } else {
@@ -141,7 +141,7 @@ struct XPUEvent {
       if (reusable_) {
 #if SYCL_COMPILER_VERSION >= 20260200
         C10_XPU_CHECK(sycl::ext::oneapi::experimental::enqueue_wait_event(
-          stream.queue(), *event_));
+            stream.queue(), *event_));
 #endif
       } else {
         std::vector<sycl::event> event_list{event()};
@@ -176,9 +176,9 @@ struct XPUEvent {
     using namespace sycl::info::event_profiling;
     // Block until both of the recorded events are completed.
     uint64_t end_time_ns =
-      C10_XPU_CHECK(other.event().get_profiling_info<command_end>());
+        C10_XPU_CHECK(other.event().get_profiling_info<command_end>());
     uint64_t start_time_ns =
-      C10_XPU_CHECK(event().get_profiling_info<command_end>());
+        C10_XPU_CHECK(event().get_profiling_info<command_end>());
     // Return the elapsed time in milliseconds.
     return 1e-6 *
         (static_cast<double>(end_time_ns) - static_cast<double>(start_time_ns));
@@ -214,7 +214,7 @@ struct XPUEvent {
         C10_XPU_CHECK(event().ext_oneapi_ipc_enabled()),
         "XPUEvent ipc_handle() requires the event to be constructed with enable_ipc=True.");
     auto handle = C10_XPU_CHECK(
-      sycl::ext::oneapi::experimental::ipc::event::get(*event_));
+        sycl::ext::oneapi::experimental::ipc::event::get(*event_));
     return handle.data();
   }
 #endif
@@ -224,10 +224,10 @@ struct XPUEvent {
     event_.reset();
     if (enable_timing_) {
       event_ = std::make_unique<sycl::event>(
-            C10_XPU_CHECK(
+          C10_XPU_CHECK(
               sycl::ext::oneapi::experimental::submit_profiling_tag(queue)));
     } else {
-        event_ = std::make_unique<sycl::event>(
+      event_ = std::make_unique<sycl::event>(
           C10_XPU_CHECK(queue.ext_oneapi_submit_barrier()));
     }
   }

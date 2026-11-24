@@ -116,7 +116,8 @@ void XPUGraphImpl::capture_begin(
         sycl::property_list{property::graph::enable_native_recording{}};
   }
 
-    auto graph_impl = C10_XPU_CHECK(xpuGraph_t(capture_stream_.queue(), sycl_property));
+  auto graph_impl =
+      C10_XPU_CHECK(xpuGraph_t(capture_stream_.queue(), sycl_property));
   graph_ = std::make_unique<xpuGraph_t>(std::move(graph_impl));
   // acquire the capture_id_ once graph is instantiated
   capture_id_ = graph_->get_id();
@@ -124,7 +125,8 @@ void XPUGraphImpl::capture_begin(
   C10_XPU_CHECK(graph_->begin_recording(capture_stream_.queue()));
 
   TORCH_INTERNAL_ASSERT(
-      C10_XPU_CHECK(capture_stream_.queue().ext_oneapi_get_state()) == queue_state::recording);
+      C10_XPU_CHECK(capture_stream_.queue().ext_oneapi_get_state()) ==
+      queue_state::recording);
 
   c10::xpu::XPUCachingAllocator::markCaptureBegin(capture_dev_);
   {

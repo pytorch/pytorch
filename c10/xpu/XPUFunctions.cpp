@@ -143,8 +143,8 @@ inline void initGlobalDevicePoolState() {
 
   // The default context is utilized for each Intel GPU device, allowing the
   // retrieval of the context from any GPU device.
-    const auto& platform = C10_XPU_CHECK(gDevicePool.devices[0]->get_platform());
-    gDevicePool.context = C10_XPU_CHECK(
+  const auto& platform = C10_XPU_CHECK(gDevicePool.devices[0]->get_platform());
+  gDevicePool.context = C10_XPU_CHECK(
       std::make_unique<sycl::context>(platform.khr_get_default_context()));
 }
 

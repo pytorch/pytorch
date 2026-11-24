@@ -21,7 +21,7 @@ class XPUAllocator : public DeviceAllocator {
       c10::DeviceIndex device_index) override {
     const auto& device = c10::xpu::get_raw_device(device_index);
     const size_t total =
-      C10_XPU_CHECK(device.get_info<sycl::info::device::global_mem_size>());
+        C10_XPU_CHECK(device.get_info<sycl::info::device::global_mem_size>());
     TORCH_CHECK(
         C10_XPU_CHECK(device.has(sycl::aspect::ext_intel_free_memory)),
         "The device (",
@@ -48,7 +48,7 @@ class XPUAllocator : public DeviceAllocator {
 #else
     // Linux drivers > 1.18.40196 reserve the same headroom as Windows on Xe.
     const auto version =
-      C10_XPU_CHECK(device.get_info<sycl::info::device::driver_version>());
+        C10_XPU_CHECK(device.get_info<sycl::info::device::driver_version>());
     int major = 0, minor = 0, patch = 0;
     const bool is_new_driver =
         std::sscanf(version.c_str(), "%d.%d.%d", &major, &minor, &patch) == 3 &&

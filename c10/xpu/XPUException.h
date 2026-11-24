@@ -22,11 +22,10 @@ namespace c10::xpu {
           std::to_string(code.value()) + "]: " + message);
 }
 
-
 template <typename Func>
 inline decltype(auto) withSyclErrorTranslation(
     Func&& func,
-  c10::SourceLocation location = c10::SourceLocation::current()) {
+    c10::SourceLocation location = c10::SourceLocation::current()) {
   std::error_code code;
   std::string message;
   try {
@@ -37,7 +36,6 @@ inline decltype(auto) withSyclErrorTranslation(
   }
   c10_xpu_check_implementation(code, message, location);
 }
-
 
 static inline sycl::async_handler asyncHandler =
     [](const sycl::exception_list& errors) {
@@ -53,7 +51,8 @@ static inline sycl::async_handler asyncHandler =
         } catch (const std::exception& error) {
           TORCH_WARN("Additional asynchronous SYCL error: ", error.what());
         } catch (...) {
-          TORCH_WARN("Additional asynchronous SYCL error: unknown exception type");
+          TORCH_WARN(
+              "Additional asynchronous SYCL error: unknown exception type");
         }
       }
       std::rethrow_exception(primary);
@@ -61,8 +60,8 @@ static inline sycl::async_handler asyncHandler =
 
 } // namespace c10::xpu
 
-#define C10_XPU_CHECK(...)                                           \
-  ::c10::xpu::withSyclErrorTranslation(                               \
-      [&]() -> decltype(auto) { return (__VA_ARGS__); },              \
+#define C10_XPU_CHECK(...)                               \
+  ::c10::xpu::withSyclErrorTranslation(                  \
+      [&]() -> decltype(auto) { return (__VA_ARGS__); }, \
       ::c10::SourceLocation::current())
 

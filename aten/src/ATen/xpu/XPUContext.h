@@ -30,14 +30,15 @@ template <class KernelClass>
     DeviceIndex device_index = c10::xpu::current_device()) {
   auto& context = c10::xpu::get_device_context();
   auto& device = c10::xpu::get_raw_device(device_index);
-    auto kernel_id = C10_XPU_CHECK(sycl::get_kernel_id<KernelClass>());
+  auto kernel_id = C10_XPU_CHECK(sycl::get_kernel_id<KernelClass>());
 
-    auto bundle = C10_XPU_CHECK(
+  auto bundle = C10_XPU_CHECK(
       sycl::get_kernel_bundle<sycl::bundle_state::executable>(
-        context, {device}, {kernel_id}));
-    sycl::kernel kernel = C10_XPU_CHECK(bundle.get_kernel(kernel_id));
-    return C10_XPU_CHECK(
-      kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(device));
+          context, {device}, {kernel_id}));
+  sycl::kernel kernel = C10_XPU_CHECK(bundle.get_kernel(kernel_id));
+  return C10_XPU_CHECK(
+      kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(
+          device));
 }
 
 // Overload for functor-based kernels: deduces KernelClass from the function
@@ -59,14 +60,16 @@ template <auto* KernelFn>
 #if SYCL_COMPILER_VERSION < 20260100
   auto bundle = C10_XPU_CHECK(
       syclex::get_kernel_bundle<KernelFn, sycl::bundle_state::executable>(
-      context));
-  sycl::kernel kernel = C10_XPU_CHECK(bundle.template ext_oneapi_get_kernel<KernelFn>());
+          context));
+  sycl::kernel kernel =
+      C10_XPU_CHECK(bundle.template ext_oneapi_get_kernel<KernelFn>());
   return C10_XPU_CHECK(
-    kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(device));
+      kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(
+          device));
 #else
   return C10_XPU_CHECK(syclex::get_kernel_info<
       KernelFn,
-    sycl::info::kernel_device_specific::work_group_size>(context, device));
+      sycl::info::kernel_device_specific::work_group_size>(context, device));
 #endif
 }
 

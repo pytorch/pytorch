@@ -92,7 +92,7 @@ bool canDeviceAccessPeer(DeviceIndex device, DeviceIndex peer) {
   if (device == peer) {
     return true;
   }
-    return C10_XPU_CHECK(c10::xpu::get_raw_device(device).ext_oneapi_can_access_peer(
+  return C10_XPU_CHECK(c10::xpu::get_raw_device(device).ext_oneapi_can_access_peer(
       c10::xpu::get_raw_device(peer),
       sycl::ext::oneapi::peer_access::access_supported));
 }
