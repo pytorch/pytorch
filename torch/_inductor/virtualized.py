@@ -258,15 +258,33 @@ def _choices_default():
     """
     from torch._inductor import config
     from torch._inductor.choices import create_inductor_choices
-    from torch._inductor.heuristics.template import tlx
 
     # Has to precede the inductor_choices_class read: installing the torchTLX
     # integration is what sets it.
-    tlx.maybe_install()
+    _install_choices_integrations()
 
     rv = create_inductor_choices(config.inductor_choices_class)
     setattr(threadlocal, _choices._key, rv)
     return rv
+
+
+def _install_choices_integrations() -> None:
+    from torch._inductor.heuristics.template import tlx
+
+    tlx.maybe_install()
+
+
+def prepare_choices_class_for_cache_key() -> None:
+    """
+    Called by FxGraphHashDetails before it snapshots the config. If this thread
+    has no choices handler yet, run the installs that creating one runs first
+    (see _choices_default), so config.inductor_choices_class names the class the
+    first lowering will use. Don't create the handler: it would stay on the thread
+    and ignore a later compile's inductor_choices_class. An existing handler is
+    left alone, as before.
+    """
+    if not hasattr(threadlocal, _choices._key):
+        _install_choices_integrations()
 
 
 _choices: Virtualized[InductorChoices] = Virtualized("choices", _choices_default)
