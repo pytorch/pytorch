@@ -124,6 +124,14 @@ void THCPGraph_init(PyObject* module) {
             return reinterpret_cast<uintptr_t>(graph_exec);
           },
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "set_raw_cuda_graph_exec",
+          [](::at::cuda::CUDAGraph& self, uintptr_t graph_exec) {
+            self.set_raw_cuda_graph_exec(
+                reinterpret_cast<cudaGraphExec_t>(graph_exec));
+          },
+          py::arg("graph_exec"),
+          py::call_guard<py::gil_scoped_release>())
       .def_static(
           "get_currently_capturing_graph",
           torch::wrap_pybind_function_no_gil(

@@ -137,7 +137,7 @@ static AttrFunction attr_func_hardsigmoid =
       ideep::attr_t attr;
       ideep::post_ops po;
       po.append_eltwise(
-          ideep::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
+          dnnl::algorithm::eltwise_hardsigmoid, 1.0f / 6.0f, 0.5f);
       attr.set_post_ops(po);
       return attr;
     };
@@ -157,19 +157,19 @@ const std::unordered_map<std::string_view, AttrFunction>& fusion_unary_attr_map(
   return fusion_attr_map;
 }
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_unary_alg_map() {
-  static const std::unordered_map<std::string_view, ideep::algorithm> fusion_attr_map{
-      {"relu", {ideep::algorithm::eltwise_relu}},
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_unary_alg_map() {
+  static const std::unordered_map<std::string_view, dnnl::algorithm> fusion_attr_map{
+      {"relu", {dnnl::algorithm::eltwise_relu}},
   };
   return fusion_attr_map;
 }
 
-const std::unordered_map<std::string_view, ideep::algorithm>& fusion_binary_alg_map() {
-  static const std::unordered_map<std::string_view, ideep::algorithm> fusion_attr_map{
-      {"add", {ideep::algorithm::binary_add}},
-      {"sub", {ideep::algorithm::binary_sub}},
-      {"mul", {ideep::algorithm::binary_mul}},
-      {"div", {ideep::algorithm::binary_div}},
+const std::unordered_map<std::string_view, dnnl::algorithm>& fusion_binary_alg_map() {
+  static const std::unordered_map<std::string_view, dnnl::algorithm> fusion_attr_map{
+      {"add", {dnnl::algorithm::binary_add}},
+      {"sub", {dnnl::algorithm::binary_sub}},
+      {"mul", {dnnl::algorithm::binary_mul}},
+      {"div", {dnnl::algorithm::binary_div}},
   };
   return fusion_attr_map;
 }
