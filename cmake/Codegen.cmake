@@ -174,20 +174,9 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   set(CUSTOM_BUILD_FLAGS)
-  if(INTERN_BUILD_MOBILE)
-    if(USE_VULKAN)
-      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU Vulkan)
-    else()
-      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
-    endif()
-  endif()
 
   if(SELECTED_OP_LIST)
-    if(TRACING_BASED)
-      message(STATUS "Running tracing-based selective build given operator list: ${SELECTED_OP_LIST}")
-      list(APPEND CUSTOM_BUILD_FLAGS
-        --op_selection_yaml_path ${SELECTED_OP_LIST})
-    elseif(NOT STATIC_DISPATCH_BACKEND)
+    if(NOT STATIC_DISPATCH_BACKEND)
       message(WARNING
         "You have to run tracing-based selective build with dynamic dispatch.\n"
         "Switching to STATIC_DISPATCH_BACKEND=CPU."
