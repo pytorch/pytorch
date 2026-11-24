@@ -22,6 +22,7 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch.fx._compatibility import compatibility
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.nn import functional as F
 
 
 __all__ = ["canonicalize_graph", "rename_nodes_to_canonical"]
@@ -44,6 +45,46 @@ _IN_PLACE_OPERATORS = frozenset(
         "itruediv",
         "ixor",
     }
+)
+
+
+_TRAINING_RNG_FUNCTIONS = frozenset(
+    {
+        F.dropout,
+        F.dropout1d,
+        F.dropout2d,
+        F.dropout3d,
+        F.alpha_dropout,
+        F.feature_alpha_dropout,
+        F.rrelu,
+        torch.dropout,
+        torch.feature_dropout,
+        torch.alpha_dropout,
+        torch.feature_alpha_dropout,
+        torch.rrelu,
+    }
+)
+_RUNNING_STAT_FUNCTIONS = frozenset(
+    {F.batch_norm, F.instance_norm, torch.batch_norm, torch.instance_norm}
+)
+_FRACTIONAL_POOL_FUNCTIONS = frozenset(
+    {
+        F.fractional_max_pool2d,
+        F.fractional_max_pool2d_with_indices,
+        F.fractional_max_pool3d,
+        F.fractional_max_pool3d_with_indices,
+    }
+)
+_EMBEDDING_FUNCTIONS = frozenset({F.embedding, F.embedding_bag})
+_ATTENTION_FUNCTIONS = frozenset(
+    {F.scaled_dot_product_attention, F.multi_head_attention_forward}
+)
+_ARGUMENT_EFFECT_FUNCTIONS = (
+    _TRAINING_RNG_FUNCTIONS
+    | _RUNNING_STAT_FUNCTIONS
+    | _FRACTIONAL_POOL_FUNCTIONS
+    | _EMBEDDING_FUNCTIONS
+    | _ATTENTION_FUNCTIONS
 )
 
 
@@ -287,7 +328,10 @@ _SUBGRAPH_ONLY_EFFECT_HOPS = frozenset(
 
 
 def _hop_effects_are_pure(
-    node: fx.Node, *, owning_module: torch.nn.Module | None = None
+    node: fx.Node,
+    *,
+    owning_module: torch.nn.Module | None = None,
+    subgraph_purity: dict[fx.GraphModule, bool] | None = None,
 ) -> bool:
     """Whether a higher order operator node can be reordered.
 
@@ -303,6 +347,8 @@ def _hop_effects_are_pure(
         owning_module = node.graph.owning_module
     if owning_module is None:
         return False
+    if subgraph_purity is None:
+        subgraph_purity = {}
     subgraphs: list[fx.GraphModule] = []
     for arg in pytree.tree_leaves((node.args, node.kwargs)):
         if not (isinstance(arg, fx.Node) and arg.op == "get_attr"):
@@ -321,22 +367,33 @@ def _hop_effects_are_pure(
             and "_checkpoint_context_fn" in submodule.meta
         ):
             return False
-        # Placeholders/outputs are structural; recursion covers nested HOPs.
-        if not all(
-            n.op in ("placeholder", "output", "get_attr") or _is_safe_to_reorder(n)
-            for n in submodule.graph.nodes
-        ):
+        pure = subgraph_purity.get(submodule)
+        if pure is None:
+            # Placeholders/outputs are structural; recursion covers nested HOPs.
+            pure = all(
+                n.op in ("placeholder", "output", "get_attr")
+                or _is_safe_to_reorder(
+                    n, owning_module=submodule, subgraph_purity=subgraph_purity
+                )
+                for n in submodule.graph.nodes
+            )
+            subgraph_purity[submodule] = pure
+        if not pure:
             return False
     return True
 
 
 def _is_safe_to_reorder(
-    node: fx.Node, *, owning_module: torch.nn.Module | None = None
+    node: fx.Node,
+    *,
+    owning_module: torch.nn.Module | None = None,
+    subgraph_purity: dict[fx.GraphModule, bool] | None = None,
 ) -> bool:
     """Check if a node is safe to reorder during graph canonicalization.
 
     Builds on Node.is_impure() (used by DCE) with additional checks for cases
-    it doesn't cover: in-place call_method nodes, higher order operators with
+    it doesn't cover: RNG methods, argument-dependent functional effects,
+    in-place methods and functional calls, higher order operators with
     non-reorderable subgraph nodes, functional collectives, nodes binding
     unbacked symbols, and non-OpOverload state-changing functions detected by
     no-node-arguments and no-tensor-or-symbolic-value heuristics, and opaque
@@ -348,6 +405,9 @@ def _is_safe_to_reorder(
     ordering safety across the whole graph. A graph with N barriers only
     canonicalizes within N+1 segments, which for data-dependent graphs degrades
     toward trace order. Add barriers only where ordering is load-bearing.
+
+    ``subgraph_purity`` may be shared within one pass, but must be discarded
+    between passes because GraphModules are mutable.
     """
     # Nodes that bind unbacked symbols (item()/_local_scalar_dense, nonzero,
     # ...) keep their trace-order position. Reordering them changes the order
@@ -357,6 +417,8 @@ def _is_safe_to_reorder(
     if node.meta.get("unbacked_bindings"):
         return False
     if node.op == "call_method":
+        if node.target in {"bernoulli", "multinomial"}:
+            return False
         return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
     if node.op == "call_module":
         if owning_module is None:
@@ -370,7 +432,9 @@ def _is_safe_to_reorder(
     if node.is_impure():
         return False
     if isinstance(node.target, torch._ops.HigherOrderOperator):
-        return _hop_effects_are_pure(node, owning_module=owning_module)
+        return _hop_effects_are_pure(
+            node, owning_module=owning_module, subgraph_purity=subgraph_purity
+        )
     # Functional collectives (all_reduce, wait_tensor, ...) keep their
     # trace-order position. Reordering a collective relative to surrounding
     # compute changes comm/compute overlap and defeats Inductor's in-place
@@ -411,15 +475,80 @@ def _is_safe_to_reorder(
             return False
         if isinstance(node.kwargs.get("out"), fx.Node):
             return False
+        if node.kwargs.get("inplace") is True:
+            return False
+        if node.target is F.gumbel_softmax:
+            return False
+        if callable(node.target) and node.target in _ARGUMENT_EFFECT_FUNCTIONS:
+            from torch.fx.operator_schemas import normalize_function
+
+            try:
+                normalized = normalize_function(
+                    node.target,
+                    node.args,
+                    node.kwargs,
+                    normalize_to_only_use_kwargs=True,
+                )
+            except (TypeError, ValueError, RuntimeError):
+                return False
+            if normalized is None:
+                return False
+            args = normalized.kwargs
+            if args.get("inplace") is True:
+                return False
+            if node.target in _TRAINING_RNG_FUNCTIONS:
+                if args.get("training", args.get("train")) is not False:
+                    return False
+            elif node.target in _RUNNING_STAT_FUNCTIONS:
+                active = args.get("training", args.get("use_input_stats"))
+                if active is not False and (
+                    args.get("running_mean") is not None
+                    or args.get("running_var") is not None
+                ):
+                    return False
+            elif node.target in _FRACTIONAL_POOL_FUNCTIONS:
+                if args.get("_random_samples") is None:
+                    return False
+            elif node.target in _EMBEDDING_FUNCTIONS:
+                if args.get("max_norm") is not None:
+                    return False
+            elif (
+                node.target is F.scaled_dot_product_attention
+                or args.get("training") is not False
+            ):
+                p = args.get("dropout_p")
+                if not isinstance(p, (int, float)) or p != 0:
+                    return False
+        if (
+            callable(node.target)
+            and getattr(node.target, "__module__", "") == "torch.nn.functional"
+            and any(arg is True for arg in node.args[1:])
+        ):
+            from torch.fx.operator_schemas import normalize_function
+
+            normalized = normalize_function(
+                node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True
+            )
+            if normalized is not None and normalized.kwargs.get("inplace") is True:
+                return False
+        # User-kernel mutation HOPs (triton_kernel_wrapper_mutation, ...) mutate
+        # tensors via kwargs but are not detected by is_impure() or
+        # trailing-underscore checks.
+        from torch._higher_order_ops.user_kernel_hop import is_user_kernel_mutation_hop
+
+        if is_user_kernel_mutation_hop(node.target):
+            return False
         # Non-OpOverload targets with no FX Node arguments are likely
-        # state-changing (e.g., _vmap_increment_nesting,
-        # _set_fwd_grad_enabled). This is intentionally conservative:
-        # pure constant-producing ops would also be treated as barriers,
-        # but those are rare in Dynamo output graphs (constants are
+        # state-changing (e.g., _set_fwd_grad_enabled). This is intentionally
+        # conservative: pure constant-producing ops would also be treated as
+        # barriers, but those are rare in Dynamo output graphs (constants are
         # typically lifted as placeholders or get_attr nodes).
         if not node.all_input_nodes:
             return False
-        # functorch batch dim ops modify the vmap interpreter stack.
+        # The functorch batch dim ops modify the vmap interpreter stack.
+        # is_impure() covers their wrappers in torch._functorch.predispatch;
+        # this name check also covers the C bindings with the same names,
+        # such as torch._add_batch_dim.
         if name in ("_add_batch_dim", "_remove_batch_dim"):
             return False
         # State-changing functions that consume other nodes escape the

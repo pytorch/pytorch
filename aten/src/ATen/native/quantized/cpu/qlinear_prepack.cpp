@@ -227,7 +227,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   std::vector<int64_t> dims = weight.sizes().vec();
   auto N = weight.size(0);
   std::vector<int32_t> wgt_zero_points;
-  ideep::scale_t wgt_scales;
+  std::vector<float> wgt_scales;
   const auto qtype = weight.qscheme();
   if (qtype == c10::kPerTensorAffine) {
     TORCH_CHECK(
@@ -235,7 +235,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
         "quantized::linear_prepack: ONEDNN only supports symmetric quantization of weight,"
         " whose zero point must be 0, but got ", weight.q_zero_point());
     wgt_zero_points = std::vector<int32_t>(1, weight.q_zero_point());
-    wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
+    wgt_scales = std::vector<float>(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
   } else if (qtype == c10::kPerChannelAffine) {
     wgt_zero_points.resize(N);
     wgt_scales.resize(N);
@@ -255,7 +255,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   auto weight_copy = weight.clone();
   ideep::tensor wgt = ideep::tensor({dims, dnnl::memory::data_type::s8}, weight_copy.data_ptr());
   wgt.transpose_(0, 1); // ONEDNN requires transposed weight
-  auto src_dims = ideep::dims(); // Unknown when prepacking
+  auto src_dims = dnnl::memory::dims(); // Unknown when prepacking
   ideep::attr_t op_attr;
   op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   auto w_desc = ideep::matmul_forward::expected_weights_desc(wgt.get_dims(), src_dims, dnnl::memory::data_type::s8,
@@ -318,7 +318,7 @@ static inline at::Tensor pack_weight_to_onednn_tensor(
       : dnnl::memory::data_type::s8;
   ideep::tensor wei = ideep::tensor({w_dims, w_data_type}, weight.data_ptr());
   wei.transpose_(0, 1); // oneDNN requires transposed weight
-  ideep::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : ideep::dims();
+  dnnl::memory::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : dnnl::memory::dims();
   ideep::attr_t op_attr;
   if (!is_fp8) {
     op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
@@ -590,12 +590,13 @@ class QLinearPackWeightInt8 final {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
+    if (ctx.qEngine() == at::QEngine::FBGEMM
 #if !defined(__aarch64__) && !defined(_M_ARM64)
-    if (ctx.qEngine() == at::QEngine::FBGEMM ||
-        ctx.qEngine() == at::QEngine::X86) {
+        || ctx.qEngine() == at::QEngine::X86
+#endif
+    ) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
-#endif
 #endif
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
@@ -623,7 +624,6 @@ class QLinearPackWeightFp16 final {
       std::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
-#if !defined(__aarch64__) && !defined(_M_ARM64)
     // temporarily convert weight back to fp32, needs to be fixed
     // after fbgemm fixes the interface for their prepacking op (take fp16 input0
     weight = weight.to(ScalarType::Float);
@@ -632,7 +632,6 @@ class QLinearPackWeightFp16 final {
       return PackedLinearWeightFp16::prepack(
           std::move(weight), std::move(bias));
     }
-#endif // !aarch64: fall through to the explicit not-supported checks below
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {

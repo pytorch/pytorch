@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA
 
 
 SUSPEND_RESUME_BACKENDS = [
-    ("nccl-legacy", "cuda", False),
     ("nccl2", "cuda", False),
     ("nccl-lazy", "cuda", True),
 ]
@@ -156,6 +155,8 @@ for backend_name, device_type, create_pair_channel in SUSPEND_RESUME_BACKENDS:
         backend_name, device_type, create_pair_channel
     )
     globals()[test_class.__name__] = test_class
+# Unbound so the last class isn't collected a second time as `test_class`.
+del test_class
 
 
 if __name__ == "__main__":

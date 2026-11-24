@@ -126,16 +126,14 @@ mha_fwd(
     const float p_dropout,
     const float softmax_scale,
     bool is_causal,
-    std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right,
+    int window_size_left,
+    int window_size_right,
     const float softcap,
     const bool return_softmax,
     std::optional<at::Generator> gen_) {
 #if defined(USE_ROCM_CK_SDPA)
   if (at::globalContext().getROCmFAPreferredBackend() ==
       at::ROCmFABackend::Ck) {
-    const int non_null_window_left = window_size_left.value_or(-1);
-    const int non_null_window_right = window_size_right.value_or(-1);
     std::optional<at::Tensor> dummy_attn_bias = std::nullopt;
     return mha_fwd_ck(
         q,
@@ -145,8 +143,8 @@ mha_fwd(
         p_dropout,
         softmax_scale,
         is_causal,
-        non_null_window_left,
-        non_null_window_right,
+        ck_window_size(window_size_left),
+        ck_window_size(window_size_right),
         return_softmax,
         gen_,
         dummy_attn_bias); // Not used in flash attention
@@ -508,20 +506,9 @@ _flash_attention_forward_impl(
   TORCH_CHECK(
       !num_splits.has_value(),
       "num_splits is not supported on ROCm");
-  // ROCM backend accepts std::optional for window_size_left/right directly.
-#ifdef DISABLE_AOTRITON  // CK backend, Passing window_size as it is
-  const auto window_left = window_size_left;
-  const auto window_right = window_size_right;
-#else  // AOTriton implements "generalized" SWA and negative size means negative shifting.
-  // aotriton_adapter::parse_window_size tries to match the behavior of CUTLASS backend
-  using sdp::aotriton_adapter::parse_window_size;
-  const auto [window_left, window_right] = parse_window_size(window_size_left,
-                                                             window_size_right);
-#endif
-#else  // USE_ROCM
+#endif  // USE_ROCM
   const int window_left = window_size_left.value_or(-1);
   const int window_right = window_size_right.value_or(-1);
-#endif  // USE_ROCM
 
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors
@@ -1355,6 +1342,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
+#ifdef USE_ROCM
   constexpr int64_t MAX_BATCH_SIZE = (1LL << 16) - 1;
   int64_t batch_size = query.size(0);
 
@@ -1363,6 +1351,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
                 "Efficient attention cannot produce valid seed and offset outputs when "
                 "the batch size exceeds (", MAX_BATCH_SIZE, ").");
   }
+#endif
   auto process_chunk = [&](const Tensor& q_chunk,
                            const Tensor& k_chunk,
                            const Tensor& v_chunk,
@@ -1398,6 +1387,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
                            std::move(offset));
   };
 
+#ifdef USE_ROCM
   // when bs is larger than allowed maximum, process in chunks
   if (batch_size > MAX_BATCH_SIZE) {
     int64_t start = 0;
@@ -1457,10 +1447,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
               std::move(seed),
               std::move(offset));
   }
-  // when bs is within the allowed size, no need to chunk it
-  else {
-    return process_chunk(query, key, value, attn_bias);
-  }
+#endif
+  return process_chunk(query, key, value, attn_bias);
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
@@ -1614,15 +1602,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   const int64_t num_heads = query.size(2);
   const int64_t num_heads_kv = key.size(2);
   TORCH_CHECK(num_heads_kv == value.size(2));
-#ifdef USE_ROCM
-  TORCH_CHECK(num_heads == num_heads_kv);
-#else
   TORCH_CHECK(
       (num_heads == 0 && num_heads_kv == 0) ||
           (num_heads > 0 && num_heads_kv > 0 &&
            num_heads % num_heads_kv == 0),
       "Number of heads in key/value must divide number of heads in query");
-#endif
 
   // Embedding per head
   TORCH_CHECK(query.size(3) == key.size(3));
@@ -1677,7 +1661,15 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   const bool in_capture_stream =
       at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;
   auto device = in_capture_stream ? at::kCUDA : at::kCPU;
-  if (use_dropout) {
+#ifdef USE_ROCM
+  // The CK forward draws its own philox state and returns the seed/offset that
+  // its backward expects.
+  const bool use_ck =
+      at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck;
+#else
+  constexpr bool use_ck = false;
+#endif
+  if (use_dropout && !use_ck) {
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
         std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
@@ -1701,7 +1693,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), options);
       offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), options);
     }
-  } else {
+  } else if (!use_ck) {
     // Not using dropout. AOTAutograd may still save these dummy tensors, and
     // ROCm attention backends may read their pointers. Keep their device
     // independent of CUDA graph capture and their value deterministic.
@@ -1728,6 +1720,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     logsumexp = at::zeros(
         {lse_batch_size, num_heads, compute_logsumexp ? max_seqlen_q : 0},
         query.options().dtype(at::ScalarType::Float));
+    if (use_ck) {
+      // Normally the CK branch below provides these.
+      const auto options = query.options().dtype(at::kLong);
+      seed_t = at::zeros({}, options);
+      offset_t = at::zeros({}, options);
+    }
     return std::make_tuple(
         std::move(res),
         std::move(logsumexp),
@@ -1737,8 +1735,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
         max_seqlen_k_.has_value() ? max_seqlen_k_.value() : max_seqlen_k);
   }
 
-  if(at::globalContext().getROCmFAPreferredBackend() ==
-    at::ROCmFABackend::Ck) {
+  if (use_ck) {
 
 #if defined(USE_ROCM_CK_SDPA)
     std::optional<Tensor> out(res);
@@ -1750,8 +1747,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
          k,
          v,
          lse,
-         seed_t,
-         offset_t,
+         ck_seed_t,
+         ck_offset_t,
          p] =
             pytorch_flash::mem_eff_forward_ck(
                                     query,
@@ -1759,7 +1756,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                                     value,
                                     dropout_p,
                                     false,                                // return dropout_randval
-                                    custom_mask_type == 0 ? false : true, // is_causal
+                                    custom_mask_type != static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask), // is_causal
+                                    custom_mask_type == static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft), // causal_top_left
                                     softmax_scale,
                                     bias,
                                     out,
@@ -1771,6 +1769,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                                     seqused_k);                           // seqused_k_
 
     logsumexp = lse;
+    // With dropout, CK returns its uint64 seed/offset; the op returns int64 like
+    // the other backends. Without dropout, CK returns uninitialized int64
+    // placeholders, which nothing reads, instead of filling zeros.
+    seed_t = ck_seed_t.view(at::kLong);
+    offset_t = ck_offset_t.view(at::kLong);
 #else
     TORCH_CHECK(false, "Attempting to use CK mem_eff_forward backend in a build that has not built CK");
 #endif
@@ -1892,6 +1895,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       params.varlen_type = VarlenType::None;
     }
 #endif
+    sdp::aotriton_adapter::mem_eff_apply_window(params,
+                                                window_size,
+                                                custom_mask_type,
+                                                max_seqlen_q,
+                                                max_seqlen_k,
+                                                seqstart_q.has_value());
     AT_CUDA_CHECK(aotriton::v3::flash::attn_fwd(
         params, aotriton::v3::flash::attn_fwd_params::kVersion, stream));
 #else
@@ -2080,12 +2089,21 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       AT_CUDA_CHECK(err);
     }
     auto blocks = p.getBlocksGrid();
-    if (blocks.x * blocks.y * blocks.z == 0 || key.size(1) == 0) {
+    if (blocks.x == 0 || blocks.y == 0 || blocks.z == 0 || key.size(1) == 0) {
       res.zero_();
       return;
     }
     Kernel::check_supported(p);
-    kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
+    // Keep full tensor dimensions for strides, GQA, and dropout RNG indexing.
+    // Only the launch grid is chunked to fit CUDA's y/z limits.
+    for (p.batch_offset = 0; p.batch_offset < p.num_batches; p.batch_offset += blocks.z) {
+      blocks.z = std::min(65535, p.num_batches - p.batch_offset);
+      for (p.head_offset = 0; p.head_offset < p.num_heads; p.head_offset += blocks.y) {
+        blocks.y = std::min(65535, p.num_heads - p.head_offset);
+        kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
+    }
   };
 
   // Dispatch to the right kernel

@@ -9,10 +9,12 @@ import unittest
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    preserves_device_selection,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    IS_LINUX,
     MI350_ARCH,
     skipIfRocmArch,
     TEST_WITH_ASAN,
@@ -20,8 +22,8 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
-    HAS_CPU,
     HAS_GPU,
+    RUN_CPU,
 )
 
 
@@ -247,17 +249,12 @@ test_failures = {
         ("cpu", "cuda", "xpu")
     ),
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    # XPU falls back max_pool2d_with_indices_backward to ATen eager (see
-    # torch/_decomp/decompositions.py), so no Triton kernel is generated.
-    "test_max_pool2d_with_indices_backward_dynamic_shapes": TestFailure(("xpu",)),
+    # Unsupported XPU configurations still fall back to ATen eager, so no
+    # Triton kernel is generated.
     "test_max_pool2d_with_indices_backward2_dynamic_shapes": TestFailure(("xpu",)),
-    "test_max_pool2d_with_indices_backward3_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward4_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(("xpu",)),
     "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(("xpu",)),
-    "test_max_pool2d_with_indices_backward_fallback_dynamic_shapes": TestFailure(
-        ("xpu",)
-    ),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -522,10 +519,11 @@ test_failures = {
 add_test_failures(test_failures, dynamic_shapes_test_failures)
 
 if not TEST_WITH_ROCM:
+    HAS_MKLDNN = torch.backends.mkldnn.is_available()
     test_failures.update(
         {
             "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-                ("cuda",) if IS_LINUX else ("cpu", "cuda", "xpu")
+                ("cuda",) if HAS_MKLDNN else ("cpu", "cuda", "xpu")
             ),
         }
     )
@@ -559,7 +557,7 @@ class DynamicShapesCodegenTestCase(TestCase):
         return self.device_type
 
 
-if HAS_CPU:
+if RUN_CPU:
 
     class DynamicShapesCodegenCpuTests(TestCase):
         hw_classification = HardwareClassification.CPU
@@ -687,6 +685,10 @@ if not TEST_WITH_ASAN:
     ):
         hw_classification = HardwareClassification.ACCELERATOR
         maxDiff = None
+        setUp = preserves_device_selection(TestCase.setUp)
+        setUpClass = classmethod(
+            preserves_device_selection(DynamicShapesCodegenTestCase.setUpClass.__func__)
+        )
 
         def common(
             self,
@@ -756,6 +758,9 @@ if not TEST_WITH_ASAN:
         if not _name.startswith("DynamicShapesCodegenGPUTests"):
             continue
         _cls = globals()[_name]
+        _device = vars(_cls).get("_device_type_at_collection")
+        if _device is not None:
+            _cls._device_at_collection = _device
         if hasattr(_cls, "test_randint_distribution_dynamic_shapes"):
             # gfx950 shows a deterministic randint64 distribution mismatch
             # for high bounds.
@@ -763,9 +768,13 @@ if not TEST_WITH_ASAN:
                 _cls.test_randint_distribution_dynamic_shapes
             )
 
+    # The loops above leave these module-level names bound to test classes,
+    # which the test loader would collect again under those names.
+    _variant_cls = _cls = None
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_GPU:
+    if RUN_CPU or HAS_GPU:
         run_tests(needs="filelock")

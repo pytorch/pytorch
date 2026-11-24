@@ -343,6 +343,12 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             self.assertEqual(num_hsdp_flat_params, cntr[orig_ar])
             self.assertEqual(num_flat_params, cntr[orig_rs])
 
+        if not use_device_mesh:
+            # FSDP created these groups for this model only, and each one holds
+            # /dev/shm until the workers exit, so free them with the model.
+            for pg in intra_node_pgs | inter_node_pgs:
+                dist.destroy_process_group(pg)
+
     @skip_if_lt_x_gpu(4)
     def test_fsdp_hybrid_shard_parity(self):
         # Build the HSDP groups once rather than once per subtest; see
