@@ -947,7 +947,8 @@ class TCPStoreTLSTest(TestCase):
             )
 
     @parametrize(
-        "identities", ["job:456", "job:123,job:456", "job:123,job:123", "task:1"]
+        "identities",
+        ["job:456", "job:,job:123", "job:123,job:456", "job:123,job:123", "task:1"],
     )
     def test_tls_peer_identity_prefix_mismatch(self, identities):
         local = self._identity_cert("prefix-good", "ASN1:UTF8String:job:123")
@@ -971,6 +972,7 @@ class TCPStoreTLSTest(TestCase):
         [
             "ASN1:UTF8String:task:1",
             "ASN1:UTF8String:job:",
+            "ASN1:UTF8String:job:,job:123",
             "ASN1:UTF8String:job:123,job:456",
             "ASN1:UTF8String:job:123,job:123",
             "ASN1:IA5STRING:job:123",

@@ -397,8 +397,10 @@ std::optional<std::string_view> uniqueIdentity(
   while (true) {
     const auto comma = remaining.find(',');
     const auto token = remaining.substr(0, comma);
-    if (prefix ? token.size() > selector.size() && token.starts_with(selector)
-               : token == selector) {
+    if (prefix && token == selector) {
+      return std::nullopt;
+    }
+    if (prefix ? token.starts_with(selector) : token == selector) {
       if (found) {
         return std::nullopt;
       }
