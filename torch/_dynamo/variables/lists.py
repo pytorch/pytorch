@@ -1149,8 +1149,9 @@ class RangeVariable(BaseListVariable):  # noqa: RVT001
         start = self.start()
         step = self.step()
         new_start = start + (length - 1) * step
+        new_stop = start - step
         new_step = -step
-        return RangeIteratorVariable(new_start, 0, new_step, length)
+        return RangeIteratorVariable(new_start, new_stop, new_step, length)
 
     # Override BaseListVariable's methods with range-specific implementations.
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/rangeobject.c#L781-L787
