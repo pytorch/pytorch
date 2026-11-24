@@ -168,8 +168,7 @@ class TestMaxAutotuneBlackwell(TestCase):
         else:
             write_api = "tl.store"
         fc = FileCheck().check("triton_tem_fused_mm")
-        # Dynamic dims fall back to device-side descriptors.
-        if host_side_tma and not dynamic:
+        if host_side_tma:
             fc.check("host_tma_descriptor_args")
             if not tma_store:
                 fc.check_not("tl.make_tensor_descriptor")

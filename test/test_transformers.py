@@ -7865,6 +7865,23 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
             self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
+    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("backend", [SDPBackend.OVERRIDEABLE, SDPBackend.MATH], name_fn=lambda b: b.name.lower())
+    @parametrize("batch", [4, 64, 512, 18432])
+    def test_sdpa_single_kv_token(self, device, batch, backend, dtype):
+        # https://github.com/pytorch/pytorch/issues/203509: with a single key/value token,
+        # SDPA returned NaN/Inf from finite fp16/bf16 inputs at large batch sizes.
+        # The softmax over one key is exactly 1, so the output must equal v broadcast over the queries.
+        torch.manual_seed(0)
+        heads, seq_q, head_dim = 5, 14, 64
+        q = torch.randn(batch, heads, seq_q, head_dim, device=device, dtype=dtype)
+        k = torch.randn(batch, heads, 1, head_dim, device=device, dtype=dtype)
+        v = torch.randn(batch, heads, 1, head_dim, device=device, dtype=dtype)
+        with sdpa_kernel(backends=[backend]):
+            out = F.scaled_dot_product_attention(q, k, v)
+        self.assertTrue(torch.isfinite(out).all())
+        self.assertEqual(out, v.expand_as(out))
+
 class TestAttnBias(NNTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 

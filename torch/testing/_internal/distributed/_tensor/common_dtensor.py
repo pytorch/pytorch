@@ -707,10 +707,8 @@ class DTensorTestMixin:
 
 class DTensorContinuousTestBase(DTensorTestMixin, MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str:
-        device_type = _get_device_type(cls.world_size)
-        backend = dist.get_default_backend_for_device(device_type)
-        return backend
+    def backend_str(cls, device) -> str:
+        return dist.get_default_backend_for_device(device)
 
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
@@ -799,14 +797,13 @@ class DTensorTestBase(DTensorTestMixin, MultiProcessTestCase):
     def world_size(self) -> int:
         return NUM_DEVICES
 
-    @property
-    def backend(self) -> str:
-        backend = dist.get_default_backend_for_device(self.device_type)
-        return backend
+    @classmethod
+    def backend_str(cls, device) -> str:
+        return dist.get_default_backend_for_device(device)
 
     def init_pg(self, eager_init, backend: str | None = None) -> None:
         if backend is None:
-            backend = self.backend
+            backend = self.backend_str(self.device_type)
 
         requires_gpu = any(
             gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS

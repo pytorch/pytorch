@@ -23,6 +23,7 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/detail/DirectCopy.h>
 
 namespace at::native {
 
@@ -38,7 +39,7 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
       src.toString());
   ideep::tensor& x = itensor_from_mkldnn(src);
   ideep::tensor& y = itensor_from_mkldnn(self);
-  ideep::direct_copy::compute(x, y);
+  mkldnn::direct_copy(x, y);
   return self;
 }
 
