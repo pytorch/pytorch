@@ -3697,7 +3697,7 @@ class ListBuiltinVariable(TypeVariable):
         # ref: https://github.com/python/cpython/blob/3.13/Objects/listobject.c#L1265-L1287
         no_keywords(tx, "list", kwargs)
         check_positional(tx, "list", len(args), 0, 1)
-        if not args:
+        if len(args) == 0:
             return ListVariable([], mutation_type=ValueMutationNew())
 
         obj = args[0]
@@ -4056,7 +4056,7 @@ class TupleBuiltinVariable(TypeVariable):
         # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
         no_keywords(tx, "tuple", kwargs)
         check_positional(tx, "tuple", len(args), 0, 1)
-        if not args:
+        if len(args) == 0:
             return TupleVariable([], mutation_type=ValueMutationNew())
 
         obj = args[0]
@@ -4109,7 +4109,7 @@ class SetBuiltinVariable(TypeVariable):
         # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
         no_keywords(tx, "set", kwargs)
         check_positional(tx, "set", len(args), 0, 1)
-        if not args:
+        if len(args) == 0:
             return variables.SetVariable(set(), mutation_type=ValueMutationNew())
 
         s = SetVariable([], mutation_type=ValueMutationNew())
@@ -4137,7 +4137,7 @@ class FrozenSetBuiltinVariable(TypeVariable):
     ) -> VariableTracker:
         no_keywords(tx, "frozenset", kwargs)
         check_positional(tx, "frozenset", len(args), 0, 1)
-        if not args:
+        if len(args) == 0:
             return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
 
         if istype(args[0], variables.FrozensetVariable):
