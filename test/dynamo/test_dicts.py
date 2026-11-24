@@ -2423,6 +2423,24 @@ class DictTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(type(res[1]) is types.MappingProxyType)
             self.assertEqual(dict(ref[1]), dict(res[1]))
 
+    def test_mapping_proxy_or(self):
+        def fn(x, m, other):
+            mp = types.MappingProxyType(m)
+            try:
+                mp |= other
+            except TypeError:
+                x = x + 1
+            try:
+                mp | [("r", 2)]
+            except TypeError:
+                x = x + 1
+            return x, mp | other, other | mp
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        args = ({"a": 0, "c": 2}, {"c": 3, "p": 0})
+        self.assertEqual(fn(x, *args), opt_fn(x, *args))
+
     def test_mapping_proxy_for_nonlocal(self):
         d = {"a": 2, "b": 3, "c": 5}
 
