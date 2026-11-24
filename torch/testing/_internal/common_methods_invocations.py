@@ -12366,6 +12366,11 @@ op_db: list[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       # test_reference_numerics_large_acosh_xpu_complex64 and its _refs variant
+                       # produce inf where the reference is finite
+                       DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                                    'TestUnaryUfuncs', 'test_reference_numerics_large',  # issues/2257
+                                    device_type='xpu', dtypes=[torch.cfloat]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
@@ -13059,7 +13064,7 @@ op_db: list[OpInfo] = [
                        ),
                        DecorateInfo(
                            toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
-                           'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cpu'
+                           'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cpu', 'xpu')
                        ),
                        precisionOverride({torch.bfloat16: 1e-2}),
                    ],
@@ -13099,6 +13104,11 @@ op_db: list[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       # test_reference_numerics_large_asinh_xpu_complex32/complex64/complex128 and
+                       # their _refs variants produce inf where the reference is finite
+                       DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                                    'TestUnaryUfuncs', 'test_reference_numerics_large',  # issues/2257
+                                    device_type='xpu', dtypes=[torch.chalf, torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
@@ -19505,6 +19515,12 @@ op_db: list[OpInfo] = [
                          # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                          DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large'),
+                         # test_reference_numerics_normal_polygamma_polygamma_n_4_xpu_float16 returns inf
+                         # where the reference is finite
+                         DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                                      'TestUnaryUfuncs', 'test_reference_numerics_normal',  # issues/2257
+                                      device_type='xpu', dtypes=[torch.half],
+                                      active_if=lambda p, n_=n_: n_ == 4),
                      ),
                      sample_kwargs=lambda device, dtype, input, n=n_: ({'n': n}, {'n': n}),
                      # polygamma functions have multiple singularities at x having non-positive integer value
@@ -23458,6 +23474,11 @@ python_ref_db = [
         "_refs.acosh",
         torch_opinfo_name="acosh",
         skips=(
+            # test_reference_numerics_large__refs_acosh_xpu_complex64 produces inf
+            # where the reference is finite
+            DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                         'TestUnaryUfuncs', 'test_reference_numerics_large',  # issues/2257
+                         device_type='xpu', dtypes=[torch.cfloat]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_normal',
                          device_type='cuda', dtypes=[torch.cdouble],
@@ -23496,7 +23517,7 @@ python_ref_db = [
                 'TestUnaryUfuncs', device_type='cuda'),
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
-                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cpu'
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type=('cpu', 'xpu')
             ),
             precisionOverride({torch.bfloat16: 1e-2}),
         ],
@@ -23516,6 +23537,11 @@ python_ref_db = [
         torch_opinfo_name="asinh",
         decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
         skips=(
+            # test_reference_numerics_large__refs_asinh_xpu_complex32/complex64/complex128
+            # produce inf where the reference is finite
+            DecorateInfo(unittest.skip("https://github.com/intel/torch-xpu-ops/issues/2257"),
+                         'TestUnaryUfuncs', 'test_reference_numerics_large',  # issues/2257
+                         device_type='xpu', dtypes=[torch.chalf, torch.cfloat, torch.cdouble]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),

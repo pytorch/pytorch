@@ -2028,7 +2028,7 @@ class TestUnaryUfuncsCUDADevice(TestCase):
         self.assertEqual(y.cpu().view(torch.uint8), ref.view(torch.uint8))
 
 
-instantiate_device_type_tests(TestUnaryUfuncs, globals(), allow_mps=True)
+instantiate_device_type_tests(TestUnaryUfuncs, globals(), allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestUnaryUfuncsCpuOnly , globals(), only_for="cpu")
 instantiate_device_type_tests(TestUnaryUfuncsCUDADevice, globals(), only_for="cuda")
 
