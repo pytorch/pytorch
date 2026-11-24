@@ -384,18 +384,29 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
-// Exposes the "l1d_cache_size" entry of at::cpu::get_cpu_capabilities() as a
-// scalar stable ABI value in bytes. Writes 0 if the entry is absent or
-// unavailable ret_size points to caller-owned writable storage; no ownership is
-// transferred.
-AOTI_TORCH_EXPORT AOTITorchError
-torch_cpu_get_l1d_cache_size(int64_t* ret_size);
+// Reads an integer from at::cpu::get_cpu_capabilities().
+// Borrowed key; caller-owned outputs. A miss sets *key_exists to false.
+// A miss leaves *ret_value unchanged. A wrong type returns an error.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_int(
+    const char* key,
+    int64_t* ret_value,
+    bool* key_exists);
 
-// Exposes the "l2_cache_size" entry of at::cpu::get_cpu_capabilities() as a
-// scalar stable ABI value in bytes. Writes 0 if the entry is absent.
-// ret_size points to caller-owned writable storage; no ownership is
-// transferred.
-AOTI_TORCH_EXPORT AOTITorchError torch_cpu_get_l2_cache_size(int64_t* ret_size);
+// Reads a string from at::cpu::get_cpu_capabilities().
+// Borrowed key; caller-owned outputs. A miss sets *key_exists to false.
+// Wrong type errors. Returned strings are borrowed until runtime unload.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_string(
+    const char* key,
+    const char** ret_value,
+    bool* key_exists);
+
+// Reads a boolean from at::cpu::get_cpu_capabilities().
+// Borrowed key; caller-owned outputs. A miss sets *key_exists to false.
+// A miss leaves *ret_value unchanged. A wrong type returns an error.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_bool(
+    const char* key,
+    bool* ret_value,
+    bool* key_exists);
 
 // Returns whether torch.set_warn_always(True) is in effect.
 AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();

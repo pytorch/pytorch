@@ -1302,19 +1302,37 @@ for warning in w:
 
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU
-    def test_stable_cpu_cache_sizes(self, device):
+    def test_stable_cpu_capabilities(self, device):
         import libtorch_agn_2_16 as libtorch_agnostic
 
+        getters = {
+            int: (libtorch_agnostic.ops.my_cpu_capability_int, 0),
+            bool: (libtorch_agnostic.ops.my_cpu_capability_bool, False),
+            str: (libtorch_agnostic.ops.my_cpu_capability_string, "unknown"),
+        }
         capabilities = torch.cpu.get_capabilities()
-        # The map may omit cache sizes; stable getters return 0 when absent.
-        self.assertEqual(
-            libtorch_agnostic.ops.my_l1d_cache_size(),
-            capabilities.get("l1d_cache_size", 0),
-        )
-        self.assertEqual(
-            libtorch_agnostic.ops.my_l2_cache_size(),
-            capabilities.get("l2_cache_size", 0),
-        )
+        for key, value in capabilities.items():
+            with self.subTest(key=key):
+                op, fallback = getters[type(value)]
+                self.assertEqual(op(key), value)
+                self.assertEqual(op(key, fallback), value)
+
+        missing_key = "nonexistent_test_cpu_capability"
+        self.assertNotIn(missing_key, capabilities)
+        for kind, (op, fallback) in getters.items():
+            with self.subTest(kind=kind):
+                self.assertIsNone(op(missing_key))
+                self.assertEqual(op(missing_key, fallback), fallback)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCPU
+    def test_stable_cpu_capabilities_wrong_type(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        with self.assertRaisesRegex(
+            RuntimeError, "torch_get_cpu_capabilities_value_int"
+        ):
+            libtorch_agnostic.ops.my_cpu_capability_int("architecture")
 
     @skipIfTorchVersionLessThan(2, 16)
     @onlyCPU

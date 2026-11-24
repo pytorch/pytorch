@@ -616,24 +616,49 @@ torch_get_num_threads(uint32_t* out_num_threads) {
       { *out_num_threads = static_cast<uint32_t>(at::get_num_threads()); });
 }
 
-static inline AOTITorchError get_cpu_capabilities_value_int(
+static const c10::IValue* find_cpu_capability(const char* key) {
+  static const auto capabilities = at::cpu::get_cpu_capabilities();
+  const auto it = capabilities.find(key);
+  return it == capabilities.end() ? nullptr : &it->second;
+}
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_int(
     const char* key,
-    int64_t* ret_size) {
+    int64_t* ret_value,
+    bool* key_exists) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    static const auto capabilities = at::cpu::get_cpu_capabilities();
-    const auto it = capabilities.find(key);
-    *ret_size = it == capabilities.end() ? 0 : it->second.toInt();
+    const auto* value = find_cpu_capability(key);
+    *key_exists = value != nullptr;
+    if (value) {
+      *ret_value = value->toInt();
+    }
   });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-torch_cpu_get_l1d_cache_size(int64_t* ret_size) {
-  return get_cpu_capabilities_value_int("l1d_cache_size", ret_size);
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_string(
+    const char* key,
+    const char** ret_value,
+    bool* key_exists) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto* value = find_cpu_capability(key);
+    *key_exists = value != nullptr;
+    if (value) {
+      *ret_value = value->toStringRef().c_str();
+    }
+  });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-torch_cpu_get_l2_cache_size(int64_t* ret_size) {
-  return get_cpu_capabilities_value_int("l2_cache_size", ret_size);
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capabilities_value_bool(
+    const char* key,
+    bool* ret_value,
+    bool* key_exists) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    const auto* value = find_cpu_capability(key);
+    *key_exists = value != nullptr;
+    if (value) {
+      *ret_value = value->toBool();
+    }
+  });
 }
 
 AOTI_TORCH_EXPORT AOTITorchError
