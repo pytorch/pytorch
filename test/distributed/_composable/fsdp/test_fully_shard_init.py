@@ -1,9 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
-import gc
 import itertools
-import weakref
 from typing import cast
 
 import torch
@@ -610,140 +608,14 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
             model0_out_proj_param_fqns, {"0.out_proj.weight", "0.out_proj.bias"}
         )
 
-    def test_fully_shard_lazy_init_from_nested_state(self):
-        """
-        Tests that lazy initialization started from a nested state makes the
-        outermost state the root.
-
-        FSDP(model(
-            0: FSDP(MLP(FSDP(in_proj), out_proj)),
-            1: MLP(in_proj, out_proj),
-        ))
-        """
-        model = nn.Sequential(MLP(8), MLP(8))
-        fully_shard(model[0].in_proj)
-        fully_shard(model[0])
-        fully_shard(model)
-        root_state = fully_shard.state(model)
-        model0_state = fully_shard.state(model[0])
-        model0_in_proj_state = fully_shard.state(model[0].in_proj)
-        model0_in_proj_state._lazy_init()
-
-        self.assertTrue(root_state._is_root)
-        self.assertFalse(model0_state._is_root)
-        self.assertFalse(model0_in_proj_state._is_root)
-        self.assertEqual(
-            root_state._state_ctx.all_states,
-            [root_state, model0_state, model0_in_proj_state],
-        )
-
-    def test_fully_shard_multi_module_lazy_init_from_nested_state(self):
-        """
-        Tests that lazy initialization started below a multi-module state makes
-        the outermost single-module state the root.
-
-        FSDP(model(
-            0: FSDP([0, 2])(MLP(FSDP(in_proj), out_proj)),
-            1: MLP(in_proj, out_proj),
-            2: FSDP([0, 2])(MLP(in_proj, out_proj)),
-        ))
-        """
-        model = nn.Sequential(MLP(8), MLP(8), MLP(8))
-        fully_shard(model[0].in_proj)
-        fully_shard([model[0], model[2]])
-        fully_shard(model)
-        root_state = fully_shard.state(model)
-        multi_module_state = fully_shard.state(model[0])
-        model0_in_proj_state = fully_shard.state(model[0].in_proj)
-        model0_in_proj_state._lazy_init()
-
-        self.assertTrue(root_state._is_root)
-        self.assertFalse(multi_module_state._is_root)
-        self.assertFalse(model0_in_proj_state._is_root)
-
-    def test_set_is_last_backward_before_lazy_init(self):
-        """
-        Tests that ``set_is_last_backward`` on a non-root module before lazy
-        initialization applies to the root, whether lazy initialization starts
-        from that module or from the root.
-        """
-        self.run_subtests(
-            {"init_from_root": [False, True]},
-            self._test_set_is_last_backward_before_lazy_init,
-        )
-
-    def _test_set_is_last_backward_before_lazy_init(self, init_from_root: bool):
-        model = nn.Sequential(MLP(8), MLP(8))
-        fully_shard(model[0])
-        fully_shard(model)
-        model[0].set_is_last_backward(False)
-        fully_shard.state(model if init_from_root else model[0])._lazy_init()
-        root_state = fully_shard.state(model)
-        self.assertTrue(root_state._is_root)
-        self.assertFalse(root_state._state_ctx.is_last_backward)
-
-    def test_fully_shard_enclosing_state_does_not_extend_lifetime(self):
-        """
-        Tests that keeping a nested module alive before lazy initialization
-        does not keep its enclosing module alive, and that the nested module
-        then becomes its own root.
-        """
-        model = nn.Sequential(MLP(8), MLP(8))
-        fully_shard(model[0])
-        fully_shard(model)
-        model0 = model[0]
-        model_ref = weakref.ref(model)
-        del model
-        # gc.collect() is a no-op while another rank's thread is collecting, so
-        # collect after every rank drops its model and check after every rank collects
-        dist.barrier()
-        gc.collect()
-        dist.barrier()
-        self.assertIsNone(model_ref())
-        model0_state = fully_shard.state(model0)
-        model0_state._lazy_init()
-        self.assertTrue(model0_state._is_root)
-
-    def test_fully_shard_lazy_init_after_module_tree_changes(self):
-        """
-        Tests that lazy initialization from a nested state uses the module tree
-        at that time: a module detached after sharding becomes its own root
-        without initializing its former root, and a module moved within the
-        tree still makes the outermost state the root.
-        """
-        model = nn.Sequential(MLP(8), MLP(8), MLP(8))
-        for mlp in model:
-            fully_shard(mlp)
-        fully_shard(model)
-        root_state = fully_shard.state(model)
-
-        detached = model[0]
-        model[0] = nn.Identity()
-        detached_state = fully_shard.state(detached)
-        detached_state._lazy_init()
-        self.assertTrue(detached_state._is_root)
-        self.assertIsNone(root_state._is_root)
-
-        moved = model[2]
-        del model[2]
-        model[1].moved = moved
-        moved_state = fully_shard.state(moved)
-        moved_state._lazy_init()
-        self.assertTrue(root_state._is_root)
-        self.assertFalse(moved_state._is_root)
-        self.assertEqual(
-            root_state._state_ctx.all_states,
-            [root_state, fully_shard.state(model[1]), moved_state],
-        )
-
     def test_fully_shard_double_lazy_init(self):
         model = nn.Sequential(MLP(8), MLP(8))
         fully_shard(model[0].in_proj)
         fully_shard(model[0].out_proj)
-        # Lazy init before ``model`` is sharded makes ``0.in_proj`` a root
-        fully_shard.state(model[0].in_proj)._lazy_init()
         fully_shard(model)
         root_state = fully_shard.state(model)
+        model0_in_proj_state = fully_shard.state(model[0].in_proj)
+        model0_in_proj_state._lazy_init()
         regex = (
             "FSDP state has already been lazily initialized for 0.in_proj\n"
             "FSDP requires running forward through the root module first"
@@ -758,6 +630,76 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         regex = "FSDP requires a single root module but got "
         with self.assertRaisesRegex(RuntimeError, regex):
             root_state._lazy_init()
+
+    def test_lazy_init_public_api(self):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
+        fully_shard(model[0].out_proj)
+        fully_shard(model)
+
+        model.lazy_init()
+        # Repeated call on the initialized root is a no-op
+        model.lazy_init()
+
+        root_state = fully_shard.state(model)
+        in_proj_state = fully_shard.state(model[0].in_proj)
+        out_proj_state = fully_shard.state(model[0].out_proj)
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(in_proj_state._is_root)
+        self.assertFalse(out_proj_state._is_root)
+        self.assertEqual(
+            root_state._state_ctx.all_states,
+            [root_state, in_proj_state, out_proj_state],
+        )
+        # Resources created at lazy init are available before the first forward
+        stream = model.get_all_gather_copy_in_stream()
+        self.assertEqual(model[0].in_proj.get_all_gather_copy_in_stream(), stream)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "lazy_init must be called on the root FSDP module"
+        ):
+            model[0].in_proj.lazy_init()
+
+    def test_lazy_init_public_api_multi_module_root_raises(self):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard([model[0], model[1]])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"(?s)FSDP requires a single root module but got .*call lazy_init\(\) on the root module first",
+        ):
+            model[0].lazy_init()
+
+    def test_lazy_init_public_api_after_submodule_init_raises(self):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0])
+        fully_shard(model)
+        model[0].lazy_init()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "FSDP state has already been lazily initialized for 0\n"
+            "FSDP requires running forward through the root module first, "
+            "or calling lazy_init\\(\\) on the root module before running submodules",
+        ):
+            model.lazy_init()
+
+    def test_lazy_init_public_api_replicate(self):
+        from torch.distributed._composable.replicate_with_fsdp import (
+            replicate as replicate_with_fsdp,
+        )
+
+        model = nn.Sequential(MLP(8), MLP(8))
+        replicate_with_fsdp(model[0])
+        replicate_with_fsdp(model)
+
+        model.lazy_init()
+        model.lazy_init()
+
+        self.assertTrue(replicate_with_fsdp.state(model)._is_root)
+        self.assertFalse(replicate_with_fsdp.state(model[0])._is_root)
+        with self.assertRaisesRegex(
+            RuntimeError, "lazy_init must be called on the root Replicate module"
+        ):
+            model[0].lazy_init()
 
     def test_reset_sharded_param_in_lazy_init(self):
         class MyModel(nn.Module):

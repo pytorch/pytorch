@@ -141,8 +141,8 @@ def fully_shard(
     parameters and later free parameters and reduce-scatter gradients.
 
     Parameter dtypes and ``grad_dtype`` may change (e.g. ``module.bfloat16()``)
-    until lazy initialization at the first forward or
-    :meth:`FSDPModule.unshard`; later changes are unsupported. An explicit
+    until lazy initialization at the first forward, :meth:`FSDPModule.lazy_init`,
+    or :meth:`FSDPModule.unshard`; later changes are unsupported. An explicit
     ``grad_dtype`` survives dtype conversions and is inherited by a parameter
     that ``load_state_dict(assign=True)`` registers without one. Device moves
     preserve sharded gradient dtypes and leave pending gradients on their
@@ -159,17 +159,6 @@ def fully_shard(
     groups ("layer by layer") allows for peak memory savings and communication/computation
     overlap. Users generally should *not* call :meth:`fully_shard` only on the
     topmost root module.
-
-    The module of the outermost :meth:`fully_shard` call is the root. FSDP
-    initializes it lazily when any FSDP module inside it first runs forward,
-    so submodules may run forward before or without the root module, e.g. when
-    an inference engine calls the embedding and the decoder layers itself.
-    Such submodules are non-root modules, so with the default
-    ``reshard_after_forward`` they reshard after each forward; pass
-    ``reshard_after_forward=False`` to keep them unsharded. If a submodule
-    enables manual backward finalization before the root is initialized,
-    submodules that run forward without the root instead run as roots of their
-    own, e.g. pipeline stages.
 
     When called with a list (``fully_shard([a, b, ...])``), the model's
     forward may run only a subset of the grouped modules, with the rest
@@ -448,6 +437,36 @@ class FSDPModule:
         return None
 
     @_dynamo_disable
+    def lazy_init(self) -> None:
+        """
+        Initializes this module as the root FSDP module and all nested FSDP
+        submodules under it as non-root modules.
+
+        Normally, FSDP performs lazy initialization on the first forward pass
+        of the root module. Call this method explicitly on the root module
+        after all :func:`fully_shard` calls have completed when submodules may
+        run forward before or without the root module (for example, evaluating
+        an encoder submodule first, or calling grouped embeddings and decoder
+        layers separately from an inference engine), or when accessing
+        resources created at lazy initialization (such as
+        :meth:`get_all_gather_copy_in_stream` or :func:`share_comm_ctx`).
+
+        Calling this method repeatedly on an already-initialized root module
+        is a no-op.
+
+        Raises:
+            RuntimeError: If called on a module that is already initialized as
+                a non-root module, on a multi-module ``fully_shard`` group, or
+                if a nested submodule has already been lazily initialized.
+        """
+        state = self._get_fsdp_state()
+        if state._is_root is False:
+            raise RuntimeError(
+                f"lazy_init must be called on the root {state._state_name} module"
+            )
+        state._lazy_init()
+
+    @_dynamo_disable
     def reset_iter_state(self) -> None:
         """
         Resets FSDP's per-iteration state after an exception aborted a
@@ -473,10 +492,12 @@ class FSDPModule:
         ``RuntimeError``. Reset from a different FSDP root sharing that context
         raises until the owning root waits or resets.
 
-        The root FSDP module is the module the top-level ``fully_shard`` was
-        applied to. Calling this on a non-root module resets its root.
+        Must be called on the root FSDP module — i.e. the module the
+        top-level ``fully_shard`` was applied to, equivalently the
+        module first forwarded. Calling on a non-root module raises
+        ``RuntimeError``.
         """
-        state = self._get_fsdp_state()._get_root_state()
+        state = self._get_fsdp_state()
         state._reset_iter_state()
 
     def set_is_last_backward(self, is_last_backward: bool) -> None:
@@ -484,21 +505,16 @@ class FSDPModule:
         Sets whether the next backward is the last one. On the last backward,
         FSDP waits on pending gradient reduction and clears internal data
         data structures for backward prefetching. This can be useful for
-        microbatching. Calling this on a non-root module, including before the
-        first forward, sets it for its root.
+        microbatching.
         """
         state = self._get_fsdp_state()
-        if state._is_root is None:
-            # Lazy init replaces each non-root state's context with the root's
-            state = state._get_outermost_state()
         state._state_ctx.is_last_backward = is_last_backward
 
     def set_manual_backward_finalization(self, enabled: bool) -> None:
         """
         Set whether the caller must finalize backward.
 
-        This applies to the root FSDP module: after the first forward, calling
-        it on a non-root module sets the mode of its root. When enabled, manual
+        This must be called on the root FSDP module. When enabled, manual
         finalization supersedes :meth:`set_is_last_backward`. Call
         :meth:`finalize_backward` after all backward passes in the logical
         backward operation and before reading or clearing gradients. Otherwise,
@@ -509,7 +525,12 @@ class FSDPModule:
         Set this before backward. The mode cannot change after backward starts
         until the backward iteration is finalized or reset.
         """
-        state = self._get_fsdp_state()._get_root_state()
+        state = self._get_fsdp_state()
+        if state._is_root is False:
+            raise RuntimeError(
+                "set_manual_backward_finalization must be called on the root "
+                f"{state._state_name} module"
+            )
         if (
             enabled != state._state_ctx.manual_backward_finalization
             and torch._C._current_graph_task_id() != -1
@@ -547,8 +568,7 @@ class FSDPModule:
         Enable manual finalization before forward, then call this after all
         backward passes in the logical backward operation. This completes
         pending gradient reduction and resharding according to their current
-        settings. Calling this before the first forward is a no-op, and calling
-        it on a non-root module finalizes its root.
+        settings. Calling this before the root module's first forward is a no-op.
         It is also safe after a completed backward that did not reach any
         FSDP-managed parameters. Do not call it between forward and backward.
 
@@ -593,7 +613,7 @@ class FSDPModule:
                 FSDP root that shares its communication context. If ``False``,
                 wait before returning.
         """
-        state = self._get_fsdp_state()._get_root_state()
+        state = self._get_fsdp_state()
         if state._is_root is None:
             return _GradientReductionHandleImpl(None, None) if async_op else None
         if state._state_ctx.gradient_reduction_pending:
@@ -1230,7 +1250,8 @@ class FSDPModule:
         and this stream carries none of them.
 
         The stream is shared by the FSDP modules under one root, and created
-        at lazy initialization, in the root module's first forward.
+        at lazy initialization, in the root module's first forward or
+        :meth:`lazy_init`.
 
         Raises:
             RuntimeError: If called before lazy initialization.
@@ -1239,7 +1260,8 @@ class FSDPModule:
         if state._is_root is None:
             raise RuntimeError(
                 "The all-gather copy-in stream is created at lazy initialization. "
-                "Call this after the root FSDP module's first forward."
+                "Call this after the root FSDP module's first forward or after "
+                "calling lazy_init() on the root module."
             )
         return state._comm_ctx.all_gather_copy_in_stream
 
