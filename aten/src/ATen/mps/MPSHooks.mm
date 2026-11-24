@@ -89,6 +89,7 @@ void* MPSHooks::getCommandBuffer() const {
   dispatch_assert_queue(stream->queue());
   // Release pending computeCommandEncoder, as extensions is likely to allocate new one
   stream->endKernelCoalescing();
+  stream->markWorkEncoded();
   return stream->commandBuffer();
 }
 

@@ -19,6 +19,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_exception.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_irange.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_jiterator_macros.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_layout.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_load.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_macros.cpp
@@ -26,14 +27,17 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_mathconstants.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_memoryformat.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_metaprogramming.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_native_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_overflows.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scalartype.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_transposetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typelist.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typetraits.cpp
-  ${AOTI_ABI_CHECK_TEST_ROOT}/test_transposetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec_half.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_zmath.cpp
 )
 
 # The below are tests that require CPU_CAPABILITY setup
@@ -44,8 +48,22 @@ set(AOTI_ABI_CHECK_VEC_TEST_SRCS
 
 if(USE_CUDA)
   list(APPEND AOTI_ABI_CHECK_TEST_SRCS
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_cast.cu
     ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_kernel_utils.cu
   )
+endif()
+
+# test_model_pool.cpp follows the build's device macro, like the pool's code.
+# ROCm builds hipify the pool's USE_CUDA into USE_ROCM.
+if(USE_CUDA)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_CUDA)
+elseif(USE_ROCM)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_ROCM)
+elseif(USE_XPU)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_XPU)
 endif()
 
 add_executable(test_aoti_abi_check
