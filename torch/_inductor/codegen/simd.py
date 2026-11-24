@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
+from torch.utils._sympy.numbers import is_infinite
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
 from ..._dynamo.utils import counters
@@ -544,6 +545,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         # forcing it adds no guard, so the caller has to check the sizes before
         # launching the kernel (ConditionalMultiKernel does).
         override_index_dtype: torch.dtype | None = None,
+        # Optimization hints to generate the kernel with instead of the example
+        # inputs' (see SizeVarAllocator.optimization_hint_overrides). Set only for the
+        # int64 kernel that config.dual_index_dtype_kernels builds next to an int32
+        # one: it only runs on sizes past int32, so it is tuned for those
+        # (_int64_kernel_hint_overrides).
+        optimization_hint_overrides: dict[sympy.Symbol, int] | None = None,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -607,6 +614,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if override_index_dtype is not None
             else self.features.select_index_dtype()
         )
+        self.optimization_hint_overrides = optimization_hint_overrides
 
     def codegen_template_body(
         self,
@@ -2939,6 +2947,33 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         return None
 
 
+def _int64_kernel_hint_overrides(
+    int32_conditions: list[sympy.Expr],
+) -> dict[sympy.Symbol, int] | None:
+    """Hints for the int64 kernel of a dual int32/int64 pair: every symbol in
+    int32_conditions (SIMDKernelFeatures.int32_index_conditions) scaled by the
+    smallest power of two at which a condition fails, i.e. the smallest input with
+    the example's proportions that launches that kernel. None if there is none."""
+    sizevars = V.graph.sizevars
+    symbols = sorted(
+        OrderedSet(s for cond in int32_conditions for s in cond.free_symbols), key=str
+    )
+    hints = {s: sizevars.optimization_hint(s) for s in symbols}
+    uppers = {s: sizevars.shape_env.bound_sympy(s).upper for s in symbols}
+    factor = 2
+    while factor <= 2**32:
+        values = {
+            s: hint * factor
+            if is_infinite(uppers[s])
+            else min(hint * factor, int(uppers[s]))
+            for s, hint in hints.items()
+        }
+        if any(cond.xreplace(values) is sympy.false for cond in int32_conditions):
+            return values
+        factor *= 2
+    return None
+
+
 class SIMDScheduling(BaseScheduling):
     """
     Single Instruction Multiple Data parent class used for fusion across
@@ -4743,13 +4778,16 @@ class SIMDScheduling(BaseScheduling):
         SchedulerNodes in codegen order (node_schedule) and its sizes; every kernel
         built below computes all of them, and one is launched. In three steps:
 
-        1. Build (_create_node_schedule_kernel), with the tiling picked once: create
-           the kernel codegen objects (one, or a multi-kernel wrapping several leaf kernels) and
-           generate each leaf's body into them. Nothing is rendered or written to the
-           wrapper, so this can run more than once; the dual index dtype path builds
-           an int32 and an int64 kernel and wraps them in a ConditionalMultiKernel.
+        1. Build (_create_node_schedule_kernel): pick the tiling, create the kernel
+           objects (one, or a multi-kernel wrapping several leaf kernels) and generate
+           each leaf's body: the Triton lines for the nodes' loads, compute and stores.
+           A leaf has no signature, decorator or name yet, and nothing is written to
+           the wrapper, so this can run more than once; the dual index dtype path
+           builds an int32 and an int64 kernel, each with its own hints and tiling,
+           and wraps them in a ConditionalMultiKernel.
         2. Define (_define_node_schedule_kernels), on the leaf kernels from step 1:
-           merge their workspaces, then render each one's Triton source and write its
+           merge their workspaces, then turn each leaf into its complete Triton source
+           (decorator with size_hints, signature, setup lines, body) and write its
            definition (`name = async_compile.triton(...)`) into the output module,
            which sets its kernel_name. This runs once, after every leaf exists,
            because the merged workspace size is part of each source.
@@ -4757,13 +4795,6 @@ class SIMDScheduling(BaseScheduling):
            write the launch of the kernel from step 1.
         """
         node_schedule = kernel_features.node_schedule
-        tiling_and_scores = self.get_tiling_and_scores(
-            node_schedule,
-            kernel_features.numel,
-            kernel_features.reduction_numel,
-            kernel_features.coalesce_analysis,
-        )
-
         final_kernel: SIMDKernel | MultiKernelBase
         # Empty or None conditions: select_index_dtype picks int32 or int64 without a
         # guard, so a single kernel suffices.
@@ -4771,10 +4802,12 @@ class SIMDScheduling(BaseScheduling):
             int32_conditions := kernel_features.int32_index_conditions()
         ):
             int32_kernel = self._create_node_schedule_kernel(
-                kernel_features, tiling_and_scores, torch.int32
+                kernel_features, torch.int32
             )
             int64_kernel = self._create_node_schedule_kernel(
-                kernel_features, tiling_and_scores, torch.int64
+                kernel_features,
+                torch.int64,
+                _int64_kernel_hint_overrides(int32_conditions),
             )
             final_kernel = ConditionalMultiKernel(
                 [
@@ -4783,9 +4816,7 @@ class SIMDScheduling(BaseScheduling):
                 ]
             )
         else:
-            final_kernel = self._create_node_schedule_kernel(
-                kernel_features, tiling_and_scores
-            )
+            final_kernel = self._create_node_schedule_kernel(kernel_features)
         kernels = leaf_kernels(final_kernel)
         self._define_node_schedule_kernels(kernels, node_schedule)
 
@@ -4829,34 +4860,47 @@ class SIMDScheduling(BaseScheduling):
     def _create_node_schedule_kernel(
         self,
         kernel_features: SIMDKernelFeatures,
-        tiling_and_scores: tuple[dict[str, sympy.Expr], dict[str, sympy.Expr] | None],
         index_dtype: torch.dtype | None = None,
+        optimization_hint_overrides: dict[sympy.Symbol, int] | None = None,
     ) -> SIMDKernel | MultiKernelBase:
-        """Build step of codegen_node_schedule: with the given tiling, create the
-        kernel codegen objects (one kernel, or a multi-kernel over several leaf
-        kernels) and replay the nodes into each leaf, filling its loads, compute and
-        stores.
+        """Build step of codegen_node_schedule: pick the tiling, create the kernel
+        objects (one kernel, or a multi-kernel over several leaf kernels) and generate
+        each leaf's body: the Triton source lines for the nodes' loads, compute and
+        stores, kept in buffers on the leaf.
 
-        Returns the kernel to launch. Its leaves have no source or name yet
-        (_define_node_schedule_kernels adds them). Nothing is written to the wrapper
-        and no graph state changes, so this can run more than once for one schedule.
+        Returns the kernel (or multi-kernel) whose leaves hold those bodies. Nothing
+        is written to the wrapper and no graph state changes, so this can run more
+        than once for one schedule.
+
         index_dtype forces the index dtype instead of deriving it (and its guard)
-        from the sizes.
+        from the sizes. optimization_hint_overrides replaces the hints that the
+        heuristics read (tiling included), here and when _define_node_schedule_kernels
+        renders the kernels.
         """
-        tiling, tiling_score = tiling_and_scores
-        kernel_kwargs: dict[str, Any] = {
-            "features": kernel_features,
-            "tiling_scores": tiling_score,
-        }
-        if index_dtype is not None:
-            kernel_kwargs["override_index_dtype"] = index_dtype
-        final_kernel = self.create_kernel_choices(
-            kernel_features, [tiling], kernel_kwargs
-        )
-        for kernel in leaf_kernels(final_kernel):
-            self.codegen_node_schedule_with_kernel(
-                kernel_features.node_schedule, kernel
+        with V.graph.sizevars.optimization_hint_overrides(optimization_hint_overrides):
+            tiling, tiling_score = self.get_tiling_and_scores(
+                kernel_features.node_schedule,
+                kernel_features.numel,
+                kernel_features.reduction_numel,
+                kernel_features.coalesce_analysis,
             )
+            kernel_kwargs: dict[str, Any] = {
+                "features": kernel_features,
+                "tiling_scores": tiling_score,
+            }
+            if index_dtype is not None:
+                kernel_kwargs["override_index_dtype"] = index_dtype
+            if optimization_hint_overrides is not None:
+                kernel_kwargs["optimization_hint_overrides"] = (
+                    optimization_hint_overrides
+                )
+            final_kernel = self.create_kernel_choices(
+                kernel_features, [tiling], kernel_kwargs
+            )
+            for kernel in leaf_kernels(final_kernel):
+                self.codegen_node_schedule_with_kernel(
+                    kernel_features.node_schedule, kernel
+                )
         return final_kernel
 
     def _define_node_schedule_kernels(
@@ -4864,9 +4908,10 @@ class SIMDScheduling(BaseScheduling):
     ) -> None:
         """Define step of codegen_node_schedule, on every leaf kernel built by
         _create_node_schedule_kernel for one launch: merge their workspaces, then
-        render each one's Triton source and write its definition
-        (`name = async_compile.triton(...)`) into the output module, setting its
-        kernel_name and code_hash.
+        turn each leaf into its complete Triton source (codegen_kernel adds the
+        decorator with size_hints, the signature and the setup lines around the
+        body) and write its definition (`name = async_compile.triton(...)`) into the
+        output module, setting its kernel_name and code_hash.
 
         Runs once, after all the leaves exist: the merged workspace size is part of
         each source.
@@ -4878,7 +4923,15 @@ class SIMDScheduling(BaseScheduling):
         config_patches = self._collect_config_patches(node_schedule)
 
         for kernel in kernels:
-            with V.set_kernel_handler(kernel), config.patch(**config_patches):
+            # Reapply the hints the kernel was built with: codegen_kernel reads hints
+            # too (e.g. for size_hints).
+            with (
+                V.set_kernel_handler(kernel),
+                config.patch(**config_patches),
+                V.graph.sizevars.optimization_hint_overrides(
+                    kernel.optimization_hint_overrides
+                ),
+            ):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
@@ -5876,7 +5929,16 @@ class SIMDScheduling(BaseScheduling):
 
     @classmethod
     @functools.lru_cache(32)
-    def candidate_tilings(cls, node, numel, reduction_numel) -> list[CandidateTiling]:
+    def candidate_tilings(
+        cls,
+        node,
+        numel,
+        reduction_numel,
+        hint_overrides_key: frozenset[tuple[sympy.Symbol, int]] | None = None,
+    ) -> list[CandidateTiling]:
+        """Candidate tilings of node, scored from optimization hints.
+        hint_overrides_key is only part of the cache key, so that scores computed
+        under some overrides are not reused under others."""
         is_pointwise = reduction_numel == 1
 
         def tile_ranges(is_pointwise: bool, ranges, rw) -> list[CandidateTiling]:
@@ -6593,10 +6655,13 @@ class SIMDScheduling(BaseScheduling):
 
             return _TilingSelection(default_tiling, None, None)
 
+        hint_overrides_key = V.graph.sizevars.optimization_hint_overrides_key
         seen_names: OrderedSet[str] = OrderedSet()
         candidate_tiles: Counter[CandidateTiling] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
-            for candidate_tiling in cls.candidate_tilings(node, numel, reduction_numel):
+            for candidate_tiling in cls.candidate_tilings(
+                node, numel, reduction_numel, hint_overrides_key
+            ):
                 if candidate_tiling.name in seen_names:
                     continue
                 elif candidate_tiling.name is not None:
