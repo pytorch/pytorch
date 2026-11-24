@@ -292,10 +292,10 @@ class UmbrellaPlanTest(unittest.TestCase):
     def test_redirects_skip_uncertain_or_invalid_umbrellas_without_review(self):
         for match, target in (("uncertain", issue(TARGET)), ("covered", {})):
             with self.subTest(match=match, target=target):
-                proposal = plan(match=match, labels=["oncall: distributed"])
+                proposal = plan(match=match, labels=["oncall: jit"])
                 result = self.evaluate(proposal, target=target)
                 self.assertEqual(result.umbrella_action, "skip")
-                self.assertIn("oncall: distributed", result.add_labels)
+                self.assertIn("oncall: jit", result.add_labels)
                 self.assertNotIn("triage review", result.add_labels)
                 self.assertEqual(result.comment, "")
                 self.assertFalse(result.close)

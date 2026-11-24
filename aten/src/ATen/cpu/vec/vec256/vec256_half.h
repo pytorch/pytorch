@@ -228,8 +228,8 @@ template <>
 inline void convert(const double* src, Half* dst, int64_t n) {
   auto load_float = [](const double* src) -> __m256 {
     // Load one float vector from an array of doubles
-    __m128 a = _mm256_cvtpd_ps(_mm256_loadu_pd(src));
-    __m128 b = _mm256_cvtpd_ps(_mm256_loadu_pd(src + 4));
+    __m128 a = cvtpd_ps_round_to_odd(_mm256_loadu_pd(src));
+    __m128 b = cvtpd_ps_round_to_odd(_mm256_loadu_pd(src + 4));
     return _mm256_insertf128_ps(_mm256_castps128_ps256(a), b, 1);
   };
 
