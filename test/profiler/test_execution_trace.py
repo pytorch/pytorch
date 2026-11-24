@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch import _dynamo as torchdynamo
+from torch._inductor.utils import fresh_cache
 from torch.autograd import (
     _record_function_with_args_enter,
     _record_function_with_args_exit,
@@ -30,8 +31,10 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
+    skipIfCppFakeTensor,
     skipIfHpu,
     skipIfTorchDynamo,
     TemporaryFileName,
@@ -57,7 +60,26 @@ except ImportError:
 Json = dict[str, Any]
 
 
-class TestExecutionTrace(TestCase):
+class _TestExecutionTraceBase(TestCase):
+    def get_execution_trace_root(self, output_file_name) -> Json:
+        import gzip
+
+        nodes = []
+        with (
+            gzip.open(output_file_name)
+            if output_file_name.endswith(".gz")
+            else open(output_file_name)
+        ) as f:
+            et_graph = json.load(f)
+            if "nodes" not in et_graph:
+                raise AssertionError(f"Expected 'nodes' in execution trace: {et_graph}")
+            nodes = et_graph["nodes"]
+        return nodes
+
+
+class TestExecutionTrace(_TestExecutionTraceBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def payload(self, device, use_device=False):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
@@ -91,21 +113,6 @@ class TestExecutionTrace(TestCase):
             if use_device:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
-
-    def get_execution_trace_root(self, output_file_name) -> Json:
-        import gzip
-
-        nodes = []
-        with (
-            gzip.open(output_file_name)
-            if output_file_name.endswith(".gz")
-            else open(output_file_name)
-        ) as f:
-            et_graph = json.load(f)
-            if "nodes" not in et_graph:
-                raise AssertionError(f"Expected 'nodes' in execution trace: {et_graph}")
-            nodes = et_graph["nodes"]
-        return nodes
 
     def get_execution_trace_rf_ids(self, nodes: list[Json]) -> list[int]:
         """Returns a sorted list of rf_id (record function ids) in execution trace"""
@@ -389,6 +396,7 @@ class TestExecutionTrace(TestCase):
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
+    @fresh_cache()
     def test_execution_trace_with_pt2(self, device):
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
@@ -464,12 +472,8 @@ class TestExecutionTrace(TestCase):
             "ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS": "1",
         },
     )
+    @fresh_cache()
     def test_execution_trace_env_enabled_with_pt2(self, device):
-        # clean up the local cache for triton kernel
-        from torch._inductor.codecache import PyCodeCache
-
-        PyCodeCache.cache_clear(purge=True)
-
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
             x = torch.nn.functional.linear(a, b)
@@ -529,12 +533,8 @@ class TestExecutionTrace(TestCase):
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
+    @fresh_cache()
     def test_triton_fx_graph_with_et(self, device):
-        # clean up the local cache for triton kernel
-        from torch._inductor.codecache import PyCodeCache
-
-        PyCodeCache.cache_clear(purge=True)
-
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
             x = torch.nn.functional.linear(a, b)
@@ -702,51 +702,6 @@ class TestExecutionTrace(TestCase):
                 f"Expected {expected_loop_events} loop events, got {event_count}"
             )
 
-    def test_execution_trace_no_capture(self):
-        with TemporaryFileName("w+t", suffix=".et.json") as file_name:
-            et = ExecutionTraceObserver().register_callback(file_name)
-
-            if file_name != et.get_output_file_path():
-                raise AssertionError(
-                    f"Expected output file path {file_name}, got {et.get_output_file_path()}"
-                )
-            et.unregister_callback()
-            nodes = self.get_execution_trace_root(file_name)
-            found_root_node = False
-            for n in nodes:
-                if "name" not in n:
-                    raise AssertionError(f"Expected node to have 'name': {n}")
-                if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                    found_root_node = True
-            if not found_root_node:
-                raise AssertionError("Expected to find root node")
-
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
-    def test_execution_trace_nested_tensor(self):
-        def fn(nt):
-            return nt.sin().cos()
-
-        with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
-            observer = ExecutionTraceObserver().register_callback(fp.name)
-            filename = fp.name
-        with torch.profiler.profile(execution_trace_observer=observer):
-            for i in range(3):
-                values = torch.rand((8 + i, 4 + i))
-                offsets = torch.tensor([0, 2, 4, 6, 8 + i])
-                nt = torch.nested.nested_tensor_from_jagged(values, offsets)
-                fn(nt)
-
-        nodes = self.get_execution_trace_root(filename)
-        os.remove(filename)
-        found_cos = False
-        for n in nodes:
-            if "name" not in n:
-                raise AssertionError(f"Expected node to have 'name': {n}")
-            if "cos" in n["name"]:
-                found_cos = True
-        if not found_cos:
-            raise AssertionError("Expected to find cos node")
-
     @skipCPUIf(True, "accelerator required for integral tensor range profiling")
     @patch.dict(
         os.environ, {"ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE": "1"}
@@ -822,6 +777,56 @@ class TestExecutionTrace(TestCase):
                 raise AssertionError("Expected t1 contents to match [1, 2, 3, 4]")
             if not (t2 == np.array([0, 0, 1, 0])).all():
                 raise AssertionError("Expected t2 contents to match [0, 0, 1, 0]")
+
+
+class TestExecutionTraceGeneric(_TestExecutionTraceBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_execution_trace_no_capture(self):
+        with TemporaryFileName("w+t", suffix=".et.json") as file_name:
+            et = ExecutionTraceObserver().register_callback(file_name)
+
+            if file_name != et.get_output_file_path():
+                raise AssertionError(
+                    f"Expected output file path {file_name}, got {et.get_output_file_path()}"
+                )
+            et.unregister_callback()
+            nodes = self.get_execution_trace_root(file_name)
+            found_root_node = False
+            for n in nodes:
+                if "name" not in n:
+                    raise AssertionError(f"Expected node to have 'name': {n}")
+                if "[pytorch|profiler|execution_trace|process]" in n["name"]:
+                    found_root_node = True
+            if not found_root_node:
+                raise AssertionError("Expected to find root node")
+
+    @skipIfCppFakeTensor("no nested tensor support")
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
+    def test_execution_trace_nested_tensor(self):
+        def fn(nt):
+            return nt.sin().cos()
+
+        with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
+            observer = ExecutionTraceObserver().register_callback(fp.name)
+            filename = fp.name
+        with torch.profiler.profile(execution_trace_observer=observer):
+            for i in range(3):
+                values = torch.rand((8 + i, 4 + i))
+                offsets = torch.tensor([0, 2, 4, 6, 8 + i])
+                nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+                fn(nt)
+
+        nodes = self.get_execution_trace_root(filename)
+        os.remove(filename)
+        found_cos = False
+        for n in nodes:
+            if "name" not in n:
+                raise AssertionError(f"Expected node to have 'name': {n}")
+            if "cos" in n["name"]:
+                found_cos = True
+        if not found_cos:
+            raise AssertionError("Expected to find cos node")
 
 
 instantiate_device_type_tests(TestExecutionTrace, globals(), allow_xpu=True)
