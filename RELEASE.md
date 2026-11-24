@@ -77,12 +77,12 @@ For Release 2.15 PyTorch Supports following CUDA Architectures:
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |
 | 13.2.2 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0) | Release wheels ship SASS only; Linux nightlies also add +PTX for 12.0 |
-| 13.4.1 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0) | Windows builds use CUDA 13.4.2. Release wheels ship SASS only; Linux nightlies also add +PTX for 12.0 |
+| 13.4.3 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0) | Release wheels ship SASS only; Linux nightlies also add +PTX for 12.0 |
 
 | CUDA | architectures supported for Linux aarch64 builds |
 | --- | --- |
 | 13.2.2 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0) |
-| 13.4.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0) |
+| 13.4.3 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0) |
 
 Release wheels ship SASS only; Linux aarch64 nightlies also add +PTX for 12.0.
 

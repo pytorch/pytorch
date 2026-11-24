@@ -2065,6 +2065,41 @@ class GraphModule(torch.nn.Module):
                         f"dep {dep} of {cd} is defined after it is used",
                     )
 
+    def test_view_mutation_in_side_stream_stays_on_side_stream(self):
+        # The slice_scatter nodes that functionalization synthesizes for
+        # b[:, :8].mul_() are rewritten by reinplacing and must keep the side
+        # stream annotation, or they race with the side stream (#205697).
+        from torch._inductor.utils import run_and_get_code
+
+        s = device_module.Stream()
+
+        def fn(x, w1, w2):
+            a = (x @ w1).clone()
+            ev = device_module.Event()
+            ev.record()
+            with device_module.stream(s):
+                s.wait_event(ev)
+                b = (x @ w2).clone()
+                b[:, :8].mul_(2.0).add_(0.5)
+                ev2 = device_module.Event()
+                ev2.record()
+            a[:, 8:].add_(x[:, 8:].sin())
+            device_module.current_stream().wait_event(ev2)
+            return a + b, b[:, :8]
+
+        x, w1, w2 = (torch.randn(16, 16, device=GPU_TYPE) for _ in range(3))
+        compiled_fn = torch.compile(fn)
+        _, (code,) = run_and_get_code(compiled_fn, x, w1, w2)
+        for i in range(3):
+            xi = x + i * 0.1
+            expected = fn(xi, w1, w2)
+            device_module.synchronize()
+            actual = compiled_fn(xi, w1, w2)
+            device_module.synchronize()
+            self.assertEqual(actual, expected)
+        # default -> side stream -> default; the bug added extra switches.
+        self.assertEqual(_count_generated_stream_contexts(code), 3)
+
 
 @unittest.skipUnless(TEST_CUDA, "requires CUDA")
 @xfailIfNoAcceleratorTriton
