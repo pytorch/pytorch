@@ -134,7 +134,7 @@ std::string show_config() {
   // Reference:
   // https://blog.kowalczyk.info/article/j/guide-to-predefined-macros-in-c-compilers-gcc-clang-msvc-etc..html
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) && !defined(__clang__)
   {
     ss << "  - GCC " << __GNUC__ << '.' << __GNUC_MINOR__ << '\n';
   }

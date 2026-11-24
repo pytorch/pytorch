@@ -3,6 +3,7 @@
 import copy
 import functools
 import itertools
+import math
 import os
 import re
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 import warnings
 import weakref
 from collections.abc import Callable
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -27,10 +29,17 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 )
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
     MixedPrecisionPolicy,
     OffloadPolicy,
+)
+from torch.distributed.fsdp._fully_shard._all_gather_layout import (
+    AllGatherFinalizeMetadata,
+    AllGatherLayout,
+    AllGatherOutputs,
+    AllGatherParamMetadata,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
@@ -38,6 +47,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
+    AllGatherResult,
     DefaultAllGather,
     DefaultAllReduce,
     DefaultReduceScatter,
@@ -45,12 +55,16 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_all_gather_copy_out,
     foreach_reduce,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo, TrainingState
+from torch.distributed.fsdp._fully_shard._fsdp_common import (
+    FSDPMeshInfo,
+    ShardPlacementResult,
+    TrainingState,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam, ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     AllGatherState,
     FSDPCommContext,
@@ -58,6 +72,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
 )
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
+    DefaultAllGatherLayout,
     reduce_scatter_input_fn_with_native_copy,
 )
 from torch.distributed.tensor import DTensor, Shard
@@ -70,6 +85,7 @@ from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MUL
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
 )
 from torch.testing._internal.common_distributed import (
@@ -575,8 +591,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 class TestFullyShardChunkCatMixedDtype(TestCase):
     def test_numerics(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
-        # Dim-0 sizes that need padding, multi-dim, and one large enough to
-        # span several blocks per chunk
+        # Dim-0 sizes that need padding, multi-dim, and one large enough for
+        # the vectorized cast
         sizes = [(5, 3), (7,), (2049, 2, 2)]
         # On CUDA: the fused kernel, a composite fallback, then the fused kernel
         # casting fp16
@@ -599,6 +615,50 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
             self.assertEqual(out, expected, atol=0, rtol=0)
             # Autograd must see the in-place write to out
             self.assertGreater(out._version, version)
+
+    @onlyCUDA
+    def test_numerics_cast_alignments(self, device):
+        # The fp32 input shifts the destination alignment of every chunk, and the
+        # source alignment changes from chunk to chunk. Each chunk of the
+        # low-precision input spans several cast blocks, and its last chunk is
+        # one row, i.e. `width` elements, short. The (8, 1000) input with 5
+        # chunks has a last chunk that is all padding.
+        for dtype, num_chunks in itertools.product(
+            (torch.bfloat16, torch.float16), (3, 5)
+        ):
+            base = torch.randn(num_chunks * 8012 + 8, device=device, dtype=dtype)
+            cases = []
+            for dst_offset, width in itertools.product(range(1, 5), range(1, 12)):
+                num_rows = num_chunks * (8001 // width + 1) - 1
+                offset = (width + dst_offset) % 8
+                flat = base[offset : offset + num_rows * width]
+                cases.append((dst_offset, flat.view(num_rows, width)))
+            cases.append((1, torch.randn(8, 1000, device=device, dtype=dtype)))
+            for dst_offset, low_precision in cases:
+                tensors = [
+                    torch.randn(num_chunks * dst_offset, device=device),
+                    low_precision,
+                ]
+                expected = torch._chunk_cat([t.float() for t in tensors], 0, num_chunks)
+                out = torch.full_like(expected, float("nan"))
+                torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, num_chunks, out=out)
+                msg = f"{dtype} {num_chunks} {dst_offset} {tuple(low_precision.shape)}"
+                self.assertEqual(out, expected, atol=0, rtol=0, msg=msg)
+
+    @onlyCUDA
+    @largeTensorTest("1GB")
+    def test_numerics_cast_several_units_per_thread(self, device):
+        # 50M bf16 elements are enough for each thread to cast 4 units on GPUs
+        # with up to 304 SMs. The fp32 input makes every chunk unaligned.
+        num_chunks = 3
+        tensors = [
+            torch.randn(num_chunks, device=device),
+            torch.randn(3 * 4194304 - 1, 4, device=device, dtype=torch.bfloat16),
+        ]
+        expected = torch._chunk_cat([t.float() for t in tensors], 0, num_chunks)
+        out = torch.full_like(expected, float("nan"))
+        torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, num_chunks, out=out)
+        self.assertEqual(out, expected, atol=0, rtol=0)
 
     def test_numerics_with_leading_dims(self, device):
         bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
@@ -894,6 +954,39 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
                 self.assertEqual(model(inp), ref_model(inp))
 
     @skip_if_lt_x_gpu(1)
+    def test_single_rank_unshard_casts_once(self):
+        # Unsharding casts the shards straight into the unsharded parameters
+        mesh = init_device_mesh(
+            device.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+        model = fully_shard(
+            nn.Linear(16, 33, device=device),
+            mesh=mesh,
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        ops = []
+
+        class RecordOps(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                ops.append(func)
+                return func(*args, **(kwargs or {}))
+
+        with RecordOps():
+            model.unshard()
+        # One copy for each of the weight and bias, and no separate casts
+        self.assertNotIn(torch.ops.aten._to_copy.default, ops)
+        self.assertEqual(ops.count(torch.ops.aten.copy_.default), 2)
+        for fsdp_param in model._get_fsdp_state()._fsdp_param_group.fsdp_params:
+            self.assertEqual(
+                fsdp_param.unsharded_param,
+                fsdp_param.sharded_param.to_local().to(torch.bfloat16),
+                atol=0,
+                rtol=0,
+            )
+
+    @skip_if_lt_x_gpu(1)
     def test_copy_fns(self):
         # Records what FSDP passes its copy functions, which delegate to the defaults
         model = nn.Sequential(
@@ -934,8 +1027,16 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
                     output_tensor, input_tensor, group, op, async_op
                 )
 
+        num_copy_ins = 0
+
+        class CountingLayout(DefaultAllGatherLayout):
+            def copy_in(self, *args):
+                nonlocal num_copy_ins
+                num_copy_ins += 1
+                return super().copy_in(*args)
+
+        model.set_all_gather_layout(CountingLayout(all_gather_output_fn))
         group = fully_shard.state(model)._fsdp_param_group
-        group._all_gather_output_fn = all_gather_output_fn
         group._prepare_reduce_scatter_inputs = reduce_scatter_input_fn
         model.set_custom_reduce_scatter(CountingReduceScatter())
         inp = torch.randn((2, 8), device=device)
@@ -948,6 +1049,9 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         # The Shard(1) weights' padded sharded sizes are (8, 2) and (4, 2)
         sizes = {"split_sizes": [16, 2, 8, 1], "outer_sizes": [8, 1, 4, 1]}
         self.assertEqual(all_gather_calls, [{**sizes, "world_size": self.world_size}])
+        # The default layout's subclass packs the input and keeps per-output buffers
+        self.assertEqual(num_copy_ins, 1)
+        self.assertIsNone(group._all_gather_buffers)
         self.assertEqual(copy_in_numels, [27 * self.world_size])
         # FSDP frees the copy-in and its gradient copies before the reduce-scatter
         self.assertEqual(num_alive_grads, [0])
@@ -1026,8 +1130,9 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         model = nn.Linear(0, 4, bias=False, device=device)
         fully_shard(model, reshard_after_forward=True)
         calls = []
-        group = fully_shard.state(model)._fsdp_param_group
-        group._all_gather_output_fn = lambda *args, **kwargs: calls.append(args)
+        model.set_all_gather_layout(
+            DefaultAllGatherLayout(lambda *args, **kwargs: calls.append(args))
+        )
         with torch.no_grad():
             for _ in range(2):
                 model(torch.randn((2, 0), device=device))
@@ -1101,6 +1206,301 @@ class TestFullyShardCollectiveCopies(FSDPTestMultiThread):
         self.assertEqual(record_copy_ins(), [None, None])
 
 
+class _RecordFuncs(TorchDispatchMode):
+    """Records the ops that run under it and returns their list on entry."""
+
+    def __enter__(self) -> list[torch._ops.OpOverload]:
+        super().__enter__()
+        self.funcs: list[torch._ops.OpOverload] = []
+        return self.funcs
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.funcs.append(func)
+        return func(*args, **(kwargs or {}))
+
+
+class TestFullyShardSingleRank(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def _shard_mesh(self) -> DeviceMesh:
+        # A size-1 shard group inside a world of 2
+        return init_device_mesh(
+            device.type, (self.world_size, 1), mesh_dim_names=("replicate", "shard")
+        )["shard"]
+
+    def _init_models(
+        self,
+        dtype: torch.dtype = torch.float32,
+        bias_grad_dtype: torch.dtype | None = None,
+        **fully_shard_kwargs,
+    ) -> tuple[nn.Module, nn.Module]:
+        # The reference takes foreach_reduce since its input fn is not the default
+        model = nn.Sequential(
+            nn.Linear(16, 33, device=device, dtype=dtype),
+            nn.ReLU(),
+            nn.Linear(33, 7, device=device, dtype=dtype),
+        )
+        # Gets no gradient in forward
+        model[0].register_parameter(
+            "unused", nn.Parameter(torch.randn(5, device=device, dtype=dtype))
+        )
+        ref_model = copy.deepcopy(model)
+        for module in (model, ref_model):
+            if bias_grad_dtype is not None:  # deepcopy does not copy it
+                module[2].bias.grad_dtype = bias_grad_dtype
+            for submodule in (module[0], module[2], module):
+                fully_shard(
+                    submodule,
+                    shard_placement_fn=lambda param: Shard(param.ndim - 1),
+                    **fully_shard_kwargs,
+                )
+        ref_model.set_reduce_scatter_input_fn(
+            functools.partial(_default_reduce_scatter_input_fn)
+        )
+        return model, ref_model
+
+    def _check_parity(
+        self,
+        model: nn.Module,
+        ref_model: nn.Module,
+        dtype: torch.dtype,
+        num_sync_microbatches: int = 3,
+    ) -> None:
+        """Trains both models and checks that they match bitwise. Only the last
+        ``num_sync_microbatches`` of 3 microbatches reduce gradients."""
+        optims = [
+            # Plain SGD supports gradients with a dtype other than the parameter's
+            torch.optim.SGD(module.parameters(), lr=1e-2, foreach=False)
+            for module in (model, ref_model)
+        ]
+        hook_grads: list[list[torch.Tensor]] = [[], []]
+        for module, grads in zip((model, ref_model), hook_grads):
+            for param in module.parameters():
+                param.register_post_accumulate_grad_hook(
+                    lambda param, grads=grads: grads.append(
+                        param.grad.to_local().clone()
+                    )
+                )
+        generator = torch.Generator(device).manual_seed(self.rank)
+        # Covers new sharded gradients and adds into zeroed ones
+        for set_to_none in (True, False, True):
+            for microbatch in range(3):
+                inp = torch.randn(4, 16, device=device, generator=generator).to(dtype)
+                sync = microbatch >= 3 - num_sync_microbatches
+                losses, copy_ins = [], []
+                for module in (model, ref_model):
+                    module.set_requires_gradient_sync(sync)
+                    losses.append(module(inp).sum())
+                    with _RecordFuncs() as funcs:
+                        losses[-1].backward()
+                    copy_ins.append(
+                        funcs.count(torch.ops.fsdp.chunk_cat_mixed_dtype.default)
+                    )
+                self.assertEqual(losses[0], losses[1], atol=0, rtol=0)
+                # Only the reference copies into reduce-scatter inputs
+                self.assertEqual(copy_ins, [0, 2 if sync else 0])
+            for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+                if (
+                    ref_param.grad is None
+                ):  # unused without reduce_scatter_unused_params
+                    self.assertIsNone(param.grad)
+                    continue
+                grad, ref_grad = param.grad.to_local(), ref_param.grad.to_local()
+                self.assertEqual(grad.dtype, ref_grad.dtype)
+                self.assertEqual(grad.stride(), ref_grad.stride())
+                self.assertEqual(grad, ref_grad, atol=0, rtol=0)
+            for optim in optims:
+                optim.step()
+                optim.zero_grad(set_to_none=set_to_none)
+        self.assertEqual(len(hook_grads[0]), len(hook_grads[1]))
+        self.assertEqual(hook_grads[0], hook_grads[1], atol=0, rtol=0)
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.to_local(), ref_param.to_local(), atol=0, rtol=0)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_matches_reduce_scatter_path(self):
+        self.run_subtests(
+            {
+                # (orig_dtype, param_dtype, reduce_dtype)
+                "dtypes": [
+                    (torch.float32, None, None),
+                    (torch.float32, None, torch.bfloat16),
+                    (torch.float32, torch.bfloat16, torch.float32),
+                    (torch.float32, torch.bfloat16, torch.bfloat16),
+                    (torch.float32, torch.float16, torch.float16),
+                    (torch.bfloat16, None, torch.float32),
+                ],
+                # (gradient divide factor, sum-only reductions)
+                "division": [(None, False), (3.0, False), (3.0, True)],
+            },
+            self._test_single_rank_matches_reduce_scatter_path,
+        )
+
+    def _test_single_rank_matches_reduce_scatter_path(
+        self,
+        dtypes: tuple[torch.dtype, torch.dtype | None, torch.dtype | None],
+        division: tuple[float | None, bool],
+    ):
+        orig_dtype, param_dtype, reduce_dtype = dtypes
+        divide_factor, force_sum = division
+        model, ref_model = self._init_models(
+            orig_dtype,
+            mesh=self._shard_mesh(),
+            mp_policy=MixedPrecisionPolicy(param_dtype, reduce_dtype),
+        )
+        for module in (model, ref_model):
+            for submodule in (module[0], module[2]):
+                if divide_factor is not None:
+                    submodule.set_gradient_divide_factor(divide_factor)
+                submodule.set_force_sum_reduction_for_comms(force_sum)
+        self._check_parity(model, ref_model, param_dtype or orig_dtype)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_mixed_grad_dtypes(self):
+        # A bf16 bias gradient next to fp32 gradients in one group, zero gradients
+        # for an unused parameter, and gradients accumulated without sync
+        self.run_subtests(
+            {"num_sync_microbatches": [3, 1]},
+            self._test_single_rank_mixed_grad_dtypes,
+        )
+
+    def _test_single_rank_mixed_grad_dtypes(self, num_sync_microbatches: int):
+        model, ref_model = self._init_models(
+            bias_grad_dtype=torch.bfloat16,
+            mesh=self._shard_mesh(),
+            mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
+        )
+        for module in (model, ref_model):
+            module.set_reduce_scatter_unused_params(True)
+        for module in (model, ref_model):
+            self.assertEqual(module[2].bias.grad_dtype, torch.bfloat16)
+        self._check_parity(model, ref_model, torch.bfloat16, num_sync_microbatches)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_grads_do_not_alias(self):
+        # Without casts or divisions, new sharded gradients copy the unsharded ones
+        model, ref_model = self._init_models(mesh=self._shard_mesh())
+        inp = torch.randn(4, 16, device=device)
+        for module in (model, ref_model):
+            loss = module(inp).sum()
+            unsharded_grads: list[torch.Tensor] = []
+            for state in (module[0]._get_fsdp_state(), module[2]._get_fsdp_state()):
+                for fsdp_param in state._fsdp_param_group.fsdp_params:
+                    fsdp_param.unsharded_param.register_post_accumulate_grad_hook(
+                        lambda param: unsharded_grads.append(param.grad)
+                    )
+            loss.backward()
+            self.assertTrue(unsharded_grads)
+            for grad in unsharded_grads:
+                grad.fill_(float("nan"))
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            if ref_param.grad is not None:
+                self.assertEqual(param.grad.to_local(), ref_param.grad.to_local())
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_hook_reads_grad_before_free(self):
+        # A hook that reads the gradient late on the reduce-scatter stream and
+        # then drops it, as an optimizer step in backward does, reads the same
+        # values as on the buffered path. The gradients are large enough that
+        # the next group's copies reuse their blocks once freed.
+        dim = 1024
+        model = nn.Sequential(
+            *(nn.Linear(dim, dim, bias=False, device=device) for _ in range(2))
+        )
+        ref_model = copy.deepcopy(model)
+        for module in (model, ref_model):
+            for submodule in (module[0], module[1], module):
+                fully_shard(submodule, mesh=self._shard_mesh())
+        ref_model.set_reduce_scatter_input_fn(
+            functools.partial(_default_reduce_scatter_input_fn)
+        )
+        inp = torch.randn(4, dim, device=device)
+        hook_grads: list[list[torch.Tensor]] = [[], []]
+        num_copy_ins: list[int] = []
+        for module, grads in zip((model, ref_model), hook_grads):
+
+            def hook(param: nn.Parameter, grads=grads) -> None:
+                device_sleep(device.type, 100_000_000)
+                grads.append(param.grad.to_local().clone())
+                param.grad = None
+
+            for param in module.parameters():
+                param.register_post_accumulate_grad_hook(hook)
+            loss = module(inp).sum()
+            with _RecordFuncs() as funcs:
+                loss.backward()
+            num_copy_ins.append(
+                funcs.count(torch.ops.fsdp.chunk_cat_mixed_dtype.default)
+            )
+        device_module.synchronize()
+        # Only the reference takes the buffered path
+        self.assertEqual(num_copy_ins, [0, 2])
+        self.assertEqual(len(hook_grads[0]), 2)
+        self.assertEqual(hook_grads[0], hook_grads[1], atol=0, rtol=0)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_zero_numel_params(self):
+        # The weight of nn.Linear(0, 3) is (3, 0), with sharded size (0, 0) on
+        # Shard(0). There is no reference model: the buffered path fails on
+        # zero-numel gradients in chunk_cat.
+        model = nn.Sequential(
+            nn.Linear(0, 3, device=device), nn.Linear(3, 0, device=device)
+        )
+        fully_shard(model, mesh=self._shard_mesh())
+        # New sharded gradients, then adds into them
+        for _ in range(2):
+            model(torch.randn(4, 0, device=device)).sum().backward()
+        for fsdp_param in model._get_fsdp_state()._fsdp_param_group.fsdp_params:
+            grad = fsdp_param.sharded_param.grad.to_local()
+            self.assertEqual(grad.shape, fsdp_param.sharded_size)
+            self.assertEqual(grad.stride(), fsdp_param.contiguous_sharded_stride)
+
+    @skip_if_lt_x_gpu(1)
+    def test_single_rank_reduce_fallbacks(self):
+        # Returns how many reduce-scatter copy-ins one backward runs
+        def num_copy_ins(model: FSDPModule) -> int:
+            loss = model(torch.randn(2, 8, device=device)).sum()
+            with _RecordFuncs() as funcs:
+                loss.backward()
+            return funcs.count(torch.ops.fsdp.chunk_cat_mixed_dtype.default)
+
+        def init_model(**kwargs: object) -> FSDPModule:
+            linear_device = "cpu" if "offload_policy" in kwargs else device
+            kwargs.setdefault("mesh", self._shard_mesh())
+            return fully_shard(nn.Linear(8, 8, device=linear_device), **kwargs)
+
+        model = init_model()
+        self.assertEqual(num_copy_ins(model), 0)
+        model.set_allocate_memory_from_process_group_for_comm(True)
+        self.assertEqual(num_copy_ins(model), 0)
+
+        # A size-1 group never calls the comm, so any comm takes the fast path
+        class CustomReduceScatter(DefaultReduceScatter):
+            pass
+
+        model.set_custom_reduce_scatter(CustomReduceScatter())
+        self.assertEqual(num_copy_ins(model), 0)
+
+        model = init_model()
+        model.set_reduce_scatter_input_fn(reduce_scatter_input_fn_with_native_copy)
+        self.assertEqual(num_copy_ins(model), 1)
+
+        model = init_model()
+        model.set_all_reduce_hook(lambda output: None)
+        self.assertEqual(num_copy_ins(model), 1)
+
+        model = init_model(offload_policy=CPUOffloadPolicy())
+        self.assertEqual(num_copy_ins(model), 1)
+
+        # HSDP with a size-1 shard dim all-reduces over the replicate dim
+        mesh = init_device_mesh(
+            device.type, (self.world_size, 1), mesh_dim_names=("replicate", "shard")
+        )
+        self.assertEqual(num_copy_ins(init_model(mesh=mesh)), 1)
+
+
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
@@ -1155,9 +1555,9 @@ class TestFullyShardCustomAllocation(FSDPTestMultiThread):
         if collective == "all_gather":
             model.set_custom_all_gather(StridedAllGather())
             if native_copy:
-                # FSDPModule has no setter for the all-gather copy-out yet
-                group = fully_shard.state(model)._fsdp_param_group
-                group._all_gather_output_fn = all_gather_output_fn_with_native_copy
+                model.set_all_gather_layout(
+                    DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+                )
         else:
             model.set_custom_reduce_scatter(StridedReduceScatter())
             if native_copy:
@@ -2771,7 +3171,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
 @skipCUDAIf(not SM90OrLater, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str | None:
+    def backend_str(cls, device) -> str | None:
         return "nccl"
 
     @classmethod
@@ -3084,6 +3484,25 @@ class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
         for ref_param, param in zip(ref_model.parameters(), model.parameters()):
             self.assertEqual(param.grad.to_local(), ref_param.grad)
 
+    @parametrize("hsdp", [False, True])
+    @parametrize("split_by", ["fp16_reduce", "force_sum"])
+    def test_singleton_split_divide_factor(self, split_by, hsdp):
+        # fp16 and forced-sum reductions split the divide factor into pre/post
+        # factors, so the singleton path must not divide by it again
+        model = nn.Linear(8, 4, bias=False, device=device)
+        shape = (1, 1) if hsdp else (1,)
+        names = ("replicate", "shard") if hsdp else None
+        mesh = init_device_mesh(device.type, shape, mesh_dim_names=names)
+        reduce_dtype = torch.float16 if split_by == "fp16_reduce" else None
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=reduce_dtype)
+        fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+        model.set_gradient_divide_factor(4.0)
+        model.set_force_sum_reduction_for_comms(split_by == "force_sum")
+        inp = torch.ones(3, 8, device=device)
+        model(inp).sum().backward()
+        expected = torch.full_like(inp[:1].expand(4, -1), 3 / 4)
+        self.assertEqual(model.weight.grad.to_local(), expected)
+
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp
 
@@ -3238,6 +3657,683 @@ class TestFullyShardReduceScatterRecordStream(FSDPTest):
                 "record_stream must not be called when the backend does not advertise "
                 "_needs_record_stream_on_free",
             )
+
+
+def _param_contiguous_views(output, param_metadata, world_size):
+    # One payload per parameter, each viewed with its own version counter
+    numels = [param.input_numels[0] * world_size for param in param_metadata]
+    return [[view.data] for view in output.split(numels)]
+
+
+class _ReorderWork(dist.Work):
+    def __init__(self, work, reorder):
+        super().__init__()
+        self.work = work
+        self.reorder = reorder
+
+    def wait(self, timeout=None):
+        self.work.wait()
+        self.reorder()
+        return True
+
+
+class _ParamContiguousAllGather(DefaultAllGather):
+    """Writes parameter-contiguous output when the layout's metadata selects it,
+    by reordering a rank-major all-gather. It keeps no per-call state, so one
+    instance can serve several modules."""
+
+    def __init__(self):
+        self.param_contiguous_calls = self.rank_major_calls = self.async_calls = 0
+
+    def __call__(
+        self, output_tensor, input_tensor, group, async_op=False, output_metadata=None
+    ):
+        self.async_calls += int(async_op)
+        if (split_sizes := output_metadata) is None:
+            self.rank_major_calls += 1
+            return super().__call__(output_tensor, input_tensor, group, async_op)
+        self.param_contiguous_calls += 1
+        # The layout's copy-in packs into storage independent of the output
+        out_ptr = output_tensor.untyped_storage().data_ptr()
+        if input_tensor.untyped_storage().data_ptr() == out_ptr:
+            raise AssertionError("copy_in packed into the collective output")
+        world_size = group.size()
+        rank_major = torch.empty_like(output_tensor)
+        work = super().__call__(rank_major, input_tensor, group, async_op)
+
+        def reorder():
+            outputs = output_tensor.split([size * world_size for size in split_sizes])
+            torch.split_with_sizes_copy(
+                rank_major.view(world_size, -1),
+                split_sizes,
+                dim=1,
+                out=[output.view(world_size, -1) for output in outputs],
+            )
+
+        if work is None:
+            reorder()
+            return None
+        return _ReorderWork(work, reorder)
+
+
+class _ParamContiguousLayout(AllGatherLayout):
+    """Backs a group's parameters with one FSDP-owned buffer that the
+    parameter-contiguous output of its ``comm``, a ``_ParamContiguousAllGather``,
+    refills with a single copy.
+
+    ``mode`` is "custom" to always select parameter-contiguous output,
+    "rank_major" to always fall back, or "alternate" to fall back on the first
+    all-gather and then alternate. "rank_major" never selects
+    parameter-contiguous output, so it also runs without a ``comm``, on FSDP's
+    default all-gather.
+    """
+
+    def __init__(self, mode, comm=None):
+        self.mode = mode
+        self.comm = comm
+        self.num_prepares = 0
+        # This call's choice, which finalize checks against FSDP's metadata
+        self.split_sizes = None
+        self.single_copy_refills = 0
+
+    def prepare_output(self, metadata):
+        if self.mode == "alternate":
+            custom = self.num_prepares % 2 == 1
+        else:
+            custom = self.mode == "custom"
+        self.num_prepares += 1
+        # Payloads gathered along dim 0 are contiguous within their parameter
+        if custom and all(size == 1 for size in metadata.input_outer_sizes):
+            self.split_sizes = metadata.input_split_sizes
+        else:
+            self.split_sizes = None
+        return self.split_sizes
+
+    def finalize_outputs(self, metadata):
+        if metadata.output_metadata is not self.split_sizes:
+            raise AssertionError("FSDP passed another call's output metadata")
+        output, params = metadata.all_gather_output, metadata.param_metadata
+        world_size, buffers = metadata.world_size, metadata.buffers
+        if not buffers:
+            buffer = output.clone()
+            views = _param_contiguous_views(buffer, params, world_size)
+            return AllGatherOutputs(tensors=views, buffers=[buffer])
+        if any(buffer.untyped_storage().size() == 0 for buffer in buffers):
+            raise AssertionError("FSDP passed a buffer without storage")
+        if len(buffers) == 1 and buffers[0].numel() == output.numel():
+            buffers[0].copy_(output)
+            self.single_copy_refills += 1
+        else:
+            # A rank-major first all-gather gave each output its own buffer
+            views = _param_contiguous_views(output, params, world_size)
+            for param, (view,) in zip(params, views):
+                param.outputs[0].copy_(view)
+        return AllGatherOutputs(
+            tensors=[param.outputs for param in params], buffers=buffers
+        )
+
+
+@instantiate_parametrized_tests
+class TestAllGatherLayouts(TestCase):
+    PASSING = ["fsdp_owned", "offset_buffer", "rebound_buffer"]
+    ERRORS = {
+        "no_buffers": "of lin.weight does not view the persistent",
+        "not_viewing": "of lin.weight does not view the persistent",
+        "strided_output": "of lin.bias must be a contiguous 1-D tensor of 4 elements",
+        "wrong_dtype": "must have dtype torch.float32, but has torch.float64",
+        "extra_param": "returned 3 parameter outputs for 2 parameters",
+        "missing_output": "returned 0 outputs for the 1 payloads of lin.bias",
+        "collective_buffer": "resizable storage of their own, not the collective's",
+        "input_buffer": "not the collective's input or output",
+        "fixed_storage": "resizable storage of their own",
+        "meta_buffer": "on cpu with resizable storage",
+    }
+    REFILL_ERRORS = {
+        "new_outputs": "did not refill",
+        "extra_param_refill": "returned 3 parameter outputs for 2 parameters",
+        "missing_output_refill": "did not refill",
+        "swapped_output_refill": "did not refill the outputs of lin.weight",
+    }
+
+    @parametrize("case", [*PASSING, *ERRORS, *REFILL_ERRORS])
+    def test_output_ownership(self, case):
+        test, world_size = self, 2
+        params = []
+        for fqn in ("lin.weight", "lin.bias"):
+            param = FSDPParam.__new__(FSDPParam)
+            param.all_gather_outputs = []
+            param._param_fqn = fqn
+            params.append(param)
+        returned_buffers = []
+
+        class Layout(AllGatherLayout):
+            def prepare_output(self, metadata):
+                return "custom"
+
+            def finalize_outputs(self, metadata):
+                output, params = metadata.all_gather_output, metadata.param_metadata
+                if metadata.buffers:
+                    test.assertGreater(metadata.buffers[0].untyped_storage().size(), 0)
+                    metadata.buffers[0].copy_(output)
+                    tensors = [param.outputs for param in params]
+                    if case == "new_outputs":
+                        tensors = _param_contiguous_views(
+                            metadata.buffers[0], params, metadata.world_size
+                        )
+                    elif case == "extra_param_refill":
+                        tensors.append([])
+                    elif case == "missing_output_refill":
+                        tensors = [[] for _ in params]
+                    elif case == "swapped_output_refill":
+                        params[0].outputs[0] = params[0].outputs[0].clone()
+                    elif case == "rebound_buffer":  # FSDP keeps its own lists
+                        for buffers in (metadata.buffers, returned_buffers[0]):
+                            buffers[0] = buffers[0].clone()
+                    return AllGatherOutputs(tensors=tensors, buffers=metadata.buffers)
+                # The buffer may view the middle of a larger storage
+                padded = case == "offset_buffer"
+                buffer = torch.empty(output.numel() + 8)[4:-4] if padded else output
+                buffer = buffer.clone() if not padded else buffer.copy_(output)
+                if case == "wrong_dtype":
+                    buffer = buffer.double()
+                elif case == "collective_buffer":
+                    buffer = output
+                elif case == "input_buffer":
+                    buffer = collective_input.copy_(output)
+                elif case == "fixed_storage":
+                    buffer = torch.from_numpy(buffer.numpy())  # not resizable
+                elif case == "meta_buffer":
+                    buffer = buffer.to("meta")
+                views = _param_contiguous_views(buffer, params, metadata.world_size)
+                buffers = [buffer]
+                if case == "no_buffers":
+                    buffers = []
+                elif case == "not_viewing":
+                    buffers = [torch.empty_like(output)]
+                elif case == "strided_output":
+                    views[1] = [buffer[::2]]
+                elif case == "extra_param":
+                    views.append([])
+                elif case == "missing_output":
+                    views[1] = []
+                returned_buffers.append(buffers)  # a layout may keep this list
+                return AllGatherOutputs(tensors=views, buffers=buffers)
+
+        def finalize(source, persistent):
+            result = AllGatherResult(
+                source, None, None, [[source.dtype]] * 2, [[2], [2]], [2, 2], [1, 1]
+            )
+            # With the metadata that Layout's prepare_output returns
+            result = result._replace(
+                layout=Layout(),
+                output_metadata="custom",
+                all_gather_input=collective_input,
+            )
+            return foreach_all_gather_copy_out(
+                result,
+                params,
+                SimpleNamespace(size=lambda: world_size),
+                persistent,
+            )
+
+        source, collective_input = torch.arange(8.0), torch.empty(8)
+        if case in self.ERRORS:
+            with self.assertRaisesRegex(ValueError, self.ERRORS[case]):
+                finalize(source, None)
+            # FSDP checks every output before adopting any
+            for param in params:
+                self.assertEqual(param.all_gather_outputs, [])
+                self.assertFalse(param._keep_all_gather_output_storage)
+            return
+        persistent = finalize(source.clone(), None)
+        outputs = [param.all_gather_outputs for param in params]
+        self.assertEqual(torch.cat([output[0] for output in outputs]), source)
+        (buffer,) = persistent.tensors
+        storage = outputs[0][0].untyped_storage()
+        self.assertEqual(storage._cdata, buffer.untyped_storage()._cdata)
+        storage_nbytes = source.nbytes + (32 if case == "offset_buffer" else 0)
+        self.assertEqual(persistent.nbytes, [storage_nbytes])
+        for param in params:
+            # The group owns the shared storage, not the parameter
+            self.assertTrue(param._keep_all_gather_output_storage)
+            param.free_all_gather_outputs()
+        self.assertEqual(storage.size(), storage_nbytes)
+        # Reshard frees the group's buffer
+        persistent.free()
+        self.assertEqual(storage.size(), 0)
+        if case in self.REFILL_ERRORS:
+            with self.assertRaisesRegex(ValueError, self.REFILL_ERRORS[case]):
+                finalize(source + 1, persistent)
+            return
+        self.assertIs(finalize(source + 1, persistent), persistent)
+        for param, previous in zip(params, outputs):
+            self.assertIs(param.all_gather_outputs, previous)
+        self.assertEqual(storage.size(), storage_nbytes)
+        self.assertEqual(torch.cat([output[0] for output in outputs]), source + 1)
+        self.assertIs(persistent.tensors[0], buffer)
+
+
+class TestAllGatherLayoutCopyOut(TestCase):
+    def test_delegated_copy_out(self, device):
+        # Mixed payload dtypes share a uint8 buffer, whose split sizes count bytes
+        world_size, dims = 2, [1, 0]
+        values = [torch.randn(2, 4, 6, device=device), torch.randn(4, 2, device=device)]
+        values[1] = values[1].to(torch.bfloat16)
+        shards = [value.chunk(world_size, dim) for value, dim in zip(values, dims)]
+        chunks = [s[r].contiguous().view(-1) for r in range(world_size) for s in shards]
+        params = [
+            AllGatherParamMetadata(
+                input_numels=[shard[0].numel()],
+                input_dtypes=[value.dtype],
+                outer_sizes=[math.prod(shard[0].shape[:dim])],
+                outputs=[],
+            )
+            for shard, value, dim in zip(shards, values, dims)
+        ]
+        outputs = DefaultAllGatherLayout().finalize_outputs(
+            AllGatherFinalizeMetadata(
+                all_gather_output=torch.cat([c.view(torch.uint8) for c in chunks]),
+                param_metadata=params,
+                world_size=world_size,
+                output_metadata=None,
+                buffers=[],
+            )
+        )
+        # Each output is its own buffer
+        for buffer, (output,) in zip(outputs.buffers, outputs.tensors, strict=True):
+            self.assertIs(buffer, output)
+        for ts, value in zip(outputs.tensors, values):
+            self.assertEqual(ts[0].view(value.shape), value)
+
+
+class TestFullyShardAllGatherLayoutSetters(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def test_layout_comm(self):
+        model = nn.Linear(8, 8)
+        fully_shard(model, mesh=init_device_mesh("cpu", (self.world_size,)))
+        group = model._get_fsdp_state()._fsdp_param_group
+        native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+        comm = _ParamContiguousAllGather()
+        # Under the default layout, neither setter replaces what the other installed
+        model.set_all_gather_layout(native)
+        model.set_custom_all_gather(comm)
+        self.assertIs(group._all_gather_layout, native)
+        self.assertIs(group._all_gather_comm, comm)
+        # Installed comms only work with the default layout: a custom layout, which
+        # carries its own comm, is rejected while one is installed and then rejects
+        # them, also from FSDP's comm setters
+        layout = _ParamContiguousLayout("custom", _ParamContiguousAllGather())
+        rejected = "cannot use _ParamContiguousAllGather"
+        with self.assertRaisesRegex(ValueError, rejected):
+            model.set_all_gather_layout(layout)
+        self.assertIs(group._all_gather_layout, native)
+        default_comm = DefaultAllGather()
+        model.set_custom_all_gather(default_comm)
+        model.set_all_gather_layout(layout)
+        with self.assertRaisesRegex(ValueError, rejected):
+            model.set_custom_all_gather(comm)
+        with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
+            model.set_allocate_memory_from_process_group_for_comm(True)
+        with self.assertRaisesRegex(ValueError, "cannot use SymmMemAllGather"):
+            model.set_symm_mem_for_comm()
+        self.assertIs(group._all_gather_comm, default_comm)
+        # The layout's comm keeps no per-call state, so another module's layout can
+        # carry it too
+        other = nn.Linear(8, 8)
+        fully_shard(other, mesh=init_device_mesh("cpu", (self.world_size,)))
+        other.set_all_gather_layout(_ParamContiguousLayout("custom", layout.comm))
+        # 2.15's hook fails loudly
+        with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
+            group._all_gather_output_fn = all_gather_output_fn_with_native_copy
+        with self.assertRaisesRegex(AttributeError, "set_all_gather_layout"):
+            group._all_gather_output_fn
+        # A layout reaches every parameter group of a module
+        mesh = init_device_mesh("cpu", (self.world_size, 1), mesh_dim_names=("a", "b"))
+        bias_placement = ShardPlacementResult(Shard(0), FSDPMeshInfo(mesh["a"], 0))
+        model = nn.Linear(8, 8)
+        fully_shard(
+            model,
+            mesh=mesh["b"],
+            shard_placement_fn=lambda p: bias_placement if p is model.bias else None,
+        )
+        model.set_all_gather_layout(native)
+        groups = model._get_fsdp_state()._fsdp_param_groups
+        self.assertEqual([group._all_gather_layout for group in groups], [native] * 2)
+
+    def test_replace_rules(self):
+        model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8))
+        mesh = init_device_mesh("cpu", (self.world_size,))
+        for module in (*model, model):
+            fully_shard(module, mesh=mesh)
+        groups = [module._get_fsdp_state()._fsdp_param_group for module in model]
+        native = DefaultAllGatherLayout(all_gather_output_fn_with_native_copy)
+        # Layouts, default ones too, change only between iterations, and FSDP
+        # checks every group before replacing any layout
+        model[1].unshard()
+        rank_major = _ParamContiguousLayout("rank_major")
+        for layout in (rank_major, native):
+            with self.assertRaisesRegex(RuntimeError, "cannot replace"):
+                model.set_all_gather_layout(layout)
+            self.assertIsNot(groups[0]._all_gather_layout, layout)
+        comm = DefaultAllGather()
+        model[1].set_custom_all_gather(comm)
+        self.assertIs(groups[1]._all_gather_comm, comm)
+        model[1].reshard()
+        model.set_all_gather_layout(native)  # reaches every nested group
+        # The root has no group of its own
+        model.set_all_gather_layout(DefaultAllGatherLayout(), recurse=False)
+        self.assertEqual([group._all_gather_layout for group in groups], [native] * 2)
+        # Replacing a layout waits for pending work and reshard, while the comm,
+        # which owns no outputs, can be replaced at any time
+        model[0].set_all_gather_layout(rank_major, recurse=False)
+        handle = model[0].unshard(async_op=True)
+        with self.assertRaisesRegex(RuntimeError, "cannot replace"):
+            model[0].set_all_gather_layout(native, recurse=False)
+        model[0].set_custom_all_gather(comm)  # the pending all-gather keeps its comm
+        self.assertIs(groups[0]._all_gather_comm, comm)
+        handle.wait()
+        with self.assertRaisesRegex(RuntimeError, "cannot replace"):
+            model[0].set_all_gather_layout(native, recurse=False)
+        # Process-group allocation needs the default layout, even where a custom
+        # layout falls back to rank-major output on every call
+        with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
+            model[0].set_allocate_memory_from_process_group_for_comm(True)
+        self.assertIs(groups[0]._all_gather_comm, comm)
+        model[0].reshard()
+        model[0].set_all_gather_layout(native, recurse=False)
+        self.assertIs(groups[0]._all_gather_layout, native)
+        model[0].set_allocate_memory_from_process_group_for_comm(True)
+        with self.assertRaisesRegex(ValueError, "cannot use ProcessGroupAlloc"):
+            model[0].set_all_gather_layout(rank_major, recurse=False)
+        self.assertIs(groups[0]._all_gather_layout, native)
+
+        # FSDP adopts nothing from a rejected result, so after reset_iter_state()
+        # another layout can follow
+        class ShortLayout(AllGatherLayout):
+            def prepare_output(self, metadata):
+                return True
+
+            def finalize_outputs(self, metadata):
+                buffer = metadata.all_gather_output.clone()
+                params, world_size = metadata.param_metadata, metadata.world_size
+                views = _param_contiguous_views(buffer, params, world_size)
+                return AllGatherOutputs(
+                    tensors=[[v[:-1]] for (v,) in views], buffers=[buffer]
+                )
+
+        model = nn.Linear(8, 8)
+        fully_shard(model, mesh=mesh)
+        model.set_all_gather_layout(ShortLayout())
+        inp = torch.randn(2, 8)
+        with self.assertRaisesRegex(ValueError, "contiguous 1-D tensor"):
+            model(inp)
+        model.reset_iter_state()
+        model.set_all_gather_layout(DefaultAllGatherLayout())
+        model(inp).sum().backward()
+
+        # A refill is rejected whether it refills the shared buffer or the
+        # parameters' own outputs after a rank-major first unshard
+        class RejectedRefill(_ParamContiguousLayout):
+            def finalize_outputs(self, metadata):
+                outputs = super().finalize_outputs(metadata)
+                if metadata.buffers:  # returns an output other than the one refilled
+                    outputs.tensors[0] = [outputs.tensors[0][0].clone()]
+                return outputs
+
+        for mode in ("custom", "alternate"):
+            model = nn.Linear(8, 8)
+            fully_shard(model, mesh=mesh, reshard_after_forward=True)
+            layout = RejectedRefill(mode, _ParamContiguousAllGather())
+            model.set_all_gather_layout(layout)
+            model(inp)
+            with self.assertRaisesRegex(ValueError, "did not refill"):
+                model(inp)
+
+    def test_shared_buffer_extension(self):
+        # Extension outputs share one FSDP-owned buffer, which an extension whose
+        # inner tensor is its output must not resize or free, while FSDP still
+        # frees an inner tensor of its own
+        def pre_all_gather(self, mesh, outer_size, outer_stride, module, mp_policy):
+            return (self,), None
+
+        def post_all_gather(self, outputs, metadata, param_dtype, *, out=None):
+            return None if out is not None else (outputs[0], outputs)
+
+        owned = []
+
+        @torch.no_grad()
+        def post_all_gather_copy(self, outputs, metadata, param_dtype, *, out=None):
+            if out is None:
+                owned.append(outputs[0].clone())
+                return owned[0], (owned[0],)
+            with torch.autograd._unsafe_preserve_version_counter(out):
+                out.copy_(outputs[0])
+
+        model = nn.Sequential(nn.Linear(8, 8, bias=False), nn.Linear(8, 8, bias=False))
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=init_device_mesh("cpu", (self.world_size,)))
+        posts = (post_all_gather, post_all_gather_copy)
+        for param, post in zip(model.parameters(), posts):
+            local_tensor = param._local_tensor
+            local_tensor.fsdp_pre_all_gather = pre_all_gather.__get__(local_tensor)
+            local_tensor.fsdp_post_all_gather = post.__get__(local_tensor)
+        layout = _ParamContiguousLayout("alternate", _ParamContiguousAllGather())
+        layout.num_prepares = 1  # custom first, then fall back every other unshard
+        model.set_all_gather_layout(layout)
+        inp = torch.randn(2, 8)
+        for _ in range(3):
+            output = model(inp)
+            self.assertEqual(output, ref_model(inp))
+            output.sum().backward()
+            buffers = model._get_fsdp_state()._fsdp_param_group._all_gather_buffers
+            self.assertEqual(buffers.tensors[0].untyped_storage().size(), 0)
+            self.assertEqual(owned[0].untyped_storage().size(), 0)
+
+    def test_custom_layout_inference(self):
+        # Outputs adopted under inference mode have no version counters to preserve
+        model = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8))
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        ref_model = copy.deepcopy(model)
+        mesh = init_device_mesh("cpu", (self.world_size,))
+        fully_shard(model, mesh=mesh, reshard_after_forward=True)
+        layout = _ParamContiguousLayout("custom", _ParamContiguousAllGather())
+        model.set_all_gather_layout(layout)
+        inp = torch.randn(2, 8)
+        with torch.inference_mode():
+            for _ in range(2):  # adopts, then refills
+                self.assertEqual(model(inp), ref_model(inp))
+
+
+_LAYOUT_PARITY_CASES = [
+    *itertools.product(
+        ["custom", "rank_major", "alternate"],
+        [True, False, 2],
+        [False, True],
+        [False, True],
+        [False],
+    ),
+    ("custom", True, False, False, True),
+    ("custom", 2, True, True, True),
+]
+
+
+def _check_layout_training(test, device, mode, reshard, async_op, mixed, keep):
+    torch.manual_seed(42)
+    ref_model = nn.Sequential(*[MLP(16) for _ in range(3)]).to(device)
+    mesh = init_device_mesh(torch.device(device).type, (test.world_size,))
+    model = copy.deepcopy(ref_model)
+    mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16 if mixed else None)
+    for module in (ref_model, model):
+        for block in module:
+            fully_shard(
+                block, mesh=mesh, mp_policy=mp_policy, reshard_after_forward=reshard
+            )
+        fully_shard(module, mesh=mesh, mp_policy=mp_policy, reshard_after_forward=False)
+        module._set_unshard_async_op(async_op)
+        module.set_keep_unsharded_storage(keep)
+    # One comm serves every block, whose all-gathers overlap, while each block has
+    # its own layout, which keeps per-call state
+    comm = _ParamContiguousAllGather()
+    layouts = [_ParamContiguousLayout(mode, comm) for _ in model]
+    for block, layout in zip(model, layouts):
+        block.set_all_gather_layout(layout, recurse=False)
+    groups = [block._get_fsdp_state()._fsdp_param_group for block in model]
+    ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
+    optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+    first_buffers = first_ptrs = None
+    torch.manual_seed(42 + test.rank + 1)
+    for _ in range(2):
+        # Accumulate without reduce-scatter or reshard, then synchronize
+        for sync in (False, True):
+            inp = torch.randn(4, 16, device=device)
+            losses = []
+            for module in (ref_model, model):
+                module.set_requires_gradient_sync(sync)
+                module.set_reshard_after_backward(sync)
+                losses.append(module(inp).float().square().sum())
+                if module is model and mode == "custom":
+                    # Resharding after forward, also to the post-forward mesh
+                    # (reshard_after_forward=2), frees the buffers unless kept
+                    for (buffer,) in (g._all_gather_buffers.tensors for g in groups):
+                        size = 0 if reshard and not keep else buffer.nbytes
+                        test.assertEqual(buffer.untyped_storage().size(), size)
+                losses[-1].backward()
+            test.assertEqual(losses[0], losses[1])
+            if mode != "custom":
+                for group in groups:
+                    test.assertIsNone(group._all_gather_buffers)
+                continue
+            buffers = []
+            for group in groups:
+                # One FSDP-owned buffer backs all of the group's parameters
+                (buffer,) = group._all_gather_buffers.tensors
+                storage = buffer.untyped_storage()
+                for param in group.fsdp_params:
+                    test.assertTrue(param._keep_all_gather_output_storage)
+                    output_storage = param.all_gather_outputs[0].untyped_storage()
+                    test.assertEqual(output_storage._cdata, storage._cdata)
+                resident = keep or not sync
+                test.assertEqual(storage.size(), buffer.nbytes if resident else 0)
+                buffers.append(buffer)
+            if first_buffers is None:
+                first_buffers = buffers
+                first_ptrs = [buffer.data_ptr() for buffer in buffers]
+            for buffer, first, ptr in zip(buffers, first_buffers, first_ptrs):
+                test.assertIs(buffer, first)
+                if keep:
+                    test.assertEqual(buffer.data_ptr(), ptr)
+        for p, q in zip(ref_model.parameters(), model.parameters()):
+            test.assertEqual(p.grad.to_local(), q.grad.to_local())
+        for optimizer in (ref_optim, optim):
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+        for p, q in zip(ref_model.parameters(), model.parameters()):
+            test.assertEqual(p.to_local(), q.to_local())
+    test.assertEqual(comm.async_calls > 0, async_op)
+    test.assertEqual(comm.param_contiguous_calls > 0, mode != "rank_major")
+    test.assertEqual(comm.rank_major_calls > 0, mode != "custom")
+    if mode == "custom":
+        for block, layout in zip(model, layouts):
+            test.assertGreater(layout.single_copy_refills, 0)
+            block.set_all_gather_layout(layout, recurse=False)  # a no-op
+            with test.assertRaisesRegex(RuntimeError, "cannot replace"):
+                block.set_all_gather_layout(DefaultAllGatherLayout())
+
+
+class TestFullyShardLayoutParity(FSDPTestMultiThread):
+    @property
+    def world_size(self):
+        return 4
+
+    @parametrize("mode,reshard,async_op,mixed,keep", _LAYOUT_PARITY_CASES)
+    def test_fsdp_owned_layout_training(
+        self, device, mode, reshard, async_op, mixed, keep
+    ):
+        _check_layout_training(self, device, mode, reshard, async_op, mixed, keep)
+
+    def test_delegating_layout_shard_dim1(self, device):
+        # A custom layout that delegates its outputs to the default one gets the
+        # parameters' outer sizes, which Shard(1) payloads need, also when a
+        # group's first parameter is an extension without payloads
+        test = self
+        mesh = init_device_mesh(torch.device(device).type, (self.world_size,))
+        torch.manual_seed(42)
+        ref_model = nn.Sequential(MLP(16, device), MLP(16, device))
+        model = copy.deepcopy(ref_model)
+
+        class Delegating(AllGatherLayout):
+            def prepare_output(self, metadata):
+                test.assertEqual(metadata.input_outer_sizes, [1, 16, 1])
+                return metadata.input_outer_sizes
+
+            def finalize_outputs(self, metadata):
+                return DefaultAllGatherLayout().finalize_outputs(metadata)
+
+        def pre_all_gather(local_tensor, mesh):
+            return (), None
+
+        @torch.no_grad()
+        def post_all_gather(local_tensor, outputs, metadata, param_dtype, *, out=None):
+            weight = torch.ones(64, 16, device=device)
+            if out is None:
+                return weight, (weight,)
+            with torch.autograd._unsafe_preserve_version_counter(out):
+                out.copy_(weight)
+
+        for module in (model, ref_model):
+            for block in module:
+                fully_shard(
+                    block, mesh=mesh, shard_placement_fn=lambda p: Shard(p.ndim - 1)
+                )
+                local = block.in_proj.weight._local_tensor
+                local.fsdp_pre_all_gather = pre_all_gather.__get__(local)
+                local.fsdp_post_all_gather = post_all_gather.__get__(local)
+            fully_shard(module, mesh=mesh)
+        model.set_all_gather_layout(Delegating())
+        for _ in range(2):
+            inp = torch.randn(4, 16, device=device)
+            for module in (model, ref_model):
+                module(inp).sum().backward()
+            for p, q in zip(model.parameters(), ref_model.parameters()):
+                self.assertEqual(p.grad.to_local(), q.grad.to_local())
+
+
+class TestFullyShardLayoutParityNCCL(FSDPTestContinuous):
+    @property
+    def world_size(self):
+        return 4
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize(
+        "mode,reshard,async_op,mixed,keep",
+        [
+            ("custom", 2, True, True, True),
+            ("custom", True, False, False, False),
+            ("alternate", True, False, False, False),
+        ],
+    )
+    def test_fsdp_owned_layout_training(
+        self, device, mode, reshard, async_op, mixed, keep
+    ):
+        device = torch.device(device).type  # each rank's own device, not device 0
+        _check_layout_training(self, device, mode, reshard, async_op, mixed, keep)
+
+
+instantiate_device_type_tests(
+    TestAllGatherLayoutCopyOut, globals(), only_for=("cpu", "cuda", "xpu")
+)
+instantiate_device_type_tests(
+    TestFullyShardLayoutParity, globals(), only_for=("cpu", "cuda", "xpu")
+)
+instantiate_device_type_tests(
+    TestFullyShardLayoutParityNCCL, globals(), only_for=("cuda", "xpu")
+)
 
 
 if __name__ == "__main__":
