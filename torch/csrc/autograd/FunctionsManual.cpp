@@ -9076,8 +9076,7 @@ std::tuple<Tensor, Tensor> philox_normal_params_backward(
     grad_std = at::sum_to(grad * z, std_sizes);
   }
   return {
-      grad_input_mask[0] ? at::sum_to(grad, mean_sizes) : Tensor(),
-      grad_std};
+      grad_input_mask[0] ? at::sum_to(grad, mean_sizes) : Tensor(), grad_std};
 }
 
 Tensor philox_normal_params_jvp(
