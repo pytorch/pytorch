@@ -444,9 +444,9 @@ def _sm107_outputs(
 # replay cap of tile.MAX_UNROLL leaves (see the compile timings there). Each R compiles
 # once per mapping (see kernel_coltile.OrderedColConfig.min_blocks) and stride width.
 # Routing dtypes and ccs, deliberately separate from the launch-policy _B200_DTYPES and
-# _B200_CCS: the route and the policies are measured and extended independently. Split
-# views without a table entry still run only on select_ordered_col_config's fallback,
-# which is gated on _B200_CCS and _B200_DTYPES.
+# _B200_CCS: the route and the policies are measured and extended independently. On
+# B200, split views without a table entry run only on select_ordered_col_config's
+# fallback, which is gated on _B200_CCS and _B200_DTYPES.
 # See the comment on kernel_coltile._ORDERED_COL_CONFIGS for which views reach entries.
 _ORDERED_COL_DTYPES = (torch.float16, torch.bfloat16, torch.float32)
 _ORDERED_COL_CCS = ((10, 0),)
