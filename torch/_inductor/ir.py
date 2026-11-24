@@ -5973,8 +5973,8 @@ class ComputedBuffer(OperationBuffer):
                 strict_reduction_rblock=old_data.strict_reduction_rblock,
             )
             self.data = new_data
-            # this layout does not matter since we skip tl.store
-            # later
+            # Mix-order codegen skips the store, but finalizes the partial
+            # results through its index into this contiguous layout.
             self.layout = FixedLayout(
                 old_data.device,
                 old_data.dtype,

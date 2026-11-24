@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
     from ..ir import IRNode
 
+from ..loop_body import MemoryUsageType
 from ..ops_handler import registered_pointwise_ops, WrapperHandler
 from ..optimize_indexing import (
     convert_index_expr_to_value_expr,
@@ -72,6 +73,7 @@ from ..utils import (
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
+    sympy_dot,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -3594,6 +3596,28 @@ class SIMDScheduling(BaseScheduling):
 
         self._codegen_mix_order_reduction(node1, node2)
 
+    @staticmethod
+    def _mix_order_partial_layout(
+        node: scheduler.SchedulerNode,
+    ) -> tuple[Sequence[sympy.Expr], list[sympy.Expr], sympy.Expr]:
+        """
+        A mix-order kernel accumulates the partial results of the outer
+        reduction node densely in the loop order of its body. Returns the loop
+        sizes and the strides and offset at which the body stores the results:
+        into node's buffer or, for a cancelled split, into the contiguous layout
+        of the original output (see ComputedBuffer.with_original_inner_fn).
+        """
+        body = node._body
+        (store,) = body.memory_usage[MemoryUsageType.STORE_REDUCTION]
+        index = body.indexing_exprs[store.index_name]
+        sizevars = V.graph.sizevars
+        strides = sizevars.stride_vars(index, body.iter_vars)
+        offset = sizevars.offset_var(index, body.iter_vars)
+        affine = offset + sympy_dot(body.iter_vars, strides)
+        if sizevars.simplify_with_ranges(index - affine, body.var_ranges) != 0:
+            raise AssertionError(f"expected an affine store index, got {index}")
+        return body.sizes[0], strides, offset
+
     def _split_mix_order_reduction_epilogue(self, node):
         # TODO: do more validation here
         nodes = node.get_nodes()
@@ -3729,8 +3753,12 @@ class SIMDScheduling(BaseScheduling):
         )
 
         converted_nodes = []
+        partial_layouts = {}
         for subnode in node2_reductions:
             subnode.cancel_reduction_split()
+            partial_layouts[subnode.node.get_name()] = self._mix_order_partial_layout(
+                subnode
+            )
             converted = subnode.extract_pw_from_reduction()
             converted.swap_pw_red_dimension()
             converted_nodes.append(converted)
@@ -3795,6 +3823,8 @@ class SIMDScheduling(BaseScheduling):
 
         if is_split_reduction:
             for subnode in node2_reductions:
+                bufname = subnode.get_outputs()[0].node.get_name()
+                partial_layouts[rename[bufname]] = partial_layouts.pop(bufname)
                 if not self.scheduler:
                     raise AssertionError("expected self.scheduler to be set")
                 self.scheduler.removed_ops.add(
@@ -3828,7 +3858,12 @@ class SIMDScheduling(BaseScheduling):
                 f"len(kernel.saved_partial_accumulate), got "
                 f"{len(converted_nodes)} and {len(kernel.saved_partial_accumulate)}"
             )
-        nsplit = V.graph.wrapper_code.codegen_python_sizevar(
+        wrapper = V.graph.wrapper_code
+
+        def sizevar_list(exprs: Sequence[sympy.Expr]) -> str:
+            return f"[{', '.join(map(wrapper.codegen_python_sizevar, exprs))}]"
+
+        nsplit = wrapper.codegen_python_sizevar(
             (numel + kernel.rsplit_size - 1) // kernel.rsplit_size
         )
         for buffer_name, reduced in kernel.mix_order_partial_finishes(
@@ -3837,35 +3872,9 @@ class SIMDScheduling(BaseScheduling):
             buffer = V.graph.get_buffer(buffer_name)
             if not isinstance(buffer, ir.Buffer):
                 raise AssertionError(type(buffer))
-
-            # Restore the exact original shape via .view() to handle keepdim
-            # and multi-dimensional reductions correctly.
-            final_shape = [
-                V.graph.wrapper_code.codegen_python_sizevar(s)
-                for s in buffer.get_layout().size
-            ]
-            reduced += f".view([{', '.join(final_shape)}])"
-
             spec = buffer.get_output_spec()
-            if isinstance(spec, ir.NonOwningLayout):
-                # The buffer is a view into another buffer's storage (e.g. a
-                # cat destination). Rebinding the name would leave the
-                # underlying region never written; write through the view
-                # instead. copy_() also handles any dtype conversion from the
-                # torch.float workspace.
-                # See https://github.com/pytorch/pytorch/issues/193061
-                V.graph.wrapper_code.codegen_allocation(buffer)
-                V.graph.wrapper_code.writeline(f"{buffer_name}.copy_({reduced})")
-            elif type(spec) in (ir.FixedLayout, ir.FlexibleLayout):
-                # The workspace tensor is in torch.float, need a cast if the
-                # buffer is not.
-                if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
-                    reduced += f".to({buffer_dtype})"
-                V.graph.wrapper_code.writeline(f"{buffer_name} = {reduced}")
-                # mark the buffer as allocated, so we don't try to allocate
-                # it again when it's later used
-                V.graph.wrapper_code.allocated.add(buffer_name)
-            else:
+            owning = type(spec) in (ir.FixedLayout, ir.FlexibleLayout)
+            if not owning and not isinstance(spec, ir.NonOwningLayout):
                 # Rebinding the name silently drops the write for any spec
                 # that must be written through rather than bound (e.g.
                 # MutationLayoutSHOULDREMOVE, CommBufferLayout). Fail loudly
@@ -3874,6 +3883,58 @@ class SIMDScheduling(BaseScheduling):
                     f"unsupported mix-order reduction output spec "
                     f"{type(spec).__name__} for {buffer_name}"
                 )
+
+            # The partials are dense in the loop order of the outer reduction,
+            # which need not be the order of its output. Its store index maps
+            # them into the buffer or, for a split reduction, into a contiguous
+            # tensor of the buffer's shape.
+            sizes, strides, offset = partial_layouts[buffer_name]
+            layout = buffer.get_layout()
+            dense = offset == 0 and ir.is_contiguous_strides_for_shape(strides, sizes)
+            contiguous = owning and layout.is_contiguous()
+            into_buffer = contiguous or not is_split_reduction
+            shape = sizevar_list(layout.size)
+            if owning and dense and into_buffer:
+                # The partials are laid out like the buffer: rebind the name.
+                if contiguous:
+                    reduced += f".view({shape})"
+                else:
+                    reduced += f".as_strided({shape}, {sizevar_list(layout.stride)})"
+                # The workspace tensor is in torch.float, need a cast if the
+                # buffer is not.
+                if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                    reduced += f".to({buffer_dtype})"
+                wrapper.writeline(f"{buffer_name} = {reduced}")
+                # mark the buffer as allocated, so we don't try to allocate
+                # it again when it's later used
+                wrapper.allocated.add(buffer_name)
+                continue
+
+            # Write through the buffer, which may be a view into another
+            # buffer's storage (e.g. a cat destination, see
+            # https://github.com/pytorch/pytorch/issues/193061). copy_() also
+            # handles any dtype conversion from the torch.float workspace.
+            wrapper.codegen_allocation(buffer)
+            store_view = (
+                f"{wrapper.codegen_shape_tuple(sizes)}, "
+                f"{wrapper.codegen_shape_tuple(strides)}, "
+                f"{wrapper.codegen_python_sizevar(offset)}"
+            )
+            partials = f"{reduced}.view({sizevar_list(sizes)})"
+            if into_buffer:
+                wrapper.writeline(
+                    f"reinterpret_tensor({buffer_name}, {store_view}).copy_({partials})"
+                )
+            elif dense:
+                wrapper.writeline(f"{buffer_name}.copy_({reduced}.view({shape}))")
+            else:
+                tmp = f"{buffer_name}_partials"
+                wrapper.writeline(f"{tmp} = {ws_name}.new_empty({shape})")
+                wrapper.writeline(
+                    f"reinterpret_tensor({tmp}, {store_view}).copy_({partials})"
+                )
+                wrapper.writeline(f"{buffer_name}.copy_({tmp})")
+                wrapper.writeline(f"del {tmp}")
 
         kernel.deallocate_workspaces()
 
