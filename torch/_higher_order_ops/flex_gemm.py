@@ -385,6 +385,12 @@ QUACK_BLOCKSCALED_RECIPES: dict[
 }
 
 
+_MXFP6_NO_EAGER_KERNEL = (
+    "FlexGEMM MXFP6 scaled-mm has no eager kernel; call it under "
+    "torch.compile with the Inductor backend"
+)
+
+
 def validate_scaled_mm(
     mat_a: torch.Tensor,
     mat_b: torch.Tensor,
@@ -412,9 +418,15 @@ def validate_scaled_mm(
         or len(scale_a) != len(recipe)
         or len(scale_b) != len(recipe)
     ):
+
+        def names(swizzles: Sequence[int]) -> list[str]:
+            return [torch.nn.functional.SwizzleType(s).name for s in swizzles]
+
         raise NotImplementedError(
             "FlexGEMM scaled-mm requires one SWIZZLE_32_4_4 block scale per operand "
-            "and optional unswizzled NVFP4 TensorWise scales"
+            "and optional unswizzled NVFP4 TensorWise scales; got swizzles "
+            f"{names(swizzle_a)} and {names(swizzle_b)} with {len(scale_a)} and "
+            f"{len(scale_b)} scales"
         )
     if (mat_a.dtype, mat_b.dtype, scale_a[0].dtype, scale_b[0].dtype) != (
         data_dtype,
@@ -508,10 +520,7 @@ def flex_gemm_scaled_mm(
         mat_a, mat_b, scale_a, scale_b, recipe_a, recipe_b, swizzle_a, swizzle_b
     )
     if mat_a.dtype is torch.float6_e2m3fn_x4 and not torch.compiler.is_compiling():
-        raise NotImplementedError(
-            "FlexGEMM MXFP6 scaled-mm has no eager kernel; call it under "
-            "torch.compile with the Inductor backend"
-        )
+        raise NotImplementedError(_MXFP6_NO_EAGER_KERNEL)
     scale_a_end = 2 + len(scale_a)
     flat_gemm_args = (mat_a, mat_b, *scale_a, *scale_b)
     gemm_kwargs = {"flex_gemm_op": "scaled_mm"}
@@ -637,6 +646,12 @@ def flex_gemm(
 
 @flex_gemm_hop.py_impl(DispatchKey.CompositeExplicitAutograd)
 def flex_gemm_dense(gemm_op, body_fn, args, kwargs, kernel_options):
+    # Reached by eager calls and by every compile backend except Inductor.
+    if (
+        kwargs.get("flex_gemm_op") == "scaled_mm"
+        and args[0].dtype is torch.float6_e2m3fn_x4
+    ):
+        raise NotImplementedError(_MXFP6_NO_EAGER_KERNEL)
     return body_fn(*args)
 
 

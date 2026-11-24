@@ -3123,6 +3123,33 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
         self.assertIs(type(raised.exception), error)
 
+    @parametrize("backend", ("eager", "aot_eager"))
+    def test_scaled_mm_mxfp6_non_inductor_backend_raises(self, backend):
+        # These backends run the HOP's dense implementation, which has no MXFP6 kernel.
+        a = torch.zeros(256, 64, dtype=torch.float6_e2m3fn_x4)
+        b = torch.zeros_like(a).t()
+        scale_a = [torch.zeros(2048, dtype=torch.float8_e8m0fnu)]
+        scale_b = [torch.zeros_like(scale_a[0])]
+        gemm_kwargs = {
+            "scale_recipe_a": [F.ScalingType.BlockWise1x32],
+            "scale_recipe_b": [F.ScalingType.BlockWise1x32],
+            "swizzle_a": [F.SwizzleType.SWIZZLE_32_4_4],
+            "swizzle_b": [F.SwizzleType.SWIZZLE_32_4_4],
+        }
+
+        @torch.compile(backend=backend, fullgraph=True)
+        def fn(a, b, scale_a, scale_b):
+            return flex_gemm(
+                F.scaled_mm,
+                (a, b, scale_a, scale_b),
+                torch.relu,
+                gemm_kwargs=gemm_kwargs,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        with self.assertRaisesRegex(NotImplementedError, "no eager kernel"):
+            fn(a, b, scale_a, scale_b)
+
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
