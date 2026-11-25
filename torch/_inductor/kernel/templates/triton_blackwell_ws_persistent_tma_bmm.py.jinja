@@ -1,5 +1,9 @@
 {{def_kernel("A", "B")}}
+    {%- if BATCH_SIZE is defined %}
     BATCH = BATCH_SIZE
+    {%- else %}
+    BATCH = {{size("A", 0)}}
+    {%- endif %}
     M = LOGICAL_M
     N = LOGICAL_N
     K = DESCRIPTOR_K
@@ -46,6 +50,7 @@
     num_tiles_per_batch = grid_m * grid_n
     num_tiles = BATCH * num_tiles_per_batch
     num_pid_in_group = GROUP_M * grid_n
+    {{epilogue_loop_init(indent_width=4)}}
     {%- if USE_META_WS %}
     for tile_id in tl.range(
         start_pid,
@@ -136,7 +141,13 @@
                 "output_subtile",
                 indent_width=12,
                 val_shape=("1", "BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
-                block_indexing=True
+                block_indexing=True,
+                subtile_loop=("i", "EPILOGUE_SUBTILE"),
+                tile_origin=("batch", "offs_cm", "offs_cn_i"),
+                batch_loop=(
+                    "start_pid // num_tiles_per_batch",
+                    "tile_id + NUM_SMS >= num_tiles",
+                ),
             )}}
             {%- else %}
             rm = offs_cm + tl.arange(0, BLOCK_M)[:, None]
@@ -147,6 +158,12 @@
                 "subtiles[i]",
                 "mask",
                 indent_width=12,
-                val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE")
+                val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
+                subtile_loop=("i", "EPILOGUE_SUBTILE"),
+                tile_origin=("batch", "offs_cm", "offs_cn_i"),
+                batch_loop=(
+                    "start_pid // num_tiles_per_batch",
+                    "tile_id + NUM_SMS >= num_tiles",
+                ),
             )}}
             {%- endif %}

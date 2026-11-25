@@ -5,8 +5,11 @@ from __future__ import annotations
 import math
 from typing import Any, TYPE_CHECKING
 
+import sympy
+
 import torch
 from torch._inductor.heuristics.registry import register_template_heuristic
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 from ... import config
 from ...autows_utils import has_two_ctas, meta_ws_enabled
@@ -16,9 +19,11 @@ from ...kernel.bmm import (
     is_blackwell_bmm_2cta_compatible,
 )
 from ...kernel_inputs import KernelInputs, MMKernelInputs
-from ...utils import can_use_tma, get_num_sms, has_free_symbols
+from ...utils import can_use_tma, expr_fits_within_32bit, get_num_sms, has_free_symbols
+from ...virtualized import V
 from .base import TemplateConfigHeuristics
 from .triton import mm_allow_tf32
+from .triton_addmm import AddMMConfigMixin
 
 
 if TYPE_CHECKING:
@@ -52,15 +57,38 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
 
         mat1_size = mat1.get_size()
         mat2_size = mat2.get_size()
-        sizes = (*mat1_size, *mat2_size)
-        # The current bounded configs require concrete dimensions, and CUDA
-        # tensor-map dimensions must be positive.
-        if has_free_symbols(sizes):
+        batch, batch_b = mat1_size[0], mat2_size[0]
+        strides = (*mat1.get_stride(), *mat2.get_stride())
+        # A backed dynamic batch is a runtime argument: only the grid and the
+        # tile loop bound depend on it. The matrix dims and strides are
+        # constexprs, so they must be static (strides can be symbolic for a
+        # slice of a dynamic tensor), and CUDA tensor-map dimensions must be
+        # positive.
+        if (
+            has_free_symbols((*mat1_size[1:], *mat2_size[1:], *strides))
+            or has_free_symbols((mat1.get_layout().offset, mat2.get_layout().offset))
+            or free_unbacked_symbols(batch)
+            or free_unbacked_symbols(batch_b)
+            or not V.graph.sizevars.statically_known_equals(batch, batch_b)
+        ):
             return
+        static_batch = isinstance(batch, (int, sympy.Integer))
+        if static_batch:
+            batch = batch_b = int(batch)
+            if batch <= 0:
+                return
 
-        batch, m, k = map(int, mat1_size)
-        batch_b, k_b, n = map(int, mat2_size)
-        if min(batch, m, n, k) <= 0:
+        m, k = map(int, mat1_size[1:])
+        k_b, n = map(int, mat2_size[1:])
+        if min(m, n, k) <= 0:
+            return
+        # The TMA store indexes in int32. A dynamic batch is checked on its
+        # hint; a larger batch recompiles (codegen guards the 32-bit index)
+        # and falls back to other choices.
+        if not static_batch and not all(
+            expr_fits_within_32bit(numel)
+            for numel in (batch * m * k, batch * k * n, batch * m * n)
+        ):
             return
 
         # Ordinary operands use rank-3 TMA descriptors; stride-zero broadcast
@@ -70,7 +98,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         if not can_use_tma(mat1, mat2):
             return
 
-        if batch != batch_b or k != k_b:
+        if (static_batch and batch != batch_b) or k != k_b:
             raise NotImplementedError(
                 "Blackwell BMM does not broadcast logical batches"
             )
@@ -88,25 +116,33 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         a_broadcast = int(mat1.get_stride()[0]) == 0
         b_broadcast = int(mat2.get_stride()[0]) == 0
         # Host descriptors are built from the base buffer, so they cannot carry a
-        # storage offset, and one aliased kernel arg cannot hold two descriptors.
+        # storage offset, and one aliased kernel arg cannot hold a descriptor and
+        # anything else (the other operand, or a baddbmm bias).
+        host_tma_nodes = [
+            node
+            for node, broadcast in ((mat1, a_broadcast), (mat2, b_broadcast))
+            if not broadcast
+        ]
+        # Count by name, not identity: baddbmm(a, a, b) passes the same node as
+        # bias and mat1.
+        input_names = [node.get_name() for node in kernel_inputs.nodes()]
         host_side_tma = (
             config.triton.enable_host_side_tma
-            and all(
-                node.get_layout().offset == 0
-                for node, broadcast in ((mat1, a_broadcast), (mat2, b_broadcast))
-                if not broadcast
-            )
-            and (a_broadcast or b_broadcast or mat1.get_name() != mat2.get_name())
+            and all(node.get_layout().offset == 0 for node in host_tma_nodes)
+            and all(input_names.count(node.get_name()) == 1 for node in host_tma_nodes)
         )
 
         output_layout = kernel_inputs.output_layout()
         flatten_output = len(output_layout.size) == 2
+        # The grid reads a dynamic batch from the rank-3 output's size.
+        if not static_batch and flatten_output:
+            return
         rank3_output = len(output_layout.size) == 3
         tma_store = config.triton.enable_template_tma_store and can_use_tma(
             output_layout=output_layout
         )
         descriptor_options = {
-            "BATCH_SIZE": batch,
+            **({"BATCH_SIZE": batch} if static_batch else {}),
             "LOGICAL_M": m,
             "LOGICAL_N": n,
             "DESCRIPTOR_K": k,
@@ -163,6 +199,9 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "TWO_CTAS": two_ctas,
                 "RANK3_TMA_OUTPUT": tma_store and rank3_output,
                 "tma_store": tma_store,
+                # Epilogue TMA loads of a rank-3 output's tiles need its TMA store.
+                "tma_load_for_template_epilogue": tma_store
+                and config.triton.enable_tma_load_for_template_epilogue,
                 **descriptor_options,
             }
             if two_ctas:
@@ -181,3 +220,15 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             raise AssertionError(f"{self.__class__.__name__} requires MMKernelInputs")
         m, n, k = kernel_inputs.mnk_symbolic()
         return {"ALLOW_TF32": mm_allow_tf32(m, n, k, kernel_inputs.device_type)}
+
+
+@register_template_heuristic(
+    blackwell_ws_persistent_tma_bmm_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="baddbmm",
+)
+class CUDABlackwellBaddbmmTemplateConfigHeuristic(
+    AddMMConfigMixin, CUDABlackwellBMMTemplateConfigHeuristic
+):
+    """Blackwell BMM configs with the baddbmm bias applied in the epilogue."""

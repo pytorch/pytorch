@@ -27,6 +27,7 @@ from ..utils import (
     use_cpp_bmm_template,
     use_cutlass_template,
     use_nv_universal_gemm_template,
+    use_triton_blackwell_bmm_template,
     use_triton_template,
 )
 from ..virtualized import ops, V
@@ -143,7 +144,8 @@ def blackwell_bmm_grid(*args, cdiv, max, min):
     # of inferring it from the output layout passed before ``meta``.
     # Flatten logical batches and matrix tiles into one global persistent queue.
     meta = args[-1]
-    b = meta["BATCH_SIZE"]
+    # A dynamic batch has no constexpr; it is the rank-3 output's first dim.
+    b = meta["BATCH_SIZE"] if "BATCH_SIZE" in meta else args[0]
     m = meta["LOGICAL_M"]
     n = meta["LOGICAL_N"]
     grid_m = cdiv(m, meta["BLOCK_M"])
@@ -393,6 +395,12 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+        if (
+            out_dtype is None
+            and use_triton_template(layout, check_max_autotune=True)
+            and use_triton_blackwell_bmm_template(mat1, mat2, layout)
+        ):
+            templates_to_use.append(blackwell_ws_persistent_tma_bmm_template)
 
     # Single unified call for all templates
     choices.extend(
@@ -541,6 +549,10 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             kernel_inputs = MMKernelInputs(
                 [inp, mat1, mat2], scalars=dict(alpha=alpha, beta=beta)
             )
+        if use_triton_template(
+            layout, check_max_autotune=True
+        ) and use_triton_blackwell_bmm_template(mat1, mat2, layout):
+            templates_to_use.append(blackwell_ws_persistent_tma_bmm_template)
 
     # Single unified call for all templates
     choices.extend(
