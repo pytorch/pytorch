@@ -1570,6 +1570,181 @@ for warning in w:
             )
 
     @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_roll(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        actual = libtorch_agnostic.ops.my_roll(x, [-1], [1])
+        self.assertEqual(actual, x.roll(-1, 1))
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_repeat_interleave(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, output_size=6)
+        self.assertEqual(actual, x.repeat_interleave(2, dim=1, output_size=6))
+        actual = libtorch_agnostic.ops.my_repeat_interleave(x, 2)
+        self.assertEqual(actual, x.repeat_interleave(2))
+        # TODO (qqaatw): add a helper that branches and checks the actual error message from Aten when torch >= 2.13.
+        with self.assertRaisesRegex(RuntimeError, "API call failed"):
+            libtorch_agnostic.ops.my_repeat_interleave(x, 2, 1, output_size=5)
+        ops = libtorch_agnostic.ops
+        repeats = torch.tensor([1, 3, 0], device=device)
+        self.assertEqual(
+            ops.my_repeat_interleave_tensor(repeats, output_size=4),
+            torch.repeat_interleave(repeats, output_size=4),
+        )
+        self.assertEqual(
+            ops.my_repeat_interleave_self_tensor(x, repeats, -1, output_size=4),
+            x.repeat_interleave(repeats, dim=-1, output_size=4),
+        )
+
+    @skipIfTorchDynamo("equal returns a data-dependent bool")
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_equal(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([0, 3, 1], device=device)
+        equal = libtorch_agnostic.ops.my_equal
+        self.assertTrue(equal(x, x.clone()))
+        self.assertFalse(equal(x, x + 1))
+
+    @skipIfTorchDynamo("nonzero has a data-dependent output shape")
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_nonzero(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        self.assertEqual(libtorch_agnostic.ops.my_nonzero(x), x.nonzero())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_expand(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1]], device=device)
+        actual = libtorch_agnostic.ops.my_expand(x, [2, 3])
+        expected = x.expand(2, 3)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.stride(), expected.stride())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_all(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([True, False], device=device)
+        self.assertEqual(libtorch_agnostic.ops.my_all(x), x.all())
+        ops = libtorch_agnostic.ops
+        x = torch.tensor([[True, False], [True, True]], device=device)
+        self.assertEqual(ops.my_all_dim(x, 0, True), x.all(0, keepdim=True))
+        self.assertEqual(ops.my_all_dims(x, [1], True), x.all((1,), keepdim=True))
+        self.assertEqual(ops.my_all_dims(x, None), x.all())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_median(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        actual = libtorch_agnostic.ops.my_median(x, 1, True)
+        self.assertEqual(actual, x.median(1, keepdim=True))
+        self.assertEqual(libtorch_agnostic.ops.my_median_default(x), x.median())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_index_fill_(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.tensor([[0, 3, 1], [2, 5, 0]], device=device)
+        index = torch.tensor([1], device=device)
+        value = torch.tensor(7, device=device)
+        expected = x.clone().index_fill_(1, index, value)
+        actual = libtorch_agnostic.ops.my_index_fill_(x, 1, index, value)
+        self.assertEqual(actual, expected)
+        self.assertEqual(x, expected)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_my_index_fill_scalar_(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        x = torch.tensor([[0.0, 3.0, 1.0], [2.0, 5.0, 0.0]], device=device)
+        index = torch.tensor([1], device=device)
+        expected = x.clone().index_fill_(1, index, -1.5)
+        actual = libtorch_agnostic.ops.my_index_fill_scalar_(x, 1, index, -1.5)
+        self.assertEqual(actual, expected)
+        self.assertEqual(x, expected)
+
+    @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
     @parametrize("memory_format", [None, torch.channels_last, torch.contiguous_format])
     def test_my_empty(self, device, layout, memory_format):

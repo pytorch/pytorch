@@ -489,6 +489,11 @@ def gen_static_dispatch_backend_call(
                 base_name = base_name.removesuffix("_symint")  # Remove "_symint" suffix
                 return f"at::symint::{base_name}<c10::SymInt>"
 
+        # For ops not having a function variant, such as Tensor.index_fill_
+        if Variant.function not in f.variants:
+            # Dispatcher order is safe here because NativeFunction requires out variants to be function-only.
+            return f"at::_ops::{f.func.name.unambiguous_name()}::call"
+
         return f"at::{cpp_sig.name()}"
     else:
         return f"at::{backend_index.dispatch_key.lower()}::{cpp_sig.name()}"
