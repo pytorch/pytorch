@@ -44,6 +44,7 @@ A {class}`torch.dtype` is an object that represents the data type of a
 | `torch.float8_e8m0fnu` [^shell] [^1] [^e8m0] | 8-bit floating point, S-E-M 0-8-0, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
 | `torch.float8_e5m3fnu` [^shell] [^1] [^4] | 8-bit unsigned floating point, S-E-M 0-5-3, block-scale format, from <https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#alternate-floating-point-data-formats> (`ue5m3`) |
 | `torch.float4_e2m1fn_x2` [^shell] [^1] [^3] | packed 4-bit floating point, S-E-M 1-2-1, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
+| `torch.float6_e2m3fn_x4` [^shell] [^1] [^5] | packed 6-bit floating point, S-E-M 1-2-3, from <https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf> |
 
 **Integer dtypes**
 
@@ -95,6 +96,15 @@ A {class}`torch.dtype` is an object that represents the data type of a
     to be even): the sign is ignored, values below `2**-127`, including 0,
     become `2**-127` (the smallest value), and values from `1.5 * 2**127` up,
     infinities and NaN map to NaN.
+
+[^5]: The `torch.float6_e2m3fn_x4` dtype represents four 6-bit values packed into
+    three bytes, so its element size is 3. The three bytes form a little-endian
+    24-bit word, and value `i` occupies bits `[6i, 6i + 6)` of it (the first
+    value is in the low 6 bits of the first byte). As with `torch.float4_e2m1fn_x2`,
+    operations which modify the shape/strides of a tensor operate on whole 3-byte
+    elements and will **not** unpack/repack the 6-bit values. DLPack exchanges it
+    as `kDLFloat6_e2m3fn` with `bits=6, lanes=4`, so shapes and strides count
+    3-byte elements; importing `lanes=1` or padded sub-byte tensors raises.
 
 **Note**: legacy constructors such as `torch.*.FloatTensor`, `torch.*.DoubleTensor`, `torch.*.HalfTensor`,
 `torch.*.BFloat16Tensor`, `torch.*.ByteTensor`, `torch.*.CharTensor`, `torch.*.ShortTensor`, `torch.*.IntTensor`,
