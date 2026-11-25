@@ -716,6 +716,9 @@ pub struct RegionSpec {
     // What RegionOut::Obj indexes.
     pub objects: Vec<pyo3::Py<pyo3::PyAny>>,
     pub name: String,
+    // What the trace read from outside its args (see exec/reads.rs): checked
+    // before `func` is called.
+    pub reads: Option<pyo3::Py<crate::exec::reads::Reads>>,
 }
 
 impl std::fmt::Debug for RegionSpec {

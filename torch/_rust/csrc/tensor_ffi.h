@@ -35,6 +35,10 @@ const Tensor* TORCH_RUST_NULLABLE tensor_by_type(std::uintptr_t py_obj) noexcept
 bool torch_function_mode_active();
 
 bool grad_mode_enabled();
+// The thread state a traced graph is specialized on beyond grad mode, packed:
+// autocast (on, and its dtype) for cpu, cuda, xpu and mps, the default dtype,
+// and the three deterministic-algorithms flags.
+std::uint64_t region_thread_state();
 // Sets grad mode; returns what it was.
 bool set_grad_mode(bool on);
 // The version counter in-place ops bump (Tensor._version).

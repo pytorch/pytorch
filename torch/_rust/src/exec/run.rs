@@ -10,6 +10,7 @@ use crate::bindings::ffi as tffi;
 use crate::cfg::ir::*;
 
 use super::effects::{self, Recorder};
+use super::reads;
 use super::ffi::*;
 use super::{Compiled, Prepared};
 
@@ -117,6 +118,9 @@ struct Act<'a> {
     edge: Vec<*mut PyObject>,
     // The span being traced (see span_trace), or null.
     stop: *const Span,
+    // Whether this activation runs a traced region's body (or a frame under
+    // it): what its instrs read is recorded (see reads.rs).
+    reading: bool,
 }
 
 // An activation's buffers, pooled per thread so a call allocates nothing.
@@ -275,7 +279,7 @@ pub const FLAG_YIELD: u8 = 16;
 // Runs `f` with a recorder for p's table at `site`, or with none on this
 // thread if p doesn't record or recording is off.
 fn recording<R>(p: &Prepared, site: Site, f: impl FnOnce(*mut Recorder) -> R) -> R {
-    if p.record && super::RECORD.load(std::sync::atomic::Ordering::Relaxed) {
+    if p.record && super::RECORD.load(std::sync::atomic::Ordering::Relaxed) && !super::region::tracing() {
         effects::scope(&p.effects, site, f)
     } else {
         effects::unrecorded(|| f(std::ptr::null_mut()))
@@ -309,7 +313,13 @@ pub unsafe fn run(c: &Compiled, prep: &Prepared, f: *mut Frame, start: Start) ->
             outs,
             edge,
             stop: std::ptr::null(),
+            reading: reads::entered_by_body(),
         };
+        // Between this frame's instrs no instr is running (the caller puts
+        // back what was, once the frame is gone).
+        if act.reading {
+            reads::set_in_instr(false);
+        }
         let result = match start {
             Start::Entry => act.run_blocks(ENTRY, None),
             Start::Resume { b, ver, i, throw } => match act.resume(b, ver, i, throw) {
@@ -347,6 +357,7 @@ pub unsafe fn run_graph(prep: &Prepared, inputs: &[*mut PyObject]) -> Result<Vec
         outs,
         edge,
         stop: std::ptr::null(),
+        reading: false,
     };
     for (obj, p) in inputs.iter().zip(&prep.cfg[ENTRY].params) {
         act.set(*p, xincref(*obj));
@@ -674,8 +685,18 @@ impl Act<'_> {
                         ffi::Py_TYPE(x) == &raw mut ffi::PyLong_Type && ffi::PyLong_AsLongLongAndOverflow(x, &mut overflow) == *n && overflow == 0
                     })
             }
-            Check::TypeAttr { name, pin } => tr_type_attr_is(o, self.name(*name), self.p.pins[*pin as usize].as_ptr()) != 0,
-            Check::Getattr { name, pin } => tr_getattr_falls_back(o, self.name(*name), self.p.pins[*pin as usize].as_ptr()) != 0,
+            Check::TypeAttr { name, pin } => {
+                if self.reading {
+                    reads::class_of(o, self.name(*name));
+                }
+                tr_type_attr_is(o, self.name(*name), self.p.pins[*pin as usize].as_ptr()) != 0
+            }
+            Check::Getattr { name, pin } => {
+                if self.reading {
+                    reads::attr(o, self.name(*name), std::ptr::null_mut(), true);
+                }
+                tr_getattr_falls_back(o, self.name(*name), self.p.pins[*pin as usize].as_ptr()) != 0
+            }
         }
     }
 
@@ -897,6 +918,7 @@ impl Act<'_> {
                 code_units: self.code_units,
                 breaker_flag: self.breaker_flag,
                 stop: std::ptr::null(),
+                reading: self.reading,
             };
             for (obj, q) in params.into_iter().zip(&origin.cfg[ENTRY].params) {
                 sub.set(*q, obj);
@@ -1411,6 +1433,7 @@ impl Act<'_> {
         let mut body = |objs: &[*mut PyObject]| -> Result<Vec<*mut PyObject>, ()> {
             let this = &mut *this;
             ran = true;
+            this.reading = reads::on();
             for ((s, attr), o) in sp.inputs.iter().zip(objs) {
                 if attr.is_none() {
                     let old = std::mem::replace(&mut *this.local(*s), xincref(*o));
@@ -1425,6 +1448,7 @@ impl Act<'_> {
             this.stop = sp;
             let out = this.run_blocks(sp.entry, None);
             this.stop = std::ptr::null();
+            this.reading = false;
             let mut outs: Vec<*mut PyObject> = sp.live_out.iter().map(|s| xincref(*this.local(*s))).collect();
             let done = match &out {
                 Outcome::Stopped(x) => {
@@ -1621,15 +1645,18 @@ impl Act<'_> {
                     this.set(*x, xincref(*o));
                 }
             }
+            this.reading = reads::on();
             for step in &code.steps {
                 let v = step.v;
                 this.set_instr(cfg[v].origin as c_int);
                 if this.exec(v, &cfg[v]).is_err() {
                     failed = true;
+                    this.reading = false;
                     return Err(());
                 }
                 this.drop_all(&code.kills[step.kill.0 as usize..step.kill.1 as usize]);
             }
+            this.reading = false;
             Ok(ver.outputs.iter().map(|o| xincref(this.val(*o))).collect())
         };
         let c = self.c.expect("checked by the caller");
@@ -1779,7 +1806,57 @@ impl Act<'_> {
         Next::Step
     }
 
+    // Whether LoadAttr/LoadMethod `ins` of name `n` reads what the span being
+    // traced takes as an input (an attribute of a local it only reads
+    // attributes of): the span's region is handed that, on every call.
+    unsafe fn span_input(&self, ins: &Instr, n: u32) -> bool {
+        match (self.stop.as_ref(), &self.cfg[ins.args[0]].op) {
+            (Some(sp), Op::LoadLocal { slot } | Op::LoadLocalChecked { slot }) => sp.inputs.contains(&(*slot, Some(n))),
+            _ => false,
+        }
+    }
+
+    // Reports what the generic instruction `ins` (just run; `ran`: it entered
+    // a Python frame) read to the trace's reads (see reads.rs).
+    unsafe fn note_read(&self, opcode: u8, oparg: u32, ins: &Instr, ran: bool) {
+        use crate::cfg::opcodes::*;
+        let a = |k: usize| self.val(ins.args[k]);
+        match opcode {
+            BINARY_SUBSCR => reads::subscript(a(0), a(1), ran),
+            CONTAINS_OP => reads::contains(a(1), a(0), ran),
+            LOAD_SUPER_ATTR => reads::super_attr(a(1), a(2), self.name(oparg >> 2)),
+            // They build or change a container: no read of it.
+            BUILD_LIST | BUILD_MAP | BUILD_SET | BUILD_STRING | BUILD_SLICE | BUILD_CONST_KEY_MAP | LIST_APPEND | SET_ADD | MAP_ADD
+            | STORE_SUBSCR | DELETE_SUBSCR | STORE_SLICE | STORE_GLOBAL | DELETE_GLOBAL | DELETE_ATTR => {}
+            // They read their last operand into the container before it.
+            LIST_EXTEND | SET_UPDATE | DICT_UPDATE | DICT_MERGE => reads::used(&[a(ins.args.len() - 1)]),
+            CALL_FUNCTION_EX => {
+                if reads::reads_args(a(0)) {
+                    let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                    reads::used(&all);
+                } else {
+                    reads::called(a(0));
+                }
+            }
+            _ => {
+                let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                reads::used(&all);
+            }
+        }
+    }
+
+    #[inline]
     unsafe fn exec(&mut self, v: ValueId, ins: &Instr) -> R {
+        if !self.reading {
+            return self.exec_instr(v, ins);
+        }
+        let outer = reads::set_in_instr(true);
+        let r = self.exec_instr(v, ins);
+        reads::set_in_instr(outer);
+        r
+    }
+
+    unsafe fn exec_instr(&mut self, v: ValueId, ins: &Instr) -> R {
         let a = |k: usize| self.val(ins.args[k]);
         let obj = match &ins.op {
             Op::Const(i) => xincref(self.konst(*i)),
@@ -1789,6 +1866,9 @@ impl Act<'_> {
                 let r = ffi::PyObject_IsTrue(a(0));
                 if r < 0 {
                     return Err(Exc::Error);
+                }
+                if self.reading {
+                    reads::truth(a(0));
                 }
                 new_bool(r != 0)
             }
@@ -1820,7 +1900,11 @@ impl Act<'_> {
             }
             Op::LoadGlobal(n) => {
                 let cache = self.p.globals[self.p.global_slot[v.idx()] as usize].get();
-                check(tr_load_global(self.f, *n as c_int, cache))?
+                let x = check(tr_load_global(self.f, *n as c_int, cache))?;
+                if self.reading {
+                    reads::global(tr_frame_globals(self.f), tr_frame_builtins(self.f), self.name(*n), x);
+                }
+                x
             }
             Op::LoadGlobalIn { name, globals, builtins } => {
                 let name = self.name(*name);
@@ -1834,12 +1918,28 @@ impl Act<'_> {
                     }
                     return Err(Exc::Error);
                 }
+                if self.reading {
+                    reads::global(self.p.pins[*globals as usize].as_ptr(), self.p.pins[*builtins as usize].as_ptr(), name, x);
+                }
                 xincref(x)
             }
-            Op::LoadAttr(n) => check(ffi::PyObject_GetAttr(a(0), self.name(*n)))?,
+            Op::LoadAttr(n) => {
+                let before = if self.reading { reads::frames() } else { 0 };
+                let x = ffi::PyObject_GetAttr(a(0), self.name(*n));
+                if self.reading && !self.span_input(ins, *n) {
+                    reads::attr(a(0), self.name(*n), x, reads::frames() != before);
+                }
+                check(x)?
+            }
             Op::LoadMethod(n) => {
                 let mut out = [std::ptr::null_mut(); 2];
-                status(tr_load_method(self.name(*n), a(0), out.as_mut_ptr()))?;
+                let before = if self.reading { reads::frames() } else { 0 };
+                let rc = tr_load_method(self.name(*n), a(0), out.as_mut_ptr());
+                if self.reading && !self.span_input(ins, *n) {
+                    let x = if out[0].is_null() { out[1] } else { out[0] };
+                    reads::attr(a(0), self.name(*n), if rc < 0 { std::ptr::null_mut() } else { x }, reads::frames() != before);
+                }
+                status(rc)?;
                 self.distribute(v, &out);
                 return Ok(());
             }
@@ -1854,12 +1954,30 @@ impl Act<'_> {
                 let args = self.args(ins);
                 let callee = if (*args).is_null() { *args.add(1) } else { *args };
                 if super::region::tracing() && (super::opaque(callee) || self.opaque_site(ins.origin)) {
-                    check(self.opaque_call(args, *argc as c_int, kw))?
+                    // Run as it is on every call: what it reads isn't the
+                    // region's to check.
+                    let _paused = reads::Recording::pause();
+                    check(super::outside_executor(|| self.opaque_call(args, *argc as c_int, kw)))?
+                } else if self.reading && reads::reads_args(callee) {
+                    let before = reads::frames();
+                    let r = check(tr_call(args, *argc as c_int, kw))?;
+                    let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                    reads::call(callee, &all[if all[0].is_null() { 2 } else { 1 }..], r, reads::frames() != before);
+                    r
                 } else {
+                    if self.reading {
+                        reads::called(callee);
+                    }
                     check(tr_call(args, *argc as c_int, kw))?
                 }
             }
-            Op::Binary(k) => check(tr_binary_op(*k as c_int, a(0), a(1)))?,
+            Op::Binary(k) => {
+                let r = check(tr_binary_op(*k as c_int, a(0), a(1)))?;
+                if self.reading {
+                    reads::used(&[a(0), a(1)]);
+                }
+                r
+            }
             Op::Aten { .. } => {
                 let (f, kw) = &self.p.aten[&v];
                 let (kw, nkw) = kw.as_ref().map_or((std::ptr::null_mut(), 0), |k| (k.as_ptr(), ffi::PyTuple_GET_SIZE(k.as_ptr()) as usize));
@@ -1902,7 +2020,13 @@ impl Act<'_> {
                 }
             }
             Op::Region(_) => unreachable!("run_blocks runs a region version's head"),
-            Op::Compare(k) => check(ffi::PyObject_RichCompare(a(0), a(1), *k as c_int))?,
+            Op::Compare(k) => {
+                let r = check(ffi::PyObject_RichCompare(a(0), a(1), *k as c_int))?;
+                if self.reading {
+                    reads::used(&[a(0), a(1)]);
+                }
+                r
+            }
             Op::BuildTuple(n) => {
                 let t = check(ffi::PyTuple_New(*n as ffi::Py_ssize_t))?;
                 for (i, x) in ins.args.iter().enumerate() {
@@ -1910,7 +2034,13 @@ impl Act<'_> {
                 }
                 t
             }
-            Op::GetIter => check(ffi::PyObject_GetIter(a(0)))?,
+            Op::GetIter => {
+                let r = check(ffi::PyObject_GetIter(a(0)))?;
+                if self.reading {
+                    reads::iterated(a(0));
+                }
+                r
+            }
             Op::MakeFunction(flags) => check(tr_make_function(self.f, *flags as c_int, self.args(ins)))?,
             Op::MakeCell { slot } => {
                 let p = self.local(*slot);
@@ -1933,6 +2063,10 @@ impl Act<'_> {
                 if x.is_null() {
                     tr_unbound_deref(self.f, *slot as c_int);
                     return Err(Exc::Error);
+                }
+                // A span's region is handed what its own frame's cells hold.
+                if self.reading && self.stop.is_null() {
+                    reads::cell(*self.local(*slot), x);
                 }
                 x
             }
@@ -1961,7 +2095,8 @@ impl Act<'_> {
             Op::Bytecode { opcode: crate::cfg::opcodes::CALL_FUNCTION_EX, .. }
                 if super::region::tracing() && (super::opaque(a(0)) || self.opaque_site(ins.origin)) =>
             {
-                check(self.opaque_call_ex(a(0), a(1), if ins.args.len() > 2 { a(2) } else { std::ptr::null_mut() }))?
+                let _paused = reads::Recording::pause();
+                check(super::outside_executor(|| self.opaque_call_ex(a(0), a(1), if ins.args.len() > 2 { a(2) } else { std::ptr::null_mut() })))?
             }
             Op::Bytecode { opcode, arg } if super::trampoline::needed(*opcode, *arg) => {
                 let args = self.args(ins);
@@ -1978,7 +2113,11 @@ impl Act<'_> {
                     &mut big
                 };
                 let args = self.args(ins);
+                let before = if self.reading { reads::frames() } else { 0 };
                 status(tr_generic(self.f, *opcode as c_int, *arg as c_int, args, out.as_mut_ptr()))?;
+                if self.reading {
+                    self.note_read(*opcode, *arg, ins, reads::frames() != before);
+                }
                 match n {
                     0 => return Ok(()),
                     1 => out[0],

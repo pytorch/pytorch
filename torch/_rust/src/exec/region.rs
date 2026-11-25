@@ -8,7 +8,8 @@
 // depended on (each tensor's dtype, device, sizes, strides and requires_grad,
 // each scalar's value, each object's identity, grad mode) and whose body is
 // one Op::Region: the compiled graph, called (from Python, which checks the
-// containers among them) on the block's params and inputs. A run whose guard fails falls through to the version
+// containers among them) on the block's params and inputs, once what the
+// trace read from elsewhere (see reads.rs) is seen to be as it was. A run whose guard fails falls through to the version
 // the trace came from, which traces again (another variant) when it has run
 // often enough again, up to max_regions() variants per block.
 
@@ -27,6 +28,15 @@ static ENABLED: AtomicBool = AtomicBool::new(false);
 static OBSERVE: AtomicBool = AtomicBool::new(false);
 static AFTER: AtomicU32 = AtomicU32::new(2);
 static MAX_REGIONS: AtomicUsize = AtomicUsize::new(4);
+static CHECK_READS: AtomicBool = AtomicBool::new(true);
+
+/// Whether a region is entered only while what its trace read is as it was
+/// (see exec/reads.rs). On, except to measure what the check costs: a region
+/// that isn't checked computes with what its trace read.
+#[pyfunction]
+pub fn _set_cfg_region_reads(on: bool) {
+    CHECK_READS.store(on, Ordering::Relaxed);
+}
 
 /// Compile pure blocks into regions (see exec/region.rs) once a version has
 /// run `after` times, up to `variants` per block (a loop body over different
@@ -135,7 +145,14 @@ pub fn _region_body<'py>(py: Python<'py>, args: &Bound<'py, PyTuple>) -> PyResul
     };
     let null = null_sentinel(py)?;
     let objs: Vec<*mut PyObject> = args.iter().map(|a| if a.is(&null) { std::ptr::null_mut() } else { a.as_ptr() }).collect();
-    let outs = unsafe { (*body)(&objs) };
+    // The trace runs outside the executor; the body runs in it again, so
+    // that the frames it enters are the executor's and what they read is
+    // recorded (see reads.rs).
+    let outs = {
+        let _exec = super::ExecGuard::new();
+        let _recording = super::reads::Recording::start();
+        unsafe { (*body)(&objs) }
+    };
     match outs {
         Ok(outs) => {
             let items: Vec<Bound<'py, PyAny>> = outs
@@ -176,14 +193,17 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     let body: *mut Body<'_> = body;
     BODY.set(Some(std::mem::transmute::<*mut Body<'_>, *mut Body<'static>>(body)));
     TRACING.set(true);
+    super::reads::begin();
     let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types)));
+    super::reads::end();
     TRACING.set(false);
     BODY.set(None);
     let r = r?;
     if r.is_none() {
         return Ok(None);
     }
-    let (func, outputs, objects, checks): (Bound<'_, PyAny>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyTuple>>) = r.extract()?;
+    let (func, outputs, objects, checks, reads): (Bound<'_, PyAny>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyTuple>>, Option<Py<super::reads::Reads>>) =
+        r.extract()?;
     let outputs = outputs.iter().map(parse_out).collect::<PyResult<Vec<_>>>()?;
     Ok(Some(Traced {
         spec: RegionSpec {
@@ -191,6 +211,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
             outputs,
             objects: objects.into_iter().map(Bound::unbind).collect(),
             name: name.to_string(),
+            reads,
         },
         checks: checks.into_iter().map(Bound::unbind).collect(),
     }))
@@ -228,6 +249,16 @@ fn parse_out(o: &Bound<'_, PyAny>) -> PyResult<RegionOut> {
 // exception set.
 pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
     let py = Python::assume_attached();
+    // Before anything of the region runs.
+    if let Some(reads) = &spec.reads
+        && CHECK_READS.load(Ordering::Relaxed)
+        && !reads.get().check()
+    {
+        if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
+            eprintln!("region {}: miss on {}", spec.name, reads.get().last());
+        }
+        return Ok(None);
+    }
     let Ok(null) = null_sentinel(py) else { return Err(()) };
     let list = ffi::PyList_New(args.len() as ffi::Py_ssize_t);
     if list.is_null() {

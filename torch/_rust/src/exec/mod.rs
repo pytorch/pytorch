@@ -9,6 +9,7 @@ pub mod ffi;
 pub mod graph;
 pub mod joint;
 mod live;
+pub mod reads;
 pub mod region;
 mod run;
 mod spans;
@@ -651,13 +652,20 @@ unsafe fn fail(msg: &str, exc: *mut pyo3::ffi::PyObject) {
 // (see _cfg_skip).
 static SKIPPED: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 static SKIP_ANY: AtomicBool = AtomicBool::new(false);
+// Those of SKIPPED that are the region tracer's own (its mode handlers, its
+// float subclass): a trace through one of the others is refused.
+static SKIPPED_OWN: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
 /// Run `f`'s frames, and every frame they run, on CPython, like
 /// `torch.compiler.disable`.
 #[pyfunction]
-pub fn _cfg_skip(f: &Bound<'_, PyAny>) -> PyResult<()> {
+#[pyo3(signature = (f, own=false))]
+pub fn _cfg_skip(f: &Bound<'_, PyAny>, own: bool) -> PyResult<()> {
     let code = f.getattr("__code__")?;
     SKIPPED.lock().unwrap().push(code.as_ptr() as usize);
+    if own {
+        SKIPPED_OWN.lock().unwrap().push(code.as_ptr() as usize);
+    }
     // Kept alive so the address isn't reused.
     std::mem::forget(code.unbind());
     SKIP_ANY.store(true, Ordering::Relaxed);
@@ -689,6 +697,31 @@ unsafe fn gc_callback(frame: *mut Frame) -> bool {
     (0..n).any(|i| tr_bound_function(pyo3::ffi::PyList_GET_ITEM(list, i)) == func)
 }
 
+// How a frame of `code` runs while a region's body is traced, if `code`
+// belongs to what traces rather than to the body: Some(true) on CPython with
+// everything it calls (torch._ops and torch._library: the operator objects
+// the dispatcher looks up from inside an operator), Some(false) on CPython
+// with the frames it enters being the executor's again (torch.fx,
+// torch.overrides and the region tracer: fx's stand-ins for a module's call
+// and attribute lookup and the handlers of the function modes call the body
+// back).
+unsafe fn tracer_code(code: *mut pyo3::ffi::PyObject) -> Option<bool> {
+    let py = Python::assume_attached();
+    let Ok(f) = Bound::from_borrowed_ptr(py, code).getattr("co_filename").and_then(|f| f.extract::<String>()) else {
+        pyo3::ffi::PyErr_Clear();
+        return None;
+    };
+    let at = f.rfind("/torch/")?;
+    let rest = &f[at + 7..];
+    if rest == "_ops.py" || rest.starts_with("_library/") {
+        Some(true)
+    } else if rest.starts_with("fx/") || rest == "overrides.py" || rest == "_rust_inductor.py" {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 unsafe extern "C" fn eval_frame(
     tstate: *mut pyo3::ffi::PyThreadState,
     frame: *mut Frame,
@@ -702,14 +735,31 @@ unsafe extern "C" fn eval_frame(
     // the generator object, and we continue from where it was suspended.
     let gen_frame = tr_frame_owned_by_generator(frame) != 0;
     let code = tr_frame_code(frame);
+    // While a region's body is traced the executor runs every frame under
+    // it, cold code too, so that what the frames read is recorded (see
+    // reads.rs); it neither observes nor optimizes then.
+    let tracing = region::tracing();
+    if tracing {
+        reads::frame_entered();
+    }
     if !gen_frame && SKIP_ANY.load(Ordering::Relaxed) && SKIPPED.lock().unwrap().contains(&(code as usize)) {
         if NEXT_CLONE.get().0 == code as usize {
             NEXT_CLONE.set((0, 0, 0));
+        }
+        if reads::on() && !SKIPPED_OWN.lock().unwrap().contains(&(code as usize)) {
+            let name = Bound::from_borrowed_ptr(Python::assume_attached(), tr_frame_qualname(frame)).to_string();
+            reads::refuse(format!("it runs {name}, which the VM was told to skip"));
         }
         return outside_executor(|| prev(tstate, frame, throwflag));
     }
     if !gen_frame && gc_callback(frame) {
         return outside_executor(|| prev(tstate, frame, throwflag));
+    }
+    if tracing && let Some(deep) = tracer_code(code) {
+        if NEXT_CLONE.get().0 == code as usize {
+            NEXT_CLONE.set((0, 0, 0));
+        }
+        return if deep { outside_executor(|| prev(tstate, frame, throwflag)) } else { prev(tstate, frame, throwflag) };
     }
     let pending = NEXT_CLONE.get();
     let compiled = if !gen_frame && pending.2 != 0 && pending.0 == code as usize && tr_current_frame(tstate) as usize == pending.1 {
@@ -730,7 +780,7 @@ unsafe extern "C" fn eval_frame(
         if !c.cold.load(Ordering::Relaxed) && BYPASSED.load(Ordering::Relaxed) && !c.auto_optimized.load(Ordering::Relaxed) {
             c.cold.store(true, Ordering::Relaxed);
         }
-        if c.cold.load(Ordering::Relaxed) {
+        if c.cold.load(Ordering::Relaxed) && !tracing {
             return if c.deep.load(Ordering::Relaxed) { outside_executor(|| prev(tstate, frame, throwflag)) } else { prev(tstate, frame, throwflag) };
         }
     }
@@ -773,8 +823,9 @@ unsafe extern "C" fn eval_frame(
     } else {
         run::Start::Entry
     };
+    let in_instr = tracing && reads::in_instr();
     let outcome = run::run(c, &plan.prep, frame, start);
-    if matches!(outcome, run::Outcome::Return(_)) && OPTIMIZE.load(Ordering::Relaxed) && !OPTIMIZING.get() {
+    if matches!(outcome, run::Outcome::Return(_)) && OPTIMIZE.load(Ordering::Relaxed) && !OPTIMIZING.get() && !tracing {
         let py = Python::assume_attached();
         if !c.auto_optimized.swap(true, Ordering::Relaxed) {
             if let Err(e) = optimize(py, c, None) {
@@ -791,7 +842,13 @@ unsafe extern "C" fn eval_frame(
             }
         }
     }
-    leave(tstate, frame, gen_frame, outcome)
+    // What the frame held is dropped with no instr of the body running
+    // (see reads.rs); then the caller's instr goes on.
+    let result = leave(tstate, frame, gen_frame, outcome);
+    if tracing {
+        reads::set_in_instr(in_instr);
+    }
+    result
 }
 
 unsafe fn leave(
@@ -817,10 +874,10 @@ unsafe fn leave(
     result
 }
 
-struct ExecGuard;
+pub(crate) struct ExecGuard;
 
 impl ExecGuard {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         if ACTIVE.get() == 0 {
             live(true);
         }
