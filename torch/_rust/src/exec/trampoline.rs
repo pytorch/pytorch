@@ -77,7 +77,7 @@ fn build(py: Python<'_>, intrinsic: Option<(u8, u32)>) -> PyResult<Py<PyAny>> {
         } else {
             opcodes::IS_OP
         };
-        let mut bytes = code.getattr("co_code")?.downcast_into::<PyBytes>()?.as_bytes().to_vec();
+        let mut bytes = code.getattr("co_code")?.cast_into::<PyBytes>()?.as_bytes().to_vec();
         let pos = (0..bytes.len())
             .step_by(2)
             .find(|i| bytes[*i] == placeholder)
