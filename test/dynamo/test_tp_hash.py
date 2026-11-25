@@ -249,7 +249,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return hash(t)
 
-        with self.assertRaisesRegex(Unsupported, "FakeIdVariable"):
+        with self.assertRaisesRegex(Unsupported, "compile-time-only hash value"):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.tensor(0))
 
     # --- SymNodeVariable ---

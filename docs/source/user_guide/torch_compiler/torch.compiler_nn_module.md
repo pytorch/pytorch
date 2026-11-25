@@ -45,7 +45,7 @@ introduce a significant performance regression, and additional work is required 
 **skip_nnmodule_hook_guards**
 When a module has no hooks, Dynamo can call `forward` directly. The default `torch._dynamo.config.skip_nnmodule_hook_guards=True` lets this shortcut skip checks that empty builtin local hook registries stay empty. Set it to `False` to detect newly added local hooks. A global hook added after taking the shortcut can go undetected with either setting.
 
-When Dynamo traces hook dispatch, it guards the callbacks and flag membership it uses. Adding a pre-hook to a module with an existing forward hook can therefore trigger recompilation with either setting. The default skips type checks on builtin global registries and hook IDs used for flag membership. Dynamo guards a registry's type when user code observes it.
+When Dynamo traces hook dispatch, it guards the callbacks and flag membership it uses. Adding a pre-hook to a module with an existing forward hook can therefore trigger recompilation with either setting. The default skips type checks on builtin registries accessed through their global names and on hook IDs used for flag membership. Dynamo guards a registry's type when user code observes it.
 
 TODO: confirm if backward/pre_backward hooks are working or not and document accordingly
 
