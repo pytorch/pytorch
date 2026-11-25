@@ -255,9 +255,24 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             next(iterator)
         self.assertEqual(actual.exception.args, expected.exception.args)
 
+    def test_escape_reversed_ordered_view(self):
+        def fn(x, mapping):
+            return x + 1, reversed(mapping.values())
+
+        mapping = OrderedDict(a=1, b=2, c=3)
+        mapping.move_to_end("a")
+        x = torch.ones(1)
+        result, iterator = torch.compile(fn, backend="eager", fullgraph=True)(
+            x, mapping
+        )
+        self.assertEqual(result, x + 1)
+        self.assertIs(type(iterator), type(reversed(mapping.values())))
+        mapping["a"] = 4
+        self.assertEqual(list(iterator), [4, 3, 2])
+
     def _assert_iterator_reconstruction_fallback(self, fn, *args):
         with self.assertRaisesRegex(
-            Unsupported, "mutations are replayed after reconstruction"
+            Unsupported, "Iterator reconstruction before an input mutation"
         ):
             torch.compile(fn, backend="eager", fullgraph=True)(*args)
 
@@ -306,8 +321,15 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             fn = types.FunctionType(write_global.__code__, namespace)
         x = torch.ones(1)
         mappings = namespace.copy(), namespace
-        for mapping in mappings:
-            self._assert_iterator_reconstruction_fallback(fn, x, mod, mapping)
+        if kind == "mapping_write":
+            compiled = torch.compile(fn, backend="eager", fullgraph=True)
+            result, keys = compiled(x, mod, mappings[0])
+            self.assertEqual((result, list(keys)), (x + 1, list(namespace)))
+            self.assertEqual(mappings[0].pop("second"), 2)
+            self._assert_iterator_reconstruction_fallback(fn, x, mod, namespace)
+        else:
+            for mapping in mappings:
+                self._assert_iterator_reconstruction_fallback(fn, x, mod, mapping)
         for mapping in mappings:
             torch._dynamo.reset()
             result, keys = torch.compile(fn, backend="eager")(x, mod, mapping)
@@ -317,19 +339,38 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             )
             (mapping if kind == "mapping_write" else namespace).pop("second")
 
+    def test_escape_namespace_iterator_after_cond(self):
+        class Box:
+            pass
+
+        def fn(x, obj, namespace):
+            namespace["second"] = 2
+            y = torch.cond(x.sum() > 0, lambda t: t + 1, lambda t: t - 1, (x,))
+            return y, iter(obj.__dict__)
+
+        obj = Box()
+        obj.first = 1
+        x = torch.ones(1)
+        self._assert_iterator_reconstruction_fallback(fn, x, obj, vars(obj))
+        result, keys = torch.compile(fn, backend="eager")(x, obj, vars(obj))
+        self.assertEqual((result, list(keys)), (x + 1, ["first", "second"]))
+
     @parametrize("factory", [dict, OrderedDict, set])
     def test_escape_iterator_after_owner_mutation(self, factory):
-        def fn(x, owner):
+        def fn(x, owner, target):
             if factory is set:
-                owner.add(3)
+                target.add(3)
             else:
-                owner[3] = 3
+                target[3] = 3
             return x + 1, iter(owner)
 
         x = torch.ones(1)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
         owner = factory({1: 1, 2: 2})
-        self._assert_iterator_reconstruction_fallback(fn, x, owner)
-        result, iterator = torch.compile(fn, backend="eager")(x, owner)
+        result, iterator = compiled(x, owner, owner.copy())
+        self.assertEqual((result, list(iterator)), (x + 1, list(owner)))
+        self._assert_iterator_reconstruction_fallback(fn, x, owner, owner)
+        result, iterator = torch.compile(fn, backend="eager")(x, owner, owner)
         self.assertEqual(result, x + 1)
         self.assertIn(3, owner)
         self.assertEqual(list(iterator), list(owner))
