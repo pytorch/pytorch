@@ -577,10 +577,51 @@ class BackendEntryPointTest(TestCase):
             out.split(), ["False", "False", "torch.distributed._backends.fake"]
         )
 
-    @parametrize("backend", ["nccl", "nccl2", "nccl-lazy"])
-    def test_nccl_backend_default_timeout(self, backend):
-        timeout = timedelta(seconds=1)
-        with unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", timeout):
+    @parametrize("backend", ["nccl", "nccl-legacy", "nccl2", "nccl-lazy"])
+    @parametrize(
+        "backend_format", ["{}", "cuda:{}", "cpu:gloo,cuda:{}", "cuda:{},cpu:gloo"]
+    )
+    @parametrize("nccl_available", [False, True])
+    def test_nccl_backend_default_timeout(
+        self, backend, backend_format, nccl_available
+    ):
+        timeout = timedelta(seconds=2)
+        nccl_timeout = timedelta(seconds=1) if nccl_available else None
+        warning_context = (
+            nullcontext()
+            if nccl_available
+            else self.assertWarnsRegex(UserWarning, "NCCL support is not compiled")
+        )
+        with (
+            unittest.mock.patch.object(c10d, "default_pg_timeout", timeout),
+            unittest.mock.patch.object(c10d, "default_pg_nccl_timeout", nccl_timeout),
+            warning_context,
+        ):
+            self.assertEqual(
+                c10d._get_default_timeout(backend_format.format(backend)),
+                nccl_timeout if nccl_available else timeout,
+            )
+
+    @parametrize(
+        "backend",
+        [
+            "gloo",
+            "cpu:gloo",
+            "cpu:gloo,cuda:gloo",
+            "custom_nccl",
+            "cuda:custom_nccl",
+            "cpu:gloo,cuda:nccl_custom",
+            "nccl:gloo",
+        ],
+    )
+    def test_other_backend_default_timeout(self, backend):
+        timeout = timedelta(seconds=2)
+        with (
+            unittest.mock.patch.object(c10d, "default_pg_timeout", timeout),
+            unittest.mock.patch.object(
+                c10d, "default_pg_nccl_timeout", timedelta(seconds=1)
+            ),
+        ):
             self.assertEqual(c10d._get_default_timeout(backend), timeout)
 
     @parametrize("legacy_default", [False, True])
