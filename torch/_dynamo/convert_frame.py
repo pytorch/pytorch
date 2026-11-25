@@ -929,16 +929,16 @@ def trace_frame(
 ) -> DynamoTracerOutput:
     from torch.fx.experimental.validator import bisect, translation_validation_enabled
 
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
     if (
-        torch.cuda.is_available()
-        and hasattr(torch._C, "_cuda_isCurrentStreamCapturing")
-        and not isinstance(torch._C._cuda_isCurrentStreamCapturing, type)
-        and torch.cuda.is_current_stream_capturing()
+        accelerator is not None
+        and torch.accelerator.current_stream().is_capturing()
         and not _in_hop_compile()
     ):
+        device_type = accelerator.type.upper()
         raise exc.TorchRuntimeError(
-            "torch.compile cannot JIT compile during CUDA graph capture. "
-            "Execute warmup iterations outside of CUDA graph capture to trigger "
+            f"torch.compile cannot JIT compile during {device_type} graph capture. "
+            f"Execute warmup iterations outside of {device_type} graph capture to trigger "
             "compilation, then capture the graph after compilation has completed."
         )
 
