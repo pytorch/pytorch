@@ -513,6 +513,7 @@ def reduction_output_name(node: scheduler.BaseSchedulerNode) -> str:
         node, scheduler.SchedulerNode
     ) and scheduler.MixOrderReduction.is_split_reduction(node):
         stage2 = node.get_outputs()[0].users[0].node
+        # pyrefly: ignore [missing-attribute]
         return stage2.get_outputs()[0].node.get_name()
     return node.get_outputs()[0].node.get_name()
 
@@ -694,6 +695,7 @@ def template_reduction_axis(
         and list(pointwise) in ([rows * n], [rows, n])
         and list(reduced) == [batch]
         and finishes_from_partials(unsplit, m, n)
+        # pyrefly: ignore [missing-attribute]
         and unsplit.node.get_reduction_type() == "sum"
         # The wrapper writes the finished sums as a contiguous tensor.
         and V.graph.get_buffer(reduction_output_name(node)).get_layout().is_contiguous()
