@@ -1123,7 +1123,10 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
       } else {
         linearIndex = index;
         if (i>0) {
-           strideBefore = src.stride(i-1); // stride after undefined dimensions
+           // Stride after undefined dimensions. Use the contiguous stride rather
+           // than src.stride(i-1): a contiguous src can have an arbitrary stride
+           // on a size-1 dim, but the kernels index src as dense.
+           strideBefore = strides[i-1];
         }
       }
     } else if (linearIndex.defined()) {
@@ -1834,12 +1837,12 @@ static bool index_add_sorted_rocm(
         const Tensor long_scratch =
             at::empty({max_long_chunks, scratch_feature_tile}, result.options());
 
-        // Explicit return type: a deduced one would instantiate the bf16-only
-        // values_per_thread == 2 kernels from the discarded branch below.
-        const auto launch_long_passes = [&](auto values_per_thread_constant,
-                                            int block_size) -> void {
+        const auto launch_long_passes = [&](auto bfloat16_values_per_thread,
+                                            int block_size) {
           constexpr int values_per_thread =
-              decltype(values_per_thread_constant)::value;
+              std::is_same_v<scalar_t, c10::BFloat16>
+              ? decltype(bfloat16_values_per_thread)::value
+              : 1;
           const int long_grid = static_cast<int>(std::min<int64_t>(
               max_long_chunks,
               multiprocessor_count * (values_per_thread == 2 ? 16 : 8)));
@@ -1894,8 +1897,8 @@ static bool index_add_sorted_rocm(
           }
         };
 
-        const auto launch_dense = [&](auto vectorized_constant) -> void {
-          constexpr bool vectorized = decltype(vectorized_constant)::value &&
+        const auto launch_dense = [&](auto bfloat16_vectorized) {
+          constexpr bool vectorized = decltype(bfloat16_vectorized)::value &&
               std::is_same_v<scalar_t, c10::BFloat16>;
           with_feature_size([&](auto feature_size_constant) {
             constexpr int64_t feature_size =
@@ -1930,18 +1933,14 @@ static bool index_add_sorted_rocm(
         };
 
         if (use_packed_bfloat16) {
-          if constexpr (std::is_same_v<scalar_t, c10::BFloat16>) {
-            launch_dense(std::true_type{});
-            launch_long_passes(std::integral_constant<int, 2>{}, 64);
-          } else {
-            TORCH_INTERNAL_ASSERT(false);
-          }
-          return;
+          TORCH_INTERNAL_ASSERT((std::is_same_v<scalar_t, c10::BFloat16>));
+          launch_dense(std::true_type{});
+          launch_long_passes(std::integral_constant<int, 2>{}, 64);
+        } else {
+          launch_dense(std::false_type{});
+          launch_long_passes(
+              std::integral_constant<int, 1>{}, static_cast<int>(inner_size));
         }
-
-        launch_dense(std::false_type{});
-        launch_long_passes(
-            std::integral_constant<int, 1>{}, static_cast<int>(inner_size));
       });
   return true;
 }
