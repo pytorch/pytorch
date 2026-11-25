@@ -45,8 +45,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    IS_CPU_CAPABILITY_ZVECTOR,
     is_iterable_of_tensors,
-    IS_S390X,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -528,6 +528,11 @@ class TestOperatorsDevice(TestCase):
                 device_type="xpu",
             ),
             tol1(
+                "nn.functional.scaled_dot_product_attention",
+                {torch.float32: tol(atol=5e-05, rtol=1.3e-06)},
+                device_type="xpu",
+            ),
+            tol1(
                 "pca_lowrank",
                 {torch.float32: tol(atol=3e-05, rtol=4e-06)},
                 device_type="cpu",
@@ -536,13 +541,11 @@ class TestOperatorsDevice(TestCase):
                 [
                     tol1(
                         "grid_sampler_2d",
-                        {
-                            torch.float32: tol(atol=1e-04, rtol=1e-04)
-                        },  # Adjust values as needed
+                        {torch.float32: tol(atol=1e-04, rtol=1e-04)},
                         device_type="cpu",
                     )
                 ]
-                if IS_S390X
+                if IS_CPU_CAPABILITY_ZVECTOR
                 else []
             ),
         ),
@@ -830,6 +833,11 @@ class TestOperatorsDevice(TestCase):
                 "nn.functional.multi_head_attention_forward",
                 {torch.float32: tol(atol=2e-03, rtol=2e-04)},
             ),
+            tol1(
+                "nn.functional.scaled_dot_product_attention",
+                {torch.float32: tol(atol=5e-05, rtol=1.3e-06)},
+                device_type="xpu",
+            ),
             tol1("__rmatmul__", {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
             tol1("matmul", {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
             tol2(
@@ -839,6 +847,17 @@ class TestOperatorsDevice(TestCase):
             tol1("linalg.multi_dot", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("svd_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+            *(
+                [
+                    tol1(
+                        "grid_sampler_2d",
+                        {torch.float32: tol(atol=1e-04, rtol=1e-04)},
+                        device_type="cpu",
+                    )
+                ]
+                if IS_CPU_CAPABILITY_ZVECTOR
+                else []
+            ),
         ),
     )
     def test_vjp(self, device, dtype, op):
@@ -2453,6 +2472,11 @@ class TestOperatorsDevice(TestCase):
             tol1(
                 "nn.functional.conv2d",
                 {torch.float32: tol(atol=5e-05, rtol=5e-05)},
+            ),
+            tol1(
+                "nn.functional.scaled_dot_product_attention",
+                {torch.float32: tol(atol=5e-05, rtol=1.3e-06)},
+                device_type="xpu",
             ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
