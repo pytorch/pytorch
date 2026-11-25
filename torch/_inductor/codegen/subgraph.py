@@ -57,6 +57,33 @@ def inline_subgraph_to_ir_nodes(
         V.graph.module = original_module
 
 
+class SubgraphCompileError(RuntimeError):
+    """The benchmark module for a subgraph choice failed to compile."""
+
+
+def _is_kernel_compile_failure(e: BaseException) -> bool:
+    """Whether e is a kernel failing to compile, not a bug in lowering or codegen.
+
+    A kernel compiled in a pool worker fails with SubprocException; one compiled
+    in process fails with a Triton CompilationError or OutOfResources. Anything
+    else (e.g. an AssertionError or KeyError in the subgraph's lowering) is a
+    bug and should still fail the compile.
+    """
+    from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+    if isinstance(e, SubprocException):
+        # A job that raised in a worker carries the worker's traceback. The pool's
+        # own failures (e.g. a result it could not deliver) carry no traceback and
+        # are not a failure of this kernel, so they propagate.
+        return e.details.startswith("Traceback (most recent call last):")
+    try:
+        from triton.compiler.errors import CompilationError
+        from triton.runtime.errors import OutOfResources
+    except ImportError:
+        return False
+    return isinstance(e, (CompilationError, OutOfResources))
+
+
 class SubgraphChoiceCaller(ir.ChoiceCaller):
     """
     Represents a Subgraph Autotuning choice, and the subgraph can be any arbitrary
@@ -119,6 +146,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         self.config_patches: dict[str, Any] = {}
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
+        # Failure from a lazy benchmark compile, so it is not retried
+        self._compile_error: str | None = None
         # Cache benchmark request for async autotuning
         self._bmreq: (
             SubgraphGPUBenchmarkRequest | SubgraphCPUBenchmarkRequest | None
@@ -263,9 +292,29 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         return self._bmreq
 
     def _ensure_compiled(self) -> None:
-        """Ensure the module is compiled. Used for lazy compilation in non-async path."""
-        if self._compiled_module is None:
+        """Ensure the module is compiled. Used for lazy compilation in non-async path.
+
+        A kernel compile failure drops this choice, like a template that fails to
+        precompile. Other errors propagate.
+        """
+        if self._compiled_module is not None:
+            return
+        if self._compile_error is not None:
+            raise SubgraphCompileError(self._compile_error)
+        try:
             self._compiled_module = self._compile_for_benchmarking()
+        except Exception as e:
+            if (
+                config.triton.disallow_failing_autotune_kernels_TESTING_ONLY
+                or not _is_kernel_compile_failure(e)
+            ):
+                raise
+            # Keep only the message: the traceback would pin the failed lowering.
+            self._compile_error = (
+                f"failed to compile benchmark module for {self.name}: "
+                f"{type(e).__name__}: {e}"
+            )
+            raise SubgraphCompileError(self._compile_error) from e
 
     def _ensure_benchmark_request(
         self,
