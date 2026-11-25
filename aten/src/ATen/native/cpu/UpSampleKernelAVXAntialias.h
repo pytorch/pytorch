@@ -330,8 +330,8 @@ void upsample_avx_bilinear_bicubic_uint8(
     input = input.contiguous(at::MemoryFormat::ChannelsLast);
   }
 
-  auto need_horizontal = xout != xin;
-  auto need_vertical = yout != yin;
+  auto need_horizontal = F::needs_pass(xin, xout, scales[1]);
+  auto need_vertical = F::needs_pass(yin, yout, scales[0]);
 
   int ksize_horiz, ksize_vert;
   std::vector<at::Tensor> horiz_indices_weights, vert_indices_weights;
