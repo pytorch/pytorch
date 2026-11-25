@@ -17,6 +17,7 @@ from torch._inductor.heuristics.registry import (
 )
 from torch._inductor.runtime.hints import (
     AutotuneHint,
+    is_default_reduction_scheduling,
     mix_order_reduction_max_num_stages,
     ReductionHint,
     TRITON_MAX_BLOCK,
@@ -232,7 +233,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         config_reduction_hint = (
             ReductionHint.DEFAULT
             if isinstance(reduction_hint, ReductionHint)
-            and reduction_hint.is_default_scheduling()
+            and is_default_reduction_scheduling(reduction_hint)
             else reduction_hint
         )
         rnumel = get_total_reduction_numel(size_hints)
