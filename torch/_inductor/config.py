@@ -626,6 +626,9 @@ max_autotune_gemm_min_sms: int | None = (
 incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
+# Extend the default kernel allowlist when incremental autotuning is enabled.
+# An explicit TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_INCLUDE still takes precedence.
+incremental_autotune_reduction = False
 # Per-state dispatch budget for incremental autotuning; 0 disables the cap.
 # A torch.compile option overrides this default for every generated kernel.
 incremental_autotune_max_dispatches = int(

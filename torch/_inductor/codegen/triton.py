@@ -8144,6 +8144,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
 
         if config.incremental_autotune:
+            if config.incremental_autotune_reduction:
+                inductor_meta["incremental_autotune_reduction"] = True
             inductor_meta["incremental_autotune_max_dispatches"] = (
                 config.incremental_autotune_max_dispatches
             )
