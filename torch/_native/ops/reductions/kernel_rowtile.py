@@ -262,14 +262,15 @@ def inner_tree_fallback(reason: str, *, explicit: bool = False) -> None:
 def select_row_order(
     cc: tuple[int, int],
     dtype: torch.dtype,
-    trait_key: str,
     N: int,
     M: int,
     *,
+    trait_type: type,
     nfields: int,
     nouts: int,
-    acc_bits: int = 32,
-    alignment: int = 16,
+    welford_outs: int,
+    acc_bits: int,
+    alignment: int,
 ) -> Literal["linear", "inner_tree"]:
     """Pick the kernel order for an unordered row reduction."""
     return "linear"
@@ -603,6 +604,9 @@ def itree_combine_plan(
     if not tile_n:
         # Narrow blocks pay off only for the staged combine; the global-memory chain keeps 128.
         rpb = _MULTIROW_ROWS_PER_BLOCK
+    # Without uniform counts the fold reads only the partition count, so ragged and whole
+    # splits of one partition count share a combine plan and its kernel.
+    bte, chunk = itree.split[1], itree.split[3]
     return _ItreePlan(
         "combine",
         1,
@@ -611,7 +615,7 @@ def itree_combine_plan(
         itree.depth,
         (),
         (),
-        itree.split,
+        (nbatch, bte, bte, chunk, chunk),
         combine_grp=g,
         combine_tile=tile_n,
         combine_unroll=min(arch.combine_unroll, tile_n),
@@ -977,9 +981,8 @@ def reduce_row_tile(
             f"got {full_align}-byte alignment"
         )
     isz = x.element_size()
-    if not ragged_vector and tile.align_bytes(x.stride(0), isz) < tile.align_bytes(
-        N, isz
-    ):
+    whole_pitch = tile.align_bytes(x.stride(0), isz) >= tile.align_bytes(N, isz)
+    if not ragged_vector and not whole_pitch:
         raise ValueError(f"rows need a pitch of whole vectors, got {N=} {x.stride(0)=}")
     cfg = row_config(N, isz * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near

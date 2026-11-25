@@ -6,7 +6,14 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_CUTEDSL,
+    TestCase,
+)
 
 
 if not TEST_CUTEDSL:
@@ -18,7 +25,12 @@ if not TEST_CUTEDSL:
 import cutlass
 
 from torch._native.cutedsl import launch as _L
-from torch._native.ops.reductions import kernel_xcta, tile, traits as T
+from torch._native.ops.reductions import (
+    kernel_general as kg,
+    kernel_xcta,
+    tile,
+    traits as T,
+)
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
@@ -123,6 +135,48 @@ class TestKernelXcta(TestCase):
                 torch.float32,
             )
         )
+
+    @parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+    def test_welford_long_subrows(self, dtype):
+        """Split one Welford row into 16384-element sub-rows, the geometry B200's Welford
+        rule launches."""
+        n = 1 << 22
+        x = torch.randn(1, n, device="cuda", dtype=dtype)
+        key = f"long_subrows_{dtype}"
+        f32 = [torch.float32] * 2
+        trait = T.VarMeanOps(correction=0)
+        res = kernel_xcta.reduce_row_xcta_2out(trait, key, x, f32, subrow_target=16384)
+        self.assertIsNotNone(res, "the split declined a shape it is meant to serve")
+        # Geometry entries lead with the sub-row count C.
+        splits = {geom[0] for k, geom in kernel_xcta._GEOM.items() if k[0] == key}
+        self.assertEqual(splits, {n // 16384})
+        want = torch.var_mean(x.double(), dim=1, correction=0)
+        self.assertEqual(res, tuple(w.float() for w in want), atol=1e-4, rtol=1e-4)
+
+    @largeTensorTest("3GB", device="cuda")
+    def test_b200_welford_subrow_target_follows_rows(self):
+        """Take the sub-row target from select_xcta_config: at B200's 256 MiB fp16
+        Welford anchor, one row splits into longer sub-rows than each of two rows."""
+        if torch.cuda.get_device_capability() not in kg._B200_CCS:
+            self.skipTest("the xcta Welford rule is measured on B200 only")
+        n = (256 << 20) // 2
+        trait = T.WelfordOps(correction=0, acc=cutlass.Float32)
+        splits = {}
+        for m in (1, 2):
+            x = torch.randn(m, n, device="cuda", dtype=torch.float16)
+            key = f"subrow_rows{m}"
+            got = kernel_xcta.reduce_row_xcta(trait, key, x, torch.float32)
+            # Geometry entries lead with the sub-row count C.
+            splits[m] = {
+                geom[0] for k, geom in kernel_xcta._GEOM.items() if k[0] == key
+            }
+            want = x.double().var(dim=1, correction=0).float()
+            self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
+            del x, got
+        self.assertEqual(splits, {1: {n // 16384}, 2: {n // 8192}})
+
+
+instantiate_parametrized_tests(TestKernelXcta)
 
 
 if __name__ == "__main__":

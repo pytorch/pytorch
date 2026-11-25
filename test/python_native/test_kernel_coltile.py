@@ -86,9 +86,17 @@ def _tags(trait_key):
 _FIXED = ct.OrderedColConfig(0)
 
 
+def _col_sig_slot(field, a, b):
+    """Index from the end of a column TileReduce.cache_sig field, found by varying it."""
+    op = (T.WelfordOps(), cutlass.Float32, "col", 1)
+    x, y = (tile.TileReduce(*op, **({"vec": 1} | {field: v})).cache_sig for v in (a, b))
+    (slot,) = (i - len(x) for i in range(len(x)) if x[i] != y[i])
+    return slot
+
+
 def _ordered_fields(key):
     # Mirrors _OrderedColReduce.cache_sig, which follows five fields in ordered keys.
-    names = "R wide nfields nouts workers tile_columns full_tiles plan"
+    names = "R ragged wide nfields nouts workers tile_columns full_tiles plan"
     return dict(zip(names.split(), key[5:], strict=True))
 
 
@@ -269,10 +277,8 @@ class TestKernelColTile(TestCase):
                     results.append(ct.reduce_col_tile_2out(trait, k, x, out))
                 else:
                     results.append((ct.reduce_col_tile(trait, k, x, torch.float32),))
-        # Plan keys end with TileReduce.cache_sig; locate col_group by varying only it.
-        op = (trait, cutlass.Float32, "col", 1)
-        sigs = [tile.TileReduce(*op, vec=1, col_group=g).cache_sig for g in (4, 8)]
-        (slot,) = (i - len(sigs[0]) for i, (a, b) in enumerate(zip(*sigs)) if a != b)
+        # Plan keys end with TileReduce.cache_sig.
+        slot = _col_sig_slot("col_group", 4, 8)
         groups = {k[slot] for k in ct._CACHE if k[:2] == ("coltile", key)}
         self.assertEqual(groups, {group})
         flat = [torch.cat([t.flatten() for t in r]).view(torch.int32) for r in results]
@@ -284,6 +290,111 @@ class TestKernelColTile(TestCase):
         for got in results:
             for g, w in zip(got, want, strict=True):
                 torch.testing.assert_close(g, w.float(), **_TOL[torch.float32])
+
+    @parametrize(
+        "dtype,key,size,threads,unroll,partition,width",
+        [
+            (torch.float16, "sum", 256, 64, 16, True, 8),
+            (torch.bfloat16, "sum", 256, 64, 16, True, 8),
+            (torch.float32, "argmaxi32", 16, 32, 64, False, 0),
+        ],
+        name_fn=lambda dtype, key, *_: f"{key}_{str(dtype)[6:]}",
+    )
+    def test_b200_ragged_column_geometry(
+        self, dtype, key, size, threads, unroll, partition, width
+    ):
+        """Run the B200 4095-column rules, which no explicit launch argument selects."""
+        if torch.cuda.get_device_capability() not in kg._B200_CCS:
+            self.skipTest("the ragged column rules are measured on B200 only")
+        # Unroll, partial layout and combine width are policy-only, so size the view
+        # onto each rule's anchor: b200_ragged_c4095 and b200_ragged_argmax_c4095_small.
+        rows = (size << 20) // (4095 * dtype.itemsize)
+        x = torch.randn(rows, 4095, device="cuda", dtype=dtype)
+        if key == "sum":
+            trait, out = T.SumOps(acc=cutlass.Float32), torch.float32
+        else:
+            trait, out = T.ArgMaxOps(acc=cutlass.Float32), torch.int64
+        # Tiled stage-two keys omit the input dtype, so the trait key carries it.
+        tkey = f"{key}_{dtype}_c4095_geom"
+        stage1_key, stage2_key = ("coltile", tkey, dtype), ("coltile2t", tkey, (out,))
+        got = ct.reduce_col_tile(trait, tkey, x, out)
+        # Stage-one keys end with TileReduce.cache_sig.
+        varied = {
+            "vec": (1, 2),
+            "threads_per_block": (32, 64),
+            "unroll": (4, 16),
+            "pc": (True, False),
+        }
+        slots = [_col_sig_slot(f, *v) for f, v in varied.items()]
+        plans = [k for k in ct._CACHE if k[:3] == stage1_key]
+        stage1 = {tuple(k[i] for i in slots) for k in plans}
+        self.assertEqual(stage1, {(1, threads, unroll, partition)})
+        # Tiled stage-two keys end with PartialColumns.cache_sig, (tile_columns, nouts).
+        tiled = {k[-2] for k in ct._CACHE if k[:3] == stage2_key}
+        self.assertEqual(tiled, {width} if width else set())
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(0, dtype=out) if key == "sum" else x.argmax(0)
+        self.assertEqual(got, want, **_TOL[torch.float32])
+
+    def test_b200_ragged_welford_columns(self):
+        """Fold b200_ragged_welford_c257's 16 MiB fp32 anchor in groups of 8."""
+        if torch.cuda.get_device_capability() not in kg._B200_CCS:
+            self.skipTest("the ragged column rules are measured on B200 only")
+        x = torch.randn((16 << 20) // (257 * 4), 257, device="cuda")
+        trait, key = T.WelfordOps(correction=1, acc=cutlass.Float32), "var_c257_rule"
+        got = ct.reduce_col_tile(trait, key, x, torch.float32)
+        # Plan keys end with TileReduce.cache_sig.
+        slot = _col_sig_slot("col_group", 4, 8)
+        groups = {k[slot] for k in ct._CACHE if k[:2] == ("coltile", key)}
+        self.assertEqual(groups, {8})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.var(dim=0)
+        self.assertEqual(got, want, **_TOL[torch.float32])
+
+    @parametrize("op", ["sum", "var"])
+    @parametrize("dtype", [torch.float32, torch.float16], name_fn=lambda d: str(d)[6:])
+    def test_b200_ragged_c4095_ordered(self, dtype, op):
+        """Hand b200_ragged_c4095_ordered's 16 MiB single-field and one-output Welford
+        anchors (R = 1024 or 2048) to the ordered kernel."""
+        if torch.cuda.get_device_capability() not in kg._B200_CCS:
+            self.skipTest("the ragged column rules are measured on B200 only")
+        x = torch.randn((16 << 20) // (4095 * dtype.itemsize), 4095, device="cuda")
+        x = x.to(dtype)
+        key = f"{op}_c4095"
+        if op == "sum":
+            trait = T.SumOps(acc=cutlass.Float32)
+        else:
+            trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
+        got = ct.reduce_col_tile(trait, key, x, torch.float32)
+        tagged = (key, dtype)
+        self.assertEqual({k[0] for k in ct._CACHE if k[1:3] == tagged}, {"ordered_col"})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.float().sum(0) if op == "sum" else x.double().var(dim=0).float()
+        self.assertEqual(got, want, **_TOL[torch.float32])
+
+    @parametrize("op", ["sum", "var"])
+    def test_b200_ragged_c4095_declined_hand_off(self, op):
+        """A pitched 16 MiB C = 4095 view, which the ordered kernel declines, takes the
+        measured linear rule (b200_ragged_c4095 or b200_ragged_welford_c4095)."""
+        if torch.cuda.get_device_capability() not in kg._B200_CCS:
+            self.skipTest("the ragged column rules are measured on B200 only")
+        x = torch.randn(1024, 4096, device="cuda")[:, :4095]
+        key = f"{op}_c4095_pitched"
+        if op == "sum":
+            trait, group = T.SumOps(acc=cutlass.Float32), 1
+        else:
+            trait, group = T.WelfordOps(correction=1, acc=cutlass.Float32), 8
+        got = ct.reduce_col_tile(trait, key, x, torch.float32)
+        tagged = (key, x.dtype)
+        self.assertEqual({k[0] for k in ct._CACHE if k[1:3] == tagged}, {"coltile"})
+        # Stage-one keys end with TileReduce.cache_sig.
+        varied = {"threads_per_block": (32, 64), "col_group": (4, 8)}
+        slots = [_col_sig_slot(f, *v) for f, v in varied.items()]
+        stage1 = [k for k in ct._CACHE if k[:3] == ("coltile", *tagged)]
+        self.assertEqual({tuple(k[i] for i in slots) for k in stage1}, {(64, group)})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(0) if op == "sum" else x.double().var(dim=0).float()
+        self.assertEqual(got, want, **_TOL[torch.float32])
 
     def test_dispatcher_routes_a_column_reduction(self):
         # Numerics cannot distinguish the column arm from K0; assert routing and reshape.
@@ -853,15 +964,12 @@ class TestOrderedColDevice(TestCase):
 
     def test_split_plans_can_be_declined(self, device):
         """Decline split plans when no config is given or selected."""
-        # No entry is selected for this key.
+        if torch.cuda.get_device_capability(device) in kg._B200_CCS:
+            self.skipTest("B200's split fallback serves unbatched views by policy")
         x = torch.randn(32768, 32, device=device)
         trait = T.SumOps(acc=cutlass.Float32)
         out = [torch.float32]
         self.assertIsNone(ct.reduce_ordered_col(trait, "decline", x, out, 1))
-        # The same view runs as a split plan with an explicit config.
-        got = ct.reduce_ordered_col(trait, "decline", x, out, 1, config=_FIXED)
-        self.assertIsNotNone(got)
-        self.assertEqual(_tags("decline"), {"ordered_col1"})
 
     def test_split_partial_indices_stay_below_int32(self, device):
         """Split partials are indexed output * partitions + partition in Int32."""
@@ -893,6 +1001,27 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNotNone(reference)
         self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
         self.assertEqual(_tags(key), {"ordered_col1"})
+
+    def test_split_rows_share_a_kernel(self, device):
+        """Split views of any row count share one stage-one kernel per mapping, stride
+        width and whole or ragged last partition, and one stage-two kernel per partition
+        count, bitwise equal to the indexed tree."""
+        trait, f32, key = T.SumOps(acc=cutlass.Float32), [torch.float32], "split_rows"
+        # 4 and 5 whole partitions, then 5, 5 and 7 with a ragged last one.
+        for rows in (32768, 40960, 40000, 40001, 50003):
+            x = torch.randn(rows, 128, device=device)
+            got = ct.reduce_ordered_col(trait, key, x, f32, 1, config=_FIXED)
+            shapes, strides = [(rows, 128)], [(128, 1)]
+            want = kg._try_indexed_itree(
+                trait, f"{key}_ref", x, shapes, strides, 128, rows, f32, 1
+            )
+            self.assertIsNotNone(got)
+            self.assertIsNotNone(want)
+            self.assertEqual(got[0].view(torch.uint8), want[0].view(torch.uint8))
+        stage_one = [k for k in ct._CACHE if k[1] == key and k[0] == "ordered_col1"]
+        self.assertEqual(len(stage_one), 2)
+        stage_two = [k for k in kg._COMPILE_CACHE if k[1:3] == ("genitree2", key)]
+        self.assertEqual(len(stage_two), 3)
 
     def test_split_plans_decline_integer_inputs(self, device):
         """Split plans are verified bitwise for floating inputs only."""
@@ -1209,6 +1338,28 @@ class TestOrderedColDevice(TestCase):
         with mock.patch.object(ct, "_INT32_LIMIT", 2 * 64 + 32):
             self.assertIsNone(ct.reduce_ordered_col(trait, "decline_int32", x, f32, 1))
 
+    @parametrize("rows", [32768, 32769])
+    def test_split_policy_matches_the_indexed_tree(self, device, rows):
+        """Keep B200's split tile widths and input-dtype outputs bitwise exact, with an
+        exact and a ragged last partition."""
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
+            self.skipTest("the split policy is measured on B200 only")
+        x = torch.randn(rows, 257, device=device, dtype=torch.float16)
+        key, trait, outputs = f"split_policy_{rows}", T.SumOps(), [torch.float16]
+        got, _ = self._reduce(device, trait, key, x, 0, outputs, route=True)
+        ops = [_ordered_fields(k) for k in ct._CACHE if k[:2] == ("ordered_col1", key)]
+        columns = x.shape[1]
+        plan = ct.trait_itree_plan(trait, rows, columns, 2, stage=False, device=device)
+        self.assertEqual(plan.shape, "split")
+        self.assertEqual(plan.split[1] != plan.split[2], rows == 32769)
+        # 257 columns at R 32768-65536 sit in the C 128-257 band of 16-column tiles.
+        self.assertEqual({f["tile_columns"] for f in ops}, {16})
+        # A ragged last partition keeps every partition's clamps.
+        ragged = plan.split[1] != plan.split[2]
+        self.assertEqual([f["full_tiles"] for f in ops], [not ragged])
+        want, _ = self._reduce(device, trait, key, x, 0, outputs, route=False)
+        self._assert_bitwise(got, want)
+
     @parametrize(
         "op,dtype,rows,cols,warps,width,off,split,full,used,tiles",
         # tiles is the compiled full_tiles: False where full is off, the looped plan is
@@ -1282,7 +1433,8 @@ class TestOrderedColDevice(TestCase):
             self._assert_bitwise(actual, reference)
 
     def test_selected_mapping_launches(self, device):
-        """Launch the selected mapping; split views run only with a table entry."""
+        """Launch the selected mapping; single-field split views without an entry need a
+        cc in _B200_CCS, whose fallback takes full tiles."""
         from torch import _native as native
 
         rows, cols = 32768, 64
@@ -1293,10 +1445,7 @@ class TestOrderedColDevice(TestCase):
         # A two-field trait whose entry applies only to the outputs it was measured with.
         arg = ct.OrderedColConfig(4, worker_warps=8, tile_columns=8, out_dtypes=(_I64,))
         cc = torch.cuda.get_device_capability(device)
-        table = {
-            cc: {"select_local": local, "select_argmax": arg},
-            (1, 0): {"select_other": other},
-        }
+        table = {cc: {T.SumOps: local, T.ArgMaxOps: arg}, (1, 0): {T.SumOps: other}}
         shapes, strides = [(rows, cols)], [(cols, 1)]
         names = ("workers", "tile_columns", "full_tiles")
         with (
@@ -1318,10 +1467,45 @@ class TestOrderedColDevice(TestCase):
                 ops = [_ordered_fields(k) for k in ct._CACHE if k[1] == key]
                 launched = {tuple(map(f.get, names)) for f in ops}
                 self.assertEqual(launched, {cfg[1:4]})
-            # The split plan declines where cc has no entry for its key.
-            for key, kwargs in (("select_local", {"cc": (1, 0)}), ("select_other", {})):
-                got = ct.reduce_ordered_col(T.SumOps(), key, x, f32, 1, **kwargs)
+            # The split plan declines where cc has no entry for its trait and no fallback,
+            # given or from the device query, even where cc has entries for other traits.
+            got = ct.reduce_ordered_col(T.SumOps(), "select_cc2", x, f32, 1, cc=(2, 0))
+            self.assertIsNone(got)
+            mean = T.MeanOps()
+            got = ct.reduce_ordered_col(mean, "select_mean_cc1", x, f32, 1, cc=(1, 0))
+            self.assertIsNone(got)
+            # Without an entry, a split view on _B200_CCS takes the selector's 32-column
+            # fallback.
+            got = ct.reduce_ordered_col(mean, "select_mean", x, f32, 1)
+            if cc not in kg._B200_CCS:
                 self.assertIsNone(got)
+            else:
+                reference = kg._try_indexed_itree(
+                    mean, "select_mean_ref", x, shapes, strides, cols, rows, f32, 1
+                )
+                self.assertIsNotNone(reference)
+                want = reference[0].view(torch.uint8)
+                self.assertEqual(got[0].view(torch.uint8), want)
+                plan = ct.trait_itree_plan(
+                    mean, rows, cols, 4, stage=False, device=device
+                )
+                fallback = ct.select_ordered_col_config(
+                    cc,
+                    x.dtype,
+                    cols,
+                    1,
+                    plan.split[0],
+                    trait_type=T.MeanOps,
+                    nfields=mean.nfields,
+                    acc_bits=32,
+                    out_dtypes=tuple(f32),
+                    rows=rows,
+                )
+                self.assertEqual(fallback.tile_columns, ct.WARP)
+                workers = min(ct._ORDERED_WORKER_WARPS, plan.wpr)
+                ops = [_ordered_fields(k) for k in ct._CACHE if k[1] == "select_mean"]
+                launched = {tuple(map(f.get, names)) for f in ops}
+                self.assertEqual(launched, {(workers, ct.WARP, True)})
             # It also declines outputs the entry was not measured with.
             got = ct.reduce_ordered_col(T.ArgMaxOps(), "select_argmax", x, [_I32], 1)
             self.assertIsNone(got)
