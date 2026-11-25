@@ -649,8 +649,8 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   auto input_contig =
       dim == 2 ? input.contiguous() : input.reshape({-1, input.size(dim - 1)}).contiguous();
 
-  auto src = at::native::itensor_from_tensor(input_contig);
-  auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
+  auto src = at::native::memory_from_tensor(input_contig);
+  auto packed_weight = at::native::memory_from_mkldnn(onednn_weight);
   int64_t K = input.size(dim - 1), M = input.numel() / K, N = packed_weight.get_dim(1);
 
   auto output_size = input.sizes().vec();
@@ -663,9 +663,9 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
     bias_val_float = bias.value().to(at::kFloat);
     if (bias_val_float.dim() == 1) {
       auto b_reshape = bias_val_float.reshape({1, bias_val_float.size(0)});
-      onednn_bias = at::native::itensor_view_from_dense(b_reshape);
+      onednn_bias = at::native::memory_view_from_dense(b_reshape);
     } else {
-      onednn_bias = at::native::itensor_view_from_dense(bias_val_float);
+      onednn_bias = at::native::memory_view_from_dense(bias_val_float);
     }
   }
   std::vector<int64_t> src_dims = {M, K};
@@ -678,7 +678,7 @@ static at::Tensor linear_dynamic_fp16_with_onednn_weight(
   if (output.numel() == 0) {
     return output;
   }
-  tensor dst = at::native::itensor_view_from_dense(output);
+  tensor dst = at::native::memory_view_from_dense(output);
   static tensor empty_tensor;
   static tensor::desc empty_tensor_desc;
 

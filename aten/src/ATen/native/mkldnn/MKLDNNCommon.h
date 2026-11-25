@@ -29,30 +29,30 @@ TORCH_API at::Tensor mkldnn_tensor_from_data_ptr(
     int64_t opaque_metadata_size);
 
 // Construct aten MKL-DNN tensor given an MkldnnMemory
-TORCH_API Tensor new_with_itensor_mkldnn(mkldnn::MkldnnMemory&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
+TORCH_API Tensor new_with_mkldnn_memory(mkldnn::MkldnnMemory&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
 
 // Retrieve `MkldnnMemory` from MKL-DNN tensor
-TORCH_API mkldnn::MkldnnMemory& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
+TORCH_API mkldnn::MkldnnMemory& memory_from_mkldnn(const Tensor& mkldnn_tensor);
 
 TORCH_API int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor);
 
 // Construct an `MkldnnMemory` "view" from dense tensor, note the
 // MkldnnMemory will share the underlying buffer
-TORCH_API mkldnn::MkldnnMemory itensor_view_from_dense(const Tensor& tensor);
-TORCH_API mkldnn::MkldnnMemory itensor_view_from_const_dense(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory memory_view_from_dense(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory memory_view_from_const_dense(const Tensor& tensor);
 
 // Construct an `MkldnnMemory` "view" from dense tensor using given desc, note
 // the MkldnnMemory will share the underlying buffer
-TORCH_API mkldnn::MkldnnMemory itensor_view_from_dense(
+TORCH_API mkldnn::MkldnnMemory memory_view_from_dense(
     const at::Tensor& tensor,
   const mkldnn::MkldnnMemory::desc& desc);
-TORCH_API mkldnn::MkldnnMemory itensor_view_from_const_dense(
+TORCH_API mkldnn::MkldnnMemory memory_view_from_const_dense(
   const at::Tensor& tensor,
   const mkldnn::MkldnnMemory::desc& desc);
 
 // Helper function for getting an MkldnnMemory out of an aten Tensor or MKL-DNN tensor.
-TORCH_API mkldnn::MkldnnMemory itensor_from_tensor(const Tensor& tensor);
-TORCH_API mkldnn::MkldnnMemory itensor_from_const_tensor(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory memory_from_tensor(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory memory_from_const_tensor(const Tensor& tensor);
 
 // Set MKLDNN verbose level
 TORCH_API int set_verbose(int level);

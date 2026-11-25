@@ -57,7 +57,7 @@ ContextConv create(
       expand_param_if_needed(input_size, "input_size", k);
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  auto w = itensor_view_from_const_dense(weight);
+  auto w = memory_view_from_const_dense(weight);
   // TODO: what if input is nhwc but w is nchw
   bool is_channels_last =
       weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
@@ -156,10 +156,10 @@ static void mkldnn_convolution_out(
   const Tensor& bias = *bias_maybe_owned;
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  const MkldnnMemory mkldnn_input = itensor_from_const_tensor(input);
+  const MkldnnMemory mkldnn_input = memory_from_const_tensor(input);
   std::optional<MkldnnMemory> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_const_tensor(bias);
+    mkldnn_bias = memory_from_const_tensor(bias);
   }
 
   _mkldnn_convolution_out(
@@ -200,7 +200,7 @@ Tensor run(ContextConv& context, const Tensor& input) {
   MkldnnMemory y;
 
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
-  MkldnnMemory mkldnn_output = itensor_from_tensor(output);
+  MkldnnMemory mkldnn_output = memory_from_tensor(output);
 
   if (is_channels_last) {
     mkldnn_convolution_out(
