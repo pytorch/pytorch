@@ -16,6 +16,7 @@ from .dsl_registry import dsl_registry, DSLModuleProtocol
 from .registry import (
     _OpCondFn,
     _OpImplFn,
+    _OpRuntimeInitFn,
     deregister_op_overrides as _deregister_op_overrides_impl,
     register_op_override as _register_op_override_impl,
 )
@@ -116,6 +117,7 @@ def register_op_override(
     cond: _OpCondFn | None,
     impl: _OpImplFn,
     *,
+    try_initialize_runtime: _OpRuntimeInitFn | None = None,
     allow_multiple_override: bool = False,
     unconditional_override: bool = False,
 ) -> None:
@@ -138,6 +140,7 @@ def register_op_override(
         dispatch_key,
         cond,
         impl,
+        try_initialize_runtime=try_initialize_runtime,
         allow_multiple_override=allow_multiple_override,
         unconditional_override=unconditional_override,
     )

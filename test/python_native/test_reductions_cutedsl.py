@@ -5,6 +5,8 @@
 
 import functools
 import os
+import subprocess
+import sys
 import unittest
 from unittest import mock
 
@@ -101,6 +103,29 @@ class TestCuTeDSLReductionWiring(TestCase):
         with _disabled():
             self.assertEqual(self._run(call)[1], 0)
         self.assertEqual(self._run(call)[1], 1)
+
+    def test_unimportable_runtime_falls_back(self, device):
+        """A CuTeDSL that fails to import declines served eager calls to ATen instead of
+        raising. Registration checks only the package spec, so blocking cutlass.cute in
+        a fresh process leaves the overrides installed."""
+        script = """
+import sys
+import torch
+sys.modules["cutlass.cute"] = None
+from torch._native.ops.reductions import overrides as ov
+x = torch.randn(128, 512, device="cuda")
+got = torch.sum(x, dim=-1)
+with torch.backends.python_native.cutedsl.disabled():
+    want = torch.sum(x, dim=-1)
+print(torch.equal(got, want), ov._runtime_ok())
+"""
+        env = {**os.environ, "TORCH_DISABLE_NATIVE_AOT": "1"}
+        cmd = [sys.executable, "-c", script]
+        proc = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.split()[-2:], ["True", "False"])
+        # The broad except must not hide a real import error here.
+        self.assertTrue(ov._runtime_ok())
 
     def test_unsupported_dtype_falls_back(self, device):
         """Leave unsupported dtypes to ATen instead of entering a mismatched kernel."""
