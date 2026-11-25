@@ -222,8 +222,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::put(
   }
   pg_->waitForNcclOperation(
       nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
-  work->recordEnd();
-  pg_->enqueueWork(work, stream);
+  pg_->finishWork(work, stream);
   return work;
 }
 
@@ -258,8 +257,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::signal(
   }
   pg_->waitForNcclOperation(
       nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
-  work->recordEnd();
-  pg_->enqueueWork(work, stream);
+  pg_->finishWork(work, stream);
   return work;
 }
 
@@ -294,8 +292,7 @@ c10::intrusive_ptr<::c10d::Work> WindowNCCL::wait_signal(
   }
   pg_->waitForNcclOperation(
       nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
-  work->recordEnd();
-  pg_->enqueueWork(work, stream);
+  pg_->finishWork(work, stream);
   return work;
 }
 
