@@ -19,7 +19,6 @@ from .common import (
     register_complex,
     register_error,
     register_force_test,
-    register_inductor,
     register_real_to_complex,
     register_simple,
     split_complex_arg,
@@ -169,24 +168,6 @@ for inplace_view_op in INPLACE_VIEW_OPS:
 
 del inplace_view_op
 
-
-@register_complex(aten.resize_)
-def resize__impl(
-    self: ComplexTensor,
-    size: list[int],
-    memory_format: torch.memory_format | None = None,
-) -> ComplexTensor:
-    # E.g. `from_interleaved` of an empty tensor leaves both components viewing one
-    # storage, so they would overlap once resized.
-    if self._re.untyped_storage()._cdata == self._im.untyped_storage()._cdata:
-        self._re = self._re.clone()
-        self._im = self._im.clone()
-    self._re = aten.resize_(aten.alias(self._re), size, memory_format=memory_format)
-    self._im = aten.resize_(aten.alias(self._im), size, memory_format=memory_format)
-    _set_wrapper_metadata(self, self._re)
-    return self
-
-
 # TODO (hameerabbasi): Not being tested
 SIMPLE_FORCE_TESTED_OPS = [
     aten.col2im,
@@ -211,60 +192,6 @@ for simple_op in SIMPLE_FORCE_TESTED_OPS:
 
 del simple_op
 
-INDUCTOR_OPS = [
-    aten._fft_c2c,
-    aten._fft_c2r,
-    aten._fft_r2c,
-    aten._linalg_det,
-    aten._linalg_eigh,
-    aten._linalg_eigvals,
-    aten._linalg_slogdet,
-    aten._linalg_solve_ex,
-    aten._linalg_svd,
-    aten.fft_fft,
-    aten.fft_fft2,
-    aten.fft_fftn,
-    aten.fft_fftshift,
-    aten.fft_hfft,
-    aten.fft_hfft2,
-    aten.fft_hfftn,
-    aten.fft_ifft,
-    aten.fft_ifft2,
-    aten.fft_ifftn,
-    aten.fft_ifftshift,
-    aten.fft_ihfft,
-    aten.fft_ihfft2,
-    aten.fft_ihfftn,
-    aten.fft_irfft,
-    aten.fft_irfft2,
-    aten.fft_irfftn,
-    aten.fft_rfft,
-    aten.fft_rfft2,
-    aten.fft_rfftn,
-    aten.linalg_cholesky_ex,
-    aten.linalg_cross,
-    aten.linalg_eig,
-    aten.linalg_eigvals,
-    aten.linalg_householder_product,
-    aten.linalg_inv_ex,
-    aten.linalg_ldl_factor_ex,
-    aten.linalg_ldl_solve,
-    aten.linalg_lu,
-    aten.linalg_lu_factor_ex,
-    aten.linalg_lu_solve,
-    aten.linalg_matrix_exp,
-    aten.linalg_matrix_sqrth,
-    aten.linalg_polar,
-    aten.linalg_qr,
-    aten.linalg_solve_triangular,
-    aten.linalg_vector_norm,
-]
-
-for inductor_op in INDUCTOR_OPS:
-    globals()[_get_func_name(inductor_op)] = register_inductor(inductor_op)
-
-del inductor_op
-
 # some binary ops which we can stamp out
 mul_impl = register_binary_nonlinear(aten.mul)
 mul__impl = register_binary_linear_inplace(aten.mul_, mul_impl)
@@ -288,26 +215,10 @@ add_impl = register_binary_linear(aten.add)
 add__impl = register_binary_linear_inplace(aten.add_, add_impl)
 sub_impl = register_binary_linear(aten.sub)
 sub__impl = register_binary_linear_inplace(aten.sub_, sub_impl)
+copy_impl = register_binary_linear(aten.copy)
 diagonal_scatter_impl = register_binary_linear(aten.diagonal_scatter)
 fill_impl = register_binary_linear(aten.fill)
 fill__impl = register_binary_linear_inplace(aten.fill_, fill_impl)
-
-
-@register_complex(aten.copy)
-def copy_impl(
-    self: ComplexTensor, src: ComplexTensor, non_blocking: bool = False
-) -> ComplexTensor:
-    src_re, src_im = split_complex_arg(src)
-    if not self.dtype.is_complex:
-        warnings.warn(
-            "Casting complex values to real discards the imaginary part", UserWarning
-        )
-        return aten.copy(self, src_re, non_blocking=non_blocking)
-    self_re, self_im = split_complex_arg(self)
-    return ComplexTensor(
-        aten.copy(self_re, src_re, non_blocking=non_blocking),
-        aten.copy(self_im, src_im, non_blocking=non_blocking),
-    )
 
 
 @register_complex(aten.rsub)
@@ -978,6 +889,13 @@ def view_as_complex_copy_impl(self: torch.Tensor) -> ComplexTensor:
     return ComplexTensor(self[..., 0].clone(), self[..., 1].clone())
 
 
+@register_complex(aten.linalg_vector_norm)
+def linalg_vector_norm_impl(
+    self: ComplexTensor, *args: Any, **kwargs: Any
+) -> torch.Tensor:
+    return torch.linalg.vector_norm(torch.abs(self), *args, **kwargs)
+
+
 @register_force_test(aten.copy_)
 def copy__impl(
     self: ComplexTensor | torch.Tensor,
@@ -1194,25 +1112,6 @@ def index_put__impl(
     out_im = self_im.index_put_(indices, values_im, accumulate=accumulate)
 
     return ComplexTensor(out_re, out_im)
-
-
-@register_complex(aten.index_put)
-def index_put_impl(
-    self: ComplexTensor,
-    indices: tuple[torch.Tensor, ...],
-    values: ComplexTensor,
-    accumulate: bool = False,
-) -> ComplexTensor:
-    if self.dtype != values.dtype:
-        raise RuntimeError(
-            "`index_put` requires the source and destination dtypes match"
-        )
-    values_re, values_im = split_complex_arg(values)
-    self_re, self_im = split_complex_arg(self)
-    return ComplexTensor(
-        aten.index_put(self_re, indices, values_re, accumulate),
-        aten.index_put(self_im, indices, values_im, accumulate),
-    )
 
 
 @register_complex(aten.tanh_backward)
