@@ -92,7 +92,10 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         ]
 
         if "ATEN" in bmm_backends:
-            for k_split in exact_k_splits:
+            # A dynamic K reaches here without a dividing split only after
+            # use_decompose_k_choice's opt-in, user-range and M * N * K >= 2**33
+            # checks; decomposeK then runs the leftover K rows as an extra MM.
+            for k_split in exact_k_splits or k_splits:
                 yield {"k_split": k_split, "bmm_backend": "aten"}
 
         # Return before the TMA checks below, which install guards. The Triton

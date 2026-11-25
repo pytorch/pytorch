@@ -2383,12 +2383,69 @@ class TestMaxAutotune(TestCase):
         config.triton.native_matmul,
         "ignore decompose_k when native matmul codegen",
     )
-    def test_decompose_k_dynamic_k_needs_a_dividing_split(self):
-        """A dynamic K that no split is known to divide gets no decompose_k and
-        no guard."""
+    def test_decompose_k_dynamic_k_remainder(self):
+        """A dynamic K that no split divides runs the leftover rows as one MM.
+        One compile serves K with 0 and 1 leftover rows and K between one and
+        two times the threshold."""
+        frames, names = self._compile_dynamic_k_mm(
+            (131072, 131079, 131073, 150011, 20011),
+            mn=(512, 512),
+            only_decompose_k=True,
+            k_multiple=1,
+        )
+        self.assertEqual(frames, 1)
+        self.assertTrue(any(n.startswith("decompose_k") for n in names), names)
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    def test_decompose_k_dynamic_k_remainder_skips_small_mm(self):
+        """A small MM (M * N * K < 2**33) whose dynamic K no split divides gets
+        no decompose_k and no guard."""
         frames, names = self._compile_dynamic_k_mm((16391, 20011), k_multiple=1)
         self.assertEqual(frames, 1)
         self.assertFalse(any(n.startswith("decompose_k") for n in names), names)
+
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    def test_decompose_k_dynamic_k_remainder_statically_large(self):
+        """A user min makes K >= threshold * max(M, N) statically true (32 * 512
+        = 16384). With no dividing split, the leftover-MM path still needs the
+        opt-in and is skipped for the user range. maybe_mark_dynamic keeps the
+        range warn-only, since an unbounded max conflicts with the int32
+        indexing guards on these shapes."""
+        for dynamic_k in (False, True):
+            frames, names = self._compile_dynamic_k_mm(
+                (131079, 150011),
+                mn=(512, 512),
+                k_multiple=1,
+                dynamic_k=dynamic_k,
+                mark_range=(16384, None),
+                weak_mark=True,
+            )
+            self.assertEqual(frames, 1)
+            self.assertFalse(
+                any(n.startswith("decompose_k") for n in names), (dynamic_k, names)
+            )
+
+    def test_decompose_k_remainder(self):
+        from torch._inductor.kernel.decompose_k import decomposeK
+
+        a = torch.randn(32, 4099, device=GPU_TYPE, dtype=torch.float32)
+        b = torch.randn(4099, 64, device=GPU_TYPE, dtype=torch.float32)
+        with tf32_off():
+            ref = a @ b
+            out = decomposeK(a, b, 16)
+        torch.testing.assert_close(out, ref, atol=1e-5 * ref.abs().max(), rtol=1e-5)
 
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
