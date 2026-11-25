@@ -203,8 +203,8 @@ def skip_unless_blas_library_selectable(backend):
 def get_wait_for_cpu_kernel():
     """Returns a compiled CUDA/HIP spin-wait kernel that blocks the GPU stream
     until the host sets a pinned int32 flag to non-zero. On NVIDIA, requires
-    SM70+ for the relaxed-system-scope PTX load. On AMD, uses
-    __hip_atomic_load with __HIP_MEMORY_SCOPE_SYSTEM (the AMDGCN equivalent).
+    SM70+ for the relaxed-system-scope PTX load. On AMD, uses a relaxed
+    system-scope atomic load.
 
     Usage::
 
@@ -225,7 +225,7 @@ def get_wait_for_cpu_kernel():
                 int flag = 0;
                 do {
             #ifdef __HIP_PLATFORM_AMD__
-                    flag = __hip_atomic_load(pinned_cpu_flag, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+                    flag = __scoped_atomic_load_n(pinned_cpu_flag, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
             #else
                     asm volatile("ld.relaxed.sys.global.s32 %0, [%1];" : "=r"(flag) : "l"(pinned_cpu_flag) : "memory");
             #endif
@@ -3615,6 +3615,132 @@ torch.cuda.synchronize()
                 self.assertTrue(torch.cuda.is_current_stream_capturing())
                 self.assertTrue(s.is_capturing())
                 g.capture_end()
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @parametrize("pool_kind", ["native", "python"])
+    @decorateIf(
+        requires_cuda_python_bindings, lambda params: params["pool_kind"] == "python"
+    )
+    def test_graph_capture_oom_keeps_cached_segments(self, pool_kind):
+        # https://github.com/pytorch/pytorch/issues/159594: running out of memory
+        # during capture must not free the pool's oversize cached segment, because
+        # cudaFree or a custom allocator's free invalidates the capture.
+        # Use a subprocess, because a regression leaves an invalid capture open.
+        script = """
+import json
+import sys
+import torch
+
+MiB = 1 << 20
+state = {"capturing": False, "fail_alloc": False, "frees_during_capture": 0}
+if sys.argv[1] == "python":
+    from cuda.bindings import runtime
+
+    def alloc(size, device, stream):
+        if state["fail_alloc"]:
+            return None
+        err, ptr = runtime.cudaMalloc(size)
+        return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
+
+    def free(ptr, size, device, stream):
+        state["frees_during_capture"] += state["capturing"]
+        runtime.cudaFree(ptr)
+
+    pool = torch.cuda.MemPool.from_py_allocator(alloc, free)
+else:
+    # Allows the 40 MiB segment, but not another 20 MiB.
+    total = torch.cuda.get_device_properties(0).total_memory
+    limit = torch.cuda.memory_reserved() + 50 * MiB
+    torch.cuda.set_per_process_memory_fraction(limit / total)
+    pool = torch.cuda.MemPool()
+stream = torch.cuda.Stream()
+with torch.cuda.stream(stream), torch.cuda.use_mem_pool(pool):
+    # Larger than max_split_size, so the 20 MiB request cannot reuse it.
+    cached = torch.empty(40 * MiB, dtype=torch.uint8, device="cuda")
+del cached
+stream.synchronize()
+graph = torch.cuda.CUDAGraph()
+state["capturing"] = state["fail_alloc"] = True
+try:
+    with torch.cuda.graph(graph, pool=pool.id, stream=stream):
+        torch.empty(20 * MiB, dtype=torch.uint8, device="cuda")
+    result = "allocated"
+except torch.OutOfMemoryError:
+    result = "out of memory"
+except Exception as error:
+    result = type(error).__name__
+state["capturing"] = False
+segments = [s["total_size"] for s in pool.snapshot()]
+print(json.dumps({**state, "result": result, "segments_kept": segments == [40 * MiB]}))
+"""
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:32"
+        proc = subprocess.run(
+            [sys.executable, "-c", script, pool_kind],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["result"], "out of memory", proc.stderr)
+        self.assertEqual(result["frees_during_capture"], 0)
+        self.assertTrue(result["segments_kept"])
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_skips_garbage_collection(self):
+        # Garbage collection frees cached default-pool segments with cudaFree,
+        # which invalidates a capture. Use a subprocess, because a regression
+        # leaves an invalid capture open. torch.cuda.graph calls empty_cache, so
+        # the script calls capture_begin directly.
+        script = """
+import json
+import torch
+
+MiB = 1 << 20
+total = torch.cuda.get_device_properties(0).total_memory
+# Garbage collection starts above 0.1 * 256 MiB of segments.
+torch.cuda.set_per_process_memory_fraction(256 * MiB / total)
+stream = torch.cuda.Stream()
+with torch.cuda.stream(stream):
+    # Cache a small segment for the allocations of capture_begin, so that they
+    # do not start garbage collection before the capture.
+    torch.empty(1, device="cuda")
+cached = torch.empty(40 * MiB, dtype=torch.uint8, device="cuda")
+del cached
+torch.cuda.synchronize()
+
+def frees():
+    return torch.cuda.memory_stats()["num_device_free"]
+
+before = frees()
+graph = torch.cuda.CUDAGraph()
+try:
+    with torch.cuda.stream(stream):
+        graph.capture_begin()
+        torch.empty(20 * MiB, dtype=torch.uint8, device="cuda")
+        graph.capture_end()
+    result = "captured"
+except Exception as error:
+    result = type(error).__name__
+during = frees() - before
+# Outside of capture, garbage collection frees the cached segment.
+torch.empty(60 * MiB, dtype=torch.uint8, device="cuda")
+print(json.dumps({"result": result, "frees_during": during, "frees_after": frees() - before - during}))
+"""
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "garbage_collection_threshold:0.1"
+        proc = subprocess.run(
+            [sys.executable, "-c", script], env=env, capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        expected = {"result": "captured", "frees_during": 0, "frees_after": 1}
+        self.assertEqual(result, expected, proc.stderr)
 
     def _allocate_graph_temporary(self, state, value):
         temporary = torch.empty(LARGE_BUFFER // 4, device="cuda")
@@ -16862,9 +16988,6 @@ instantiate_device_type_tests(TestCudaGreenContexts, globals(), except_for="cpu"
 # Tests for fp32_precision flag propagation that don't require an actual CUDA
 # device — they only exercise C++ context state management.
 class TestFP32PrecisionFlags(TestCase):
-    @unittest.skipIf(
-        IS_LINUX or TEST_WITH_SLOW, "https://github.com/pytorch/pytorch/issues/182021"
-    )
     @recover_orig_fp32_precision
     @serialTest()
     def test_generic_fp32_precision_propagates_to_cudnn_conv_rnn(self):
@@ -16877,6 +17000,102 @@ class TestFP32PrecisionFlags(TestCase):
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cudnn.fp32_precision, "ieee")
             self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
+
+    # The initial state: every setting inherits from its parent.
+    _INHERITING_FP32_PRECISION = {
+        "generic.all": "none",
+        "cuda.all": "none",
+        "cuda.conv": "default",
+        "cuda.rnn": "default",
+        "cuda.matmul": "none",
+        "mkldnn.all": "none",
+        "mkldnn.conv": "none",
+        "mkldnn.rnn": "none",
+        "mkldnn.matmul": "none",
+        "float32_matmul_precision": "highest",
+        "cudnn_allow_tf32": True,
+    }
+
+    def _assert_all_inherit_generic(self):
+        with torch.backends.flags(fp32_precision="ieee"):
+            for module in (
+                torch.backends.cudnn,
+                torch.backends.cudnn.conv,
+                torch.backends.cudnn.rnn,
+                torch.backends.cuda.matmul,
+                torch.backends.mkldnn.conv,
+                torch.backends.mkldnn.rnn,
+                torch.backends.mkldnn.matmul,
+            ):
+                self.assertEqual(module.fp32_precision, "ieee", msg=module)
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_restore_keeps_inheritance(self):
+        # Code that saves and restores the precision settings must put back
+        # what was stored, not the resolved values; writing those back pins
+        # settings that were inheriting, which then ignore their parent.
+        # torch.export loads _trace lazily, so import it for a standalone run.
+        from torch.export._trace import _ignore_backend_decomps
+
+        def export_linear():
+            torch.export.export(nn.Linear(2, 2), (torch.randn(1, 2),))
+            return contextlib.nullcontext()
+
+        restorers = {
+            "cudnn.flags": torch.backends.cudnn.flags,
+            "cudnn.flags(allow_tf32=False)": lambda: torch.backends.cudnn.flags(
+                allow_tf32=False
+            ),
+            "mkldnn.flags": torch.backends.mkldnn.flags,
+            "tf32_off": tf32_off,
+            "tf32_on": lambda: tf32_on(self),
+            "tf32_enabled": tf32_enabled,
+            "_ignore_backend_decomps": _ignore_backend_decomps,
+            "torch.export.export": export_linear,
+        }
+        for name, make_ctx in restorers.items():
+            with self.subTest(name):
+                _restore_fp32_precision(self._INHERITING_FP32_PRECISION)
+                with make_ctx():
+                    pass
+                self.assertEqual(
+                    _snapshot_fp32_precision(), self._INHERITING_FP32_PRECISION
+                )
+                self._assert_all_inherit_generic()
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_restore_after_dynamo_compile(self):
+        # Dynamo restores cuda.matmul after tracing a frame.
+        _restore_fp32_precision(self._INHERITING_FP32_PRECISION)
+        with torch.backends.flags(fp32_precision="ieee"):
+            torch.compile(lambda x: x + 1, backend="eager")(torch.ones(1))
+        self.assertEqual(_snapshot_fp32_precision(), self._INHERITING_FP32_PRECISION)
+        self._assert_all_inherit_generic()
+
+    @recover_orig_fp32_precision
+    @serialTest()
+    def test_fp32_precision_flags_still_pin_cudnn_tf32(self):
+        _restore_fp32_precision(self._INHERITING_FP32_PRECISION)
+        with torch.backends.cudnn.flags(), torch.backends.flags(fp32_precision="ieee"):
+            self.assertEqual(torch.backends.cudnn.conv.fp32_precision, "tf32")
+            self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "tf32")
+
+    def test_fp32_precision_default_is_not_public(self):
+        for module in (
+            torch.backends,
+            torch.backends.cudnn,
+            torch.backends.cudnn.conv,
+            torch.backends.cudnn.rnn,
+            torch.backends.cuda.matmul,
+        ):
+            # common_utils freezes the torch.backends and cudnn setters.
+            with (
+                patch.object(torch.backends.m, "flags_frozen", return_value=False),
+                self.assertRaisesRegex(RuntimeError, "Unknown precision: default"),
+            ):
+                module.fp32_precision = "default"
 
 
 class TestMemoryViz(TestCase):
