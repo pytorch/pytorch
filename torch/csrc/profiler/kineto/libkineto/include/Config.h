@@ -87,6 +87,15 @@ class Config : public AbstractConfig {
     return rocprofDispatchRecordWait_;
   }
 
+  // Whether this trace may trace any device. It covers the GPU tracer, which
+  // never runs in a profiler registered without GPU support, and every child
+  // profiler that traces a device, which must return no session from
+  // configure when this is false. The KINETO_CONFIG file is parsed after the
+  // client's config string, so it can override what the client asked for.
+  [[nodiscard]] bool deviceTracingEnabled() const {
+    return deviceTracingEnabled_;
+  }
+
   void setSelectedActivityTypes(const std::set<ActivityType>& types) {
     selectedActivityTypes_ = types;
   }
@@ -336,6 +345,10 @@ class Config : public AbstractConfig {
   // Upper bound on how long stopping a ROCm trace waits for kernel dispatch
   // records that are still in flight.
   std::chrono::milliseconds rocprofDispatchRecordWait_{20};
+
+  // Lets a client keep a trace that requested no device activity away from
+  // device tracers, which may be shared with other tools.
+  bool deviceTracingEnabled_{true};
   std::set<ActivityType> selectedActivityTypes_;
 
   // The activity profiler settings are all on-demand
