@@ -1205,10 +1205,6 @@ class TestOptimRenewed(TestCase):
                 if optim_cls.__name__ == "Adafactor" and kwargs.get("maximize", False):
                     # When maximize is True, Adafactor also tracks device_grad
                     nintermediates = 3
-            elif optim_cls.__name__ == "Muon":
-                # Muon keeps the orthogonalized updates and their full-precision
-                # copies live together before applying the parameter update.
-                nintermediates = 2
 
             # Dynamo ST uses less mem than eager in the case of Adam/Adagrad/Nadam/RAdam
             # which makes the foreach memory check fail
