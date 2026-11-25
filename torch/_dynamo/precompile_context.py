@@ -129,9 +129,9 @@ class PrecompileContext:
         """
         Edit the content of an existing artifact
         """
-        if key not in cls._backend_artifacts_by_key:
+        artifact = cls._backend_artifacts_by_key.get(_BackendId(key))
+        if artifact is None:
             raise AssertionError(f"Key {key} not found in artifacts")
-        artifact = cls._backend_artifacts_by_key[_BackendId(key)]
         artifact.edit_contents(edit_fn)
 
     @classmethod
@@ -139,7 +139,7 @@ class PrecompileContext:
         """
         Return the backend cache artifact with the associated key
         """
-        return cls._backend_artifacts_by_key.get(_BackendId(key), None)
+        return cls._backend_artifacts_by_key.get(_BackendId(key))
 
     @classmethod
     def take_artifact(cls, key: str) -> BackendCacheArtifact[Any] | None:
@@ -159,7 +159,6 @@ class PrecompileContext:
         Return a JSON serializable debug dump of all entries in the precompile context
         Called in serialize before serialization, and in populate_caches after deserialization
         """
-        # Print debug information
         debug_info: defaultdict[str, list[Any]] = defaultdict(list)
         for key, cache_entry in dynamo_entries.items():
             info = cache_entry.debug_info()
@@ -189,16 +188,11 @@ class PrecompileContext:
         dynamo_entries = cls._dynamo_cache_entries
         backend_artifacts = cls._backend_artifacts_by_key
 
-        num_artifacts = len(dynamo_entries)
-
         debug_info = PrecompileContext.dump_debug_info(
             dynamo_entries, backend_artifacts
         )
         debug_str = json.dumps(
-            {
-                "num_entries": num_artifacts,
-                "artifacts": debug_info,
-            },
+            {"num_entries": len(dynamo_entries), "artifacts": debug_info}
         )
         torch._logging.trace_structured(
             "artifact",
@@ -214,21 +208,12 @@ class PrecompileContext:
 
         for key, cache_entry in dynamo_entries.items():
             try:
-                result = PrecompileCacheEntry.from_cache_entry(
+                precompile_cache_entries[key] = PrecompileCacheEntry.from_cache_entry(
                     cache_entry, backend_artifacts
                 )
-                if result is not None:
-                    precompile_cache_entries[key] = result
             except Exception as e:
                 logger.warning("Failed to create cache entry %s", key, exc_info=True)
-
-                error = e
-                data = json.dumps(
-                    {
-                        "key": key,
-                        "error": str(error),
-                    }
-                )
+                data = json.dumps({"key": key, "error": str(e)})
                 torch._logging.trace_structured(
                     "artifact",
                     metadata_fn=lambda: {
@@ -237,5 +222,4 @@ class PrecompileContext:
                     },
                     payload_fn=lambda: data,
                 )
-                continue
         return precompile_cache_entries, debug_info

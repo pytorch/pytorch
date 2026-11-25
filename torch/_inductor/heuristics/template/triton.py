@@ -3580,10 +3580,6 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             }
             if two_ctas:
                 out["ctas_per_cga"] = (2, 1, 1)
-                # A cluster runs two consecutive tile ids, which must be an M pair
-                # sharing B, so each GROUP_M swizzle group needs an even M count.
-                if "GROUP_M" in out:
-                    out["GROUP_M"] += out["GROUP_M"] % 2
             yield out
 
     @staticmethod
