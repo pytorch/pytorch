@@ -1942,6 +1942,18 @@ test_without_numpy() {
   popd
 }
 
+test_rocm_packed_atomic() {
+  # test_aoti_abi_check otherwise runs only in inductor_cpp_wrapper, which
+  # ROCm jobs do not select. This filter is the ROCm packed-atomic case.
+  # Same slow-config skip as test_libtorch, so slow shard 1 doesn't rerun it.
+  if [[ "$TEST_CONFIG" != "slow" ]]; then
+    mkdir -p test/test-reports/cpp
+    LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}" "${BUILD_BIN_DIR}/test_aoti_abi_check" \
+      --gtest_filter='TestRocmPackedAtomic.*' \
+      --gtest_output=xml:test/test-reports/cpp/test_rocm_packed_atomic.xml
+  fi
+}
+
 test_libtorch() {
   local SHARD="$1"
 
@@ -2526,47 +2538,47 @@ test_cpp_extensions() {
 test_vec_all_types() {
   # Runs vec_test_all_types, built once per CPU capability, for each capability
   # that dispatch can pick on this CPU.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Testing vectorized types (vec_test_all_types) for the CPU capabilities that dispatch can pick"
-    pushd build/bin
-    vec_all_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
-    # The CPU's capability, not an ATEN_CPU_CAPABILITY override.
-    cpu_capability=$(env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
-    # Unlike most tests, deliberately run every binary and report their failures
-    # at the end, so that one CI run shows the failures of all capabilities (few
-    # contributors can run them all locally), and fail if none ran, so that these
-    # tests can't silently stop running.
-    ran=0
-    failed=""
-    for vec_all_exec in $vec_all_tests
-    do
-      # Only run the capabilities that dispatch can pick on this CPU: the others
-      # would hit illegal instructions, or for SVE, assume another vector length.
-      capability=${vec_all_exec#./vec_test_all_types_}
-      if [[ "$capability" != DEFAULT && "$capability" != "$cpu_capability" &&
-            ! ( "$capability" == AVX2 && "$cpu_capability" == AVX512 ) ]]; then
-        echo "Skipping $vec_all_exec: PyTorch uses $cpu_capability"
-        continue
-      fi
-      # Find libc10 in the installed torch, as the build tree's RPATH doesn't
-      # point to it where jobs run from a copy of the workspace (XPU). Each
-      # capability reports to its own directory, which test stats key on.
-      if ! LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}" $vec_all_exec --gtest_output=xml:../../test/test-reports/vec_test_all_types_"$capability"/"$vec_all_exec".xml; then
-        failed="$failed $vec_all_exec"
-      fi
-      ran=$((ran + 1))
-    done
-    popd
-    if [[ "$ran" == 0 ]]; then
-      echo "No vec_test_all_types binary ran"
-      return 1
+  echo "Testing vectorized types (vec_test_all_types) for the CPU capabilities that dispatch can pick"
+  # The CPU's capability, not an ATEN_CPU_CAPABILITY override. Probe from test/:
+  # the repo root shadows the installed torch, and on ROCm an empty
+  # LD_LIBRARY_PATH entry makes build/bin's libtorch* symlinks miss libshm.
+  cpu_capability=$(cd test && env -u ATEN_CPU_CAPABILITY python -c "import torch; print(torch.backends.cpu.get_cpu_capability().replace(' ', ''))")
+  pushd build/bin
+  vec_all_tests=$(find . -maxdepth 1 -executable -name 'vec_test_all_types_*')
+  # Unlike most tests, deliberately run every binary and report their failures
+  # at the end, so that one CI run shows the failures of all capabilities (few
+  # contributors can run them all locally), and fail if none ran, so that these
+  # tests can't silently stop running.
+  ran=0
+  failed=""
+  for vec_all_exec in $vec_all_tests
+  do
+    # Only run the capabilities that dispatch can pick on this CPU: the others
+    # would hit illegal instructions, or for SVE, assume another vector length.
+    capability=${vec_all_exec#./vec_test_all_types_}
+    if [[ "$capability" != DEFAULT && "$capability" != "$cpu_capability" &&
+          ! ( "$capability" == AVX2 && "$cpu_capability" == AVX512 ) ]]; then
+      echo "Skipping $vec_all_exec: PyTorch uses $cpu_capability"
+      continue
     fi
-    if [[ -n "$failed" ]]; then
-      echo "Failed vec_test_all_types binaries:$failed"
-      return 1
+    # Find libc10 in the installed torch, as the build tree's RPATH doesn't
+    # point to it where jobs run from a copy of the workspace (XPU). Each
+    # capability reports to its own directory, which test stats key on.
+    if ! LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH:-}" $vec_all_exec --gtest_output=xml:../../test/test-reports/vec_test_all_types_"$capability"/"$vec_all_exec".xml; then
+      failed="$failed $vec_all_exec"
     fi
-    assert_git_not_dirty
+    ran=$((ran + 1))
+  done
+  popd
+  if [[ "$ran" == 0 ]]; then
+    echo "No vec_test_all_types binary ran"
+    return 1
   fi
+  if [[ -n "$failed" ]]; then
+    echo "Failed vec_test_all_types binaries:$failed"
+    return 1
+  fi
+  assert_git_not_dirty
 }
 
 test_docs_test() {
@@ -2981,6 +2993,9 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_aten
   test_vec_all_types
   test_libtorch 1
+  if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
+    test_rocm_packed_atomic
+  fi
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
   fi
