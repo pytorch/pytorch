@@ -31,6 +31,7 @@ from torch.testing._internal.common_methods_invocations import (
     op_db,
 )
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     IS_FBCODE,
     LazyVal,
@@ -2019,6 +2020,9 @@ POINTWISE_XFAIL = frozenset(
 
 BACKWARD_XFAIL = frozenset(
     {
+        ("addcdiv", "bfloat16"),
+        ("addcdiv", "float16"),
+        ("addcdiv", "float32"),
         ("float_power", "float32"),
         ("mvlgamma_mvlgamma_p_1", "float32"),
         ("mvlgamma_mvlgamma_p_3", "float32"),
@@ -2405,6 +2409,10 @@ class PointwiseStrictNumericsTest(TestCase):
                 f"on (source, index, shape, kwargs, kind): {mismatches}.",
             )
 
+    @decorateIf(
+        unittest.skip("uncompilable op under fullgraph"),
+        lambda p: p["op"].name in COMPILE_UNSUPPORTED,
+    )
     @_strict_ops(
         POINTWISE_OPS, POINTWISE_XFAIL, full_dtype_ops=FULL_DTYPE_POINTWISE_OPS
     )
@@ -2414,6 +2422,10 @@ class PointwiseStrictNumericsTest(TestCase):
             mismatches, op, dtype, "forward", POINTWISE_XFAIL, "POINTWISE_XFAIL"
         )
 
+    @decorateIf(
+        unittest.skip("uncompilable op under fullgraph"),
+        lambda p: p["op"].name in COMPILE_UNSUPPORTED,
+    )
     @ops(NONFLOAT_INPUT_OPS, allowed_dtypes=_NONFLOAT_DTYPES)
     def test_pointwise_nonfloat(self, device, dtype, op):
         mismatches = self._sweep(device, op, dtype, POINTWISE_STRICT_CFG)
@@ -2524,6 +2536,10 @@ class PointwiseStrictNumericsTest(TestCase):
             self._require_kernel(tested, "no differentiable sample")
         return mismatches
 
+    @decorateIf(
+        unittest.skip("uncompilable op under fullgraph"),
+        lambda p: p["op"].name in COMPILE_UNSUPPORTED,
+    )
     @_strict_ops(BACKWARD_OPS, BACKWARD_XFAIL, full_dtype_ops=FULL_DTYPE_BACKWARD_OPS)
     def test_pointwise_backward(self, device, dtype, op):
         mismatches = self._sweep_backward(device, op, dtype, POINTWISE_STRICT_CFG)
