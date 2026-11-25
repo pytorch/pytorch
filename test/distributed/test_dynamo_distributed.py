@@ -92,6 +92,14 @@ def init_weights(m):
         m.bias.data.fill_(0.01)
 
 
+def compile_count():
+    # get_compilation_metrics() also accumulates is_runtime rows, flushed when a
+    # compiled graph's first call spends time in runtime autotuning. Whether a
+    # rank autotunes depends on its own graph and on inductor cache state, so
+    # those rows must not be part of a count compared across ranks.
+    return sum(not m.is_runtime for m in torch._dynamo.utils.get_compilation_metrics())
+
+
 @contextmanager
 def enable_guard_collectives():
     old = set_enable_guard_collectives(True)
@@ -1567,9 +1575,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     torch.randn(data, device=self.rank),
                 )
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
@@ -1680,9 +1687,8 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 x = torch.randn(12, device=self.rank)  # recompile on one rank
             f(x)
 
-            metrics = torch._dynamo.utils.get_compilation_metrics()
             res = [None] * self.world_size
-            torch.distributed.all_gather_object(res, len(metrics))
+            torch.distributed.all_gather_object(res, compile_count())
             for r in res[1:]:
                 self.assertEqual(res[0], r)
 
