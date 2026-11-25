@@ -1624,6 +1624,7 @@ class Reduction(Loops):
         split_quantum = 8
         min_splits = 16
         max_splits = 64
+
         xblocks = (numel_hint + first_stage_xblock - 1) // first_stage_xblock
         target_splits = (target_ctas_per_sm * num_sm) // max(xblocks, 1)
         target_splits = (target_splits // split_quantum) * split_quantum
@@ -1817,7 +1818,17 @@ class Reduction(Loops):
         split_large_outer = (
             preserve_large_outer_hint
             and should_split
-            and config.triton.enable_experimental_large_output_outer_reductions
+            and (
+                (
+                    config.triton.enable_experimental_large_output_outer_reductions
+                    and not config.triton.autotune_experimental_large_output_outer_reductions
+                )
+                or (
+                    config.triton.autotune_experimental_large_output_outer_reductions
+                    and not V.graph.cpp_wrapper
+                    and not V.graph.aot_mode
+                )
+            )
             and not config.deterministic
             and not config.batch_invariant
             and not torch.are_deterministic_algorithms_enabled()
@@ -1979,7 +1990,14 @@ class Reduction(Loops):
                         dtype in (torch.bfloat16, torch.float32)
                         for dtype in source_dtypes
                     )
-                    and producer_profitable
+                    # The direct structural mode keeps the conservative
+                    # producer guard.  Whole-plan autotuning can safely admit
+                    # the broader shape-eligible family because it benchmarks
+                    # the complete structural sequence against one-pass.
+                    and (
+                        config.triton.autotune_experimental_large_output_outer_reductions
+                        or producer_profitable
+                    )
                 ):
                     split = Reduction._experimental_large_output_outer_split_factor(
                         reduction_numel_hint, numel_hint, num_sm
@@ -2302,7 +2320,11 @@ class Reduction(Loops):
 
             # Find the reduction that get split
             split_reduction = None
-            if config.triton.mix_order_reduction and isinstance(out, TensorBox):
+            needs_original_reduction = (
+                config.triton.mix_order_reduction
+                or config.triton.autotune_experimental_large_output_outer_reductions
+            )
+            if needs_original_reduction and isinstance(out, TensorBox):
 
                 def _find_split_reduction(
                     cur_node: TensorBox,
@@ -2345,6 +2367,29 @@ class Reduction(Loops):
                 split_reduction._original_inner_fn = inner_fn
                 split_reduction._original_ranges = ranges
                 split_reduction._original_reduction_ranges = reduction_ranges
+                split_reduction._whole_plan_outer_reduction = False
+                if (
+                    config.triton.autotune_experimental_large_output_outer_reductions
+                    and hint == ReductionHint.OUTER
+                ):
+                    numel_hint = V.graph.sizevars.optimization_hint(
+                        sympy_product(ranges)
+                    )
+                    reduction_numel_hint = V.graph.sizevars.optimization_hint(
+                        reduction_numel
+                    )
+                    # OUTER also names pre-existing split reductions.  Only
+                    # preserve a one-pass alternative when num_splits selected
+                    # the experimental large-output path above.
+                    split_reduction._whole_plan_outer_reduction = (
+                        numel_hint
+                        >= DeviceProperties.create(device).multi_processor_count
+                        * 2
+                        * 32
+                        and Reduction._should_use_experimental_large_output_outer_plan(
+                            reduction_numel_hint, numel_hint, int(split)
+                        )
+                    )
             return out
 
         out = TensorBox.create(
@@ -6256,6 +6301,9 @@ class ComputedBuffer(OperationBuffer):
     _original_reduction_ranges: Sequence[_IntLike] | None = None
     # See Reduction.create_multilayer_split_as_grid.
     _grid_split_factor: int | None = None
+    # Request a bounded runtime choice between the original one-pass reduction
+    # and this buffer's generated partial+final structural plan.
+    _whole_plan_outer_reduction: bool = False
 
     @contextlib.contextmanager
     def with_original_inner_fn(self) -> Iterator[None]:
@@ -6298,6 +6346,7 @@ class ComputedBuffer(OperationBuffer):
         finally:
             self.data = old_data
             self.layout = old_layout
+            self.get_default_sizes_body.clear_cache(self)
 
     @staticmethod
     @contextlib.contextmanager
