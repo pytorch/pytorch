@@ -18,8 +18,8 @@ struct deconv_forward_params {
   dnnl::deconvolution_forward::primitive_desc pd;
   dnnl::deconvolution_forward primitive;
   int groups;
-  ideep::attr_t op_attr;
-  ideep::attr_t bias_attr;
+  Attr op_attr;
+  Attr bias_attr;
   // Keep {dnnl_arg, tensor} pairs of scales and zero points for primitive execution
   std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_scales = nullptr;
   std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_zero_points =
@@ -48,7 +48,7 @@ void convolution_transpose_forward_compute(
     const std::vector<float>& dst_scales,
     const std::vector<int32_t>& src_zero_point,
     const std::vector<int32_t>& dst_zero_point,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
     const ideep::lowp_kind alowp_kind = ideep::u8s8);
@@ -74,7 +74,7 @@ void convolution_transpose_forward_prepare(
     const std::vector<float>& dst_scales,
     const std::vector<int32_t>& src_zero_point,
     const std::vector<int32_t>& dst_zero_point,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
     const ideep::lowp_kind alowp_kind = ideep::u8s8);
@@ -112,7 +112,7 @@ void convolution_transpose_forward_compute_v3(
     const dnnl::memory::dims& dilates = {1, 1},
     int groups = 1,
     bool is_channels_last = false,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward);
 
@@ -134,7 +134,7 @@ void convolution_transpose_forward_compute_v3(
     const dnnl::memory::dims& dilates = {1, 1},
     int groups = 1,
     bool is_channels_last = false,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward);
 
@@ -158,7 +158,7 @@ ideep::tensor::desc convolution_transpose_forward_expected_weights_desc(
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct,
     dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
     const dnnl::memory::dims& src_dims = dnnl::memory::dims(),
-    const ideep::attr_t& attr = ideep::attr_t());
+    const Attr& attr = Attr());
 
 // Ported from ideep::convolution_transpose_backward_data::compute_v3.
 void convolution_transpose_backward_data_compute_v3(
@@ -172,7 +172,7 @@ void convolution_transpose_backward_data_compute_v3(
     const dnnl::memory::dims& dilates = {1, 1},
     const int groups = 1,
     bool is_channels_last = false,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct);
 
 // Ported from ideep::convolution_transpose_backward_weights::compute_v3 (with
@@ -189,7 +189,7 @@ void convolution_transpose_backward_weights_compute_v3(
     const dnnl::memory::dims& dilates = {1, 1},
     const int groups = 1,
     bool is_channels_last = false,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct);
 
 // Ported from ideep::convolution_transpose_backward_weights::compute_v3
@@ -205,7 +205,7 @@ void convolution_transpose_backward_weights_compute_v3(
     const dnnl::memory::dims& dilates = {1, 1},
     const int groups = 1,
     bool is_channels_last = false,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::algorithm aalgorithm = dnnl::algorithm::deconvolution_direct);
 
 } // namespace at::native::mkldnn

@@ -198,7 +198,7 @@ Tensor mkldnn_reorder_conv2d_weight(
       dnnl::prop_kind::forward_inference,
       w.get_data_type(),
       src_dims,
-      ideep::attr_t(),
+      mkldnn::Attr(),
       is_channels_last);
   ideep::tensor result;
   result.init(desc);
@@ -245,7 +245,7 @@ Tensor mkldnn_reorder_conv3d_weight(
       dnnl::prop_kind::forward_inference,
       w.get_data_type(),
       src_dims,
-      ideep::attr_t(),
+      mkldnn::Attr(),
       is_channels_last);
   ideep::tensor result;
   result.init(desc);
