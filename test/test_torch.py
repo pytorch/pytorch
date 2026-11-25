@@ -7101,6 +7101,117 @@ class TestTorchDeviceType(TestCase):
                 added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor, alpha=-1)
                 self.assertEqual(added, -tensor)
 
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("slice_shape", [(2,), (6,), (127,), (128,), (130,), (512,), (4096,), (2, 64), (1, 2, 64)])
+    @parametrize("index_layout", ["dense", "strided", "broadcast"])
+    @parametrize("offset", [0, 1, 2])
+    @parametrize("alpha", [0, 1, -0.5, 2])
+    def test_index_add_paired_reduced_precision(
+        self, device, dtype, index_dtype, slice_shape, index_layout, offset, alpha
+    ):
+        output_shape = (7, *slice_shape)
+        source_shape = (33, *slice_shape)
+        source_cpu = ((torch.arange(math.prod(source_shape)).reshape(source_shape) % 7 - 3) / 16).to(dtype)
+        initial = torch.full(output_shape, 0.125, dtype=dtype)
+        index_cpu = (torch.arange(33, dtype=index_dtype) * 3) % 7
+        if index_layout == "broadcast":
+            index_cpu.zero_()
+        scaled = (source_cpu.float() * torch.tensor(alpha, dtype=dtype).float()).to(dtype)
+        expected = initial.float().index_add(0, index_cpu, scaled.float()).to(dtype)
+        source_storage = torch.full((source_cpu.numel() + 4,), 17, device=device, dtype=dtype)
+        source = source_storage[offset:offset + source_cpu.numel()].view(source_shape)
+        source.copy_(source_cpu)
+        saved_source = source_storage.clone()
+        output_storage = torch.full((initial.numel() + 4,), 9, device=device, dtype=dtype)
+        output = output_storage[offset:offset + initial.numel()].view(output_shape)
+        index = index_cpu.to(device)
+        if index_layout == "strided":
+            index = index.repeat_interleave(2)[::2]
+        elif index_layout == "broadcast":
+            index = index[:1].expand(33)
+        for dim in (0, -len(output_shape)):
+            output.copy_(initial)
+            with DeterministicGuard(False):
+                output.index_add_(dim, index, source, alpha=alpha)
+                functional = torch.index_add(initial.to(device), dim, index, source, alpha=alpha)
+                out = torch.empty_like(output)
+                torch.index_add(initial.to(device), dim, index, source, alpha=alpha, out=out)
+            for actual in (output, functional, out):
+                self.assertEqual(actual.cpu().view(torch.int16), expected.view(torch.int16))
+            self.assertEqual(output_storage[:offset], torch.full_like(output_storage[:offset], 9))
+            self.assertEqual(output_storage[offset + initial.numel():], torch.full_like(output_storage[offset + initial.numel():], 9))
+            self.assertEqual(source_storage, saved_source)
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("num_index", [65537, 131073])
+    @parametrize("alpha", [1, -0.5])
+    def test_index_add_paired_grid_stride(self, device, dtype, index_dtype, num_index, alpha):
+        active = torch.arange(64) * (num_index - 1) // 63
+        values_cpu = ((torch.arange(64 * 128).reshape(64, 128) % 7 - 3) / 16).to(dtype)
+        index_cpu = torch.arange(num_index, dtype=index_dtype) % 8
+        source = torch.zeros(num_index, 128, device=device, dtype=dtype)
+        source.index_copy_(0, active.to(device), values_cpu.to(device))
+        output = torch.zeros(8, 128, device=device, dtype=dtype)
+        scaled = (values_cpu.float() * torch.tensor(alpha, dtype=dtype).float()).to(dtype)
+        expected = torch.zeros(8, 128).index_add(0, index_cpu[active], scaled.float()).to(dtype)
+        with DeterministicGuard(False):
+            output.index_add_(0, index_cpu.to(device), source, alpha=alpha)
+        self.assertEqual(output.cpu().view(torch.int16), expected.view(torch.int16))
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    @parametrize("alpha", [1, -1, 0.1, -0.3, 1.0006, math.pi, float("inf"), float("nan"), -0.0])
+    def test_index_add_paired_alpha_rounding(self, device, dtype, index_dtype, alpha):
+        source_cpu = ((torch.arange(257 * 130).reshape(257, 130) % 127 - 63) / 13).to(dtype)
+        tiny = torch.finfo(dtype).tiny
+        subnormal = tiny * torch.finfo(dtype).eps
+        special = torch.tensor([0.0, -0.0, subnormal, -subnormal, tiny, -tiny,
+                                float("inf"), -float("inf"), float("nan")], dtype=dtype)
+        source_cpu[0] = special[torch.arange(130) % special.numel()]
+        initial = torch.full_like(source_cpu, 0.125)
+        initial[-1].fill_(-0.0)
+        index_cpu = torch.arange(257, dtype=index_dtype).flip(0)
+        scaled = (source_cpu.float() * torch.tensor(alpha, dtype=dtype).float()).to(dtype)
+        expected = (initial.float() + scaled.flip(0).float()).to(dtype)
+        with DeterministicGuard(False):
+            actual = initial.to(device).index_add(0, index_cpu.to(device), source_cpu.to(device), alpha=alpha)
+        actual_cpu = actual.cpu()
+        self.assertEqual(actual_cpu, expected, atol=0, rtol=0)
+        not_nan = ~expected.isnan()
+        self.assertEqual(actual_cpu.view(torch.int16)[not_nan], expected.view(torch.int16)[not_nan])
+
+    @onlyAccelerator
+    @largeTensorTest("6GB")
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("index_dtype", [torch.int32, torch.int64])
+    def test_index_add_paired_64bit(self, device, dtype, index_dtype):
+        last_row = 2**30
+        output = torch.zeros(last_row + 1, 2, device=device, dtype=dtype)
+        source_cpu = ((torch.arange(66).reshape(33, 2) % 7 - 3) / 16).to(dtype)
+        index_cpu = torch.arange(33, dtype=index_dtype) % 2
+        index = (index_cpu * last_row).to(device)
+        expected = torch.zeros(2, 2).index_add(0, index_cpu, source_cpu.float() * -0.5).to(dtype)
+        with DeterministicGuard(False):
+            output.index_add_(0, index, source_cpu.to(device), alpha=-0.5)
+        selected = output.index_select(0, torch.tensor([0, last_row], device=device))
+        self.assertEqual(selected.cpu().view(torch.int16), expected.view(torch.int16))
+        self.assertEqual(output[1], torch.zeros(2, device=device, dtype=dtype))
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("deterministic", [False, True])
+    def test_index_select_paired_backward(self, device, dtype, deterministic):
+        index_cpu = torch.arange(33) % 7
+        grad_cpu = ((torch.arange(33 * 130).reshape(33, 130) % 7 - 3) / 16).to(dtype)
+        expected = torch.zeros(7, 130).index_add(0, index_cpu, grad_cpu.float()).to(dtype)
+        leaf = torch.zeros(7, 130, device=device, dtype=dtype, requires_grad=True)
+        with DeterministicGuard(deterministic):
+            leaf.index_select(0, index_cpu.to(device)).backward(grad_cpu.to(device))
+        self.assertEqual(leaf.grad.cpu().view(torch.int16), expected.view(torch.int16))
+
     def test_index_add_cornercase(self, device):
         dest = torch.randn((), device=device)
         index = torch.tensor([0], device=device)
