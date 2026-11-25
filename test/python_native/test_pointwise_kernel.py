@@ -92,6 +92,25 @@ class TestPointwiseIndexing(TestCase):
         self.assertIs(result, value)
         self.assertEqual(value, expected)
 
+    @skipIfNoCuteDSL
+    @parametrize("dtype", (torch.float64, torch.complex128))
+    def test_transpose_word_span_uses_wide_indices(self, dtype: torch.dtype) -> None:
+        from torch._native.ops.pointwise.transpose_copy import indexing_supported
+
+        source = torch.empty((4096, 4096, 64), dtype=dtype, device="meta").transpose(
+            0, 1
+        )
+        target = torch.empty(source.shape, dtype=dtype, device="meta")
+        spec = (1, 4096, 1, 4096, 64, source.element_size())
+        self.assertTrue(indexing_supported(source, target, spec))
+        self.assertTrue(indexing_supported(source, None, spec))
+        overflow = torch.empty((2**31,), dtype=dtype, device="meta")
+        self.assertFalse(
+            indexing_supported(
+                overflow, None, (1, 2**31, 1, 1, 1, overflow.element_size())
+            )
+        )
+
 
 class TestPointwiseKernel(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -177,6 +196,21 @@ class TestPointwiseKernel(TestCase):
         if allowed:
             actual = overrides._make_impl(row, "out")(*inputs, out=wide)
             self.assertEqual(actual, reference, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    def test_transpose_decline_preserves_cow_output(self, device: str) -> None:
+        from torch._native.ops.pointwise.overrides import _copy_cond
+
+        # Complex dtype prevents conversion fallback for this permutation.
+        src = torch.arange(120, device=device).to(torch.complex64)
+        src = src.reshape(2, 3, 4, 5).permute(1, 0, 3, 2)
+        base = torch.full(src.shape, 7, dtype=src.dtype, device=device)
+        out = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(out))
+        self.assertFalse(_copy_cond(out, src))
+        self.assertTrue(torch._C._is_cow_tensor(out))
+        self.assertEqual(out, base)
 
     @onlyCUDA
     @skipIfNoCuteDSL

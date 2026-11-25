@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -8,10 +9,15 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND as PromotionKind,
     is_cpu_scalar_tensor as _is_wrapped_scalar,
     is_non_overlapping_and_dense_or_false,
+    make_contiguous_strides_for,
 )
+from torch._tensor_iterator import TensorIterator
 
 from ... import cutedsl_utils as cu
-from ...cutedsl.config import POINTWISE_ARCH_MAJORS as _ARCH_MAJORS
+from ...cutedsl.config import (
+    POINTWISE_ARCH_MAJORS as _ARCH_MAJORS,
+    POINTWISE_HOST_CACHE_LIMIT,
+)
 from ...registry import _resolve_overload
 from ...utils import capability as cap
 from ...utils.lazy import LazyModule
@@ -32,14 +38,22 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ...cutedsl import dtypes as dt
-    from . import kernel as K, ops
-    from ._types import Number, OperatorResult, PromotionOperands, Shape
+    from . import kernel as K, ops, transpose_copy as TC
+    from ._types import (
+        CacheKey,
+        Number,
+        OperatorResult,
+        PromotionOperands,
+        Shape,
+        TransposeSpec,
+    )
     from .signature import Functor, Signature
 else:
     # Keep cutlass and kernel imports lazy during `import torch`.
     dt = LazyModule("torch._native.cutedsl.dtypes")
     K = LazyModule("torch._native.ops.pointwise.kernel")
     ops = LazyModule("torch._native.ops.pointwise.ops")
+    TC = LazyModule("torch._native.ops.pointwise.transpose_copy")
 
 
 _SUPPORTED = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
@@ -441,6 +455,9 @@ def _make_impl(
     return impl
 
 
+_TRANSPOSE_DTYPES = _CONV_STORAGE_DTYPES + (torch.complex64, torch.complex128)
+
+
 def _conv_serveable(src: torch.Tensor, dst_dtype: torch.dtype) -> bool:
     # FP64-to-uint16 edges require ATen's conversion.
     if src.dtype is torch.float64 and dst_dtype is torch.uint16:
@@ -542,7 +559,7 @@ def _to_copy_cond(
         return False
     dst = x.dtype if dtype is None else dtype
     # Rowvec preserves input gaps; _to_copy allocates contiguous output.
-    return _conv_serveable(x, dst) and x.is_contiguous()
+    return dst != x.dtype and _conv_serveable(x, dst) and x.is_contiguous()
 
 
 def _to_copy_impl(
@@ -561,16 +578,197 @@ def _to_copy_impl(
     return _run_conversion("_to_copy", x, out)
 
 
+def _transpose_source_serveable(
+    src: torch.Tensor, quantized: bool, *, check_dense: bool = True
+) -> bool:
+    if not (
+        src.layout is torch.strided
+        and src.is_quantized == quantized
+        and (quantized or src.dtype in _TRANSPOSE_DTYPES)
+        and src.ndim >= 2
+        and not src.is_contiguous()
+        and (not check_dense or is_non_overlapping_and_dense_or_false(src))
+        and src.numel() > 0
+        and src.element_size() in (1, 2, 4, 8, 16)
+        and not src.is_neg()
+        and not src.is_conj()
+        and not src._is_zerotensor()
+        and not cap.is_traced(src)
+        and cap.device_ok(src, _ARCH_MAJORS)
+        and cap.on_current_device(src)
+    ):
+        return False
+    if quantized and (
+        src.dtype
+        not in (
+            torch.qint8,
+            torch.quint8,
+            torch.qint32,
+            torch.quint4x2,
+            torch.quint2x4,
+        )
+        or src.qscheme() != torch.per_tensor_affine
+    ):
+        return False
+    if src.dtype in (torch.quint4x2, torch.quint2x4):
+        pack = 2 if src.dtype is torch.quint4x2 else 4
+        if src.storage_offset() % pack:
+            return False
+    return True
+
+
+def _transpose_source_spec(
+    src: torch.Tensor, *, quantized: bool = False
+) -> TransposeSpec | None:
+    if not _transpose_source_serveable(src, quantized):
+        return None
+    itemsize = src.element_size()
+    shape = tuple(src.shape)
+    for dim0 in range(src.ndim):
+        for dim1 in range(dim0 + 1, src.ndim):
+            base_shape = list(shape)
+            base_shape[dim0], base_shape[dim1] = (
+                base_shape[dim1],
+                base_shape[dim0],
+            )
+            expected = list(make_contiguous_strides_for(base_shape))
+            expected[dim0], expected[dim1] = expected[dim1], expected[dim0]
+            if tuple(expected) != src.stride():
+                continue
+            outer = math.prod(shape[:dim0])
+            b = shape[dim0]
+            middle = math.prod(shape[dim0 + 1 : dim1])
+            a = shape[dim1]
+            inner = math.prod(shape[dim1 + 1 :])
+            spec = outer, b, middle, a, inner, itemsize
+            return spec if TC.indexing_supported(src, None, spec) else None
+    return None
+
+
+_TRANSPOSE_SPECS: dict[CacheKey, TransposeSpec | None] = {}
+_TRANSPOSE_SPECS_LOCK = threading.RLock()
+
+
+def _transpose_iterator_spec(
+    out: torch.Tensor, src: torch.Tensor
+) -> TransposeSpec | None:
+    key = (src.dtype, tuple(src.shape), src.stride(), out.stride())
+    with _TRANSPOSE_SPECS_LOCK:
+        if key not in _TRANSPOSE_SPECS:
+            _TRANSPOSE_SPECS[key] = _build_transpose_iterator_spec(out, src)
+            if len(_TRANSPOSE_SPECS) > POINTWISE_HOST_CACHE_LIMIT:
+                _TRANSPOSE_SPECS.pop(next(iter(_TRANSPOSE_SPECS)))
+        return _TRANSPOSE_SPECS[key]
+
+
+def _build_transpose_iterator_spec(
+    out: torch.Tensor, src: torch.Tensor
+) -> TransposeSpec | None:
+    try:
+        # Only geometry is needed; const inputs preserve COW storage.
+        iterator = TensorIterator(
+            const_inputs=[out, src],
+            resize_outputs=False,
+            check_all_same_dtype=False,
+            check_all_same_device=False,
+        )
+    except RuntimeError:
+        return None
+    if iterator.ndim < 2:
+        return None
+
+    # Fastest-first groups are (inner, a, middle, b, outer); source swaps a and b.
+    shape = iterator.shape
+    out_strides = iterator.strides(0)
+    src_strides = iterator.strides(1)
+    stride = src.element_size()
+    for dim in range(iterator.ndim):
+        if out_strides[dim] != stride:
+            return None
+        stride *= shape[dim]
+
+    order = sorted(range(iterator.ndim), key=src_strides.__getitem__)
+    stride = src.element_size()
+    for dim in order:
+        if src_strides[dim] != stride:
+            return None
+        stride *= shape[dim]
+    moved = [dim for dim, source_dim in enumerate(order) if dim != source_dim]
+    if len(moved) != 2:
+        return None
+    dim0, dim1 = moved
+    if order[dim0] != dim1 or order[dim1] != dim0:
+        return None
+
+    inner = math.prod(shape[:dim0])
+    a = shape[dim0]
+    middle = math.prod(shape[dim0 + 1 : dim1])
+    b = shape[dim1]
+    outer = math.prod(shape[dim1 + 1 :])
+    return outer, b, middle, a, inner, src.element_size()
+
+
+def _transpose_copy_plan(
+    out: torch.Tensor, src: torch.Tensor, *, quantized: bool = False
+) -> tuple[TransposeSpec, TC._Plan] | None:
+    if not (
+        out.layout is torch.strided
+        and not out._is_zerotensor()
+        and out.is_quantized == quantized
+        and out.ndim == src.ndim
+        and out.shape == src.shape
+        and out.dtype == src.dtype
+        and out.device == src.device
+        and out.is_contiguous()
+        and not out.is_neg()
+        and not out.is_conj()
+        and not cap.is_traced(out)
+        and not torch._C._is_alias_of(out, src)
+    ):
+        return None
+    if not _transpose_source_serveable(src, quantized, check_dense=False):
+        return None
+    if quantized and (
+        out.qscheme() != src.qscheme()
+        or out.q_scale() != src.q_scale()
+        or out.q_zero_point() != src.q_zero_point()
+    ):
+        return None
+    if out.dtype in (torch.quint4x2, torch.quint2x4):
+        pack = 2 if out.dtype is torch.quint4x2 else 4
+        if out.storage_offset() % pack:
+            return None
+    if src.ndim == 2 and src.stride() == (1, src.shape[0]):
+        spec = (1, src.shape[0], 1, src.shape[1], 1, src.element_size())
+    else:
+        spec = _transpose_iterator_spec(out, src)
+        if spec is None:
+            return None
+    return spec, TC._plan(src, out, spec)
+
+
 def _copy_cond(
     self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
 ) -> bool:
     # copy_ allows dtype casts and source broadcasting; cross-device copies use ATen.
     if not (
         isinstance(src, torch.Tensor)
+        and not self._is_zerotensor()
         and src.device == self.device
         and can_use_32bit_indexing(self)
     ):
         return False
+    if (
+        self.dtype == src.dtype
+        and self.shape == src.shape
+        and self.is_contiguous()
+        and src.is_contiguous()
+    ):
+        return False
+    planned = _transpose_copy_plan(self, src)
+    if planned is not None:
+        spec, plan = planned
+        return TC.indexing_supported(src, self, spec, plan=plan)
     if not (_conv_serveable(src, self.dtype) and self.is_contiguous()):
         return False
     if cap.is_traced(self) or self.is_neg() or self.is_conj():
@@ -591,7 +789,52 @@ def _copy_cond(
 def _copy_impl(
     self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
 ) -> torch.Tensor:
+    planned = _transpose_copy_plan(self, src)
+    if planned is not None:
+        spec, plan = planned
+        return TC.run(src, self, spec, plan=plan)
     return _run_conversion("copy_", src, self)
+
+
+def _quantized_copy_cond(
+    self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
+) -> bool:
+    if not isinstance(src, torch.Tensor) or src.device != self.device:
+        return False
+    planned = _transpose_copy_plan(self, src, quantized=True)
+    if planned is None:
+        return False
+    spec, plan = planned
+    return TC.indexing_supported(src, self, spec, plan=plan)
+
+
+def _quantized_copy_impl(
+    self: torch.Tensor, src: torch.Tensor, non_blocking: bool = False
+) -> torch.Tensor:
+    planned = _transpose_copy_plan(self, src, quantized=True)
+    if planned is None:
+        raise AssertionError("quantized transpose copy no longer matches")
+    spec, plan = planned
+    return TC.run(src, self, spec, plan=plan)
+
+
+def _quantized_clone_cond(
+    self: torch.Tensor, *, memory_format: torch.memory_format | None = None
+) -> bool:
+    return (
+        memory_format is torch.contiguous_format
+        and _transpose_source_spec(self, quantized=True) is not None
+    )
+
+
+def _quantized_clone_impl(
+    self: torch.Tensor, *, memory_format: torch.memory_format | None = None
+) -> torch.Tensor:
+    out = torch.empty_like(self, memory_format=torch.contiguous_format)
+    spec = _transpose_source_spec(self, quantized=True)
+    if spec is None:
+        raise AssertionError("quantized transpose clone no longer matches")
+    return TC.run(self, out, spec)
 
 
 _FILL_DTYPES = _SUPPORTED + _INT_DTYPES
@@ -843,6 +1086,20 @@ def register_pointwise_overrides() -> None:
         "aten", "_to_copy", "CUDA", cond=_to_copy_cond, impl=_to_copy_impl
     )
     cu.register_op_override("aten", "copy_", "CUDA", cond=_copy_cond, impl=_copy_impl)
+    cu.register_op_override(
+        "aten",
+        "copy_",
+        "QuantizedCUDA",
+        cond=_quantized_copy_cond,
+        impl=_quantized_copy_impl,
+    )
+    cu.register_op_override(
+        "aten",
+        "clone",
+        "QuantizedCUDA",
+        cond=_quantized_clone_cond,
+        impl=_quantized_clone_impl,
+    )
     cu.register_op_override(
         "aten", "fill_.Scalar", "CUDA", cond=_fill_cond, impl=_fill_impl
     )
