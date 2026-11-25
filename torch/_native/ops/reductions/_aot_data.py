@@ -1,7 +1,7 @@
 """Torch-free metadata shared by reduction AOT declarations and builders."""
 
-# Compute capability 10.x, matching overrides._ARCH_MAJORS.
-ARCHS = ("sm_100f",)
+# Compute capabilities 9.x and 10.x, matching overrides._ARCH_MAJORS.
+ARCHS = ("sm_90", "sm_100f")
 
 # Welford reductions remain JIT-only: their correction overloads are unstructured,
 # and no STRUCTURED=False declaration covers them yet.
