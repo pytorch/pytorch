@@ -477,7 +477,7 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
 
   # ---[ NCCL EP extension (torch._nccl_ep)
   # Optional standalone extension holding the NCCL EP bindings, imported lazily
-  # by torch/distributed/_token_switch.py so libtorch_cuda never references
+  # by torch/distributed/_token_switch/__init__.py so libtorch_cuda never references
   # ncclEp*. How it links libnccl_ep follows how torch links NCCL:
   #  - USE_SYSTEM_NCCL=OFF: __caffe2_nccl_ep is libnccl_ep.a, statically linked
   #    here -- self-contained (nccl* bind to torch_cuda's embedded NCCL; JIT
