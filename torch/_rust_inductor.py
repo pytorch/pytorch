@@ -758,7 +758,8 @@ def _leaf_check(leaf, where, scalars=False):
 
 def _plan(args, unused, span=False, scalars=False):
     """What the guard checks (Rust) and what func reads and checks (Python),
-    by arg: ("tensor",), ("float", value or None), ("tree", spec, leaf
+    by arg: ("tensor",), ("float", value or None), ("equal", type, value) for
+    an immutable value that isn't a number, ("tree", spec, leaf
     checks, a TreeChecks or None: see rust.TreeChecks) or None (nothing). Args at `unused` the block doesn't read, or
     only passes on. With `scalars`, floats (and those in plain containers)
     are graph inputs."""
@@ -785,6 +786,10 @@ def _plan(args, unused, span=False, scalars=False):
         elif type(a) is tuple and all(type(x) is int for x in a):
             checks.append(("ints", i, True, list(a)))
             plan.append(None)
+        elif type(a) in _IMMUTABLE:
+            # A str, a device, a dtype: what it is, not which object it is
+            # (`tensor.device` is a new object on every read). func checks it.
+            plan.append(("equal", type(a), a))
         elif _is_tree(a):
             leaves, shape = [], []
             _walk(a, leaves, shape)
@@ -831,6 +836,12 @@ def _inputs(args, plan, why=None):
                     why.append(f"arg {i} (float)")
                 return None
             floats.append(float.__float__(a))
+            continue
+        if p[0] == "equal":
+            if type(a) is not p[1] or a != p[2]:
+                if why is not None:
+                    why.append(f"arg {i} ({p[1].__name__}, checked by value)")
+                return None
             continue
         if p[3] is not None:
             got = p[3].leaves(a)
@@ -1442,6 +1453,8 @@ def _input_types(args, plan, types, consts):
             continue
         if p[0] == "float":
             floats.append(_types.FloatType(p[1]))
+            continue
+        if p[0] == "equal":
             continue
         leaves: list[Any] = []
         _walk(a, leaves, [])
