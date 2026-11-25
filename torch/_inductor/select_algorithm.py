@@ -2651,10 +2651,11 @@ class TritonTemplateKernel(TritonKernel):
         if name not in (self.tma_store_epilogue_outputs or ()):
             return False
         access = self._tile_tma_descriptor(name, index, self.args.output(name))
-        if access is None:
+        ctx = self._tile_tma_store_ctx
+        if access is None or ctx is None:
             return False
         desc, offsets = access
-        rows, cols = self._tile_tma_store_ctx[2]
+        rows, cols = ctx[2]
         dtype = V.graph.get_buffer(name).get_dtype()
         self.stores.writeline(
             DeferredLine(
@@ -2673,7 +2674,8 @@ class TritonTemplateKernel(TritonKernel):
         if name not in self.tma_load_epilogue_inputs:
             return None
         access = self._tile_tma_load_descriptor(name, index, self.args.input(name))
-        if access is None:
+        ctx = self._tile_tma_load_ctx
+        if access is None or ctx is None:
             return None
         desc, offsets = access
         line, dtype = f"{desc}.load([{offsets}])", V.graph.get_buffer(name).get_dtype()
@@ -2682,9 +2684,7 @@ class TritonTemplateKernel(TritonKernel):
             and config.triton.codegen_upcast_to_fp32
         ):
             line, dtype = f"{line}.to(tl.float32)", torch.float32
-        return self.cse.generate(
-            self.loads, line, dtype=dtype, shape=self._tile_tma_load_ctx[4]
-        )
+        return self.cse.generate(self.loads, line, dtype=dtype, shape=ctx[4])
 
     def _tile_tma_load_descriptor(
         self, name: str, index: sympy.Expr, var: str
@@ -3245,6 +3245,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         self.cse.invalidate(OrderedSet(self.cse.store_cache.values()))
                         for node in matrix_readers:
+                            # pyrefly: ignore [missing-attribute]
                             node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     row_loads = {}
                     if first_red < len(nodes):
@@ -3735,7 +3736,9 @@ class TritonTemplateKernel(TritonKernel):
                 return None
             sizes = template_output_size(self.output_node)
             for recorded, var in self._template_loads.get(name, ()):
-                if not same_template_element(element, recorded, sizes):
+                if var.shape is None or not same_template_element(
+                    element, recorded, sizes
+                ):
                     continue
                 shape = tuple(
                     "1" if str(d) == "1" else str(size)
@@ -3792,6 +3795,7 @@ class TritonTemplateKernel(TritonKernel):
                 tile_syms,
                 offsets,
                 within,
+                # pyrefly: ignore [unbound-name]
                 rows_per_batch if len(origin) == 3 else None,
                 (rows, cols),
             )
