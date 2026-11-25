@@ -237,7 +237,7 @@ from .base import (
     VariableTracker,
     VariableTrackerMeta,
 )
-from .builtin import BuiltinVariable
+from .builtin import BuiltinVariable, FloatBuiltinVariable
 from .constant import ConstantVariable, FakeIdVariable, FakeValueKind
 from .ctx_manager import (
     AutocastModeVariable,
@@ -2387,7 +2387,7 @@ class VariableBuilder:
         elif is_function(value) and value in (float.fromhex, float.hex):
             self.install_guards(GuardBuilder.ID_MATCH)
             return GetAttrVariable(
-                BuiltinVariable(float, source=self.source),
+                FloatBuiltinVariable(source=self.source),
                 value.__name__,
                 py_type=type(value),
             )
@@ -2705,7 +2705,7 @@ class VariableBuilder:
                 source=self.source,
                 tx=self.tx,
             )
-        elif issubclass(type(value), dict) and type(value).__new__ is dict.__new__:
+        elif issubclass(type(value), dict):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 

@@ -764,7 +764,7 @@ class SubgraphReuseMatch:
     runtime_guards: list[Guard] = field(default_factory=list)
     captured_variables: dict[Source, VariableTracker] = field(default_factory=dict)
     static_metadata: dict[Source, "SizesStridesInfo"] = field(default_factory=dict)
-    pending_shape_guards: list[tuple[Any, bool]] = field(default_factory=list)
+    pending_shape_guards: list[sympy.Basic] = field(default_factory=list)
     symbol_replacements: dict[Any, Any] = field(default_factory=dict)
 
     def remap_source(self, source: Source) -> Source:
@@ -925,20 +925,20 @@ def _range_implies_bound(env: symbolic_shapes.ShapeEnv, expr: sympy.Basic) -> bo
 def _shape_guards_match(
     env: symbolic_shapes.ShapeEnv, match: SubgraphReuseMatch
 ) -> bool:
-    for predicate, oblivious in match.entry.shape_guards:
+    for predicate in match.entry.shape_guards:
         try:
             expr = predicate.xreplace(match.symbol_replacements)
         except ZeroDivisionError:
             return _reject_reuse("zero divisor in %s", predicate)
-        if expr == predicate or (not oblivious and _range_implies_bound(env, expr)):
+        if expr == predicate or _range_implies_bound(env, expr):
             continue
         if expr.free_symbols <= env.var_to_range.keys():
             try:
                 if env.guarding_hint_or_throw(expr):
-                    match.pending_shape_guards.append((expr, oblivious))
+                    match.pending_shape_guards.append(expr)
                     continue
             except symbolic_shapes.GuardOnDataDependentSymNode:
-                bounds = env.bound_sympy(expr, size_oblivious=oblivious)
+                bounds = env.bound_sympy(expr)
                 if bounds.is_singleton() and bool(bounds.lower):
                     continue
         return _reject_reuse("%s rejected as %s", predicate, expr)
@@ -1310,11 +1310,11 @@ def save_reuse_entry(
             rebound.update(item.expr.free_symbols)
         elif isinstance(item, LiftedCapturedSource):
             captures.add(item.source)
-    shape_guards: list[tuple[sympy.Basic, bool]] = []
+    shape_guards: list[sympy.Basic] = []
     if rebound and condition is not None:
         shape_env = tx.output.shape_env
         candidates = [
-            (guard.expr, guard.size_oblivious)
+            guard.expr
             for guard in shape_env.guards
             if guard.expr.free_symbols & rebound
         ]
@@ -1323,18 +1323,16 @@ def save_reuse_entry(
             bounds = shape_env.var_to_range[symbol]
             for rel, limit in ((sympy.Ge, bounds.lower), (sympy.Le, bounds.upper)):
                 if isinstance(limit, sympy.Integer):
-                    candidates.append((rel(symbol, limit), False))
+                    candidates.append(rel(symbol, limit))
         for assertions in shape_env.deferred_runtime_asserts.values():
             candidates.extend(
-                (a.expr, False) for a in assertions if a.expr.free_symbols & rebound
+                a.expr for a in assertions if a.expr.free_symbols & rebound
             )
-        # Implications cannot cross the size-oblivious evaluation policy.
-        implied: dict[bool, set[sympy.Basic]] = {False: set(), True: set()}
-        for predicate, oblivious in candidates:
-            known = implied[oblivious]
+        known: set[sympy.Basic] = set()
+        for predicate in candidates:
             if symbolic_shapes.canonicalize_bool_expr(predicate) in known:
                 continue
-            shape_guards.append((predicate, oblivious))
+            shape_guards.append(predicate)
             facts = shape_env.get_implications(predicate)
             known.update(expr for expr, truth in facts if truth is sympy.true)
 
@@ -1429,8 +1427,8 @@ def stamp_out_subgraph(
     cached = match.entry
     tracer = tx.output.current_tracer
     tx.output.input_source_to_sizes_strides.update(match.static_metadata)
-    for expr, oblivious in match.pending_shape_guards:
-        tx.output.shape_env.evaluate_expr(expr, hint=True, size_oblivious=oblivious)
+    for expr in match.pending_shape_guards:
+        tx.output.shape_env.evaluate_expr(expr, hint=True)
     flat_proxies = get_flat_proxies(fingerprint)
     for guard in match.runtime_guards:
         existing = tx.output.guards.get_guards_for_source(guard.originating_source)

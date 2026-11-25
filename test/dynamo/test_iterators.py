@@ -316,6 +316,7 @@ class TestIterators(torch._dynamo.test_case.TestCase):
             Box() if kind in ("instance", "mapping_write") else types.ModuleType("mod")
         )
         namespace = vars(mod)
+        namespace["first"] = 1
         if kind == "globals":
             namespace["__builtins__"] = __builtins__
             fn = types.FunctionType(write_global.__code__, namespace)
@@ -351,7 +352,14 @@ class TestIterators(torch._dynamo.test_case.TestCase):
         obj = Box()
         obj.first = 1
         x = torch.ones(1)
-        self._assert_iterator_reconstruction_fallback(fn, x, obj, vars(obj))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        other = vars(obj).copy()
+        result, keys = compiled(x, obj, other)
+        self.assertEqual((result, list(keys), other["second"]), (x + 1, ["first"], 2))
+        with self.assertRaisesRegex(
+            Unsupported, "Iterator reconstruction before an input mutation"
+        ):
+            compiled(x, obj, vars(obj))
         result, keys = torch.compile(fn, backend="eager")(x, obj, vars(obj))
         self.assertEqual((result, list(keys)), (x + 1, ["first", "second"]))
 
