@@ -141,6 +141,15 @@ class TileMap:
 
 
 @cute.jit
+def _rotate(r, shift, rb):
+    if const_expr(shift is None):
+        return r
+    # Compare against rb - shift so r + shift never overflows a 32-bit count.
+    wrap = rb - shift
+    return r - wrap if r >= wrap else r + shift
+
+
+@cute.jit
 def fold_decoded(
     trait,
     mX,
@@ -155,11 +164,13 @@ def fold_decoded(
     chunk_base,
     gidx: cutlass.Constexpr = "r",
     native_div: cutlass.Constexpr = False,
+    shift=None,
 ):
     """Grid-stride one output using mixed-radix addressing.
 
     Runtime decodes cover arbitrary layouts; threads_per_block threads cooperate and gidx selects
-    the index reported to traits.
+    the index reported to traits. A runtime shift (below rb) folds element (r + shift) % rb
+    in place of r.
     """
     reduce_fn, acc_dt = trait.reduce, trait.acc
     acc = trait.init()
@@ -167,30 +178,22 @@ def fold_decoded(
     base_r = tidx
     for _ in cutlass.range(n_full):
         # Inline offsets to avoid a spurious loop-carried value.
-        if const_expr(gidx == "flat"):
+        if const_expr(gidx == "chunk"):
             acc = reduce_fn(
                 acc,
                 acc_dt(
                     mX[
                         obase
-                        + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
+                        + _decode_offset(
+                            _rotate(base_r, shift, rb),
+                            rdivs,
+                            rstrides,
+                            npairs,
+                            native_div,
+                        )
                     ]
                 ),
-                Int32(
-                    obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
-                ),
-                True,
-            )
-        elif const_expr(gidx == "chunk"):
-            acc = reduce_fn(
-                acc,
-                acc_dt(
-                    mX[
-                        obase
-                        + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
-                    ]
-                ),
-                chunk_base + base_r,
+                chunk_base + _rotate(base_r, shift, rb),
                 True,
             )
         else:
@@ -199,23 +202,29 @@ def fold_decoded(
                 acc_dt(
                     mX[
                         obase
-                        + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
+                        + _decode_offset(
+                            _rotate(base_r, shift, rb),
+                            rdivs,
+                            rstrides,
+                            npairs,
+                            native_div,
+                        )
                     ]
                 ),
-                base_r,
+                _rotate(base_r, shift, rb),
                 True,
             )
         base_r = base_r + threads_per_block
     # Invalid lanes read in_base because overhanging chunks may put obase out of range.
     valid = base_r < rb
-    off = obase + _decode_offset(base_r, rdivs, rstrides, npairs, native_div)
+    off = obase + _decode_offset(
+        _rotate(base_r, shift, rb), rdivs, rstrides, npairs, native_div
+    )
     off_s = off if valid else in_base
     val = acc_dt(mX[off_s])
-    if const_expr(gidx == "flat"):
-        return reduce_fn(acc, val, Int32(off_s), valid)
     if const_expr(gidx == "chunk"):
-        return reduce_fn(acc, val, chunk_base + base_r, valid)
-    return reduce_fn(acc, val, base_r, valid)
+        return reduce_fn(acc, val, chunk_base + _rotate(base_r, shift, rb), valid)
+    return reduce_fn(acc, val, _rotate(base_r, shift, rb), valid)
 
 
 @cute.jit
@@ -586,11 +595,15 @@ class TileReduce:
         order="linear",
         # Duck-typed because its driver-owned type would invert the dependency.
         itree: Any = None,
+        # Rotate each ragged chunk's fold by its chunk index (see the general kernel).
+        rotate_chunks: bool = False,
     ) -> None:
         if axis not in ("row", "col", "general"):
             raise ValueError(f"axis must be 'row', 'col' or 'general', got {axis!r}")
         if order not in ("linear", "inner_tree"):
             raise ValueError(f"order must be 'linear' or 'inner_tree', got {order!r}")
+        if rotate_chunks and not ragged_chunk:
+            raise ValueError("rotate_chunks needs ragged_chunk")
         if order == "inner_tree":
             if axis not in ("row", "general") or itree is None:
                 raise ValueError(
@@ -667,6 +680,7 @@ class TileReduce:
         self.gidx_from = gidx_from
         self.flat_tail = flat_tail
         self.ragged_chunk = ragged_chunk
+        self.rotate_chunks = rotate_chunks
         self.order = order
         self.itree = itree
         itemsize = dtype.width // 8 if dtype is not None else 0
@@ -733,6 +747,7 @@ class TileReduce:
             self.flat_tail,
             self.ragged_chunk,
             self.order,
+            self.rotate_chunks,
             # Fixed DAGs key on N, requiring one kernel per shape instead of per vec class.
             self.itree.sig if self.itree is not None else None,
         )
@@ -1191,7 +1206,8 @@ class TileReduce:
         bx, by, _ = cute.arch.block_idx()
         grid_x = cute.arch.grid_dim()[0] if const_expr(self.wide_output) else Int32(0)
         trait = self.trait
-        chunk_base = Int32(0)  # nonzero only under ragged_chunk, for gidx_from "chunk"
+        chunk_base = Int32(0)  # set by ragged_chunk and flat_tail, for gidx "chunk"
+        shift = None  # set only under rotate_chunks
         batch_idx = None  # split shape only: which batch of the row this block folds
         # Inner-tree thread map, set from its plan.
         lane_w = warp_id = row_in_block = None
@@ -1299,8 +1315,10 @@ class TileReduce:
                     const_expr(self.wide_output),
                 )
             rb = nchunks
+            slot = lane  # this thread's first step; rotate_chunks permutes it
             if const_expr(self.flat_tail):
                 # Clamp reduce-all stage 1's overhanging final chunk.
+                chunk_base = unit * nchunks
                 left = limit - obase
                 c64 = cutlass.Int64(nchunks)
                 left = left if left < c64 else c64  # noqa: FURB136 -- no DSL builtin min
@@ -1328,6 +1346,19 @@ class TileReduce:
                     if const_expr(self.wide_count)
                     else cutlass.Int32(left)
                 )
+                if const_expr(self.rotate_chunks):
+                    # Chunks along a broadcast axis fold identical values; starting chunk c
+                    # of C at c * left // C, evenly spaced, gives them distinct roundings,
+                    # which then do not add up coherently in stage 2.
+                    nck = kdivs[0]
+                    if const_expr(not self.wide_output):
+                        nck = nck.divisor
+                    step = c * left // cutlass.Int64(nck)
+                    shift = step if const_expr(self.wide_count) else cutlass.Int32(step)
+                    # An odd multiplier also permutes the threads' steps, so the lane tree
+                    # groups different elements in each chunk.
+                    mask = const_expr(self.threads_per_block - 1)
+                    slot = (lane * (Int32(cc) * 2 + 1)) & Int32(mask)
             if const_expr(self.combine):
                 accs = (
                     fold_partials_run(
@@ -1351,11 +1382,12 @@ class TileReduce:
                         const_expr(self.npairs_red),
                         rb,
                         const_expr(self.threads_per_block),
-                        Int64(lane) if const_expr(self.wide_count) else lane,
+                        Int64(slot) if const_expr(self.wide_count) else slot,
                         in_base,
                         chunk_base,
                         const_expr(self.gidx_from),
                         const_expr(self.wide_count),
+                        shift,
                     ),
                 )
             accs = (merge_lanes(trait, accs[0], const_expr(self.threads_per_row)),)
