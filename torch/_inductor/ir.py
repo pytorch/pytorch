@@ -110,7 +110,11 @@ from .fx_utils import get_node_storage
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
-from .runtime.hints import DeviceProperties, ReductionHint
+from .runtime.hints import (
+    DeviceProperties,
+    is_default_reduction_scheduling,
+    ReductionHint,
+)
 from .sizevars import is_range_bound
 from .utils import (
     argsort,
@@ -1430,6 +1434,19 @@ def get_reduction_combine_fn(
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
 
 
+class _ReductionReads(NamedTuple):
+    """What Reduction.num_splits learns from a reduction's reads."""
+
+    # indices of the full-size reads, or else of the broadcast reduction reads
+    indices: Sequence[Expr]
+    # whether deciding an input's layout changed its stride
+    changed: bool
+    # dtypes of those reads (collected only for the large-output OUTER plan)
+    source_dtypes: list[torch.dtype]
+    # whether a read indexes some but not all output dims plus a reduction dim
+    has_partial_output_broadcast_read: bool
+
+
 class AlignedSplit(NamedTuple):
     """
     A split of a multi-dim reduction at a dim boundary
@@ -1501,6 +1518,11 @@ class AlignedSplit(NamedTuple):
             )
 
         return wrapper_fn
+
+
+def grid_split_chunk(extent: _IntLike, split: _IntLike) -> Expr:
+    """Compute ceil(extent / split) without overflowing for positive extents."""
+    return FloorDiv(extent - 1, split) + 1
 
 
 @ir_dataclass
@@ -1626,11 +1648,15 @@ class Reduction(Loops):
         numel_hint: int,
         split: int,
     ) -> bool:
-        # The normal one-pass Blackwell plan uses R0_BLOCK=64. Runtime-matched
-        # production sweeps show a sharp schedule cliff when a deep leading
-        # reduction has a tail at that granularity, while aligned depths favor
-        # the one-pass plan. Keep output tails and shallow reductions on the
-        # one-pass path, and rely on the split/workspace bounds above.
+        """Whether a split of ``split`` beats the one-pass plan for this shape.
+
+        The normal one-pass Blackwell plan uses R0_BLOCK=64. Runtime-matched
+        production sweeps show a sharp schedule cliff when a deep leading
+        reduction has a tail at that granularity, while aligned depths favor
+        the one-pass plan. Output tails and shallow reductions stay on the
+        one-pass path; the split and workspace bounds come from
+        _experimental_large_output_outer_split_factor.
+        """
         return (
             reduction_numel_hint >= 4096
             and reduction_numel_hint % 64 != 0
@@ -1645,10 +1671,13 @@ class Reduction(Loops):
         nontrivial_read_count: int,
         has_partial_output_broadcast_read: bool,
     ) -> bool:
-        # Structural OUTER pays for a workspace and a final reduction.  Favor
-        # fused producers with enough work/read pressure to amortize that cost,
-        # including partially-broadcast reduction reads whose one-pass access
-        # pattern is particularly inefficient.
+        """Whether the fused producer is heavy enough to pay for a split.
+
+        Structural OUTER pays for a workspace and a final reduction, so it is
+        used only for fused producers with enough work and read pressure to
+        amortize that cost, including partially broadcast reduction reads,
+        whose one-pass access pattern is particularly inefficient.
+        """
         return num_ops >= 8 and (
             nontrivial_read_count >= 4 or has_partial_output_broadcast_read
         )
@@ -1787,6 +1816,7 @@ class Reduction(Loops):
         )
         split_large_outer = (
             preserve_large_outer_hint
+            and should_split
             and config.triton.enable_experimental_large_output_outer_reductions
             and not config.deterministic
             and not config.batch_invariant
@@ -1806,9 +1836,7 @@ class Reduction(Loops):
             reduction_hint=ReductionHint.DEFAULT,
         )
 
-        def get_read_indices(
-            r: Reduction,
-        ) -> tuple[Sequence[Expr], bool, list[torch.dtype | None], bool]:
+        def get_read_indices(r: Reduction) -> _ReductionReads:
             device = r.get_device()
             if device is None:
                 raise AssertionError("Expected device is not None")
@@ -1847,7 +1875,7 @@ class Reduction(Loops):
             ]
             indices: list[Expr] = []
             broadcasted_reduction_indices: list[Expr] = []
-            source_dtypes: list[torch.dtype | None] = []
+            source_dtypes: list[torch.dtype] = []
             has_partial_output_broadcast_read = False
             changed = False
             for md in sorted(read_writes.reads, key=lambda x: x.name):
@@ -1876,36 +1904,26 @@ class Reduction(Loops):
                     broadcasted_reduction_indices.append(md.index)
                 if is_full_size_read or is_broadcasted_reduction_read:
                     if split_large_outer:
-                        try:
-                            source_dtypes.append(V.graph.get_dtype(md.name))
-                        except KeyError:
-                            source_dtypes.append(None)
+                        source_dtypes.append(V.graph.get_dtype(md.name))
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
                         original_stride = getattr(buf.layout, "stride", None)
                         buf.decide_layout()
                         if getattr(buf.layout, "stride", None) != original_stride:
                             changed = True
-            return (
+            return _ReductionReads(
                 indices or broadcasted_reduction_indices,
                 changed,
                 source_dtypes,
                 has_partial_output_broadcast_read,
             )
 
-        (
-            indices,
-            changed,
-            source_dtypes,
-            has_partial_output_broadcast_read,
-        ) = get_read_indices(r)
-        if changed:
-            (
-                indices,
-                _,
-                source_dtypes,
-                has_partial_output_broadcast_read,
-            ) = get_read_indices(r)
+        reads = get_read_indices(r)
+        if reads.changed:
+            reads = get_read_indices(r)
+        indices = reads.indices
+        source_dtypes = reads.source_dtypes
+        has_partial_output_broadcast_read = reads.has_partial_output_broadcast_read
 
         if len(indices) == 0:
             # TODO determine splits when all inputs are broadcast
@@ -2100,7 +2118,7 @@ class Reduction(Loops):
         strict_reduction_rblock = None
         if strict_reduction and (
             reduction_hint == ReductionHint.INNER
-            or reduction_hint.is_default_scheduling()
+            or is_default_reduction_scheduling(reduction_hint)
         ):
             num_outputs = sympy_product(ranges)
             if V.graph.sizevars.all_unbacked_explicitly_hinted(
@@ -2308,6 +2326,11 @@ class Reduction(Loops):
                     return buf
 
                 split_reduction = _find_split_reduction(out)
+                if (
+                    split_reduction is not None
+                    and split_reduction._grid_split_factor is not None
+                ):
+                    split_reduction = None
 
             if split_reduction:
                 # If a reduction is split to more than 2 layers,
@@ -2625,10 +2648,12 @@ class Reduction(Loops):
         strict_reduction: bool = False,
         *,
         split_first_stage: bool = True,
+        grid_split: _IntLike | None = None,
     ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
-        recursively
+        recursively. With `grid_split`, stage 1 is built as is and tagged with
+        the split factor (see create_multilayer_split_as_grid).
         """
         # triton will automatically compute reductions in fp32 if reducing over fp16/bf16
         # within the kernel. keep the intermediate in fp32 so as to keep the whole reduction
@@ -2638,19 +2663,41 @@ class Reduction(Loops):
             if dst_dtype not in (torch.float16, torch.bfloat16)
             else torch.float
         )
-        intermediate = Reduction.create(
-            device,
-            intermediate_dtype,
-            src_dtype,
-            wrapper_fn,
-            new_ranges,
-            new_reduction_ranges,
-            reduction_type,
-            reduction_hint,
-            strict_reduction=strict_reduction,
-            allow_split=split_first_stage,
-        )
+        if grid_split is None:
+            intermediate = Reduction.create(
+                device,
+                intermediate_dtype,
+                src_dtype,
+                wrapper_fn,
+                new_ranges,
+                new_reduction_ranges,
+                reduction_type,
+                reduction_hint,
+                strict_reduction=strict_reduction,
+                allow_split=split_first_stage,
+            )
+        else:
+            intermediate = TensorBox.create(
+                Reduction(
+                    device=device,
+                    dtype=intermediate_dtype,
+                    inner_fn=wrapper_fn,
+                    ranges=new_ranges,
+                    reduction_ranges=new_reduction_ranges,
+                    reduction_type=reduction_type,
+                    src_dtype=src_dtype,
+                    reduction_hint=reduction_hint,
+                )
+            )
         intermediate.realize()
+        if grid_split is not None:
+            stage1_buf = V.graph.name_to_buffer.get(intermediate.get_name())
+            if not isinstance(stage1_buf, ComputedBuffer):
+                raise AssertionError(
+                    "split-as-grid stage-1 must realize to a ComputedBuffer, got "
+                    f"{type(stage1_buf).__name__}"
+                )
+            stage1_buf._grid_split_factor = grid_split
         intermediate_loader = intermediate.make_loader()
 
         def intermediate_fn(
@@ -2732,6 +2779,29 @@ class Reduction(Loops):
                 split_first_stage=reduction_hint != ReductionHint.INNER,
             )
 
+        # strict_reduction needs the classic lowering's fixed summation order.
+        if (
+            config.triton.split_reductions_as_grid
+            and is_triton(device)
+            and not strict_reduction
+            and sum(
+                not V.graph.sizevars.statically_known_equals(rng, 1)
+                for rng in reduction_ranges
+            )
+            == 1
+        ):
+            return cls.create_multilayer_split_as_grid(
+                device,
+                dst_dtype,
+                src_dtype,
+                inner_fn,
+                ranges,
+                reduction_ranges,
+                reduction_type,
+                split,
+                reduction_hint,
+            )
+
         # TODO(jansel): realize the reduction so we can do dynamic indexing
         reduction_numel = sympy_product(reduction_ranges)
         block_size = FloorDiv(reduction_numel + (split - 1), split)
@@ -2759,6 +2829,77 @@ class Reduction(Loops):
             split,
             reduction_hint,
             strict_reduction,
+        )
+
+    @classmethod
+    def create_multilayer_split_as_grid(
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        ranges: Sequence[_IntLike],
+        reduction_ranges: Sequence[_IntLike],
+        reduction_type: ReductionType,
+        split: _IntLike,
+        reduction_hint: ReductionHint,
+    ) -> TensorBox:
+        """
+        Split a reduction using an extra grid dimension for the split factor.
+
+        Stage-1 keeps the reduction axis at its true extent, with a mask selecting
+        one contiguous chunk for each split slot. Loads retain their real extent
+        for block pointers. Codegen can narrow the loop to the selected chunk;
+        stage-2 combines over the appended split axis.
+        """
+        reduction_numel = sympy_product(reduction_ranges)
+        chunk = grid_split_chunk(reduction_numel, split)
+        reduction_strides = [
+            sympy_product(reduction_ranges[i + 1 :])
+            for i in range(len(reduction_ranges))
+        ]
+        index_dtype = dtype_from_size(split * chunk)
+        default = cls.default_value(reduction_type, src_dtype)
+        if not isinstance(default, (int, float)):
+            raise AssertionError(
+                f"split-as-grid needs a scalar identity for {reduction_type}, "
+                f"got {default!r}"
+            )
+
+        def wrapper_fn(
+            index: Sequence[Symbol], reduction_index: Sequence[Symbol]
+        ) -> OpsValue:
+            *new_index, split_block = index
+            # One index_expr over both r and the split slot: an expression in the
+            # grid-only split dim alone has no tensor dim, which codegen's shape
+            # tracking treats as a scalar while the kernel holds it as a [1] block.
+            chunk_offset = ops.index_expr(
+                sympy_dot(reduction_index, reduction_strides) - split_block * chunk,
+                index_dtype,
+            )
+            mask = ops.logical_and(
+                ops.ge(chunk_offset, ops.constant(0, index_dtype)),
+                ops.lt(chunk_offset, ops.index_expr(chunk, index_dtype)),
+            )
+            return ops.where(
+                mask,
+                inner_fn(new_index, reduction_index),
+                ops.constant(default, src_dtype),
+            )
+
+        return cls.create_multilayer_helper(
+            device,
+            dst_dtype,
+            src_dtype,
+            wrapper_fn,
+            ranges,
+            reduction_ranges,
+            [*ranges, split],
+            [*reduction_ranges],
+            reduction_type,
+            split,
+            reduction_hint,
+            grid_split=split,
         )
 
     @classmethod
@@ -6113,6 +6254,8 @@ class ComputedBuffer(OperationBuffer):
     _original_inner_fn: Callable[..., Any] | None = None
     _original_ranges: Sequence[_IntLike] | None = None
     _original_reduction_ranges: Sequence[_IntLike] | None = None
+    # See Reduction.create_multilayer_split_as_grid.
+    _grid_split_factor: int | None = None
 
     @contextlib.contextmanager
     def with_original_inner_fn(self) -> Iterator[None]:
