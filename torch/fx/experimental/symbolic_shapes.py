@@ -4167,6 +4167,11 @@ class ShapeEnv:
         # practice
         self.var_to_range: dict[sympy.Symbol, ValueRanges[sympy.Expr]] = {}
         self.var_to_range_sloc: dict[sympy.Symbol, ValueRangesSLoc] = {}
+        # Symbols created with a StrictMinMaxConstraint (e.g. mark_dynamic(min=,
+        # max=) or an export Dim range). Guards on them must stay within the
+        # declared range, which var_to_range alone cannot tell apart from
+        # ranges later narrowed by guards.
+        self.strict_min_max_constrained_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
         self.source_name_to_debug_name: dict[str, str] = {}
         self.var_to_sources: dict[sympy.Symbol, list[Source]] = {}
         # A set of unbacked symbols that are inputs (i.e: not data dependent).
@@ -6065,6 +6070,7 @@ class ShapeEnv:
                         raise AssertionError(
                             "duck must be False for StrictMinMaxConstraint"
                         )
+                    self.strict_min_max_constrained_symbols.add(sympy_expr)
                     self._update_var_to_range(
                         sympy_expr, constraint_dim.vr, is_constraint=True
                     )

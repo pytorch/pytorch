@@ -3481,17 +3481,22 @@ def use_decompose_k_choice(
 
 
 def _has_user_bounded_symbol(expr: sympy.Expr) -> bool:
-    """Whether a symbol of ``expr`` has a narrowed value range, e.g. from
-    mark_dynamic(min=, max=). Guarding on it could violate the user's range."""
+    """Whether a symbol of ``expr`` carries a user-declared range
+    (StrictMinMaxConstraint, e.g. mark_dynamic(min=, max=)). A guard on it
+    could violate that range. Ranges narrowed only by guards do not count."""
     from torch._inductor.virtualized import V
-    from torch.utils._sympy.numbers import int_oo
 
     shape_env = V.graph.sizevars.shape_env
-    for sym in expr.free_symbols:
-        vr = shape_env.var_to_range.get(sym)
-        if vr is not None and (vr.lower > 2 or vr.upper is not int_oo):
-            return True
-    return False
+    constrained = shape_env.strict_min_max_constrained_symbols
+    if not constrained:
+        return False
+    # A constrained symbol may have been replaced by an equal one, so compare
+    # against the symbols each constrained symbol now resolves to.
+    resolved = OrderedSet[sympy.Symbol]()
+    for sym in constrained:
+        resolved.update(shape_env.replace(sym).free_symbols)
+        resolved.add(sym)
+    return any(sym in resolved for sym in expr.free_symbols)
 
 
 @functools.cache
