@@ -31,7 +31,7 @@ import sys
 import textwrap
 import traceback
 import weakref
-from collections.abc import Callable, Generator, MutableMapping
+from collections.abc import Callable, Generator
 from types import CellType, SimpleNamespace
 from typing import Any, TYPE_CHECKING
 
@@ -873,8 +873,6 @@ class SideEffects:
             variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, collections.deque):
             variable_cls = variables.UserDefinedDequeVariable
-        elif issubclass(user_cls, MutableMapping):
-            variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
             variable_cls = FrozenDataClassVariable
         elif issubclass(user_cls, BaseException):
