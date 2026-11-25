@@ -616,7 +616,6 @@ class TestRegistryRuntime(TestCase):
         else:
             router = torch.library.get_kernel("aten::add.Tensor", "CPU")
             actual = router.call_boxed(keyset, x, y)
-        self.assertEqual(actual.dtype, expected.dtype)
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @parametrize("dtype,value", ((torch.float16, 2049), (torch.bfloat16, 257)))
@@ -675,7 +674,6 @@ class TestRegistryRuntime(TestCase):
         self._install(op_name, "CPU")
         router = torch.library.get_kernel(f"aten::{op_name}", "CPU")
         actual = router.call_boxed(keys, sequence, value, out_int32=out_int32)
-        self.assertEqual(actual.dtype, expected.dtype)
         self.assertEqual(actual, expected)
 
     @parametrize("dtype", (torch.int64, torch.float32, torch.float64))
@@ -704,7 +702,6 @@ class TestRegistryRuntime(TestCase):
             self._install("div.Tensor", "CPU")
             router = torch.library.get_kernel("aten::div.Tensor", "CPU")
             actual = router.call_boxed(keys, x, value)
-            self.assertEqual(actual.dtype, expected.dtype)
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
     def test_scalar_router_cleanup_restores_native(self) -> None:
@@ -927,6 +924,27 @@ class TestRegistryRuntime(TestCase):
         # eager dispatch, consulting cond exactly once (and not recursing).
         self.assertEqual(cond_calls[0], 1)
         self.assertFalse(getattr(self.registry._router_active, "on", False))
+
+    def test_dynamo_fullgraph_preserves_original_operator(self) -> None:
+        def decline(*args: Any, **kwargs: Any) -> bool:
+            return False
+
+        def unexpected(*args: Any, **kwargs: Any) -> None:
+            raise AssertionError("declined implementation executed")
+
+        self.registry.register_op_override(
+            "test_dsl", "aten", "mul.Tensor", "CPU", decline, unexpected
+        )
+        self._install("mul.Tensor", "CPU")
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return torch.mul(a, b)
+
+        self.assertEqual(
+            fn(torch.tensor([2.0, 3.0]), torch.tensor([4.0, 5.0])),
+            torch.tensor([8.0, 15.0]),
+        )
 
     def test_dynamo_shortcut_preserves_cow_fallback(self):
         """COW inputs must keep using the eager fallback path under Dynamo."""
