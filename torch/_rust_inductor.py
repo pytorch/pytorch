@@ -556,6 +556,40 @@ stats = {
     "reads": 0,
 }
 
+
+@dataclasses.dataclass
+class Trace:
+    """What a trace of a block or a span came to (see torch.vm.regions)."""
+
+    # "QUALNAME:bbN lines A-B", or "QUALNAME:span bbN".
+    name: str
+    # "region", "too small", "refused" (the trace depends on something a
+    # region cannot hold or check) or "gave up" (the traced run raised, or
+    # left the span by a way no earlier run took).
+    state: str
+    # Why it is no region.
+    why: str | None = None
+    ops: int = 0
+    inputs: int = 0
+    constants: int = 0
+    # The check of what the region's trace read (exec/reads.rs), if any.
+    reads: Any = None
+    # How often the region ran, and the calls its own checks turned down, by
+    # what did not match.
+    runs: int = 0
+    misses: dict[str, int] = dataclasses.field(default_factory=dict)
+
+
+# The traces of this process, in the order they were made.
+traces: list[Trace] = []
+
+
+def _traced(name: str, state: str, why: str | None = None, **fields: Any) -> Trace:
+    record = Trace(name, state, why, **fields)
+    traces.append(record)
+    return record
+
+
 # Compiled graphs by (code, input metadata, grad mode): clones of a code (one
 # per call site) trace the same graphs.
 _compiled: dict[Any, Any] = {}
@@ -1682,6 +1716,7 @@ def trace_region(
         own_checks = _span_checks(checks) if span else []
     except _Refused as e:
         stats["refused"] += 1
+        _traced(name, "refused", str(e))
         if DEBUG:
             print(f"region {name}: refused: {e}")
         return None
@@ -1787,11 +1822,15 @@ def trace_region(
     torch.autograd.Function.apply = classmethod(_tracing_apply)
     try:
         gm = make_fx(body, tracing_mode="real")(*example)
-    except Exception:
+    except Exception as e:
         # The executor runs the block again from its start.
         with torch.no_grad():
             for t, saved in backups.values():
                 t.copy_(saved)
+        if isinstance(e, _Refused):
+            _traced(name, "refused", str(e))
+        else:
+            _traced(name, "gave up", f"{type(e).__name__}: {e}")
         raise
     finally:
         del Backward.__init__
@@ -1815,6 +1854,7 @@ def trace_region(
                 plan[i][2][leaf] = (_FLOAT, value)
     if "refused" in result:
         stats["refused"] += 1
+        _traced(name, "refused", result["refused"])
         if DEBUG:
             print(f"region {name}: refused: {result['refused']}")
         return None
@@ -1837,12 +1877,14 @@ def trace_region(
     ops = [n for n in gm.graph.nodes if n.op == "call_function"]
     if any(n.target in _SKIP_OPS and not (in_vm and _cpu_read(n)) for n in ops):
         stats["refused"] += 1
+        _traced(name, "refused", "it reads a tensor's value")
         if DEBUG:
             print(f"region {name}: refused: reads a tensor's value")
         return None
     n_ops = sum(1 for n in ops if n.target is not operator.getitem)
     if n_ops < MIN_OPS:
         stats["small"] += 1
+        _traced(name, "too small", f"{n_ops} ops, fewer than {MIN_OPS}", ops=n_ops)
         if DEBUG:
             print(f"region {name}: {n_ops} ops, too small")
         return None
@@ -1850,6 +1892,7 @@ def trace_region(
         consts = _lift_constants(gm)
     except _Refused as e:
         stats["refused"] += 1
+        _traced(name, "refused", str(e))
         if DEBUG:
             print(f"region {name}: refused: {e}")
         return None
@@ -1864,6 +1907,14 @@ def trace_region(
         # structure, on every call.
         reads.forget(_tree_holders(args, plan))
         stats["reads"] += len(reads)
+    record = _traced(
+        name,
+        "region",
+        ops=n_ops,
+        inputs=len(example),
+        constants=len(consts),
+        reads=reads,
+    )
     if DEBUG:
         print(
             f"region {name}: {n_ops} ops, {len(example)} inputs + {len(consts)} constants"
@@ -1877,6 +1928,7 @@ def trace_region(
 
     def func(region_args):
         if own_checks and not _span_holds(own_checks, region_args):
+            record.misses["an argument"] = record.misses.get("an argument", 0) + 1
             if COUNT:
                 counts[f"{name} CHECK"] = counts.get(f"{name} CHECK", 0) + 1
             return None
@@ -1889,9 +1941,15 @@ def trace_region(
             counts[key] = counts.get(key, 0) + 1
         if inputs is None:
             stats["misses"] += 1
-            if why:
-                print(f"region {name}: miss on {why[0]}")
+            if why is None:
+                why = []
+                _inputs(region_args, plan, why)
+            what = why[0] if why else "an argument"
+            record.misses[what] = record.misses.get(what, 0) + 1
+            if DEBUG:
+                print(f"region {name}: miss on {what}")
             return None
+        record.runs += 1
         return compiled(*inputs, *consts)
 
     return func, result["outputs"], result["objects"], checks, reads

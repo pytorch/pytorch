@@ -196,6 +196,7 @@ __all__ = [
     "nbytes",
     "passes",
     "placeholder",
+    "regions",
     "replace_backward_uses",
     "replace_segment",
     "run_until",
@@ -470,7 +471,119 @@ def explain(fn: Callable, *, block: int | None = None, view: str = "cfg") -> str
     text = _pipeline.explain(program.pipeline.reports, block, view)
     if program.cfg_notes and block is None:
         text = "cfg passes:\n" + "".join(f"  {n}\n" for n in program.cfg_notes) + text
+    if block is None:
+        # What is in no region, and why (see regions).
+        rest = [r for r in regions(fn) if r["state"] != "region"]
+        if rest:
+            text += "\nnot in a region:\n" + "".join(
+                f"  {r['where']}: {r['state']}: {r['why']}\n" for r in rest
+            )
     return text
+
+
+def regions(fn: Callable) -> list[dict[str, Any]]:
+    """Where the tensor work of ``fn`` (a function from ``torch.vm``) runs as
+    a region, and where and why it does not, as data: one dict per place.
+
+    A place that was traced (a block, or a span of blocks) has
+
+    - ``where``: ``"QUALNAME:bbN lines A-B"`` or ``"QUALNAME:span bbN"``,
+      ``function`` (the qualname), ``kind`` (``"block"`` or ``"span"``) and
+      ``lines`` (``(first, last)``, None for a span);
+    - ``state``: ``"region"``, or why it is none in short: ``"too small"``,
+      ``"refused"`` (the trace depends on something a region cannot hold or
+      check) or ``"gave up"`` (the traced run raised, or left the span by a
+      way no earlier run took); ``why`` has the reason in full;
+    - ``ops``, ``inputs``, ``constants`` of the graph, ``variants`` (how many
+      regions the place has: one per state it was traced in), ``reads`` (how
+      many reads of state outside its arguments they are checked against);
+    - ``runs`` (calls that ran a region) and ``misses`` (calls a region's own
+      checks turned down, by what did not match: an argument's leaf, or
+      ``"read: ..."`` for what a callee read);
+    - ``traces``: ``(state, why)`` of every trace made there, in order (a
+      place can be given up once and be a region on a later call);
+    - ``notes``: what the block passes said about it (a pass that raised).
+
+    A call that keeps the code around it out of a region has ``state``
+    ``"not movable"``, ``kind`` ``"call"``, ``where`` (``"QUALNAME line N"``),
+    ``function``, ``lines`` and ``why`` (``"... called <built-in function
+    print>"``, ``"... ran aten::item"``, ``"... writes"``).
+
+    The executor's switches are process-wide (one function on the VM per
+    process), and so is this report: it covers every function the VM ran.
+    """
+    import torch._rust as rust
+    import torch._rust_inductor as ri
+
+    program = _program(fn)
+    places: dict[str, dict[str, Any]] = {}
+    for t in ri.traces:
+        function, _, rest = t.name.partition(":")
+        span = rest.startswith("span ")
+        lines = None
+        if not span and " lines " in rest:
+            first, _, last = rest.rpartition(" lines ")[2].partition("-")
+            lines = (int(first), int(last))
+        row = places.setdefault(
+            t.name,
+            {
+                "where": t.name,
+                "function": function,
+                "kind": "span" if span else "block",
+                "lines": lines,
+                "state": t.state,
+                "why": t.why,
+                "ops": 0,
+                "inputs": 0,
+                "constants": 0,
+                "variants": 0,
+                "reads": 0,
+                "runs": 0,
+                "misses": {},
+                "traces": [],
+                "notes": [],
+            },
+        )
+        row["traces"].append((t.state, t.why))
+        if t.state == "region":
+            row.update(
+                state="region",
+                why=None,
+                ops=t.ops,
+                inputs=t.inputs,
+                constants=t.constants,
+            )
+            row["variants"] += 1
+            row["runs"] += t.runs
+            for what, n in t.misses.items():
+                row["misses"][what] = row["misses"].get(what, 0) + n
+            if t.reads is not None:
+                row["reads"] += len(t.reads)
+                n, what = t.reads.misses
+                if n:
+                    row["misses"][f"read: {what}"] = (
+                        row["misses"].get(f"read: {what}", 0) + n
+                    )
+        elif row["state"] != "region":
+            row.update(state=t.state, why=t.why, ops=t.ops)
+    for name, report in program.pipeline.reports.items():
+        row = places.get(name.partition(" #")[0])
+        if row is not None:
+            row["notes"].extend(report.notes)
+    out = list(places.values())
+    for code, line, why in rust._cfg_impure():
+        function = code.rpartition("@")[0]
+        out.append(
+            {
+                "where": f"{function} line {line}",
+                "function": function,
+                "kind": "call",
+                "lines": (line, line),
+                "state": "not movable",
+                "why": why,
+            }
+        )
+    return out
 
 
 def versions(fn: Callable, block: int | None = None) -> list[VersionInfo]:

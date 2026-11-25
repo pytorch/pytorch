@@ -54,6 +54,9 @@ class CfgValue:
         self.line: int = data["line"]
         self.origin: int = data["origin"]
         self.movable: bool = data["movable"]
+        # Why the VM does not take it for something that only computes (the
+        # reason TORCH_RUST_PURE_DEBUG prints), if it judged it and said no.
+        self.why: str | None = data.get("why")
         self._effects: list[str] = data["effects"]
         self._type: str | None = data["type"]
         self._args: list[int] = data["args"]
@@ -211,7 +214,12 @@ class Cfg:
         self.filename: str | None = None
         self.code: int | None = None
         self.notes: list[str] = []
-        self._edits: dict[str, list[Any]] = {"movable": [], "spans": [], "split": [], "opaque": []}
+        self._edits: dict[str, list[Any]] = {
+            "movable": [],
+            "spans": [],
+            "split": [],
+            "opaque": [],
+        }
         self._values: dict[int, CfgValue] = {}
         self._blocks: dict[int, Block] = {}
         self._spans: list[tuple[int, int | None]] = []
@@ -231,7 +239,9 @@ class Cfg:
 
     def _function(self) -> None:
         if self.qualname is None:
-            raise TypeError("this is the program's Cfg (the VM's own passes get it); a cfg pass gets each function's")
+            raise TypeError(
+                "this is the program's Cfg (the VM's own passes get it); a cfg pass gets each function's"
+            )
 
     # Analyses.
 
@@ -257,17 +267,33 @@ class Cfg:
             return out
         if callable(to) and not isinstance(to, str):
             return [c for c in out if c.callee is to]
-        return [c for c in out if to in f"{getattr(c.callee, '__module__', '')}.{getattr(c.callee, '__qualname__', '')}"]
+        return [
+            c
+            for c in out
+            if to
+            in f"{getattr(c.callee, '__module__', '')}.{getattr(c.callee, '__qualname__', '')}"
+        ]
 
     def opaque_calls(self) -> list[Call]:
         """The calls that can't sit in a region (they end one): those that
         ran something other than torch ops, or no torch op the VM could see."""
         return [c for c in self.calls() if not c.movable and c.block.seen]
 
+    def why_opaque(self, call: Call) -> str | None:
+        """Why ``call`` can't sit in a region, in the VM's words: the chain
+        from the call to the instruction that decides (``"%66 Call -> f: %16
+        Call called <built-in function print>"``, ``"... ran aten::item"``,
+        ``"... writes"``). None for a call that is movable, and for one the
+        VM didn't judge (pure calls are off)."""
+        return None if call.movable else call.why
+
     def spans(self) -> list[Span]:
         """The stretches of blocks the VM will trace as one region each."""
         self._function()
-        return [Span(self.block(e), None if x is None else self.block(x)) for e, x in self._spans]
+        return [
+            Span(self.block(e), None if x is None else self.block(x))
+            for e, x in self._spans
+        ]
 
     def loops(self) -> list[Loop]:
         """Loops, from their back-edges (blocks are numbered in reverse
@@ -283,7 +309,11 @@ class Cfg:
 
     def branches(self) -> list[Branch]:
         self._function()
-        return [Branch(b, tuple(b.succs)) for b in self._blocks.values() if b.term == "branch" and len(b._succs) == 2]  # type: ignore[arg-type]
+        return [
+            Branch(b, tuple(b.succs))
+            for b in self._blocks.values()
+            if b.term == "branch" and len(b._succs) == 2
+        ]  # type: ignore[arg-type]
 
     def effects(self, v: CfgValue) -> list[str]:
         """What the runs did at v: the torch ops it ran and Python frames it
@@ -299,7 +329,14 @@ class Cfg:
 
     # Edits.
 
-    def merge_across(self, call: Call, reads: Iterable[Any] = (), writes: Iterable[Any] = (), capturable: bool = False, trace: bool = False) -> Merge:
+    def merge_across(
+        self,
+        call: Call,
+        reads: Iterable[Any] = (),
+        writes: Iterable[Any] = (),
+        capturable: bool = False,
+        trace: bool = False,
+    ) -> Merge:
         """Lets ``call`` sit in a region, so the regions on either side of it
         become one. By default a region's trace records this call (not other
         calls of its callee) as one node calling the callee, so every run
@@ -326,7 +363,9 @@ class Cfg:
         why)."""
         self._function()
         self._edits["spans"].append((entry.id, None if exit is None else exit.id))
-        self.notes.append(f"merge_blocks bb{entry.id} -> {'return' if exit is None else f'bb{exit.id}'}")
+        self.notes.append(
+            f"merge_blocks bb{entry.id} -> {'return' if exit is None else f'bb{exit.id}'}"
+        )
         return Span(entry, exit)
 
     def split(self, block: Block) -> None:
