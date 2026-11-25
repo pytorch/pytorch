@@ -21,8 +21,7 @@ from concurrent.futures.process import BrokenProcessPool
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING
-from typing_extensions import Self
+from typing import Any, cast, NamedTuple, Optional, Self, TYPE_CHECKING
 from unittest.mock import patch
 
 import sympy
@@ -43,7 +42,8 @@ from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
-from ..utils._sympy.functions import CeilDiv, Max, Min
+from ..utils._sympy.functions import CeilDiv, FloorDiv, Max, Min
+from ..utils._sympy.symbol import symbol_is_type, SymT
 from . import config, ir
 from .autotune_process import (
     AsyncAutotuner,
@@ -84,6 +84,7 @@ from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
 from .runtime.hints import TritonMeta
+from .runtime.tiling import pointwise_prefixes
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
@@ -463,6 +464,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
         if name not in self.fixed_inputs:
+            self.kernel._record_negative_offset(name, index)
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
@@ -621,7 +623,7 @@ class TritonTemplateKernel(TritonKernel):
                     f"TMA template output rank must be in {supported_ranks}, "
                     f"got {output_rank}"
                 )
-            prefixes = ("x", "y", "z")
+            prefixes = tuple(reversed(pointwise_prefixes(output_rank)))
             tiling = dict(zip(prefixes, output_node.get_size()))
             tiling["r0_"] = sympy.S.One
         else:
@@ -636,7 +638,8 @@ class TritonTemplateKernel(TritonKernel):
         )
         if tma_tiled:
             # By default `construct_range_trees` will return the range_trees in the order
-            # ["z", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
+            # ["z0_", "y", "x", "r0_", "r1_", "r2_"] using runtime.tiling's
+            # get_pointwise_prefixes and get_reduction_prefixes filters,
             # and this order defines what the kernel block shape will be. So if the template
             # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
             # trees in the order ["y", "x"]. This would mean that the template would need to transpose
@@ -674,6 +677,8 @@ class TritonTemplateKernel(TritonKernel):
         self.num_buffers_warp_spec = num_buffers_warp_spec
         self.grid_fn = grid_fn
         self.meta = meta
+        # Input args given a device-side TMA descriptor under HOST_SIDE_TMA.
+        self.device_tma_descriptor_args = OrderedSet[str]()
         self.call_sizes = call_sizes
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
@@ -980,6 +985,26 @@ class TritonTemplateKernel(TritonKernel):
                     return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
+    def body_fixed_blocks(self, sig_arg_names: OrderedSet[str]) -> dict[str, int]:
+        fixed_blocks: dict[str, int] = {}
+        # prologue_cache maps a block name to the size expression that emitted its
+        # constexpr line; it also caches var -> descriptor name, which won't evaluate.
+        numeric_meta = {
+            k: v
+            for k, v in self.meta.items()
+            if isinstance(v, int) and not isinstance(v, bool)
+        }
+        for block_name, block_size in self.prologue_cache.items():
+            if block_name in sig_arg_names:
+                continue
+            try:
+                val = sympy.sympify(block_size).subs(numeric_meta)
+            except (sympy.SympifyError, TypeError, SyntaxError):
+                continue
+            if val.is_Integer:
+                fixed_blocks[block_name] = int(val)
+        return fixed_blocks
+
     def jit_lines(self):
         """Render decorators and metadata for the generated Triton template."""
         if self.use_jit:
@@ -997,7 +1022,8 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         # Rendered from a deferred hook, so the body -- including any subgraph
-        # modifications that emit atomics -- already exists at this point.
+        # modifications that emit atomics and the accesses that record negative
+        # offsets -- already exists at this point.
         triton_meta["configs"] = [
             config_of(signature, pointer_range_override=self.pointer_range_override())
         ]
@@ -1032,12 +1058,12 @@ class TritonTemplateKernel(TritonKernel):
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
+        resolved_host_tma: dict[str, Any] = {}
         if self.host_tma_descriptor_args:
             # This meta is repr'd into the generated module, so epilogue-registered
             # TensorDescriptorOptions must be resolved to plain dims first.
-            inductor_meta["host_tma_descriptor_args"] = (
-                self.resolved_host_tma_descriptor_args()
-            )
+            resolved_host_tma = self.resolved_host_tma_descriptor_args()
+            inductor_meta["host_tma_descriptor_args"] = resolved_host_tma
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
@@ -1070,8 +1096,21 @@ class TritonTemplateKernel(TritonKernel):
                 """
                 triton_meta_extra[k] = v
 
+        # The signature below still shows these as pointers; _precompile_config
+        # rewrites them per config, so spell out what it will produce.
+        signature = self.triton_meta["signature"]
+        upgrades = [
+            f"#   {name} -> tensordesc<{signature[name][1:]}{desc['block_shape']}>"
+            for name, desc in resolved_host_tma.items()
+            if isinstance(signature.get(name), str) and signature[name].startswith("*")
+        ]
+        host_tma_note = ""
+        if upgrades:
+            body = "\n            ".join(upgrades)
+            host_tma_note = f"# host-side TMA, rewritten at precompile:\n            {body}\n\n            "
+
         return f"""
-            @triton_heuristics.template(
+            {host_tma_note}@triton_heuristics.template(
                 {template_args}
             )
             @triton.jit
@@ -1140,11 +1179,13 @@ class TritonTemplateKernel(TritonKernel):
                 continue
 
             arg_name = self.args.input_buffers[input_node.get_name()]
-            if input_node.get_layout().offset == 0:
+            offset = input_node.get_layout().offset
+            if not self._has_storage_offset(input_node):
                 renames.writeline(f"{name} = {arg_name}")
             else:
-                offset = texpr(self.rename_indexing(input_node.get_layout().offset))
-                renames.writeline(f"{name} = {arg_name} + {offset}")
+                self._record_negative_offset(input_node.get_name(), offset)
+                offset_expr = texpr(self.rename_indexing(offset))
+                renames.writeline(f"{name} = {arg_name} + {offset_expr}")
 
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order
@@ -1216,12 +1257,14 @@ class TritonTemplateKernel(TritonKernel):
         """
         Hook called from template code to declare a TMA descriptor.
 
-        When HOST_SIDE_TMA is True: registers the input's pointer arg in
-        host_tma_descriptor_args so the launcher replaces it with a
-        TensorDescriptor. Emits an alias so the template can use desc_name.
+        When HOST_SIDE_TMA is True and the launcher can evaluate the input's
+        sizes and strides (integers, or dynamic sizes it reads at launch):
+        registers the input's pointer arg in host_tma_descriptor_args so the
+        launcher replaces it with a TensorDescriptor. Emits an alias so the
+        template can use desc_name.
 
-        When HOST_SIDE_TMA is False: emits device-side descriptor creation
-        using tl.make_tensor_descriptor().
+        Otherwise (HOST_SIDE_TMA False, or a dim the launcher cannot evaluate):
+        emits device-side descriptor creation using tl.make_tensor_descriptor().
 
         dim_order: permutation of dimensions for TMA layout. e.g. [1, 0]
             transposes a 2D tensor so the contiguous dim is last. If None,
@@ -1237,24 +1280,82 @@ class TritonTemplateKernel(TritonKernel):
         if dim_order is None:
             dim_order = list(range(ndim))
 
-        if self.meta.get("HOST_SIDE_TMA", False):
-            if input_name is None:
-                raise NotImplementedError(
-                    "host-side TMA descriptors for template outputs are not supported"
-                )
-            arg_name = self.args.input_buffers.get(node.get_name(), input_name)
+        host_side = self.meta.get("HOST_SIDE_TMA", False)
+        arg_name = (
+            self.args.input_buffers.get(node.get_name(), input_name)
+            if input_name is not None
+            else None
+        )
+        launch_args: OrderedSet[str] | None = None
+        dims: list[sympy.Expr] = []
+        if host_side and arg_name is not None:
             # Read dims off the IR node rather than via self.size()/self.stride():
             # those wrap the result in tl.full(...) under int64 indexing, which is
             # kernel-side syntax the host launcher cannot resolve.
-            node_size = node.get_size()
             node_stride = self.get_stride_and_maybe_freeze_layout(node)
+            dims = [
+                sympy.sympify(dim)
+                for dim in [size[d] for d in dim_order]
+                + [node_stride[d] for d in dim_order]
+            ]
+            launch_args = self._host_tma_launch_args(dims)
+            # def_kernel offsets the input's pointer in the kernel (A = arg_A + offset),
+            # but a host descriptor's base is data_ptr(), which already includes it.
+            if self._has_storage_offset(node):
+                launch_args = None
+            # def_kernel merges operands that view one buffer into a single arg,
+            # and the launcher would hand that arg to all of them as one
+            # TensorDescriptor. Views with dynamic dims have differing shapes, so
+            # a shared arg keeps launch-time dims out and falls back, as do dims
+            # the launcher cannot evaluate; once one view falls back, all do.
+            shared = (
+                sum(
+                    self.args.input_buffers.get(n.get_name(), name) == arg_name
+                    for name, n in self.named_input_nodes.items()
+                )
+                > 1
+            )
+            if launch_args and shared:
+                launch_args = None
+            device_args = self.device_tma_descriptor_args
+            if arg_name in device_args or launch_args is None:
+                if arg_name in self.host_tma_descriptor_args:
+                    raise NotImplementedError(
+                        f"host-side TMA cannot share arg {arg_name} with a "
+                        "device-side descriptor for a dynamic view"
+                    )
+                device_args.add(arg_name)
+                host_side = False
+        if host_side:
+            if arg_name is None:
+                raise NotImplementedError(
+                    "host-side TMA descriptors for template outputs are not supported"
+                )
+            if launch_args is None:
+                raise AssertionError("host-side descriptor without resolved dims")
+            rendered = [self._host_tma_dim(self.rename_indexing(d)) for d in dims]
             desc: dict[str, Any] = {
                 "block_shape": [int(b) for b in block_shape],
-                "shape": [texpr(self.rename_indexing(node_size[d])) for d in dim_order],
-                "strides": [
-                    texpr(self.rename_indexing(node_stride[d])) for d in dim_order
-                ],
+                "shape": rendered[: len(dim_order)],
+                "strides": rendered[len(dim_order) :],
             }
+            if launch_args:
+                # The kernel's size args these dims read; the launcher evaluates
+                # the rendered expressions over them at each launch.
+                desc["launch_args"] = sorted(launch_args)
+                if V.graph.cpp_wrapper:
+                    from .codegen.cpp_utils import cexpr
+
+                    # Python's // floors where C++'s / truncates, so the C++
+                    # wrapper takes its own rendering rather than the launcher's.
+                    cpp_rendered = [
+                        int(d)
+                        if d.is_number
+                        else cexpr(self.rename_indexing(d), simplify=False)
+                        for d in map(V.graph.sizevars.simplify, dims)
+                    ]
+                    desc["cpp_shape"] = cpp_rendered[: len(dim_order)]
+                    desc["cpp_strides"] = cpp_rendered[len(dim_order) :]
             prev = self.host_tma_descriptor_args.get(arg_name)
             if prev is not None and prev != desc:
                 # def_kernel dedupes operands that alias one buffer into a single
@@ -1266,6 +1367,70 @@ class TritonTemplateKernel(TritonKernel):
             self.host_tma_descriptor_args[arg_name] = desc
             return f"{desc_name} = {input_name}"
 
+        return self._device_tma_descriptor(
+            desc_name, input_name, block_shape, dim_order
+        )
+
+    def _host_tma_launch_args(self, dims: list[sympy.Expr]) -> OrderedSet[str] | None:
+        """Kernel size args a host-side descriptor's dims read at launch, or None
+        if a dim cannot be evaluated by the launcher.
+
+        A dim can be read at launch when it is an integer expression whose free
+        symbols are all graph sizes (dynamic shapes), which become the kernel's
+        size args (ks0), built only from operations that pexpr prints as plain
+        Python (see _host_tma_plain_dim). The C++ wrapper's kernel call wrapper
+        takes those size args as parameters and builds the descriptor from them
+        (cpp_wrapper_gpu._host_tma_cpp_dim), but only for kernels autotuned at
+        compile time.
+        """
+        launch_args: OrderedSet[str] = OrderedSet()
+        for dim in dims:
+            dim = V.graph.sizevars.simplify(dim)
+            if not dim.free_symbols:
+                continue
+            if not dim.is_integer or not self._host_tma_plain_dim(dim):
+                return None
+            if V.graph.cpp_wrapper and config.triton.autotune_at_compile_time is False:
+                return None
+            if not all(
+                symbol_is_type(sym, (SymT.SIZE, SymT.PRECOMPUTED_SIZE))
+                for sym in dim.free_symbols
+            ):
+                return None
+            launch_args.update(
+                str(self.rename_indexing(sym)) for sym in dim.free_symbols
+            )
+        return launch_args
+
+    @staticmethod
+    def _has_storage_offset(node: ir.IRNode) -> bool:
+        return not V.graph.sizevars.statically_known_equals(node.get_layout().offset, 0)
+
+    @staticmethod
+    def _host_tma_plain_dim(dim: sympy.Expr) -> bool:
+        """Whether pexpr renders dim with only integers, names, + * // and
+        builtin max/min. Others print as math.floor(...), torch.sym_float(...)
+        and so on, which the launchers do not bind."""
+        if dim.is_Integer or dim.is_Symbol:
+            return True
+        if isinstance(dim, (sympy.Add, sympy.Mul, FloorDiv, Max, Min)):
+            return all(
+                TritonTemplateKernel._host_tma_plain_dim(arg) for arg in dim.args
+            )
+        return False
+
+    @staticmethod
+    def _host_tma_dim(dim: sympy.Expr) -> int | str:
+        """A host-side descriptor dim: an int, or launcher (Python) source."""
+        return int(dim) if dim.is_number else pexpr(dim)
+
+    def _device_tma_descriptor(
+        self,
+        desc_name: str,
+        input_name: str | None,
+        block_shape: list[int],
+        dim_order: list[int],
+    ) -> str:
         base_name = input_name if input_name is not None else "output"
         stride_exprs = ", ".join(self.stride(input_name, d) for d in dim_order)
         size_exprs = ", ".join(self.size(input_name, d) for d in dim_order)
@@ -1511,9 +1676,7 @@ class TritonTemplateKernel(TritonKernel):
             # in def_kernel above we define the inputs with the storage offset adjusted
             # creating the load in input_node.make_indexer() will also adjust by storage offset
             # so subtract here to not double increment
-            if not V.graph.sizevars.statically_known_equals(
-                input_node.layout.offset, 0
-            ):
+            if self._has_storage_offset(input_node):
                 output_index = output_index - self.rename_indexing(
                     input_node.get_layout().offset
                 )
@@ -1745,7 +1908,7 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(val_shape),
-                                block_name=range_tree.symt.name,
+                                block_name=f"{range_tree.prefix.upper()}BLOCK",
                             )
                         )
                         # Generate the xmask and ymask
@@ -1759,7 +1922,7 @@ class TritonTemplateKernel(TritonKernel):
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
 
-                        val_shape_copy[i] = range_tree.symt.name
+                        val_shape_copy[i] = f"{range_tree.prefix.upper()}BLOCK"
                     # pyrefly: ignore [bad-assignment]
                     val_shape = tuple(val_shape_copy)
                 else:
@@ -2098,6 +2261,8 @@ class TritonTemplateKernel(TritonKernel):
 
         # Use FixedGrid which properly handles grid values passed as arguments
         inductor_meta = FixedGrid.setup_grid_as_args() if additional_call_args else None
+        if self.asserts_need_real_inputs:
+            inductor_meta = {**(inductor_meta or {}), "asserts_need_real_inputs": True}
         wrapper.generate_kernel_call(
             name,
             call_args,
@@ -2312,9 +2477,13 @@ class TritonTemplateKernel(TritonKernel):
                                 self.prologue_fused_inputs_preserve_zero |= (
                                     prologue_node.get_buffer_names()
                                 )
-                        prologue_node.codegen(
-                            self.split_and_set_ranges(prologue_node.get_ranges())
-                        )
+                        # Masked lanes of a prologue load reach the template's tl.dot,
+                        # and zero-preserving prologues are not re-masked, so the load
+                        # itself must fill them with zeros.
+                        with patch.object(self, "_load_other", 0):
+                            prologue_node.codegen(
+                                self.split_and_set_ranges(prologue_node.get_ranges())
+                            )
                     self.cse.invalidate(OrderedSet())
 
     def _finalize_partial_render(
@@ -3249,7 +3418,9 @@ class TritonTemplate(KernelTemplate):
         if not (code is not None and extra is not None):
             raise AssertionError("code and extra must not be None")
 
-        mod = PyCodeCache.load(code, extra, set_sys_modules=False)
+        # Key by code alone, as the precompile worker does: the module name is part
+        # of @triton.jit helper names, so another key misses the worker's compile.
+        mod = PyCodeCache.load(code, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
         load_input_fusion_allowed_inputs = (
@@ -4348,6 +4519,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "kpack",
                 "matrix_instr_nonkdim",
                 "waves_per_eu",
+                "NUM_XCCS",
             ]
         )
     )
@@ -5589,15 +5761,15 @@ class AlgorithmSelectorCache(PersistentCache):
         if not work.wait(timeout):
             raise TimeoutError("Barrier timeout before benchmarking")
 
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
         total_time = 0.0
 
         for i in range(nruns):
-            torch.cuda.synchronize()
+            torch.accelerator.synchronize()
 
-            start_evt = torch.cuda.Event(enable_timing=True)
-            end_evt = torch.cuda.Event(enable_timing=True)
+            start_evt = torch.Event(enable_timing=True)
+            end_evt = torch.Event(enable_timing=True)
 
             start_evt.record()
             choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
@@ -5634,7 +5806,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # Use default process group (None = all ranks)
         process_group = None
-        rank = dist.get_rank(process_group)
 
         benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
             cls._uses_layout_preserving_inputs(choice)
@@ -5656,10 +5827,9 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
             avg_time = total_time / nruns
-
             # All-reduce to get avg time across ranks
             time_tensor = torch.tensor(
-                [avg_time], dtype=torch.float32, device=f"cuda:{rank}"
+                [avg_time], dtype=torch.float32, device=f"{inputs[0].device}"
             )
             work = dist.all_reduce(
                 time_tensor,
@@ -6509,6 +6679,8 @@ class AlgorithmSelectorCache(PersistentCache):
         pad_after = backing_size - reserve_span
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
+        # Triton codegen relies on rand_strided filling non-float tensors with
+        # zeros (see TritonKernel._is_zero_in_autotune_block).
         with preserve_rng_state():
             return rand_strided(
                 reserve,

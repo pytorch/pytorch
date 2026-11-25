@@ -35,6 +35,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
+    decorateIf,
     HardwareClassification,
     is_iterable_of_tensors,
     parametrize,
@@ -233,6 +234,8 @@ op_assert_ref_tol_table = {
     # eager operator, causing a significant difference on float16
     (torch.bfloat16, torch.ops.aten.addcmul.default): 1e-5,
     (torch.float16, torch.ops.aten.addcmul.default): 1e-5,
+    (torch.float16, torch.ops.aten._trilinear.default): 2e-3,
+    (torch.bfloat16, torch.ops.aten._trilinear.default): 1e-2,
 }
 
 
@@ -577,6 +580,19 @@ comprehensive_failures = {
 }
 
 
+skip_cross_ref = decorateIf(
+    unittest.skip("Op and dtype excluded from decomposition cross-reference tests"),
+    lambda p: any(
+        key in CROSS_REF_EXCLUDE_SET
+        for key in (
+            (torch.device(p["device"]).type, p["dtype"], p["op"].name),
+            (None, p["dtype"], p["op"].name),
+            (None, None, p["op"].name),
+        )
+    ),
+)
+
+
 @unMarkDynamoStrictTest
 class TestDecomp(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
@@ -589,6 +605,7 @@ class TestDecomp(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(_decomp_test_ops)
+    @skip_cross_ref
     def test_quick(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
@@ -597,6 +614,19 @@ class TestDecomp(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(_decomp_test_ops_core_autograd, allowed_dtypes=(torch.float64,))
+    @decorateIf(
+        unittest.skip(
+            "Op and dtype excluded from backward decomposition cross-reference tests"
+        ),
+        lambda p: any(
+            key in CROSS_REF_BACKWARD_EXCLUDE_SET
+            for key in (
+                (torch.device(p["device"]).type, p["dtype"], p["op"].name),
+                (None, p["dtype"], p["op"].name),
+                (None, None, p["op"].name),
+            )
+        ),
+    )
     def test_quick_core_backward(self, device, dtype, op):
         test_keys = [
             (torch.device(device).type, dtype, op.name),
@@ -625,6 +655,7 @@ class TestDecomp(TestCase):
     @skipOps(comprehensive_failures)
     @suppress_warnings
     @ops(op_db)
+    @skip_cross_ref
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
@@ -650,6 +681,108 @@ class TestDecomp(TestCase):
         res = hann_window_periodic(8, dtype=torch.float64, device=device)
         self.assertEqual(ref, res)
         self.assertEqual(res.dtype, torch.float64)
+
+    @onlyCPU
+    @parametrize(
+        "kernel_size,stride,ceil_mode,expect_scatter",
+        [
+            subtest(([2, 2], [2, 2], False, False), name="two_by_two"),
+            subtest(([2, 2], [2, 2], True, False), name="ceil_mode"),
+            subtest(([2, 2], [3, 3], False, False), name="stride_gap"),
+            subtest(([5, 5], [5, 5], False, False), name="five_by_five"),
+            subtest(([2, 13], [2, 13], False, False), name="larger_than_25_area"),
+            subtest(([2, 2], [1, 1], False, True), name="overlap"),
+        ],
+    )
+    def test_max_pool2d_backward_nonoverlap_decomp(
+        self, device, kernel_size, stride, ceil_mode, expect_scatter
+    ):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        decomp = get_decompositions([aten.max_pool2d_with_indices_backward])[
+            aten.max_pool2d_with_indices_backward.default
+        ]
+        x = torch.randn(2, 4, 15, 16, device=device).contiguous(
+            memory_format=torch.channels_last
+        )
+        result, indices = aten.max_pool2d_with_indices(
+            x,
+            kernel_size,
+            stride,
+            [0, 0],
+            [1, 1],
+            ceil_mode,
+        )
+        grad_output = torch.randn_like(result)
+        graph = make_fx(
+            lambda grad, inp, ind: decomp(
+                grad,
+                inp,
+                kernel_size,
+                stride,
+                [0, 0],
+                [1, 1],
+                ceil_mode,
+                ind,
+            )
+        )(grad_output, x, indices)
+        targets = {node.target for node in graph.graph.nodes}
+
+        self.assertEqual(
+            aten.scatter_add.default in targets,
+            expect_scatter,
+        )
+        self.assertEqual(
+            graph(grad_output, x, indices),
+            aten.max_pool2d_with_indices_backward(
+                grad_output,
+                x,
+                kernel_size,
+                stride,
+                [0, 0],
+                [1, 1],
+                ceil_mode,
+                indices,
+            ),
+            exact_stride=True,
+        )
+
+    @onlyCPU
+    def test_max_pool2d_backward_nonoverlap_decomp_symbolic(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        kernel_size = [2, 2]
+        decomp = get_decompositions([aten.max_pool2d_with_indices_backward])[
+            aten.max_pool2d_with_indices_backward.default
+        ]
+
+        def fn(grad_output, x, indices):
+            return decomp(
+                grad_output,
+                x,
+                kernel_size,
+                kernel_size,
+                [0, 0],
+                [1, 1],
+                True,
+                indices,
+            )
+
+        def inputs(shape):
+            x = torch.randn(shape, device=device)
+            result, indices = aten.max_pool2d_with_indices(
+                x,
+                kernel_size,
+                kernel_size,
+                [0, 0],
+                [1, 1],
+                True,
+            )
+            return torch.randn_like(result), x, indices
+
+        graph = make_fx(fn, tracing_mode="symbolic")(*inputs((2, 4, 15, 16)))
+        args = inputs((3, 4, 17, 19))
+        self.assertEqual(graph(*args), fn(*args), exact_stride=True)
 
     def test_uniform(self, device):
         size = (2, 3, 4, 5)
@@ -861,6 +994,11 @@ def forward(self, x_1, start_1):
     return convert_element_type""",
         )
 
+    @decorateIf(
+        unittest.skip("only runs on XPU and CUDA and PrivateUse1."),
+        lambda p: torch.device(p["device"]).type
+        not in ("xpu", "cuda", torch._C._get_privateuse1_backend_name()),
+    )
     def test_masked_fill(self, device):
         from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -1210,7 +1348,7 @@ def forward(self, scores_1, mask_1, value_1):
         torch.testing.assert_close(ref, res, check_dtype=True)
 
 
-instantiate_device_type_tests(TestDecomp, globals())
+instantiate_device_type_tests(TestDecomp, globals(), allow_xpu=True)
 
 
 class DecompOneOffTests(TestCase):
@@ -1260,6 +1398,106 @@ class DecompOneOffTests(TestCase):
                     torch.ops.aten.softshrink_backward(grad, x, lambd)
                 with self.assertRaisesRegex(RuntimeError, "overflow"):
                     softshrink_backward(grad, x, lambd)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "shapes, dims",
+        [
+            # normal trilinear operations
+            subtest(
+                ([(4, 3), (5, 3, 6), (4, 6)], ([1, 3], [0], [1, 2], [2, 3], 1)),
+                name="bilinear",
+            ),
+            # negative dimension indices
+            subtest(
+                ([(4, 3), (5, 3, 6), (4, 6)], ([-3, -1], [0], [1, -2], [2, 3], 2)),
+                name="neg_dims",
+            ),
+            # no dimensions to sum
+            subtest(
+                ([(2, 3), (3, 4), (2, 4)], ([2], [0], [1], [], 0)), name="no_sumdim"
+            ),
+            # zero size input dimensions
+            subtest(
+                ([(0, 3), (5, 3, 6), (0, 6)], ([1, 3], [0], [1, 2], [2, 3], 1)),
+                name="zero_size",
+            ),
+        ],
+    )
+    def test_trilinear(self, device, shapes, dims):
+        from torch._decomp.decompositions import _trilinear
+
+        inputs = [torch.randn(s, device=device) for s in shapes]
+        args = (*inputs, *dims)
+
+        actual = _trilinear(*args)
+        expected = torch._trilinear(*args)
+
+        self.assertEqual(actual, expected)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "dims",
+        [
+            subtest(([0], [0], [0], [2], 1), name="out_dim"),
+            subtest(([0], [0], [0], [0], 0), name="unroll_dim"),
+        ],
+    )
+    def test_trilinear_dim_expanded_by_all_inputs(self, device, dims):
+        from torch._decomp.decompositions import _trilinear
+
+        x = torch.randn(2, 3, device=device)
+
+        actual = _trilinear(x, x, x, *dims)
+        expected = torch._trilinear(x, x, x, *dims)
+
+        self.assertEqual(actual, expected)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "dtypes",
+        [
+            subtest((torch.float32, torch.float64, torch.float32), name="f32_f64"),
+            subtest((torch.float64, torch.float32, torch.float32), name="f64_f32"),
+            subtest((torch.bool, torch.bool, torch.bool), name="bool"),
+            subtest((torch.float32, torch.int64, torch.int64), name="f32_i64"),
+        ],
+    )
+    @parametrize("sumdim", [[], [1]])
+    def test_trilinear_dtypes(self, device, dtypes, sumdim):
+        from torch._decomp.decompositions import _trilinear
+
+        a, b, c = (torch.randn(2, 3, device=device).to(dt) for dt in dtypes)
+        args = (a, b, c, [], [], [], sumdim, 1)
+
+        actual = _trilinear(*args)
+        expected = torch._trilinear(*args)
+
+        self.assertEqual(actual, expected, exact_dtype=True)
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    @parametrize(
+        "dtypes",
+        [
+            subtest((torch.int64, torch.float32), name="i64_f32"),
+            subtest((torch.bool, torch.float32), name="bool_f32"),
+            subtest((torch.float32, torch.complex64), name="f32_c64"),
+        ],
+    )
+    def test_trilinear_unsafe_cast(self, device, dtypes):
+        from torch._decomp.decompositions import _trilinear
+
+        a, b = (torch.randn(2, 3, device=device).to(dt) for dt in dtypes)
+        args = (a, b, b, [], [], [], [1], 1)
+
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            torch._trilinear(*args)
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            _trilinear(*args)
 
     @onlyNativeDeviceTypes
     @skipIfCrossRef
@@ -1353,13 +1591,13 @@ class DecompOneOffTests(TestCase):
     @onlyAccelerator
     def test_exponential_non_inf(self, device):
         inp = torch.empty((4, 400, 256), device=device)
-
-        with torch._dynamo.utils.preserve_rng_state():
-            exp_ref = inp.exponential_()
         exp = torch._refs.exponential(inp)
 
-        self.assertEqual(exp, exp_ref)
+        # The CUDA kernel builds each sample from the raw 32-bit draw, which rand_like has already rounded away, so
+        # the ref matches it in distribution rather than elementwise.
         self.assertFalse(exp.isinf().any())
+        self.assertTrue((exp > 0).all())
+        self.assertEqual(exp.mean().item(), 1.0, atol=0.01, rtol=0)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
@@ -1465,6 +1703,19 @@ class DecompOneOffTests(TestCase):
 
     @onlyAccelerator
     @skipIfCrossRef
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_native_dropout_backward_opmath(self, device, dtype):
+        grad = torch.tensor([7 / 2048, -7 / 2048, 7 / 2048], device=device, dtype=dtype)
+        mask = torch.tensor([True, True, False], device=device)
+        scale = 1.0 / 0.9
+        expected = aten.native_dropout_backward.default(grad, mask, scale)
+        actual = decomposition_table[aten.native_dropout_backward.default](
+            grad, mask, scale
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyAccelerator
+    @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):
         input_tensor = torch.randn(10, 10, dtype=torch.float32, device=device)
 
@@ -1545,10 +1796,10 @@ class DecompOneOffTests(TestCase):
                 )
             )
             actual_res = decomposed_res[0]
-            # Native CPU flash attention allocates empty_like(query).
-            self.assertEqual(
-                actual_res.stride(), torch.empty_like(query_layer).stride()
-            )
+            # Output has form (N, H, L, E), but should be continuous on (L, N, H, E)
+            # in order for subsequent view(L * N, H * E) to be valid.
+            # So permute(2, 0, 1, 3) before checking that tensor is contiguous
+            self.assertTrue(actual_res.permute(2, 0, 1, 3).is_contiguous())
 
             eager_res = op(
                 query_layer,
@@ -1560,44 +1811,6 @@ class DecompOneOffTests(TestCase):
             )
 
             self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
-
-    @onlyCPU
-    @parametrize(
-        "make_query",
-        [
-            subtest(lambda randn: randn(2, 3, 4, 8), name="contiguous"),
-            subtest(lambda randn: randn(4, 2, 3, 8).permute(1, 2, 0, 3), name="mha"),
-            subtest(lambda randn: randn(2, 4, 3, 8).transpose(1, 2), name="bert"),
-        ],
-    )
-    def test_cpu_flash_attention_output_layout(self, device, make_query):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        def randn(*shape):
-            return torch.randn(*shape, device=device, dtype=torch.double)
-
-        query = make_query(randn).requires_grad_()
-        key = torch.randn_like(query, requires_grad=True)
-        value = torch.randn_like(query, requires_grad=True)
-        inputs = (query, key, value)
-        decompose = (
-            torch._decomp.decompositions.scaled_dot_product_flash_attention_for_cpu
-        )
-        expected = aten._scaled_dot_product_flash_attention_for_cpu(*inputs)[0]
-        actual = decompose(*inputs)[0]
-        self.assertEqual(actual, expected)
-        self.assertEqual(actual.stride(), expected.stride())
-
-        with FakeTensorMode() as mode:
-            fake_inputs = tuple(mode.from_tensor(x) for x in inputs)
-            fake_actual = decompose(*fake_inputs)[0]
-        self.assertEqual(fake_actual.stride(), expected.stride())
-
-        grad = torch.randn_like(expected)
-        self.assertEqual(
-            torch.autograd.grad(actual, inputs, grad),
-            torch.autograd.grad(expected, inputs, grad),
-        )
 
     @onlyCPU
     def test_native_layer_norm_cpu_decomp(self, device):

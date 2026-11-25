@@ -118,6 +118,26 @@ class TestLstmXpu(NNTestCase):
         finally:
             torch.use_deterministic_algorithms(False)
 
+    @dtypes(torch.float32, torch.half)
+    def test_lstm_cow_input(self, device, dtype):
+        lstm = torch.nn.LSTM(16, 16).to(device, dtype).eval()
+        x = torch.randn(5, 2, 16, device=device, dtype=dtype)
+        h0 = torch.randn(1, 2, 16, device=device, dtype=dtype)
+        c0 = torch.randn(1, 2, 16, device=device, dtype=dtype)
+        xc = torch._lazy_clone(x)
+        xc_copy = xc.clone()
+
+        # In lstm_onednn_xpu, h0, c0, and weights are concatenated into
+        # contiguous buffers before oneDNN sees them, so only xc directly exercises
+        # the binding changed for input arguments.
+        with torch.no_grad():
+            torch.ops.aten.lstm.input(
+                xc, [h0, c0], lstm.all_weights[0], True, 1, 0.0, False, False, False
+            )
+
+        self.assertTrue(torch._C._is_cow_tensor(xc))
+        self.assertEqual(xc, xc_copy)
+
 
 instantiate_device_type_tests(TestLstmXpu, globals(), only_for="xpu", allow_xpu=True)
 

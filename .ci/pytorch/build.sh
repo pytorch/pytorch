@@ -175,14 +175,6 @@ elif [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
   export USE_MKLDNN=0
 fi
 
-# Use special scripts for Android builds
-
-if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-  export USE_VULKAN=1
-  # shellcheck disable=SC1091
-  source /var/lib/jenkins/vulkansdk/setup-env.sh
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # hcc used to run out of memory, silently exiting without stopping
   # the build process, leaving undefined symbols in the shared lib,
@@ -208,8 +200,10 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/umf/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
-  # shellcheck disable=SC1091
-  source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  if [ -f /opt/intel/oneapi/mpi/latest/env/vars.sh ]; then
+    # shellcheck disable=SC1091
+    source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  fi
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Enable XCCL build
@@ -399,10 +393,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
     install_torchao
-  fi
-
-  if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchcomms* ]]; then
-    install_torchcomms
   fi
 
   if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *spmd_types* ]]; then
