@@ -14,7 +14,12 @@ from torch._C import _SDPBackend as SDPBackend
 
 from . import _is_sdp_priority_order_active
 from ._registry import current_flash_attention_impl
-from ._utils import _empty_with_matching_layout, _input_requires_grad
+from ._utils import (
+    _empty_with_matching_layout,
+    _input_requires_grad,
+    _validate_descale,
+    DescaleType,
+)
 
 
 log = logging.getLogger(__name__)
@@ -28,6 +33,8 @@ _CUDNN_SM100_FORWARD_LARGE_HEAD_DIMS = frozenset(
     {(192, 128), (192, 192), (256, 128), (256, 256)}
 )
 _CUDNN_SM100_BACKWARD_LARGE_HEAD_DIMS = frozenset({(192, 128)})
+# Flash attention runs these through the `.quantized` ops, which write a bf16 output.
+_FP8_DTYPES = (torch.float8_e4m3fn, torch.float8_e5m2)
 
 
 def _normalize_window_size(window_size: list[int] | None) -> list[int]:
@@ -44,6 +51,60 @@ def _validate_scale(scale: float | None) -> None:
     # This form also rejects NaN, unlike scale <= 0.
     if scale is not None and not scale > 0:
         raise ValueError(f"scale must be greater than 0, got {scale}")
+
+
+def _validate_fp8_inputs(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    cu_seq_q: torch.Tensor,
+    num_heads_k: int,
+    q_descale: torch.Tensor | None,
+    k_descale: torch.Tensor | None,
+    v_descale: torch.Tensor | None,
+    out: torch.Tensor | None = None,
+) -> None:
+    """Check fp8 inputs before any kernel runs; descales are only allowed with an fp8 query.
+
+    Example (2 sequences, 2 KV heads):
+
+        query, key, value: float8_e4m3fn; q_descale: float32 (2, 2)    OK
+        query: bfloat16; q_descale given                               ValueError
+        query: float8_e4m3fn, key: float8_e5m2                         ValueError
+        q_descale: float32 (2, 4)                                      ValueError
+        query.requires_grad under grad mode                            RuntimeError
+    """
+    descales = {"q": q_descale, "k": k_descale, "v": v_descale}
+    if query.dtype not in _FP8_DTYPES:
+        if any(descale is not None for descale in descales.values()):
+            raise ValueError(
+                "q_descale, k_descale and v_descale need a float8_e4m3fn or float8_e5m2 query, key and "
+                f"value, got {query.dtype}, {key.dtype} and {value.dtype}"
+            )
+        return
+
+    if not query.dtype == key.dtype == value.dtype:
+        raise ValueError(
+            "fp8 varlen attention needs one dtype for query, key and value, got "
+            f"{query.dtype}, {key.dtype} and {value.dtype}"
+        )
+
+    batch_size = cu_seq_q.numel() - 1
+    for name, descale in descales.items():
+        _validate_descale(descale, name, batch_size, num_heads_k, DescaleType.PER_HEAD)
+
+    if out is not None and out.dtype != torch.bfloat16:
+        raise ValueError(
+            f"fp8 varlen attention writes bfloat16, got out of dtype {out.dtype}"
+        )
+
+    present_descales = [descale for descale in descales.values() if descale is not None]
+    if torch.is_grad_enabled() and _input_requires_grad(
+        query, key, value, *present_descales
+    ):
+        raise RuntimeError(
+            "fp8 varlen attention is inference-only: query, key, value and the descales must not require grad"
+        )
 
 
 @torch.compiler.assume_constant_result
@@ -258,6 +319,9 @@ def _varlen_attn(
     num_splits: int | None = None,
     backend: int = _FLASH_ATTENTION_BACKEND,
     return_lse: bool = False,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -289,7 +353,16 @@ def _varlen_attn(
         output, softmax_lse, rng_state = result[0], result[1], result[6]
     elif backend == _FLASH_ATTENTION_BACKEND:
         log.info("Using Flash Attention backend for varlen_attn")
-        output, softmax_lse, rng_state, _, _ = torch.ops.aten._flash_attention_forward(
+        flash_forward = torch.ops.aten._flash_attention_forward
+        fp8_kwargs = {}
+        if query.dtype in _FP8_DTYPES:
+            flash_forward = torch.ops.aten._flash_attention_forward.quantized
+            fp8_kwargs = {
+                "q_descale": q_descale,
+                "k_descale": k_descale,
+                "v_descale": v_descale,
+            }
+        output, softmax_lse, rng_state, _, _ = flash_forward(
             query,
             key,
             value,
@@ -306,6 +379,7 @@ def _varlen_attn(
             seqused_k=seqused_k,
             block_table=block_table,
             num_splits=num_splits,
+            **fp8_kwargs,
         )
     else:
         raise AssertionError(f"Unsupported varlen attention backend: {backend}")
@@ -334,6 +408,9 @@ def _varlen_attn_fake(
     num_splits: int | None = None,
     backend: int = _FLASH_ATTENTION_BACKEND,
     return_lse: bool = False,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -344,7 +421,11 @@ def _varlen_attn_fake(
     """
     window_size = _normalize_window_size(window_size)
 
-    output = _empty_with_matching_layout(query, (*query.shape[:-1], value.size(-1)))
+    output = _empty_with_matching_layout(
+        query,
+        (*query.shape[:-1], value.size(-1)),
+        dtype=torch.bfloat16 if query.dtype in _FP8_DTYPES else None,
+    )
 
     # For varlen path: logsumexp shape is (num_heads, total_q)
     total_q = query.size(0)
@@ -374,6 +455,9 @@ def varlen_attn(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     r"""Compute variable-length attention using Flash Attention.
 
@@ -435,6 +519,17 @@ def varlen_attn(
             regardless of what other sequences are in the batch, at the
             cost of lower GPU utilization when there are few queries. When
             ``None`` (default), the kernel chooses automatically.
+        q_descale (Tensor, optional): Dequantization scale of an fp8 ``query``; shape :math:`(N, H_{kv})`,
+            dtype ``float32``. With ``float8_e4m3fn`` or ``float8_e5m2`` ``query``, ``key`` and ``value``,
+            attention runs on ``query * q_descale``, ``key * k_descale`` and ``value * v_descale``: each
+            sequence and KV head has one scale, shared by the query heads of that KV head. A missing descale
+            is 1. fp8 inputs give a ``bfloat16`` output, run forward only, and need the FA3 (SM90) or FA4
+            (SM100) flash attention implementation (``torch.nn.attention.activate_flash_attention_impl``).
+            FA3 takes only ``float8_e4m3fn``.
+        k_descale (Tensor, optional): Dequantization scale of an fp8 ``key``; same shape and dtype as
+            ``q_descale``.
+        v_descale (Tensor, optional): Dequantization scale of an fp8 ``value``; same shape and dtype as
+            ``q_descale``.
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H_q, D)`.
@@ -499,6 +594,9 @@ def varlen_attn(
         )
 
     _validate_scale(scale)
+    _validate_fp8_inputs(
+        query, key, value, cu_seq_q, num_heads_k, q_descale, k_descale, v_descale
+    )
     window_size_list = list(window_size)
     is_causal = window_size_list == [-1, 0]
     return_lse = return_aux is not None and return_aux.lse
@@ -532,6 +630,9 @@ def varlen_attn(
         num_splits,
         backend,
         return_lse,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     if return_lse:
         return out, lse
@@ -556,6 +657,9 @@ def _varlen_attn_out(
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
     backend: int = _FLASH_ATTENTION_BACKEND,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Private custom op for variable-length attention with pre-allocated output.
@@ -581,7 +685,18 @@ def _varlen_attn_out(
         )
     if backend == _FLASH_ATTENTION_BACKEND:
         log.info("Using Flash Attention backend for varlen_attn_out")
-        return torch.ops.aten._flash_attention_forward_no_dropout_inplace(
+        flash_forward_out = torch.ops.aten._flash_attention_forward_no_dropout_inplace
+        fp8_kwargs = {}
+        if query.dtype in _FP8_DTYPES:
+            flash_forward_out = (
+                torch.ops.aten._flash_attention_forward_no_dropout_inplace.quantized
+            )
+            fp8_kwargs = {
+                "q_descale": q_descale,
+                "k_descale": k_descale,
+                "v_descale": v_descale,
+            }
+        return flash_forward_out(
             out,
             query,
             key,
@@ -599,6 +714,7 @@ def _varlen_attn_out(
             seqused_k=seqused_k,
             block_table=block_table,
             num_splits=num_splits,
+            **fp8_kwargs,
         )
     raise AssertionError(f"Unsupported varlen attention backend: {backend}")
 
@@ -621,6 +737,9 @@ def _varlen_attn_out_fake(
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
     backend: int = _FLASH_ATTENTION_BACKEND,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -651,6 +770,9 @@ def varlen_attn_out(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     r"""Compute variable-length attention with a pre-allocated output tensor.
 
@@ -674,6 +796,9 @@ def varlen_attn_out(
         )
 
     _validate_scale(scale)
+    _validate_fp8_inputs(
+        query, key, value, cu_seq_q, num_heads_k, q_descale, k_descale, v_descale, out
+    )
     window_size_list = list(window_size)
     is_causal = window_size_list == [-1, 0]
     backend = _select_backend(
@@ -705,6 +830,9 @@ def varlen_attn_out(
         block_table,
         num_splits,
         backend,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -729,6 +857,9 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         num_splits,
         backend,
         return_lse,
+        _q_descale,
+        _k_descale,
+        _v_descale,
     ) = inputs
     out, lse, rng_state = output
 
@@ -914,15 +1045,23 @@ def _backward(
         grad_lse,
     )
     # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, \
-    # enable_gqa, seqused_k, block_table, num_splits, backend, return_lse
-    num_params = 13
+    # enable_gqa, seqused_k, block_table, num_splits, backend, return_lse, \
+    # q_descale, k_descale, v_descale
+    num_params = 16
     return (dq, dk, dv, *((None,) * num_params))
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
 
+# Dynamo blocks by object id, so a pre-bound overload needs its own entry.
 torch._dynamo.disallow_in_graph(
     torch.ops.aten._flash_attention_forward_no_dropout_inplace
+)
+torch._dynamo.disallow_in_graph(
+    torch.ops.aten._flash_attention_forward_no_dropout_inplace.default
+)
+torch._dynamo.disallow_in_graph(
+    torch.ops.aten._flash_attention_forward_no_dropout_inplace.quantized
 )
 
 from torch.utils.flop_counter import (

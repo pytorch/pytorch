@@ -137,6 +137,22 @@ def _varlen_backends(*, include_fa4_paged_kv: bool) -> list[str]:
     return ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if fa4_supported else [])
 
 
+# FA4's fp8 forward runs on the SM100 family only.
+_FA4_FP8_SUPPORTED = SM100OrLater and torch.cuda.get_device_capability()[0] == 10
+
+
+def _dequantize_fp8(x, descale, cu_seq, heads_per_kv_head=1):
+    """Return fp8 ``x`` (tokens, heads, dim) in bf16, times its sequence's per-KV-head ``descale``.
+
+    Example: cu_seq [0, 2, 5], descale [[0.5, 2], [1, 4]], heads_per_kv_head 2:
+        tokens 0-1, heads 0-1 -> x * 0.5    tokens 0-1, heads 2-3 -> x * 2
+        tokens 2-4, heads 0-1 -> x * 1      tokens 2-4, heads 2-3 -> x * 4
+    """
+    per_token = descale.repeat_interleave(cu_seq.diff(), dim=0)
+    per_head = per_token.repeat_interleave(heads_per_kv_head, dim=1)
+    return (x.float() * per_head[..., None]).to(torch.bfloat16)
+
+
 VarlenShape = namedtuple(
     "VarlenShape",
     ["batch_size", "max_seq_len", "embed_dim", "num_heads", "num_kv_heads"],
@@ -1258,7 +1274,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
-    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    @parametrize("dtype", [torch.bfloat16, torch.float16, torch.float8_e4m3fn])
     @parametrize("num_splits", [1, None])
     @parametrize(
         "window_size",
@@ -1287,6 +1303,11 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         unittest.skip("num_splits is not supported on ROCm"),
         lambda p: TEST_WITH_ROCM and p["num_splits"] is not None,
     )
+    @decorateIf(
+        unittest.skip("fp8 varlen attention runs on FA4 here"),
+        lambda p: p["dtype"] == torch.float8_e4m3fn
+        and (p["backend"] != "fa4" or not _FA4_FP8_SUPPORTED),
+    )
     def test_batch_invariance(
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
     ):
@@ -1304,26 +1325,29 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         num_heads, head_dim = 2, 128
         target_seq_len = 512
         extra_seq_len = 1024
+        # fp8 inputs are drawn in bf16 and give a bf16 output.
+        is_fp8 = dtype == torch.float8_e4m3fn
+        input_dtype = out_dtype = torch.bfloat16 if is_fp8 else dtype
 
         target_q = torch.randn(
-            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
+            target_seq_len, num_heads, head_dim, device=device, dtype=input_dtype
+        ).to(dtype)
         target_k = torch.randn(
-            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
+            target_seq_len, num_heads, head_dim, device=device, dtype=input_dtype
+        ).to(dtype)
         target_v = torch.randn(
-            target_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
+            target_seq_len, num_heads, head_dim, device=device, dtype=input_dtype
+        ).to(dtype)
 
         extra_q = torch.randn(
-            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
+            extra_seq_len, num_heads, head_dim, device=device, dtype=input_dtype
+        ).to(dtype)
         extra_k = torch.randn(
-            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
+            extra_seq_len, num_heads, head_dim, device=device, dtype=input_dtype
+        ).to(dtype)
         extra_v = torch.randn(
-            extra_seq_len, num_heads, head_dim, device=device, dtype=dtype
-        )
+            extra_seq_len, num_heads, head_dim, device=device, dtype=input_dtype
+        ).to(dtype)
 
         cu_seq_solo = torch.tensor(
             [0, target_seq_len], device=device, dtype=torch.int32
@@ -1337,6 +1361,19 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         all_q = torch.cat([target_q, extra_q], dim=0)
         all_k = torch.cat([target_k, extra_k], dim=0)
         all_v = torch.cat([target_v, extra_v], dim=0)
+
+        # fp8: one descale row per sequence; the target keeps its row in the solo and batched calls.
+        solo_descales, batched_descales = {}, {}
+        if is_fp8:
+            scales = {
+                "q_descale": (0.5, 2.0),
+                "k_descale": (2.0, 0.5),
+                "v_descale": (0.5, 1.0),
+            }
+            for name, (target_scale, extra_scale) in scales.items():
+                rows = [[target_scale] * num_heads, [extra_scale] * num_heads]
+                solo_descales[name] = torch.tensor(rows[:1], device=device)
+                batched_descales[name] = torch.tensor(rows, device=device)
 
         forward_context = (
             patch.object(
@@ -1364,6 +1401,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                 target_seq_len,
                 window_size=window_size,
                 num_splits=num_splits,
+                **solo_descales,
             )
 
             batched_output = varlen_attn(
@@ -1376,9 +1414,10 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                 extra_seq_len,
                 window_size=window_size,
                 num_splits=num_splits,
+                **batched_descales,
             )
 
-            solo_out_buf = torch.empty_like(target_q)
+            solo_out_buf = torch.empty_like(target_q, dtype=out_dtype)
             varlen_attn_out(
                 solo_out_buf,
                 target_q,
@@ -1390,9 +1429,10 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                 target_seq_len,
                 window_size=window_size,
                 num_splits=num_splits,
+                **solo_descales,
             )
 
-            batched_out_buf = torch.empty_like(all_q)
+            batched_out_buf = torch.empty_like(all_q, dtype=out_dtype)
             varlen_attn_out(
                 batched_out_buf,
                 all_q,
@@ -1404,8 +1444,18 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                 extra_seq_len,
                 window_size=window_size,
                 num_splits=num_splits,
+                **batched_descales,
             )
-            if num_splits == 1:
+            if num_splits == 1 and is_fp8:
+                # Bitwise, as varlen_attn's docstring promises for num_splits=1.
+                self.assertTrue(
+                    torch.equal(solo_output, batched_output[:target_seq_len])
+                )
+                self.assertTrue(
+                    torch.equal(solo_out_buf, batched_out_buf[:target_seq_len])
+                )
+                self.assertTrue(torch.equal(solo_output, solo_out_buf))
+            elif num_splits == 1:
                 self.assertEqual(solo_output, batched_output[:target_seq_len])
                 self.assertEqual(solo_out_buf, batched_out_buf[:target_seq_len])
                 self.assertEqual(solo_output, solo_out_buf)
@@ -1735,6 +1785,178 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                     num_splits=1,
                 )
             self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
+
+    @unittest.skipUnless(_FA4_FP8_SUPPORTED, "FA4 fp8 needs an SM100-family GPU")
+    @parametrize("dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    @parametrize("paged", [False, True])
+    @parametrize("compile", [False, True])
+    def test_fp8_descales(self, device, dtype, paged, compile):
+        # Each parametrization compiles varlen_attn on its own; see test_block_table_kv_cache.
+        torch._dynamo.reset()
+        torch.manual_seed(42)
+
+        num_heads, num_kv_heads, head_dim, page_size = 8, 2, 128, 64
+        heads_per_kv_head = num_heads // num_kv_heads
+        q_lens, kv_lens = [1, 4, 37], [300, 129, 200]
+        batch_size = len(q_lens)
+        # Powers of two, so the dequantized reference inputs are exact in bf16.
+        q_descale = torch.tensor([[0.5, 2.0], [1.0, 4.0], [2.0, 0.5]], device=device)
+        k_descale = torch.tensor([[2.0, 1.0], [0.5, 4.0], [1.0, 2.0]], device=device)
+        v_descale = torch.tensor([[1.0, 0.5], [2.0, 1.0], [0.5, 2.0]], device=device)
+        descales = {
+            "q_descale": q_descale,
+            "k_descale": k_descale,
+            "v_descale": v_descale,
+        }
+        # Max error per unit of v_descale: FA4 rounds P to the fp8 dtype for P @ V.
+        # e5m2 has one mantissa bit less than e4m3, so its rounding step and bound are twice e4m3's.
+        bound = {torch.float8_e4m3fn: 0.25, torch.float8_e5m2: 0.5}[dtype]
+
+        def fp8_randn(*shape):
+            return torch.randn(*shape, device=device, dtype=torch.bfloat16).to(dtype)
+
+        q = fp8_randn(sum(q_lens), num_heads, head_dim)
+        cu_seq_q = torch.tensor(
+            [0, *accumulate(q_lens)], device=device, dtype=torch.int32
+        )
+        cu_seq_k = torch.tensor(
+            [0, *accumulate(kv_lens)], device=device, dtype=torch.int32
+        )
+        max_q = max(q_lens)
+
+        # Logical K and V per sequence, packed, for the reference.
+        if paged:
+            pages_per_seq = math.ceil(max(kv_lens) / page_size)
+            num_pages = batch_size * pages_per_seq
+            k_input = fp8_randn(num_pages, page_size, num_kv_heads, head_dim)
+            v_input = fp8_randn(num_pages, page_size, num_kv_heads, head_dim)
+            block_table = torch.randperm(
+                num_pages, device=device, dtype=torch.int32
+            ).view(batch_size, pages_per_seq)
+
+            def pack_pages(cache):
+                logical = gather_paged_cache(cache, block_table)
+                return torch.cat([logical[i, :n] for i, n in enumerate(kv_lens)])
+
+            k, v = pack_pages(k_input), pack_pages(v_input)
+            cu_seq_k_input, max_k = None, pages_per_seq * page_size
+            kv_cache_kwargs = {
+                "seqused_k": torch.tensor(kv_lens, device=device, dtype=torch.int32),
+                "block_table": block_table,
+            }
+        else:
+            k = k_input = fp8_randn(sum(kv_lens), num_kv_heads, head_dim)
+            v = v_input = fp8_randn(sum(kv_lens), num_kv_heads, head_dim)
+            cu_seq_k_input, max_k = cu_seq_k, max(kv_lens)
+            kv_cache_kwargs = {}
+
+        def reference(q_descale, k_descale, v_descale):
+            return varlen_attn(
+                _dequantize_fp8(q, q_descale, cu_seq_q, heads_per_kv_head),
+                _dequantize_fp8(k, k_descale, cu_seq_k),
+                _dequantize_fp8(v, v_descale, cu_seq_k),
+                cu_seq_q,
+                cu_seq_k,
+                max_q,
+                max(kv_lens),
+                window_size=(-1, 0),
+                enable_gqa=True,
+            )
+
+        def assert_close_per_kv_head(output, expected, v_descale):
+            for i in range(batch_size):
+                rows = slice(cu_seq_q[i], cu_seq_q[i + 1])
+                for h in range(num_kv_heads):
+                    heads = slice(h * heads_per_kv_head, (h + 1) * heads_per_kv_head)
+                    error = (
+                        (output[rows, heads].float() - expected[rows, heads].float())
+                        .abs()
+                        .max()
+                    )
+                    self.assertLessEqual(
+                        error.item(),
+                        bound * v_descale[i, h].item(),
+                        f"sequence {i}, KV head {h}",
+                    )
+
+        args = (q, k_input, v_input, cu_seq_q, cu_seq_k_input, max_q, max_k)
+        attn_kwargs = {"window_size": (-1, 0), "enable_gqa": True, **kv_cache_kwargs}
+        attn = torch.compile(varlen_attn, fullgraph=True) if compile else varlen_attn
+        with _use_backend("fa4"), torch.no_grad():
+            expected = reference(q_descale, k_descale, v_descale)
+            output = attn(*args, **attn_kwargs, **descales)
+            out = torch.empty(q.shape, device=device, dtype=torch.bfloat16)
+            returned = varlen_attn_out(out, *args, **attn_kwargs, **descales)
+
+            self.assertEqual(output.dtype, torch.bfloat16)
+            self.assertEqual(returned.data_ptr(), out.data_ptr())
+            self.assertTrue(torch.equal(out, output))
+            assert_close_per_kv_head(output, expected, v_descale)
+
+            if not compile:
+                # A missing descale means 1.
+                ones = torch.ones_like(q_descale)
+                output_no_descales = varlen_attn(*args, **attn_kwargs)
+                assert_close_per_kv_head(
+                    output_no_descales, reference(ones, ones, ones), ones
+                )
+
+                # The fake output is bf16 for fp8 inputs. test_schema runs in test_custom_op_compliance:
+                # with fp8 inputs, its mutation check calls allclose, which has no fp8 kernel.
+                op_kwargs = {
+                    "is_causal": True,
+                    "window_size": [-1, 0],
+                    "enable_gqa": True,
+                    **kv_cache_kwargs,
+                    **descales,
+                }
+                torch.library.opcheck(
+                    torch.ops.torch_attn._varlen_attn,
+                    args,
+                    op_kwargs,
+                    test_utils=["test_faketensor"],
+                )
+                torch.library.opcheck(
+                    torch.ops.torch_attn._varlen_attn_out,
+                    (out, *args),
+                    op_kwargs,
+                    test_utils=["test_faketensor"],
+                )
+
+    @skipIfRocm
+    def test_fp8_descales_errors(self, device):
+        q_bf16 = torch.randn(8, 4, 64, device=device, dtype=torch.bfloat16)
+        q = q_bf16.to(torch.float8_e4m3fn)
+        cu_seq = torch.tensor([0, 3, 8], device=device, dtype=torch.int32)
+        descale = torch.ones(2, 4, device=device)
+        args = (cu_seq, cu_seq, 5, 5)
+
+        value_error_cases = [
+            ("need a float8_e4m3fn or float8_e5m2", (q_bf16, q_bf16, q_bf16), descale),
+            (
+                "one dtype for query, key and value",
+                (q, q_bf16.to(torch.float8_e5m2), q),
+                descale,
+            ),
+            ("must have dtype float32", (q, q, q), descale.bfloat16()),
+            ("must be a CUDA tensor", (q, q, q), descale.cpu()),
+            ("batch dimension must match", (q, q, q), torch.ones(3, 4, device=device)),
+            ("head dimension must match", (q, q, q), torch.ones(2, 2, device=device)),
+        ]
+        for message, qkv, q_descale in value_error_cases:
+            with self.assertRaisesRegex(ValueError, message):
+                varlen_attn(*qkv, *args, q_descale=q_descale)
+
+        with self.assertRaisesRegex(ValueError, "writes bfloat16"):
+            varlen_attn_out(torch.empty_like(q), q, q, q, *args)
+
+        # fp8 is inference-only; this fails at the forward, before any kernel runs.
+        with self.assertRaisesRegex(RuntimeError, "inference-only"):
+            varlen_attn(q, q, q, *args, q_descale=descale.clone().requires_grad_())
+
+        # Without FA3 or FA4, the .quantized op has no kernel.
+        with self.assertRaisesRegex(RuntimeError, "requires FA3 .* or FA4"):
+            varlen_attn(q, q, q, *args, q_descale=descale)
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
