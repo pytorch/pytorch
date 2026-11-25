@@ -2109,6 +2109,52 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_set_stance_eager_then_compile_with_make_fx(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            def inner(a):
+                return a + 1
+
+            traced = make_fx(inner)(x)
+            return traced(x)
+
+        with torch.compiler.set_stance("eager_then_compile"):
+            x1 = torch.randn(2, 2)
+            self.assertEqual(fn(x1), x1 + 1)
+            x2 = torch.randn(2, 2)
+            self.assertEqual(fn(x2), x2 + 1)
+            x3 = torch.randn(2, 2)
+            self.assertEqual(fn(x3), x3 + 1)
+
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_set_stance_aot_eager_then_compile_with_make_fx(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            def inner(a):
+                return a + 1
+
+            traced = make_fx(inner)(x)
+            return traced(x)
+
+        with torch.compiler.set_stance("aot_eager_then_compile"):
+            x1 = torch.randn(2, 2)
+            self.assertEqual(fn(x1), x1 + 1)
+            x2 = torch.randn(2, 2)
+            self.assertEqual(fn(x2), x2 + 1)
+            x3 = torch.randn(2, 2)
+            self.assertEqual(fn(x3), x3 + 1)
+
+        self.assertGreaterEqual(cnts.frame_count, 1)
+
     def test_set_stance_force_eager(self):
         @torch.compile(backend="eager")
         def a(x):
