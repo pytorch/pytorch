@@ -22,6 +22,7 @@ import types
 import typing
 import unittest
 import weakref
+from collections import defaultdict, OrderedDict
 from collections.abc import Iterator
 from typing import Any, NamedTuple
 from unittest import mock
@@ -961,6 +962,11 @@ class _ABCHolder(metaclass=abc.ABCMeta):  # noqa: B024 - exercise a concrete ABC
         self.unused = threading.Lock()
 
 
+_pruning_graph = functools.partial(
+    types.SimpleNamespace, torch_function_mode_stack=(), fx_annotation=None
+)
+
+
 class DictionaryToken:
     def __init__(self, **attrs):
         self.__dict__.update(attrs)
@@ -984,11 +990,11 @@ class _PayloadConsumer(TokenConsumer):
             raise ValueError("Missing constructor payload")
 
 
-class _RegisteredPayloadConsumer(_PayloadConsumer):
+class _RegisteredConsumer(_PayloadConsumer):
     __reduce_ex__ = object.__reduce_ex__
 
 
-class _DynamicStateConsumer(_RegisteredPayloadConsumer):
+class _DynamicConsumer(_RegisteredConsumer):
     def __getattr__(self, name):
         if name == "__setstate__":
             return lambda state: self.__init__(state["token"])
@@ -1004,7 +1010,7 @@ _PayloadRecord = collections.namedtuple("_PayloadRecord", ["token"])
 _tuple_new = tuple.__new__
 
 
-class _PayloadNewConsumer(_PayloadRecord):
+class _NewConsumer(_PayloadRecord):
     def __new__(cls, token):
         return _tuple_new(cls, (token or None,))
 
@@ -1018,8 +1024,7 @@ class SlottedTokenConsumer(TokenConsumer):
 class DefaultSlottedTokenConsumer:
     __slots__ = ("token",)
 
-    def __init__(self, token):
-        self.token = token
+    __init__ = TokenConsumer.__init__
 
     def __setattr__(self, name, value):
         if name == "token" and not isinstance(value, DictionaryToken):
@@ -1871,14 +1876,11 @@ class _ODictViewOwner(collections.OrderedDict):
 
 
 class _ODictViewStateLookup(_ODictViewOwner):
-    def __getattribute__(self, name):
-        if name == "__setstate__" and type(dict.get(self, "b", [])) is not list:
-            raise AssertionError("State lookup must retain unguarded dictionary values")
-        return object.__getattribute__(self, name)
+    __getattribute__ = _DictStateLookup.__getattribute__
 
 
 class _ODictViewStateGetattr(_ODictViewOwner):
-    __getattr__ = _ODictViewStateLookup.__getattribute__
+    __getattr__ = _DictStateLookup.__getattribute__
 
 
 @instantiate_parametrized_tests
@@ -1893,13 +1895,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
 
     @parametrize(
         "mapping_type",
-        [
-            dict,
-            PlainNamespaceDict,
-            GenericGetattrDict,
-            collections.OrderedDict,
-            collections.defaultdict,
-        ],
+        [dict, PlainNamespaceDict, GenericGetattrDict, OrderedDict, defaultdict],
     )
     @parametrize(
         "key,consumer_type",
@@ -1952,14 +1948,26 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         cfg = {"token": token}
         backing = ClassReducedDict(token)
         backing["loss"] = _MappingCallable(cfg)
-        unused = {"lock": threading.Lock(), "proxy": types.MappingProxyType(backing)}
+        orphan = DictionaryToken()
+        unused = {"lock": threading.Lock(), "token": orphan}
+        unused["self"] = unused
         backing.private = unused
         proxy = types.MappingProxyType(backing)
+        unused["proxy"] = proxy
         scope = {"cfg": cfg, "unused": unused, "get": proxy.get, "proxy": proxy}
-        saved = self._roundtrip_pruned(scope, [cfg, unused])
+        scope["alias"] = unused
+        scope["orphan"] = types.MappingProxyType({"consumer": TokenConsumer(orphan)})
+        # Registered globals outside the saved scopes are not pickle roots.
+        holder = ReducedHolder(2, {})
+        holder.cfg = unused
+        saved = self._roundtrip_pruned(scope, [cfg, unused], {"helper": holder})
         self.assertIs(saved["get"].__self__, saved["proxy"])
         self.assertIs(saved["get"]("loss").cfg, saved["cfg"])
-        self.assertIsInstance(saved["unused"]["lock"], _Missing)
+        self.assertIs(saved["unused"], saved["alias"])
+        self.assertIs(saved["unused"]["self"], saved["unused"])
+        self.assertIsInstance(saved["orphan"]["consumer"].token, DictionaryToken)
+        for name in ("lock", "token"):
+            self.assertIsInstance(saved["unused"][name], _Missing)
 
         def copy():
             consumer = TokenConsumer(token) if token_live else _MappingCallable(cfg)
@@ -2000,23 +2008,6 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertNotIn(id(mapping), pickler._pruned_dictionary_ids)
         self.assertIn(id(plain), pickler._pruned_dictionary_ids)
 
-    def test_pruned_dictionary_preserves_recursive_and_repeated_references(self):
-        token = DictionaryToken()
-        proxy = types.MappingProxyType({"consumer": TokenConsumer(token)})
-        value = {"bystander": threading.Lock(), "token": token}
-        value["self"] = value
-        helper = ReducedHolder(2, {})
-        helper.cfg = value
-        # A registered globals dict omitted from the saved scopes is not a pickle root.
-        scope = {"left": value, "right": value, "proxy": proxy}
-        saved = self._roundtrip_pruned(scope, [value], {"helper": helper})
-        left, right = saved["left"], saved["right"]
-        self.assertIsInstance(left["token"], _Missing)
-        self.assertIsInstance(saved["proxy"]["consumer"].token, DictionaryToken)
-        self.assertIs(left, right)
-        self.assertIs(left["self"], left)
-        self.assertIsInstance(left["bystander"], _Missing)
-
     def test_required_state_traversal_does_not_read_class_property(self):
         class Key:
             @property
@@ -2041,24 +2032,22 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         GuardsStatePickler(objects, {}, {}, {}, buf).dump(value)
         return load_guards_state(buf.getvalue())
 
-    @parametrize("mapping_type", [collections.OrderedDict, _ODictViewOwner])
-    @parametrize("ordered_view", [False, True])
+    @parametrize("owner_type", [OrderedDict, _ODictViewOwner])
+    @parametrize("ordered", [False, True])
     @parametrize("view_first", [False, True])
     @parametrize("empty", [False, True])
-    def test_dictionary_keys_roundtrip_preserves_owner(
-        self, mapping_type, ordered_view, view_first, empty
-    ):
-        owner = mapping_type() if empty else mapping_type(a=1, b=2)
+    def test_keys_view_owner_roundtrip(self, owner_type, ordered, view_first, empty):
+        owner = owner_type() if empty else owner_type(a=1, b=2)
         if not empty:
             owner.move_to_end("a")
         owner.slot = 7
-        view = collections.OrderedDict.keys(owner) if ordered_view else dict.keys(owner)
+        view = (OrderedDict if ordered else dict).keys(owner)
         owner.saved = view
         value = (view, owner, vars(owner)) if view_first else (owner, view, vars(owner))
         loaded = self._roundtrip_ordered_dict(value, owner, view, vars(owner))
         loaded_view, loaded_owner = loaded[:2] if view_first else (loaded[1], loaded[0])
         self.assertIs(type(loaded_view), type(view))
-        self.assertIs(type(loaded_owner), mapping_type)
+        self.assertIs(type(loaded_owner), owner_type)
         self.assertIs(gc.get_referents(loaded_view)[0], loaded_owner)
         self.assertIs(vars(loaded_owner), loaded[2])
         self.assertIs(loaded_owner.saved, loaded_view)
@@ -2561,7 +2550,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         # An unguarded symbolic LOCAL is a bystander: pickle_guards_state
         # registers it and it is pruned before the refusal is reached.
         s, x = env.create_unbacked_symint(), torch.randn(2)
-        graph = types.SimpleNamespace(
+        graph = _pruning_graph(
             guards=[],
             local_scope={"s": s, "x": x},
             global_scope={},
@@ -2640,7 +2629,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         def fn(a, cfg=[1, m.cfg]):  # noqa: B006
             return a
 
-        graph = types.SimpleNamespace(
+        graph = _pruning_graph(
             guards=[],
             local_scope={"m": m, "fn": fn},
             global_scope={},
@@ -2672,7 +2661,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         def fn(a, cfg=_Cfg(m.cfg)):
             return a
 
-        graph = types.SimpleNamespace(
+        graph = _pruning_graph(
             guards=[],
             local_scope={"m": m, "fn": fn},
             global_scope={},
@@ -2758,7 +2747,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             pass
 
         t = torch.randn(2)
-        graph = types.SimpleNamespace(
+        graph = _pruning_graph(
             guards=[],
             local_scope={
                 "dt": torch.float32,
@@ -2807,7 +2796,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
                 buf = io.BytesIO()
                 GuardsStatePickler({}, {}, {}, {}, buf).dump({"o": obj})
                 self.assertIsInstance(load_guards_state(buf.getvalue())["o"], _Missing)
-                graph = types.SimpleNamespace(
+                graph = _pruning_graph(
                     guards=[],
                     local_scope={"o": obj},
                     global_scope={},
@@ -3674,6 +3663,29 @@ class TestGuardSerialization(TestGuardSerializationBase):
         check(inputs, True)
         return check
 
+    @parametrize("annotation", [False, True])
+    def test_list_leaf_alias_in_saved_constructor(self, annotation):
+        def fn(x, items, holder):
+            return x + items[1] + holder.weight
+
+        token, holder = DictionaryToken(), DictionaryToken(weight=3)
+        consumer = TokenConsumer(token)
+        if not annotation:
+            holder.cb = consumer.__reduce_ex__
+        metadata = {"consumer": consumer, "token": token} if annotation else {}
+        with torch.fx.traceback.annotate(metadata):
+            self._test_serialization(
+                "CONSTANT_MATCH", fn, torch.ones(1), [token, 5], holder
+            )
+        graph = load_guards_state(self._cached_guards_state).output_graph
+        items = graph.local_scope["items"]
+        if annotation:
+            self.assertIs(graph.fx_annotation["token"], items[0])
+            consumer = graph.fx_annotation["consumer"]
+        else:
+            consumer = graph.local_scope["holder"].cb.__self__
+        self.assertIs(consumer.token, items[0])
+
     @parametrize("helper_type", [DictionaryToken, ReducedHolder, TokenConsumer])
     @parametrize("mapping_type", [dict, collections.defaultdict])
     def test_dictionary_snapshot_constructor_aliases(self, helper_type, mapping_type):
@@ -3701,7 +3713,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         saved = load_guards_state(self._cached_guards_state).output_graph
         loaded, opts = saved.local_scope["holder"], saved.local_scope["nested"]["opts"]
         self.assertIs(loaded.items[2].token, opts[1])
-        self.assertIs(saved.torch_function_mode_stack[0].consumer.token, opts[2])
+        self.assertIs(saved.torch_function_mode_stack[-1].consumer.token, opts[2])
         if helper_type is ReducedHolder:
             self.assertIsInstance(loaded.cfg["token"], DictionaryToken)
             self.assertIs(loaded.items[0].cfg["token"], loaded.cfg["token"])
@@ -3809,12 +3821,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
     @parametrize(
         "consumer_type",
-        [
-            _PayloadConsumer,
-            _PayloadNewConsumer,
-            _RegisteredPayloadConsumer,
-            _DynamicStateConsumer,
-        ],
+        [_PayloadConsumer, _NewConsumer, _RegisteredConsumer, _DynamicConsumer],
     )
     def test_custom_constructor_keeps_independently_guarded_arguments(
         self, consumer_type
@@ -3825,7 +3832,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         token = _PayloadToken(scale=3, payload=["required"])
         consumer = consumer_type(token)
         inputs = {"x": torch.ones(1), "consumer": consumer, "token": token}
-        reducers = {_RegisteredPayloadConsumer: lambda obj: (type(obj), (obj.token,))}
+        reducers = {_RegisteredConsumer: lambda obj: (type(obj), (obj.token,))}
         with mock.patch.dict(copyreg.dispatch_table, reducers):
             check = self._roundtrip_checks("CONSTANT_MATCH", fn, inputs)
         token.scale += 1
@@ -3848,7 +3855,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         inputs = {"x": torch.ones(1), "holder": holder}
         kinds = ("TYPE_MATCH", "CONSTANT_MATCH", "TENSOR_MATCH")
         if root_type is _StateHolder:
-            # An arbitrary setter can inspect its child, as _DynamicStateConsumer does.
+            # An arbitrary setter can inspect its child, as _DynamicConsumer does.
             with self.assertRaisesRegex(PackageError, "cannot pickle.*lock"):
                 self._test_serialization(kinds, fn, *inputs.values())
             return
@@ -3980,7 +3987,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
             self._test_check_fn(*managers, {"x": x, "cls": cls}, expected)
 
     @parametrize("reordered", [False, True])
-    def test_native_ordered_dict_order(self, reordered):
+    @parametrize("mapping_type", [None, OrderedDict, _ODictSubclass])
+    def test_native_ordered_dict_order(self, reordered, mapping_type):
         def install_order_guard(ctx):
             from torch._dynamo.guards import GuardBuilder, install_guard
 
@@ -3990,16 +3998,21 @@ class TestGuardSerialization(TestGuardSerializationBase):
             install_guard(mapping.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
         def fn(x, mapping):
-            comptime(install_order_guard)
-            return x + len(mapping)
+            if mapping_type is None:
+                comptime(install_order_guard)
+                return x + len(mapping)
+            return x + sum(mapping.values())
 
-        mapping = collections.OrderedDict(a=1, b=2)
+        mapping = (mapping_type or OrderedDict)(a=1, b=2)
         if reordered:
             mapping.move_to_end("a")
         x = torch.ones(1)
         ref, loaded = self._test_serialization(
             "ORDERED_DICT_ORDER_MATCH", fn, x, mapping
         )
+        order = (1, 0) if reordered else (0, 1)
+        for manager in (ref, loaded):
+            self.assertIn(f"== {order!r}", str(manager))
         self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, True)
         mapping.move_to_end("b" if reordered else "a")
         self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, False)
@@ -5356,12 +5369,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
     @parametrize("iterate", [False, True])
     @parametrize(
         "mapping_type",
-        [
-            dict,
-            LockDict,
-            collections.OrderedDict,
-            functools.partial(collections.defaultdict, list),
-        ],
+        [dict, LockDict, OrderedDict, functools.partial(defaultdict, list)],
     )
     def test_dictionary_keys_prune_unused_values(self, as_view, iterate, mapping_type):
         def fn(x, cfg):
@@ -5987,25 +5995,6 @@ class TestGuardSerialization(TestGuardSerializationBase):
         check(fresh, True)
         fresh["module"]._forward_hooks.move_to_end(3)
         check(fresh, False)
-
-    @parametrize("reordered", [False, True])
-    @parametrize("mapping_type", [collections.OrderedDict, _ODictSubclass])
-    def test_ordered_dict_iteration_order(self, reordered, mapping_type):
-        def fn(x, mapping):
-            return x + sum(mapping.values())
-
-        x = torch.ones(2)
-        mapping = mapping_type(a=1, b=2)
-        if reordered:
-            mapping.move_to_end("a")
-        guard = "ORDERED_DICT_ORDER_MATCH"
-        ref, loaded = self._test_serialization(guard, fn, x, mapping)
-        order = (1, 0) if reordered else (0, 1)
-        self.assertIn(f"== {order!r}", str(ref))
-        self.assertIn(f"== {order!r}", str(loaded))
-        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, True)
-        mapping.move_to_end("b" if reordered else "a")
-        self._test_check_fn(ref, loaded, {"x": x, "mapping": mapping}, False)
 
     @parametrize("with_kwargs", [False, True])
     def test_forward_pre_hook_membership(self, with_kwargs):
@@ -6644,6 +6633,25 @@ class TestGuardSerialization(TestGuardSerializationBase):
         renamed = marked(min=2, max=8, shape_id="t")
         self._test_check_fn(ref, loaded, {"x": renamed}, False)
 
+        def refined_fn(x):
+            torch._check(x.shape[0] == 1)
+            return x + 1
+
+        def refined_marked(size, static_size=2):
+            t = torch.randn(size, static_size)
+            torch._dynamo.decorators.mark_unbacked(t, 0)
+            return t
+
+        # torch._check replaces the unbacked size with 1; the serialized
+        # TENSOR_MATCH must leave that dim unchecked, like the live guard,
+        # instead of requiring size 1.
+        x = refined_marked(1)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", refined_fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        # The runtime assertion, not either input guard, enforces the refinement.
+        self._test_check_fn(ref, loaded, {"x": refined_marked(2)}, True)
+        self._test_check_fn(ref, loaded, {"x": refined_marked(2, 3)}, False)
+
     def test_weak_and_strict_markings_round_trip(self):
         def fn(x):
             return x + 1
@@ -6874,13 +6882,12 @@ class TestGuardSerialization(TestGuardSerializationBase):
             dist.destroy_process_group()
             tmpfile.close()
 
-    @parametrize("view_cls", [dict, collections.OrderedDict])
+    @parametrize("view_cls", [dict, OrderedDict])
     @parametrize("empty", [False, True])
     @parametrize("walk", [False, True])
     @parametrize(
         "kind",
-        [collections.OrderedDict, _ODictSubclass]
-        + [_ODictViewStateLookup, _ODictViewStateGetattr],
+        [OrderedDict, _ODictSubclass, _ODictViewStateLookup, _ODictViewStateGetattr],
     )
     def test_ordered_owner_keys_input_serialization(self, view_cls, empty, walk, kind):
         preserve = kind is not collections.OrderedDict

@@ -28,7 +28,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     # importing _POOL_HANDLE at runtime toplevel causes an import cycle
-    from torch.cuda import _POOL_HANDLE, MemPool
+    from torch.cuda import _POOL_HANDLE, HostMemPool, MemPool
     from torch.utils._cuda_debug import _CUDAGraphInputLivenessTracker
     from torch.utils.hooks import RemovableHandle
 
@@ -70,6 +70,8 @@ def _get_pool_id(pool: _GraphPool | None) -> _POOL_HANDLE | None:
         return None
     if _is_mem_pool(pool):
         return typing.cast("_POOL_HANDLE", pool.id)
+    if isinstance(pool, torch.cuda.HostMemPool):
+        raise TypeError("A HostMemPool cannot be used as a graph capture pool")
     return typing.cast("_POOL_HANDLE", pool)
 
 
@@ -805,7 +807,11 @@ class CUDAGraph(_CUDAGraph):
         r"""Return opaque tokens for all memory pools retained by this graph."""
         return [torch.cuda._POOL_HANDLE(pool) for pool in super().pools()]
 
-    def _retain_pool(self, pool: _GraphPool) -> None:
+    def _retain_pool(self, pool: _GraphPool | HostMemPool) -> None:
+        # A HostMemPool cannot be a graph's pool, but a graph that routes to it
+        # during capture keeps it.
+        if isinstance(pool, torch.cuda.HostMemPool):
+            return super()._retain_pool(typing.cast("_POOL_HANDLE", pool.id))
         pool_id = _get_pool_id(pool)
         if pool_id is None:
             raise RuntimeError("CUDAGraph._retain_pool expected a memory pool")
