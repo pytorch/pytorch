@@ -82,7 +82,7 @@ from ._aot_autograd.descriptors import (
 )
 from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.graph_compile import is_opaque_node
-from ._aot_autograd.logging_utils import get_aot_graph_name
+from ._aot_autograd.logging_utils import get_aot_graph_name, NativeGradientInfo
 from ._aot_autograd.utils import (
     _is_bwd_seed_offset,
     _is_fwd_seed_offset,
@@ -176,7 +176,7 @@ class MinCutOptions:
 
 
 def must_recompute(node: fx.Node) -> bool:
-    return node.meta.get("recompute", None) in [
+    return node.op != "placeholder" and node.meta.get("recompute", None) in [
         CheckpointPolicy.MUST_RECOMPUTE,
         CheckpointPolicy.PREFER_RECOMPUTE,
     ]
@@ -2440,9 +2440,27 @@ def cleanup_recompute_tags(
     If there are two consecutive checkpointed blocks with no operator in
     between, we would still want to stash the tensor at the boundary of
     checkpointed blocks. The following pass makes the last output node
-    non-recomputable to allow for that.
+    non-recomputable to allow for that. It also saves the results of DTensor
+    random ops, which can't be replayed.
     """
     for node in joint_module.graph.nodes:
+        if node.target is torch._prims.rng_prims.run_dtensor_rng_op:
+            # A DTensor random op draws from the generator's current state, so
+            # rerunning it in the backward would draw different values, and
+            # functionalize_rng_ops doesn't wrap it (it has no
+            # nondeterministic_seeded tag). Save its results instead.
+            if node.meta.get("recompute") == CheckpointPolicy.MUST_RECOMPUTE:
+                raise RuntimeError(
+                    "Activation checkpointing does not support MUST_RECOMPUTE for "
+                    "a random op on a DTensor: recomputing it would draw a "
+                    "different result. Use PREFER_RECOMPUTE or MUST_SAVE for it."
+                )
+            # Both the op and its getitems: the default partitioner saves through
+            # the getitems (it skips tuple-valued nodes), and min-cut bans
+            # recomputing through the op (it ignores tags on getitems).
+            for n in (node, *node.users):
+                if must_recompute(n) and (n is node or n.target is operator.getitem):
+                    n.meta["recompute"] = CheckpointPolicy.MUST_SAVE
         if must_recompute(node):
             for user in node.users:
                 if (
@@ -4235,7 +4253,9 @@ def min_cut_rematerialization_partition(
             backward_dependencies.add(node)
             backward_dependency_stack.extend(node.all_input_nodes)
 
-        def partition_key(node: fx.Node) -> tuple[bool, fx.Node | None]:
+        native_info = joint_module.meta.get("native_gradient_info")
+
+        def partition_key(node: fx.Node) -> tuple[bool, fx.Node | None, int | None]:
             # Observable native mutations must retain their destination identity.
             native_mutation = (
                 node
@@ -4243,7 +4263,21 @@ def min_cut_rematerialization_partition(
                 and isinstance(node.meta.get("original_aten_mutation"), tuple)
                 else None
             )
-            return node in backward_dependencies, native_mutation
+            seq_nr = node.meta.get("seq_nr")
+            entry = (
+                native_info.nodes.get(seq_nr)
+                if isinstance(native_info, NativeGradientInfo)
+                and isinstance(seq_nr, int)
+                else None
+            )
+            names = node.meta.get("grad_fn_names", [])
+            # Absent-gradient pruning needs each native derivative's ownership.
+            native_gradient = (
+                seq_nr
+                if entry is not None and names and names[-1] == entry.name
+                else None
+            )
+            return node in backward_dependencies, native_mutation, native_gradient
 
         cse_graph = fx_graph_cse(fx_g, extra_node_key=partition_key)
         joint_module.graph = cse_graph

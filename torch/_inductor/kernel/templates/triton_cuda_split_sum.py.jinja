@@ -1,0 +1,32 @@
+{{def_kernel("X", *PARTIAL_NAMES)}}
+    for output in range(tl.program_id(0).to(tl.int64), M, tl.num_programs(0)):
+        value = tl.full((), 0, ACC_TYPE)
+        {% for leaf in LEAVES %}
+        {% set leaf_index = loop.index0 %}
+        inside = True
+        local_output = tl.full((), 0, tl.int64)
+        multiplier = 1
+        {% for d in range(RDIMS, SHAPE|length) %}
+        coordinate = (output // {{OSTRIDES[d]}}) % {{SHAPE[d]}}
+        inside = inside & (coordinate >= {{leaf[1][d]}}) & (coordinate < {{leaf[1][d] + leaf[0][d]}})
+        local_output = local_output + (coordinate - {{leaf[1][d]}}) * multiplier
+        multiplier = multiplier * {{leaf[0][d]}}
+        {% endfor %}
+        if inside:
+            source = X + {{leaf[7]}}
+            incoming = tl.full((), 0, ACC_TYPE)
+            {% for plan in leaf[5] %}
+            {% if loop.first %}if{% elif not loop.last %}elif{% else %}else:{% endif %}{% if not loop.last or loop.first %} source.to(tl.uint64) % {{plan[0] * ITEMSIZE}} == 0:{% endif %}
+                incoming = triton_helpers.cuda_native_sum(
+                    source, P{{leaf_index}}, local_output, 0, {{leaf[0]}}, ISTRIDES, OSTRIDES,
+                    RDIMS, {{leaf[3]}}, {{leaf[4]}}, {{plan[1]}}, {{plan[2]}}, {{plan[3]}}, {{plan[4]}},
+                    {{plan[5]}}, {{plan[6]}}, {{plan[7]}}, {{leaf[6]}}, True, True, {{plan[8]}})
+            {% endfor %}
+            {% if leaf[2] %}
+            value = value + incoming
+            {% else %}
+            value = incoming
+            {% endif %}
+        {% endfor %}
+        value = value[None]
+        {{store_output(("output",), "value", "True", indent_width=8, val_shape=("1",))}}

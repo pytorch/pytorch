@@ -5,6 +5,7 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/ScanKernel.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -38,7 +39,8 @@ static std::pair<uint32_t, uint32_t> get_2d_grid_dims(const IntArrayRef& shape, 
     }
   }
 
-  TORCH_CHECK(grid_y <= UINT32_MAX && grid_x <= UINT32_MAX, "Unable to safely factor shape for grid dimensions.");
+  TORCH_CHECK(std::in_range<uint32_t>(grid_y) && std::in_range<uint32_t>(grid_x),
+              "Unable to safely factor shape for grid dimensions.");
 
   if (grid_y > grid_x) {
     std::swap(grid_x, grid_y);
@@ -521,6 +523,11 @@ void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
   const auto axis_size = self.size(wrapped_dim);
   const auto n_scans = self.numel() / axis_size;
   const bool is_innermost = (wrapped_dim == ndim - 1);
+  // A size-1 dim can have any stride, which the outer kernels would take for the inner size.
+  if (axis_size == 1) {
+    output.copy_(self);
+    return;
+  }
 
   // Run a scan that writes a contiguous result shaped like `proto`, delivering it
   // into `output` (staging through a temporary when output isn't contiguous).
@@ -678,7 +685,7 @@ void scan_simple_mps_impl(const Tensor& self, const Tensor& output, int64_t dim,
         int thread_group_size = n_simdgroups * simd_size;
 
         auto tmp_grid_dims = get_2d_grid_dims(input_tensor.sizes(), wrapped_dim);
-        if (tmp_grid_dims.first * stride_blocks <= UINT_MAX) {
+        if (std::in_range<uint32_t>(tmp_grid_dims.first * stride_blocks)) {
           tmp_grid_dims.first *= stride_blocks;
         } else {
           tmp_grid_dims.second *= stride_blocks;
@@ -711,6 +718,11 @@ static void scan_with_indices_mps_impl(const Tensor& self,
   const int64_t ndim = self.dim();
   const int64_t wrapped_dim = maybe_wrap_dim(dim, ndim);
   const int64_t axis_size = self.size(wrapped_dim);
+  if (axis_size == 1) {
+    values_output.copy_(self);
+    indices_output.zero_();
+    return;
+  }
 
   // Preprocess input tensor - ensure it's contiguous for Metal shaders
   auto input_tensor = self.contiguous();
@@ -778,7 +790,7 @@ static void scan_with_indices_mps_impl(const Tensor& self,
         int thread_group_size = n_simdgroups * simd_size;
 
         auto tmp_grid_dims = get_2d_grid_dims(input_tensor.sizes(), wrapped_dim);
-        if (tmp_grid_dims.first * stride_blocks <= UINT_MAX) {
+        if (std::in_range<uint32_t>(tmp_grid_dims.first * stride_blocks)) {
           tmp_grid_dims.first *= stride_blocks;
         } else {
           tmp_grid_dims.second *= stride_blocks;

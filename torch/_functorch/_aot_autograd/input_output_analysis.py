@@ -142,6 +142,8 @@ def create_synthetic_base_metadata(
     inner_args: list[Any],
     inner_args_desc: list[AOTInput],
 ) -> tuple[ViewAndMutationMeta, list[int]]:
+    from .schemas import MutationType
+
     # maps inner arg indices to outer arg indices
     synthetic_base_to_indices: dict[int, list[int]] = {}
     for inner_idx in range(len(inner_args)):
@@ -160,7 +162,7 @@ def create_synthetic_base_metadata(
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
     # pyrefly: ignore [implicit-any]
     input_infos = []
-    for outer_indices in synthetic_base_to_indices.values():
+    for inner_idx, outer_indices in synthetic_base_to_indices.items():
         # leaf-ness should be all-or-nothing for aliased tensor.
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
@@ -212,7 +214,9 @@ def create_synthetic_base_metadata(
             ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
-            is_leaf=any_leaf,
+            is_leaf=inner_args[inner_idx].is_leaf
+            if isinstance(synthetic_base_info[outer_indices[0]], tuple)
+            else any_leaf,
             requires_grad=requires_grad,
             keep_input_mutations=m.keep_input_mutations,
         )
@@ -247,6 +251,7 @@ def create_synthetic_base_metadata(
     ]
     existing_output_infos = []
     for o in m.output_info:
+        input_merged = False
         if o.base_idx is None or o.output_type not in INPUT_ALIAS_TYPES:
             # base_idx is not an input index for these, so synthetic bases
             # leave it alone. See OutputAliasInfo.base_idx.
@@ -276,7 +281,9 @@ def create_synthetic_base_metadata(
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
-                view_meta_sequence=o.view_meta_sequence,
+                # The recorded sequence starts at the original input view.
+                # Reconstruct from target metadata when its base changes.
+                view_meta_sequence=None if input_merged else o.view_meta_sequence,
             )
         )
 
@@ -287,7 +294,9 @@ def create_synthetic_base_metadata(
             TangentAOTInput(InputMutationAOTOutput(x_desc)),
         )
         for inner_idx, (x, x_desc) in enumerate(zip(inner_args, inner_args_desc))
-        if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
+        if input_infos[inner_idx].mutation_type == MutationType.MUTATED_OUT_GRAPH
+        and input_infos[inner_idx].mutates_data
+        and input_infos[inner_idx].requires_grad
     ]
     inner_mutated_tangents = [
         x[0][0] for x in inner_mutated_tangents_and_memory_formats

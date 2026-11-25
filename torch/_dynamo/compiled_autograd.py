@@ -40,15 +40,10 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
     set_locals_to_steal,
 )
-from torch._functorch._aot_autograd.runtime_wrappers import (
-    AutogradLazyBackwardCompileInfo,
-    CachedAutogradLazyBackwardCompileInfo,
-)
 from torch._guards import compile_context, CompileContext, CompileId, Source
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
-from torch._subclasses import FakeTensorMode
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import (
@@ -68,6 +63,10 @@ from torch.utils._traceback import CapturedTraceback
 
 
 if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.runtime_wrappers import (
+        AutogradLazyBackwardCompileInfo,
+        CachedAutogradLazyBackwardCompileInfo,
+    )
     from torch._functorch._aot_autograd.schemas import SubclassMeta, ViewAndMutationMeta
     from torch.fx.proxy import Proxy
 
@@ -116,17 +115,28 @@ class _AOTCompiledFunction(Protocol):
     """
 
     _lazy_backward_info: (
-        AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None
+        "AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo | None"
     )
     metadata: "ViewAndMutationMeta"
     maybe_subclass_metadata: "SubclassMeta | None"
     _aot_id: int
     _bw_prologue_fn: Callable[..., Any]
     _bw_has_input_alias_validator: bool
+    _bw_nullable_graph: (
+        Callable[[Sequence[Any]], tuple[GraphModule | None, tuple[int, ...]]] | None
+    )
     _bw_epilogue_fn: Callable[..., Any]
+    _original_view_input_indices: tuple[int, ...]
+    _project_original_view_gradients: Callable[..., Any]
 
 
 def extract_bw_module(CompiledFunction: _AOTCompiledFunction) -> GraphModule:
+    # runtime_wrappers imports Dynamo, so defer this dependency until runtime.
+    from torch._functorch._aot_autograd.runtime_wrappers import (
+        AutogradLazyBackwardCompileInfo,
+        CachedAutogradLazyBackwardCompileInfo,
+    )
+
     if isinstance(
         CompiledFunction._lazy_backward_info, AutogradLazyBackwardCompileInfo
     ):
@@ -347,7 +357,7 @@ class AutogradCompilerInstance:
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Proxy | None = None
 
-    def wrap_fake(self, x: torch.Tensor, source: Source | None) -> FakeTensor:
+    def wrap_fake(self, x: torch.Tensor, source: Source | None) -> torch.Tensor:
         if not isinstance(x, torch.Tensor):
             raise AssertionError(f"Expected torch.Tensor, got {type(x)}")
         return self.fake_tensor_mode.from_tensor(x, source=source)
@@ -527,12 +537,36 @@ class AutogradCompilerInstance:
 
         # NOTE: we should only close over constants
         CompiledFunction: _AOTCompiledFunction = ctx._forward_cls  # type: ignore[attr-defined]
-        bw_module = extract_bw_module(CompiledFunction)
+        nullable_graph = CompiledFunction._bw_nullable_graph
+        bw_module = None
+        materialize = ()
+        if nullable_graph is not None:
+            with disable_proxy_modes_tracing():
+                bw_module, materialize = nullable_graph(pinputs)
+        if bw_module is None:
+            bw_module = extract_bw_module(CompiledFunction)
+        if materialize:
+            from torch._functorch._aot_autograd.runtime_wrappers import (
+                _materialize_output_cotangents,
+            )
+
+            materialized_inputs = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=_materialize_output_cotangents,
+                args=(pctx, list(pinputs), materialize),
+                kwargs={},
+            )
+            pinputs = tuple(materialized_inputs[i] for i in range(len(pinputs)))
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
         aot_id = CompiledFunction._aot_id
         bw_prologue_fn = CompiledFunction._bw_prologue_fn
         has_input_alias_validator = CompiledFunction._bw_has_input_alias_validator
+        input_projection_fn = (
+            CompiledFunction._project_original_view_gradients
+            if CompiledFunction._original_view_input_indices
+            else None
+        )
         bw_epilogue_fn = CompiledFunction._bw_epilogue_fn
         del CompiledFunction
 
@@ -729,6 +763,17 @@ class AutogradCompilerInstance:
             results = bw_epilogue_fn(outputs)
 
         presults = pytree.tree_map(self.to_proxy, results)
+        if input_projection_fn is not None:
+            projected = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=input_projection_fn,
+                args=(pctx, tuple(presults)),
+                kwargs={},
+            )
+            presults = [
+                None if result is None else projected[i]
+                for i, result in enumerate(presults)
+            ]
         return presults
 
     def proxy_call_backward(
