@@ -108,6 +108,22 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 
 
+def grid_split_factors(nodes: Iterable[BaseSchedulerNode]) -> OrderedSet[int | None]:
+    """Split-as-grid factors of the reductions in `nodes`; None marks a reduction
+    without one. See ir.Reduction.create_multilayer_split_as_grid."""
+    return OrderedSet(
+        n.node._grid_split_factor if isinstance(n.node, ir.ComputedBuffer) else None
+        for n in nodes
+        if n.is_reduction()
+    )
+
+
+def _has_grid_split(node: BaseSchedulerNode) -> bool:
+    return config.triton.split_reductions_as_grid and any(
+        split is not None for split in grid_split_factors(node.get_nodes())
+    )
+
+
 def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
     """Names of real reads/writes, excluding WeakDep (ordering-only deps that
     do not actually read or write the buffer)."""
@@ -470,6 +486,8 @@ class MixOrderReduction:
         Check whether we can fuse two reductions with mix loop orders.
         """
         if not config.triton.mix_order_reduction:
+            return False
+        if _has_grid_split(node1) or _has_grid_split(node2):
             return False
 
         # TODO: Mix order reduction is not supported with cpp_wrapper yet
@@ -2487,6 +2505,8 @@ class NestedReduction:
 
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        if _has_grid_split(node1) or _has_grid_split(node2):
+            return False
         return cls.plan(node1, node2) is not None
 
     @classmethod
@@ -11537,7 +11557,13 @@ class Scheduler:
         # Non-injective scatter: range vars absent from write index mean
         # multiple iterations hit the same location. Can't fuse the reader
         # in or it will see partially-written state between iterations.
-        if not OrderedSet(write.var_names) <= write.index.free_symbols:
+        # Compare against the writer's ranges, since trailing unused vars are
+        # dropped from write.var_names
+        writer = self.name_to_buf[weak_dep.mutating_buf].defining_op
+        if not isinstance(writer, SchedulerNode):
+            return False
+        iter_numel = sympy_product(writer.get_ranges()[0])
+        if not V.graph.sizevars.statically_known_equals(write.get_numel(), iter_numel):
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]

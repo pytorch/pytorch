@@ -46,7 +46,9 @@ inductor_fallback_ops: dict[str, dict[str, str | dict[str, list[str] | str]]] = 
     "aten._embedding_bag.default": {},
     "aten._fft_c2c.default": {},
     "aten._fft_r2c.default": {},
-    "aten._flash_attention_backward.default": {},
+    "aten._flash_attention_backward.default": {
+        "v2": {"new_args": ["grad_logsumexp"], "since": "TORCH_VERSION_2_16_0"}
+    },
     "aten._flash_attention_forward.default": {
         "v2": {
             "new_args": ["block_table", "num_splits"],
