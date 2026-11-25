@@ -1667,7 +1667,19 @@ class CUDAPluggableAllocator(_CUDAAllocator):
 def change_current_allocator(allocator: _CUDAAllocator) -> None:
     r"""Change the currently used memory allocator to be the one provided.
 
-    If the current allocator has already been used/initialized, this function will error.
+    It can be called at any time, including after the current allocator has been used:
+
+    - Memory stays with the allocator that made it. The caching allocator's memory is freed by
+      the caching allocator whichever allocator is current, but a
+      :class:`CUDAPluggableAllocator`'s memory is freed through the current pluggable
+      allocator, so it must not outlive a change away from it.
+    - Storages keep a pointer to the allocator that made them, so an allocator that has been
+      current must stay alive.
+    - While it is current, the new allocator receives every allocator call in the program.
+      After memory has been allocated, it should hand the calls it does not handle to the one
+      it replaces, which :func:`_get_current_allocator` returns (and which can be made current
+      again). Only the calls the program actually makes need handling; the others can stay
+      unsupported.
 
 
     Args:
@@ -1679,13 +1691,15 @@ def change_current_allocator(allocator: _CUDAAllocator) -> None:
 
 
 @contextlib.contextmanager
-def _graph_allocator(allocator: _CUDAAllocator | torch._C._cuda_CUDAAllocator):
+def _route_capture_allocations(
+    allocator: _CUDAAllocator | torch._C._cuda_CUDAAllocator,
+):
     r"""Make the current CUDA graph capture's tensor allocations from ``allocator`` (private).
 
     Use it inside the capture, on its capturing stream::
 
         with torch.cuda.graph(g):
-            with torch.cuda.memory._graph_allocator(allocator):
+            with torch.cuda.memory._route_capture_allocations(allocator):
                 fn()
 
     While it is open, the tensor allocations made through the CUDA caching allocator that it
@@ -1701,25 +1715,36 @@ def _graph_allocator(allocator: _CUDAAllocator | torch._C._cuda_CUDAAllocator):
     must not allocate CUDA memory through PyTorch, and ``free_fn(ptr, size, device, stream)`` as
     soon as the allocation dies, in order, during the capture or after it. The graph keeps using
     memory freed during the capture, so the allocator must not hand it out outside the graph
-    until the graph is destroyed. :meth:`~torch.Tensor.record_stream` on its memory during the
-    window goes to the allocator; after the window it is ignored. Its memory is not counted in
+    until the graph is destroyed. :meth:`~torch.Tensor.record_stream` on its memory while it is
+    open goes to the allocator; afterwards it is ignored. Its memory is not counted in
     the memory statistics or snapshots. ``_lazy_clone`` of its tensors is not supported.
+
+    While it is open, a routing allocator is made current with :func:`change_current_allocator` (and the
+    previous one again after it). Besides the capture's allocations, it hands the calls that
+    occur during a capture (raw allocations, MemPools, cross-device copies, statistics) to the
+    caching allocator; other allocator calls (e.g. memory snapshots or history) are not
+    supported while it is open.
 
     One at a time, and it requires the native caching allocator. No other CUDA graph capture may
     begin or end while it is open (e.g. conditional nodes, or captures on other threads).
     """
     if isinstance(allocator, _CUDAAllocator):
         allocator = allocator.allocator()
-    torch._C._cuda_beginGraphAllocatorWindow(allocator)
+    previous = _get_current_allocator()
+    routing = torch._C._cuda_armCaptureRouting(allocator)
     try:
-        yield
+        change_current_allocator(_CUDAAllocator(routing))
+        try:
+            yield
+        finally:
+            change_current_allocator(previous)
     finally:
-        other_capture = torch._C._cuda_endGraphAllocatorWindow()
+        other_capture = torch._C._cuda_disarmCaptureRouting()
     if other_capture:
         raise RuntimeError(
-            "another CUDA graph capture began or ended while a CUDA graph allocator "
-            "window was open (conditional nodes and concurrent captures are not "
-            "supported)"
+            "another CUDA graph capture began or ended while a CUDA graph capture's "
+            "allocations were routed (conditional nodes and concurrent captures are "
+            "not supported)"
         )
 
 
