@@ -322,7 +322,6 @@
   "test/inductor/test_auto_chunker.py",
   "test/inductor/test_autoheuristic.py",
   "test/inductor/test_autows_utils.py",
-  "test/inductor/test_b2b_gemm.py",
   "test/inductor/test_backward_symint_guards.py",
   "test/inductor/test_benchmark_fusion.py",
   "test/inductor/test_benchmarking.py",
