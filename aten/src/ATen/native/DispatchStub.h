@@ -199,9 +199,7 @@ struct TORCH_API DispatchStubImpl {
     void* hip_dispatch_ptr;
     void* mps_dispatch_ptr;
     void* mtia_dispatch_ptr;
-  #if defined(USE_XPU)
     void* xpu_dispatch_ptr;
-  #endif
     void* hpu_dispatch_ptr;
     void* privateuse1_dispatch_ptr;
   #else
@@ -210,9 +208,7 @@ struct TORCH_API DispatchStubImpl {
     void* hip_dispatch_ptr = nullptr;
     void* mps_dispatch_ptr = nullptr;
     void* mtia_dispatch_ptr = nullptr;
-  #if defined(USE_XPU)
     void* xpu_dispatch_ptr = nullptr;
-  #endif
     void* hpu_dispatch_ptr = nullptr;
     void* privateuse1_dispatch_ptr = nullptr;
   #endif
@@ -228,6 +224,18 @@ struct DispatchStub<rT (*)(Args...), T> {
 
 private:
   FnPtr get_call_ptr(const c10::DeviceType device_type) {
+    // NOTE [ DispatchStub CPU fast path ]
+    // CPU is the only device whose kernel is chosen dynamically (by CPU
+    // capability) and cached lazily in cpu_dispatch_ptr; every other device
+    // holds a plain pointer set at registration time. cpu_dispatch_ptr is a
+    // write-once cache: a non-null value is final and points at static code,
+    // so a relaxed load is sufficient. Null (first call) falls through to the
+    // out-of-line slow path, which computes, caches, and does all error checks.
+    if (device_type == c10::DeviceType::CPU) {
+      if (void* fptr = impl.cpu_dispatch_ptr.load(std::memory_order_relaxed)) {
+        return reinterpret_cast<FnPtr>(fptr);
+      }
+    }
     return reinterpret_cast<FnPtr>(
       impl.get_call_ptr(device_type
       , reinterpret_cast<void*>(DEFAULT)
@@ -262,11 +270,9 @@ public:
     impl.cuda_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
-  #if defined(USE_XPU)
   void set_xpu_dispatch_ptr(FnPtr fn_ptr){
     impl.xpu_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
-  #endif
 
   void set_hpu_dispatch_ptr(FnPtr fn_ptr) {
     impl.hpu_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);

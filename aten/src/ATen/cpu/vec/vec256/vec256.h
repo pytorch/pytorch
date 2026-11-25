@@ -107,7 +107,7 @@ std::
         const Vectorized<double>& src,
         const double* base_addr,
         const Vectorized<int64_t>& vindex,
-        Vectorized<double>& mask) {
+        const Vectorized<double>& mask) {
   return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, scale);
 }
 
@@ -117,7 +117,7 @@ std::
         const Vectorized<float>& src,
         const float* base_addr,
         const Vectorized<int32_t>& vindex,
-        Vectorized<float>& mask) {
+        const Vectorized<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
 }
 #endif

@@ -329,20 +329,13 @@ inline torch::stable::Tensor transpose(
 /// tensor method version (t.zero_()), this is called as a function: zero_(t).
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.9.
 ///
 /// @param self The tensor to fill with zeros.
 /// @return The input tensor, now filled with zeros.
 inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
-  const auto num_args = 1;
-  std::array<StableIValue, num_args> stack{torch::stable::detail::from(self)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::zero_", "", stack.data(), TORCH_ABI_VERSION));
-#else
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::zero_", "", stack.data()));
-#endif
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_zero_(self.get()));
+  return self;
 }
 
 /// Stable version of the copy_ op.
@@ -352,6 +345,7 @@ inline torch::stable::Tensor zero_(torch::stable::Tensor& self) {
 /// broadcastable.
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @param self The destination tensor (modified in-place).
 /// @param src The source tensor to copy from.
@@ -362,19 +356,9 @@ inline torch::stable::Tensor copy_(
     torch::stable::Tensor& self,
     const torch::stable::Tensor& src,
     std::optional<bool> non_blocking = std::nullopt) {
-  const auto num_args = 3;
-  std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(src),
-      torch::stable::detail::from(non_blocking.value_or(false))};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::copy_", "", stack.data(), TORCH_ABI_VERSION));
-#else
   STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::copy_", "", stack.data()));
-#endif
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+      aoti_torch_copy_(self.get(), src.get(), non_blocking.value_or(false)));
+  return self;
 }
 
 /// Stable version of the clone op.
@@ -383,24 +367,16 @@ inline torch::stable::Tensor copy_(
 /// and type as the input, but is stored in a new memory location.
 ///
 /// Minimum compatible version: PyTorch 2.9.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @note Optional memory_format kwarg support
 ///
 /// @param self The input tensor to clone.
 /// @return A new tensor with copied data.
 inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
-  const auto num_args = 2;
-  std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(std::nullopt)};
-#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::clone", "", stack.data(), TORCH_ABI_VERSION));
-#else
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      aoti_torch_call_dispatcher("aten::clone", "", stack.data()));
-#endif
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_clone(self.get(), &ret0));
+  return torch::stable::Tensor(ret0);
 }
 
 /// Stable version of the flatten.using_ints op.
@@ -632,6 +608,117 @@ inline torch::stable::Tensor empty(
   STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
       "aten::empty", "memory_format", stack.data(), TORCH_ABI_VERSION));
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the empty_strided op.
+///
+/// Creates an uninitialized tensor with the specified sizes and strides.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param size The size of each dimension of the output tensor.
+/// @param stride The stride of each dimension, in elements.
+/// @param dtype Optional scalar type for the tensor elements.
+/// @param layout Optional memory layout, which must be strided for this op.
+/// @param device Optional device to place the tensor on.
+/// @param pin_memory Optional flag to allocate the CPU tensor in pinned memory.
+/// @return A new uninitialized tensor with the specified properties.
+inline torch::stable::Tensor empty_strided(
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    torch::headeronly::IntHeaderOnlyArrayRef stride,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  int32_t dtype_val = dtype
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*dtype))
+      : 0;
+  int32_t layout_val = layout
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*layout))
+      : 0;
+  int32_t device_type = device
+      ? torch::stable::detail::to<int32_t>(
+            torch::stable::detail::from(device->type()))
+      : 0;
+  int32_t pin_memory_val = pin_memory.value_or(false);
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_empty_strided(
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      stride.data(),
+      static_cast<int64_t>(stride.size()),
+      dtype ? &dtype_val : nullptr,
+      layout ? &layout_val : nullptr,
+      device ? &device_type : nullptr,
+      device ? device->index() : 0,
+      pin_memory ? &pin_memory_val : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 6> stack{
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(stride),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::empty_strided", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the slice.Tensor op.
+///
+/// Returns a view of the input tensor sliced along the specified dimension.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @param dim The dimension to slice. Defaults to 0.
+/// @param start The inclusive start index. Defaults to the start of the
+/// dimension.
+/// @param end The exclusive end index. Defaults to the end of the dimension.
+/// @param step The positive step between elements. Defaults to 1.
+/// @return A sliced view of the input tensor.
+inline torch::stable::Tensor slice(
+    const torch::stable::Tensor& self,
+    int64_t dim = 0,
+    std::optional<int64_t> start = std::nullopt,
+    std::optional<int64_t> end = std::nullopt,
+    int64_t step = 1) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_slice_Tensor(
+      self.get(),
+      dim,
+      start ? &*start : nullptr,
+      end ? &*end : nullptr,
+      step,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 5> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(start),
+      torch::stable::detail::from(end),
+      torch::stable::detail::from(step)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::slice", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
 }
 
 /// Stable version of the reshape op.
@@ -935,6 +1022,7 @@ inline torch::stable::Tensor contiguous(
 /// a simpler overload that only takes dtype is available.
 ///
 /// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @param self The input tensor whose properties may be inherited if kwargs are
 ///             not provided.
@@ -951,17 +1039,29 @@ inline torch::stable::Tensor new_empty(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
-  const auto num_args = 6;
-  std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(size),
-      torch::stable::detail::from(dtype),
-      torch::stable::detail::from(layout),
-      torch::stable::detail::from(device),
-      torch::stable::detail::from(pin_memory)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::new_empty", "", stack.data(), TORCH_ABI_VERSION));
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  int32_t dtype_val = dtype
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*dtype))
+      : 0;
+  int32_t layout_val = layout
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*layout))
+      : 0;
+  int32_t device_type_val = device
+      ? torch::stable::detail::to<int32_t>(
+            torch::stable::detail::from(device->type()))
+      : 0;
+  int32_t pin_memory_val = pin_memory.value_or(false);
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_empty(
+      self.get(),
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      dtype ? &dtype_val : nullptr,
+      layout ? &layout_val : nullptr,
+      device ? &device_type_val : nullptr,
+      device ? device->index() : 0,
+      pin_memory ? &pin_memory_val : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
 }
 
 /// Stable version of the new_zeros op (2.10 version with full kwargs).
@@ -971,6 +1071,7 @@ inline torch::stable::Tensor new_empty(
 /// a simpler overload that only takes dtype is available.
 ///
 /// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.10.
 ///
 /// @param self The input tensor whose properties may be inherited if kwargs are
 ///             not provided.
@@ -987,17 +1088,29 @@ inline torch::stable::Tensor new_zeros(
     std::optional<torch::headeronly::Layout> layout = std::nullopt,
     std::optional<torch::stable::Device> device = std::nullopt,
     std::optional<bool> pin_memory = std::nullopt) {
-  const auto num_args = 6;
-  std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(size),
-      torch::stable::detail::from(dtype),
-      torch::stable::detail::from(layout),
-      torch::stable::detail::from(device),
-      torch::stable::detail::from(pin_memory)};
-  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::new_zeros", "", stack.data(), TORCH_ABI_VERSION));
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  int32_t dtype_val = dtype
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*dtype))
+      : 0;
+  int32_t layout_val = layout
+      ? torch::stable::detail::to<int32_t>(torch::stable::detail::from(*layout))
+      : 0;
+  int32_t device_type_val = device
+      ? torch::stable::detail::to<int32_t>(
+            torch::stable::detail::from(device->type()))
+      : 0;
+  int32_t pin_memory_val = pin_memory.value_or(false);
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_new_zeros(
+      self.get(),
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      dtype ? &dtype_val : nullptr,
+      layout ? &layout_val : nullptr,
+      device ? &device_type_val : nullptr,
+      device ? device->index() : 0,
+      pin_memory ? &pin_memory_val : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
 }
 
 /// Stable version of the sum.dim_IntList op.
@@ -1389,6 +1502,727 @@ inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> sort(
       torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
 }
 
+/// Stable version of the masked_select op.
+///
+/// Returns a 1-D tensor of the elements of self where mask is true.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param mask A boolean tensor broadcastable with self.
+/// @return A 1-D tensor of the selected elements.
+inline torch::stable::Tensor masked_select(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mask) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(mask)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::masked_select", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the mm.out op.
+///
+/// Computes the matrix product of the 2-D tensors self and mat2, storing the
+/// result in out.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 2-D input tensor.
+/// @param mat2 The second 2-D input tensor.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& mm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::mm", "out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the mm.dtype_out op.
+///
+/// Computes the matrix product of self and mat2 in out_dtype. This is a
+/// different overload than mm_out without the out_dtype argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 2-D input tensor.
+/// @param mat2 The second 2-D input tensor.
+/// @param out_dtype The dtype of the result.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& mm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2,
+    torch::headeronly::ScalarType out_dtype) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out_dtype),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::mm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the bmm.out op.
+///
+/// Computes the batch matrix product of the 3-D tensors self and mat2,
+/// storing the result in out.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 3-D input tensor of shape (b, n, m).
+/// @param mat2 The second 3-D input tensor of shape (b, m, p).
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& bmm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bmm", "out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the bmm.dtype_out op.
+///
+/// Computes the batch matrix product of self and mat2 in out_dtype. This is a
+/// different overload than bmm_out without the out_dtype argument.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param out The output tensor (modified in-place).
+/// @param self The first 3-D input tensor of shape (b, n, m).
+/// @param mat2 The second 3-D input tensor of shape (b, m, p).
+/// @param out_dtype The dtype of the result.
+/// @return Reference to the output tensor.
+inline torch::stable::Tensor& bmm_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& mat2,
+    torch::headeronly::ScalarType out_dtype) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(mat2),
+      torch::stable::detail::from(out_dtype),
+      torch::stable::detail::from(out)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::bmm", "dtype_out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+/// Stable version of the flip op.
+///
+/// Reverses the order of elements along the given dimensions and returns
+/// the result as a new tensor. Negative dimensions are wrapped.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param self The input tensor.
+/// @param dims The dimensions to flip.
+/// @return A new tensor with the given dimensions reversed.
+inline torch::stable::Tensor flip(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef dims) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dims)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::flip", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the from_file op.
+///
+/// Creates a CPU tensor backed by a memory-map of the file at filename.
+/// Unlike at::from_file, filename is a const std::string& rather than a
+/// std::string_view.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.15.
+///
+/// @param filename Path of the file to read.
+/// @param shared Optional flag to write tensor changes back to the file.
+/// @param size Optional number of elements to read from the file.
+/// @param dtype Optional scalar type for the tensor elements.
+/// @param layout Optional memory layout, which must be strided for this op.
+/// @param device Optional device, which must be CPU for this op.
+/// @param pin_memory Optional pinning flag, which must be false for this op.
+/// @return A new tensor holding the file contents.
+inline torch::stable::Tensor from_file(
+    const std::string& filename,
+    std::optional<bool> shared = std::nullopt,
+    std::optional<int64_t> size = 0,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  const auto num_args = 7;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(filename),
+      torch::stable::detail::from(shared),
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::from_file", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+/// Stable version of the roll op.
+///
+/// Shifts elements along the specified dimensions.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @param shifts The shifts to apply.
+/// @param dims The dimensions to roll. An empty list rolls the flattened
+/// tensor.
+/// @return The rolled tensor.
+inline torch::stable::Tensor roll(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef shifts,
+    torch::headeronly::IntHeaderOnlyArrayRef dims = {}) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_roll(
+      self.get(),
+      shifts.data(),
+      static_cast<int64_t>(shifts.size()),
+      dims.data(),
+      static_cast<int64_t>(dims.size()),
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 3> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(shifts),
+      torch::stable::detail::from(dims)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::roll", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the repeat_interleave.Tensor op.
+///
+/// Returns indices repeated according to the counts.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param repeats The repeat counts.
+/// @param output_size The optional total output size.
+/// @return The result tensor.
+inline torch::stable::Tensor repeat_interleave(
+    const torch::stable::Tensor& repeats,
+    std::optional<int64_t> output_size = std::nullopt) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_repeat_interleave_Tensor(
+      repeats.get(), output_size ? &*output_size : nullptr, &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 2> stack{
+      torch::stable::detail::from(repeats),
+      torch::stable::detail::from(output_size)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::repeat_interleave", "Tensor", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the repeat_interleave.self_Tensor op.
+///
+/// Repeats elements according to the supplied counts.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @param repeats The repeat counts.
+/// @param dim The optional dimension to repeat.
+/// @param output_size The optional output size along the repeated dimension.
+/// @return The result tensor.
+inline torch::stable::Tensor repeat_interleave(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& repeats,
+    std::optional<int64_t> dim = std::nullopt,
+    std::optional<int64_t> output_size = std::nullopt) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_repeat_interleave_self_Tensor(
+      self.get(),
+      repeats.get(),
+      dim ? &*dim : nullptr,
+      output_size ? &*output_size : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 4> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(repeats),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(output_size)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::repeat_interleave",
+      "self_Tensor",
+      stack.data(),
+      TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the repeat_interleave.self_int op.
+///
+/// Repeats each element along a dimension.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @param repeats The number of repeats per element.
+/// @param dim The dimension to repeat. Defaults to the flattened input.
+/// @param output_size The optional output size along the repeated dimension.
+/// @return The tensor with repeated elements.
+inline torch::stable::Tensor repeat_interleave(
+    const torch::stable::Tensor& self,
+    int64_t repeats,
+    std::optional<int64_t> dim = std::nullopt,
+    std::optional<int64_t> output_size = std::nullopt) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_repeat_interleave_self_int(
+      self.get(),
+      repeats,
+      dim ? &*dim : nullptr,
+      output_size ? &*output_size : nullptr,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 4> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(repeats),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(output_size)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::repeat_interleave", "self_int", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the equal op.
+///
+/// Checks whether two tensors have the same shape and elements.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @param other The tensor to compare with self.
+/// @return Whether the tensors are equal.
+inline bool equal(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  int32_t ret0 = 0;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_equal(self.get(), other.get(), &ret0));
+  return ret0 != 0;
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 2> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::equal", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<bool>(stack[0]);
+#endif
+}
+
+/// Stable version of the nonzero op.
+///
+/// Finds the indices of nonzero elements.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @return A tensor of nonzero indices.
+inline torch::stable::Tensor nonzero(const torch::stable::Tensor& self) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_nonzero(self.get(), &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 1> stack{torch::stable::detail::from(self)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::nonzero", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the expand op.
+///
+/// Returns a broadcasted view of the input tensor. Exposed as a free
+/// function, consistent with other stable tensor operations.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @param size The target sizes.
+/// @param implicit Whether the expansion is implicit. Defaults to false.
+/// @return The expanded view.
+inline torch::stable::Tensor expand(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    bool implicit = false) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_expand(
+      self.get(),
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      implicit,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 3> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(implicit)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::expand", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the all.dim op.
+///
+/// Tests whether all elements along a dimension evaluate to true.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @param dim The dimension to reduce.
+/// @param keepdim Whether to retain the reduced dimension.
+/// @return The result tensor.
+inline torch::stable::Tensor all(
+    const torch::stable::Tensor& self,
+    int64_t dim,
+    bool keepdim = false) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_all_dim(self.get(), dim, keepdim, &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 3> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(keepdim)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::all", "dim", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the all.dims op.
+///
+/// Tests whether all elements along the given dimensions evaluate to true.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @param dim The dimensions to reduce. Nullopt reduces every dimension.
+/// @param keepdim Whether to retain the reduced dimensions.
+/// @return The result tensor.
+inline torch::stable::Tensor all(
+    const torch::stable::Tensor& self,
+    std::optional<torch::headeronly::IntHeaderOnlyArrayRef> dim,
+    bool keepdim = false) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  const int64_t* dim_data = dim ? dim->data() : nullptr;
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_all_dims(
+      self.get(),
+      dim ? &dim_data : nullptr,
+      dim ? static_cast<int64_t>(dim->size()) : 0,
+      keepdim,
+      &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 3> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(keepdim)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::all", "dims", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the all op.
+///
+/// Tests whether all elements evaluate to true.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @return The scalar result tensor.
+inline torch::stable::Tensor all(const torch::stable::Tensor& self) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_all(self.get(), &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 1> stack{torch::stable::detail::from(self)};
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::all", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the median op.
+///
+/// Computes the median of all elements.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @return The result tensor.
+inline torch::stable::Tensor median(const torch::stable::Tensor& self) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_median(self.get(), &ret0));
+  return torch::stable::Tensor(ret0);
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 1> stack{torch::stable::detail::from(self)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::median", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+#endif
+}
+
+/// Stable version of the median.dim op.
+///
+/// Computes the median along a dimension.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @param self The input tensor.
+/// @param dim The dimension to reduce.
+/// @param keepdim Whether to retain the reduced dimension. Defaults to false.
+/// @return The median values and their indices.
+inline std::tuple<torch::stable::Tensor, torch::stable::Tensor> median(
+    const torch::stable::Tensor& self,
+    int64_t dim,
+    bool keepdim = false) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  AtenTensorHandle ret0 = nullptr;
+  AtenTensorHandle ret1 = nullptr;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_median_dim(self.get(), dim, keepdim, &ret0, &ret1));
+  return std::make_tuple(
+      torch::stable::Tensor(ret0), torch::stable::Tensor(ret1));
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 3> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(keepdim)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::median", "dim", stack.data(), TORCH_ABI_VERSION));
+  return std::make_tuple(
+      torch::stable::detail::to<torch::stable::Tensor>(stack[0]),
+      torch::stable::detail::to<torch::stable::Tensor>(stack[1]));
+#endif
+}
+
+/// Stable version of the index_fill_.int_Tensor op.
+///
+/// Fills indexed positions along a dimension in place.
+///
+/// Minimum compatible version: PyTorch 2.10.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note Targeting PyTorch 2.16 or later via TORCH_TARGET_VERSION reduces
+///       host-side call overhead by using a typed C shim. Targets from 2.10
+///       through 2.15 use boxed dispatch.
+///
+/// @note Following torch::stable::fill_, this wrapper returns the tensor
+///       handle by value. The ATen C++ API returns a mutable tensor reference.
+///
+/// @param self The tensor to modify.
+/// @param dim The dimension to index.
+/// @param index The indices to fill.
+/// @param value The zero-dimensional tensor containing the fill value.
+/// @return The modified input tensor.
+inline torch::stable::Tensor index_fill_(
+    const torch::stable::Tensor& self,
+    int64_t dim,
+    const torch::stable::Tensor& index,
+    const torch::stable::Tensor& value) {
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_index_fill__int_Tensor(
+      self.get(), dim, index.get(), value.get()));
+  return self;
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  std::array<StableIValue, 4> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(index),
+      torch::stable::detail::from(value)};
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::index_fill_", "int_Tensor", stack.data(), TORCH_ABI_VERSION));
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return self;
+#endif
+}
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+
+/// Stable version of the index_fill_.int_Scalar op.
+///
+/// Fills indexed positions along a dimension in place. The fill value is
+/// passed as a double. Use the tensor overload for complex values or
+/// integers that cannot be represented exactly as double.
+///
+/// Minimum compatible version: PyTorch 2.16.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @note The value parameter is typed as double
+///       API uses double for the Scalar parameter.
+///
+/// @note Following torch::stable::fill_, this wrapper returns the tensor
+///       handle by value. The ATen C++ API returns a mutable tensor reference.
+///
+/// @param self The tensor to modify.
+/// @param dim The dimension to index.
+/// @param index The indices to fill.
+/// @param value The real fill value.
+/// @return The modified input tensor.
+inline torch::stable::Tensor index_fill_(
+    const torch::stable::Tensor& self,
+    int64_t dim,
+    const torch::stable::Tensor& index,
+    double value) {
+  STABLE_TORCH_ERROR_CODE_CHECK(aoti_torch_aten_index_fill__int_Scalar(
+      self.get(), dim, index.get(), value));
+  return self;
+}
+
+/// Stable version of the add.Tensor op.
+///
+/// Adds the other tensor to self, scaled by alpha: self + alpha * other.
+/// Unlike at::add, alpha is a double rather than a Scalar. Adding two
+/// integral or boolean tensors is not supported.
+///
+/// Minimum compatible version: PyTorch 2.16.
+/// Build time minimum version: PyTorch 2.16.
+///
+/// @param self The input tensor.
+/// @param other The tensor to add.
+/// @param alpha The scaling factor for other. Defaults to 1.0.
+/// @return The result of self + alpha * other.
+inline torch::stable::Tensor add(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other,
+    double alpha = 1.0) {
+  AtenTensorHandle ret0;
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_add_Tensor(self.get(), other.get(), alpha, &ret0));
+  return torch::stable::Tensor(ret0);
+}
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
 HIDDEN_NAMESPACE_END(torch, stable)

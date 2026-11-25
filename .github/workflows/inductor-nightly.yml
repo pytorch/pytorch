@@ -45,11 +45,11 @@ jobs:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_timm", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_timm", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "linux.8xlarge.amx" },
-          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "linux.8xlarge.amx" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_huggingface", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_timm", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_timm", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 1, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
+          { config: "dynamic_cpu_max_autotune_inductor_amp_freezing_torchbench", shard: 2, num_shards: 2, runner: "mt-l-x86iamx-32-128" },
         ]}
       build-additional-packages: "vision audio torchao"
       python-version: "3.11"

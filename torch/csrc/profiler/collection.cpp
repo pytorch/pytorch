@@ -34,8 +34,21 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
+// A storage whose data was released with an error message set (e.g. a remat
+// placeholder or an overwritten cudagraph-tree output) throws on data pointer
+// access: use null.
+static const void* storageData(const at::Tensor& t) {
+  if (!t.has_storage()) {
+    return nullptr;
+  }
+  const auto& storage = t.storage();
+  return storage.unsafeGetStorageImpl()->throw_on_immutable_data_ptr()
+      ? nullptr
+      : storage.data();
+}
+
 RawTensorMetadataBase::RawTensorMetadataBase(const at::Tensor& t)
-    : data_{t.has_storage() ? t.storage().data() : nullptr},
+    : data_{storageData(t)},
       dtype_{t.scalar_type()},
       layout_{t.layout()},
       size_dim_{static_cast<uint32_t>(t.sizes().size())} {
@@ -70,9 +83,8 @@ TensorMetadata::TensorMetadata(
   SOFT_ASSERT(r.weak_self_.has_value());
 }
 
-OpArgData parseArgData(
-    const std::vector<op_input_t>& input_shapes,
-    const std::vector<op_input_t>& concreteInputs) {
+OpArgData parseArgData(const DecodedInputs& inputs) {
+  const auto& input_shapes = inputs.shapes;
   if (input_shapes.empty()) {
     return OpArgData{.hasData = false};
   }
@@ -82,7 +94,7 @@ OpArgData parseArgData(
   std::vector<std::vector<int64_t>> shapesForKinetoEvent(input_shapes.size());
 
   std::vector<std::string> dtypes(input_shapes.size());
-  std::vector<c10::IValue> concrete_inputs_list;
+  std::vector<c10::IValue> concrete_inputs_list(input_shapes.size());
 
   for (const auto& i : c10::irange(input_shapes.size())) {
     std::visit(
@@ -106,30 +118,20 @@ OpArgData parseArgData(
               strides[i] = std::move(stride);
               dtypes[i] = "TensorList";
             },
-            [&](const c10::IValue&) { dtypes[i] = "Scalar"; },
+            [&](const c10::IValue& val) {
+              concrete_inputs_list[i] = val;
+              dtypes[i] = "Scalar";
+            },
             [&](const auto&) {}),
         input_shapes[i]);
-  }
-
-  // If we recorded concrete inputs, then parse them
-  if (input_shapes.size() == concreteInputs.size() && !concreteInputs.empty()) {
-    concrete_inputs_list.resize(input_shapes.size());
-
-    for (const auto& i : c10::irange(input_shapes.size())) {
-      std::visit(
-          c10::overloaded(
-              [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
-              [&](const auto&) {}),
-          input_shapes[i]);
-      std::visit(
-          c10::overloaded(
-              [&](const c10::IValue& val) {
-                concrete_inputs_list[i] = val;
-                dtypes[i] = "ScalarList";
-              },
-              [&](const auto&) {}),
-          concreteInputs[i]);
-    }
+    std::visit(
+        c10::overloaded(
+            [&](const c10::IValue& val) {
+              concrete_inputs_list[i] = val;
+              dtypes[i] = "ScalarList";
+            },
+            [&](const auto&) {}),
+        inputs.concrete[i]);
   }
 
   return OpArgData{
@@ -144,37 +146,6 @@ OpArgData parseArgData(
 // ============================================================================
 // == PyTorch Ops =============================================================
 // ============================================================================
-
-namespace {
-struct TagToIOType {
-  InputOutputEncoder::Tag tag;
-  InputOutputEncoder::IOType io_type;
-};
-
-constexpr int tagCount = ((int)InputOutputEncoder::Tag::TERMINATOR) + 1;
-constexpr std::array<TagToIOType, tagCount> tag_map = {{
-    {InputOutputEncoder::Tag::Tensor, InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::UndefinedTensor,
-     InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::TensorListBegin,
-     InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::ScalarList,
-     InputOutputEncoder::IOType::ConcreteInputs},
-    {InputOutputEncoder::Tag::Scalar, InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::Other, InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::TERMINATOR, InputOutputEncoder::IOType::None},
-}};
-
-constexpr bool allTagsMapped(int idx = 0) {
-  return tag_map[idx].tag == InputOutputEncoder::Tag::TERMINATOR ||
-      ((idx == (int)tag_map[idx].tag) && allTagsMapped(idx + 1));
-}
-static_assert(allTagsMapped(), "tag_map is out of order");
-
-constexpr InputOutputEncoder::IOType tagToIOType(InputOutputEncoder::Tag tag) {
-  return tag_map[(int)tag].io_type;
-}
-} // namespace
 
 // ----------------------------
 // |  Input / Output encoder  |
@@ -197,8 +168,14 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       }
       tags_.emplace_back(Tag::TERMINATOR);
     } else if (isSupportedScalarList(value)) {
+      // Storing the elements lets the boxed list be freed when the op returns.
       tags_.emplace_back(Tag::ScalarList);
-      ivalues_.emplace_back(value);
+      scalar_list_types_.emplace_back(value.toList().elementType());
+      const auto elements = value.toListRef();
+      ivalues_.emplace_back(static_cast<int64_t>(elements.size()));
+      for (const auto& element : elements) {
+        ivalues_.emplace_back(element);
+      }
     } else {
       tags_.emplace_back(Tag::Other);
     }
@@ -236,32 +213,25 @@ bool InputOutputEncoder::isSupportedScalarList(
     return false;
   }
   auto list_ref = list_candidate.toListRef();
-  if (C10_UNLIKELY(list_ref.empty())) {
+  if (list_ref.empty()) [[unlikely]] {
     return true;
   }
-  if (C10_UNLIKELY(!list_ref[0].isScalar())) {
+  if (!list_ref[0].isScalar()) [[unlikely]] {
     return false;
   }
-  if (C10_UNLIKELY(list_ref.size() > SCALAR_LIST_LENGTH_LIMIT)) {
+  if (list_ref.size() > SCALAR_LIST_LENGTH_LIMIT) [[unlikely]] {
     return false;
   }
   return true;
 }
 
-// This function returns a lambda which is a custom-iterator-like getter.
-// Each invocation of the lambda returns input values for one op.
-//
-// io_type is used to filter the ivalues between 'Shapes' and 'Concrete Args'.
-// Shapes are used to represent the shapes of tensors. We save only the shapes
-//   of the tensors because tensors can be large.
-// Concrete args are separated to clarify that they are the actual values.
-auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
+auto InputOutputEncoder::getInputDecoder() {
   return [this,
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_strides_it = tensor_sizes_strides_.begin(),
           ivals_it = ivalues_.begin(),
-          io_type]() mutable {
+          scalar_list_types_it = scalar_list_types_.begin()]() mutable {
     auto decode_tensor = [&]() -> TensorMetadata {
       std::vector<int64_t> sizes;
       std::vector<int64_t> strides;
@@ -294,20 +264,18 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
       return {raw_metadata, sizes, strides};
     };
 
-    std::vector<op_input_t> out;
-    auto push_value = [&out, io_type](const Tag& tag, op_input_t input) {
-      if (io_type == tagToIOType(tag)) {
-        out.emplace_back(std::move(input));
-      } else {
-        out.emplace_back(std::nullopt);
-      }
+    DecodedInputs out;
+    auto push_value = [&out](
+                          op_input_t shape_input, op_input_t concrete_input) {
+      out.shapes.emplace_back(std::move(shape_input));
+      out.concrete.emplace_back(std::move(concrete_input));
     };
 
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
       switch (*tag_it) {
         case Tag::Tensor:
-          push_value(*tag_it, decode_tensor());
+          push_value(decode_tensor(), std::nullopt);
           break;
 
         case Tag::TensorListBegin: {
@@ -322,20 +290,28 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
             arg.emplace_back(decode_tensor());
           }
           if (found_undefined) {
-            push_value(*tag_it, std::nullopt);
+            push_value(std::nullopt, std::nullopt);
           } else {
-            push_value(Tag::TensorListBegin, std::move(arg));
+            push_value(std::move(arg), std::nullopt);
           }
         } break;
 
-        case Tag::ScalarList:
+        case Tag::ScalarList: {
+          c10::impl::GenericList list(*scalar_list_types_it++);
+          const auto n = (*ivals_it++).toInt();
+          for ([[maybe_unused]] const auto _ : c10::irange(n)) {
+            list.push_back(*ivals_it++);
+          }
+          push_value(std::nullopt, c10::IValue(list));
+        } break;
+
         case Tag::Scalar:
-          push_value(*tag_it, *ivals_it++);
+          push_value(*ivals_it++, std::nullopt);
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          push_value(*tag_it, std::nullopt);
+          push_value(std::nullopt, std::nullopt);
           break;
 
         case Tag::TERMINATOR:
@@ -352,19 +328,12 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
   };
 }
 
-auto InputOutputEncoder::getInputShapeGenerator() {
-  return getIValueGenerator(IOType::Shapes);
-}
-
-auto InputOutputEncoder::getConcreteInputGenerator() {
-  return getIValueGenerator(IOType::ConcreteInputs);
-}
-
 void InputOutputEncoder::clear() {
   tags_.clear();
   tensor_metadata_.clear();
   tensor_sizes_strides_.clear();
   ivalues_.clear();
+  scalar_list_types_.clear();
 }
 
 // ---------------------------------------------------
@@ -472,10 +441,6 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
   }
 
   event->start_time_ = c10::getApproximateTime();
-  event->allow_tf32_cublas_ =
-      at::globalContext().float32Precision(
-          at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
-      at::Float32Precision::TF32;
   if (!config_.experimental_config.performance_events.empty()) {
     const size_t n = config_.experimental_config.performance_events.size();
     event->counters_ = std::make_unique<perf_counters_t>(n, 0);
@@ -548,8 +513,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     }
   }
 
-  auto input_shape_getter = inputs_outputs_.getInputShapeGenerator();
-  auto concrete_input_getter = inputs_outputs_.getConcreteInputGenerator();
+  auto input_decoder = inputs_outputs_.getInputDecoder();
 
   auto jit_stack = StealOrDefault(jit_stack_);
   auto jit_module = StealOrDefault(jit_modules_);
@@ -563,15 +527,14 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         std::move(event->basic_fields_),
         ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(event),
         time_converter(event->end_time_),
-        input_shape_getter(),
-        concrete_input_getter(),
+        input_decoder(),
         jit_stack(),
         jit_module(),
         extra_args(),
         collective_meta(),
         kwinputs(),
         gpu_fallback(),
-        event->allow_tf32_cublas_,
+        allow_tf32_cublas_,
         std::move(event->counters_)};
 
     out.emplace_back(Result::create(
@@ -687,7 +650,7 @@ std::string Result::name() const {
 std::string Result::overload_name() const {
   return visit(c10::overloaded(
       ATTRIBUTE(TorchOp, std::string(e.overload_name_)),
-      [](const auto& e) -> std::string { return ""; }));
+      [](const auto& /*e*/) -> std::string { return ""; }));
 }
 
 libkineto::ActivityType Result::kinetoType() const {
@@ -775,6 +738,8 @@ RecordQueue::RecordQueue(
     }
   }
 }
+
+RecordQueue::~RecordQueue() = default;
 
 bool RecordQueue::tracePython() const {
   return config_.with_stack && activities_.contains(ActivityType::CPU);
@@ -1068,11 +1033,10 @@ void passEventsToKineto(
   // Generate Kineto events for each event recorded by the PyTorch profiler.
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
-    // Here we are essentially setting the duration to -1 if the event never
-    // ends. This way Kineto will extend the event to the end of the trace. This
-    // is useful so that we can still have 0 duration events if necessary
-    // without extension
-    int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_ - 1);
+    // Only genuinely unfinished events use the negative-duration sentinel.
+    const int64_t act_end_time = std::max(
+        std::min(e->endTimeNS(), static_cast<int64_t>(end_time_ns)),
+        e->start_time_ns_ - 1);
     std::string name = e->name();
     if (!e->overload_name().empty()) {
       name = fmt::format("{}.{}", e->name(), e->overload_name());
@@ -1155,16 +1119,6 @@ class TransferEvents {
   }
 
  private:
-  static long long extractIndex(const std::string& metadata_json) {
-    static const auto prefix = fmt::format("\"{}\": ", indexKey);
-    auto pos = metadata_json.find(prefix);
-    return (pos == std::string::npos) ? unmatchedIndex : [&]() {
-      auto end = metadata_json.find(',', pos);
-      end = (end == std::string::npos) ? metadata_json.size() : end;
-      return std::stoll(metadata_json.substr(pos + prefix.size(), end));
-    }();
-  }
-
   std::shared_ptr<Result> lookup(const itrace_t* key) {
     if (key == nullptr) {
       return nullptr;
@@ -1176,10 +1130,10 @@ class TransferEvents {
       return it->second;
     }
 
-    // Then fallback to the encoded metadata.
-    const auto index = extractIndex(key ? key->metadataJson() : "");
-    if (index != unmatchedIndex) {
-      auto out = results_.get().at(index);
+    // Then fallback to the event index metadata.
+    const auto index_str = key->getMetadataValue(indexKey);
+    if (!index_str.empty()) {
+      auto out = results_.get().at(std::stoll(index_str));
       kineto_events_[key] = out;
       return out;
     }
@@ -1426,7 +1380,6 @@ class TransferEvents {
     }
   }
 
-  static constexpr long long unmatchedIndex = -1;
   static constexpr auto noTID = std::numeric_limits<uint64_t>::max();
   std::reference_wrapper<std::vector<std::shared_ptr<Result>>> results_;
   std::reference_wrapper<const ProfilerConfig> config_;
@@ -1540,12 +1493,22 @@ void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
       return;
     }
 
+    // A Python frame can end before a TorchOp it contains that never ended,
+    // e.g. when the Python tracer stops mid-session. Leave such an op
+    // unfinished so it gets the session end, as in the exported trace, instead
+    // of borrowing the frame's end.
+    const bool python_event =
+        event->tag() == EventType::PyCall || event->tag() == EventType::PyCCall;
     auto start_tid = event->start_tid_;
     auto frame = stacks.at(start_tid);
 
     while (frame.get() != event.get()) {
       TORCH_INTERNAL_ASSERT(frame != nullptr);
-      mark_finished(frame);
+      const auto* op = std::get_if<op_fields>(&frame->extra_fields_);
+      if (!python_event || !op ||
+          op->end_time_ns_ != std::numeric_limits<c10::time_t>::min()) {
+        mark_finished(frame);
+      }
       TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
       frame = frame->parent_.lock();
     }
@@ -1793,6 +1756,16 @@ RecordQueue::getRecords(
     out.insert(out.end(), ev.begin(), ev.end());
     python_tracer_.reset();
   }
+
+  // A worker thread can still start an event after a trace stopped early.
+  out.erase(
+      std::remove_if(
+          out.begin(),
+          out.end(),
+          [end_time_ns](const auto& r) {
+            return r->start_time_ns_ > static_cast<c10::time_t>(end_time_ns);
+          }),
+      out.end());
 
   if (config_.experimental_config.adjust_timestamps) {
     std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {

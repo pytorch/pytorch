@@ -60,12 +60,16 @@ set_bool(AT_HIPSPARSELT_ENABLED CAFFE2_USE_HIPSPARSELT)
 # target's HIP_ARCHITECTURES and the runtime check in Context.cpp are all
 # derived from this one list.
 #
-# gfx1200/gfx1201 (RDNA4, WMMA) is opt-in through USE_ROCM_CK_SDPA_GFX12 (OFF by
-# default): those arches are already in the ROCm wheel arch list, so building CK
-# SDPA for them would add code generation and compile cost to existing builds.
+# gfx1100/gfx1101/gfx1102/gfx1150/gfx1151 (RDNA3/RDNA3.5, WMMA) and gfx1200/gfx1201 (RDNA4, WMMA) are opt-in through
+# USE_ROCM_CK_SDPA_GFX11 and USE_ROCM_CK_SDPA_GFX12 (OFF by default): those arches
+# are already in the ROCm wheel arch list, so building CK SDPA for them would add
+# code generation and compile cost to existing builds.
 set(AT_ROCM_CK_SDPA_ARCHS "")
 if(USE_ROCM AND USE_ROCM_CK_SDPA AND USE_FLASH_ATTENTION)
   set(_ck_sdpa_candidate_archs gfx942 gfx950)
+  if(USE_ROCM_CK_SDPA_GFX11)
+    list(APPEND _ck_sdpa_candidate_archs gfx1100 gfx1101 gfx1102 gfx1150 gfx1151)
+  endif()
   if(USE_ROCM_CK_SDPA_GFX12)
     list(APPEND _ck_sdpa_candidate_archs gfx1200 gfx1201)
   endif()
@@ -79,6 +83,12 @@ endif()
 string(REPLACE ";" "," AT_ROCM_CK_SDPA_ARCHS_STR "${AT_ROCM_CK_SDPA_ARCHS}")
 # Alongside the other generated ATen headers (see cmake/Codegen.cmake).
 configure_file(ROCmCKSDPAConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKSDPAConfig.h" @ONLY)
+
+# CK GEMM allowlist (TORCH_CK_GEMM_ARCH_LIST, top-level CMakeLists.txt) surfaced
+# to Context.cpp and the ck_gemm .hip dispatch, so the runtime check stays in
+# step with the build arch filter (torch_filter_ck_gemm_arches).
+string(REPLACE ";" "," TORCH_CK_GEMM_ARCH_LIST_STR "${TORCH_CK_GEMM_ARCH_LIST}")
+configure_file(ROCmCKGEMMConfig.h.in "${CMAKE_BINARY_DIR}/aten/src/ATen/ROCmCKGEMMConfig.h" @ONLY)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
@@ -94,9 +104,7 @@ endif()
 file(GLOB_RECURSE ATen_CORE_HEADERS CONFIGURE_DEPENDS  "core/*.h")
 file(GLOB_RECURSE ATen_CORE_SRCS CONFIGURE_DEPENDS "core/*.cpp")
 file(GLOB_RECURSE ATen_TRANSFORMER_HEADERS CONFIGURE_DEPENDS "native/transformers/*.h")
-if(NOT BUILD_LITE_INTERPRETER)
-  file(GLOB_RECURSE ATen_CORE_TEST_SRCS CONFIGURE_DEPENDS "core/*_test.cpp")
-endif()
+file(GLOB_RECURSE ATen_CORE_TEST_SRCS CONFIGURE_DEPENDS "core/*_test.cpp")
 EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 
 file(GLOB base_h CONFIGURE_DEPENDS "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec128/*.h" "cpu/vec/vec128/zarch/*.h" "cpu/vec/vec256/*.h" "cpu/vec/vec256/vsx/*.h" "cpu/vec/sve/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h" "accelerator/*.h")
@@ -130,21 +138,14 @@ file(GLOB mkldnn_xpu_cpp CONFIGURE_DEPENDS "native/mkldnn/xpu/*.cpp" "native/mkl
 
 file(GLOB native_cpp CONFIGURE_DEPENDS "native/*.cpp")
 file(GLOB native_mkl_cpp CONFIGURE_DEPENDS "native/mkl/*.cpp")
-file(GLOB native_mkldnn_cpp CONFIGURE_DEPENDS "native/mkldnn/*.cpp")
+file(GLOB native_mkldnn_cpp CONFIGURE_DEPENDS "native/mkldnn/*.cpp" "native/mkldnn/detail/*.cpp")
 file(GLOB vulkan_cpp CONFIGURE_DEPENDS "vulkan/*.cpp")
-file(GLOB native_vulkan_cpp CONFIGURE_DEPENDS "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
 
 file(GLOB native_eigen_cpp CONFIGURE_DEPENDS "native/sparse/eigen/*.cpp")
 
 # Metal
 file(GLOB metal_h CONFIGURE_DEPENDS "metal/*.h")
 file(GLOB metal_cpp CONFIGURE_DEPENDS "metal/*.cpp")
-file(GLOB_RECURSE native_metal_h CONFIGURE_DEPENDS "native/metal/*.h")
-file(GLOB metal_test_srcs CONFIGURE_DEPENDS "native/metal/mpscnn/tests/*.mm")
-file(GLOB_RECURSE native_metal_srcs CONFIGURE_DEPENDS "native/metal/*.mm" "native/metal/*.cpp")
-EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
-file(GLOB metal_prepack_h CONFIGURE_DEPENDS "native/metal/MetalPrepackOpContext.h")
-file(GLOB metal_prepack_cpp CONFIGURE_DEPENDS "native/metal/MetalPrepackOpRegister.cpp")
 
 file(GLOB native_ao_sparse_cpp CONFIGURE_DEPENDS
             "native/ao_sparse/*.cpp"
@@ -217,6 +218,8 @@ file(GLOB flash_attention_cuda_kernels_cu CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR
 file(GLOB flash_attention_cuda_cpp CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
 file(GLOB native_flash_attn_api_cpp CONFIGURE_DEPENDS "native/transformers/cuda/flash_attn/flash_api.cpp")
 
+file(GLOB native_xpu_cpp CONFIGURE_DEPENDS "native/xpu/*.cpp")
+file(GLOB native_xpu_h CONFIGURE_DEPENDS "native/xpu/*.h")
 
 # flash_attention hip sources
 file(GLOB flash_attention_hip_hip CONFIGURE_DEPENDS "native/transformers/hip/flash_attn/*.hip")
@@ -228,7 +231,7 @@ if(USE_FLASH_ATTENTION)
     # is built for. Auto-disable when it is empty; otherwise the ck_sdpa target
     # ends up with an empty HIP_ARCHITECTURES and CMake errors out.
     if(USE_ROCM_CK_SDPA AND NOT AT_ROCM_CK_SDPA_ARCHS)
-      message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch CK SDPA is built for (gfx942/gfx950; gfx1200/gfx1201 with USE_ROCM_CK_SDPA_GFX12)")
+      message(STATUS "USE_ROCM_CK_SDPA disabled: PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}) has no arch CK SDPA is built for (gfx942/gfx950; gfx1100/gfx1101/gfx1102/gfx1150/gfx1151 with USE_ROCM_CK_SDPA_GFX11; gfx1200/gfx1201 with USE_ROCM_CK_SDPA_GFX12)")
       caffe2_update_option(USE_ROCM_CK_SDPA OFF)
     endif()
   endif()
@@ -280,9 +283,6 @@ if(USE_FLASH_ATTENTION)
     #  list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
     #endif()
 
-    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-early-inline-all=true)
-    list(APPEND CK_SDPA_EXTRA_HIPCC_FLAGS -mllvm=-amdgpu-function-calls=false)
-
     # Additional CK compiler flags
     set(CK_SDPA_EXTRA_HIPCC_OPTIONS
         CK_ENABLE_BF16
@@ -303,6 +303,11 @@ if(USE_FLASH_ATTENTION)
         CK_TILE_FMHA_FWD_APPENDKV_API=1
         CK_TILE_FMHA_FWD_PAGEDKV_API=1
         __GCC_HAVE_DWARF2_CFI_ASM=1
+        # Newer composable_kernel defaults ck_tile to its unified MMA framework,
+        # which needs a single GPU target at compile time (CK_CMAKE_GPU_TARGET_IDS)
+        # that a multi-arch build cannot give. Keep the WarpGemm path, which is
+        # what older CK uses by default.
+        USE_NEW_UNIFIED_FRAMEWORK=0
         USE_ROCM_CK_SDPA)
 
     message(STATUS "Generating CK kernel instances...")
@@ -530,22 +535,14 @@ append_filelist("jit_core_sources" ATen_CORE_SRCS)
 add_subdirectory(quantized)
 add_subdirectory(nnapi)
 
-if(BUILD_LITE_INTERPRETER)
-  set(all_cpu_cpp ${generated_sources} ${core_generated_sources} ${cpu_kernel_cpp})
-  append_filelist("jit_core_sources" all_cpu_cpp)
-  append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
-  append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
-  append_filelist("aten_native_xnnpack_source_list" all_cpu_cpp)
-else()
-  set(
-    all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
-    ${native_ao_sparse_cpp} ${native_sparse_cpp} ${native_nested_cpp}
-    ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
-    ${native_transformers_cpp}
-    ${native_utils_cpp} ${native_xnnpack} ${generated_sources} ${core_generated_sources}
-    ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
-  )
-endif()
+set(
+  all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
+  ${native_ao_sparse_cpp} ${native_sparse_cpp} ${native_nested_cpp}
+  ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
+  ${native_transformers_cpp}
+  ${native_utils_cpp} ${native_xnnpack} ${generated_sources} ${core_generated_sources}
+  ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
+)
 
 if(USE_LIGHTWEIGHT_DISPATCH)
   set(all_cpu_cpp ${all_cpu_cpp} ${generated_unboxing_sources})
@@ -559,17 +556,14 @@ endif()
 if(AT_MKLDNN_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkldnn_cpp})
 endif()
-if(USE_VULKAN)
-  set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp} ${native_vulkan_cpp} ${vulkan_generated_cpp})
-else()
-  set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp})
-endif()
+set(all_cpu_cpp ${all_cpu_cpp} ${vulkan_cpp})
 if(USE_EIGEN_SPARSE)
   set(all_cpu_cpp ${all_cpu_cpp} ${native_eigen_cpp})
 endif()
 
 if(USE_XPU)
   list(APPEND ATen_XPU_SRCS ${mkldnn_xpu_cpp})
+  list(APPEND ATen_XPU_SRCS ${native_xpu_cpp})
   list(APPEND ATen_XPU_SRCS ${native_transformers_xpu_cpp})
   list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
 
@@ -581,16 +575,7 @@ if(USE_XPU)
   list(APPEND ATen_XPU_DEPENDENCY_LIBS ${SYCL_LIBRARY})
 endif()
 
-# Metal
-if(USE_PYTORCH_METAL_EXPORT)
-  # Add files needed from exporting metal models(optimized_for_mobile)
-  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${metal_prepack_cpp})
-elseif(APPLE AND USE_PYTORCH_METAL)
-  # Compile Metal kernels
-  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
-else()
-  set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
-endif()
+set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
@@ -676,20 +661,24 @@ if(USE_ROCM)
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
   else()
-    # composable_kernel has no gfx1250 support yet, so its CK GEMM kernels fail to
-    # compile for that arch. Build CK GEMM as a separate library with gfx1250
-    # filtered out of HIP_ARCHITECTURES so every other requested arch still gets
-    # CK GEMM. Remove this filtering once the CK submodule supports gfx1250.
+    # composable_kernel supports CK GEMM only on an allowlist of gfx archs
+    # (torch_filter_ck_gemm_arches in cmake/public/utils.cmake; mirrors the
+    # allowlist in at::Context::ckGemmSupported()). Build CK GEMM as a separate
+    # library restricted to that subset via HIP_ARCHITECTURES so every other
+    # requested arch still builds. Dependencies.cmake turns USE_ROCM_CK_GEMM off
+    # when the subset is empty, so this branch always has at least one arch.
     exclude(ATen_HIP_SRCS "${ATen_HIP_SRCS}"
       ${native_hip_bgemm} ${native_hip_ck})
-    set(_ck_gemm_hip_arches ${PYTORCH_ROCM_ARCH})
-    list(REMOVE_ITEM _ck_gemm_hip_arches "gfx1250")
+    torch_filter_ck_gemm_arches(_ck_gemm_hip_arches)
     set_source_files_properties(${native_hip_bgemm} ${native_hip_ck} PROPERTIES LANGUAGE HIP)
     add_library(ck_gemm STATIC ${native_hip_bgemm} ${native_hip_ck})
     set_target_properties(ck_gemm PROPERTIES
       POSITION_INDEPENDENT_CODE ON
       HIP_ARCHITECTURES "${_ck_gemm_hip_arches}")
     target_compile_options(ck_gemm PRIVATE ${HIP_CXX_FLAGS})
+    # ck_tile_group_gemm.hip uses ck_tile: see USE_NEW_UNIFIED_FRAMEWORK in
+    # CK_SDPA_EXTRA_HIPCC_OPTIONS above.
+    target_compile_definitions(ck_gemm PRIVATE USE_NEW_UNIFIED_FRAMEWORK=0)
     target_include_directories(ck_gemm PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/hip
       ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include
@@ -790,11 +779,6 @@ if(NOT MSVC)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS m)
 endif()
 
-if(AT_NNPACK_ENABLED)
-  include_directories(${NNPACK_INCLUDE_DIRS})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS nnpack) # cpuinfo is added below
-endif()
-
 if(MKLDNN_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
@@ -804,7 +788,7 @@ if(USE_MKLDNN_ACL)
     list(APPEND ATen_CPU_DEPENDENCY_LIBS ${ACL_LIBRARIES})
 endif()
 
-if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
+if(NOT EMSCRIPTEN)
   if(NOT MSVC)
     # Bump up optimization level for sleef to -O1, since at -O0 the compiler
     # excessively spills intermediate vector registers to the stack
@@ -828,6 +812,12 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
     set(SLEEF_DISABLE_OPENMP ON CACHE BOOL "OpenMP only used by sleef DFT and tests, both disabled" FORCE)
     if(WIN32)
       set(SLEEF_BUILD_WITH_LIBM OFF CACHE BOOL "Don't build sleef with libm for Windows." FORCE)
+      # Turn off SLEEF SVE on Windows:
+      # - MSVC 14.51 (VS 2026) ships arm_sve.h, so SLEEF's SVE check passes
+      # - SLEEF has no MSVC flag that defines __ARM_FEATURE_SVE, so its SVE files fail to build
+      # - MSVC 14.44 (VS 2022) had no arm_sve.h, so SVE was already off
+      # - ATen builds no SVE kernels with MSVC, so nothing uses SLEEF SVE here
+      set(SLEEF_DISABLE_SVE ON CACHE BOOL "Disable SLEEF SVE on Windows" FORCE)
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
@@ -914,11 +904,9 @@ endif()
       list(APPEND ATen_HIP_DEPENDENCY_LIBS torch::magma)
     endif(USE_ROCM)
     if(MSVC)
-      if($ENV{TH_BINARY_BUILD})
-        # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
-        # in caffe2/CMakeLists.txt
-        list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
-      endif($ENV{TH_BINARY_BUILD})
+      # Do not do this on Linux: see Note [Extra MKL symbols for MAGMA in torch_cpu]
+      # in caffe2/CMakeLists.txt
+      list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
     endif(MSVC)
   endif(USE_MAGMA)
 
@@ -954,15 +942,26 @@ if(USE_MPS)
     if(CAN_COMPILE_METAL)
         foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
             cmake_path(GET SHADER STEM TGT_STEM)
-            string(CONCAT TGT_BASIC ${TGT_STEM} "_31.air")
+            string(CONCAT TGT_BASIC ${TGT_STEM} "_32.air")
             list(APPEND AIR_BASIC ${TGT_BASIC})
-            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.1")
+            metal_to_air(${SHADER} ${TGT_BASIC} "-std=metal3.2")
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
         list(APPEND METALLIB_DEPS kernels_basic.metallib)
         if(CAN_COMPILE_METAL_40)
+            # Shaders built for Metal 4.0 as well. BundledShaderLibrary resolves a
+            # kernel to kernels_40 when it defines it and to kernels_basic otherwise,
+            # so every kernel in these shaders runs the 4.0 build on MPP devices and
+            # every other kernel runs the 3.2 build. A shader must be listed when it
+            # has C10_METAL_HAS_MPP kernels (checked at build time below).
+            set(METAL_40_SHADERS Attention Cholesky Convolution GroupedMM LU Matmul Quantized ScaledMM TriangularSolve)
+            set(SHADER_STEMS)
             foreach(SHADER ${native_mps_metal} ${native_mps_sparse_metal})
                 cmake_path(GET SHADER STEM TGT_STEM)
+                list(APPEND SHADER_STEMS ${TGT_STEM})
+                if(NOT TGT_STEM IN_LIST METAL_40_SHADERS)
+                    continue()
+                endif()
                 string(CONCAT TGT_40 ${TGT_STEM} "_40.air")
                 list(APPEND AIR_40 ${TGT_40})
                 # MetalPerformancePrimitives switches the cooperative-tensor ABI on the
@@ -970,8 +969,32 @@ if(USE_MPS)
                 # MPP kernels assume the 26.2+ layout, so pin the target explicitly.
                 metal_to_air(${SHADER} ${TGT_40} "-std=metal4.0;-mmacos-version-min=26.2")
             endforeach()
+            foreach(TGT_STEM ${METAL_40_SHADERS})
+                if(NOT TGT_STEM IN_LIST SHADER_STEMS)
+                    message(FATAL_ERROR "METAL_40_SHADERS lists ${TGT_STEM}, but there is no ${TGT_STEM}.metal")
+                endif()
+            endforeach()
+            set(METAL_40_CHECK ${CMAKE_SOURCE_DIR}/cmake/CheckMetal40Shaders.cmake)
+            add_custom_command(
+                COMMAND ${CMAKE_COMMAND} "-DSHADERS=${native_mps_metal};${native_mps_sparse_metal}" "-DMETAL_40_SHADERS=${METAL_40_SHADERS}" -DSOURCE_DIR=${CMAKE_SOURCE_DIR} -DSTAMP=${CMAKE_CURRENT_BINARY_DIR}/metal_40_shaders.stamp -P ${METAL_40_CHECK}
+                DEPENDS ${native_mps_metal} ${native_mps_sparse_metal} ${METAL_HEADER_DEPS} ${METAL_40_CHECK}
+                OUTPUT metal_40_shaders.stamp
+                COMMENT "Checking METAL_40_SHADERS"
+                VERBATIM)
+            list(APPEND METALLIB_DEPS metal_40_shaders.stamp)
             air_to_metallib(kernels_40.metallib ${AIR_40})
             list(APPEND METALLIB_DEPS kernels_40.metallib)
+        endif()
+        if(CAN_COMPILE_METAL_41)
+            # Shaders with Metal 4.1 kernels (native fp8), which shadow the 4.0 ones on macOS 27+
+            set(METAL_41_SHADERS ScaledMM)
+            foreach(TGT_STEM ${METAL_41_SHADERS})
+                string(CONCAT TGT_41 ${TGT_STEM} "_41.air")
+                list(APPEND AIR_41 ${TGT_41})
+                metal_to_air(${CMAKE_CURRENT_SOURCE_DIR}/native/mps/kernels/${TGT_STEM}.metal ${TGT_41} "-std=metal4.1;-mmacos-version-min=27.0")
+            endforeach()
+            air_to_metallib(kernels_41.metallib ${AIR_41})
+            list(APPEND METALLIB_DEPS kernels_41.metallib)
         endif()
         add_custom_command(
                           COMMAND echo "// $$(date)" > metallib_dummy.cpp
@@ -1005,25 +1028,8 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
 set(INSTALL_HEADERS ${base_h} ${ATen_CORE_HEADERS} ${native_nested_h} ${ATen_TRANSFORMER_HEADERS})
-if(NOT INTERN_BUILD_MOBILE)
-  list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
-  # Metal
-  if(USE_PYTORCH_METAL_EXPORT)
-    # Add files needed from exporting metal models(optimized_for_mobile)
-    list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
-  elseif(APPLE AND USE_PYTORCH_METAL)
-    # Needed by Metal kernels
-    list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
-  else()
-    list(APPEND INSTALL_HEADERS ${metal_h})
-  endif()
-else()
-  if(IOS AND USE_PYTORCH_METAL)
-      list(APPEND INSTALL_HEADERS ${metal_h} ${native_metal_h})
-  else()
-      list(APPEND INSTALL_HEADERS ${metal_h} ${metal_prepack_h})
-  endif()
-endif()
+list(APPEND INSTALL_HEADERS ${native_h} ${native_cpu_h} ${native_ao_sparse_h} ${native_quantized_h} ${cuda_h} ${native_cuda_h} ${native_hip_h} ${cudnn_h} ${hip_h} ${xpu_h} ${native_xpu_h} ${mps_h} ${native_kleidiai_h} ${native_mps_h} ${native_utils_h} ${miopen_h})
+list(APPEND INSTALL_HEADERS ${metal_h})
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
 foreach(HEADER  ${INSTALL_HEADERS})
@@ -1058,18 +1064,9 @@ install(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
 
 if(ATEN_NO_TEST)
   message("disable test because ATEN_NO_TEST is set")
-elseif(BUILD_LITE_INTERPRETER)
-  message("disable aten test when BUILD_LITE_INTERPRETER is enabled")
 else()
   add_subdirectory(test)
 endif()
-
-list(APPEND ATen_MOBILE_BENCHMARK_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/tensor_add.cpp)
-list(APPEND ATen_MOBILE_BENCHMARK_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/quantize_per_channel.cpp)
-list(APPEND ATen_MOBILE_BENCHMARK_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/stateful_conv1d.cpp)
 
 # Pass source, includes, and libs to parent
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
@@ -1090,9 +1087,6 @@ set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_XPU_TEST_SRCS ${ATen_XPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CORE_TEST_SRCS ${ATen_CORE_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
-set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
-set(ATen_MOBILE_BENCHMARK_SRCS ${ATen_MOBILE_BENCHMARK_SRCS} PARENT_SCOPE)
-set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VEC_TEST_SRCS  ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_TEST_SRCS ${ATen_QUANTIZED_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS} PARENT_SCOPE)

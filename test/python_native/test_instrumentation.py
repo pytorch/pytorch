@@ -21,6 +21,7 @@ from torch._native.instrumentation import (
     instrument_helion_kernel,
     instrument_triton_kernel,
 )
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import run_tests, skipIfNoCuteDSL, TestCase
 from torch.testing._internal.logging_utils import log_settings, preserve_log_state
 
@@ -712,8 +713,9 @@ def _scan_for_missing_instrumentation(source, label):
 
     A compile site is any function carrying a DSL rule's ``jit_decorator`` or
     its ``combined_decorator``. A violation is such a site that isn't fully
-    instrumented (see :func:`_is_instrumented`). ``n_compile_sites`` lets
-    callers assert the scan saw something rather than passing vacuously.
+    instrumented (see :func:`_is_instrumented`).
+    ``n_compile_sites`` lets callers assert the scan saw something rather than
+    passing vacuously.
     """
     violations = []
     n_compile_sites = 0
@@ -743,6 +745,14 @@ _CACHE_DECORATORS = ("jit_cache", "instrumented_cutedsl_cache")
 # Paths are POSIX-normalized so Windows labels match. Keep one shared helper: the runtime
 # test covers only it, and another indicates factoring drift.
 _SHARED_COMPILE_HELPERS = (("cutedsl/launch.py", "compile_kernel"),)
+# The eager compile of user-defined CuTeDSL kernels, which jit_cache cannot cache: its
+# disk cache keys by qualified name and pickled arguments and loads tvm-ffi modules. The
+# launcher caches it and instruments it with cached_plan(op=...), which
+# test/inductor/test_cutedsl_kernels.py checks at runtime.
+_USER_KERNEL_COMPILE_SITES = (("cutedsl/user_kernel.py", "_compile"),)
+# Each names a module-level function: a method or nested function of that name is not
+# exempt.
+_APPROVED_COMPILE_SITES = _SHARED_COMPILE_HELPERS + _USER_KERNEL_COMPILE_SITES
 
 
 def _scan_for_raw_cute_compile(source, label):
@@ -765,6 +775,7 @@ def _scan_for_raw_cute_compile(source, label):
             cur = parent.get(cur)
         return None
 
+    module_functions = {n for n in tree.body if isinstance(n, ast.FunctionDef)}
     violations = []
     n_calls = 0
     for node in ast.walk(tree):
@@ -772,8 +783,8 @@ def _scan_for_raw_cute_compile(source, label):
             continue
         n_calls += 1
         fn = enclosing_function(node)
-        if fn is not None and any(
-            label.endswith(f) and fn.name == name for f, name in _SHARED_COMPILE_HELPERS
+        if fn in module_functions and any(
+            label.endswith(f) and fn.name == name for f, name in _APPROVED_COMPILE_SITES
         ):
             continue
         cached = fn is not None and any(
@@ -825,9 +836,11 @@ class TestInstrumentationCoverage(TestCase):
         checked = 0
         for path in self._native_files():
             with open(path) as f:
-                violations, n = _scan_for_missing_instrumentation(
-                    f.read(), os.path.relpath(path).replace(os.sep, "/")
-                )
+                source = f.read()
+            violations, n = _scan_for_missing_instrumentation(
+                source,
+                os.path.relpath(path).replace(os.sep, "/"),
+            )
             missing += violations
             checked += n
 
@@ -939,8 +952,19 @@ class TestInstrumentationCoverage(TestCase):
         win = f"torch\\_native\\{helper_file}".replace("/", "\\")
         v, _ = _scan_for_raw_cute_compile(src, win.replace("\\", "/"))
         self.assertEqual(v, [], "a normalized Windows path was wrongly flagged")
+        # An approved site names a module-level function: a method or a nested
+        # function of that name, such as a launcher class's _compile, is flagged.
+        ret = "return cute.compile(fn)\n"
+        for site_file, site_name in _APPROVED_COMPILE_SITES:
+            for src, flagged in (
+                (f"def {site_name}(fn):\n    {ret}", 0),
+                (f"class Launcher:\n    def {site_name}(self, fn):\n        {ret}", 1),
+                (f"def launch(fn):\n    def {site_name}():\n        {ret}", 1),
+            ):
+                v, n = _scan_for_raw_cute_compile(src, f"torch/_native/{site_file}")
+                self.assertEqual((n, len(v)), (1, flagged), src)
 
-    @unittest.skipUnless(_HAS_CUDA, "cutedsl compile coverage needs CUDA")
+    @unittest.skipUnless(_HAS_CUDA and SM90OrLater, "Hopper+ required")
     @skipIfNoCuteDSL
     def test_every_cute_compile_hits_instrumented_frame(self):
         # Runtime coverage finds an instrumentation frame regardless of op factoring; the

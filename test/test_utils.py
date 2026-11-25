@@ -2,6 +2,7 @@
 # Owner(s): ["module: unknown"]
 
 import importlib.util
+import json
 import multiprocessing
 import os
 import random
@@ -667,11 +668,16 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-from torch.utils.collect_env import get_pretty_env_info
+from torch.utils.collect_env import (
+    _decode_output,
+    get_intel_gpu_onboard,
+    get_pretty_env_info,
+    run,
+)
 
 
-@unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
 class TestCollectEnv(TestCase):
+    @unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count("\n") >= 17)
@@ -679,10 +685,227 @@ class TestCollectEnv(TestCase):
         self.assertIn("HIP used to build PyTorch:", info_output)
         self.assertNotIn("ROCM used to build PyTorch:", info_output)
 
+    def test_decode_output_prefers_platform_encoding(self):
+        # These GBK bytes are also valid UTF-8, so trying UTF-8 first would
+        # silently mis-decode output that the platform encoding decodes correctly.
+        raw = "专业".encode("gbk")
+        self.assertNotEqual(raw.decode("utf-8"), "专业")
+        self.assertEqual(_decode_output(raw, "cp936"), "专业")
+
+    def test_decode_output_replaces_undecodable_bytes(self):
+        self.assertEqual(_decode_output(b"\x81\xff name", "cp936"), "�� name")
+
+    # Issue 203948: powershell.exe can write UTF-8 while the OEM code page is a
+    # multi-byte one, which used to raise UnicodeDecodeError.
+    def test_run_falls_back_to_utf8(self):
+        caption = "Microsoft Windows 11 专业版"
+        with self.assertRaises(UnicodeDecodeError):
+            caption.encode().decode("cp936")
+        proc = mock.Mock(returncode=0)
+        proc.communicate.return_value = (caption.encode(), b"")
+        with (
+            mock.patch("torch.utils.collect_env.subprocess.Popen", return_value=proc),
+            mock.patch("torch.utils.collect_env.get_platform", return_value="linux"),
+            mock.patch("locale.getpreferredencoding", return_value="cp936"),
+        ):
+            self.assertEqual(run("cmd"), (0, caption, ""))
+
+    def _run_intel_gpu_onboard(self, discovery):
+        run_lambda = unittest.mock.Mock(return_value=(0, json.dumps(discovery), ""))
+        with unittest.mock.patch(
+            "torch.utils.collect_env.get_platform", return_value="linux"
+        ):
+            return get_intel_gpu_onboard(run_lambda)
+
+    def test_intel_gpu_onboard_without_device_name(self):
+        # xpu-smi 2.x lists GPUs hidden by ZE_AFFINITY_MASK without a
+        # device_name, describing them by device_state only (e.g.
+        # "survivability mode"); get_intel_gpu_onboard must report such
+        # entries by their state instead of raising KeyError. run_lambda is
+        # mocked, so no real XPU device is needed.
+        discovery = {
+            "device_list": [
+                {"device_id": 0, "device_name": "Intel(R) Arc(TM) Pro B60 Graphics"},
+                {"device_id": 1, "device_state": "survivability mode"},
+                {"device_id": 2},
+            ]
+        }
+        onboard = self._run_intel_gpu_onboard(discovery)
+        self.assertEqual(
+            onboard,
+            "* [0] Intel(R) Arc(TM) Pro B60 Graphics\n"
+            "* [1] survivability mode\n"
+            "* [2] N/A",
+        )
+
+    def test_intel_gpu_onboard_empty_device_list(self):
+        # An empty or missing device_list must fall back to "N/A" instead of
+        # producing an empty section or raising.
+        self.assertEqual(self._run_intel_gpu_onboard({"device_list": []}), "N/A")
+        self.assertEqual(self._run_intel_gpu_onboard({}), "N/A")
+
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
+
+    @unittest.skipIf(IS_WINDOWS, "Creating symlinks may require privileges on Windows")
+    def test_canonicalize_hip_source(self):
+        # `_canonicalize_hip_source` must leave a source that already lives under
+        # the build dir untouched (return its abspath), so a source symlinked
+        # *into* the build dir keeps its generated .hip under the build dir. A
+        # source outside the build dir must be realpath-resolved so the Windows
+        # `subst` drive / symlinked-path spelling matches the form hipify records.
+        from torch.utils.cpp_extension import _canonicalize_hip_source
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_real = os.path.realpath(tmp)
+            build_dir = os.path.join(tmp_real, "build")
+            real_dir = os.path.join(tmp_real, "real")
+            os.makedirs(build_dir)
+            os.makedirs(real_dir)
+
+            # Source that resolves under the build dir (via a symlink into it) is
+            # returned as its in-build-dir abspath, not the symlink target.
+            real_source = os.path.join(real_dir, "kernel.cu")
+            with open(real_source, "w"):
+                pass
+            linked_source = os.path.join(build_dir, "kernel.cu")
+            os.symlink(real_source, linked_source)
+            self.assertEqual(
+                _canonicalize_hip_source(linked_source, build_dir),
+                os.path.abspath(linked_source),
+            )
+
+            # Source outside the build dir reached via a symlinked directory is
+            # realpath-resolved to its true location on Windows only; POSIX keeps
+            # the abspath so includes still resolve next to the symlink.
+            link_dir = os.path.join(tmp_real, "link")
+            os.symlink(real_dir, link_dir)
+            outside_source = os.path.join(link_dir, "kernel.cu")
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", True):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    real_source,
+                )
+            with unittest.mock.patch("torch.utils.cpp_extension.IS_WINDOWS", False):
+                self.assertEqual(
+                    _canonicalize_hip_source(outside_source, build_dir),
+                    os.path.abspath(outside_source),
+                )
+
+    def test_hipify_processes_relative_extra_files(self):
+        # A relative `extra_files` entry must still be hipified. Previously the
+        # normalization loop rebound a local variable but the preprocessing loop
+        # iterated the raw (relative) `extra_files`, so the relative spelling
+        # never matched the normalized `all_files` set and the source was
+        # silently skipped (never hipified).
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.realpath(tmp)
+            source_name = "kernel.cu"
+            with open(os.path.join(build_dir, source_name), "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void my_kernel() {}\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[source_name],  # relative entry
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(os.path.join(build_dir, source_name))
+            self.assertIn(key, result)
+            self.assertIsNotNone(
+                result[key].hipified_path,
+                "relative extra_files source was silently skipped by hipify",
+            )
+            self.assertTrue(result[key].hipified_path.endswith(".hip"))
+
+    def test_hipify_keeps_std_math_functions(self):
+        # hipify used to rewrite std::exp( and friends to the global namespace, a
+        # workaround for the hcc compiler. hip-clang resolves std:: math in device
+        # code, and the rewrite also hit host code and string literals.
+        from torch.utils.hipify import hipify_python
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build_dir = os.path.realpath(tmp)
+            source_name = "kernel.cu"
+            with open(os.path.join(build_dir, source_name), "w") as f:
+                f.write(
+                    "#include <cuda_runtime.h>\n"
+                    "__global__ void k(float* x) { x[0] = std::exp(x[0]) + std::pow(x[1], 2); }\n"
+                    "void launch() { cudaDeviceSynchronize(); }\n"
+                )
+
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                includes=[os.path.join(build_dir, "*")],
+                extra_files=[source_name],
+                hipify_extra_files_only=True,
+                is_pytorch_extension=True,
+            )
+
+            key = os.path.abspath(os.path.join(build_dir, source_name))
+            with open(result[key].hipified_path) as f:
+                hipified = f.read()
+            self.assertIn("std::exp(x[0]) + std::pow(x[1], 2)", hipified)
+            self.assertIn("hipDeviceSynchronize", hipified)
+
+    def test_hipify_extension_sources(self):
+        from torch.utils.hipify import hipify_python
+
+        with (
+            tempfile.TemporaryDirectory() as src_dir,
+            tempfile.TemporaryDirectory() as build_dir,
+        ):
+            include_dir = os.path.join(src_dir, "includes")
+            os.makedirs(include_dir)
+            with open(os.path.join(include_dir, "helper.cuh"), "w") as f:
+                f.write("#include <cuda_runtime.h>\n")
+            source = os.path.join(src_dir, "kernel.cu")
+            with open(source, "w") as f:
+                f.write('#include <ATen/cuda/CUDAContext.h>\n#include "helper.cuh"\n')
+
+            # Mirrors the hipify call in torch.utils.cpp_extension._jit_compile.
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                header_include_dirs=[include_dir],
+                extra_files=[os.path.abspath(source)],
+                show_detailed=False,
+                show_progress=False,
+                is_pytorch_extension=True,
+            )
+
+            hipified = result[os.path.abspath(source)].hipified_path
+            self.assertEqual(hipified, os.path.join(src_dir, "kernel.hip"))
+            with open(hipified) as f:
+                out = f.read()
+            self.assertIn("ATen/hip/HIPContext.h", out)
+            self.assertIn('#include "helper_hip.cuh"', out)
+            self.assertTrue(os.path.exists(os.path.join(include_dir, "helper_hip.cuh")))
+
+    def test_hipify_rel_path_without_common_root(self):
+        from torch.utils.hipify import hipify_python
+
+        # Windows raises ValueError from relpath for paths on different drives.
+        path = os.path.abspath(os.path.join("cuda", "kernel.cu"))
+        with mock.patch.object(
+            hipify_python.os.path, "relpath", side_effect=ValueError
+        ):
+            base, rel = hipify_python._rel_path_for_hipify(path, "unused")
+        self.assertFalse(os.path.isabs(rel))
+        self.assertNotIn("\\", rel)
+        self.assertEqual(os.path.normpath(os.path.join(base, rel)), path)
 
 
 class TestHipifyTrie(TestCase):
@@ -769,21 +992,6 @@ class TestAssert(TestCase):
         with self.assertRaisesRegex(AssertionError, "bar"):
             torch._assert(torch.tensor([False], dtype=torch.bool), "bar")
 
-    def test_assert_scriptable(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                torch._assert(x.sum() > 0, "foo")
-                return x
-
-        m = M()
-        # scriptable
-        ms = torch.jit.script(m)
-        # data can be passed without errors
-        x = torch.randn(4, 4).fill_(1.0)
-        ms(x)
-        with self.assertRaisesRegex(torch.jit.Error, "foo"):
-            ms(torch.tensor([False], dtype=torch.bool))
-
 
 @unittest.skipIf(IS_SANDCASTLE, "cpp_extension is OSS only")
 class TestStandaloneCPPJIT(TestCase):
@@ -818,10 +1026,16 @@ class TestStandaloneCPPJIT(TestCase):
             )
 
             for shell in [True, False]:
+                # GPU init setenv()s ROCPROFILER_REGISTER_LIBRARY. os.environ
+                # never sees it, but this binary inherits it and aborts before
+                # main(). Rebuilding from os.environ drops it.
+                env = os.environ.copy()
+                env.pop("ROCPROFILER_REGISTER_LIBRARY", None)
                 r = subprocess.run(
                     [exec_path],
                     shell=shell,
                     stdout=subprocess.PIPE,
+                    env=env,
                 )
                 self.assertEqual(r.returncode, 0)
                 self.assertEqual(
@@ -963,7 +1177,7 @@ class TestDeviceUtils(TestCase):
             self.assertTrue(tree_all_only(torch.Tensor, is_meta_device, r))
 
 
-instantiate_device_type_tests(TestDeviceUtils, globals())
+instantiate_device_type_tests(TestDeviceUtils, globals(), allow_xpu=True)
 
 
 class TestTorchPathResolution(TestCase):
@@ -1049,6 +1263,16 @@ class TestCppExtensionUtils(TestCase):
         prefix = torch.utils.cmake_prefix_path
         config = os.path.join(prefix, "Torch", "TorchConfig.cmake")
         self.assertTrue(os.path.isfile(config), f"{config} does not exist")
+
+    def test_cmake_prefix_path_falls_back_when_get_file_path_raises(self):
+        # Build systems that do not ship the CMake package files have a
+        # get_file_path that raises for them, with an exception type of their
+        # choosing; torch.utils must still import.
+        expected = os.path.join(os.path.dirname(torch.__file__), "share", "cmake")
+        for exc in (OSError("not shipped"), ValueError("not packaged")):
+            with self.subTest(exc=type(exc).__name__):
+                with mock.patch.object(torch.utils, "_get_file_path", side_effect=exc):
+                    self.assertEqual(torch.utils._resolve_cmake_prefix_path(), expected)
 
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform("c++"))
@@ -1206,7 +1430,7 @@ class TestTraceback(TestCase):
     def test_symbolize_mode(self):
         script = "import torch; print(torch._C._get_symbolize_mode())"
         for disable_addr2line, expected in [
-            (None, "dladdr"),
+            (None, "fast"),
             ("0", "addr2line"),
             ("1", "dladdr"),
         ]:
@@ -1352,7 +1576,7 @@ class TestUtilsInternal(TestCase):
             torch._utils_internal.max_clock_rate.cache_clear()
 
     def test_max_clock_rate_uses_current_rocm_device(self):
-        properties = types.SimpleNamespace(gcnArchName="gfx90a:sramecc+")
+        properties = types.SimpleNamespace(clock_rate=1_700_000)
         torch._utils_internal.max_clock_rate.cache_clear()
         try:
             with (
