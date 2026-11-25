@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import functools
 import itertools
 from pprint import pformat
 from typing import NamedTuple
@@ -250,6 +251,78 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         dt_dim1 = dtensor.nansum(dim=1)
         self.assertEqual(dt_dim1.full_tensor(), tensor.nansum(dim=1))
         self.assertEqual(dt_dim1.placements, (Shard(0),))
+
+        # Pending Partial(sum) input is reduced first: nansum would drop a NaN
+        # held by one rank, but the reduced input is NaN there.
+        rows = torch.zeros(self.world_size, 2, device=self.device_type)
+        rows[0] = torch.tensor([float("nan"), 1.0])
+        rows[1] = torch.tensor([2.0, 3.0])
+        # Local value on rank r is rows[r]
+        partial = distribute_tensor(rows, device_mesh, [Shard(0)]).sum(0)
+        self.assertEqual(partial.placements, (Partial("sum"),))
+        self.assertEqual(partial.nansum().full_tensor(), partial.full_tensor().nansum())
+
+    @with_comms
+    @parametrize(
+        "op_str",
+        [
+            "sum",
+            "mean",
+            "amax",
+            "amin",
+            "nansum",
+            "std",
+            "var",
+            "logsumexp",
+            "norm",
+            "norm_inf",
+        ],
+    )
+    @parametrize("shard_dim", [0, 1])
+    def test_reduction_empty_dim(self, op_str, shard_dim):
+        device_mesh = self.build_device_mesh()
+        # 3 * world_size - 1 columns: uneven shards, none of them empty.
+        tensor = torch.randn(
+            2 * self.world_size, 3 * self.world_size - 1, device=self.device_type
+        )
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
+        if op_str.startswith("norm"):
+            norm_ord = float("inf") if op_str == "norm_inf" else 2
+            fn = functools.partial(torch.linalg.vector_norm, ord=norm_ord)
+        else:
+            fn = getattr(torch, op_str)
+
+        for keepdim in (True, False):
+            # Eager logsumexp(dim=[], keepdim=False) raises: amax reads the empty
+            # list as all dims but squeeze reads it as none, so the shapes mismatch.
+            # https://github.com/pytorch/pytorch/issues/206379
+            if op_str == "logsumexp" and not keepdim:
+                continue
+            out = fn(dtensor, dim=[], keepdim=keepdim)
+            self.assertFalse(any(p.is_shard() for p in out.placements))
+            self.assertEqual(out.full_tensor(), fn(tensor, dim=[], keepdim=keepdim))
+
+            # Eager var/std(dim=[]) backward is itself wrong (var_backward counts an
+            # empty dim list as one element), so there is no reference gradient:
+            # https://github.com/pytorch/pytorch/issues/206384
+            if op_str in ("std", "var"):
+                continue
+            ref = tensor.clone().requires_grad_()
+            fn(ref, dim=[], keepdim=keepdim).sum().backward()
+            grad_dt = dtensor.detach().requires_grad_()
+            fn(grad_dt, dim=[], keepdim=keepdim).sum().backward()
+            self.assertEqual(grad_dt.grad.full_tensor(), ref.grad)
+
+    @with_comms
+    def test_bool_reduction_empty_dim(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(2 * self.world_size, 3, device=self.device_type) > 0
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
+        # any/all read dim=[] as no reduction.
+        for op_str in ("any", "all"):
+            out = getattr(dtensor, op_str)(dim=[])
+            self.assertEqual(out.placements, (Shard(0),))
+            self.assertEqual(out.full_tensor(), getattr(tensor, op_str)(dim=[]))
 
     @with_comms
     def test_prims_amax_amin(self):
@@ -1133,6 +1206,42 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertEqual(out_0.placements[0].reduce_op, "sum")
 
     @with_comms
+    def test_inf_norm_of_pending_partial(self):
+        # inf/-inf norms reduce a pending Partial("max"/"min") input first: abs
+        # is not monotone, so norms of the local values can disagree with the
+        # norm of the reduced input. E.g. Partial("max") with local values
+        # [-9, 1] on rank 0 and [1, 2] on the other ranks: the input is [1, 2]
+        # and its inf-norm is 2, but max(norm([-9, 1]), norm([1, 2])) = 9.
+        device_mesh = self.build_device_mesh()
+        inf = float("inf")
+        rows = torch.tensor([[1.0, 2.0]], device=self.device_type).repeat(
+            self.world_size, 1
+        )
+        rows[0] = torch.tensor([-9.0, 1.0])
+        # Local value on rank r is rows[r]
+        partial_max = distribute_tensor(rows, device_mesh, [Shard(0)]).amax(0)
+        self.assertEqual(partial_max.placements, (Partial("max"),))
+        full_max = partial_max.full_tensor()
+        self.assertEqual(
+            torch.linalg.vector_norm(partial_max, inf).full_tensor(),
+            torch.linalg.vector_norm(full_max, inf),
+        )
+        self.assertEqual(
+            torch._foreach_norm([partial_max], inf)[0].full_tensor(),
+            torch._foreach_norm([full_max], inf)[0],
+        )
+
+        # Partial("min") of [-9, 4] and [1, 2]: the input is [-9, 2] and its
+        # -inf-norm is 2, but min(norm([-9, 4]), norm([1, 2])) = 1.
+        rows[0] = torch.tensor([-9.0, 4.0])
+        partial_min = distribute_tensor(rows, device_mesh, [Shard(0)]).amin(0)
+        self.assertEqual(partial_min.placements, (Partial("min"),))
+        self.assertEqual(
+            torch.linalg.vector_norm(partial_min, -inf).full_tensor(),
+            torch.linalg.vector_norm(partial_min.full_tensor(), -inf),
+        )
+
+    @with_comms
     def test_foreach_powsum_sharded(self):
         """Test that _foreach_powsum produces correct values and placements for sharded input."""
         device_mesh = self.build_device_mesh()
@@ -1727,7 +1836,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         )
 
     @with_comms
-    def test_matching_partial_reduction_ops(self):
+    def test_max_of_partial_max_reduces_input(self):
+        # max does not pass a pending Partial("max") through: NCCL's all_reduce
+        # MAX ignores NaN, so a NaN in one rank's local values would hide that
+        # rank's other values. The input is reduced first.
         mesh = self.build_device_mesh()
         rank = dist.get_rank()
 
@@ -1736,16 +1848,10 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         dt = DTensor.from_local(
             local_tensor, device_mesh=mesh, placements=[Partial("max")]
         )
-        out_without_redistribute = torch.max(dt)
+        out = torch.max(dt)
 
-        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
-        out_with_redistribute = torch.max(dt)
-
-        self.assertTrue(out_without_redistribute.placements[0].is_partial())
-        self.assertTrue(out_with_redistribute.placements[0].is_replicate())
-        self.assertEqual(
-            out_without_redistribute.full_tensor(), out_with_redistribute.full_tensor()
-        )
+        self.assertTrue(out.placements[0].is_replicate())
+        self.assertEqual(out.full_tensor(), torch.max(dt.full_tensor()))
 
     @skip_if_lt_x_gpu(4)
     @with_comms
@@ -2092,6 +2198,19 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         dt_B = distribute_tensor(B, device_mesh, [Partial()])
         expected = torch.linalg.solve(A, B)
         result = torch.linalg.solve(dt_A, dt_B)
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    def test_inter_area_uint8_partial(self):
+        if self.device_type != "cpu":
+            self.skipTest("inter-area is CPU only")
+        mesh = self.build_device_mesh()
+        local = torch.tensor([0, 1], dtype=torch.uint8, device=self.device_type)
+        local = local.reshape(1, 1, 1, 2).repeat(1, 5, 1, 1)
+        partial = DTensor.from_local(local, mesh, [Partial("sum")])
+
+        result = F.interpolate(partial, size=(1, 1), mode="inter-area")
+        expected = F.interpolate(partial.full_tensor(), size=(1, 1), mode="inter-area")
         self.assertEqual(result.full_tensor(), expected)
 
     @with_comms

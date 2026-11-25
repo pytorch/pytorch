@@ -98,7 +98,14 @@ from .static_triton_launcher import (
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
 )
-from .tiling import block_to_prefix, get_max_block
+from .tiling import (
+    block_to_prefix,
+    get_max_block,
+    get_max_block_prefix,
+    get_pointwise_prefixes,
+    get_yz_grid_extents,
+    get_z_prefixes,
+)
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -170,7 +177,7 @@ def _should_enable_triton_debug_asserts(inductor_meta: InductorMeta) -> bool:
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container, Generator, Hashable
+    from collections.abc import Callable, Container, Generator, Hashable, Sequence
 
     from torch._C._profiler import _RecordFunctionFast
     from torch._guards import CompileId
@@ -286,12 +293,17 @@ def _warn_host_tma_clone(name: str) -> None:
     )
 
 
-def _host_tma_aligned(tensor, name):
+def _host_tma_aligned(tensor, name, is_output=False):
     """Return a TMA_ALIGNMENT-aligned view of `tensor`, cloning (with a one-time
     warning) only if its base address is not aligned. Used by the host-side TMA
-    launcher to build TensorDescriptors from aligned storage."""
+    launcher to build TensorDescriptors from aligned storage. An output can't be
+    cloned, since the kernel's writes would land in the copy."""
     if tensor.data_ptr() % TMA_ALIGNMENT == 0:
         return tensor
+    if is_output:
+        raise RuntimeError(
+            f"host-side TMA: output {name} is not {TMA_ALIGNMENT}-byte aligned"
+        )
     _warn_host_tma_clone(name)
     return tensor.clone()
 
@@ -336,7 +348,6 @@ def autotune_hints_to_configs(
     Based on those hints, this function will generate a list of additional autotuning
     configs to try.
     """
-    xyz_options: tuple[tuple[int, int | None, int | None], ...]
     configs: list[Config] = []
     for hint in hints:
         if hint == AutotuneHint.ONE_ELEMENT_PER_THREAD:
@@ -347,16 +358,11 @@ def autotune_hints_to_configs(
                     device_props.type,
                 )
                 continue
-            if len(size_hints) == 1:
-                xyz_options = ((block_size // 4, None, None),)
-            elif len(size_hints) == 2:
-                xyz_options = ((block_size // 4, 1, None), (1, block_size // 4, None))
-            elif len(size_hints) == 3:
-                xyz_options = (
-                    (block_size // 4, 1, 1),
-                    (1, block_size // 4, 1),
-                    (1, 1, block_size // 4),
-                )
+            num_budgets = min(3, len(size_hints))
+            xyz_options = (
+                tuple(block_size // 4 if i == axis else 1 for i in range(num_budgets))
+                for axis in range(num_budgets)
+            )
             warp_size = device_props.warp_size_or_default
             configs.extend(
                 triton_config(
@@ -1483,7 +1489,7 @@ class CachingAutotuner(KernelInterface):
             all_constants = compile_meta["constants"]
             # The launchers build exactly these descriptors, with these dims, so
             # whether an arg is compiled as tensordesc<> is decided once, here.
-            resolved_descs: dict[str, dict[str, list[int | str]]] = {}
+            resolved_descs: dict[str, dict[str, Any]] = {}
             for key in list(compile_meta["signature"]):
                 desc_info = host_tma_args.get(key)
                 if desc_info is None or not isinstance(desc_info, dict):
@@ -1527,6 +1533,8 @@ class CachingAutotuner(KernelInterface):
                     "strides": stride_vals,
                     "launch_args": launch_args,
                 }
+                if desc_info.get("is_output"):
+                    resolved_descs[key]["is_output"] = True
             compile_meta["host_tma_descriptors"] = resolved_descs
 
         compile_meta["debug"] = _should_enable_triton_debug_asserts(self.inductor_meta)
@@ -2428,6 +2436,24 @@ class CachingAutotuner(KernelInterface):
         # Currently num_ctas is already captured via config_to_dict(launcher.config)
         # for scratch space scaling, but is not used in the actual kernel launch.
         binary_metadata = binary.metadata
+        triton_meta = self.triton_meta
+        compiled_signature = getattr(launcher, "signature", None)
+        if compiled_signature and triton_meta is not None:
+            # Host-side TMA operands are tensordesc<> in the compiled kernel;
+            # the C++ wrapper must launch them as descriptors.
+            signature = triton_meta.get("signature", {})
+            tma_rewrites = {
+                name: sig
+                for name, sig in compiled_signature.items()
+                if isinstance(sig, str)
+                and sig.startswith("tensordesc<")
+                and signature.get(name) != sig
+            }
+            if tma_rewrites:
+                triton_meta = {
+                    **triton_meta,
+                    "signature": {**signature, **tma_rewrites},
+                }
         legacy_tensordesc_meta = (
             binary_metadata.get("tensordesc_meta")
             if isinstance(binary_metadata, dict)
@@ -2442,7 +2468,7 @@ class CachingAutotuner(KernelInterface):
                 "stream": stream,
                 "config": config_to_dict(launcher.config),
                 "inductor_meta": self.inductor_meta,
-                "triton_meta": self.triton_meta,
+                "triton_meta": triton_meta,
                 "def_args": launcher.def_args,
                 "call_args": launcher.call_args,
                 "global_scratch": launcher.global_scratch,
@@ -2473,7 +2499,7 @@ class CachingAutotuner(KernelInterface):
                 "stream": stream,
                 "config": config_to_dict(launcher.config),
                 "inductor_meta": self.inductor_meta,
-                "triton_meta": self.triton_meta,
+                "triton_meta": triton_meta,
                 "def_args": launcher.def_args,
                 "call_args": launcher.call_args,
                 "global_scratch": launcher.global_scratch,
@@ -3079,9 +3105,7 @@ class CompileResult(Generic[_T]):
 
     def make_launcher(self) -> LauncherType: ...
 
-    def _host_tma_descriptors(
-        self, call_args: list[str]
-    ) -> dict[str, dict[str, list[int | str]]]:
+    def _host_tma_descriptors(self, call_args: list[str]) -> dict[str, dict[str, Any]]:
         """The host-side TMA descriptors to build at launch, keyed by arg.
 
         _create_compile_meta decided which args were compiled as tensordesc<> and
@@ -3122,9 +3146,11 @@ class CompileResult(Generic[_T]):
             stride_vals = dims["strides"]
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
-            # _host_tma_aligned clones (warning once) only if misaligned.
+            # _host_tma_aligned clones a misaligned input (warning once) and
+            # raises for a misaligned output.
             pre_runner_lines.append(
-                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}"'
+                + (", is_output=True)" if dims.get("is_output") else ")")
             )
             pre_runner_lines.append(
                 f"{desc_var} = TensorDescriptor({aligned_var}, {_launcher_dims(shape_vals)},"
@@ -3175,7 +3201,8 @@ class CompileResult(Generic[_T]):
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
             pre_runner_lines.append(
-                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}"'
+                + (", is_output=True)" if dims.get("is_output") else ")")
             )
             pre_runner_lines.append(
                 f"{desc_var} = expand_host_tma_descriptor(_tma_cache, {idx}, "
@@ -3755,6 +3782,10 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 ]
             launcher.def_args = def_args
             launcher.call_args = call_args
+            # The compiled signature: host-side TMA operands are tensordesc<>
+            # here though triton_meta still has them as pointers. The C++
+            # wrapper launches from it (save_gpu_kernel).
+            launcher.signature = dict(compile_meta["signature"])
             kernel_metadata = getattr(self.kernel, "metadata", None)
 
             # for the scratch arguments: None indicates that the kernel doesn't
@@ -4169,11 +4200,18 @@ def unique_configs(configs: list[Config]):
     return pruned_configs
 
 
-def check_config(cfg, *, xnumel=None, ynumel=None, z0_numel=None):
-    for numel, label in zip((xnumel, ynumel, z0_numel), ("X", "Y", "Z0_")):
+def check_config(cfg, *, xnumel=None, ynumel=None, z0_numel=None, size_hints=None):
+    numels = {"x": xnumel, "y": ynumel, "z0_": z0_numel, **(size_hints or {})}
+    for prefix, numel in numels.items():
+        label = prefix.upper()
         if numel is None:
             continue
-        block = cfg[f"{label}BLOCK"]
+        block_key = f"{label}BLOCK"
+        if block_key not in cfg:
+            raise AssertionError(
+                f"Missing required block size {block_key} for tiling axis {prefix} (cfg={cfg})."
+            )
+        block = cfg[block_key]
         if numel == 1:
             if block != 1:
                 raise AssertionError(
@@ -4181,7 +4219,9 @@ def check_config(cfg, *, xnumel=None, ynumel=None, z0_numel=None):
                     f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
                 )
         max_block = get_max_block(label, TRITON_MAX_BLOCK)
-        max_block_str = f'config.triton.max_block["{label}"]'
+        max_block_str = (
+            f'TRITON_MAX_BLOCK["{get_max_block_prefix(prefix, TRITON_MAX_BLOCK)}"]'
+        )
         if max_block % block != 0:
             raise AssertionError(
                 f"TritonKernel.indexing assumes {label}BLOCK divides {max_block_str}"
@@ -4414,6 +4454,10 @@ def triton_config(
     based on size_hints. Size_hints is a tuple of numels in each tile
     dimension and will be rounded up to the nearest power of 2.
 
+    x, y, and z are pointwise block-size budgets, ordered from inner axes outward.
+    The last supplied budget is spread over the remaining axes, innermost first.
+    When supplied, z is one budget shared across all Z axes.
+
     num_elements_per_warp is a suggestion for controlling how many warps
     the triton config should contain. e.g.: if x=16, y=8, z=4 then
     num_elements = 16*8*4 = 512. Then if we set num_elements_per_warp=128,
@@ -4426,6 +4470,16 @@ def triton_config(
     """
     # Ideally we want to read this from some device config
 
+    pointwise_size_hints = size_hints
+    prefixes = tuple(reversed(get_pointwise_prefixes(size_hints)))
+    num_budgets = 1 + (y is not None) + (z is not None)
+    if num_budgets > len(prefixes):
+        raise AssertionError("More pointwise budgets than pointwise dimensions")
+    size_hints = {p: size_hints[p] for p in prefixes[: num_budgets - 1]} | {
+        prefixes[num_budgets - 1]: math.prod(
+            pointwise_size_hints[p] for p in prefixes[num_budgets - 1 :]
+        )
+    }
     maxGridSize = [2147483647, 65535, 65535]
 
     target = conditional_product(x, y, z)
@@ -4479,9 +4533,6 @@ def triton_config(
     # see https://github.com/pytorch/pytorch/pull/97950
     if conditional_product(x, y, z) >= 128 and not torch.version.hip:
         num_warps = max(num_warps, 4)
-    xnumel = size_hints["x"]
-    ynumel = size_hints.get("y")
-    z0_numel = size_hints.get("z0_")
 
     # Increase x to satisfy min_elem_per_thread requirements.
     block_size = max(
@@ -4493,13 +4544,15 @@ def triton_config(
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps, warp_size=warp_size)
     x = min(x, size_hints["x"])
 
-    cfg = {"XBLOCK": x}
-    if y:
-        cfg["YBLOCK"] = y
-    if z:
-        cfg["Z0_BLOCK"] = z
+    pointwise_numels = _get_nd_pointwise_numels(
+        pointwise_size_hints, [budget for budget in (x, y, z) if budget is not None]
+    )
+    # Rounded size hints can overestimate launchable legacy 3D grids.
+    if len(get_z_prefixes(pointwise_size_hints)) > 1:
+        _check_max_grid_yz(pointwise_size_hints, pointwise_numels)
+    cfg = _get_config(pointwise_numels)
     check_max_block(cfg)
-    check_config(cfg, xnumel=xnumel, ynumel=ynumel, z0_numel=z0_numel)
+    check_config(cfg, size_hints={p: pointwise_size_hints[p] for p in prefixes})
     config = Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
     if torch.version.hip:
@@ -4511,6 +4564,80 @@ def triton_config(
             config.kwargs["kpack"] = kpack
 
     return config
+
+
+def _check_max_grid_yz(size_hints: dict[str, int], numels: dict[str, int]) -> None:
+    groups = get_yz_grid_extents(size_hints, numels)
+    if not groups:
+        return
+    target = math.prod(numels.values())
+    limit = get_max_y_grid()
+
+    def grid(group: Sequence[str]) -> int:
+        return get_yz_grid_extents(size_hints, numels)[tuple(group)]
+
+    for group in groups:
+        while grid(group) > limit:
+            prefix = next(
+                (
+                    p
+                    for p in group
+                    if numels[p]
+                    < min(size_hints[p], get_max_block(p, TRITON_MAX_BLOCK))
+                ),
+                None,
+            )
+            if prefix is None:
+                axis = "Y" if group == ("y",) else "Z"
+                raise AssertionError(
+                    f"Tiling configuration exceeds the {axis} launch-grid limit: "
+                    f"extent={grid(group)}, limit={limit}, axes={group}, "
+                    f"size_hints={size_hints}, block_sizes={numels}. "
+                    "Reduce torch._inductor.config.triton.max_tiles to use fewer tiling axes."
+                )
+            numels[prefix] *= 2
+
+    for prefix in reversed(get_pointwise_prefixes(numels)):
+        while numels[prefix] > 1 and math.prod(numels.values()) > target:
+            numels[prefix] //= 2
+            if any(grid(group) > limit for group in groups):
+                numels[prefix] *= 2
+                break
+
+
+def _get_nd_pointwise_numels(
+    size_hints: dict[str, int],
+    budgets: Sequence[int],
+) -> dict[str, int]:
+    """Expand the last supplied budget over the remaining axes, inner first.
+
+    Size hints and budgets are powers of two, as in reduction-budget expansion.
+    """
+    prefixes = tuple(reversed(get_pointwise_prefixes(size_hints)))
+    if not budgets:
+        raise AssertionError("At least one pointwise budget is required")
+    if len(budgets) > len(prefixes):
+        raise AssertionError("More pointwise budgets than pointwise dimensions")
+
+    numels = {
+        prefix: min(budget, size_hints[prefix])
+        for prefix, budget in zip(prefixes, budgets[:-1])
+    }
+    expanded_prefixes = prefixes[len(budgets) - 1 :]
+    remaining = min(budgets[-1], math.prod(size_hints[p] for p in expanded_prefixes))
+    for prefix in expanded_prefixes:
+        dim = min(size_hints[prefix], remaining)
+        if prefix != expanded_prefixes[-1]:
+            dim = min(dim, get_max_block(prefix, TRITON_MAX_BLOCK))
+        if remaining % dim:
+            raise AssertionError(
+                f"Expected dimension '{dim}' to divide remaining size '{remaining}'"
+            )
+        numels[prefix] = dim
+        remaining //= dim
+    if remaining != 1:
+        raise AssertionError(f"Pointwise budget exceeds size hints: {size_hints}")
+    return numels
 
 
 def _get_nd_reduction_numels(r: int, size_hints: dict[str, int]) -> dict[str, int]:
@@ -4961,36 +5088,43 @@ def triton_config_tiled_reduction(
     waves_per_eu=None,
     *,
     warp_size: int = 32,
+    z: int | None = None,
 ):
     """
     Construct a tile reduction triton config with some adjustment
     heuristics based on size_hints. Size_hints is a tuple of numels in
     each tile dimension and will be rounded up to the nearest power of 2.
+
+    x, y, and optional z are pointwise block-size budgets.
+    The last supplied budget is spread over the remaining axes, innermost first.
+    When supplied, z is one budget shared across all Z axes.
     """
     # Convert the linear reduction numel into a multi-dimensional block.
     rnumels = _get_nd_reduction_numels(r, size_hints)
 
-    # shrink sizes to size hints
-    x = min(x, size_hints["x"])
-    y = min(y, size_hints["y"])
+    pointwise_numels = _get_nd_pointwise_numels(
+        size_hints, [budget for budget in (x, y, z) if budget is not None]
+    )
 
     def total_numel() -> int:
-        return conditional_product(x, y, *rnumels.values())
+        return conditional_product(*pointwise_numels.values(), *rnumels.values())
 
     target = total_numel()
     if conditional_product(*size_hints.values()) < target:
         target //= 8
 
     # if we are below original block size, scale up where we can
-    while x < size_hints["x"] and total_numel() < target:
-        x *= 2
+    while pointwise_numels["x"] < size_hints["x"] and total_numel() < target:
+        pointwise_numels["x"] *= 2
     for prefix in sorted(rnumels):
         while rnumels[prefix] < size_hints[prefix] and total_numel() < target:
             rnumels[prefix] *= 2
-    while y < size_hints["y"] and total_numel() < target:
-        y *= 2
+    for prefix in tuple(reversed(get_pointwise_prefixes(pointwise_numels)))[1:]:
+        while pointwise_numels[prefix] < size_hints[prefix] and total_numel() < target:
+            pointwise_numels[prefix] *= 2
 
-    cfg = _get_config({"x": x, "y": y, **rnumels})
+    _check_max_grid_yz(size_hints, pointwise_numels)
+    cfg = _get_config({**pointwise_numels, **rnumels})
     num_warps = _num_warps(total_numel() // 256, min_num_warps=1, warp_size=warp_size)
     num_warps = _num_warps(
         num_warps,
@@ -4998,7 +5132,7 @@ def triton_config_tiled_reduction(
         register_intensive=register_intensive,
         warp_size=warp_size,
     )
-    check_config(cfg, xnumel=size_hints["x"], ynumel=size_hints["y"])
+    check_config(cfg, size_hints=size_hints)
     check_max_block(cfg)
     config = Config(cfg, num_warps=num_warps, num_stages=num_stages)
     if torch.version.hip:
@@ -5849,6 +5983,8 @@ class GridExpr:
             "RSPLIT": f"{kernel_name}_result.rsplit",
             "RSPLIT_SIZE": f"{kernel_name}_result.rsplit_size",
         }
+        for i in range(max(0, self.inductor_meta.get("rank", 0) - 2)):
+            meta[f"Z{i}_BLOCK"] = f"{kernel_name}_result.zblocks[{i}]"
         # assertions are done based on real values, so we can skip here
         self.generate(meta, is_lazy=True)
 
@@ -5888,6 +6024,17 @@ class Grid3D(GridExpr):
         self.x_grid = self.ceildiv("xnumel", meta.get("XBLOCK"))
         self.y_grid = self.ceildiv("ynumel", meta.get("YBLOCK"))
         self.z_grid = self.ceildiv("z0_numel", meta.get("Z0_BLOCK"))
+
+
+class GridND(Grid2D):
+    def generate(self, meta: dict[str, int], is_lazy: bool = False) -> None:
+        super().generate(meta, is_lazy)
+        self.z_grid = self.product(
+            [
+                self.ceildiv(f"z{i}_numel", meta.get(f"Z{i}_BLOCK"))
+                for i in range(self.inductor_meta["rank"] - 2)
+            ]
+        )
 
 
 class BatchMatmulGrid3D(GridExpr):
