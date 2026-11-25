@@ -657,7 +657,9 @@ __device__ __forceinline__ void store_dwords_partial(const T (&x)[ITEMS], T* p, 
 
 // On gfx950, partial tiles of vector-aligned rows of 4-byte elements in scan_rows_block take vector
 // loads where they can (see load_items; scan_rows_warp takes load_items_row_end instead). On other
-// targets, and for other element sizes, the extra path makes some rows slower.
+// targets, and for other element sizes, the extra path makes some rows slower. It is chosen at compile
+// time, so in a build for a generic ISA such as gfx9-4-generic it is off on gfx950 too: those partial
+// tiles are slower there, and the results are the same.
 #if defined(__gfx950__)
 template <typename T>
 constexpr bool kVecPartialTile = sizeof(T) == 4;
@@ -1312,8 +1314,8 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   if (self.numel() == self.size(dim)) {
 #if defined(USE_ROCM)
     if constexpr (inner_scan::Traits<scalar_t, BinaryFunction>::kCheapOp) {
-      // 1-D inputs take the row scan at every length: it is deterministic, and as fast as or faster than
-      // hipCUB except for f64 of about 6,000 to 32,000 elements on gfx1250.
+      // 1-D inputs of up to 2^32 - 1 elements take the row scan: it is deterministic, and as fast as or
+      // faster than hipCUB except for f64 of about 6,000 to 32,000 elements on gfx1250.
       const int64_t n = self.numel();
       if (inner_scan::supported_device() && n <= std::numeric_limits<uint32_t>::max()) {
         inner_scan::launch<scalar_t>(
