@@ -74,141 +74,138 @@ class TestCustomLowering(InductorTestCase):
         )
 
 
+test_inductor_ops = torch.library.Library(  # noqa: SCOPED_LIBRARY
+    "test_inductor_ops", "DEF"
+)
+privateuse1 = torch._C._get_privateuse1_backend_name().upper()
+_impl_meta = torch.library.Library(  # noqa: SCOPED_LIBRARY
+    "test_inductor_ops", "IMPL", "Meta"
+)
+_impl_cuda = torch.library.Library(  # noqa: SCOPED_LIBRARY
+    "test_inductor_ops", "IMPL", "CUDA"
+)
+_impl_xpu = torch.library.Library(  # noqa: SCOPED_LIBRARY
+    "test_inductor_ops", "IMPL", "XPU"
+)
+_impl_pu1 = torch.library.Library(  # noqa: SCOPED_LIBRARY
+    "test_inductor_ops", "IMPL", privateuse1
+)
+
+
+def _register_jagged_to_padded_dense():
+    # Approximation of fbgemm.jagged_to_padded_dense_forward
+    test_inductor_ops.define(
+        "jagged_to_padded_dense(Tensor input, Tensor offsets, SymInt max_seq_len, Scalar pad_value) -> Tensor"
+    )
+
+    def j2pd_meta(inp, offsets, max_seq_len, pad_value):
+        return torch.empty(
+            (offsets.shape[0] - 1, max_seq_len, inp.shape[1]),
+            device=inp.device,
+            dtype=inp.dtype,
+        )
+
+    def j2pd_gpu(inp, offsets, max_seq_len, pad_value):
+        res = torch.full(
+            (offsets.shape[0] - 1, max_seq_len, inp.shape[1]),
+            pad_value,
+            device=inp.device,
+            dtype=inp.dtype,
+        )
+        for b in range(offsets.shape[0] - 1):
+            for r in range(offsets[b + 1] - offsets[b]):
+                res[b][r] = inp[offsets[b] + r]
+        return res
+
+    def j2pd_lowering(inp, offsets, max_seq_len, pad_value):
+        offsets_loader = offsets.make_loader()
+        inp_loader = inp.make_loader()
+        jagged_len = inp.get_size()[0]
+        offsets_dtype = offsets.get_dtype()
+
+        def inner_fn(index):
+            batch_idx, seq_idx, emb_idx = index
+
+            begin_idx = ops.indirect_indexing(
+                offsets_loader([batch_idx]),
+                jagged_len + 1,
+            )
+            end_idx = offsets_loader([batch_idx + 1])
+            jagged_idx = begin_idx + seq_idx
+
+            return ops.masked(
+                ops.lt(
+                    ops.index_expr(jagged_idx, offsets_dtype),
+                    end_idx,
+                ),
+                lambda: inp_loader([jagged_idx, emb_idx]),
+                pad_value,
+            )
+
+        return Pointwise.create(
+            device=inp.get_device(),
+            dtype=inp.get_dtype(),
+            inner_fn=inner_fn,
+            ranges=[offsets.get_size()[0] - 1, max_seq_len, inp.get_size()[1]],
+        )
+
+    register_lowering(
+        torch.ops.test_inductor_ops.jagged_to_padded_dense, type_promotion_kind=None
+    )(j2pd_lowering)
+
+    _impl_meta.impl("jagged_to_padded_dense", j2pd_meta)
+    _impl_cuda.impl("jagged_to_padded_dense", j2pd_gpu)
+    _impl_xpu.impl("jagged_to_padded_dense", j2pd_gpu)
+    _impl_pu1.impl("jagged_to_padded_dense", j2pd_gpu)
+
+
+def _register_asm_op():
+    # Approximation of fbgemm.jagged_to_padded_dense_forward
+    test_inductor_ops.define("tanh_approx(Tensor input) -> Tensor")
+
+    def tanh_approx_meta(inp):
+        return torch.tanh(inp)
+
+    _impl_meta.impl("tanh_approx", tanh_approx_meta)
+
+    def tanh_approx_lowering(inp):
+        fn = partial(ops.inline_asm_elementwise, asm="tanh.approx.f32 $0, $1;")
+        return make_pointwise(fn)(inp)
+
+    register_lowering(
+        torch.ops.test_inductor_ops.tanh_approx, type_promotion_kind=None
+    )(tanh_approx_lowering)
+
+    test_inductor_ops.define("add_custom(Tensor a, Tensor b) -> Tensor")
+
+    def add_custom(a, b):
+        return a + b
+
+    _impl_meta.impl("add_custom", add_custom)
+
+    def add_custom_lowering(a, b):
+        if torch.version.hip:
+            # ROCm GCN assembly
+            fn = partial(
+                ops.inline_asm_elementwise,
+                asm="v_add_f32 $0, $1, $2",
+                constraints="=v, v, v",
+            )
+        else:
+            fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
+        return make_pointwise(fn)(a, b)
+
+    register_lowering(torch.ops.test_inductor_ops.add_custom, type_promotion_kind=None)(
+        add_custom_lowering
+    )
+
+
+_register_jagged_to_padded_dense()
+_register_asm_op()
+
+
 class TestCustomLoweringDevice(InductorTestCase):
     hw_classification = HardwareClassification.ACCELERATOR
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls.test_inductor_ops = torch.library.Library(  # noqa: SCOPED_LIBRARY
-            "test_inductor_ops", "DEF"
-        )
-        privateuse1 = torch._C._get_privateuse1_backend_name().upper()
-        cls.device_list = ["Meta", "CUDA", "XPU", privateuse1]
-        for device in cls.device_list:
-            setattr(
-                cls,
-                "impl_" + device.lower(),
-                torch.library.Library(  # noqa: SCOPED_LIBRARY
-                    "test_inductor_ops", "IMPL", device
-                ),
-            )
-        cls._register_jagged_to_padded_dense()
-        cls._register_asm_op()
-
-    @classmethod
-    def tearDown(cls):
-        super().tearDownClass()
-
-    @classmethod
-    def _register_jagged_to_padded_dense(cls):
-        # Approximation of fbgemm.jagged_to_padded_dense_forward
-        cls.test_inductor_ops.define(
-            "jagged_to_padded_dense(Tensor input, Tensor offsets, SymInt max_seq_len, Scalar pad_value) -> Tensor"
-        )
-
-        def j2pd_meta(inp, offsets, max_seq_len, pad_value):
-            return torch.empty(
-                (offsets.shape[0] - 1, max_seq_len, inp.shape[1]),
-                device=inp.device,
-                dtype=inp.dtype,
-            )
-
-        def j2pd_gpu(inp, offsets, max_seq_len, pad_value):
-            res = torch.full(
-                (offsets.shape[0] - 1, max_seq_len, inp.shape[1]),
-                pad_value,
-                device=inp.device,
-                dtype=inp.dtype,
-            )
-            for b in range(offsets.shape[0] - 1):
-                for r in range(offsets[b + 1] - offsets[b]):
-                    res[b][r] = inp[offsets[b] + r]
-            return res
-
-        def j2pd_lowering(inp, offsets, max_seq_len, pad_value):
-            offsets_loader = offsets.make_loader()
-            inp_loader = inp.make_loader()
-            jagged_len = inp.get_size()[0]
-            offsets_dtype = offsets.get_dtype()
-
-            def inner_fn(index):
-                batch_idx, seq_idx, emb_idx = index
-
-                begin_idx = ops.indirect_indexing(
-                    offsets_loader([batch_idx]),
-                    jagged_len + 1,
-                )
-                end_idx = offsets_loader([batch_idx + 1])
-                jagged_idx = begin_idx + seq_idx
-
-                return ops.masked(
-                    ops.lt(
-                        ops.index_expr(jagged_idx, offsets_dtype),
-                        end_idx,
-                    ),
-                    lambda: inp_loader([jagged_idx, emb_idx]),
-                    pad_value,
-                )
-
-            return Pointwise.create(
-                device=inp.get_device(),
-                dtype=inp.get_dtype(),
-                inner_fn=inner_fn,
-                ranges=[offsets.get_size()[0] - 1, max_seq_len, inp.get_size()[1]],
-            )
-
-        register_lowering(
-            torch.ops.test_inductor_ops.jagged_to_padded_dense, type_promotion_kind=None
-        )(j2pd_lowering)
-
-        cls.impl_meta.impl("jagged_to_padded_dense", j2pd_meta)
-        cls.impl_cuda.impl("jagged_to_padded_dense", j2pd_gpu)
-        cls.impl_xpu.impl("jagged_to_padded_dense", j2pd_gpu)
-        privateuse1_name = torch._C._get_privateuse1_backend_name()
-        impl_privateuse1 = getattr(cls, f"impl_{privateuse1_name}")
-        impl_privateuse1.impl("jagged_to_padded_dense", j2pd_gpu)
-
-    @classmethod
-    def _register_asm_op(cls):
-        # Approximation of fbgemm.jagged_to_padded_dense_forward
-        cls.test_inductor_ops.define("tanh_approx(Tensor input) -> Tensor")
-
-        def tanh_approx_meta(inp):
-            return torch.tanh(inp)
-
-        cls.impl_meta.impl("tanh_approx", tanh_approx_meta)
-
-        def tanh_approx_lowering(inp):
-            fn = partial(ops.inline_asm_elementwise, asm="tanh.approx.f32 $0, $1;")
-            return make_pointwise(fn)(inp)
-
-        register_lowering(
-            torch.ops.test_inductor_ops.tanh_approx, type_promotion_kind=None
-        )(tanh_approx_lowering)
-
-        cls.test_inductor_ops.define("add_custom(Tensor a, Tensor b) -> Tensor")
-
-        def add_custom(a, b):
-            return a + b
-
-        cls.impl_meta.impl("add_custom", add_custom)
-
-        def add_custom_lowering(a, b):
-            if torch.version.hip:
-                # ROCm GCN assembly
-                fn = partial(
-                    ops.inline_asm_elementwise,
-                    asm="v_add_f32 $0, $1, $2",
-                    constraints="=v, v, v",
-                )
-            else:
-                fn = partial(ops.inline_asm_elementwise, asm="add.f32 $0, $1, $2;")
-            return make_pointwise(fn)(a, b)
-
-        register_lowering(
-            torch.ops.test_inductor_ops.add_custom, type_promotion_kind=None
-        )(add_custom_lowering)
 
     @requires_triton()
     def test_jagged_to_padded_dense_sanity(self, device):
