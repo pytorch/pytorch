@@ -427,7 +427,9 @@ auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
     const ideep::tensor& x = itensor_from_const_tensor(self);
-    ideep::tensor grady = itensor_from_const_tensor(grad);
+    // Sum backward can produce zero-stride gradients, which oneDNN does not support.
+    const auto grad_contiguous = grad.contiguous();
+    ideep::tensor grady = itensor_from_const_tensor(grad_contiguous);
     ideep::tensor gradx = itensor_from_tensor(grad_input);
     mkldnn::eltwise_backward(x, grady, gradx,
       dnnl::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
