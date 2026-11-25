@@ -1411,6 +1411,11 @@ void callPythonDeallocator(
   };
   try {
     py::gil_scoped_acquire gil;
+    // A tensor's last reference may be dropped while a Python exception is
+    // propagating (e.g. a temporary of the expression that raised): set the
+    // pending error aside for the callback and restore it afterwards, or the
+    // callback fails with a SystemError and the pending error is lost.
+    py::error_scope pending_error;
     try {
       py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 1))(
           reinterpret_cast<uintptr_t>(ptr),
@@ -1463,6 +1468,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              allocator) {
         torch::cuda::CUDAPluggableAllocator::changeCurrentAllocator(allocator);
       });
+  m.def(
+      "_cuda_armCaptureRouting",
+      &torch::cuda::CUDAPluggableAllocator::armCaptureRouting,
+      py::arg("allocator"));
+  m.def(
+      "_cuda_disarmCaptureRouting",
+      &torch::cuda::CUDAPluggableAllocator::disarmCaptureRouting);
   py::class_<
       torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator,
       c10::cuda::CUDACachingAllocator::CUDAAllocator,
@@ -2814,6 +2826,11 @@ void initCusparseltBindings(PyObject* module);
 
 } // namespace shared
 
+namespace memory_planner {
+void initMemoryPlanningUtilsBindings(PyObject* module);
+void initMemoryPlannerBindings(PyObject* module);
+} // namespace memory_planner
+
 void initModule(PyObject* module) {
   python::initCommMethods(module);
   // As weird as it seems, this file is also compiled for ROCm,
@@ -2829,6 +2846,8 @@ void initModule(PyObject* module) {
   shared::initGdsBindings(module);
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
+  memory_planner::initMemoryPlanningUtilsBindings(module);
+  memory_planner::initMemoryPlannerBindings(module);
   initCudaMethodBindings(module);
 }
 
