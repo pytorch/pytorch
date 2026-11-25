@@ -1302,6 +1302,59 @@ class TestBlackwellTMALoadFusion(TestCase):
 
         _check_tma_descriptors(code[0], "triton_tem_fused", ".load([", host_side_tma)
 
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("K", (64, 128))
+    def test_blackwell_addmm_two_ctas_single_k_tile_no_epilogue_tma_load(self, K: int):
+        """A 2-CTA template whose K fits in one BLOCK_K tile loads the bias
+        with tl.load, as autoWS can hang on it with a TMA-loaded epilogue
+        input; with two K tiles the bias is TMA-loaded."""
+
+        def fn(bias, x, W):
+            return torch.addmm(bias, x, W.T)
+
+        M, N = 512, 256
+        x = torch.randn(M, K, dtype=torch.bfloat16, device=GPU_TYPE)
+        W = torch.randn(N, K, dtype=torch.bfloat16, device=GPU_TYPE)
+        bias = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE)
+        test_config = BlackwellGPUGemmConfig(
+            128, 128, 64, 3, 4, two_ctas=True, warp_specialize=False, flatten=False
+        )
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
+
+        keys = [
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
+        ]
+        orig = {}
+        for key in keys:
+            h = get_template_heuristic(*key)
+            orig[key] = h.mm_configs
+            h.mm_configs = [test_config]
+        try:
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_tma_load_for_template_epilogue": True,
+                    "triton.enable_template_tma_store": False,
+                    "triton.enable_host_side_tma": False,
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+                }
+            ):
+                actual, code = run_and_get_code(torch.compile(fn), bias, x, W)
+        finally:
+            for key, configs in orig.items():
+                if key in _HEURISTIC_CACHE:
+                    _HEURISTIC_CACHE[key].mm_configs = configs
+        torch.testing.assert_close(actual, fn(bias, x, W), atol=1e-1, rtol=1e-1)
+        self.assertIn("TWO_CTAS", code[0])
+        loads = re.search(r"tma_descriptor\d+\.load\(\[", code[0]) is not None
+        self.assertEqual(loads, K > 64, code[0])
+
     @staticmethod
     @contextlib.contextmanager
     def _mm_config(
