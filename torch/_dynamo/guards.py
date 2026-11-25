@@ -140,10 +140,13 @@ from torch._subclasses.fake_tensor import (
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
+from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
+    _get_placeholder_expr,
     _ShapeGuardsHelper,
     EqualityConstraint,
+    has_free_unbacked_symbols,
     is_symbolic,
     SYMPY_INTERP,
 )
@@ -409,7 +412,9 @@ def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoR
         gb_type="Builtin method operation requires identity guards",
         context=context,
         explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
-        hints=["Compute the result outside compilation and pass it as an input."],
+        hints=[
+            "Bind the method inside the compiled function or pass the computed result as an input."
+        ],
         skip_frame=skip_frame,
         preserve_skip_frame_after_inline=skip_frame,
     )
@@ -1214,6 +1219,8 @@ def get_verbose_code_parts(
     # add a hint explaining which closure variable is being checked.
     # This helps users understand which closure variable caused the guard failure.
     if guard is not None:
+        if guard.recompile_hint is not None:
+            recompile_hint = guard.recompile_hint
         closure_hint = _get_closure_var_hint(guard.originating_source)
         if closure_hint:
             recompile_hint = (
@@ -1258,7 +1265,15 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
     else:
         if not isinstance(dim, torch.SymInt):
             raise AssertionError(f"Expected torch.SymInt, got {type(dim)}")
-        return dim.node.maybe_as_int()
+        node = dim.node
+        if isinstance(node, SymNode) and node.shape_env is not None:
+            expr = _get_placeholder_expr(node)
+            # An unbacked input dim refined to a constant (e.g. by
+            # torch._check(x.shape[0] == 1)) stays None, so TENSOR_MATCH does not
+            # check it and the runtime assert enforces the value instead.
+            if expr.is_Symbol and has_free_unbacked_symbols(expr):
+                return None
+        return node.maybe_as_int()
 
 
 def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
@@ -7699,13 +7714,16 @@ def install_not_in_instance_dict_guard(source: Source, name: str) -> None:
     )
 
 
-def install_guard(*guards: Guard, skip: int = 0) -> None:
+def install_guard(
+    *guards: Guard, skip: int = 0, recompile_hint: str | None = None
+) -> None:
     """
     Add dynamo guards to the current tracing context.
 
     Args:
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
+        recompile_hint: explanation to display when this guard fails
     """
     from torch._guards import TracingContext
 
@@ -7722,6 +7740,8 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
             raise AssertionError(f"Expected Guard, got {type(guard)}")
         if is_from_skip_guard_source(guard.originating_source):
             continue
+        if recompile_hint is not None:
+            guard.recompile_hint = recompile_hint
         add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
 
 
