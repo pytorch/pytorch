@@ -64,6 +64,7 @@ query ($owner: String!, $repo: String!, $cursor: String) {
         endCursor
       }
       nodes {
+        baseRefName
         headRefName
         number
         updatedAt
@@ -213,12 +214,16 @@ def get_branches_with_magic_label_or_open_pr() -> set[str]:
         lambda res: res["data"]["repository"]["label"]["pullRequests"]["pageInfo"],
     )
 
-    pr_infos.extend(get_open_prs())
+    branch_names = [pr["headRefName"] for pr in pr_infos]
+    # A stacked PR (e.g. GitHub native stacks) targets the branch of the PR
+    # below it, and that PR may already be closed by the merge bot.  Deleting a
+    # branch can close the open PRs based on it, so keep open PRs' bases too.
+    for pr in get_open_prs():
+        branch_names.extend([pr["headRefName"], pr["baseRefName"]])
 
-    # Get the most recent PR for each branch base (group gh together)
+    # Group gh branches together
     branch_bases = set()
-    for pr in pr_infos:
-        branch_base_name = pr["headRefName"]
+    for branch_base_name in branch_names:
         if x := re.match(r"(gh\/.+)\/(head|base|orig)", branch_base_name):
             branch_base_name = x.group(1)
         branch_bases.add(branch_base_name)
