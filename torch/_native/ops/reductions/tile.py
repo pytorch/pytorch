@@ -1147,16 +1147,17 @@ class TileReduce:
                 issue = _uniform_combine_issue(trait, itree.split, mode)
                 if issue is not None:
                     raise ValueError(f"uniform_combine={mode!r} needs {issue}")
-            if uniform and (itree.shape != "combine" or not itree.combine_tile):
+            # A split plan carries its combine's mode: stage 1 skips the derived count.
+            staged = itree.shape == "combine" and itree.combine_tile
+            if uniform and not (staged or itree.shape == "split"):
                 raise ValueError(
-                    f"uniform_combine={mode!r} needs a staged combine plan, got {itree.shape=} {itree.combine_tile=}"
+                    f"uniform_combine={mode!r} needs a staged combine plan or its split, got {itree.shape=} {itree.combine_tile=}"
                 )
             # The plan maps wpr chunks to wpr // kchunk warps and rows_per_block rows.
             threads_per_row = WARP * (itree.wpr // itree.kchunk) if itree.wpr else 1
             if itree.stage_e:
                 threads_per_row = WARP
             threads_per_block = threads_per_row * itree.rows_per_block
-            staged = itree.shape == "combine" and itree.combine_tile
             if staged and threads_per_block > WARP:
                 # Partial and weight staging index the block's rows by lane.
                 raise ValueError(
@@ -1206,6 +1207,12 @@ class TileReduce:
         self.threads_per_block = threads_per_block
         self.nouts = nouts
         self.final = final
+        derived_count = (
+            order == "inner_tree"
+            and itree.shape == "split"
+            and itree.uniform_combine != "off"
+        )
+        self.partial_fields = trait.nfields - derived_count
         self.unroll = unroll
         self.ragged_vector = ragged_vector
         # The count compiles as whole loads and whether a tail remains.
@@ -2350,7 +2357,7 @@ class TileReduce:
             # Emit raw per-field partials for stage 2.
             if lane == 0 and alive:
                 for s in cutlass.range_constexpr(self.nslots):
-                    for f in cutlass.range_constexpr(trait.nfields):
+                    for f in cutlass.range_constexpr(self.partial_fields):
                         mOuts[f][part_base + Int32(s) * part_stride] = trait.fdtypes[f](
                             accs[s][f]
                         )
