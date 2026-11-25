@@ -747,12 +747,72 @@ class BuiltinFormatTests(TestCase):
         x = torch.randn(2)
         self.assertEqual(compiled(x)[1], fn(x)[1])
 
+    @parametrize("spec", ["", ".1f"])
+    def test_tensor_no_graph_break(self, spec):
+        def fn(x):
+            return x + 1, format(x.sum(), spec)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+    @parametrize("spec", ["", "03d"])
+    def test_symint_no_graph_break(self, spec):
+        def fn(x):
+            return x + 1, format(x.size(0), spec)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=True)
+        for n in (2, 3):
+            x = torch.randn(n)
+            self.assertEqual(compiled(x)[1], fn(x)[1])
+        self.assertEqual(cnt.frame_count, 1)
+
     def test_str_subclass_returns_exact_str(self):
         def fn(x):
             return x + 1, type(format(_StrSubclass("xy")))
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertIs(compiled(torch.randn(2))[1], str)
+
+
+class _Point:
+    def __init__(self):
+        self.x = 1
+        self.items = [2, 3]
+
+    def __str__(self):
+        return f"P{self.x}"
+
+
+@instantiate_parametrized_tests
+class FStringFormatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "call",
+        [
+            subtest(lambda o, p, t: f"<{o:y}>", name="user_format"),
+            subtest(lambda o, p, t: f"{p}|{p!r:.2}|{p.x}", name="default_format"),
+            subtest(lambda o, p, t: f"{o:{p.x + 2}}", name="nested_spec"),
+            subtest(lambda o, p, t: f"a{p}b{t.sum():.2f}", name="tensor"),
+        ],
+    )
+    def test_fstring(self, call):
+        def fn(x, o, p):
+            return x + 1, call(o, p, x)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        args = (torch.randn(2), _FormatOverride(), _Point())
+        self.assertEqual(compiled(*args)[1], fn(*args)[1])
+
+    def test_fstring_sees_mutation(self):
+        def fn(x, p):
+            p.x = 5
+            return x + 1, f"{p}"
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(torch.randn(2), _Point())[1], "P5")
 
 
 if __name__ == "__main__":

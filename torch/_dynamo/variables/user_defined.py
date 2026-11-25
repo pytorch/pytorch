@@ -3515,9 +3515,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     hints=[*graph_break_hints.FUNDAMENTAL],
                 )
 
-            overloaded = (
-                self._base_methods is not None and method not in self._base_methods
-            )
+            if self._base_methods is not None:
+                overloaded = method not in self._base_methods
+            else:
+                base = getattr(object, name, None)
+                overloaded = base is not None and method is not base
             tp_method = self.lookup_tp_method(name)
             if tp_method is not None and not overloaded:
                 result = tp_method(self, tx, name, args, kwargs)

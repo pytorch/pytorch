@@ -604,6 +604,9 @@ def pyobject_format(
     obj: VariableTracker,
     format_spec: VariableTracker,
 ) -> VariableTracker:
+    if isinstance(obj, (variables.TensorVariable, variables.SymNodeVariable)):
+        fmt = "{:" + format_spec.as_python_constant() + "}"
+        return variables.StringFormatVariable.create(tx, fmt, [obj], {})
     obj_type = maybe_get_python_type(obj)
     if format_spec.as_python_constant() == "":
         if obj_type is str:
