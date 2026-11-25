@@ -104,10 +104,9 @@ def _nested_region_identity(
     tracer.has_container_identity |= container
     if a is None or b is None or a == b or any(map(is_constant_source, (a, b))):
         return None
-    if container:
-        # Reconstructed containers do not preserve identity.
-        resolve = tx.output.resolve_source_value
-        same = resolve(a) is resolve(b)
+    if container or kind is variables.UserFunctionVariable:
+        # Containers can be reconstructed and function VTs can unwrap decorators.
+        same = tx.output.resolve_source_value(a) is tx.output.resolve_source_value(b)
     elif kind is VariableTracker or isinstance(left, variables.UserDefinedVariable):
         same = left.value is right.value
     else:
