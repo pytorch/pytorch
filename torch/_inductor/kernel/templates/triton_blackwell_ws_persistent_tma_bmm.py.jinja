@@ -1,5 +1,9 @@
 {{def_kernel("A", "B")}}
+    {%- if BATCH_SIZE is defined %}
     BATCH = BATCH_SIZE
+    {%- else %}
+    BATCH = {{size("A", 0)}}
+    {%- endif %}
     M = LOGICAL_M
     N = LOGICAL_N
     K = DESCRIPTOR_K
