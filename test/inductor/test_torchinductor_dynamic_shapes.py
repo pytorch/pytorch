@@ -136,7 +136,6 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
@@ -1134,9 +1133,13 @@ class TestInductorDynamic(DynamicShapesTestCase):
             with _record_launches() as launched:
                 actual = compiled(big)
             if dual:
+                # Kernels past int32 launch their int64 variant, tuned for those
+                # sizes. Smaller kernels, like the second stage of a split reduction
+                # (which this sum is on GPUs below sm100), launch int32.
+                self.assertIn("i64", {dtype for dtype, _ in launched})
                 for dtype, size_hints in launched:
-                    self.assertEqual(dtype, "i64")
-                    self.assertGreaterEqual(math.prod(size_hints.values()), 2**31)
+                    big = math.prod(size_hints.values()) >= 2**31
+                    self.assertEqual(dtype, "i64" if big else "i32")
             # Compare in chunks: eager on all of big needs another full-size output,
             # and sum upcasts int8 to int64 (16 GiB).
             for out, chunk in zip(actual.split(2**10), big.split(2**10)):
@@ -1787,6 +1790,19 @@ class TestInductorDynamic(DynamicShapesTestCase):
         x = torch.empty_strided((1, 4), (5, 1), device=device)
         torch._dynamo.decorators.mark_unbacked(x, 0)
         f(x)
+
+    def test_adaptive_avg_pool2d_backward_dynamic_shapes(self, device):
+        def fn(grad_output, x):
+            return torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        grad_output = torch.randn(2, 3, 5, 4, device=device)
+        # Heights 7 and 8 share the overlap bound; height 3 needs another tap.
+        for height, expected_frames in ((7, 1), (8, 1), (3, 2)):
+            x = torch.randn(2, 3, height, 9, device=device)
+            self.assertEqual(compiled(grad_output, x), fn(grad_output, x))
+            self.assertEqual(counter.frame_count, expected_frames)
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
     def test_unspecialized_float_operations(self, device):

@@ -12,7 +12,7 @@ import torch
 import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
+from torch._dynamo.utils import counters, ReinplaceCounters, ReInplaceTrigger
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.user_kernel_hop import (
     get_user_kernel_hop_info,
@@ -277,6 +277,102 @@ def annotate_scatter_chain_lengths(graph: torch.fx.Graph) -> None:
             node.meta["scatter_chain_length"] = len(chain)
 
 
+# Allocation ops that reach post-grad graphs under torch.compile (empty_like,
+# zeros, full_like and friends are decomposed into these). Their result cannot
+# alias a graph input.
+_FRESH_ALLOCATION_OPS = OrderedSet(
+    [
+        aten.empty.memory_format,
+        aten.empty_strided.default,
+        aten.new_empty_strided.default,
+        aten.full.default,
+    ]
+)
+
+
+# Set on a scatter that should_reinplace_scatter reinplaces only because its
+# input is an auto_functionalized_v2 base, so the rewrite can be counted.
+_MUTATED_BASE_SCATTER = "reinplace_mutated_base_scatter"
+
+
+def _updated_base_offset(outputs: Sequence[Any], num_bases: int) -> int:
+    """Index of the first updated base among auto_functionalized outputs: the op's
+    own outputs come first, then one updated copy per mutated base."""
+    return len(outputs) - num_bases
+
+
+def _auto_functionalized_v2_input_base(node: object) -> torch.fx.Node | None:
+    """The _all_bases input that node is the updated copy of, if node is one of
+    the updated bases auto_functionalized_v2 returns after its op's own
+    outputs, else None."""
+    if not (isinstance(node, torch.fx.Node) and node.target is operator.getitem):
+        return None
+    af, index = node.args
+    if not (
+        isinstance(af, torch.fx.Node)
+        and af.target is torch.ops.higher_order.auto_functionalized_v2
+        and isinstance(index, int)
+    ):
+        return None
+    outputs = af.meta.get("val")
+    bases = af.kwargs.get("_all_bases", ())
+    if not isinstance(outputs, (tuple, list)) or not isinstance(bases, (tuple, list)):
+        return None
+    base_index = index - _updated_base_offset(outputs, len(bases))
+    if base_index < 0:
+        return None
+    base = bases[base_index]
+    return base if isinstance(base, torch.fx.Node) else None
+
+
+def _is_reinplaced_auto_functionalized_v2_base(node: torch.fx.Node) -> bool:
+    """True if an auto_functionalized_v2 that has already been reinplaced writes
+    node, one of its _all_bases, in place rather than into a clone."""
+    for user in node.users:
+        if user.target is not torch.ops.higher_order.auto_functionalized_v2:
+            continue
+        cloned = user.meta.get("only_clone_these_tensors")
+        if cloned is None:
+            continue
+        bases = user.kwargs.get("_all_bases", ())
+        if not isinstance(bases, (tuple, list)):
+            continue
+        if any(base is node and i not in cloned for i, base in enumerate(bases)):
+            return True
+    return False
+
+
+def _is_auto_functionalized_v2_base(node: object) -> bool:
+    """True if node is a fresh allocation that auto_functionalized_v2 writes in
+    place, seen either as one of its updated bases or as the base itself.
+
+    When reinplacing rewires auto_functionalized_v2 outputs (the default when
+    the op is decomposed afterwards), each in-place updated base is replaced
+    by its input base before later nodes are visited, so node is the base and
+    the op's only_clone_these_tensors metadata shows it is written in place.
+    Without rewiring, node is the updated-base getitem, and the base is found
+    by following the chain of such getitems and views back to its root.
+
+    Either way the base must be a fresh allocation. If it is a graph input, or
+    anything else that may itself be reinplaced into one, the input's epilogue
+    copy_ runs after the scatter, and can_inplace() cannot see that.
+    """
+    if not isinstance(node, torch.fx.Node):
+        return False
+    base = _auto_functionalized_v2_input_base(node)
+    if base is None:
+        root = _get_view_base(node)
+        return (
+            root.op == "call_function"
+            and root.target in _FRESH_ALLOCATION_OPS
+            and _is_reinplaced_auto_functionalized_v2_base(root)
+        )
+    root = _get_view_base(base)
+    while (base := _auto_functionalized_v2_input_base(root)) is not None:
+        root = _get_view_base(base)
+    return root.op == "call_function" and root.target in _FRESH_ALLOCATION_OPS
+
+
 def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     """Choose between mutating and functional scatter decompositions
 
@@ -300,6 +396,13 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
         return True
 
     if is_node_realized(inp) and is_node_realized(node):  # type: ignore[arg-type]
+        return True
+
+    # is_node_realized() does not count the updated bases of
+    # auto_functionalized_v2 as buffers, but the op has written them in place,
+    # so a functional scatter would copy the whole base to update one region.
+    if is_node_realized(node) and _is_auto_functionalized_v2_base(inp):
+        node.meta[_MUTATED_BASE_SCATTER] = True
         return True
 
     # If the output is copied back into the input, this forces both to be
@@ -1061,7 +1164,7 @@ def reinplace_inplaceable_ops_core(
         outputs = node.meta.get("val")
         if not isinstance(outputs, tuple) or len(outputs) < len(mutated_args):
             return {}
-        offset = len(outputs) - len(mutated_args)
+        offset = _updated_base_offset(outputs, len(mutated_args))
         original_storages = FakeTensorUpdater._storage_ids(outputs[:offset])
         if original_storages is None:
             return {}
@@ -1310,20 +1413,28 @@ def reinplace_inplaceable_ops_core(
             # Check if ALL mutated args can be inplaced
             # Only convert if we don't need to clone any tensor
             mutated_args = [node.args[idx] for idx in inplaceable_op.mutated_args]
-            if (
+            reinplace = (
                 all_can_inplace(node, mutated_args)
                 and inplaceable_op.extra_check(node)
                 and all(
                     not cannot_refresh_lowering_metadata(node, mutated_arg)
                     for mutated_arg in mutated_args
                 )
-            ):
+            )
+            into_mutated_base = node.meta.pop(_MUTATED_BASE_SCATTER, False)
+            if reinplace:
                 for mutated_arg in mutated_args:
                     copy_node = copy_node_for_reinplaced_arg(node, mutated_arg)
                     if copy_node is not None:
                         replacements[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
                 changed_nodes.add(node)
+                if into_mutated_base:
+                    counters["inductor"]["reinplace_mutated_base_scatter"] += 1
+                    log.debug(
+                        "reinplaced scatter %s into an auto_functionalized_v2 base",
+                        node,
+                    )
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
             kwargs = node.kwargs
