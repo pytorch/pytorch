@@ -24,6 +24,7 @@ training mode isn't entered in evaluation mode, which gets one of its own.
 import contextlib
 import dataclasses
 import functools
+import inspect
 import logging
 import operator
 import os
@@ -35,12 +36,25 @@ from typing import Any
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, get_proxy_mode, make_fx, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    get_proxy_mode,
+    make_fx,
+    PythonKeyTracer,
+    track_tensor_tree,
+)
 from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
 log = logging.getLogger(__name__)
+
+
+def _rust() -> Any:
+    """The torch._rust extension (it has no stubs)."""
+    import torch._rust as rust
+
+    return rust
 
 
 class _Null:
@@ -62,7 +76,17 @@ block_pipeline: Any = None
 
 _PLAIN = (torch.Tensor, torch.nn.Parameter)
 _SCALARS = (bool, int, float, type(None))
-_IMMUTABLE = (bool, int, float, type(None), str, torch.dtype, torch.device, torch.layout, torch.memory_format)
+_IMMUTABLE = (
+    bool,
+    int,
+    float,
+    type(None),
+    str,
+    torch.dtype,
+    torch.device,
+    torch.layout,
+    torch.memory_format,
+)
 _SKIP_OPS = {torch.ops.aten._local_scalar_dense.default, torch.ops.aten.item.default}
 
 
@@ -70,6 +94,8 @@ def _cpu_read(n: torch.fx.Node) -> bool:
     """A read of a CPU tensor's value (no sync), which torch.vm traces."""
     v = getattr(n.args[0], "meta", {}).get("val")
     return isinstance(v, torch.Tensor) and v.device.type == "cpu"
+
+
 _CONTAINERS = (list, tuple, dict)
 
 
@@ -86,6 +112,9 @@ class _Scalar(float):
     # with args _Scalars of the same trace or numbers. trace: the
     # _scalar_state of the trace that made it.
     __slots__ = ("expr", "deps", "trace")
+    expr: tuple[Any, ...]
+    deps: frozenset[int]
+    trace: dict[str, Any] | None
 
 
 # While a region is traced in torch.vm: the float inputs (by position among
@@ -105,6 +134,14 @@ def _new_scalar(value: float, expr: tuple[Any, ...], deps: frozenset) -> _Scalar
 
 def _plain(x):
     return float.__float__(x) if type(x) is _Scalar else x
+
+
+def _tracer() -> PythonKeyTracer:
+    """The tracer of the make_fx trace running (the region's)."""
+    mode = get_proxy_mode()
+    if mode is None or not isinstance(mode.tracer, PythonKeyTracer):
+        raise AssertionError("no make_fx trace is running")
+    return mode.tracer
 
 
 def _plain_result(x, depth=0):
@@ -142,7 +179,9 @@ def _arith(op, reflected=False):
         if type(value) is not float or not (_live(a) or _live(b)):
             return value
         deps = frozenset().union(*(x.deps for x in (a, b) if _live(x)))
-        return _new_scalar(value, (op, tuple(x if _live(x) else _plain(x) for x in (a, b))), deps)
+        return _new_scalar(
+            value, (op, tuple(x if _live(x) else _plain(x) for x in (a, b))), deps
+        )
 
     return method
 
@@ -162,23 +201,57 @@ def _specializing(name):
 
     def method(self, *args):
         if _scalar_state is not None:
-            _scalar_state["specialized"].update(*(a.deps for a in (self, *args) if _live(a)))
+            _scalar_state["specialized"].update(
+                *(a.deps for a in (self, *args) if _live(a))
+            )
         return base(float.__float__(self), *map(_plain, args))
 
     return method
 
 
-for _name, _op in (("add", operator.add), ("sub", operator.sub), ("mul", operator.mul), ("truediv", operator.truediv), ("floordiv", operator.floordiv), ("mod", operator.mod), ("pow", operator.pow)):
+for _name, _op in (
+    ("add", operator.add),
+    ("sub", operator.sub),
+    ("mul", operator.mul),
+    ("truediv", operator.truediv),
+    ("floordiv", operator.floordiv),
+    ("mod", operator.mod),
+    ("pow", operator.pow),
+):
     setattr(_Scalar, f"__{_name}__", _arith(_op))
     setattr(_Scalar, f"__r{_name}__", _arith(_op, reflected=True))
 for _name, _op in (("neg", operator.neg), ("pos", operator.pos), ("abs", operator.abs)):
     setattr(_Scalar, f"__{_name}__", _unary(_op))
-for _name in ("__bool__", "__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__", "__int__", "__hash__", "__round__", "__trunc__", "__floor__", "__ceil__", "__format__", "__repr__", "__str__", "__divmod__", "__rdivmod__", "is_integer", "as_integer_ratio", "hex"):
+for _name in (
+    "__bool__",
+    "__eq__",
+    "__ne__",
+    "__lt__",
+    "__le__",
+    "__gt__",
+    "__ge__",
+    "__int__",
+    "__hash__",
+    "__round__",
+    "__trunc__",
+    "__floor__",
+    "__ceil__",
+    "__format__",
+    "__repr__",
+    "__str__",
+    "__divmod__",
+    "__rdivmod__",
+    "is_integer",
+    "as_integer_ratio",
+    "hex",
+):
     setattr(_Scalar, _name, _specializing(_name))
 
 
 def _has_floats(p) -> bool:
-    return p is not None and (p[0] == "float" or (p[0] == "tree" and any(c[0] == _FLOAT for c in p[2])))
+    return p is not None and (
+        p[0] == "float" or (p[0] == "tree" and any(c[0] == _FLOAT for c in p[2]))
+    )
 
 
 # Whether _skip_tracer_frames has run.
@@ -198,8 +271,9 @@ def _skip_tracer_frames() -> None:
     global _tracer_frames_skipped
     if _tracer_frames_skipped:
         return
-    from torch._rust import _cfg_skip
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+
+    _cfg_skip = _rust()._cfg_skip
 
     own = [
         *vars(_Scalar).values(),
@@ -243,7 +317,9 @@ def _substitute(x, scalars, restore, n, locs, where):
                 x[k] = z
         return x
     if t is tuple:
-        new = tuple(_substitute(y, scalars, restore, n, locs, (where[0], True)) for y in x)
+        new = tuple(
+            _substitute(y, scalars, restore, n, locs, (where[0], True)) for y in x
+        )
         return new if any(a is not b for a, b in zip(new, x)) else x
     n[0] += 1
     return x
@@ -276,15 +352,29 @@ class _ScalarArgs(TorchFunctionMode):
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        if func is torch.Tensor.item and not kwargs and len(args) == 1 and _scalar_state is not None:
+        if (
+            func is torch.Tensor.item
+            and not kwargs
+            and len(args) == 1
+            and _scalar_state is not None
+        ):
             t = args[0]
-            if isinstance(t, torch.Tensor) and t.device.type == "cpu" and t.numel() == 1:
+            if (
+                isinstance(t, torch.Tensor)
+                and t.device.type == "cpu"
+                and t.numel() == 1
+            ):
                 # A CPU scalar's value (no sync): a graph node, so the region
                 # reads it on every call.
                 with torch.utils._python_dispatch._disable_current_modes():
                     value = t.item()
-                tracer = get_proxy_mode().tracer
-                proxy = tracer.create_proxy("call_function", torch.ops.aten._local_scalar_dense.default, (tracer.unwrap_proxy(t),), {})
+                tracer = _tracer()
+                proxy = tracer.create_proxy(
+                    "call_function",
+                    torch.ops.aten._local_scalar_dense.default,
+                    (tracer.unwrap_proxy(t),),
+                    {},
+                )
                 proxy.node.meta["val"] = value
                 if type(value) is float:
                     return _new_scalar(value, ("node", proxy.node), frozenset([_DATA]))
@@ -303,7 +393,10 @@ class _ScalarArgs(TorchFunctionMode):
                 made.append(node)
             node = node.next
         traced = [n for n in made if _floats_in([list(n.args), dict(n.kwargs)], [])]
-        if len(traced) == 1 and [float.__float__(x) for x in _floats_in([list(traced[0].args), dict(traced[0].kwargs)], [])] == [float.__float__(x) for x in given]:
+        if len(traced) == 1 and [
+            float.__float__(x)
+            for x in _floats_in([list(traced[0].args), dict(traced[0].kwargs)], [])
+        ] == [float.__float__(x) for x in given]:
             it = iter(given)
 
             def put_back(a):
@@ -316,7 +409,9 @@ class _ScalarArgs(TorchFunctionMode):
         return out
 
 
-def _scalars_to_nodes(gm: torch.fx.GraphModule, inputs: list[torch.fx.Node], state: dict[str, Any]) -> None:
+def _scalars_to_nodes(
+    gm: torch.fx.GraphModule, inputs: list[torch.fx.Node], state: dict[str, Any]
+) -> None:
     """Replaces the _Scalars of the trace (`state`) in gm's nodes by nodes
     computing them from the float `inputs`, each made before its first use.
     Others (an earlier trace's) are their values."""
@@ -372,6 +467,8 @@ def _at_path(path, items):
     for k in path:
         x = x[k]
     return x
+
+
 # Pytree node types (by qualified name: torch doesn't depend on torchrec)
 # whose flattening keeps all of their state, so a region can take and make
 # them by their leaves. Others (KeyedJaggedTensor caches Python lists) are
@@ -389,7 +486,9 @@ def _is_tree(x) -> bool:
     t = type(x)
     tree = _tree_types.get(t)
     if tree is None:
-        tree = _tree_types[t] = issubclass(t, _CONTAINERS) or f"{t.__module__}.{t.__qualname__}" in _TREES
+        tree = _tree_types[t] = (
+            issubclass(t, _CONTAINERS) or f"{t.__module__}.{t.__qualname__}" in _TREES
+        )
     return tree
 
 
@@ -425,6 +524,8 @@ def _walk(x, leaves, shape):
             _walk(y, leaves, shape)
     else:
         leaves.append(x)
+
+
 _ITERATORS = tuple(
     type(iter(x)) for x in ([], (), {}, {}.values(), {}.items(), range(0))
 )
@@ -445,7 +546,15 @@ _PINNABLE = (
 )
 
 # "reads": the entries of the regions' checks of what their traces read.
-stats = {"traced": 0, "compiled": 0, "reused": 0, "small": 0, "refused": 0, "misses": 0, "reads": 0}
+stats = {
+    "traced": 0,
+    "compiled": 0,
+    "reused": 0,
+    "small": 0,
+    "refused": 0,
+    "misses": 0,
+    "reads": 0,
+}
 
 # Compiled graphs by (code, input metadata, grad mode): clones of a code (one
 # per call site) trace the same graphs.
@@ -509,8 +618,11 @@ def _tracing_apply(cls, *args, **kwargs):
             out = target(*args)
         finally:
             Backward.__init__ = _refusing_init
-    proxy = mode.tracer.create_proxy("call_function", target, tuple(pytree.tree_map(mode.tracer.unwrap_proxy, args)), {})
-    return track_tensor_tree(out, proxy, constant=None, tracer=mode.tracer)
+    tracer = _tracer()
+    proxy = tracer.create_proxy(
+        "call_function", target, tuple(pytree.tree_map(tracer.unwrap_proxy, args)), {}
+    )
+    return track_tensor_tree(out, proxy, constant=None, tracer=tracer)
 
 
 class _Effect:
@@ -525,8 +637,14 @@ class _Effect:
         # Traced into another graph (a lowering re-tracing the region, as AOT
         # Autograd does), it would run once, at trace time, and the tensors it
         # reads itself (a module's weights) would be baked in, with no grads.
-        if get_proxy_mode() is not None or torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
-            raise RuntimeError(f"{self!r} can't be traced into another graph: it must run as eager on every call")
+        if (
+            get_proxy_mode() is not None
+            or torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
+            is not None
+        ):
+            raise RuntimeError(
+                f"{self!r} can't be traced into another graph: it must run as eager on every call"
+            )
         return self.fn(*args, **kwargs)
 
     def __repr__(self) -> str:
@@ -555,13 +673,26 @@ def _opaque_call(fn, *args, **kwargs):
     global _scalar_state
     state, _scalar_state = _scalar_state, None
     try:
-        with torch.utils._python_dispatch._disable_current_modes(), torch._C.DisableTorchFunction():
-            with _RefuseImpure(_trace_backups, refuse=False) if _trace_backups is not None else contextlib.nullcontext():
+        with (
+            torch.utils._python_dispatch._disable_current_modes(),
+            torch._C.DisableTorchFunction(),
+        ):
+            with (
+                _RefuseImpure(_trace_backups, refuse=False)
+                if _trace_backups is not None
+                else contextlib.nullcontext()
+            ):
                 out = fn(*args, **kwargs)
     finally:
         _scalar_state = state
-    proxy = mode.tracer.create_proxy("call_function", target, tuple(pytree.tree_map(mode.tracer.unwrap_proxy, args)), pytree.tree_map(mode.tracer.unwrap_proxy, kwargs))
-    return track_tensor_tree(out, proxy, constant=None, tracer=mode.tracer)
+    tracer = _tracer()
+    proxy = tracer.create_proxy(
+        "call_function",
+        target,
+        tuple(pytree.tree_map(tracer.unwrap_proxy, args)),
+        pytree.tree_map(tracer.unwrap_proxy, kwargs),
+    )
+    return track_tensor_tree(out, proxy, constant=None, tracer=tracer)
 
 
 # The tensors the trace running wrote in place, with their copies (see
@@ -576,13 +707,17 @@ class _RefuseImpure(TorchDispatchMode):
     each tensor an op writes in place is copied into `backups` first, for
     the caller to put back."""
 
-    def __init__(self, backups: dict[int, tuple[torch.Tensor, torch.Tensor]], refuse: bool = True) -> None:
+    def __init__(
+        self, backups: dict[int, tuple[torch.Tensor, torch.Tensor]], refuse: bool = True
+    ) -> None:
         super().__init__()
         self.backups = backups
         self.refuse = refuse
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if self.refuse and (func.namespace in ("c10d", "_c10d_functional") or func in _SKIP_OPS):
+        if self.refuse and (
+            func.namespace in ("c10d", "_c10d_functional") or func in _SKIP_OPS
+        ):
             raise _Refused(f"it runs {func}")
         kwargs = kwargs or {}
         if func._schema.is_mutable:
@@ -657,10 +792,8 @@ def _plan(args, unused, span=False, scalars=False):
             leaf_checks = [_leaf_check(x, f"arg {i}", plain) for x in leaves]
             fast = None
             if all(c[0] != _FLOAT for c in leaf_checks):
-                import torch._rust as rust
-
                 try:
-                    fast = rust.TreeChecks(a)
+                    fast = _rust().TreeChecks(a)
                 except TypeError:
                     pass
             plan.append(("tree", shape, leaf_checks, fast))
@@ -691,7 +824,9 @@ def _inputs(args, plan, why=None):
             inputs.append(a)
             continue
         if p[0] == "float":
-            if not isinstance(a, float) or (p[1] is not None and float.__float__(a) != p[1]):
+            if not isinstance(a, float) or (
+                p[1] is not None and float.__float__(a) != p[1]
+            ):
                 if why is not None:
                     why.append(f"arg {i} (float)")
                 return None
@@ -716,14 +851,18 @@ def _inputs(args, plan, why=None):
             elif kind == _VALUE:
                 ok = type(leaf) is want[0] and leaf == want[1]
             elif kind == _FLOAT:
-                ok = isinstance(leaf, float) and (want is None or float.__float__(leaf) == want)
+                ok = isinstance(leaf, float) and (
+                    want is None or float.__float__(leaf) == want
+                )
                 if ok:
                     floats.append(float.__float__(leaf))
             else:
                 ok = leaf is want
             if not ok:
                 if why is not None:
-                    why.append(f"arg {i} leaf {k} ({type(leaf).__name__}, checked by {('meta', 'value', 'identity', 'float value')[kind]})")
+                    why.append(
+                        f"arg {i} leaf {k} ({type(leaf).__name__}, checked by {('meta', 'value', 'identity', 'float value')[kind]})"
+                    )
                 return None
     return inputs + floats
 
@@ -773,14 +912,32 @@ def _template(o, args, tensor_outs, objects, old):
                 raise _Refused(f"an output dict has a {type(k).__name__} key")
             objects.append(k)
             keys.append(len(objects) - 1)
-        return ("dict", keys, [_template(v, args, tensor_outs, objects, old) for v in o.values()])
+        return (
+            "dict",
+            keys,
+            [_template(v, args, tensor_outs, objects, old) for v in o.values()],
+        )
     if type(o) is enumerate:
         it, count = o.__reduce__()[1]
         objects.append(_enumerate)
-        return ("call", len(objects) - 1, [_template(it, args, tensor_outs, objects, old), _template(count, args, tensor_outs, objects, old)])
+        return (
+            "call",
+            len(objects) - 1,
+            [
+                _template(it, args, tensor_outs, objects, old),
+                _template(count, args, tensor_outs, objects, old),
+            ],
+        )
     if type(o) is zip:
         objects.append(_zip)
-        return ("call", len(objects) - 1, [_template(it, args, tensor_outs, objects, old) for it in o.__reduce__()[1]])
+        return (
+            "call",
+            len(objects) - 1,
+            [
+                _template(it, args, tensor_outs, objects, old)
+                for it in o.__reduce__()[1]
+            ],
+        )
     if type(o) in _ITERATORS:
         # A loop's iterator: rebuilt over what's left of it (the trace's run
         # consumed the rest), which misses changes to the container later.
@@ -790,14 +947,22 @@ def _template(o, args, tensor_outs, objects, old):
         return ("iter", _template(rest, args, tensor_outs, objects, old))
     if (names := _init_fields(o)) is not None:
         objects.append(functools.partial(_dataclass, type(o), names))
-        return ("call", len(objects) - 1, [_template(getattr(o, n), args, tensor_outs, objects, old) for n in names])
+        return (
+            "call",
+            len(objects) - 1,
+            [_template(getattr(o, n), args, tensor_outs, objects, old) for n in names],
+        )
     if _is_tree(o):
         leaves, spec = _flatten(o)
         objects.append(functools.partial(_unflatten, spec))
-        return ("call", len(objects) - 1, [_template(x, args, tensor_outs, objects, old) for x in leaves])
+        return (
+            "call",
+            len(objects) - 1,
+            [_template(x, args, tensor_outs, objects, old) for x in leaves],
+        )
     if isinstance(o, types.FunctionType) and o.__code__ is _fx_wrapper_code():
         # A function fx.wrap registered, which make_fx patches while tracing.
-        o = o.__wrapped__
+        o = inspect.unwrap(o, stop=lambda f: f.__code__ is not _fx_wrapper_code())
     if isinstance(o, types.FunctionType) and "<locals>" in o.__code__.co_qualname:
         # Maybe made by the run (a new closure each time), not pinnable.
         raise _Refused(f"an output is a local function {o.__qualname__}")
@@ -844,7 +1009,12 @@ def _contents(args) -> dict[int, Any]:
         x = todo.pop()
         if isinstance(x, (list, dict, set)) and id(x) not in out:
             items = list(x.items()) if isinstance(x, dict) else list(x)
-            out[id(x)] = (x, [(k, id(v)) for k, v in items] if isinstance(x, dict) else [id(v) for v in items])
+            out[id(x)] = (
+                x,
+                [(k, id(v)) for k, v in items]
+                if isinstance(x, dict)
+                else [id(v) for v in items],
+            )
             todo.extend(x.values() if isinstance(x, dict) else x)
         elif type(x) is tuple:
             todo.extend(x)
@@ -877,7 +1047,9 @@ def _init_fields(o) -> list[str] | None:
     if code is None or "__create_fn__" not in code.co_qualname:
         return None
     names = [f.name for f in dataclasses.fields(cls)]
-    if any(not f.init for f in dataclasses.fields(cls)) or set(getattr(o, "__dict__", ())) != set(names):
+    if any(not f.init for f in dataclasses.fields(cls)) or set(
+        getattr(o, "__dict__", ())
+    ) != set(names):
         return None
     return names
 
@@ -896,7 +1068,9 @@ def _lift_constants(gm: torch.fx.GraphModule) -> list[torch.Tensor]:
             continue
         if value.grad_fn is not None:
             # Made by the autograd graph of one run, not held across runs.
-            raise _Refused(f"it reads {node.target} ({tuple(value.shape)}), which has a grad_fn ({value.grad_fn.name()})")
+            raise _Refused(
+                f"it reads {node.target} ({tuple(value.shape)}), which has a grad_fn ({value.grad_fn.name()})"
+            )
         if node.target not in lifted:
             if last is None:
                 with gm.graph.inserting_before(next(iter(gm.graph.nodes))):
@@ -939,7 +1113,9 @@ def _split_host(gm: torch.fx.GraphModule, n_inputs: int):
         for i, a in enumerate(n.target._schema.arguments):
             if a.alias_info is not None and a.alias_info.is_write:
                 x = n.args[i] if i < len(n.args) else n.kwargs.get(a.name)
-                out.extend(y for y in pytree.tree_leaves(x) if isinstance(y, torch.fx.Node))
+                out.extend(
+                    y for y in pytree.tree_leaves(x) if isinstance(y, torch.fx.Node)
+                )
         return out
 
     order = {n: i for i, n in enumerate(gm.graph.nodes)}
@@ -952,7 +1128,11 @@ def _split_host(gm: torch.fx.GraphModule, n_inputs: int):
     todo = [(n, len(order)) for n in reads]
     while todo:
         n, before = todo.pop()
-        todo.extend((w, order[w]) for w in writers.get(n, ()) if order[w] < before and w not in host)
+        todo.extend(
+            (w, order[w])
+            for w in writers.get(n, ())
+            if order[w] < before and w not in host
+        )
         if n.op != "call_function" or n in host:
             continue
         if not cpu(n) or not all(cpu(a) for a in n.all_input_nodes):
@@ -960,11 +1140,21 @@ def _split_host(gm: torch.fx.GraphModule, n_inputs: int):
         host.add(n)
         todo.extend((a, order[n]) for a in n.all_input_nodes)
     for n in gm.graph.nodes:
-        if n.op == "call_function" and n not in host and not isinstance(n.meta.get("val"), torch.Tensor) and n.all_input_nodes and all(a in host or a.op == "placeholder" for a in n.all_input_nodes) and any(a in host for a in n.all_input_nodes):
+        if (
+            n.op == "call_function"
+            and n not in host
+            and not isinstance(n.meta.get("val"), torch.Tensor)
+            and n.all_input_nodes
+            and all(a in host or a.op == "placeholder" for a in n.all_input_nodes)
+            and any(a in host for a in n.all_input_nodes)
+        ):
             host.add(n)
     for w in host:
         for x in written(w):
-            if any(u not in host and u.op != "output" and order[u] < order[w] for u in x.users):
+            if any(
+                u not in host and u.op != "output" and order[u] < order[w]
+                for u in x.users
+            ):
                 return None
     shared: dict[torch.fx.Node, None] = {}
     for n in gm.graph.nodes:
@@ -982,10 +1172,14 @@ def _split_host(gm: torch.fx.GraphModule, n_inputs: int):
             if n.target in _SKIP_OPS:
                 # Tensor.item skips OpOverload.__call__.
                 env[n].op, env[n].target = "call_method", "item"
-            elif isinstance(n.target, torch._ops.OpOverload) and n.target.overloadpacket.__name__.startswith("_foreach_"):
+            elif isinstance(
+                n.target, torch._ops.OpOverload
+            ) and n.target.overloadpacket.__name__.startswith("_foreach_"):
                 # torch's own binding converts a tensor list faster than
                 # OpOverload's (it picks the same overload from the args).
-                env[n].target = getattr(torch, n.target.overloadpacket.__name__, n.target)
+                env[n].target = getattr(
+                    torch, n.target.overloadpacket.__name__, n.target
+                )
     pro.output(tuple(env[a] for a in shared))
     _dedupe_reads(pro)
     _memo_chains(pro)
@@ -1020,12 +1214,19 @@ def _dedupe_reads(pro: torch.fx.Graph) -> None:
             if first is not n:
                 n.replace_all_uses_with(first)
                 pro.erase_node(n)
-        elif isinstance(n.target, torch._ops.OpOverload) and n.target._schema.is_mutable or callable(n.target) and getattr(n.target, "__name__", "").endswith("_"):
+        elif (
+            isinstance(n.target, torch._ops.OpOverload)
+            and n.target._schema.is_mutable
+            or callable(n.target)
+            and getattr(n.target, "__name__", "").endswith("_")
+        ):
             seen.clear()
     pro.lint()
 
 
-_SCALAR_OPS = {v for k, v in vars(operator).items() if not k.startswith("_") and callable(v)}
+_SCALAR_OPS = {
+    v for k, v in vars(operator).items() if not k.startswith("_") and callable(v)
+}
 
 
 def _run_chains(template, reads, *shared):
@@ -1081,13 +1282,25 @@ def _memo_chains(pro: torch.fx.Graph) -> None:
             continue
         chain_deps = {owner[a] for a in n.all_input_nodes if a in owner}
         # Its other inputs must not depend on a read at all (shared values).
-        if len(chain_deps) == 1 and all(a in owner or a not in tainted for a in n.all_input_nodes):
+        if len(chain_deps) == 1 and all(
+            a in owner or a not in tainted for a in n.all_input_nodes
+        ):
             owner[n] = chain_deps.pop()
     chains: dict[torch.fx.Node, list[torch.fx.Node]] = {r: [] for r in reads}
     for n in pro.nodes:
         if n in owner and n is not owner[n]:
             chains[owner[n]].append(n)
-    groups: dict[Any, list[tuple[torch.fx.Node, list[torch.fx.Node], list[torch.fx.Node]]]] = {}
+    groups: dict[
+        Any,
+        list[
+            tuple[
+                torch.fx.Node,
+                list[torch.fx.Node],
+                list[torch.fx.Node],
+                list[torch.fx.Node],
+            ]
+        ],
+    ] = {}
     for r, nodes in chains.items():
         members = {r, *nodes}
         index = {x: i for i, x in enumerate(nodes)}
@@ -1130,7 +1343,13 @@ def _memo_chains(pro: torch.fx.Graph) -> None:
             env[x] = template.node_copy(x, env.__getitem__)
         template.output(tuple(env[(r0, *nodes0)[k]] for k in export_pos))
         fn = _chains_target(torch.fx.GraphModule(torch.nn.Module(), template))
-        users = [u for _, nodes, exports, _ in group for x in exports for u in x.users if u not in owner]
+        users = [
+            u
+            for _, nodes, exports, _ in group
+            for x in exports
+            for u in x.users
+            if u not in owner
+        ]
         first_use = min(users, key=order.__getitem__)
         with pro.inserting_before(first_use):
             run = pro.call_function(fn, ([r for r, *_ in group], *shared0))
@@ -1235,25 +1454,41 @@ def _compile(name, gm, example, consts, args, plan, types):
     from torch._inductor.compile_fx import compile_fx
 
     if block_pipeline is None:
-        key = (gm.code, tuple(_meta(t) for t in example + consts), torch.is_grad_enabled())
+        key = (
+            gm.code,
+            tuple(_meta(t) for t in example + consts),
+            torch.is_grad_enabled(),
+        )
         if key not in _compiled:
             _compiled[key] = compile_fx(gm, example + consts)
             stats["compiled"] += 1
         else:
             stats["reused"] += 1
         return _compiled[key]
-    split = _split_host(gm, len(example)) if any(n.target in _SKIP_OPS for n in gm.graph.nodes) else None
+    split = (
+        _split_host(gm, len(example))
+        if any(n.target in _SKIP_OPS for n in gm.graph.nodes)
+        else None
+    )
     if split is not None:
         prologue, gm, floats = split
         k = len(example)
         types = _input_types(args, plan, types, consts)
-        rest = _compile_vm(name, gm, example + floats, consts, types[:k] + [_vm_types().FloatType() for _ in floats] + types[k:])
+        rest = _compile_vm(
+            name,
+            gm,
+            example + floats,
+            consts,
+            types[:k] + [_vm_types().FloatType() for _ in floats] + types[k:],
+        )
 
         def run(*inputs):
             return rest(*inputs[:k], *prologue(*inputs), *inputs[k:])
 
         return run
-    return _compile_vm(name, gm, example, consts, _input_types(args, plan, types, consts))
+    return _compile_vm(
+        name, gm, example, consts, _input_types(args, plan, types, consts)
+    )
 
 
 def _vm_types():
@@ -1265,7 +1500,14 @@ def _vm_types():
 def _compile_vm(name, gm, example, consts, input_types):
     # Regions with the same graph and input metadata share the passes' output,
     # unless a pass read a weight's value.
-    key = (block_pipeline, gm.code, tuple(_meta(t) if isinstance(t, torch.Tensor) else float for t in example + consts), torch.is_grad_enabled())
+    key = (
+        block_pipeline,
+        gm.code,
+        tuple(
+            _meta(t) if isinstance(t, torch.Tensor) else float for t in example + consts
+        ),
+        torch.is_grad_enabled(),
+    )
     own = (*key, tuple(map(id, consts)))
     for k in (key, own):
         if k in _compiled:
@@ -1285,8 +1527,12 @@ def check(name: str, mine, theirs) -> None:
     def same(a, b, where):
         if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
             if a.shape != b.shape or a.dtype != b.dtype:
-                return f"{where}: {tuple(a.shape)} {a.dtype} vs {tuple(b.shape)} {b.dtype}"
-            if not torch.allclose(a.detach().float(), b.detach().float(), rtol=1e-3, atol=1e-3):
+                return (
+                    f"{where}: {tuple(a.shape)} {a.dtype} vs {tuple(b.shape)} {b.dtype}"
+                )
+            if not torch.allclose(
+                a.detach().float(), b.detach().float(), rtol=1e-3, atol=1e-3
+            ):
                 return f"{where}: values differ by {(a.detach().float() - b.detach().float()).abs().max().item()}"
             return None
         if type(a) is not type(b):
@@ -1294,11 +1540,23 @@ def check(name: str, mine, theirs) -> None:
         if isinstance(a, (list, tuple)):
             if len(a) != len(b):
                 return f"{where}: length {len(a)} vs {len(b)}"
-            return next((m for m in (same(x, y, f"{where}[{i}]") for i, (x, y) in enumerate(zip(a, b))) if m), None)
+            return next(
+                (
+                    m
+                    for m in (
+                        same(x, y, f"{where}[{i}]")
+                        for i, (x, y) in enumerate(zip(a, b))
+                    )
+                    if m
+                ),
+                None,
+            )
         if isinstance(a, dict):
             if list(a) != list(b):
                 return f"{where}: keys {list(a)} vs {list(b)}"
-            return next((m for m in (same(a[k], b[k], f"{where}[{k!r}]") for k in a) if m), None)
+            return next(
+                (m for m in (same(a[k], b[k], f"{where}[{k!r}]") for k in a) if m), None
+            )
         if type(a) in _IMMUTABLE and a != b:
             return f"{where}: {a!r} vs {b!r}"
         if type(a) in _ITERATORS or type(a) in (enumerate, zip):
@@ -1316,9 +1574,7 @@ def check(name: str, mine, theirs) -> None:
 def _span_checks(checks):
     """A span's checks (no guard makes them) as (kind, arg, expected); its
     tensor args checked in one TreeChecks call."""
-    import torch._rust as rust
-
-    out = []
+    out: list[tuple[str, Any, Any]] = []
     tensors: list[tuple[int, torch.Tensor]] = []
     for c in checks:
         kind = c[0]
@@ -1337,7 +1593,13 @@ def _span_checks(checks):
         elif kind != "requires_grad":
             raise _Refused(f"a span can't check {kind}")
     if tensors:
-        out.append(("tensors", tuple(i for i, _ in tensors), rust.TreeChecks(tuple(t for _, t in tensors))))
+        out.append(
+            (
+                "tensors",
+                tuple(i for i, _ in tensors),
+                _rust().TreeChecks(tuple(t for _, t in tensors)),
+            )
+        )
     return out
 
 
@@ -1377,24 +1639,32 @@ def _shared_container(outs) -> bool:
             todo.extend(x)
         elif isinstance(x, dict):
             todo.extend(x.values())
-        elif _init_fields(x) is not None:
-            todo.extend(getattr(x, n) for n in _init_fields(x))
+        elif (names := _init_fields(x)) is not None:
+            todo.extend(getattr(x, n) for n in names)
     return False
 
 
-def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool = False, types: list[Any] | None = None):
+def trace_region(
+    name: str,
+    args: tuple[Any, ...],
+    unused: list[int],
+    span: bool = False,
+    types: list[Any] | None = None,
+):
     """Runs the block being traced (via torch._rust._region_body) and returns
     (func, outputs, objects, checks) for its region, or None. A None before
     the body ran leaves running it to the executor. A span's region (`span`)
     makes the checks itself. ``types``: what the VM recorded at each arg over
     the runs before (see torch.vm.Type)."""
-    from torch._rust import _region_body, _region_reads
+    _region_body, _region_reads = _rust()._region_body, _rust()._region_reads
 
     allow = os.environ.get("TORCH_RUST_REGION_ALLOW")
     if allow is not None and not re.search(allow, name):
         return None
     try:
-        checks, plan = _plan(args, set(unused), span, scalars=block_pipeline is not None)
+        checks, plan = _plan(
+            args, set(unused), span, scalars=block_pipeline is not None
+        )
         example = _inputs(args, plan)
         own_checks = _span_checks(checks) if span else []
     except _Refused as e:
@@ -1405,8 +1675,13 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
     if example is None:
         raise AssertionError(f"region {name}: the inputs don't match their own trace")
     if os.environ.get("TORCH_RUST_REGION_DEBUG") == "2":
-        kinds = [p[0] if p else ("unread" if i in unused else "checked") for i, p in enumerate(plan)]
-        print(f"region {name}: args {[(type(a).__name__, k) for a, k in zip(args, kinds)]}")
+        kinds = [
+            p[0] if p else ("unread" if i in unused else "checked")
+            for i, p in enumerate(plan)
+        ]
+        print(
+            f"region {name}: args {[(type(a).__name__, k) for a, k in zip(args, kinds)]}"
+        )
 
     result: dict[str, Any] = {}
     Backward = torch.autograd.function.BackwardCFunction
@@ -1416,11 +1691,17 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
     pinned = {c[1] for c in checks if c[0] == "is"}
     unpinned = _old_containers([a for i, a in enumerate(args) if i not in pinned])
     # By id: whether only args the guard pins hold it.
-    old = {k: k not in unpinned for k in _old_containers([args[i] for i in pinned])}
+    old: dict[int, Any] = {
+        k: k not in unpinned for k in _old_containers([args[i] for i in pinned])
+    }
     old.update(dict.fromkeys(unpinned, False))
     old.update(_paths(args, plan))
     n_floats = sum(1 for p in plan if p is not None and p[0] == "float") + sum(
-        1 for p in plan if p is not None and p[0] == "tree" for c in p[2] if c[0] == _FLOAT
+        1
+        for p in plan
+        if p is not None and p[0] == "tree"
+        for c in p[2]
+        if c[0] == _FLOAT
     )
     n_tensors = len(example) - n_floats
     backups: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
@@ -1438,14 +1719,23 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
         if in_vm:
             _scalar_state = state
         if n_floats:
-            scalars = iter([_new_scalar(v, ("input", k), frozenset([k])) for k, v in enumerate(xs[n_tensors:])])
+            scalars = iter(
+                [
+                    _new_scalar(v, ("input", k), frozenset([k]))
+                    for k, v in enumerate(xs[n_tensors:])
+                ]
+            )
             call_args = tuple(
-                _substitute(a, scalars, restore, [0], locs, (i, p[0] == "tree")) if _has_floats(p) else a
+                _substitute(a, scalars, restore, [0], locs, (i, p[0] == "tree"))
+                if _has_floats(p)
+                else a
                 for i, (a, p) in enumerate(zip(args, plan))
             )
         try:
             before = _contents(call_args)
-            scalar_args = _ScalarArgs(get_proxy_mode().tracer.graph) if in_vm else contextlib.nullcontext()
+            scalar_args = (
+                _ScalarArgs(_tracer().graph) if in_vm else contextlib.nullcontext()
+            )
             with scalar_args, _RefuseImpure(backups):
                 _trace_backups = backups
                 try:
@@ -1467,7 +1757,9 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
                 result["refused"] = "its outputs share a container"
                 return []
             try:
-                result["outputs"] = [_template(o, call_args, tensor_outs, objects, old) for o in outs]
+                result["outputs"] = [
+                    _template(o, call_args, tensor_outs, objects, old) for o in outs
+                ]
             except _Refused as e:
                 result["refused"] = str(e)
                 return []
@@ -1499,7 +1791,9 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
     if _DATA in state["specialized"]:
         result["refused"] = "it branches on a value it reads from a tensor"
     elif in_vm:
-        _scalars_to_nodes(gm, list(gm.graph.find_nodes(op="placeholder"))[n_tensors:], state)
+        _scalars_to_nodes(
+            gm, list(gm.graph.find_nodes(op="placeholder"))[n_tensors:], state
+        )
         for k in state["specialized"]:
             (i, leaf), value = locs[k], example[n_tensors + k]
             if leaf is None:
@@ -1522,7 +1816,11 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
     for k in [*gm._parameters, *gm._buffers]:
         if k not in read:
             delattr(gm, k)
-    unread = [i for i, n in enumerate(gm.graph.find_nodes(op="placeholder")) if not n.users and isinstance(n.meta.get("val"), torch.Tensor)]
+    unread = [
+        i
+        for i, n in enumerate(gm.graph.find_nodes(op="placeholder"))
+        if not n.users and isinstance(n.meta.get("val"), torch.Tensor)
+    ]
     ops = [n for n in gm.graph.nodes if n.op == "call_function"]
     if any(n.target in _SKIP_OPS and not (in_vm and _cpu_read(n)) for n in ops):
         stats["refused"] += 1
@@ -1554,7 +1852,9 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
         reads.forget(_tree_holders(args, plan))
         stats["reads"] += len(reads)
     if DEBUG:
-        print(f"region {name}: {n_ops} ops, {len(example)} inputs + {len(consts)} constants")
+        print(
+            f"region {name}: {n_ops} ops, {len(example)} inputs + {len(consts)} constants"
+        )
         if reads is not None and os.environ.get("TORCH_RUST_REGION_DEBUG") == "2":
             print(f"region {name}: checks {len(reads)} reads")
             print("\n".join(f"  read: {line}" for line in reads.describe()))
@@ -1576,7 +1876,7 @@ def trace_region(name: str, args: tuple[Any, ...], unused: list[int], span: bool
             counts[key] = counts.get(key, 0) + 1
         if inputs is None:
             stats["misses"] += 1
-            if DEBUG:
+            if why:
                 print(f"region {name}: miss on {why[0]}")
             return None
         return compiled(*inputs, *consts)

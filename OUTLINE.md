@@ -1,7 +1,7 @@
 helloworld1:
   g0 = True
 
-  @torch.compile3
+  @torch._compile3
   def model(a, b, c):
     if g0:
       e = a * b + c

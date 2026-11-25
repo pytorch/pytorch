@@ -12,14 +12,33 @@ seeing a block's forward and start seeing its joint graph, then its forward
 and backward graphs. ``Inductor`` is a block pass that compiles the graph.
 """
 
-import copy
 import dataclasses
 from collections.abc import Callable
 from typing import Any
 
 import torch
-from torch.vm._graph import lower_to
 from torch.vm._cfg import Cfg
+from torch.vm._graph import lower_to
+
+
+__all__ = [
+    "Autograd",
+    "BypassCold",
+    "Elide",
+    "Inductor",
+    "LiftGuard",
+    "OPTIMIZER",
+    "Partition",
+    "PinCalls",
+    "PureCalls",
+    "Regions",
+    "Skip",
+    "Spans",
+    "Split",
+    "ThreadRng",
+    "UseAten",
+    "static_parameters",
+]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -29,7 +48,9 @@ class _Builtin:
 
     @property
     def name(self) -> str:
-        return "".join(f"_{c.lower()}" if c.isupper() else c for c in type(self).__name__).lstrip("_")
+        return "".join(
+            f"_{c.lower()}" if c.isupper() else c for c in type(self).__name__
+        ).lstrip("_")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -133,7 +154,9 @@ def _inductor_partition(joint, joint_inputs, **kwargs):
     from torch._inductor.fx_passes.joint_graph import joint_graph_passes
 
     joint_graph_passes(joint)
-    return min_cut_rematerialization_partition(joint, joint_inputs, compiler="inductor", **kwargs)
+    return min_cut_rematerialization_partition(
+        joint, joint_inputs, compiler="inductor", **kwargs
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -162,20 +185,31 @@ class Inductor:
     def __init__(self, config: dict[str, Any] | None = None, **options: Any) -> None:
         self.config = {**(config or {}), **options}
 
-    def __call__(self, gm: torch.fx.GraphModule, input_types: list[Any]) -> torch.fx.GraphModule:
+    def __call__(
+        self, gm: torch.fx.GraphModule, input_types: list[Any]
+    ) -> torch.fx.GraphModule:
         from torch._inductor import config
         from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 
         stage = gm.meta.get("vm_stage", "forward")
         inputs = gm.meta["vm_example_inputs"]
         if stage == "joint":
-            raise TypeError("Inductor can't compile a joint graph: put it after vm.passes.Partition()")
+            raise TypeError(
+                "Inductor can't compile a joint graph: put it after vm.passes.Partition()"
+            )
         if stage == "forward" and any(isinstance(x, float) for x in inputs):
             return _compile_without_floats(gm, inputs, self.config)
         if stage == "forward":
-            return lower_to(gm, compile_fx(gm, inputs, config_patches=dict(self.config) or None))
+            return lower_to(
+                gm, compile_fx(gm, inputs, config_patches=dict(self.config) or None)
+            )
         with config.patch(self.config):
-            boxed = compile_fx_inner(gm, inputs, is_backward=stage == "backward", is_inference=stage == "inference")
+            boxed = compile_fx_inner(
+                gm,
+                inputs,
+                is_backward=stage == "backward",
+                is_inference=stage == "inference",
+            )
 
         def inductor(*args):
             return boxed(list(args))
@@ -192,7 +226,9 @@ class Inductor:
         return f"Inductor({self.config!r})" if self.config else "Inductor()"
 
 
-def _compile_without_floats(gm: torch.fx.GraphModule, inputs: list[Any], config: dict[str, Any]) -> torch.fx.GraphModule:
+def _compile_without_floats(
+    gm: torch.fx.GraphModule, inputs: list[Any], config: dict[str, Any]
+) -> torch.fx.GraphModule:
     """Inductor on a graph with float inputs: specialized on their values
     (see vm.specialize_floats), then compiled without them; outputs the
     folding made constants are put back around the compiled call."""
@@ -216,7 +252,9 @@ def _compile_without_floats(gm: torch.fx.GraphModule, inputs: list[Any], config:
     nodes = [k for k, x in enumerate(items) if isinstance(x, torch.fx.Node)]
     out.args = ([items[k] for k in nodes],)
     inner.recompile()
-    compiled = compile_fx(inner, [inputs[i] for i in keep], config_patches=dict(config) or None)
+    compiled = compile_fx(
+        inner, [inputs[i] for i in keep], config_patches=dict(config) or None
+    )
 
     def inductor(*args):
         got = iter(compiled(*[args[i] for i in keep]))
@@ -226,7 +264,10 @@ def _compile_without_floats(gm: torch.fx.GraphModule, inputs: list[Any], config:
         return tuple(made) if isinstance(results, tuple) else list(made)
 
     lowered = lower_to(special, inductor)
-    for ph, special_ph in zip(lowered.graph.find_nodes(op="placeholder"), special.graph.find_nodes(op="placeholder")):
+    for ph, special_ph in zip(
+        lowered.graph.find_nodes(op="placeholder"),
+        special.graph.find_nodes(op="placeholder"),
+    ):
         for user in special_ph.users:
             if user.target is guard_node:
                 from torch.vm._guards import guard
@@ -236,7 +277,9 @@ def _compile_without_floats(gm: torch.fx.GraphModule, inputs: list[Any], config:
     return lowered
 
 
-def static_parameters(gm: torch.fx.GraphModule, input_types: list[Any]) -> torch.fx.GraphModule:
+def static_parameters(
+    gm: torch.fx.GraphModule, input_types: list[Any]
+) -> torch.fx.GraphModule:
     """Marks a block's weights as static inputs, so Inductor's CUDA graphs read
     them in place rather than copying them on every replay (sound: a region
     passes the same weight tensors on every call, and an optimizer updates
@@ -246,9 +289,12 @@ def static_parameters(gm: torch.fx.GraphModule, input_types: list[Any]) -> torch
 
     gm.meta["dynamo_compile_id"] = None
     gm._param_name_to_source = {}
-    for i, (node, t) in enumerate(zip(gm.graph.find_nodes(op="placeholder"), input_types)):
+    for i, (node, t) in enumerate(
+        zip(gm.graph.find_nodes(op="placeholder"), input_types)
+    ):
         node._dynamo_source = LocalSource(f"vm_input_{i}")
         if t.is_const:
-            node.meta.setdefault("tensor_dict", {})["_dynamo_static_input_type"] = "unguarded"
+            node.meta.setdefault("tensor_dict", {})["_dynamo_static_input_type"] = (
+                "unguarded"
+            )
     return gm
-

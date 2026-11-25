@@ -713,6 +713,7 @@
 # /torch/_python_dispatcher.py
 # /torch/_refs/
 # /torch/_rust/
+# /torch/_rust_inductor.py
 # /torch/_size_docs.py
 # /torch/_sources.py
 # /torch/_storage_docs.py
@@ -759,6 +760,7 @@
 # /torch/torch_version.py
 # /torch/types.py
 # /torch/utils/
+# /torch/vm/
 /torch/_vendor/quack/ @slayton58 @drisspg
 # label: module: dsl-native-ops
 # owner: @drisspg @pearu @slayton58
@@ -826,8 +828,10 @@
 # /test/test_transformers.py
 # /test/test_type_hints.py
 # /test/test_typing.py
+# /test/test_vm.py
 # /test/torch_np/
 # /test/typing/
+# /test/vm_passes/
 # /test/xpu/test_transformers.py
 # label: module: sdpa
 # owner: @liangel-02
@@ -1337,9 +1341,13 @@
 # /GLOSSARY.md
 # /LICENSE
 # /NOTICE
+# /OUTLINE.md
+# /QUESTIONS.md
 # /README.md
 # /RELEASE.md
 # /SECURITY.md
+# /TODO.md
+# /hello1.py
 # label: module: docs
 # owner: @albanD
 # /docs/
