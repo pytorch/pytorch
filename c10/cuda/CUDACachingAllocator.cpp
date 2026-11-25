@@ -2774,7 +2774,7 @@ class DeviceCachingAllocator {
       }
       offset = static_cast<const char*>(block->ptr) -
           static_cast<const char*>(base_block->ptr);
-      cudaIpcMemHandle_t handle;
+      cudaIpcMemHandle_t handle{};
       C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base_block->ptr));
       ss.write(reinterpret_cast<const char*>(&handle), CUDA_IPC_HANDLE_SIZE);
     } else {
