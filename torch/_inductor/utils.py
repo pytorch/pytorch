@@ -52,6 +52,7 @@ from typing_extensions import dataclass_transform, ParamSpec, TypeVar
 from unittest import mock
 
 import sympy
+from sympy.polys.polyerrors import BasePolynomialError
 
 import torch
 import torch.utils._pytree as pytree
@@ -232,7 +233,7 @@ from torch.utils._sympy.functions import (
     Mod,
     ModularIndexing,
 )
-from torch.utils._sympy.symbol import make_symbol, SymT
+from torch.utils._sympy.symbol import make_symbol, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from . import config
@@ -665,6 +666,62 @@ class GraphPartitionMap:
 
     # name of constants read/written by the graph partition
     constant_names: list[str]
+
+
+class GraphPartitionMode(enum.Enum):
+    """Whether, and why, a compile is split into partition functions."""
+
+    # One callable: graph_partition is off, unsupported (cpp_wrapper, fx_wrapper,
+    # AOT) or unwanted (subgraph bodies, benchmark-only lowerings).
+    NONE = "none"
+    # config.graph_partition=True.
+    FROM_CONFIG = "from_config"
+
+
+@dataclasses.dataclass(frozen=True)
+class GraphPartitionPlan:
+    """How one compile is split into partitions, and what the partitions are for.
+
+    Decided once before lowering; GraphLowering and CompiledFxGraph carry it
+    instead of reading config.graph_partition. ConstructorMoverPass,
+    the cpp_wrapper/fx_wrapper setup and compile_fx's override_cudagraphs
+    handling still read the config itself, and the scheduler's
+    partition-minimizing reorder requires both it and config.triton.cudagraphs,
+    preserving that optimization's opt-in.
+    """
+
+    mode: GraphPartitionMode = GraphPartitionMode.NONE
+    # The partitions are for CUDA Graphs or a customized partition wrapper: the
+    # scheduler splits off ops that cannot be captured, call() leaves the input
+    # alignment and NaN asserts to the partition functions, and post_compile
+    # captures the partitions instead of the whole graph.
+    cudagraphs_per_partition: bool = False
+
+    def __post_init__(self) -> None:
+        if self.cudagraphs_per_partition and not self.uses_graph_partition:
+            raise ValueError("cudagraphs_per_partition=True requires partitioning")
+
+    @property
+    def uses_graph_partition(self) -> bool:
+        """Whether codegen emits partition functions and a Runner."""
+        return self.mode is not GraphPartitionMode.NONE
+
+    @staticmethod
+    def no_partition() -> GraphPartitionPlan:
+        """One callable whatever config.graph_partition says: subgraph bodies
+        and benchmark-only lowerings."""
+        return GraphPartitionPlan()
+
+    @staticmethod
+    def from_config() -> GraphPartitionPlan:
+        """The plan config.graph_partition and config.triton.cudagraphs imply."""
+        if not config.graph_partition:
+            return GraphPartitionPlan.no_partition()
+        return GraphPartitionPlan(
+            GraphPartitionMode.FROM_CONFIG,
+            cudagraphs_per_partition=config.triton.cudagraphs
+            or _unstable_customized_partition_wrapper.wrapper is not None,
+        )
 
 
 def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
@@ -1736,6 +1793,40 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
     have the same replaced expression integer and nonnegative properties.
     """
     return _sympy_subs(expr, replacements)
+
+
+_SIZE_SYMBOL_TYPES = (SymT.SIZE, SymT.PRECOMPUTED_SIZE, SymT.UNBACKED_INT)
+
+
+def is_affine_indexing(index: sympy.Expr) -> bool:
+    """
+    True if index is affine in the loop and indirect variables: coefficients
+    may involve size symbols, but there is no ModularIndexing, FloorDiv, Min,
+    Max, Abs or Where of a loop variable and no product of loop variables.
+    """
+    # not simultaneous, which would leave the inner one of nested wrappers
+    index = index.replace(Identity, lambda x: x, simultaneous=False)
+    loop_vars = [
+        sym for sym in index.free_symbols if not symbol_is_type(sym, _SIZE_SYMBOL_TYPES)
+    ]
+    if not loop_vars:
+        return True
+    try:
+        return sympy.Poly(index, *loop_vars).total_degree() <= 1
+    except BasePolynomialError:
+        return False
+
+
+# The constructs InductorChoices.use_modular_indexing decides about.
+ModularIndexingUse = Literal[
+    "view",  # dim-merging view whose inlined loads need it
+    "reduction",  # flat split of a multi-dim reduction
+    "repeat",
+    "roll",
+    "slice_scatter",  # strided slice_scatter
+    "index",  # %, //, abs, clamp of an index tensor folded into the address
+    "reindex",  # loop reindexing and index inversion during fusion
+]
 
 
 def is_symbolic(a: object) -> TypeGuard[torch.SymInt | torch.Tensor]:
@@ -3237,7 +3328,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
         return False
-    from .codegen.cutlass.utils import try_import_cutlass
+    from .codegen.cutlass.utils import is_cutlass_arch_supported, try_import_cutlass
 
     # Do not use cutlass template on ROCm
     if torch.version.hip:
@@ -3251,6 +3342,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     res = (
         (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("CUTLASS")
+        and is_cutlass_arch_supported(layout.device.type)
         and _use_template_for_gpu(layout, layout_dtypes)
     )
 
@@ -3423,11 +3515,16 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
 
     pow_of_2_divisors, mul_of_32_divisors, rest_of_splits = [], [], []
 
+    max_k_per_split = config.triton.decompose_k_max_k_per_split
     for d in divisors:
         kPart = k // d
 
         # Smaller than 128 might not even fit in a single tile, BLOCK_K can be 128
         if kPart < 128:
+            continue
+
+        # Long per-split chunks lose fp32 accumulation accuracy in the partial matmul
+        if max_k_per_split > 0 and kPart > max_k_per_split:
             continue
 
         # Power of 2 divisors are best performing, conform to hardware
@@ -4571,6 +4668,22 @@ def is_gpu(device: str | None) -> bool:
     return device in GPU_TYPES
 
 
+def triton_fp_fusion_enabled() -> bool:
+    """Whether Triton may contract multiply-adds in Inductor's kernels into FMAs.
+
+    Which multiply-adds Triton contracts can depend on the block size and
+    num_warps, so deterministic mode turns it off: otherwise the result depends
+    on the config autotuning picks.
+    """
+    from torch._inductor import config
+
+    return (
+        config.triton.enable_fp_fusion
+        and not config.emulate_precision_casts
+        and not (config.deterministic or config.batch_invariant)
+    )
+
+
 def is_rocm() -> bool:
     """Check if we're running on ROCm/HIP platform."""
     return torch.version.hip is not None
@@ -5410,13 +5523,6 @@ def is_codegen_graph_partition_subgraph(wrapper: PythonWrapperCodegen) -> bool:
     )
 
 
-def is_using_cudagraph_partition() -> bool:
-    return (
-        torch._inductor.config.triton.cudagraphs
-        or _unstable_customized_partition_wrapper.wrapper is not None
-    ) and torch._inductor.config.graph_partition
-
-
 def dtype_from_size(size: int) -> torch.dtype:
     from .virtualized import V
 
@@ -5852,6 +5958,13 @@ def load_template(name: str, template_dir: Path) -> str:
         # template is malformed, which is easy to misdiagnose when it surfaces
         # deep inside kernel lowering.
         raise ValueError(f"Template {path} is not valid UTF-8: {e}") from e
+
+
+def get_cpp_wrapper_header_device(device: str) -> str:
+    """PrivateUse1 backends register an arbitrary device name, but the runtime
+    headers are shipped under the generic privateuse1 name."""
+    privateuse1 = torch._C._get_privateuse1_backend_name()
+    return "privateuse1" if device == privateuse1 else device
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:

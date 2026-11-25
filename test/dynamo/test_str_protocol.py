@@ -712,5 +712,48 @@ class ObjectFormatTests(TestCase):
         self.assertEqual(compiled(x, o)[1], fn(x, o)[1])
 
 
+class _StrSubclass(str):
+    __slots__ = ()
+
+
+@instantiate_parametrized_tests
+class BuiltinFormatTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @parametrize(
+        "args",
+        [
+            subtest(("abc", ">5"), name="str"),
+            subtest(("abc",), name="str_no_spec"),
+            subtest((_StrSubclass("xy"), ">4"), name="str_subclass"),
+            subtest((5,), name="int"),
+            subtest((5, "03d"), name="int_spec"),
+            subtest((2.5, ".3f"), name="float"),
+            subtest((None,), name="none"),
+            subtest((_HasStr(), ""), name="object"),
+            subtest((None, "x"), name="object_bad_spec"),
+            subtest((1, 2), name="spec_not_str"),
+            subtest((1, "", 3), name="too_many_args"),
+        ],
+    )
+    def test_format(self, args):
+        def fn(x):
+            try:
+                return x + 1, format(*args)
+            except TypeError as e:
+                return x + 1, str(e)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(compiled(x)[1], fn(x)[1])
+
+    def test_str_subclass_returns_exact_str(self):
+        def fn(x):
+            return x + 1, type(format(_StrSubclass("xy")))
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertIs(compiled(torch.randn(2))[1], str)
+
+
 if __name__ == "__main__":
     run_tests()

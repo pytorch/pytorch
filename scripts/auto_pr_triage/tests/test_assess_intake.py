@@ -289,9 +289,10 @@ class MaintainerActivityTest(unittest.TestCase):
             {
                 "event": event,
                 "actor": {"login": "maintainer", "type": "User"},
-                "label": {"name": "open source"},
+                "label": {"name": label},
             }
             for event in ("labeled", "unlabeled")
+            for label in ("open source", "bot-retriage")
         ]
         with (
             mock.patch(

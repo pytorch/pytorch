@@ -1439,6 +1439,7 @@ class ListVariable(BaseListVariable):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
+        "__getitem__": Method.from_slot(BaseListVariable.mp_subscript_impl),
         "append": Method(BaseListVariable.list_append),
         "extend": Method(BaseListVariable.list_extend),
         "insert": Method(BaseListVariable.list_insert),
@@ -1859,13 +1860,8 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not (self.is_mutable() and len(args) > 0):
             return None
-        if kwargs or len(args) != 2:
-            raise_args_mismatch(
-                tx,
-                "insert",
-                "2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        no_keywords(tx, "deque.insert", kwargs)
+        check_positional(tx, "insert", len(args), 2, 2)
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None and len(self.items) == maxlen:
             raise_observed_exception(
@@ -1943,31 +1939,6 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
             self.state,
             mutation_type=ValueMutationNew(),
         )
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "__setattr__":
-            # deque has no __dict__, so every attribute write raises. A name
-            # backed by a getset descriptor (maxlen) is read-only; anything else
-            # is simply absent.
-            attr_name = args[0].as_python_constant()
-            if self.lookup_tp_getset_member(attr_name) is not None:
-                msg = (
-                    f"attribute '{attr_name}' of 'collections.deque' objects "
-                    "is not writable"
-                )
-            else:
-                msg = (
-                    f"'collections.deque' object has no attribute '{attr_name}' "
-                    "and no __dict__ for setting new attributes"
-                )
-            raise_observed_exception(AttributeError, tx, args=[msg])
-        return super().call_method(tx, name, args, kwargs)
 
     def tp_init_impl(
         self,
@@ -2073,19 +2044,16 @@ class TupleVariable(BaseListVariable):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # tuple.__new__(cls, iterable=()); `self` is the BuiltinVariable(tuple)
-        # __new__ was found on (there's no TupleBuiltinVariable -- BuiltinVariable
-        # delegates here explicitly), `args[0]` is the actual (possibly
-        # subclassed) cls.
-        from .builtin import BuiltinVariable
-
+        # tuple.__new__(cls, iterable=()); `self` is the TupleBuiltinVariable
+        # __new__ was found on, `args[0]` is the actual (possibly subclassed)
+        # cls.
         if not 1 <= len(args) <= 2:
             return VariableTracker.tp_new_impl(self, tx, args, kwargs)
         # tuple_new rejects keywords only when tuple's own tp_init would run.
         cls = args[0].as_python_constant()
         if cls is tuple or cls.__init__ is tuple.__init__:
             no_keywords(tx, "tuple", kwargs)
-        if isinstance(args[0], BuiltinVariable) and args[0].fn is tuple:
+        if cls is tuple:
             init_args = unpack_iterable(tx, args[1]) if len(args) == 2 else []
             return TupleVariable(init_args, mutation_type=ValueMutationNew())
         return tx.output.side_effects.track_new_user_defined_object(
@@ -2793,7 +2761,7 @@ class ByteArrayVariable(VariableTracker):
             item = item.realize()
             if isinstance(item, ByteArrayVariable):
                 parts.append(item.data)
-            elif istype(item, ConstantVariable):
+            elif ConstantVariable.is_constant_vt(item):
                 # Not UserDefinedConstantVariable: a str or int subclass may
                 # define __buffer__, which must not run at trace time.
                 parts.append(item.as_python_constant())
@@ -2817,9 +2785,10 @@ class ByteArrayVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
-        # upper(), lower() and title() are METH_NOARGS: Method.__call__
-        # enforces arity before this handler runs, so args/kwargs are
-        # always empty here (same no-arg pattern as list_copy).
+        # upper(), lower(), title(), capitalize() and swapcase() are
+        # METH_NOARGS: Method.__call__ enforces arity before this handler
+        # runs, so args/kwargs are always empty here (same no-arg pattern as
+        # list_copy).
         result = getattr(self.data, method_name)()
         return VariableTracker.build(tx, result)
 
@@ -2847,6 +2816,22 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_case_method(tx, "title", args, kwargs)
 
+    def bytearray_capitalize(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "capitalize", args, kwargs)
+
+    def bytearray_swapcase(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "swapcase", args, kwargs)
+
     def bytearray_replace(
         self,
         tx: "InstructionTranslatorBase",
@@ -2854,6 +2839,22 @@ class ByteArrayVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "replace")
+
+    def bytearray_removeprefix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "removeprefix")
+
+    def bytearray_removesuffix(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "removesuffix")
 
     def bytearray_translate(
         self,
@@ -2887,7 +2888,123 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "rjust")
 
+    def bytearray_strip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "strip")
+
+    def bytearray_lstrip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "lstrip")
+
+    def bytearray_rstrip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "rstrip")
+
+    def bytearray_reduce(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "__reduce__")
+
+    def bytearray_zfill(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "zfill")
+
+    def bytearray_expandtabs(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "expandtabs")
+
+    def bytearray_isalnum(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # The is*() predicates are METH_NOARGS like upper()/lower()/title(),
+        # so they share _bytearray_case_method, which calls the real method
+        # on the tracked contents and returns the resulting bool.
+        return self._bytearray_case_method(tx, "isalnum", args, kwargs)
+
+    def bytearray_isalpha(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isalpha", args, kwargs)
+
+    def bytearray_isascii(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isascii", args, kwargs)
+
+    def bytearray_isdigit(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isdigit", args, kwargs)
+
+    def bytearray_islower(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "islower", args, kwargs)
+
+    def bytearray_isspace(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isspace", args, kwargs)
+
+    def bytearray_istitle(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "istitle", args, kwargs)
+
+    def bytearray_isupper(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isupper", args, kwargs)
+
     tp_methods = {
+        "__reduce__": Method(bytearray_reduce),
         "index": Method(bytearray_index),
         "rindex": Method(bytearray_rindex),
         "count": Method(bytearray_count),
@@ -2908,11 +3025,28 @@ class ByteArrayVariable(VariableTracker):
         "upper": Method(bytearray_upper),
         "lower": Method(bytearray_lower),
         "title": Method(bytearray_title),
+        "capitalize": Method(bytearray_capitalize),
+        "swapcase": Method(bytearray_swapcase),
         "replace": Method(bytearray_replace),
+        "removeprefix": Method(bytearray_removeprefix),
+        "removesuffix": Method(bytearray_removesuffix),
         "translate": Method(bytearray_translate),
         "center": Method(bytearray_center),
         "ljust": Method(bytearray_ljust),
         "rjust": Method(bytearray_rjust),
+        "strip": Method(bytearray_strip),
+        "lstrip": Method(bytearray_lstrip),
+        "rstrip": Method(bytearray_rstrip),
+        "zfill": Method(bytearray_zfill),
+        "expandtabs": Method(bytearray_expandtabs),
+        "isalnum": Method(bytearray_isalnum),
+        "isalpha": Method(bytearray_isalpha),
+        "isascii": Method(bytearray_isascii),
+        "isdigit": Method(bytearray_isdigit),
+        "islower": Method(bytearray_islower),
+        "isspace": Method(bytearray_isspace),
+        "istitle": Method(bytearray_istitle),
+        "isupper": Method(bytearray_isupper),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -3508,7 +3642,27 @@ class ByteArrayIteratorVariable(IteratorVariable):
             return ConstantVariable.create(0)
         return ConstantVariable.create(max(len(self.parent.data) - self.index, 0))
 
-    tp_methods = {"__length_hint__": Method(length_hint)}
+    def reduce(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.is_exhausted:
+            return VariableTracker.build(tx, (iter, ((),)))
+        # Preserve the parent reference so restored iterators see later mutations.
+        return TupleVariable(
+            [
+                VariableTracker.build(tx, iter),
+                TupleVariable([self.parent]),
+                ConstantVariable.create(self.index),
+            ]
+        )
+
+    tp_methods = {
+        "__length_hint__": Method(length_hint),
+        "__reduce__": Method(reduce),
+    }
 
     def python_type(self) -> type:
         return type(iter(bytearray()))
@@ -3686,6 +3840,20 @@ class ListReverseIteratorVariable(IteratorVariable):
         self.index += len(remaining)
         self.it_index = -1
         return remaining
+
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3999-L4009
+        remaining = self.it_index + 1
+        if self.is_exhausted or remaining > len(self.source_seq.items):  # type: ignore[attr-defined]
+            remaining = 0
+        return ConstantVariable.create(remaining)
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_exhausted or self.it_index != len(self.source_seq.items) - 1:  # type: ignore[attr-defined]
