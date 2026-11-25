@@ -3717,8 +3717,6 @@ class TestInvokeSubgraphReuse(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_method_receiver_alias_guards_retrace(self):
-        from types import SimpleNamespace
-
         @nested_compile_region
         def region(x, pair):
             return x + (list.count.__get__(pair.left) == list.count.__get__(pair.right))
@@ -3727,8 +3725,8 @@ class TestInvokeSubgraphReuse(TestCase):
             return region(x, first) + region(x, second)
 
         x, shared = torch.ones(1), []
-        first = SimpleNamespace(left=[], right=[])
-        second = SimpleNamespace(left=shared, right=shared)
+        first = Holder(left=[], right=[])
+        second = Holder(left=shared, right=shared)
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         with self._count_speculate_calls() as count:
             result = compiled(x, first, second)
@@ -3758,9 +3756,8 @@ class TestInvokeSubgraphReuse(TestCase):
         count = self.enterContext(self._count_speculate_calls())
 
         def check(*args, traces=None, frames=None, expected=None):
-            args = (*prefix, *args)
-            result = compiled(*args)
-            self.assertEqual(result, fn(*args) if expected is None else expected)
+            xs = (*prefix, *args)
+            self.assertEqual(compiled(*xs), fn(*xs) if expected is None else expected)
             if traces is not None:
                 self.assertEqual(count(), traces)
             if frames is not None:
@@ -3795,16 +3792,17 @@ class TestInvokeSubgraphReuse(TestCase):
         run(holders, frames=2)
 
     @parametrize("child", [0, 1])
-    @parametrize("field", ["scale", "op", "data", "mapping", "hooks", "cond"])
+    @parametrize(
+        "field", ["scale", "op", "data", "mapping", "hooks", "cond", "cond_reused"]
+    )
     def test_reused_region_runtime_guard(self, child, field):
         pred = torch.tensor(True)
 
         @nested_compile_region
         def inner(x, h):
-            if field == "cond":
+            if field.startswith("cond"):
                 return torch.cond(pred, lambda: x * h.scale, lambda: x - h.scale)
-            value = h.op(x) * h.scale + h.data.shape[0] + next(iter(h.mapping))
-            return h.module(value)
+            return h.module(h.op(x) * h.scale + h.data.shape[0] + next(iter(h.mapping)))
 
         pair = _map_nested_region(lambda x, hs: tuple(inner(x, h) for h in hs))
 
@@ -3819,7 +3817,7 @@ class TestInvokeSubgraphReuse(TestCase):
         run(pairs, traces=4 if field == "cond" else 2, frames=1)
         h = pairs[1][child]
         updates = {"scale": 3, "op": torch.cos, "data": torch.ones(3)}
-        target = "scale" if field == "cond" else field
+        target = "scale" if field.startswith("cond") else field
         if target in updates:
             setattr(h, target, updates[target])
         else:
@@ -3853,7 +3851,7 @@ class TestInvokeSubgraphReuse(TestCase):
         if kind == "division":
             predicate = sympy.Eq(FloorDiv(8, old), 2)
         match = Holder(
-            entry=Holder(shape_guards=[(predicate, False)]),
+            entry=Holder(shape_guards=[predicate]),
             symbol_replacements={old: dim if kind in ("bounded", "unbacked") else 0},
             pending_shape_guards=[],
         )
@@ -3888,9 +3886,8 @@ class TestInvokeSubgraphReuse(TestCase):
 
         layout = lambda: torch.ones(6, 5)[1:, 0]  # length, stride and offset are all 5
         fixed = Holder(tensor=layout())
-        first = _dynamic_capture(5) if kind == "prebuilt" else torch.ones(5)
-        captures = (first, _dynamic_capture(5))
-        holders = [Holder(tensor=tensor, layout=layout()) for tensor in captures]
+        holders = [Holder(layout=layout()) for _ in range(2)]
+        holders[0].tensor = _dynamic_capture(5) if kind == "prebuilt" else torch.ones(5)
         run = self._reuse_runner(fn, torch.ones(1), dynamic=True)
         for size in (5, 7, 9):
             holders[1].tensor = _dynamic_capture(size)
@@ -3949,8 +3946,7 @@ class TestInvokeSubgraphReuse(TestCase):
 
         def reject(match, *args):
             tx = match.tx
-            ((predicate, oblivious),) = match.pending_shape_guards
-            self.assertFalse(oblivious)
+            (predicate,) = match.pending_shape_guards
             self.assertEqual(predicate, next(iter(predicate.free_symbols)) < 6)
             self.assertNotIn(predicate, [g.expr for g in tx.output.shape_env.guards])
             tensors = {vt.as_proxy().node for vt in match.captured_variables.values()}
@@ -3996,21 +3992,20 @@ class TestInvokeSubgraphReuse(TestCase):
             stats = run(holders)
         self.assertEqual(stats, (2 if second_capture == "static" else 1, 1))
 
-    @parametrize("metadata", ["scalar", "offset", "static_offset", "data"])
-    def test_reused_region_captured_symbol_source(self, metadata):
+    @parametrize("op", ["scalar", "offset", "static_offset", "data"])
+    def test_reused_region_captured_symbol_source(self, op):
         holder = lambda n: Holder(scale=n, tensor=torch.arange(12.0)[n : n + 2])
         read = {"scalar": lambda h: h.scale, "data": lambda h: h.tensor}
-        value = read.get(metadata, lambda h: h.tensor.storage_offset())
+        value = read.get(op, lambda h: h.tensor.storage_offset())
         fn = _map_nested_region(lambda x, h: x + value(h))
 
-        sizes = {"data": range(10), "static_offset": (0, 1, 1)}.get(metadata, (5, 3, 7))
+        sizes = {"data": range(10), "static_offset": (0, 1, 1)}.get(op, (5, 3, 7))
         holders = list(map(holder, sizes))
-        run = self._reuse_runner(fn, dynamic=metadata in ("scalar", "offset"))
-        x = torch.ones(2)
-        run(x, holders)
-        if metadata != "static_offset":
+        run = self._reuse_runner(fn, torch.ones(2), dynamic=op in ("scalar", "offset"))
+        run(holders)
+        if op != "static_offset":
             holders[-1] = holder(6)
-        run(x, holders, traces=2 if metadata == "static_offset" else 1, frames=1)
+        run(holders, traces=2 if op == "static_offset" else 1, frames=1)
 
     @torch._dynamo.config.patch(install_free_tensors=True)
     @parametrize("metadata", ["buffer", "size", "stride"])
@@ -4102,9 +4097,9 @@ class TestInvokeSubgraphReuse(TestCase):
         tx.output.side_effects.mutated_sources.add(sources[1])
         self.assertIsNone(reuse.build_reuse_condition(*args))
 
-    @parametrize("first,candidate", list(product((False, True), repeat=2)))
+    @parametrize("first,second", list(product((False, True), repeat=2)))
     @parametrize("operands", ["explicit", "captured", "mixed", "views"])
-    def test_reused_region_captured_tensor_aliases(self, first, candidate, operands):
+    def test_reused_region_captured_tensor_aliases(self, first, second, operands):
         @nested_compile_region
         def region(a, b):
             left = a.tensor if operands == "captured" else a
@@ -4123,12 +4118,11 @@ class TestInvokeSubgraphReuse(TestCase):
             return tuple(region(left, other) for other in right)
 
         x = torch.ones(1)
-        holder = lambda alias: Holder(tensor=x if alias else x * 3)
-        holders = [holder(True), holder(first), holder(candidate)]
+        holders = [Holder(tensor=x if dup else x * 3) for dup in (True, first, second)]
         run = self._reuse_runner(fn, x)
-        run(holders, traces=1 if first == candidate else 2)
+        run(holders, traces=1 if first == second else 2)
         holders[-1].tensor = x * 3
-        run(holders, frames=2 if candidate else 1)
+        run(holders, frames=2 if second else 1)
 
     @parametrize(
         "make",
@@ -5700,7 +5694,7 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', hidden);  subgraph_1 = None
         hidden_1: "i64[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (hidden, hidden_1)
+        return (hidden_1, hidden)
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_hidden_: "i64[]"):
