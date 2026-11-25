@@ -8,6 +8,7 @@ import unittest
 import unittest.mock as mock
 import warnings
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 from parameterized import parameterized_class
 
@@ -3684,8 +3685,6 @@ class TestInvokeSubgraphReuse(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_method_receiver_alias_guards_retrace(self):
-        from types import SimpleNamespace
-
         @nested_compile_region
         def region(x, pair):
             return x + (list.count.__get__(pair.left) == list.count.__get__(pair.right))
@@ -5171,7 +5170,7 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', hidden);  subgraph_1 = None
         hidden_1: "i64[]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (hidden, hidden_1)
+        return (hidden_1, hidden)
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_hidden_: "i64[]"):
