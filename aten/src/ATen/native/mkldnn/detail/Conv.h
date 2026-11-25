@@ -5,6 +5,9 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 
+#include <memory>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace at::native::mkldnn {
@@ -67,6 +70,49 @@ void prepare_parameters(
     ideep::tensor::desc& weights_desc, /* Output */
     ideep::tensor::desc& bias_desc, /* Output */
     ideep::tensor::desc& dst_desc /* Output */);
+
+// Ported from ideep::convolution_forward_params.
+struct convolution_forward_params {
+  convolution_forward_params() {}
+
+  convolution_forward_params(
+      dnnl::convolution_forward::primitive_desc&& pd,
+      dnnl::convolution_forward&& primitive,
+      ideep::attr_t&& op_attr,
+      int groups)
+      : pd(std::move(pd)),
+        primitive(std::move(primitive)),
+        op_attr(op_attr),
+        groups(groups),
+        bias_attr(ideep::attr_t()),
+        pd_use_threads(omp_get_max_threads()) {}
+
+  convolution_forward_params(
+      dnnl::convolution_forward::primitive_desc&& pd,
+      dnnl::convolution_forward&& primitive,
+      ideep::attr_t&& op_attr,
+      int groups,
+      ideep::attr_t&& bias_attr)
+      : pd(std::move(pd)),
+        primitive(std::move(primitive)),
+        op_attr(op_attr),
+        groups(groups),
+        bias_attr(std::move(bias_attr)),
+        pd_use_threads(omp_get_max_threads()) {}
+
+  dnnl::convolution_forward::primitive_desc pd;
+  dnnl::convolution_forward primitive;
+  ideep::attr_t op_attr;
+  int groups;
+  ideep::attr_t bias_attr;
+  // Set by the constructors but not read in ATen; kept to match ideep's layout.
+  int pd_use_threads;
+
+  // Keep {dnnl_arg, tensor} pairs of scales and zero points for primitive execution
+  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_scales = nullptr;
+  std::shared_ptr<std::unordered_map<int, ideep::tensor>> all_zero_points =
+      nullptr;
+};
 
 // Ported from ideep::convolution_forward::compute_v2 (with bias).
 // DEPRECATED
@@ -248,6 +294,73 @@ void convolution_backward_weights_compute_v2(
     int groups,
     bool is_channels_last = false,
     const ideep::attr_t& attr = ideep::attr_t());
+
+// Ported from ideep::convolution_forward::prepare.
+// Prepare params for int8 conv. Bias is not used if it is empty.
+// Channels-last is inferred from the src and weights descriptors.
+void convolution_forward_prepare(
+    convolution_forward_params& param,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_point,
+    const std::vector<int32_t>& dst_zero_point,
+    const ideep::attr_t& attr = ideep::attr_t(),
+    dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
+    dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
+    const ideep::lowp_kind alowp_kind = ideep::u8s8);
+
+// Ported from ideep::convolution_forward::compute (pre-prepared params).
+// Conv computation with params from convolution_forward_prepare
+//   param: pd, primitive, groups ...
+// reorder as true means reorder might needed for src/weight/bias/dst as
+// adapt to oneDNN recommended memory format or your simply not sure, set
+// to false if src/weight/bias/dst are pre-reorded or no reorder needed as
+// you know for sure
+// Only <false, false> is instantiated.
+template <bool reorder_src, bool reorder_weight>
+void convolution_forward_compute(
+    const convolution_forward_params& param,
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    ideep::tensor& dst);
+
+// Ported from ideep::convolution_forward::compute (int8 2-in-1).
+// 2-in-1 compute for int8. Bias is not used if it is empty.
+// Always passes is_channels_last = true, unlike convolution_forward_prepare,
+// which infers it from src and weights.
+template <bool reorder_src = true, bool reorder_weight = true>
+void convolution_forward_compute(
+    const ideep::tensor& src,
+    const ideep::tensor& weights,
+    const ideep::tensor& bias,
+    const dnnl::memory::dims& dst_dims,
+    ideep::tensor& dst,
+    const dnnl::memory::dims& strides,
+    const dnnl::memory::dims& dilates,
+    const dnnl::memory::dims& padding_l,
+    const dnnl::memory::dims& padding_r,
+    int groups,
+    const std::vector<float>& src_scales,
+    const std::vector<float>& weights_scales,
+    const std::vector<float>& dst_scales,
+    const std::vector<int32_t>& src_zero_point,
+    const std::vector<int32_t>& dst_zero_point,
+    const ideep::attr_t& attr = ideep::attr_t(),
+    dnnl::algorithm aalgorithm = dnnl::algorithm::convolution_direct,
+    dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward,
+    const ideep::lowp_kind alowp_kind = ideep::u8s8);
 
 } // namespace at::native::mkldnn
 
