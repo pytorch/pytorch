@@ -1,0 +1,96 @@
+{% if FINAL and KIND in (2, 3) %}
+{{def_kernel("X", "VECTOR", "PARTIAL")}}
+{% else %}
+{{def_kernel("X", "VECTOR")}}
+{% endif %}
+    row = tl.program_id(0).to(tl.int64)
+    cta = tl.program_id(1)
+    {% if FINAL and KIND == 3 %}
+    real = tl.full((1,), 0, ACC_TYPE)
+    imag = tl.full((1,), 0, ACC_TYPE)
+    for index in range(CTAS):
+        real += tl.load(PARTIAL + 2 * (row * CTAS + index))
+        imag += tl.load(PARTIAL + 2 * (row * CTAS + index) + 1)
+    {% elif FINAL and KIND == 2 %}
+    lane = tl.arange(0, THREADS)
+    {% for part in ("real", "imag") %}
+    total_{{part}} = tl.full((THREADS,), 0, ACC_TYPE)
+    for chunk_{{part}} in range(triton.cdiv(CTAS, THREADS)):
+        index_{{part}} = lane + chunk_{{part}} * THREADS
+        total_{{part}} += tl.load(PARTIAL + 2 * (row * CTAS + index_{{part}}) + {{loop.index0}}, index_{{part}} < CTAS, 0)
+    for shift_{{part}} in tl.static_range(THREADS // 2, 16, -32):
+        partner_{{part}} = tl.gather(total_{{part}}, (lane + shift_{{part}}) % THREADS, 0)
+        total_{{part}} = tl.where(lane < shift_{{part}}, total_{{part}} + partner_{{part}}, total_{{part}})
+    group = tl.arange(0, 4)
+    sums_{{part}} = tl.full((4,), 0, ACC_TYPE)
+    for index_{{part}} in tl.static_range(8):
+        sums_{{part}} += tl.gather(total_{{part}}, group + index_{{part}} * 4, 0)
+    {{part}} = tl.full((1,), 0, ACC_TYPE)
+    for index_{{part}} in tl.static_range(4):
+        {{part}} += tl.gather(sums_{{part}}, tl.full((1,), index_{{part}}, tl.int32), 0)
+    {% endfor %}
+    {% else %}
+    lane = tl.arange(0, THREADS)
+    total_real = tl.full((THREADS,), 0, ACC_TYPE)
+    total_imag = tl.full((THREADS,), 0, ACC_TYPE)
+    {% if KIND == 2 %}
+    CHUNK: tl.constexpr = K
+    STEP: tl.constexpr = THREADS * CTAS
+    INNER: tl.constexpr = 1
+    {% elif KIND == 3 %}
+    CHUNK: tl.constexpr = triton.cdiv(K, CTAS)
+    STEP: tl.constexpr = INNER_CHUNK * (ACTIVE_THREADS if INNER_STRIDE == 1 else INNER_STRIDE)
+    INNER: tl.constexpr = INNER_CHUNK
+    {% else %}
+    CHUNK: tl.constexpr = K
+    STEP: tl.constexpr = INNER_CHUNK * (THREADS if INNER_STRIDE == 1 else INNER_STRIDE)
+    INNER: tl.constexpr = INNER_CHUNK
+    {% endif %}
+    for chunk in range(triton.cdiv(CHUNK, STEP)):
+        for step in range(INNER):
+            {% if KIND == 2 %}
+            index = lane + THREADS * cta + chunk * STEP
+            {% elif KIND == 3 %}
+            index = cta * CHUNK + lane * (INNER_CHUNK if INNER_STRIDE == 1 else 1) + chunk * STEP + step * INNER_STRIDE
+            {% else %}
+            index = lane * (INNER_CHUNK if INNER_STRIDE == 1 else 1) + chunk * STEP + step * INNER_STRIDE
+            {% endif %}
+            valid = index < K
+            {% if KIND == 3 %}
+            valid = valid & (index - cta * CHUNK < CHUNK)
+            {% endif %}
+            xr = tl.load(X + 2 * (row * S0 + index * S1), valid, 0)
+            xi = tl.load(X + 2 * (row * S0 + index * S1) + 1, valid, 0)
+            vr = tl.load(VECTOR + 2 * index * VS, valid, 0)
+            vi = tl.load(VECTOR + 2 * index * VS + 1, valid, 0)
+            {% if PRE_SCALE %}
+            vr, vi = tl.fma(vr, 1., -vi * 0.), tl.fma(vi, 1., vr * 0.)
+            {% endif %}
+            {% if PRODUCT %}
+            next_real = total_real + tl.fma(xr, vr, -xi * vi)
+            next_imag = total_imag + tl.fma(xr, vi, xi * vr)
+            {% else %}
+            next_real = tl.fma(-xi, vi, tl.fma(xr, vr, total_real))
+            {% if SWAP %}
+            next_imag = tl.fma(xr, vi, tl.fma(xi, vr, total_imag))
+            {% else %}
+            next_imag = tl.fma(xi, vr, tl.fma(xr, vi, total_imag))
+            {% endif %}
+            {% endif %}
+            total_real = tl.where(valid, next_real, total_real)
+            total_imag = tl.where(valid, next_imag, total_imag)
+    total_real = triton_helpers.cuda_native_sum_x_reduce(total_real, lane, THREADS, THREADS, True)
+    total_imag = triton_helpers.cuda_native_sum_x_reduce(total_imag, lane, THREADS, THREADS, True)
+    real = tl.gather(total_real, tl.full((1,), 0, tl.int32), 0)
+    imag = tl.gather(total_imag, tl.full((1,), 0, tl.int32), 0)
+    {% endif %}
+    {% if FINAL and not PRE_SCALE %}
+    real, imag = tl.fma(real, 1., -imag * 0.), tl.fma(imag, 1., real * 0.)
+    {% endif %}
+    component = tl.arange(0, 2)
+    value = tl.where(component == 0, real, imag)
+    {% if FINAL %}
+    {{store_output(("row", "component"), "value", "row < M", val_shape=("2",))}}
+    {% else %}
+    {{store_output(("row", "cta", "component"), "value", "row < M", val_shape=("2",))}}
+    {% endif %}

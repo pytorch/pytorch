@@ -191,7 +191,7 @@ void GenericActivityProfiler::processTraceInternal(ActivityLogger& logger) {
   }
 
   // Process GPU activities via derived class
-  if (!cpuOnly_) {
+  if (shouldTraceGpu()) {
     processGpuActivities(logger);
     if (!gpuActivityPresent()) {
       LOG(WARNING) << "GPU trace is empty!";
@@ -488,7 +488,7 @@ void GenericActivityProfiler::configure(
   if (LOG_IS_ON(INFO)) {
     config_->printActivityProfilerConfig(LIBKINETO_DBG_STREAM);
   }
-  if (!cpuOnly_ && !libkineto::api().client()) {
+  if (shouldTraceGpu() && !libkineto::api().client()) {
     gpuOnly_ = true;
     if (derivedConfig_->isProfilingByIteration()) {
       LOG(INFO) << "GPU-only tracing for " << config_->activitiesRunIterations()
@@ -507,7 +507,8 @@ void GenericActivityProfiler::configure(
     addMetadata("trace_id", "\"" + config_->requestTraceID() + "\"");
   }
 
-  if (!cpuOnly_) {
+  toggleState_.store(true);
+  if (shouldTraceGpu()) {
     // Enabling CUPTI activity tracing incurs a larger perf hit at first,
     // presumably because structures are allocated and initialized, callbacks
     // are activated etc. After a while the overhead decreases and stabilizes.
@@ -519,7 +520,6 @@ void GenericActivityProfiler::configure(
     if (VLOG_IS_ON(1)) {
       timestamp = system_clock::now();
     }
-    toggleState_.store(true);
     enableGpuTracing();
     if (VLOG_IS_ON(1)) {
       auto t2 = system_clock::now();
@@ -527,6 +527,7 @@ void GenericActivityProfiler::configure(
           setupOverhead_, duration_cast<microseconds>(t2 - timestamp).count());
     }
   }
+  gpuTracingArmed_.store(shouldTraceGpu());
 
   if (!profilers_.empty()) {
     configureChildProfilers();
@@ -566,7 +567,9 @@ void GenericActivityProfiler::configure(
 void GenericActivityProfiler::flushWarmupBuffers(
     int64_t currentIter,
     const time_point<system_clock>& nextWakeupTime) {
-  if (cpuOnly_) {
+  // This runs without mutex_, so it reads the armed flag rather than config_,
+  // which a sync trace that preempts this one may replace.
+  if (!gpuTracingArmed_.load()) {
     return;
   }
   // Flushing GPU activities can take a while so avoid doing it close to
@@ -603,15 +606,25 @@ void GenericActivityProfiler::toggleCollectionDynamic(const bool enable) {
   //   - BEFORE we enable
   //
   // Both to prevent the synchronization event from showing up in traces.
+  //
+  // Only a running trace that armed GPU tracing may toggle it. A trace that
+  // opted out, or one that already stopped, would never disarm it.
+  const bool traceGpu = gpuTracingArmed_.load();
   if (!enable) {
     for (auto& session : sessions_) {
       session->toggleCollectionDynamic(enable);
     }
-    disableGpuTracing();
+    if (traceGpu) {
+      disableGpuTracing();
+    }
   }
-  synchronizeGpuDevice();
+  if (traceGpu) {
+    synchronizeGpuDevice();
+  }
   if (enable) {
-    enableGpuTracing();
+    if (traceGpu) {
+      enableGpuTracing();
+    }
     for (auto& session : sessions_) {
       session->toggleCollectionDynamic(enable);
     }
@@ -631,7 +644,7 @@ void GenericActivityProfiler::startTraceInternal(
 void GenericActivityProfiler::stopTraceInternal(
     const time_point<system_clock>& now) {
   captureWindowEndTime_ = libkineto::timeSinceEpoch(now);
-  if (!cpuOnly_) {
+  if (shouldTraceGpu()) {
     time_point<system_clock> timestamp;
     if (VLOG_IS_ON(1)) {
       timestamp = system_clock::now();
@@ -644,6 +657,7 @@ void GenericActivityProfiler::stopTraceInternal(
           setupOverhead_, duration_cast<microseconds>(t2 - timestamp).count());
     }
   }
+  gpuTracingArmed_.store(false);
 
   for (auto& session : sessions_) {
     LOG(INFO) << "Stopping child profiler session";
@@ -694,7 +708,7 @@ void GenericActivityProfiler::finalizeTrace(
     logger.handleDeviceInfo(
         {.id = pid, .sortIndex = pid, .name = process_name, .label = "CPU"},
         captureWindowStartTime_);
-    if (!cpuOnly_ && use_default_device_info) {
+    if (shouldTraceGpu() && use_default_device_info) {
       // Usually, GPU events use device id as pid (0-7).
       // In some cases, CPU sockets are numbered starting from 0.
       // In the worst case, 8 CPU sockets + 8 GPUs, so the max GPU ID is 15.
@@ -772,7 +786,7 @@ void GenericActivityProfiler::popUserCorrelationId() {
 }
 
 void GenericActivityProfiler::resetTraceData() {
-  if (!cpuOnly_) {
+  if (shouldTraceGpu()) {
     clearGpuActivities();
     onResetTraceData();
   }
@@ -798,7 +812,7 @@ void GenericActivityProfiler::collectTrace(
     libkineto::api().client()->stop();
   }
 
-  if (isGpuCollectionStopped()) {
+  if (isStopped()) {
     ecs_.gpu_stopped_early = true;
     LOG(ERROR)
         << "State: CollectTrace stopped by GPU profiler. (Buffer size configured is "

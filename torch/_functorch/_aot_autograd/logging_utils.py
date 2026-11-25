@@ -5,7 +5,8 @@ compilation, capturing user-friendly tracebacks, and debug messages.
 
 import collections
 from collections.abc import Callable, Generator, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -70,6 +71,83 @@ def track_graph_compiling(
                 tracing_context.aot_graph_name = old_name
 
 
+@dataclass
+class NativeGradientNodeInfo:
+    roots: tuple[int, ...]
+    name: str
+    outputs: list[tuple[str, bool]] = field(default_factory=list)
+    outputs_complete: bool = False
+
+
+@dataclass
+class NativeGradientInfo:
+    root_count: int
+    nodes: dict[int, NativeGradientNodeInfo] = field(default_factory=dict)
+
+
+@contextmanager
+def capture_native_gradient_info(
+    outputs: list[torch.Tensor], info: NativeGradientInfo
+) -> Generator[None, None, None]:
+    from torch.fx.experimental.proxy_tensor import _get_proxies
+
+    # InputBuffer executes a Node only if a defined gradient reaches it.
+    # Keep conservative root reachability and actual native class identity.
+    masks: dict[torch.autograd.graph.Node, set[int]] = {}
+    sequences: dict[int, set[torch.autograd.graph.Node]] = {}
+    for index, output in enumerate(outputs):
+        pending: list[torch.autograd.graph.Node] = (
+            [output.grad_fn] if output.grad_fn is not None else []
+        )
+        seen = set()
+        while pending:
+            node = pending.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            masks.setdefault(node, set()).add(index)
+            sequences.setdefault(node._sequence_nr(), set()).add(node)
+            pending.extend(fn for fn, _ in node.next_functions if fn is not None)
+
+    with ExitStack() as stack:
+        for sequence, nodes in sequences.items():
+            if len(nodes) != 1:
+                continue
+            node = next(iter(nodes))
+            cls = type(node)
+            if getattr(torch._C._functions, cls.__name__, None) is not cls:
+                continue
+            entry = NativeGradientNodeInfo(tuple(sorted(masks[node])), cls.__name__)
+            info.nodes[sequence] = entry
+
+            def record_outputs(
+                grad_input: Any,
+                grad_output: Any,
+                *,
+                entry: NativeGradientNodeInfo = entry,
+                sequence: int = sequence,
+            ) -> None:
+                refs = []
+                complete = True
+                for grad in grad_input:
+                    if isinstance(grad, torch.Tensor):
+                        proxies = _get_proxies(grad)
+                        complete = complete and bool(proxies)
+                        for proxy in proxies:
+                            names = proxy.node.meta.get("grad_fn_names", [])
+                            generated = (
+                                proxy.node.meta.get("seq_nr") == sequence
+                                and bool(names)
+                                and names[-1] == entry.name
+                            )
+                            refs.append((proxy.node.name, generated))
+                entry.outputs = refs
+                entry.outputs_complete = complete
+
+            stack.callback(node.register_hook(record_outputs).remove)
+        yield
+
+
 # Set up hooks so that during backward the fx's stack_trace is properly set
 callback_set = False
 
@@ -105,7 +183,9 @@ def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) 
 
         return callback
 
-    def get_prehook(stack_: list[str], seq_nr: int) -> Callable[[Any], None]:
+    def get_prehook(
+        stack_: list[str], seq_nr: int, grad_fn_name: str | None
+    ) -> Callable[[Any], None]:
         def prehook(grad_output: Any) -> None:
             global callback_set
 
@@ -116,7 +196,7 @@ def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) 
                 callback_set = True
 
             fx_traceback.set_stack_trace(stack_)
-            fx_traceback.set_grad_fn_seq_nr(seq_nr)
+            fx_traceback.set_grad_fn_seq_nr(seq_nr, grad_fn_name)
             fx_traceback._mark_autograd_backward()
 
         return prehook
@@ -134,7 +214,16 @@ def setup_stacktrace_preservation_hooks(roots: list[torch.autograd.graph.Node]) 
     for node in iter_graph(roots):
         # pyrefly: ignore[missing-attribute]
         forward_node_stack = node.metadata.get("traceback_", [])
-        node.register_prehook(get_prehook(forward_node_stack, node._sequence_nr()))
+        node_type = type(node)
+        # Python backward names can imitate a native name; retain native identity.
+        grad_fn_name = (
+            node_type.__name__
+            if getattr(torch._C._functions, node_type.__name__, None) is node_type
+            else None
+        )
+        node.register_prehook(
+            get_prehook(forward_node_stack, node._sequence_nr(), grad_fn_name)
+        )
 
         special_stack = forward_node_stack.copy()
         special_stack.append(fx_traceback.GRADIENT_ACC_SPECIAL_STACK)

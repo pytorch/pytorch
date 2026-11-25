@@ -2131,6 +2131,8 @@ def where(
         raise NotImplementedError
 
     utils.check_same_device(pred, a, b, allow_cpu_scalar_tensors=True)
+    if pred.dtype is torch.uint8:
+        pred = pred.to(torch.bool)
     torch._check(
         pred.dtype is torch.bool,
         lambda: f"expected predicate to be bool, got {pred.dtype}",
@@ -3959,7 +3961,7 @@ def istft(
         )
         if not onesided_:
             input = input.narrow(dim=-1, start=0, length=n_fft // 2 + 1)
-        input = torch.fft.irfft(input, dim=-1, norm=norm)
+        input = torch.fft.irfft(input, n=n_fft, dim=-1, norm=norm)
 
     if input.size(2) != n_fft:
         raise AssertionError(
