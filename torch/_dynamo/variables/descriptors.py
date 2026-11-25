@@ -155,11 +155,17 @@ def _vt_cls_modeling(vt: VariableTracker, py_type: type) -> type | None:
         if cpython_type is None:
             continue
         types = cpython_type if isinstance(cpython_type, tuple) else (cpython_type,)
-        # Only a class vt is an instance of: another class's slot impls assume
-        # their own representation, e.g. IntConstantVariable's fold a constant
-        # and cannot run on a SymNodeVariable that also models int.
-        if py_type in types and isinstance(vt, subclass):
-            return subclass
+        if py_type not in types:
+            continue
+        # A SymNodeVariable also models int/float/bool, but other classes'
+        # impls fold constants and cannot run on a symbolic value.
+        if isinstance(vt, variables.SymNodeVariable) and not isinstance(vt, subclass):
+            continue
+        return subclass
+    # An exact py_type instance has no Python overrides, so its own VT's slots
+    # are py_type's C slots, e.g. SymNodeVariable for int.__neg__ on a SymInt.
+    if vt.python_type() is py_type:
+        return type(vt)
     return None
 
 
@@ -299,14 +305,14 @@ class WrapperDescriptorVariable(DescriptorVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> "WrapperDescriptorVariable | MethodWrapperVariable":
         # Mirrors wrapperdescr_get which calls PyWrapper_New to produce
         # a bound method-wrapper.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L203-L213
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1489-L1505
-        if obj.is_constant_none():
+        if obj is None:
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         return MethodWrapperVariable(self.descriptor, obj, source=self.source)
@@ -426,6 +432,8 @@ class MethodWrapperVariable(VariableTracker):  # noqa: RVT001
         if self.descriptor.__objclass__ is dict and isinstance(
             self.obj, variables.ConstDictVariable
         ):
+            if self.descriptor is dict.__init__ and not (args or kwargs):
+                return ConstantVariable.create(None)
             # A prebound base-dict write still bypasses OrderedDict's linked storage.
             self.obj.check_base_dict_mutation(
                 tx, self.descriptor.__name__, args, kwargs, bound=True
@@ -575,14 +583,14 @@ class MethodDescriptorVariable(DescriptorVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors method_get which calls PyCFunction_NewEx to produce a
         # bound builtin_function_or_method.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L137-L159
         # https://github.com/python/cpython/blob/3.13/Objects/methodobject.c#L40
-        if obj.is_constant_none():
+        if obj is None:
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # PyCFunction_NewEx creates a fresh object; see ClassMethodDescriptorVariable.
@@ -982,14 +990,14 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> BoundBuiltinMethodVariable:
         # classmethod_get binds the C method to the class (ignoring obj),
         # producing a builtin_function_or_method via PyCMethod_New.
         # It first requires owner to be a type and a subtype of __objclass__.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L94-L134
-        if owner.is_constant_none():
+        if obj is not None and owner.is_constant_none():
             owner = obj.tp_getattro_impl(tx, "__class__")
         owner_type = owner.python_type()
         if not issubclass(owner_type, type):
@@ -1031,7 +1039,7 @@ class ClassMethodDescriptorVariable(DescriptorVariable):
                 f"descriptor '{self.descriptor.__name__}' of "
                 f"'{self.descriptor.__objclass__.__name__}' object needs an argument",
             )
-        bound = self.tp_descr_get_impl(tx, ConstantVariable.create(None), args[0])
+        bound = self.tp_descr_get_impl(tx, None, args[0])
         return bound.call_function(tx, args[1:], kwargs)
 
 
@@ -1216,7 +1224,7 @@ class ClassMethodVariable(VariableTracker):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # cm_descr_get binds the wrapped function to the class.
@@ -1328,13 +1336,13 @@ class MemberDescriptorVariable(DescriptorVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors member_get which calls PyMember_GetOne to read the
         # C struct field.
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L162-L180
-        if obj.is_constant_none():
+        if obj is None:
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         from .object_protocol import _UnhandledDescriptorError
@@ -1504,7 +1512,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def tp_descr_get_impl(
         self,
         tx: "InstructionTranslatorBase",
-        obj: VariableTracker,
+        obj: VariableTracker | None,
         owner: VariableTracker,
     ) -> VariableTracker:
         # Mirrors getset_get which calls the C getter function.
@@ -1514,7 +1522,7 @@ class GetSetDescriptorVariable(DescriptorVariable):
         # concrete Python object (UDOV.value, or as_python_constant
         # for classes/constants). Fall back to tp_getattro_impl for
         # proxy-based VTs like TensorVariable.
-        if obj.is_constant_none():
+        if obj is None:
             return self
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         # Prefer the VT's declarative table when it models this attribute
