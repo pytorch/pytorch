@@ -33,12 +33,16 @@ _FLOW_NAMES = {1: "fwdbwd", 2: "ac2g"}
 
 _PARAM_COMMS_CALL_NAME = "record_param_comms"
 
+# Must match excludedTypes in ChromeTraceLogger::handleActivity
+# (torch/csrc/profiler/kineto/libkineto/src/output_json.cpp).
 _EXCLUDED_EXTERNAL_ID_TYPES = {
     "gpu_memcpy",
     "gpu_memset",
     "kernel",
     "cuda_runtime",
     "cuda_driver",
+    "xpu_runtime",
+    "xpu_driver",
     "privateuse1_runtime",
     "privateuse1_driver",
 }
