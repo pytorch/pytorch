@@ -2,7 +2,6 @@
 """Helpers for block passes: plain functions over a ``torch.fx.GraphModule``."""
 
 import copy
-
 import dataclasses
 import inspect
 import itertools
@@ -12,7 +11,7 @@ from typing import Any
 
 import torch
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.vm._types import Interval, TensorType, Varies
 
 
@@ -36,10 +35,14 @@ def _fake(mode, x: Any) -> Any:
             return mode.from_tensor(x._const)
         sizes = [d.seen for d in x.dims]
         with mode:
-            return torch.empty_strided(sizes, x.strides or _contiguous(sizes), dtype=x.dtype, device=x.device)
-    if isinstance(x, FakeTensor):
+            return torch.empty_strided(
+                sizes, x.strides or _contiguous(sizes), dtype=x.dtype, device=x.device
+            )
+    if is_fake_tensor(x):
         with mode:
-            return torch.empty_strided(x.shape, x.stride(), dtype=x.dtype, device=x.device)
+            return torch.empty_strided(
+                x.shape, x.stride(), dtype=x.dtype, device=x.device
+            )
     if isinstance(x, torch.Tensor):
         return mode.from_tensor(x)
     return x
@@ -72,12 +75,16 @@ class Match:
 
     def node(self, name: str) -> torch.fx.Node:
         if name not in self.named:
-            raise KeyError(f"the pattern has no tensor named {name!r} that's in the match; it has {', '.join(self.named)}")
+            raise KeyError(
+                f"the pattern has no tensor named {name!r} that's in the match; it has {', '.join(self.named)}"
+            )
         return self.named[name]
 
     def __getitem__(self, name: str) -> Any:
         if name not in self.constants:
-            raise KeyError(f"the pattern has no constant {name!r}; it has {', '.join(self.constants)}")
+            raise KeyError(
+                f"the pattern has no constant {name!r}; it has {', '.join(self.constants)}"
+            )
         return self.constants[name]
 
     def replace(
@@ -97,11 +104,15 @@ class Match:
         version's guards must give the same answer on every rank. Returns the
         new node."""
         if writes:
-            raise NotImplementedError("replace(writes=...): effect nodes need cfg.merge_across, which isn't implemented yet")
+            raise NotImplementedError(
+                "replace(writes=...): effect nodes need cfg.merge_across, which isn't implemented yet"
+            )
         if collectives not in ("same", "changes"):
             raise ValueError(f"collectives is 'same' or 'changes', not {collectives!r}")
         g = self.gm.graph
-        with g.inserting_before(self.outputs[0] if len(self.outputs) == 1 else _first(g, self.outputs)):
+        with g.inserting_before(
+            self.outputs[0] if len(self.outputs) == 1 else _first(g, self.outputs)
+        ):
             new = g.call_function(op, tuple(args))
         if len(self.outputs) == 1:
             self.outputs[0].replace_all_uses_with(new)
@@ -143,22 +154,38 @@ class _Pattern:
 
 
 def _float_constants(pattern: Callable) -> dict[str, float]:
-    return {q.name: q.default for q in inspect.signature(pattern).parameters.values() if type(q.default) is float}
+    return {
+        q.name: q.default
+        for q in inspect.signature(pattern).parameters.values()
+        if type(q.default) is float
+    }
 
 
-def _trace(pattern: Callable, examples: Sequence[Any], constants: dict[str, Any] | None = None) -> _Pattern:
+def _trace(
+    pattern: Callable, examples: Sequence[Any], constants: dict[str, Any] | None = None
+) -> _Pattern:
     """Traces ``pattern`` on fakes like ``examples``, its float constants set
     to ``constants`` (to sentinels when None, to find where they're used)."""
     import functools
     import sys
 
     from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch.fx.experimental.proxy_tensor import get_proxy_mode, get_proxy_slot, make_fx
+    from torch.fx.experimental.proxy_tensor import (
+        get_proxy_mode,
+        get_proxy_slot,
+        make_fx,
+    )
 
     floats = _float_constants(pattern)
-    sentinels = {k: _SENTINEL + i for i, k in enumerate(floats)} if constants is None else {}
+    sentinels = (
+        {k: _SENTINEL + i for i, k in enumerate(floats)} if constants is None else {}
+    )
     fn = functools.partial(pattern, **(sentinels or constants or {}))
-    params = [q.name for q in inspect.signature(pattern).parameters.values() if q.default is q.empty]
+    params = [
+        q.name
+        for q in inspect.signature(pattern).parameters.values()
+        if q.default is q.empty
+    ]
     found: dict[str, torch.fx.Node] = {}
 
     def profile(frame, event, arg):
@@ -185,7 +212,7 @@ def _trace(pattern: Callable, examples: Sequence[Any], constants: dict[str, Any]
     phs = list(pg.graph.find_nodes(op="placeholder"))
     # Locals found while tracing are nodes of make_fx's graph, which is pg's.
     named = {k: n for k, n in found.items() if n in alive and n.op != "placeholder"}
-    named.update({k: p for k, p in zip(params, phs)})
+    named.update(zip(params, phs))
     slots: dict[str, list[tuple[torch.fx.Node, int | str]]] = {}
     by_value = {v: k for k, v in sentinels.items()}
     for n in pg.graph.nodes:
@@ -213,11 +240,19 @@ def _constants(pattern: Callable, p: _Pattern, m: Any) -> dict[str, Any] | None:
 def _matches(gm: torch.fx.GraphModule, p: _Pattern, ignore_literals: bool) -> list[Any]:
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher
 
-    matcher = SubgraphMatcher(p.gm.graph, match_output=False, match_placeholder=False, remove_overlapping_matches=True, ignore_literals=ignore_literals)
+    matcher = SubgraphMatcher(
+        p.gm.graph,
+        match_output=False,
+        match_placeholder=False,
+        remove_overlapping_matches=True,
+        ignore_literals=ignore_literals,
+    )
     return matcher.match(gm.graph)
 
 
-def _candidates(gm: torch.fx.GraphModule, n: int, limit: int = 256) -> Iterator[list[Any]]:
+def _candidates(
+    gm: torch.fx.GraphModule, n: int, limit: int = 256
+) -> Iterator[list[Any]]:
     """Example inputs to trace a pattern of ``n`` tensors on, to find its
     structure: the graph's tensor metadata, by (rank, dtype, device), most
     common first, each also as a square shape (broadcasts and multiplies with
@@ -229,16 +264,30 @@ def _candidates(gm: torch.fx.GraphModule, n: int, limit: int = 256) -> Iterator[
             by = shapes.setdefault((v.dim(), v.dtype, v.device), {})
             by[tuple(v.shape)] = by.get(tuple(v.shape), 0) + 1
     options = []
-    for (rank, dtype, device), by in sorted(shapes.items(), key=lambda kv: -sum(kv[1].values())):
+    for (rank, dtype, device), by in sorted(
+        shapes.items(), key=lambda kv: -sum(kv[1].values())
+    ):
         for shape in [(8,) * rank, *sorted(by, key=by.__getitem__, reverse=True)[:3]]:
-            options.append(TensorType(torch.Tensor, dtype, device, tuple(Interval(s, s, s) for s in shape), Varies))
+            options.append(
+                TensorType(
+                    torch.Tensor,
+                    dtype,
+                    device,
+                    tuple(Interval(s, s, s) for s in shape),
+                    Varies,
+                )
+            )
     yield from ([o] * n for o in options)
     for combo in itertools.islice(itertools.product(options, repeat=n), limit):
         if len(set(map(id, combo))) > 1:
             yield list(combo)
 
 
-def match(gm: torch.fx.GraphModule, pattern: Callable, example_inputs: Sequence[Any] | None = None) -> list[Match]:
+def match(
+    gm: torch.fx.GraphModule,
+    pattern: Callable,
+    example_inputs: Sequence[Any] | None = None,
+) -> list[Match]:
     """Where ``pattern`` (a function of tensors, written as the model writes
     it) occurs in ``gm``, matched on aten ops. It's traced on each match's own
     input metadata, so sizes it reads must agree too; its float arguments
@@ -250,7 +299,11 @@ def match(gm: torch.fx.GraphModule, pattern: Callable, example_inputs: Sequence[
     if example_inputs is not None:
         tries: Iterable[Sequence[Any]] = [example_inputs]
     else:
-        n = sum(1 for q in inspect.signature(pattern).parameters.values() if q.default is q.empty)
+        n = sum(
+            1
+            for q in inspect.signature(pattern).parameters.values()
+            if q.default is q.empty
+        )
         tries = _candidates(gm, n)
     found: list[tuple[Any, _Pattern, dict[str, Any]]] = []
     tried = set()
@@ -272,7 +325,10 @@ def match(gm: torch.fx.GraphModule, pattern: Callable, example_inputs: Sequence[
             tried.add(key)
             try:
                 exact = _trace(pattern, m.placeholder_nodes, constants)
-                found.extend((e, exact, constants) for e in _matches(gm, exact, ignore_literals=False))
+                found.extend(
+                    (e, exact, constants)
+                    for e in _matches(gm, exact, ignore_literals=False)
+                )
             except Exception:
                 continue
     out, taken = [], set()
@@ -283,7 +339,16 @@ def match(gm: torch.fx.GraphModule, pattern: Callable, example_inputs: Sequence[
             continue
         taken.update(nodes)
         named = {k: m.nodes_map[v] for k, v in p.named.items() if v in m.nodes_map}
-        out.append(Match(gm, list(m.placeholder_nodes), list(m.returning_nodes), sorted(nodes, key=order.__getitem__), named, constants))
+        out.append(
+            Match(
+                gm,
+                list(m.placeholder_nodes),
+                list(m.returning_nodes),
+                sorted(nodes, key=order.__getitem__),
+                named,
+                constants,
+            )
+        )
     return out
 
 
@@ -322,7 +387,9 @@ def copy_graph_module(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return out
 
 
-def specialize_floats(gm: torch.fx.GraphModule, inputs: list[Any]) -> torch.fx.GraphModule:
+def specialize_floats(
+    gm: torch.fx.GraphModule, inputs: list[Any]
+) -> torch.fx.GraphModule:
     """``gm`` with each float input (a Python float among ``inputs``)
     replaced by its value, the Python arithmetic on it folded, and a
     ``vm.Value`` guard on it: so the result runs only on calls with these
@@ -336,14 +403,22 @@ def specialize_floats(gm: torch.fx.GraphModule, inputs: list[Any]) -> torch.fx.G
         return gm
     gm = copy_graph_module(gm)
     phs = list(gm.graph.find_nodes(op="placeholder"))
-    known: dict[torch.fx.Node, Any] = {ph: x for ph, x in zip(phs, inputs) if isinstance(x, float)}
-    folding = {v for k, v in vars(operator).items() if not k.startswith("_") and callable(v)}
+    known: dict[torch.fx.Node, Any] = {
+        ph: x for ph, x in zip(phs, inputs) if isinstance(x, float)
+    }
+    folding = {
+        v for k, v in vars(operator).items() if not k.startswith("_") and callable(v)
+    }
     for node in list(gm.graph.nodes):
         if node.op == "placeholder":
             continue
         node.args = torch.fx.node.map_arg(node.args, lambda n: known.get(n, n))
         node.kwargs = torch.fx.node.map_arg(node.kwargs, lambda n: known.get(n, n))
-        if node.op == "call_function" and node.target in folding and not node.all_input_nodes:
+        if (
+            node.op == "call_function"
+            and node.target in folding
+            and not node.all_input_nodes
+        ):
             known[node] = node.target(*node.args, **node.kwargs)
     for node in reversed(list(gm.graph.nodes)):
         if node in known and node.op != "placeholder" and not node.users:
@@ -360,7 +435,14 @@ def direct(gm: torch.fx.GraphModule) -> Callable | None:
     nodes = list(gm.graph.nodes)
     phs = [n for n in nodes if n.op == "placeholder"]
     rest = nodes[len(phs) :]
-    if len(rest) == 2 and rest[0].op == "call_function" and list(rest[0].args) == phs and not rest[0].kwargs and rest[1].op == "output" and rest[1].args[0] is rest[0]:
+    if (
+        len(rest) == 2
+        and rest[0].op == "call_function"
+        and list(rest[0].args) == phs
+        and not rest[0].kwargs
+        and rest[1].op == "output"
+        and rest[1].args[0] is rest[0]
+    ):
         return rest[0].target
     return None
 
@@ -390,7 +472,11 @@ class Segment:
         """Indices among ``inputs`` of the block's weights (same tensor on
         every call)."""
         consts = set(self.gm.meta.get("vm_const_inputs", ()))
-        return {i for i, x in enumerate(self.inputs) if x.op == "placeholder" and x.name in consts}
+        return {
+            i
+            for i, x in enumerate(self.inputs)
+            if x.op == "placeholder" and x.name in consts
+        }
 
 
 def segments(gm: torch.fx.GraphModule, split_at: Iterable[Any] = ()) -> list[Segment]:
@@ -420,7 +506,9 @@ def segments(gm: torch.fx.GraphModule, split_at: Iterable[Any] = ()) -> list[Seg
     return out
 
 
-def replace_segment(gm: torch.fx.GraphModule, seg: Segment, fn: Callable) -> torch.fx.Node:
+def replace_segment(
+    gm: torch.fx.GraphModule, seg: Segment, fn: Callable
+) -> torch.fx.Node:
     """Replaces the segment's nodes with ``fn(*seg.inputs)``, which returns its
     outputs as a sequence."""
     g = gm.graph
@@ -443,7 +531,9 @@ def run_until(gm: torch.fx.GraphModule, node: torch.fx.Node) -> Any:
     rerunning them changes nothing)."""
     inputs = gm.meta.get("vm_example_inputs")
     if inputs is None:
-        raise ValueError("run_until needs the graph the VM gave the pass (it carries the traced run's inputs)")
+        raise ValueError(
+            "run_until needs the graph the VM gave the pass (it carries the traced run's inputs)"
+        )
     result: dict[str, Any] = {}
 
     class Until(torch.fx.Interpreter):
@@ -465,7 +555,9 @@ def run_until(gm: torch.fx.GraphModule, node: torch.fx.Node) -> Any:
 def effect(fn: Callable) -> Callable:
     """An opaque call as a graph node, ordered by the tensors it writes. Needs
     ``cfg.merge_across``, which isn't implemented yet."""
-    raise NotImplementedError("vm.effect needs vm.Cfg.merge_across, which isn't implemented yet")
+    raise NotImplementedError(
+        "vm.effect needs vm.Cfg.merge_across, which isn't implemented yet"
+    )
 
 
 # Joint graphs (what passes between vm.passes.Autograd and Partition see):
@@ -475,7 +567,9 @@ def effect(fn: Callable) -> Callable:
 def _backward(gm: torch.fx.GraphModule) -> set[torch.fx.Node]:
     bw: set[torch.fx.Node] = set()
     for n in gm.graph.nodes:
-        if (n.op == "placeholder" and n.name.startswith("tangents")) or any(a in bw for a in n.all_input_nodes):
+        if (n.op == "placeholder" and n.name.startswith("tangents")) or any(
+            a in bw for a in n.all_input_nodes
+        ):
             bw.add(n)
     return bw
 
@@ -484,20 +578,35 @@ def forward_values_used_in_backward(gm: torch.fx.GraphModule) -> list[torch.fx.N
     """The forward's values the backward reads: what Partition would save
     (or recompute)."""
     bw = _backward(gm)
-    return [n for n in gm.graph.nodes if n not in bw and n.op == "call_function" and any(u in bw and u.op != "output" for u in n.users)]
+    return [
+        n
+        for n in gm.graph.nodes
+        if n not in bw
+        and n.op == "call_function"
+        and any(u in bw and u.op != "output" for u in n.users)
+    ]
 
 
 def last_forward_user(gm: torch.fx.GraphModule, node: torch.fx.Node) -> torch.fx.Node:
     bw = _backward(gm)
-    return max((u for u in node.users if u not in bw and u.op != "output"), key=list(gm.graph.nodes).index, default=node)
+    return max(
+        (u for u in node.users if u not in bw and u.op != "output"),
+        key=list(gm.graph.nodes).index,
+        default=node,
+    )
 
 
 def first_backward_user(gm: torch.fx.GraphModule, node: torch.fx.Node) -> torch.fx.Node:
     bw = _backward(gm)
-    return min((u for u in node.users if u in bw and u.op != "output"), key=list(gm.graph.nodes).index)
+    return min(
+        (u for u in node.users if u in bw and u.op != "output"),
+        key=list(gm.graph.nodes).index,
+    )
 
 
-def replace_backward_uses(gm: torch.fx.GraphModule, old: torch.fx.Node, new: torch.fx.Node) -> None:
+def replace_backward_uses(
+    gm: torch.fx.GraphModule, old: torch.fx.Node, new: torch.fx.Node
+) -> None:
     bw = _backward(gm)
     for u in list(old.users):
         if u in bw and u is not new and u.op != "output":
@@ -537,7 +646,9 @@ class Mismatch(RuntimeError):
 def _operator(node: torch.fx.Node) -> str:
     """``aten::mul.Tensor`` for a node calling ``torch.ops.aten.mul.Tensor``."""
     schema = node.target._schema
-    return f"{schema.name}.{schema.overload_name}" if schema.overload_name else schema.name
+    return (
+        f"{schema.name}.{schema.overload_name}" if schema.overload_name else schema.name
+    )
 
 
 def _same_operator(wanted: str, found: str) -> bool:
@@ -548,7 +659,10 @@ def _same_operator(wanted: str, found: str) -> bool:
 
 
 def _writes_or_draws(node: torch.fx.Node) -> bool:
-    return node.target._schema.is_mutable or torch.Tag.nondeterministic_seeded in node.target.tags
+    return (
+        node.target._schema.is_mutable
+        or torch.Tag.nondeterministic_seeded in node.target.tags
+    )
 
 
 def _differs(want: Any, have: Any, rtol: float, atol: float) -> str | None:
@@ -559,8 +673,12 @@ def _differs(want: Any, have: Any, rtol: float, atol: float) -> str | None:
         if have.shape != want.shape:
             return f"has shape {tuple(have.shape)}, not {tuple(want.shape)}"
         if have.dtype != want.dtype or have.device != want.device:
-            return f"is {have.dtype} on {have.device}, not {want.dtype} on {want.device}"
-        if not torch.allclose(have.detach(), want.detach(), rtol=rtol, atol=atol, equal_nan=True):
+            return (
+                f"is {have.dtype} on {have.device}, not {want.dtype} on {want.device}"
+            )
+        if not torch.allclose(
+            have.detach(), want.detach(), rtol=rtol, atol=atol, equal_nan=True
+        ):
             return f"differs by up to {(have.detach() - want.detach()).abs().max().item():.3g}"
         return None
     if type(want) is type(have) and want == have:
@@ -596,7 +714,14 @@ def _segment_of(gm: torch.fx.GraphModule, nodes: list[torch.fx.Node]) -> Segment
     return Segment(gm, nodes, list(inputs), outputs) if outputs else None
 
 
-def _checked(kernel: Callable, checks: int, rtol: float, atol: float, reference: torch.fx.GraphModule, n_outputs: int) -> Callable:
+def _checked(
+    kernel: Callable,
+    checks: int,
+    rtol: float,
+    atol: float,
+    reference: torch.fx.GraphModule,
+    n_outputs: int,
+) -> Callable:
     """``kernel`` in place of the ops of ``reference`` (which give
     ``n_outputs`` values): for its first ``checks`` calls the ops run on the
     same inputs, and a kernel that gives something else raises Mismatch."""
@@ -614,18 +739,29 @@ def _checked(kernel: Callable, checks: int, rtol: float, atol: float, reference:
         out = kernel(*values)
         found = (out,) if n_outputs == 1 else tuple(out)
         if len(found) != n_outputs:
-            raise Mismatch(f"{name} gave {len(found)} values where the ops it replaced give {n_outputs}")
+            raise Mismatch(
+                f"{name} gave {len(found)} values where the ops it replaced give {n_outputs}"
+            )
         if expected is not None:
             for i, (want, have) in enumerate(zip(expected, found)):
                 how = _differs(want, have, rtol, atol)
                 if how is not None:
-                    raise Mismatch(f"{name}: result {i} {how} on call {state['calls']} (the ops it replaced were run on the same inputs)")
+                    raise Mismatch(
+                        f"{name}: result {i} {how} on call {state['calls']} (the ops it replaced were run on the same inputs)"
+                    )
         return found
 
     return _as_target(swapped, f"swap_{name}")
 
 
-def swap(ops: Iterable[str], kernel: Callable, *, check: bool | int = True, rtol: float = SWAP_RTOL, atol: float = SWAP_ATOL) -> Callable:
+def swap(
+    ops: Iterable[str],
+    kernel: Callable,
+    *,
+    check: bool | int = True,
+    rtol: float = SWAP_RTOL,
+    atol: float = SWAP_ATOL,
+) -> Callable:
     """A block pass that replaces a run of ops by one call of ``kernel`` and
     checks the kernel against the ops it replaced.
 
@@ -656,19 +792,41 @@ def swap(ops: Iterable[str], kernel: Callable, *, check: bool | int = True, rtol
     checks = 8 if check is True else int(check)
     name = getattr(kernel, "__name__", type(kernel).__name__)
 
-    def swap_pass(gm: torch.fx.GraphModule, input_types: list[Any]) -> torch.fx.GraphModule:
+    def swap_pass(
+        gm: torch.fx.GraphModule, input_types: list[Any]
+    ) -> torch.fx.GraphModule:
         while True:
             order = list(gm.graph.nodes)
-            calls = [n for n in order if n.op == "call_function" and isinstance(n.target, torch._ops.OpOverload)]
+            calls = [
+                n
+                for n in order
+                if n.op == "call_function"
+                and isinstance(n.target, torch._ops.OpOverload)
+            ]
             for at in range(len(calls) - len(wanted) + 1):
                 run = calls[at : at + len(wanted)]
-                if not all(_same_operator(w, _operator(n)) for w, n in zip(wanted, run)) or any(map(_writes_or_draws, run)):
+                if not all(
+                    _same_operator(w, _operator(n)) for w, n in zip(wanted, run)
+                ) or any(map(_writes_or_draws, run)):
                     continue
                 # What stands between the ops (an item taken out of a result) comes along.
-                seg = _segment_of(gm, [n for n in order[order.index(run[0]) : order.index(run[-1]) + 1] if n.op == "call_function"])
+                seg = _segment_of(
+                    gm,
+                    [
+                        n
+                        for n in order[order.index(run[0]) : order.index(run[-1]) + 1]
+                        if n.op == "call_function"
+                    ],
+                )
                 if seg is None:
                     continue
-                replace_segment(gm, seg, _checked(kernel, checks, rtol, atol, seg.as_callable(), len(seg.outputs)))
+                replace_segment(
+                    gm,
+                    seg,
+                    _checked(
+                        kernel, checks, rtol, atol, seg.as_callable(), len(seg.outputs)
+                    ),
+                )
                 _replacements(gm).append((kernel, atol, rtol, "same"))
                 break
             else:

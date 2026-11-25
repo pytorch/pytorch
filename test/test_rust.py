@@ -118,7 +118,7 @@ class TestCompile3(TestCase):
         return result, out.getvalue()
 
     def test_prints_callees_in_order(self):
-        @torch.compile3
+        @torch._compile3
         def top(x):
             return _middle() + x
 
@@ -139,7 +139,7 @@ class TestCompile3(TestCase):
         self.assertIn("--- CFG ---", out)
 
     def test_each_code_printed_once_per_call(self):
-        @torch.compile3
+        @torch._compile3
         def top():
             return [_leaf() for _ in range(5)]
 
@@ -149,7 +149,7 @@ class TestCompile3(TestCase):
         self.assertEqual(out.count("=== _leaf "), 1)
 
     def test_disabled_after_return_and_raise(self):
-        @torch.compile3
+        @torch._compile3
         def boom():
             raise ValueError("boom")
 
@@ -162,7 +162,7 @@ class TestCompile3(TestCase):
         def documented():
             """doc"""
 
-        wrapped = torch.compile3(documented)
+        wrapped = torch._compile3(documented)
         self.assertEqual(wrapped.__name__, "documented")
         self.assertEqual(wrapped.__doc__, "doc")
 
@@ -1123,11 +1123,11 @@ def _cfg_outline_context():
         raise context
     except Exception:
         try:
-            raise Exception("caught")
+            raise Exception("caught")  # noqa: TRY002
         except Exception:
             pass
         try:
-            raise Exception("new")
+            raise Exception("new")  # noqa: TRY002
         except Exception as exc:
             raised = exc
     return raised.__context__ is context
@@ -1177,7 +1177,7 @@ class TestCfgExecution(TestCase):
             while t > 10:
                 t -= 7
             a, *b, c = [1, 2, 3, 4]
-            return t, a, b, c, {"x": 1, "y": [i for i in range(3)]}, f"{t!r:>4}"
+            return t, a, b, c, {"x": 1, "y": [i for i in range(3)]}, f"{t!r:>4}"  # noqa: C416
 
         self.same(f, 20)
 
@@ -3405,7 +3405,7 @@ bb4(%14 s0, %15 lasti, %16 exc):
         def f(xs, flag):
             if flag:
                 y = 1
-            r = [y for y in xs]
+            r = [y for y in xs]  # noqa: C416
             del r
             return y
 
@@ -3418,9 +3418,9 @@ bb4(%14 s0, %15 lasti, %16 exc):
         def h(x):
             x = x + 1
             y = x * 2
-            return (lambda: x + y)()
+            return (lambda: x + y)()  # noqa: PLC3002
 
-        class O:
+        class O:  # noqa: E742
             def m(self, v):
                 return v + 1
 
@@ -3440,7 +3440,7 @@ bb4(%14 s0, %15 lasti, %16 exc):
         def f():
             sys.settrace(lambda *a: None)
             try:
-                return (lambda: 1)()
+                return (lambda: 1)()  # noqa: PLC3002
             finally:
                 sys.settrace(None)
 
