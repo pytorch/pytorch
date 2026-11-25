@@ -110,7 +110,8 @@ void MPSStream::commitIfNeeded() {
   // stall the caller, so skip the commit while kMaxCommandBuffersInFlight of the stream's own commits are in
   // flight (MPSGraph's are not counted).
   constexpr uint32_t kKernelsPerCommit = 16; // See https://github.com/pytorch/pytorch/pull/200181 for the sweep
-  if (_enableCommitAndContinue && _kernelsSinceCommit >= kKernelsPerCommit && !tooManyCommandBuffersInFlight()) {
+  if (_enableCommitAndContinue && _kernelsSinceCommit >= kKernelsPerCommit &&
+      _commandBuffersInFlight < kMaxCommandBuffersInFlight) {
     synchronize(SyncType::COMMIT);
   }
 }
@@ -143,6 +144,21 @@ void MPSStream::synchronize(SyncType syncType) {
 
 void MPSStream::commit() {
   _kernelsSinceCommit = 0;
+  // A command buffer committed behind an event wait cannot complete before the awaited event signals, and the
+  // calling thread may be the one that has to signal it (torch.mps.Event.signal). Those commits must not add up
+  // to the 64 uncompleted command buffers at which Metal blocks the caller (see commitIfNeeded), so past
+  // kMaxCommandBuffersInFlight keep encoding into the current command buffer. A completion handler retries.
+  const auto mustDefer = [this] {
+    return _eventWaitsInFlight > 0 && _commandBuffersInFlight >= kMaxCommandBuffersInFlight;
+  };
+  if (mustDefer()) {
+    _commitDeferred = true;
+    // A handler that ran before the flag was set does not retry, so check again
+    if (mustDefer()) {
+      return;
+    }
+  }
+  _commitDeferred = false;
   if (_enableCommitAndContinue) {
     [commandBuffer() commitAndContinue];
   } else {
@@ -178,6 +194,8 @@ void MPSStream::commitAndWait() {
     checkLastError();
   }
   _hasWorkSinceQuerySignal = false;
+  _hasEventWait = false;
+  _commitDeferred = false;
 }
 
 void MPSStream::commitAndContinue() {
@@ -216,8 +234,24 @@ void MPSStream::addErrorHandler() {
   // so that checkLastError() raises it at the next synchronization point, rather than
   // silently returning garbage, similar to how CUDA reports asynchronous errors.
   ++_commandBuffersInFlight;
+  const bool hasEventWait = std::exchange(_hasEventWait, false);
+  if (hasEventWait) {
+    ++_eventWaitsInFlight;
+  }
   [commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
     --_commandBuffersInFlight;
+    if (hasEventWait) {
+      --_eventWaitsInFlight;
+    }
+    if (_commitDeferred) {
+      dispatch_async(_serialQueue, ^() {
+        @autoreleasepool {
+          if (_commitDeferred) {
+            synchronize(SyncType::COMMIT);
+          }
+        }
+      });
+    }
     CommandBufferError error;
     if (commandBufferFailed(cb, error.is_oom, error.code, error.message)) {
       recordCommandBufferError(std::move(error));

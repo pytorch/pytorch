@@ -66,6 +66,7 @@ static bool encodeEventWait(MTLSharedEvent_t event, uint64_t value, MPSStream* s
   stream->endKernelCoalescing();
   id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
   [commandBuffer encodeWaitForEvent:event value:value];
+  stream->markEventWaitEncoded();
   // The stream is not idle until the awaited event signals
   stream->markWorkEncoded();
   if (syncEvent) {
@@ -232,17 +233,23 @@ void MPSEventPool::waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream
 }
 
 void MPSEventPool::waitForHostSignal(id_t event_id, MPSStream* stream, uint64_t value) {
+  if (value == 0) {
+    getInUseEvent(event_id);
+    return;
+  }
   const auto event = getEventForHostSignal(event_id);
   const auto host_event = event->m_hostEvent;
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      encodeEventWait(host_event, value, stream, /*syncEvent=*/!stream->tooManyCommandBuffersInFlight());
+      encodeEventWait(host_event, value, stream, /*syncEvent=*/true);
     }
   });
 }
 
 void MPSEventPool::signalEvent(id_t event_id, uint64_t value) {
-  getEventForHostSignal(event_id)->m_hostEvent.signaledValue = value;
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  const auto host_event = getEventForHostSignal(event_id)->m_hostEvent;
+  host_event.signaledValue = std::max(host_event.signaledValue, value);
 }
 
 void MPSEventPool::synchronizeEvent(id_t event_id) {

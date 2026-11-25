@@ -1,3 +1,5 @@
+import operator
+
 import torch
 
 from .streams import Stream
@@ -8,11 +10,20 @@ __all__ = [
 ]
 
 
+def _host_signal_value(value: int) -> int:
+    value = operator.index(value)
+    if not 0 <= value < 2**64:
+        raise ValueError(f"expected an unsigned 64-bit value, but got {value}")
+    return value
+
+
 class Event:
     r"""Wrapper around an MPS event.
 
     MPS events are synchronization markers that can be used to monitor the
     device's progress, to accurately measure timing, and to synchronize MPS streams.
+    An event also has a host signal counter that a stream can wait for, see
+    :meth:`wait` and :meth:`signal`.
 
     Args:
         enable_timing (bool, optional): indicates if the event should measure time
@@ -40,24 +51,23 @@ class Event:
         torch._C._mps_recordEvent(self.__eventId, stream.stream_id)
 
     def wait(self, stream: Stream | None = None, *, value: int | None = None) -> None:
-        r"""wait(stream=None, *, value=None) -> None
-
-        Makes all future work submitted to the given stream wait for this event.
+        r"""Makes all future work submitted to the given stream wait for this event.
 
         By default the stream waits for the latest :meth:`record`. If ``value``
         is given, it instead waits on the GPU until the host calls
         :meth:`signal` with ``value`` or higher. The host signal counter is
-        separate from the recorded work, so :meth:`query`, :meth:`synchronize`
-        and :meth:`elapsed_time` ignore it.
+        independent of :meth:`record`.
 
         .. note::
-            A stream that waits for a host signal cannot be drained:
-            :func:`torch.mps.synchronize`, :func:`torch.mps.empty_cache`,
-            ``tensor.cpu()`` and ``tensor.item()`` block until another thread
-            calls :meth:`signal`. Keep the event alive until then. If the
-            signal does not arrive before Metal's command buffer timeout, the
-            wait fails and a ``RuntimeError`` is raised at a later
-            synchronization point.
+            Nothing submitted to the stream after an unsignalled host wait
+            completes, so whatever waits for that work blocks until another
+            thread calls :meth:`signal`: :func:`torch.mps.synchronize`,
+            :func:`torch.mps.empty_cache`, :meth:`elapsed_time`,
+            ``tensor.cpu()``, ``tensor.item()``, and :meth:`synchronize` of an
+            event recorded after the wait. Keep the event alive until it is
+            signalled. If the signal does not arrive before Metal's command
+            buffer timeout, the wait fails and a ``RuntimeError`` is raised at
+            a later synchronization point.
 
         Args:
             stream (torch.mps.Stream, torch.Stream, optional): Uses ``torch.mps.current_stream()`` if no stream is specified.
@@ -79,24 +89,20 @@ class Event:
             raise RuntimeError(f"expected an MPS stream, but got {stream.device.type}")
         if value is None:
             torch._C._mps_waitForEvent(self.__eventId, stream.stream_id)
-        elif 0 <= value < 2**64:
-            torch._C._mps_waitForHostSignal(self.__eventId, stream.stream_id, value)
         else:
-            raise ValueError(f"expected an unsigned 64-bit value, but got {value}")
+            value = _host_signal_value(value)
+            torch._C._mps_waitForHostSignal(self.__eventId, stream.stream_id, value)
 
     def signal(self, value: int) -> None:
-        r"""signal(value) -> None
-
-        Advance the host signal counter for :meth:`wait`. The counter starts
-        at zero and only increases. GPU work waiting for a value at or below
-        the current counter can proceed.
+        r"""Advances the host signal counter for :meth:`wait`. The counter starts
+        at zero and only increases, so a value below the current counter is
+        ignored. GPU work waiting for a value at or below the current counter
+        can proceed.
 
         Args:
             value (int): Unsigned 64-bit signal value.
         """
-        if not 0 <= value < 2**64:
-            raise ValueError(f"expected an unsigned 64-bit value, but got {value}")
-        torch._C._mps_signalEvent(self.__eventId, value)
+        torch._C._mps_signalEvent(self.__eventId, _host_signal_value(value))
 
     def query(self) -> bool:
         r"""Returns True if all work currently captured by event has completed."""

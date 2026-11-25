@@ -87,10 +87,6 @@ class TORCH_API MPSStream {
   void synchronize(SyncType syncType);
   // Commits once enough kernels are encoded, so that the GPU runs them while the host keeps encoding
   void commitIfNeeded();
-  // Whether another commit could stall the creation of the next command buffer, see commitIfNeeded
-  bool tooManyCommandBuffersInFlight() const {
-    return _commandBuffersInFlight >= kMaxCommandBuffersInFlight;
-  }
   void copy(MTLBuffer_t srcBuffer,
             MTLBuffer_t dstBuffer,
             size_t length,
@@ -122,6 +118,12 @@ class TORCH_API MPSStream {
   // so that `query` detects the newly encoded work.
   void markWorkEncoded() {
     _hasWorkSinceQuerySignal = true;
+  }
+
+  // Any caller that encodes an event wait into `commandBuffer` must call this function, so that the commits
+  // behind the wait stay bounded, see `commit`.
+  void markEventWaitEncoded() {
+    _hasEventWait = true;
   }
 
   /// Get the MPS device index that this stream is associated with.
@@ -164,6 +166,11 @@ class TORCH_API MPSStream {
   uint32_t _kernelsSinceCommit = 0;
   static constexpr uint32_t kMaxCommandBuffersInFlight = 32;
   std::atomic<uint32_t> _commandBuffersInFlight{0};
+  // Whether the current command buffer has an event wait, and how many such command buffers are in flight
+  bool _hasEventWait = false;
+  std::atomic<uint32_t> _eventWaitsInFlight{0};
+  // Whether a commit was deferred, for a completion handler to retry
+  std::atomic<bool> _commitDeferred{false};
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
   // First execution error reported by an asynchronously committed command buffer
