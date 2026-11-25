@@ -16929,6 +16929,65 @@ class TestGraphAllocators(TestCase):
         self.assertEqual(y, x + 1)
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+@unittest.skipIf(TEST_WITH_ROCM, "not supported on ROCm")
+class TestMemoryPlanningUtils(TestCase):
+    # the CUDA driver and graph helpers of torch.cuda.memory_planning
+
+    @staticmethod
+    def _tensor(ptr, nbytes):
+        class Memory:
+            __cuda_array_interface__ = {
+                "shape": (nbytes // 4,),
+                "typestr": "<i4",
+                "data": (ptr, False),
+                "version": 3,
+            }
+
+        return torch.as_tensor(Memory(), device="cuda")
+
+    def test_virtual_memory(self):
+        # one chunk of memory mapped at two addresses: what is written through
+        # one is read through the other
+        C = torch._C
+        device = torch.cuda.current_device()
+        n = C._cuda_vmmGranularity(device)
+        self.assertGreater(n, 0)
+        handle = C._cuda_vmmCreate(n, device)
+        base = C._cuda_vmmAddressReserve(2 * n)
+        for ptr in (base, base + n):
+            C._cuda_vmmMap(ptr, n, handle)
+        C._cuda_vmmSetAccess(base, 2 * n, device)
+        a, b = self._tensor(base, n), self._tensor(base + n, n)
+        a.fill_(7)
+        self.assertTrue(b.eq(7).all().item())
+        del a, b
+        torch.cuda.synchronize()
+        for ptr in (base, base + n):
+            C._cuda_vmmUnmap(ptr, n)
+        C._cuda_vmmAddressFree(base, 2 * n)
+        C._cuda_vmmRelease(handle)
+
+    def test_capture_info_and_topology(self):
+        # the frontier read during a capture names nodes of the captured graph
+        C = torch._C
+        x = torch.ones(16, device="cuda")
+        s = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph(keep_graph=True)
+        with torch.cuda.graph(g, stream=s):
+            y = x + 1
+            graph, frontier = C._cuda_streamCaptureInfo(s.cuda_stream)
+            y.mul_(2)
+        self.assertEqual(C._cuda_streamCaptureInfo(s.cuda_stream), (0, []))
+        self.assertEqual(graph, g.raw_cuda_graph())
+        nodes, edges = C._cuda_graphTopology(graph)
+        self.assertEqual(C._cuda_graphSize(graph), (2, 1))
+        self.assertEqual(len(frontier), 1)
+        (mul,) = set(nodes) - set(frontier)
+        self.assertEqual(edges, [(frontier[0], mul)])
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(TEST_WITH_ROCM, "graph allocators are not tested on ROCm")
 @unittest.skipIf(_GRAPH_ALLOCATORS_TEST, "already in a subprocess")
