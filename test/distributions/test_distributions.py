@@ -3289,7 +3289,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
         self.assertEqual(batched_prob, unbatched_prob, atol=1e-3, rtol=0)
 
-    @expectedFailureMPS
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_multivariate_normal_sample(self):
         set_rng_seed(
