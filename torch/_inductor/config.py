@@ -635,6 +635,13 @@ incremental_autotune_max_dispatches = int(
     os.getenv("TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_MAX_DISPATCHES", 200)
 )
 
+# Keep the template cudaGraph_t alive after CUDA Graph Trees finishes recording,
+# instead of destroying it at capture_end. Costs the memory of the graph's node
+# structure, and is what makes an already-instantiated graph mutable: the node
+# handles cuGraphExecKernelNodeSetParams takes must come from the template the
+# exec was instantiated from.
+cudagraph_keep_graph: bool = os.environ.get("TORCHINDUCTOR_CUDAGRAPH_KEEP_GRAPH") == "1"
+
 inductor_default_autotune_warmup = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
 )

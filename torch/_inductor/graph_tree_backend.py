@@ -183,7 +183,12 @@ def disable_conv_cache_emptying() -> Generator[None, None, None]:
 
 class CUDAGraphTreeGraphInterface(GraphTreeGraphInterface):
     def create_graph(self, *, num_generators: int = 0) -> GraphTreeGraph:
-        return torch.cuda.CUDAGraph(num_rng_states=max(8, 1 + num_generators))
+        from torch._inductor import config
+
+        return torch.cuda.CUDAGraph(
+            keep_graph=config.cudagraph_keep_graph,
+            num_rng_states=max(8, 1 + num_generators),
+        )
 
     def create_stream(self, device_index: int) -> torch.cuda.Stream:
         return torch.cuda.Stream(device=device_index)
