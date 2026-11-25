@@ -2,6 +2,7 @@
 # Owner(s): ["module: unknown"]
 
 import importlib.util
+import json
 import multiprocessing
 import os
 import random
@@ -667,11 +668,16 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-from torch.utils.collect_env import _decode_output, get_pretty_env_info, run
+from torch.utils.collect_env import (
+    _decode_output,
+    get_intel_gpu_onboard,
+    get_pretty_env_info,
+    run,
+)
 
 
-@unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
 class TestCollectEnv(TestCase):
+    @unittest.skipIf(IS_FBCODE, "runs pip which is not available internally")
     def test_smoke(self):
         info_output = get_pretty_env_info()
         self.assertTrue(info_output.count("\n") >= 17)
@@ -703,6 +709,40 @@ class TestCollectEnv(TestCase):
             mock.patch("locale.getpreferredencoding", return_value="cp936"),
         ):
             self.assertEqual(run("cmd"), (0, caption, ""))
+
+    def _run_intel_gpu_onboard(self, discovery):
+        run_lambda = unittest.mock.Mock(return_value=(0, json.dumps(discovery), ""))
+        with unittest.mock.patch(
+            "torch.utils.collect_env.get_platform", return_value="linux"
+        ):
+            return get_intel_gpu_onboard(run_lambda)
+
+    def test_intel_gpu_onboard_without_device_name(self):
+        # xpu-smi 2.x lists GPUs hidden by ZE_AFFINITY_MASK without a
+        # device_name, describing them by device_state only (e.g.
+        # "survivability mode"); get_intel_gpu_onboard must report such
+        # entries by their state instead of raising KeyError. run_lambda is
+        # mocked, so no real XPU device is needed.
+        discovery = {
+            "device_list": [
+                {"device_id": 0, "device_name": "Intel(R) Arc(TM) Pro B60 Graphics"},
+                {"device_id": 1, "device_state": "survivability mode"},
+                {"device_id": 2},
+            ]
+        }
+        onboard = self._run_intel_gpu_onboard(discovery)
+        self.assertEqual(
+            onboard,
+            "* [0] Intel(R) Arc(TM) Pro B60 Graphics\n"
+            "* [1] survivability mode\n"
+            "* [2] N/A",
+        )
+
+    def test_intel_gpu_onboard_empty_device_list(self):
+        # An empty or missing device_list must fall back to "N/A" instead of
+        # producing an empty section or raising.
+        self.assertEqual(self._run_intel_gpu_onboard({"device_list": []}), "N/A")
+        self.assertEqual(self._run_intel_gpu_onboard({}), "N/A")
 
 
 class TestHipify(TestCase):
@@ -1137,7 +1177,7 @@ class TestDeviceUtils(TestCase):
             self.assertTrue(tree_all_only(torch.Tensor, is_meta_device, r))
 
 
-instantiate_device_type_tests(TestDeviceUtils, globals())
+instantiate_device_type_tests(TestDeviceUtils, globals(), allow_xpu=True)
 
 
 class TestTorchPathResolution(TestCase):

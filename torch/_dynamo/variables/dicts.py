@@ -201,9 +201,23 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
         items_cls = cast(type, self._cpython_type)
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
-        self.items: dict[HashableTracker, VariableTracker] = storage_cls(
-            {make_hashable(x): v for x, v in items.items()}
-        )
+        self.items: dict[HashableTracker, VariableTracker]
+        if storage_cls is collections.OrderedDict and isinstance(
+            items, collections.OrderedDict
+        ):
+            # Preserve storage and linked order without hashing twice.
+            storage = cast(
+                dict[VariableTracker | HashableTracker, VariableTracker], items
+            )
+            keys: dict[int, HashableTracker] = {}
+            self.items = collections.OrderedDict()
+            for key, value in dict.items(storage):
+                keys[id(key)] = wrapped = make_hashable(key)
+                self.items[wrapped] = value
+            for key in items:
+                self.items.move_to_end(keys[id(key)])
+        else:
+            self.items = storage_cls({make_hashable(x): v for x, v in items.items()})
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
         self.should_reconstruct_all = (
@@ -254,13 +268,18 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L3033-L3110
-        self.install_dict_order_guard(tx)
+        ConstDictVariable.install_dict_order_guard(self, tx)
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "{...}")
+            storage = (
+                self.items.items()
+                if isinstance(self.items, SideEffectsProxyDict)
+                else dict.items(self.items)
+            )
             items = [
-                f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-                for key, value in self.items.items()
+                f"{tracked_repr(tx, cast(HashableTracker, key).vt)}: {tracked_repr(tx, value)}"
+                for key, value in storage
             ]
         return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
@@ -448,7 +467,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         value = self.items.get(key)
         # The deletion marker is explicit; `isinstance` would realize lazy values.
         if value is None or type(value) is variables.DeletedVariable:
-            self.install_dict_contains_guard(tx, key, key_present=False)
+            self.install_dict_contains_guard(
+                tx,
+                key,
+                key_present=False,
+                recompile_hint=(
+                    f"`{self.source.name if self.source else 'dict'}[key]` traced KeyError "
+                    "for an absent key; a newly present key must return its value instead."
+                ),
+            )
             raise_observed_exception(KeyError, tx, args=[arg])
         return value
 
@@ -490,9 +517,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 original_key.realize()
                 break
 
-    def install_dict_keys_match_guard(self) -> None:
+    def install_dict_keys_match_guard(
+        self, *, recompile_hint: str | None = None
+    ) -> None:
         if self.source and not is_constant_source(self.source):
-            install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            install_guard(
+                self.make_guard(GuardBuilder.DICT_KEYS_MATCH),
+                recompile_hint=recompile_hint,
+            )
 
     def install_dict_order_guard(self, tx: "InstructionTranslatorBase") -> None:
         if self.source and not is_constant_source(self.source):
@@ -505,6 +537,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         key: HashableTracker,
         *,
         key_present: bool | None = None,
+        recompile_hint: str | None = None,
     ) -> None:
         # Key guarding - These are the cases to consider
         # 1) The dict has been mutated. In this case, we would have already
@@ -547,13 +580,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                         guard_fn,
                         key=arg.as_python_constant(),
                     )
-                )
+                ),
+                recompile_hint=recompile_hint,
             )
         elif arg.source:
             if key_present:
                 self.realize_key_vt(key)
             else:
-                self.install_dict_keys_match_guard()
+                self.install_dict_keys_match_guard(recompile_hint=recompile_hint)
 
     def _lookup_key(
         self,
@@ -581,7 +615,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     ) -> VariableTracker:
         # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
         # Unhashable key check happens inside HashableTracker (tp_hash_impl → TypeError).
-        return self.getitem_const_raise_exception_if_absent(tx, key)
+        if not hasattr(self.python_type(), "__missing__"):
+            return self.getitem_const_raise_exception_if_absent(tx, key)
+        hashed = self._lookup_key(tx, key)
+        value = self.items.get(hashed)
+        if value is None or istype(value, variables.DeletedVariable):
+            self.install_dict_contains_guard(tx, hashed, key_present=False)
+            return self.call_method(tx, "__missing__", [key], {})
+        return value
 
     def sq_contains_impl(
         self,
@@ -675,7 +716,17 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         key = self._lookup_key(tx, args[0])
         value = self.items.get(key)
         if value is None or type(value) is variables.DeletedVariable:
-            self.install_dict_contains_guard(tx, key, key_present=False)
+            self.install_dict_contains_guard(
+                tx,
+                key,
+                key_present=False,
+                recompile_hint=(
+                    f"`{self.source.name if self.source else 'dict'}.get("
+                    f"key{', default' if len(args) == 2 else ''})` traced "
+                    f"{'the default' if len(args) == 2 else 'None'} for an absent key; "
+                    "a newly present key must return its value instead."
+                ),
+            )
             if len(args) == 1:
                 # if default is not given, return None
                 return ConstantVariable.create(None)
@@ -725,7 +776,18 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 value = self.items.pop(key, None)
         if value is None or type(value) is variables.DeletedVariable:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
-            self.install_dict_contains_guard(tx, key, key_present=False)
+            self.install_dict_contains_guard(
+                tx,
+                key,
+                key_present=False,
+                recompile_hint=(
+                    f"`{self.source.name if self.source else 'dict'}.pop("
+                    f"key{', default' if len(args) == 2 else ''})` traced "
+                    f"{'the default' if len(args) == 2 else 'KeyError'} "
+                    "without removing an entry; encountering this key in the dict "
+                    "requires a recompile to remove the entry and return its value."
+                ),
+            )
             if len(args) == 1:
                 # if default is not given, raise KeyError
                 raise_observed_exception(KeyError, tx, args=[args[0]])
@@ -873,6 +935,8 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L5252-L5273
     tp_methods = {
+        "__contains__": Method.from_slot(sq_contains_impl),
+        "__getitem__": Method.from_slot(mp_subscript_impl),
         "items": Method(dict_items),
         "keys": Method(dict_keys),
         "values": Method(dict_values),
@@ -1020,12 +1084,57 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
     def python_type(self) -> type:
         return collections.OrderedDict
 
+    def reduce_ex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        from .iter import OrderedDictItemsIterator
+
+        if type(self) is not OrderedDictVariable or not self.is_python_constant():
+            return None
+
+        if self.source and not is_constant_source(self.source):
+            instance_dict = AttrSource(self.source, "__dict__")
+            effects = tx.output.side_effects
+            # A pending write to another input dict could alias self.__dict__
+            # on a cache hit, even if the inputs did not alias during tracing.
+            if tx.output.resolve_source_value(instance_dict) or any(
+                var is not self
+                and isinstance(var, ConstDictVariable)
+                and var.source is not None
+                and effects.is_modified(var)
+                for var in effects.id_to_variable.values()
+            ):
+                unimplemented(
+                    gb_type="Copying an OrderedDict with instance attributes",
+                    context="OrderedDict.__reduce_ex__",
+                    explanation="The OrderedDict has instance attributes, or a pending dictionary write could have modified them. Dynamo cannot preserve this state when tracing the copy.",
+                    hints=["Copy the OrderedDict outside the compiled region."],
+                )
+            install_guard(instance_dict.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            self.install_dict_order_guard(tx)
+
+        reduced = self.as_python_constant().__reduce_ex__(args[0].as_python_constant())
+        return variables.TupleVariable(
+            [VariableTracker.build(tx, item) for item in reduced[:-1]]
+            + [OrderedDictItemsIterator.create(self.items)]
+        )
+
     def move_to_end(
         self: "OrderedDictVariable",
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.source:
+            unimplemented(
+                gb_type="Input OrderedDict linked-order mutation",
+                context="OrderedDict.move_to_end",
+                explanation="Dynamo does not yet replay linked order for input OrderedDicts.",
+                hints=[],
+            )
         self.install_dict_keys_match_guard()
         tx.output.side_effects.mutation(self)
         if args[0] not in self:
@@ -1064,6 +1173,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/odictobject.c#L1378-L1403
     tp_methods = {
+        "__reduce_ex__": Method(reduce_ex),
         "move_to_end": Method(move_to_end),
         "popitem": Method(popitem),
     }
@@ -1095,6 +1205,7 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
         # https://github.com/python/cpython/blob/v3.13.3/Objects/odictobject.c#L1385-L1418
+        self.install_dict_order_guard(tx)
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "...")
@@ -1288,7 +1399,9 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 class NNModuleHooksDictVariable(OrderedDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
     # nn.Module hook dicts are OrderedDict, so back storage/reconstruct with it.
-    def install_dict_keys_match_guard(self) -> None:
+    def install_dict_keys_match_guard(
+        self, *, recompile_hint: str | None = None
+    ) -> None:
         pass
 
     def install_dict_contains_guard(
@@ -1297,6 +1410,7 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         key: HashableTracker,
         *,
         key_present: bool | None = None,
+        recompile_hint: str | None = None,
     ) -> None:
         pass
 
@@ -1392,6 +1506,18 @@ class DictViewVariable(VariableTracker):
             list(reversed(self.view_items_vt)),
             mutation_type=ValueMutationNew(),
         )
+
+    def isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_isdisjoint
+        ).call_function(tx, [self, *args], kwargs)
 
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/dictobject.c#L6992-L6998
     tp_methods = {
@@ -1492,20 +1618,8 @@ class DictKeysVariable(DictViewVariable):
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
         return ConstDictVariable.sq_contains_impl(self.dv_dict, tx, item)
 
-    def isdisjoint(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        from .builder import SourcelessBuilder
-
-        return SourcelessBuilder.create(
-            tx, polyfills.dictview_isdisjoint
-        ).call_function(tx, [self, *args], kwargs)
-
     tp_methods = {
-        "isdisjoint": Method(isdisjoint),
+        "isdisjoint": Method(DictViewVariable.isdisjoint),
     }
 
     def tp_richcompare_impl(
@@ -1671,6 +1785,10 @@ class DictItemsVariable(DictViewVariable):
         if self.dv_dict.source and not is_constant_source(self.dv_dict.source):
             tx.output.guard_on_key_order.add(self.dv_dict.source)
         return DictItemsIterator.create(self.dv_dict.items)
+
+    tp_methods = {
+        "isdisjoint": Method(DictViewVariable.isdisjoint),
+    }
 
 
 kV = HashableTracker | str
@@ -1950,7 +2068,9 @@ class DunderDictVariable(ConstDictVariable):
 
     # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
     # so we don't need to install guards. Guard installation is overridden to no-op.
-    def install_dict_keys_match_guard(self) -> None:
+    def install_dict_keys_match_guard(
+        self, *, recompile_hint: str | None = None
+    ) -> None:
         pass
 
     def install_dict_contains_guard(
@@ -1959,5 +2079,6 @@ class DunderDictVariable(ConstDictVariable):
         key: HashableTracker,
         *,
         key_present: bool | None = None,
+        recompile_hint: str | None = None,
     ) -> None:
         pass

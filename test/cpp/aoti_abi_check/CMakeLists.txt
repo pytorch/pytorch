@@ -19,6 +19,7 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_exception.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_headeronlyarrayref.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_irange.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_jiterator_macros.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_layout.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_load.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_macros.cpp
@@ -26,14 +27,17 @@ set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_mathconstants.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_memoryformat.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_metaprogramming.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_native_math.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_overflows.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_rand.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_scalartype.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_transposetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typelist.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_typetraits.cpp
-  ${AOTI_ABI_CHECK_TEST_ROOT}/test_transposetype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_vec_half.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_zmath.cpp
 )
 
 # The below are tests that require CPU_CAPABILITY setup
@@ -44,13 +48,44 @@ set(AOTI_ABI_CHECK_VEC_TEST_SRCS
 
 if(USE_CUDA)
   list(APPEND AOTI_ABI_CHECK_TEST_SRCS
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_cast.cu
     ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_kernel_utils.cu
   )
+endif()
+# This directory is not hipified. The CUDA file above stays CUDA-only.
+# The ROCm file forces ROCM_VERSION 0 so the packed-atomic branch is compiled.
+if(USE_ROCM)
+  list(APPEND AOTI_ABI_CHECK_TEST_SRCS
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_rocm_packed_atomic.cu
+  )
+  set_source_files_properties(
+    ${AOTI_ABI_CHECK_TEST_ROOT}/cuda/test_rocm_packed_atomic.cu
+    PROPERTIES LANGUAGE HIP COMPILE_DEFINITIONS USE_ROCM)
+endif()
+
+# test_model_pool.cpp follows the build's device macro, like the pool's code.
+# ROCm builds hipify the pool's USE_CUDA into USE_ROCM.
+if(USE_CUDA)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_CUDA)
+elseif(USE_ROCM)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_ROCM)
+elseif(USE_XPU)
+  set_source_files_properties(${AOTI_ABI_CHECK_TEST_ROOT}/test_model_pool.cpp
+    PROPERTIES COMPILE_DEFINITIONS USE_XPU)
 endif()
 
 add_executable(test_aoti_abi_check
   ${AOTI_ABI_CHECK_TEST_SRCS}
 )
+# A HIP source makes CMake link this target with ROCm clang. Manywheel
+# gtest is not PIC, and that ld.lld link fails. Keep the host linker.
+if(USE_ROCM)
+  set_target_properties(test_aoti_abi_check PROPERTIES
+    LINKER_LANGUAGE CXX
+    HIP_ARCHITECTURES "${PYTORCH_ROCM_ARCH}")
+endif()
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
@@ -60,6 +95,8 @@ target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
 target_link_libraries(test_aoti_abi_check PRIVATE gtest_main sleef)
 if(USE_CUDA)
   target_link_libraries(test_aoti_abi_check PRIVATE torch::cudart)
+elseif(USE_ROCM)
+  target_link_libraries(test_aoti_abi_check PRIVATE hip::host)
 endif()
 target_include_directories(test_aoti_abi_check PRIVATE ${ATen_CPU_INCLUDE})
 if(NOT USE_SYSTEM_SLEEF)
