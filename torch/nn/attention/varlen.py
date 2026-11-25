@@ -13,7 +13,8 @@ import torch
 from torch._C import _SDPBackend as SDPBackend
 
 from . import _is_sdp_priority_order_active
-from ._utils import _empty_with_matching_layout
+from ._registry import current_flash_attention_impl
+from ._utils import _empty_with_matching_layout, _input_requires_grad
 
 
 log = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ def _cudnn_rejection_reasons(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    needs_backward: bool = False,
 ) -> list[str]:
     """Return the constraints preventing cuDNN varlen attention."""
     reasons = []
@@ -134,9 +136,6 @@ def _cudnn_rejection_reasons(
         reasons.append("query dtype must be float16 or bfloat16")
     if query.shape[-1] % 8 != 0 or value.shape[-1] % 8 != 0:
         reasons.append("query and value head dimensions must be divisible by 8")
-    needs_backward = torch.is_grad_enabled() and any(
-        tensor.requires_grad for tensor in (query, key, value)
-    )
     if not _cudnn_supports_head_dims(query, value, needs_backward):
         phase = "backward" if needs_backward else "forward"
         reasons.append(
@@ -181,10 +180,12 @@ def _select_backend(
     seqused_k: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
+    return_lse: bool = False,
 ) -> int:
     """Select the first eligible varlen backend in the SDPA priority order."""
     cudnn_enabled = torch._C._get_cudnn_sdp_enabled()
     flash_enabled = torch._C._get_flash_sdp_enabled()
+    needs_backward = torch.is_grad_enabled() and _input_requires_grad(query, key, value)
     cudnn_reasons = (
         _cudnn_rejection_reasons(
             query,
@@ -197,13 +198,23 @@ def _select_backend(
             seqused_k,
             block_table,
             num_splits,
+            needs_backward,
         )
         if cudnn_enabled
         else []
     )
     cudnn_eligible = cudnn_enabled and not cudnn_reasons
+    # Only FA4 consumes the gradient of a returned lse, so prefer it over cuDNN
+    # unless the user set an explicit priority order.
+    prefer_flash = (
+        flash_enabled
+        and return_lse
+        and needs_backward
+        and current_flash_attention_impl() == "FA4"
+        and not _is_sdp_priority_order_active()
+    )
     for backend in _get_sdp_priority_order():
-        if backend == _CUDNN_ATTENTION_BACKEND and cudnn_eligible:
+        if backend == _CUDNN_ATTENTION_BACKEND and cudnn_eligible and not prefer_flash:
             return backend
         if backend == _FLASH_ATTENTION_BACKEND and flash_enabled:
             return backend
@@ -246,6 +257,7 @@ def _varlen_attn(
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
     backend: int = _FLASH_ATTENTION_BACKEND,
+    return_lse: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -321,6 +333,7 @@ def _varlen_attn_fake(
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
     backend: int = _FLASH_ATTENTION_BACKEND,
+    return_lse: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -367,7 +380,8 @@ def varlen_attn(
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
     Backend enablement follows :func:`torch.nn.attention.sdpa_kernel`. By default,
-    eligible cuDNN is preferred over Flash; ``set_priority=True`` overrides this order.
+    eligible cuDNN is preferred over Flash, except that Flash is preferred when FA4 is active
+    and the lse is returned under grad; ``set_priority=True`` overrides this order.
 
     Args:
         query (Tensor): Query tensor; shape :math:`(T_q, H_q, D)`
@@ -379,7 +393,13 @@ def varlen_attn(
         cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
         max_q (int): Maximum query sequence length in the batch.
         max_k (int): Maximum key/value sequence length in the batch.
-        return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
+        return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the
+            logsumexp tensor. Backpropagating through it requires the FA4 flash attention
+            implementation (``torch.nn.attention.activate_flash_attention_impl("FA4")``) on the
+            Flash backend; other backends raise if a gradient reaches it. An lse that does not
+            reach the loss usually sends no gradient, but some callers pass zeros for it
+            (returning it from a ``torch.compile`` region, reentrant activation checkpointing);
+            detach the lse in those cases.
         scale (float, optional): Positive scaling factor for attention scores.
         window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
             Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
@@ -485,6 +505,7 @@ def varlen_attn(
     _validate_scale(scale)
     window_size_list = list(window_size)
     is_causal = window_size_list == [-1, 0]
+    return_lse = return_aux is not None and return_aux.lse
     backend = _select_backend(
         query,
         key,
@@ -496,6 +517,7 @@ def varlen_attn(
         seqused_k,
         block_table,
         num_splits,
+        return_lse,
     )
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query,
@@ -513,8 +535,9 @@ def varlen_attn(
         block_table,
         num_splits,
         backend,
+        return_lse,
     )
-    if return_aux is not None and return_aux.lse:
+    if return_lse:
         return out, lse
     return out
 
@@ -709,6 +732,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         block_table,
         num_splits,
         backend,
+        return_lse,
     ) = inputs
     out, lse, rng_state = output
 
@@ -718,7 +742,14 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         raise RuntimeError("block_table is an inference-only parameter.")
 
     ctx.backend = backend
-    ctx.mark_non_differentiable(lse, rng_state)
+    # Only a caller-visible lse is differentiable, and autograd passes None
+    # rather than zeros for an unused out or lse, so only an lse that reaches
+    # the loss sends a gradient to the backward.
+    ctx.set_materialize_grads(False)
+    if return_lse:
+        ctx.mark_non_differentiable(rng_state)
+    else:
+        ctx.mark_non_differentiable(lse, rng_state)
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
 
     ctx.max_q = max_q
@@ -745,8 +776,32 @@ def _varlen_attn_backward(
     scale: float | None = None,
     window_size: list[int] | None = None,
     backend: int = _FLASH_ATTENTION_BACKEND,
+    grad_lse: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     window_size = _normalize_window_size(window_size)
+    # Checked in the op so torch.compile raises at backward time rather than while
+    # tracing, and without reading values so it never syncs.
+    if grad_lse is not None:
+        fa4_active = current_flash_attention_impl() == "FA4"
+        if backend == _CUDNN_ATTENTION_BACKEND:
+            fix = (
+                "enable SDPBackend.FLASH_ATTENTION and put it first with set_priority=True"
+                if fa4_active
+                else 'call torch.nn.attention.activate_flash_attention_impl("FA4") '
+                "(CUDA SM90/SM100), after which Flash is preferred automatically"
+            )
+            raise NotImplementedError(
+                "Backpropagating through the lse returned by varlen_attn is not supported "
+                f"by the cuDNN backend, which was selected; {fix}. If the lse does not "
+                "reach the loss, detach it"
+            )
+        if not fa4_active:
+            raise NotImplementedError(
+                "Backpropagating through the lse returned by varlen_attn requires the FA4 "
+                "flash attention implementation (CUDA SM90/SM100): call "
+                'torch.nn.attention.activate_flash_attention_impl("FA4"). If the lse does '
+                "not reach the loss, detach it"
+            )
 
     unused = torch.empty(0, device=query.device)
 
@@ -790,6 +845,7 @@ def _varlen_attn_backward(
             scale=scale,
             window_size_left=window_size[0],
             window_size_right=window_size[1],
+            grad_logsumexp=grad_lse,
         )
     else:
         raise AssertionError(f"Unsupported varlen attention backend: {backend}")
@@ -813,6 +869,7 @@ def _varlen_attn_backward_fake(
     scale: float | None = None,
     window_size: list[int] | None = None,
     backend: int = _FLASH_ATTENTION_BACKEND,
+    grad_lse: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -827,9 +884,14 @@ def _varlen_attn_backward_fake(
 
 
 def _backward(
-    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
+    ctx: Any,
+    grad_out: torch.Tensor | None,
+    grad_lse: torch.Tensor | None,
+    grad_rng: torch.Tensor | None,
 ) -> tuple[torch.Tensor | None, ...]:
     query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state = ctx.saved_tensors
+    if grad_out is None:
+        grad_out = torch.zeros_like(out)
 
     max_q = ctx.max_q
     max_k = ctx.max_k
@@ -853,10 +915,11 @@ def _backward(
         scale,
         window_size,
         ctx.backend,
+        grad_lse,
     )
     # cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size, \
-    # enable_gqa, seqused_k, block_table, num_splits, backend
-    num_params = 12
+    # enable_gqa, seqused_k, block_table, num_splits, backend, return_lse
+    num_params = 13
     return (dq, dk, dv, *((None,) * num_params))
 
 
