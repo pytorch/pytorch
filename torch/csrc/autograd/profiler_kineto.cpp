@@ -63,7 +63,7 @@ inline int64_t getTimeNs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
 #else
-  return c10::getTime();
+  return c10::getTimeSinceEpoch();
 #endif // USE_KINETO
 }
 
