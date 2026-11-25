@@ -233,9 +233,12 @@ cudaError_t GetDeviceCount(int* dev_count) {
 // ROCm.
 //
 // If the requested device has a primary context, MaybeSetDevice calls
-// SetDevice, which clears the deferred index and skips cudaSetDevice if the
-// device is already current. Otherwise, it only records the requested device as
-// the deferred index. GetDevice reports the deferred index when one is set.
+// SetDevice, which clears the deferred index and calls cudaSetDevice if the
+// requested device is not current. If the requested device has no primary
+// context, MaybeSetDevice only records it as the deferred index.
+// GetDevice reports the deferred index when one is set, without querying the
+// CUDA runtime. If the deferred index is not set, it calls cudaGetDevice to
+// get the CUDA runtime's current device.
 // This preserves lazy context creation for applications like this:
 //
 // ```
@@ -289,10 +292,13 @@ cudaError_t MaybeSetDevice(DeviceIndex device) {
   return cudaSuccess;
 }
 
-// Return the deferred device index, or the runtime's current device if none is
-// deferred, and clear the deferred index. Call cudaSetDevice unless no index
-// was deferred and to_device is already current; that early return does not
-// initialize a context.
+// Switch to to_device and return the previous device index, which is either
+// the deferred index if it was previously set, or the runtime's current device.
+// If there was no device deferred and to_device is already current, no switch
+// is needed, in this case no CUDA context if forced to be initialized. In all
+// other cases, ExchangeDevice calls cudaSetDevice(to_device), initializing its
+// primary context if it was uninitialized. ExchangeDevice clears the deferred
+// index in any scenario.
 DeviceIndex ExchangeDevice(DeviceIndex to_device) {
   auto cur_device = deferredDeviceIndex;
   deferredDeviceIndex = -1;
