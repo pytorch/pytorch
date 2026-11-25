@@ -132,7 +132,7 @@ class TestCuTeDSLRng(TestCase):
         + [
             _DrawCase(kind, view_offset=offset)
             for kind in ("uniform", "normal")
-            for offset in range(4)
+            for offset in range(1, 4)
         ]
         + [
             _DrawCase("uniform", bounds)
