@@ -4,6 +4,8 @@ import logging
 from collections.abc import Sequence
 from typing import Any, cast, Literal
 
+import sympy
+
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.autoheuristic.autoheuristic import AutoHeuristicSelectAlgorithm
@@ -676,7 +678,25 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
-        if use_decompose_k_choice(m, n, k):
+        from ..codegen.cuda.cuda_env import get_cuda_arch
+        from ..heuristics.template.triton import mm_allow_tf32
+        from ..utils import get_num_sms
+
+        # A TF32 mm whose 128x128 output tiles fill less than one wave can use
+        # decompose_k at a lower K ratio. Measured on B200 (SM 10.0) only.
+        device = mat1.get_device()
+        tf32 = (
+            mat1.get_dtype() == torch.float32
+            and device is not None
+            and device.type == "cuda"
+            and mm_allow_tf32(m, n, k, device.type)
+            and torch.version.hip is None
+            and get_cuda_arch() == "100"
+            and V.graph.sizevars.statically_known_true(
+                sympy.Lt(ceildiv(m, 128) * ceildiv(n, 128), get_num_sms())
+            )
+        )
+        if use_decompose_k_choice(m, n, k, tf32=tf32):
             templates_to_use.append(decompose_k_subgraph_template)
         # CUDA drops Triton mm from the default search once decompose_k applies
         # at twice the usual threshold. The exhaustive search still includes it.
