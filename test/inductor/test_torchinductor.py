@@ -21379,6 +21379,127 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(simple_expected, simple_actual, atol=1e-2, rtol=1e-3)
         self.assertIn("async_compile.multi_kernel_plan(", simple_source_codes[0])
 
+    @config.patch(
+        {
+            "max_autotune": True,
+            "compile_threads": 1,
+            "force_disable_caches": True,
+            "triton.enable_experimental_large_output_outer_reductions": True,
+        }
+    )
+    @skipIfRocm
+    @skipIfXpu
+    @xfail_if_mps
+    def test_experimental_large_outer_reduction_plan_dynamic(self):
+        if self.device == "cpu":
+            self.skipTest("Skip for CPU device")
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("experimental large OUTER plan is restricted to SM100+")
+
+        def f(x, y, stats):
+            return (x.float() * y.float() * torch.rsqrt(stats + 1e-5)).sum(dim=0)
+
+        def inputs(n):
+            return (
+                torch.randn(n, 96, 128, device=self.device, dtype=torch.bfloat16),
+                torch.randn(n, 96, 128, device=self.device, dtype=torch.bfloat16),
+                torch.rand(n, 96, 1, device=self.device, dtype=torch.float32),
+            )
+
+        # The reduced (leading) dim is symbolic, so the plan is chosen from its
+        # hint. 6144 is a multiple of 64: a symbolic depth is still treated as
+        # having a tail, so the plan is used.
+        for hint in (5247, 6144):
+            torch._dynamo.reset()
+            compiled = torch.compile(f, fullgraph=True, dynamic=False)
+            args = inputs(hint)
+            for a in args:
+                torch._dynamo.mark_dynamic(a, 0)
+            actual, source_codes = run_and_get_code(compiled, *args)
+            self.assertEqual(f(*args), actual, atol=1e-3, rtol=1e-4)
+            code = source_codes[0]
+            self.assertNotIn("ReductionHint.OUTER_NO_SPLIT", code)
+            self.assertGreaterEqual(code.count("ReductionHint.OUTER"), 2)
+
+            # Other sizes reuse the graph (no guard on the plan choice) and
+            # stay correct, including sizes below the split.
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                for n in (5300, 4096 + 64, 2049, 40, 3):
+                    args = inputs(n)
+                    self.assertEqual(f(*args), compiled(*args), atol=1e-3, rtol=1e-4)
+
+    @config.patch(
+        {
+            "max_autotune": True,
+            "compile_threads": 1,
+            "force_disable_caches": True,
+            "triton.autotune_experimental_large_output_outer_reductions": True,
+        }
+    )
+    @skipIfRocm
+    @skipIfXpu
+    @xfail_if_mps
+    def test_autotuned_large_outer_reduction_plan_dynamic(self):
+        if self.device == "cpu":
+            self.skipTest("Skip for CPU device")
+        if torch.cuda.get_device_capability()[0] < 10:
+            self.skipTest("experimental large OUTER plan is restricted to SM100+")
+        from torch._inductor.codegen.multi_kernel import MultiKernelPlanCall
+
+        def f(x, y, stats):
+            return (x.float() * y.float() * torch.rsqrt(stats + 1e-5)).sum(dim=0)
+
+        def inputs(n):
+            return (
+                torch.randn(n, 96, 128, device=self.device, dtype=torch.bfloat16),
+                torch.randn(n, 96, 128, device=self.device, dtype=torch.bfloat16),
+                torch.rand(n, 96, 1, device=self.device, dtype=torch.float32),
+            )
+
+        # Run each plan of the symbolic-size multi-kernel plan at several sizes.
+        for timings in ([1.0, 2.0], [2.0, 1.0]):
+            torch._dynamo.reset()
+            compiled = torch.compile(f, fullgraph=True, dynamic=False)
+            args = inputs(5247)
+            for a in args:
+                torch._dynamo.mark_dynamic(a, 0)
+            with unittest.mock.patch.object(
+                MultiKernelPlanCall, "benchmark_plans", return_value=timings
+            ):
+                actual, source_codes = run_and_get_code(compiled, *args)
+                self.assertEqual(f(*args), actual, atol=1e-3, rtol=1e-4)
+                self.assertIn("async_compile.multi_kernel_plan(", source_codes[0])
+                with torch._dynamo.config.patch(error_on_recompile=True):
+                    for n in (5300, 40):
+                        args = inputs(n)
+                        self.assertEqual(
+                            f(*args), compiled(*args), atol=1e-3, rtol=1e-4
+                        )
+
+        # A reduction over two leading dims makes every plan kernel's reduction
+        # numel a distinct symbolic expression (2*s, ceil(2*s/split)), each of
+        # which must reach its own kernel.
+        def g(x):
+            return x.float().sum(dim=(0, 1))
+
+        for timings in ([1.0, 2.0], [2.0, 1.0]):
+            torch._dynamo.reset()
+            compiled = torch.compile(g, fullgraph=True, dynamic=False)
+            x = torch.randn(2624, 2, 96, 128, device=self.device, dtype=torch.bfloat16)
+            torch._dynamo.mark_dynamic(x, 0)
+            with unittest.mock.patch.object(
+                MultiKernelPlanCall, "benchmark_plans", return_value=timings
+            ):
+                actual, source_codes = run_and_get_code(compiled, x)
+                self.assertEqual(g(x), actual, atol=1e-3, rtol=1e-4)
+                self.assertIn("async_compile.multi_kernel_plan(", source_codes[0])
+                with torch._dynamo.config.patch(error_on_recompile=True):
+                    for n in (2650, 20):
+                        x = torch.randn(
+                            n, 2, 96, 128, device=self.device, dtype=torch.bfloat16
+                        )
+                        self.assertEqual(g(x), compiled(x), atol=1e-3, rtol=1e-4)
+
     @skip_if_device(lambda device: device == "cpu", "Skip for CPU device")
     @config.patch(force_disable_caches=True)
     @xfail_if_mps  # MPS codegen does not emit ReductionHint.OUTER
