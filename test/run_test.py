@@ -2263,7 +2263,10 @@ def get_selected_tests(options) -> list[str]:
 
         # Disable tests on Windows for SM89 and later - tests failing in ci
         # Enable tests after fixing the failures
-        if SM89OrLater:
+        # Windows ROCm reports a gfx version as its device capability and took these
+        # blocklists before SM*OrLater became NVIDIA-only; keep that.
+        rocm_gpu = TEST_WITH_ROCM and TEST_CUDA
+        if SM89OrLater or rocm_gpu:
             WINDOWS_BLOCKLIST.extend(
                 [
                     # Windows fatal exception / access violation
@@ -2294,7 +2297,7 @@ def get_selected_tests(options) -> list[str]:
 
         # Disable tests on Windows for SM120 and later - tests failing in ci
         # Enable tests after fixing the failures
-        if SM120OrLater:
+        if SM120OrLater or (rocm_gpu and isRocmArchAnyOf(("gfx120", "gfx1250"))):
             WINDOWS_BLOCKLIST.extend(
                 [
                     # test_api fails on Windows SM120+. Triage pending.

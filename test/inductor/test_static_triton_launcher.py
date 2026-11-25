@@ -45,7 +45,11 @@ from torch._inductor.runtime.triton_heuristics import (
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
+    SM80OrLater,
+    SM90OrLater,
+)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipXPUIf,
@@ -1706,7 +1710,7 @@ class TestFastLauncher(_FastLauncherMixin, TestCase):
         self.assertEqual(new_arg0, expected)
 
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and not SM80OrLater,
+        not HAS_XPU_AND_TRITON and not PLATFORM_SUPPORTS_BF16,
         "uses bfloat16 which requires SM >= 80 or XPU",
     )
     def test_bfloat16_scalar(self):

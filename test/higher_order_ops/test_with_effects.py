@@ -27,7 +27,7 @@ from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.node import has_side_effect
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
@@ -1010,7 +1010,7 @@ class TestWithEffectsDevice(TestCase):
 
     @onlyAccelerator
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @skipCUDAIf(not SM80OrLater, "triton")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN, "triton")
     @skipIfNoDynamoSupport
     def test_register_effectful_custom_op(self, device):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -1267,7 +1267,7 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
 
     @onlyAccelerator
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @skipCUDAIf(not SM80OrLater, "triton")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_INDUCTOR_GPU_CODEGEN, "triton")
     def test_effectful_op_with_flex_attention(self, device):
         """Test that effectful custom ops work with flex_attention."""
         from torch._library.effects import EffectType

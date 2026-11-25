@@ -57,7 +57,7 @@ from torch._inductor.utils import (
     snode_args_kwargs,
 )
 from torch._inductor.virtualized import V
-from torch.testing._internal.common_cuda import SM70OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_TRITON
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -2698,7 +2698,7 @@ class TestScheduler(TestCase):
         self.assertFalse(cleaned.skip_cudagraph)
 
     @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_TRITON, "GPU capability is < SM70")
     @xfailIfNoAcceleratorTriton
     def test_disable_get_estimated_runtime_logging(self, device, dtype):
         if device == "cpu":
@@ -2720,7 +2720,7 @@ class TestScheduler(TestCase):
 
     @xfailIfNoAcceleratorTriton
     @dtypes(torch.float, torch.float16)
-    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_TRITON, "GPU capability is < SM70")
     @parametrize(
         "options",
         [

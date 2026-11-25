@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     munge_exc,
     skipIfTorchDynamo,
     skipIfWindows,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
@@ -226,13 +227,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 200, in outmost_fn
+    -   File [file_path], line 201, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 203, in outer_fn
+    -   File [file_path], line 204, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 206, in fn
+    -   File [file_path], line 207, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 209, in inner
+    -   File [file_path], line 210, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -1405,7 +1406,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 
     @make_logging_test(autotuning=True)
     @requires_gpu
-    @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
+    # ROCm ran this test before SM90OrLater became NVIDIA-only; keep it running.
+    @unittest.skipIf(not SM90OrLater and not TEST_WITH_ROCM, "requires H100+ GPU")
     def test_autotuning(self, records):
         with torch._inductor.utils.fresh_cache():
 

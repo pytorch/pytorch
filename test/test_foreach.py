@@ -13,7 +13,10 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    PLATFORM_SUPPORTS_GROUPED_GEMM,
+)
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -2546,9 +2549,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         ):
             self.assertEqual(impl._foreach_mm_route(A, B), expected)
 
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GROUPED_GEMM, "requires CUDA SM90+")
     @parametrize(
         "label,a_shape,b_shape,a_dtype,b_dtype",
         [
@@ -2569,9 +2570,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
         B = [torch.randn(*b_shape, dtype=b_dtype, device="cuda") for _ in range(2)]
         self.assertFalse(_foreach_mm_cond(A, B))
 
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GROUPED_GEMM, "requires CUDA SM90+")
     @parametrize(
         "label,shapes",
         [
@@ -2603,9 +2602,7 @@ class TestForeachMMCUDA(_TestForeachMMHelper, TestCase):
             self.assertEqual(o, r)
 
     @skipIfNoNvmath
-    @unittest.skipUnless(
-        torch.cuda.is_available() and SM90OrLater, "requires CUDA SM90+"
-    )
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GROUPED_GEMM, "requires CUDA SM90+")
     @parametrize(
         "label,shapes",
         [

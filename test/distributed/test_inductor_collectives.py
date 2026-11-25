@@ -59,7 +59,7 @@ from torch.distributed.distributed_c10d import GroupMember
 from torch.distributed.tensor.placement_types import Shard
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     DynamoDistributedMultiProcTestCase,
@@ -2620,7 +2620,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             self.assertEqual(stats.moves, 0)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16")
     @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_all_gather_bucket(self, bucket_mode):
         def func(x, w, ag_0, ag_1, ag_2, ag_3, *, tag, ranks, group_size):
@@ -2741,7 +2741,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16")
     def test_all_gather_bucket_path(self):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
             # do some unrelated matmuls
@@ -2794,7 +2794,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         FileCheck().check_count("wait_tensor.default(", 2, exactly=True).run(code)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16")
     @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reduce_scatter_bucket(self, bucket_mode):
         def func(x, w, rs_0, rs_1, tag, ranks, group_size):
@@ -2905,7 +2905,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16")
     @parametrize(
         "bucket_mode", ["all"]
     )  # "all" is just a placeholder, there is only one bucketmode
@@ -2963,7 +2963,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16")
     @parametrize("bucket_mode", ["custom_ops_multidtype"])
     def test_all_gather_bucket_multidtype(self, bucket_mode):
         def func(x, w, ag_0, ag_1, *, tag, ranks, group_size):
@@ -3028,7 +3028,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             raise AssertionError(f"Expected out to match correct: {out} vs {correct}")
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16")
     @parametrize("bucket_mode", ["default", "custom_ops"])
     def test_reorder_peak_memory_bucketed(self, bucket_mode):
         """
@@ -4181,7 +4181,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_BF16 or TEST_XPU, "bfloat16")
     def test_schedule_overlap_benchmark(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.cuda.set_device(self.rank)

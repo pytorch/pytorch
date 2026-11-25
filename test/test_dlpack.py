@@ -2,10 +2,7 @@
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import (
-    SM80OrLater,
-    xfailCUDAIfSM89OrLaterOnWindows,
-)
+from torch.testing._internal.common_cuda import xfailCUDAIfSM89OrLaterOnWindows
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
     dtypes,
@@ -14,7 +11,6 @@ from torch.testing._internal.common_device_type import (
     onlyAccelerator,
     onlyCUDA,
     onlyNativeDeviceTypes,
-    skipCUDAIf,
     skipCUDAIfNotRocm,
     skipMeta,
     skipMPS,
@@ -988,7 +984,6 @@ class TestTorchDlPackDevice(TestCase):
         self.assertNotEqual(t0.device, t1.device)
 
     @onlyAccelerator
-    @skipCUDAIf(not SM80OrLater, "SM80+ required")
     @skipIfTorchDynamo(
         "ReadOnlyTensorWrapper is eager-only; __dlpack__ unsupported in dynamo"
     )

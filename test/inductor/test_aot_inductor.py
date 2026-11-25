@@ -68,13 +68,13 @@ from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
     CDNA2OrLater,
+    PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     RDNA3OrLater,
     requires_triton_ptxas_compat,
-    SM80OrLater,
     SM90OrLater,
     tf32_on_and_off,
 )
@@ -1919,7 +1919,11 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_conv_freezing(self):
-        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        dtypes = (
+            [torch.bfloat16, torch.float]
+            if PLATFORM_SUPPORTS_BF16 and not TEST_XPU
+            else [torch.float]
+        )
         for dtype, groups in itertools.product(dtypes, [1, 2]):
             iC = 2
             oC = 3
@@ -1975,7 +1979,11 @@ class AOTInductorTestsTemplate:
         "Not yet runnable in fbcode when the model.so is newly generated while older PyTorch is used",
     )
     def test_linear_freezing(self):
-        dtypes = [torch.bfloat16, torch.float] if SM80OrLater else [torch.float]
+        dtypes = (
+            [torch.bfloat16, torch.float]
+            if PLATFORM_SUPPORTS_BF16 and not TEST_XPU
+            else [torch.float]
+        )
         for dtype in dtypes:
 
             class LinearModel(torch.nn.Module):
@@ -2736,7 +2744,7 @@ class AOTInductorTestsTemplate:
 
     # scaled_dot_product_flash_attention
     @unittest.skipIf(
-        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        not PLATFORM_SUPPORTS_BF16 and not HAS_XPU_AND_TRITON,
         "bfloat16 only supported in sm80+ or XPU",
     )
     def test_sdpa(self):
@@ -2755,7 +2763,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(
-        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        not PLATFORM_SUPPORTS_BF16 and not HAS_XPU_AND_TRITON,
         "bfloat16 only supported in sm80+ or XPU",
     )
     @unittest.skipIf(
@@ -7345,7 +7353,7 @@ class AOTInductorTestsTemplate:
 
         if not TEST_MPS:
             dtypes.append(torch.float64)
-        if SM80OrLater:
+        if PLATFORM_SUPPORTS_BF16 and not TEST_XPU:
             dtypes.append(torch.bfloat16)
 
         for dtype in dtypes:
@@ -7368,7 +7376,7 @@ class AOTInductorTestsTemplate:
         }
         if not TEST_MPS:
             dynamic_shapes["x_torch.float64"] = {0: dim0}
-        if SM80OrLater:
+        if PLATFORM_SUPPORTS_BF16 and not TEST_XPU:
             dynamic_shapes["x_torch.bfloat16"] = {1: dim1}
 
         m = Model()
@@ -7381,7 +7389,7 @@ class AOTInductorTestsTemplate:
 
         # Expected results for the following checks:
         # ("unmatched dtype", "unmatched dim value at", "dim value is too", "unmatched stride value at")
-        if SM80OrLater:
+        if PLATFORM_SUPPORTS_BF16 and not TEST_XPU:
             # 10 dynamic dims
             expected_results = (10, 21, 18, 21)
         elif TEST_MPS:
@@ -11706,7 +11714,7 @@ class AOTInductorTestsTemplate:
             (InBoundsAsStrided(), (x,)),
             # Different attention backends.
             (Attention(), (q,)),
-            *([(Attention(), (q.bfloat16(),))] if SM80OrLater else []),
+            *([(Attention(), (q.bfloat16(),))] if PLATFORM_SUPPORTS_BF16 else []),
         ):
             with self.subTest(type(model).__name__):
                 options = {"aot_inductor.cudagraphs": True}
@@ -13843,7 +13851,10 @@ class TestCppWrapperFallbackProfiling(TestCase):
                 else:
                     FileCheck().check_not("RAIIAtenRecordFunctionHandle").run(code)
 
-    @unittest.skipIf(not SM90OrLater, "CUTLASS mm templates require SM90+")
+    # ROCm passed this gate before SM90OrLater became NVIDIA-only; keep that.
+    @unittest.skipIf(
+        not SM90OrLater and not TEST_WITH_ROCM, "CUTLASS mm templates require SM90+"
+    )
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(
         sys.platform not in ["linux", "win32"],
@@ -13858,7 +13869,7 @@ class TestCppWrapperFallbackProfiling(TestCase):
         """
         # Dense mm only uses CUTLASS 3.x kernels, which need SM90+; on SM80 the
         # CUTLASS backend has no choices and autotuning raises NoValidChoicesError.
-        if not SM90OrLater:
+        if not SM90OrLater and not TEST_WITH_ROCM:
             raise unittest.SkipTest("CUTLASS mm templates require SM90+")
         from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 

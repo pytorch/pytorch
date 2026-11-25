@@ -47,7 +47,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, RDNA3OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, RDNA3OrLater, IS_SM90, PLATFORM_SUPPORTS_BF16, SM90OrLater, tf32_enabled, tf32_on_and_off, \
     _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION, \
     PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
@@ -6856,14 +6856,14 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @parametrize("n", [48, 64])
     @decorateIf(
         unittest.skip('requires SM80 or later'),
-        lambda p: torch.device(p['device']).type == 'cuda' and (not SM80OrLater),
+        lambda p: torch.device(p['device']).type == 'cuda' and (not PLATFORM_SUPPORTS_BF16),
     )
     @decorateIf(
         unittest.skip('_convert_weight_to_int4pack_cuda is supported only for CDNA2 or later, or RDNA3 or later'),
         lambda p: TEST_WITH_ROCM and torch.device(p['device']).type == 'cuda' and (not (CDNA2OrLater() or RDNA3OrLater())),
     )
     def test__int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type == 'cuda' and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and not (CDNA2OrLater() or RDNA3OrLater()):
@@ -6933,14 +6933,14 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @parametrize("n", [48, 64])
     @decorateIf(
         unittest.skip('requires SM80 or later'),
-        lambda p: torch.device(p['device']).type == 'cuda' and (not SM80OrLater),
+        lambda p: torch.device(p['device']).type == 'cuda' and (not PLATFORM_SUPPORTS_BF16),
     )
     @decorateIf(
         unittest.skip('_convert_weight_to_int4pack_cuda supported only for CDNA2 or later, or RDNA3 or later'),
         lambda p: TEST_WITH_ROCM and torch.device(p['device']).type == 'cuda' and (not (CDNA2OrLater() or RDNA3OrLater())),
     )
     def test_compile_int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type == 'cuda' and not PLATFORM_SUPPORTS_BF16:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and not (CDNA2OrLater() or RDNA3OrLater()):
@@ -12927,7 +12927,7 @@ class TestGroupedMM(TestCase):
                 self.assertEqual(b.grad[b_idx], b_ref.grad, **grad_tol)
             start = end
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
@@ -13028,7 +13028,7 @@ class TestGroupedMM(TestCase):
             configs.add(f"{a_layout}{b_layout} {m}x{n}x{k} {int(waves_m) * int(waves_n)}w {wm}x{wn}x{wk} {pads}{c1}")
         self.assertEqual(configs, _GROUPED_MM_CK_TILE_CONFIGS[key])
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @parametrize("a_shape,b_shape,offsets,a_row_major,b_row_major", [
         subtest(((25, 8192), (1, 1024, 8192), [25], True, False), name="rows_bn128"),
         subtest(((2, 49, 8192), (1024, 8192), [257, 1024], False, True), name="cols_bn256"),
@@ -13044,7 +13044,7 @@ class TestGroupedMM(TestCase):
         self.grouped_mm_helper(a, b, offs)
 
     @onlyOn(["cuda", "mps", "xpu"])
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @dtypes(torch.bfloat16)
     def test_grouped_mm_large_stride_fallback(self, device, dtype):
         # Forces MPS's oversized-stride guard and jagged-column transposed fallback.
@@ -13054,7 +13054,7 @@ class TestGroupedMM(TestCase):
         offs = torch.tensor([17], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     def test_grouped_mm_mismatched_dtypes(self, device):
         a = torch.ones(8, 16, device=device, dtype=torch.float16)
         b = torch.ones(4, 16, 16, device=device, dtype=torch.bfloat16)
@@ -13062,7 +13062,7 @@ class TestGroupedMM(TestCase):
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             F.grouped_mm(a, b, offs=offs)
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @parametrize("a_shape,b_shape,offsets", [
         subtest(((16, 256), (32, 256), [0, 128, 128, 256]), name="2d_2d_zero_size"),
         subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64]), name="2d_3d"),
@@ -13106,7 +13106,7 @@ class TestGroupedMM(TestCase):
         with mode, self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
             out_op(*fake_args, out=fake_wrong_out)
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     def test_grouped_mm_out_unaligned_width(self, device):
         a = self._make_grouped_mm_matrix((2, 8, 32), True, device, torch.float32)
         b = self._make_grouped_mm_matrix((2, 17, 32), True, device, torch.float32).transpose(-2, -1)
@@ -13154,7 +13154,7 @@ class TestGroupedMM(TestCase):
 
         self.assertEqual(torch.func.functionalize(resized)(a, b).stride(), resized(a, b).stride())
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @parametrize("rows,cols", [(0, 16), (8, 0)])
     def test_grouped_mm_empty_result_strides(self, device, rows, cols):
         a = self._make_grouped_mm_matrix((2, rows, 32), True, device, torch.float32)
@@ -13166,7 +13166,7 @@ class TestGroupedMM(TestCase):
 
     @onlyCUDA
     @skipIfRocm(msg="ROCm builds do not pad the functional result")
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_out_writes_in_place(self, device, dtype):
         # With default settings, fp16 runs the fused cuBLASLt kernel where it is built and supported, bf16 runs the
@@ -13206,7 +13206,7 @@ class TestGroupedMM(TestCase):
             else:
                 self.assertEqual(full_copies, [])
 
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     def test_grouped_mm_out_internal_overlap(self, device):
         a = self._make_grouped_mm_matrix((8, 32), True, device, torch.float32)
         b = self._make_grouped_mm_matrix((8, 32), True, device, torch.float32).transpose(-2, -1)
@@ -13220,7 +13220,7 @@ class TestGroupedMM(TestCase):
         check_out_variant(torch.ops.aten._grouped_mm.default, torch.ops.aten._grouped_mm.out)
 
     @onlyOn(["cuda", "mps", "xpu"])
-    @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
+    @skipCUDAIf(not PLATFORM_SUPPORTS_BF16, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
     @largeTensorTest("6GB")
     @largeMPSBufferTest((2**31 + 64) * torch.bfloat16.itemsize)
