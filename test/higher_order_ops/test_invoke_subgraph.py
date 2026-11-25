@@ -12,7 +12,7 @@ import warnings
 from collections import defaultdict, deque, OrderedDict
 from dataclasses import dataclass
 from itertools import product
-from types import SimpleNamespace as Holder
+from types import FunctionType, SimpleNamespace as Holder
 
 import invoke_subgraph_test_module as _lexical
 import sympy
@@ -3806,20 +3806,20 @@ class TestInvokeSubgraphReuse(TestCase):
             value = h.op(x) * h.scale + h.data.shape[0] + next(iter(h.mapping))
             return h.module(value)
 
-        @_map_nested_region
-        def pair(x, hs):
-            return inner(x, hs[0]) + inner(x, hs[1])
+        pair = _map_nested_region(lambda x, hs: tuple(inner(x, h) for h in hs))
 
         base = Holder(op=torch.sin, scale=2, data=torch.ones(2), mapping={1: 0, 2: 0})
         base.module = torch.nn.Identity()
         base.module.register_forward_hook(lambda m, a, v: v + 1)
         base.module.register_forward_hook(lambda m, a, v: v * 2)
         pairs = [[copy.deepcopy(base) for _ in range(2)] for _ in range(2)]
-        h = pairs[1][child]
+        if field == "cond":
+            pairs[0][1].scale = 4  # trace scales 2 and 4, then reuse 2
         run = self._reuse_runner(pair, torch.ones(1), dynamic=False)
-        run(pairs, traces=2, frames=1)
-        target = "scale" if field == "cond" else field
+        run(pairs, traces=4 if field == "cond" else 2, frames=1)
+        h = pairs[1][child]
         updates = {"scale": 3, "op": torch.cos, "data": torch.ones(3)}
+        target = "scale" if field == "cond" else field
         if target in updates:
             setattr(h, target, updates[target])
         else:
@@ -4133,7 +4133,7 @@ class TestInvokeSubgraphReuse(TestCase):
     @parametrize(
         "make",
         [IdentityItem, object, list, dict, set, tuple, range, slice]
-        + [OrderedDict, defaultdict, deque, frozenset, torch.Size],
+        + [OrderedDict, defaultdict, deque, frozenset, torch.Size, FunctionType],
         name_fn=lambda make: make.__name__,
     )
     @parametrize("preload", [False, True])
@@ -4150,6 +4150,7 @@ class TestInvokeSubgraphReuse(TestCase):
             fn = lambda x, hs: (preload and _lexical.tensor.a.value, region(x, hs))
 
         args = {tuple: ([1],), torch.Size: ([1],), range: (2,), slice: (2,)}
+        args[FunctionType] = ((lambda: None).__code__, globals())
         a, b, c, d = (make(*args.get(make, ())) for _ in range(4))
         hs = [Holder(a=a, b=b), Holder(a=c, b=c), Holder(a=d, b=d)]
         self.enterContext(mock.patch.object(_lexical, "tensor", hs[0]))
