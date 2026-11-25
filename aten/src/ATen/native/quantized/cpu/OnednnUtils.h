@@ -124,8 +124,8 @@ enum PostOps {
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   PackedLinearWeightsOnednn(
-      std::unique_ptr<ideep::tensor> weight,
-      std::optional<ideep::tensor> bias,
+      std::unique_ptr<at::native::mkldnn::MkldnnMemory> weight,
+      std::optional<at::native::mkldnn::MkldnnMemory> bias,
       at::Tensor orig_weight,
       std::optional<at::Tensor> orig_bias)
       : weight_(std::move(weight)),
@@ -134,8 +134,8 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
         orig_bias_(std::move(orig_bias)) {
     cache_initialized_flag = std::make_unique<c10::once_flag>();
   }
-  std::unique_ptr<ideep::tensor> weight_;
-  std::optional<ideep::tensor> bias_;
+  std::unique_ptr<at::native::mkldnn::MkldnnMemory> weight_;
+  std::optional<at::native::mkldnn::MkldnnMemory> bias_;
   at::Tensor orig_weight_;
   std::optional<at::Tensor> orig_bias_;
 
@@ -194,8 +194,8 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
 template <int kSpatialDim = 2>
 struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightsOnednn(
-      std::unique_ptr<ideep::tensor> weight,
-      std::optional<ideep::tensor> bias,
+      std::unique_ptr<at::native::mkldnn::MkldnnMemory> weight,
+      std::optional<at::native::mkldnn::MkldnnMemory> bias,
       at::Tensor orig_weight,
       std::optional<at::Tensor> orig_bias,
       torch::List<int64_t> stride,
@@ -217,8 +217,8 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
     cache_initialized_flag = std::make_unique<c10::once_flag>();
   }
 
-  std::unique_ptr<ideep::tensor> weight_;
-  std::optional<ideep::tensor> bias_;
+  std::unique_ptr<at::native::mkldnn::MkldnnMemory> weight_;
+  std::optional<at::native::mkldnn::MkldnnMemory> bias_;
   at::Tensor orig_weight_;
   std::optional<at::Tensor> orig_bias_;
   torch::List<int64_t> stride_;
@@ -320,11 +320,10 @@ inline at::native::mkldnn::Attr create_attr_by_post_op(
     double binary_alpha,
     double input1_scale,
     int64_t input1_zero_point,
-    const ideep::tensor::desc& input1_desc,
+    const at::native::mkldnn::MkldnnMemory::desc& input1_desc,
     const std::string_view& unary_post_op,
     const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
     const std::string_view& unary_post_op_algorithm) {
-  using ideep::tensor;
   if (binary_post_op == "none") {
     if (unary_post_op == "relu") {
       return at::native::mkldnn::Attr::fuse_relu();
@@ -500,17 +499,17 @@ struct QlinearForwardParams {
   std::vector<int64_t> output_size;
   dnnl::matmul primitive;
   std::unordered_map<int, dnnl::memory> args;
-  ideep::tensor src;
-  ideep::tensor dst;
-  std::optional<ideep::tensor> src1;
-  ideep::tensor packed_weight;
-  ideep::tensor weight_scales;
-  std::optional<ideep::tensor> src_scale;
-  std::optional<ideep::tensor> src_zero_point;
-  std::optional<ideep::tensor> dst_scale;
-  std::optional<ideep::tensor> dst_zero_point;
-  std::optional<ideep::tensor> bias;
-  ideep::tensor scratchpad;
+  at::native::mkldnn::MkldnnMemory src;
+  at::native::mkldnn::MkldnnMemory dst;
+  std::optional<at::native::mkldnn::MkldnnMemory> src1;
+  at::native::mkldnn::MkldnnMemory packed_weight;
+  at::native::mkldnn::MkldnnMemory weight_scales;
+  std::optional<at::native::mkldnn::MkldnnMemory> src_scale;
+  std::optional<at::native::mkldnn::MkldnnMemory> src_zero_point;
+  std::optional<at::native::mkldnn::MkldnnMemory> dst_scale;
+  std::optional<at::native::mkldnn::MkldnnMemory> dst_zero_point;
+  std::optional<at::native::mkldnn::MkldnnMemory> bias;
+  at::native::mkldnn::MkldnnMemory scratchpad;
 
   void init_args() {
     args.insert({DNNL_ARG_SRC, src});
