@@ -67,6 +67,7 @@ from .descriptors import (
     AOTOutput,
     DummyAOTInput,
     MetadataMutationAOTOutput,
+    PlainAOTInput,
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
@@ -1974,6 +1975,45 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 self.base_groups[base_idx].append(orig_idx)
         other_arg_entries.sort()
         self.other_arg_indices = [orig_idx for _, orig_idx in other_arg_entries]
+
+        # When aliased inputs are merged into a synthetic base, gen_alias_from_base
+        # bakes concrete int storage offsets into as_strided / as_strided_scatter.
+        # Dynamo's TENSOR_MATCH guard does not check storage_offset, so guard it
+        # explicitly to avoid reusing a cached graph across different overlap geometries.
+        if (
+            TracingContext.try_get() is not None
+            and aot_config.aot_autograd_arg_pos_to_source
+        ):
+            from torch._dynamo.guards import GuardBuilder, install_guard
+            from torch._dynamo.source import (
+                is_constant_source,
+                TensorProperty,
+                TensorPropertySource,
+            )
+
+            sources = aot_config.aot_autograd_arg_pos_to_source
+            for group in self.base_groups.values():
+                for orig_idx in group:
+                    view_tensor = flat_args[orig_idx]
+                    if isinstance(view_tensor, torch.Tensor) and isinstance(
+                        view_tensor.storage_offset(), int
+                    ):
+                        desc = flat_args_descs[orig_idx]
+                        source_idx = (
+                            desc.idx if isinstance(desc, PlainAOTInput) else orig_idx
+                        )
+                        if source_idx < len(sources):
+                            source = sources[source_idx]
+                            if (
+                                source is not None
+                                and source.subguards_allowed()
+                                and not is_constant_source(source)
+                            ):
+                                install_guard(
+                                    TensorPropertySource(
+                                        source, TensorProperty.STORAGE_OFFSET
+                                    ).make_guard(GuardBuilder.EQUALS_MATCH)
+                                )
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations

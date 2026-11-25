@@ -1668,6 +1668,45 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self._test_no_storage_overlap_guards(f, non_overlapping_args)
 
+    def test_synthetic_base_storage_offset_guard(self):
+        def f(x, y, c):
+            x.add_(1)
+            return y + c
+
+        cases = [
+            ("full_to_partial", slice(0, 4), slice(0, 4), slice(0, 4), slice(2, 6)),
+            ("partial_to_full", slice(0, 4), slice(2, 6), slice(0, 4), slice(0, 4)),
+            ("shifted_both", slice(1, 5), slice(3, 7), slice(2, 6), slice(4, 8)),
+        ]
+        for dynamic in (False, True):
+            for name, s1x, s1c, s2x, s2c in cases:
+                with self.subTest(dynamic=dynamic, case=name):
+                    torch._dynamo.reset()
+                    cnt = CompileCounterWithBackend("aot_eager")
+                    opt_f = torch.compile(f, backend=cnt, fullgraph=True, dynamic=dynamic)
+
+                    b1 = torch.arange(10.0)
+                    b1_ref = b1.clone()
+                    out1 = opt_f(b1[s1x], torch.zeros(4), b1[s1c])
+                    ref1 = f(b1_ref[s1x], torch.zeros(4), b1_ref[s1c])
+                    self.assertEqual(out1, ref1)
+                    self.assertEqual(cnt.frame_count, 1)
+
+                    # Same overlap geometry should hit the compiled cache.
+                    b1_again = torch.arange(10.0)
+                    b1_again_ref = b1_again.clone()
+                    out1_again = opt_f(b1_again[s1x], torch.zeros(4), b1_again[s1c])
+                    ref1_again = f(b1_again_ref[s1x], torch.zeros(4), b1_again_ref[s1c])
+                    self.assertEqual(out1_again, ref1_again)
+                    self.assertEqual(cnt.frame_count, 1)
+
+                    # Different overlap geometry must match eager results.
+                    b2 = torch.arange(10.0)
+                    b2_ref = b2.clone()
+                    out2 = opt_f(b2[s2x], torch.zeros(4), b2[s2c])
+                    ref2 = f(b2_ref[s2x], torch.zeros(4), b2_ref[s2c])
+                    self.assertEqual(out2, ref2)
+
     def test_inputs_overlapping_with_mutation_stress(self):
         # Stress test for StorageOverlap guard.
         #
