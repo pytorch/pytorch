@@ -1264,6 +1264,182 @@ class TestVmRustPasses(TestCase):
                 vm.load_passes(library)
 
 
+def reasons_prints(x):
+    y = x.sin() + 1
+    print(end="")
+    return (y.tanh().cos() * 2).exp()
+
+
+def reasons_small(x):
+    return x.sin().cos()
+
+
+def reasons_branches(x):
+    y = x.sin() + 1
+    if (y > 0).any():
+        y = y * 2
+    return y.tanh().cos().exp()
+
+
+def reasons_leaves(x, n, stop):
+    for i in range(n):
+        x = (x.sin() * 2 + 1).tanh().cos()
+        if i == stop:
+            x = x - 1
+            break
+    return x.exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmRegionReasons(TestCase):
+    """vm.regions: where the tensor work runs as a region and, as data, why
+    the rest does not."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def rows(self, fn, *args, calls=8, passes=EARLY, before=None):
+        g = vm(fn, passes=passes)
+        for call in range(calls):
+            if before is not None:
+                args = before(call) or args
+            g(*args)
+        rows = vm.regions(g)
+        for row in rows:
+            self.assertIn(
+                row["state"],
+                ("region", "too small", "refused", "gave up", "not movable"),
+            )
+            self.assertEqual(row["why"] is None, row["state"] == "region", msg=str(row))
+        return rows
+
+    @isolated
+    def test_region_and_the_calls_it_turned_down(self):
+        def before(call):
+            global READS_FACTOR
+            READS_FACTOR = 5 if call >= 5 else 2
+
+        fn = reads_through(lambda y: y * READS_FACTOR)
+        (row,) = (
+            r
+            for r in self.rows(fn, torch.randn(4, 8), before=before)
+            if r["state"] == "region"
+        )
+        self.assertEqual(
+            (row["kind"], row["function"]), ("block", "reads_through.<locals>.outer")
+        )
+        self.assertEqual(row["lines"], (fn.__code__.co_firstlineno + 1,) * 2)
+        self.assertEqual(
+            (row["ops"], row["inputs"], row["constants"], row["variants"]), (6, 1, 0, 2)
+        )
+        # Call 4 runs the first region; 5 finds the global changed (a miss)
+        # and is traced again; 6 and 7 run the second, which is tried first.
+        self.assertEqual(row["runs"], 3)
+        self.assertEqual(row["misses"], {"read: a namespace or a container": 1})
+        self.assertEqual(row["traces"], [("region", None)] * 2)
+        self.assertGreater(row["reads"], 0)
+
+    @isolated
+    def test_block_with_too_few_operations(self):
+        (row,) = self.rows(reasons_small, torch.randn(4, 8))
+        self.assertEqual(
+            (row["state"], row["ops"], row["why"]),
+            ("too small", 2, "2 ops, fewer than 4"),
+        )
+        self.assertEqual(row["function"], "reasons_small")
+
+    @isolated
+    def test_trace_that_reads_what_no_check_covers(self):
+        weight = torch.randn(8, requires_grad=True)
+        weight.grad = torch.randn(8)
+        rows = self.rows(reads_through(lambda y: y * weight.grad), torch.randn(4, 8))
+        (row,) = (r for r in rows if r["state"] == "refused")
+        self.assertIn("it reads a tensor's .grad", row["why"])
+        self.assertEqual(row["kind"], "block")
+
+    @isolated
+    def test_call_that_is_not_movable(self):
+        rows = self.rows(reasons_prints, torch.randn(4, 8))
+        (row,) = (r for r in rows if r["state"] == "not movable")
+        self.assertEqual((row["kind"], row["function"]), ("call", "reasons_prints"))
+        self.assertIn("called <built-in function print>", row["why"])
+        line = reasons_prints.__code__.co_firstlineno + 2
+        self.assertEqual(
+            (row["lines"], row["where"]), ((line, line), f"reasons_prints line {line}")
+        )
+
+    @isolated
+    def test_cfg_pass_is_told_why_a_call_is_opaque(self):
+        said = {}
+
+        def look(cfg: vm.Cfg) -> None:
+            for call in cfg.opaque_calls():
+                said[(cfg.qualname, call.line)] = cfg.why_opaque(call)
+            for call in cfg.calls():
+                if call.movable:
+                    self.assertIsNone(cfg.why_opaque(call))
+
+        g = vm(reasons_prints, passes=(*EARLY, look))
+        for _ in range(8):
+            g(torch.randn(4, 8))
+        line = reasons_prints.__code__.co_firstlineno + 2
+        self.assertIn(
+            "called <built-in function print>", said[("reasons_prints", line)]
+        )
+        # vm.explain lists what is in no region after the regions.
+        text = vm.explain(g)
+        self.assertIn("\nnot in a region:\n", text)
+        self.assertIn(f"  reasons_prints line {line}: not movable: ", text)
+
+    @isolated
+    def test_branch_on_tensor_data(self):
+        rows = self.rows(reasons_branches, torch.randn(4, 8))
+        why = [
+            r["why"]
+            for r in rows
+            if r["state"] == "not movable" and r["function"] == "reasons_branches"
+        ]
+        self.assertTrue(any(" ran aten::" in w for w in why), msg=str(rows))
+
+    @isolated
+    def test_span_that_is_left_by_another_way(self):
+        # The traced call (the fourth) leaves the loop by a block that no
+        # earlier call ran.
+        rows = self.rows(
+            reasons_leaves,
+            torch.randn(8),
+            3,
+            -1,
+            before=lambda call: (torch.randn(8), 3, 1 if call == 3 else -1),
+        )
+        (row,) = (r for r in rows if r["kind"] == "span")
+        self.assertEqual((row["function"], row["lines"]), ("reasons_leaves", None))
+        # The loop's first round was traced into a region; the second round
+        # is the one that leaves.
+        self.assertEqual([state for state, _ in row["traces"]], ["region", "gave up"])
+        self.assertIn(
+            "the span left by another way or ran a block never seen run",
+            row["traces"][1][1],
+        )
+        self.assertEqual(row["state"], "region")
+
+    @isolated
+    def test_pass_that_raises_is_in_the_notes(self):
+        def broken(gm, input_types):
+            raise ValueError("no")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            rows = self.rows(
+                reads_through(lambda y: y * 2),
+                torch.randn(4, 8),
+                passes=(*EARLY, broken),
+            )
+        (row,) = (r for r in rows if r["state"] == "region")
+        self.assertTrue(
+            any("raised ValueError: no" in note for note in row["notes"]), msg=str(row)
+        )
+
+
 class TestVmWithoutRuntime(TestCase):
     """A build of PyTorch that skipped the torch._rust crate (another Python
     than 3.12, another system than Linux, no cargo)."""

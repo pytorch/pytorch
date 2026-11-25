@@ -1140,6 +1140,8 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
         None => plan.prep.cfg.block_ids().collect(),
     };
     PURE_DEBUG_CODE.with_borrow_mut(|q| *q = format!("{}@{}", c.qualname, c.depth));
+    PURE_DEBUG_LINES.with_borrow_mut(|l| l.clone_from(&c.lines));
+    IMPURE_NOW.with_borrow_mut(|m| m.clear());
     let (mut movable, aten, pinnable, nulls) = observed_ops(py, &plan.prep, &blocks, Some(&current.prep.clones));
     let mut cfg = (*plan.prep.cfg).clone();
     let (mut objects, mut calls) = (HashMap::new(), HashMap::new());
@@ -2152,6 +2154,7 @@ fn cfg_view<'py>(py: Python<'py>, c: &Compiled, prep: &Prepared, movable: &HashS
             i.set_item("line", c.line(ins.origin))?;
             i.set_item("origin", ins.origin)?;
             i.set_item("movable", movable.contains(v))?;
+            i.set_item("why", IMPURE_NOW.with_borrow(|m| m.get(&(prep as *const Prepared as usize, v.0)).cloned()))?;
             let mut seq: Vec<String> = vec![];
             for (visit, _) in effects.get(Site::Instr(*v)) {
                 for e in visit {
@@ -2829,8 +2832,29 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
 }
 
 thread_local! {
-    // The code being optimized, for TORCH_RUST_PURE_DEBUG.
+    // The code being optimized, for TORCH_RUST_PURE_DEBUG, and its lines.
     static PURE_DEBUG_CODE: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static PURE_DEBUG_LINES: std::cell::RefCell<Vec<(u32, u32, i32)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+thread_local! {
+    // Why the sites judged in the optimizing run in progress aren't pure,
+    // by (Prepared, instr): what the view of a cfg pass says (see cfg_view).
+    static IMPURE_NOW: std::cell::RefCell<HashMap<(usize, u32), String>> = std::cell::RefCell::new(HashMap::new());
+}
+
+// Why a site isn't pure (see pure_site), as (code, line, why): what
+// TORCH_RUST_PURE_DEBUG prints, kept for torch.vm.regions. Each once.
+static IMPURE: Mutex<Vec<(String, i32, String)>> = Mutex::new(Vec::new());
+const MAX_IMPURE: usize = 4096;
+
+/// Why the sites that keep the code around them out of a region aren't pure:
+/// (qualname@depth, line, why) for each call that isn't movable and each
+/// other instr with effects that isn't, as judged when their code was last
+/// optimized.
+#[pyfunction]
+pub fn _cfg_impure() -> Vec<(String, i32, String)> {
+    IMPURE.lock().unwrap().clone()
 }
 
 // Whether the frames of `code` were only seen computing, judged from its own
@@ -2901,8 +2925,20 @@ fn pure_site(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Value
     match pure_instr(py, prep, v, clones, 0, &Own::default(), memo) {
         Ok(()) => true,
         Err(why) => {
-            if std::env::var_os("TORCH_RUST_PURE_DEBUG").is_some() && !effects_empty(prep, v) {
+            let effects = !effects_empty(prep, v);
+            if std::env::var_os("TORCH_RUST_PURE_DEBUG").is_some() && effects {
                 PURE_DEBUG_CODE.with_borrow(|q| eprintln!("impure: {q}: {why}"));
+            }
+            let ins = &prep.cfg[v];
+            let call = matches!(ins.op, Op::Call { .. } | Op::Bytecode { opcode: opcodes::CALL_FUNCTION_EX, .. });
+            IMPURE_NOW.with_borrow_mut(|m| m.insert((prep as *const Prepared as usize, v.0), why.clone()));
+            if effects || call {
+                let code = PURE_DEBUG_CODE.with_borrow(|q| q.clone());
+                let line = PURE_DEBUG_LINES.with_borrow(|l| l.iter().find(|(s, e, _)| *s <= ins.origin && ins.origin < *e).map_or(0, |x| x.2));
+                let mut seen = IMPURE.lock().unwrap();
+                if seen.len() < MAX_IMPURE && !seen.iter().any(|(c, l, w)| *c == code && *l == line && *w == why) {
+                    seen.push((code, line, why));
+                }
             }
             false
         }
