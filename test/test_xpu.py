@@ -2552,6 +2552,40 @@ if __name__ == "__main__":
                 f"capture with a side-stream free must complete without error, got {e!r}"
             ) from e
 
+    @serialTest()
+    def test_graph_allocator_explicit_stream_preserves_deferred_free(self):
+        torch.xpu.empty_cache()
+        capture_stream = torch.xpu.Stream()
+        auxiliary_stream = torch.xpu.Stream()
+        allocation_stream = torch.xpu.Stream()
+        g = torch.xpu.XPUGraph()
+
+        # Warm the unrelated stream's cache to avoid a device allocation during capture.
+        raw_ptr = torch.xpu.caching_allocator_alloc(256, stream=allocation_stream)
+        torch.xpu.caching_allocator_delete(raw_ptr)
+
+        with torch.xpu.stream(capture_stream):
+            g.capture_begin()
+            temporary = torch.ones(64, device="xpu")
+            temporary_ptr = temporary.data_ptr()
+            auxiliary_stream.wait_stream(capture_stream)
+            with torch.xpu.stream(auxiliary_stream):
+                output = temporary + 1
+            temporary.record_stream(auxiliary_stream)
+            del temporary
+
+            # This request must not drain frees from the ongoing capture.
+            raw_ptr = torch.xpu.caching_allocator_alloc(256, stream=allocation_stream)
+            self.addCleanup(torch.xpu.caching_allocator_delete, raw_ptr)
+            replacement = torch.full((64,), 3, device="xpu")
+            capture_stream.wait_stream(auxiliary_stream)
+            g.capture_end()
+
+        self.assertNotEqual(temporary_ptr, replacement.data_ptr())
+        g.replay()
+        torch.xpu.synchronize()
+        self.assertEqual(output, torch.full_like(output, 2))
+
     def test_graph_memory_stats_and_use_result_after_destroy_graph(self):
         kSmallSize = 1048576
         kSmallBuffer = 2097152

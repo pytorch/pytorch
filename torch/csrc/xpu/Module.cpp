@@ -601,6 +601,20 @@ static void bindGetDeviceProperties(PyObject* module) {
 
 static void initXpuMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  m.def(
+      "_xpu_xpuCachingAllocator_raw_alloc",
+      [](size_t size,
+         int64_t stream_id,
+         int64_t device_index,
+         int64_t device_type) {
+        auto stream = at::xpu::XPUStream::unpack3(
+            stream_id,
+            static_cast<c10::DeviceIndex>(device_index),
+            static_cast<c10::DeviceType>(device_type));
+        py::gil_scoped_release no_gil;
+        return reinterpret_cast<uintptr_t>(
+            c10::xpu::XPUCachingAllocator::raw_alloc_with_stream(size, stream));
+      });
   m.def("_xpu_xpuCachingAllocator_raw_delete", [](uintptr_t mem_ptr) {
     py::gil_scoped_release no_gil;
     // NOLINTNEXTLINE(performance-no-int-to-ptr)

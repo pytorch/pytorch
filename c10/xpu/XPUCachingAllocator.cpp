@@ -2612,7 +2612,7 @@ class NativeCachingAllocator : public XPUAllocator {
     return r;
   }
 
-  void* raw_alloc_with_stream(size_t size, XPUStream stream) {
+  void* raw_alloc_with_stream(size_t size, XPUStream stream) override {
     if (size == 0) {
       return nullptr;
     }
