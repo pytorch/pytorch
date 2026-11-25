@@ -100,6 +100,23 @@ def test_stable_torch_warn_once(value) -> None:
     torch.ops.libtorch_agn_2_16.test_stable_torch_warn_once.default(value)
 
 
+def my_index_fill_scalar_(self, dim, index, value) -> torch.Tensor:
+    """
+    Fill indexed positions in place with a scalar.
+
+    Args:
+        self: Tensor - input tensor
+        dim: int - dimension to fill
+        index: Tensor - indices to fill
+        value: float - fill value
+
+    Returns: Tensor - the modified input tensor
+    """
+    return torch.ops.libtorch_agn_2_16.my_index_fill_scalar_.default(
+        self, dim, index, value
+    )
+
+
 def __getattr__(name):
     """Proxy for inherited ops from previous versions."""
     if name.startswith("_"):

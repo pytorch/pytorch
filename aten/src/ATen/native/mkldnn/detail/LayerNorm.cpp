@@ -5,12 +5,12 @@
 namespace at::native::mkldnn {
 
 void layer_normalization_forward(
-    const ITensor& src,
-    const ITensor& scale,
-    const ITensor& shift,
-    ITensor& dst,
-    ITensor& mean,
-    ITensor& variance,
+    const MkldnnMemory& src,
+    const MkldnnMemory& scale,
+    const MkldnnMemory& shift,
+    MkldnnMemory& dst,
+    MkldnnMemory& mean,
+    MkldnnMemory& variance,
     float epsilon) {
   const auto& engine = Engine::cpu_engine();
   const auto flags = dnnl::normalization_flags::use_scale |
@@ -33,7 +33,7 @@ void layer_normalization_forward(
   mean.reinit_if_possible(pd.mean_desc());
   variance.reinit_if_possible(pd.variance_desc());
   dst.reinit_if_possible(pd.dst_desc());
-  ITensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   dnnl::layer_normalization_forward(pd).execute(
       IStream::default_stream(),

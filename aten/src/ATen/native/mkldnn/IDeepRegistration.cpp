@@ -6,7 +6,7 @@
 #include <c10/core/Allocator.h>
 #include <ATen/native/mkldnn/IDeepRegistration.h>
 #include <ATen/native/mkldnn/detail/PrimitiveCache.h>
-#include <ATen/native/mkldnn/detail/Tensor.h>
+#include <ATen/native/mkldnn/detail/Memory.h>
 
 #include <cstdlib>
 #include <cstring>

@@ -295,6 +295,7 @@ class Guard:
     # serialize_guards refuses it.
     _unserializable: type | None = None
     _force_dict_keys_match: bool = False
+    recompile_hint: str | None = dataclasses.field(default=None, compare=False)
 
     def __hash__(self) -> int:
         if self._hash is None:
