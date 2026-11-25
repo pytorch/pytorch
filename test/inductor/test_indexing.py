@@ -568,6 +568,27 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertFalse(sizevars.expand_floor_div(expr, (x,)))
 
     @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_optimization_hint_overrides_replaced_symbol(self):
+        """An override of a symbol also applies to a symbol the shape env has since
+        replaced with an expression of it."""
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        shape_env = ShapeEnv()
+        a, b = (
+            shape_env.create_symbol(
+                v, ConstantSource(n), dynamic_dim=DimDynamic.DYNAMIC
+            )
+            for n, v in (("a", 64), ("b", 65))
+        )
+        shape_env.evaluate_expr(sympy.Eq(a, b - 1))
+        ((replaced, expr),) = shape_env.replacements.items()
+        (canonical,) = expr.free_symbols
+        sizevars = SizeVarAllocator(shape_env)
+        with sizevars.optimization_hint_overrides({canonical: 1000}):
+            self.assertEqual(
+                sizevars.optimization_hint(replaced), int(expr.subs(canonical, 1000))
+            )
+
     def test_int8_unpack(self):
         @torch.compile
         def f(x):
