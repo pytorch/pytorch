@@ -359,12 +359,13 @@ def _compile_lock():
 
 @contextlib.contextmanager
 def _counting_compiles():
-    """A spy on cute.compile, with the eager compile cache emptied for the duration,
-    so that its call count is the number of compiles eager launches did."""
+    """Count user-kernel compilations with an empty eager cache."""
     from torch._native.cutedsl import user_kernel as cutedsl_user_kernel
 
     with mock.patch.dict(cutedsl_user_kernel._compiled, clear=True):
-        with mock.patch.object(cute, "compile", wraps=cute.compile) as compile_spy:
+        with mock.patch.object(
+            cutedsl_user_kernel, "_compile", wraps=cutedsl_user_kernel._compile
+        ) as compile_spy:
             yield compile_spy
 
 
