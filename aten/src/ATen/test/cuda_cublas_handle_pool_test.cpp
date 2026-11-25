@@ -28,8 +28,10 @@
 #include <array>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <exception>
 #include <future>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -1093,6 +1095,105 @@ TEST(CUDABlasHandlePoolTest, StreamDestroyWaitsForQueuedWork) {
       hipMemcpy(&ran_value, ran, sizeof(ran_value), hipMemcpyDeviceToHost),
       hipSuccess);
   EXPECT_EQ(ran_value, 1u);
+}
+
+namespace {
+
+// Run in a fresh process by LtHandleCreationWaitsForLegacyStream.
+void expectLtHandleCreationWaitsForLegacyStream() {
+  at::cuda::CUDAGuard device_guard(0);
+  // Creates this thread's handle first, so that the creation timed below does
+  // not include loading hipBLASLt.
+  (void)at::cuda::getCurrentCUDABlasLtHandle();
+  ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+  hipStream_t fresh = nullptr;
+  ASSERT_EQ(hipStreamCreateWithFlags(&fresh, hipStreamNonBlocking), hipSuccess);
+  // The legacy stream has the default priority, so an opener with the greatest
+  // one never shares its hardware queue, which the wait would block.
+  int least_priority = 0;
+  int greatest_priority = 0;
+  ASSERT_EQ(
+      hipDeviceGetStreamPriorityRange(&least_priority, &greatest_priority),
+      hipSuccess);
+  hipStream_t opener = nullptr;
+  ASSERT_EQ(
+      hipStreamCreateWithPriority(
+          &opener, hipStreamNonBlocking, greatest_priority),
+      hipSuccess);
+  void* gate = nullptr;
+  ASSERT_EQ(
+      hipExtMallocWithFlags(&gate, sizeof(uint64_t), hipMallocSignalMemory),
+      hipSuccess);
+  ASSERT_EQ(hipStreamWriteValue64(opener, gate, 0, 0), hipSuccess);
+  ASSERT_EQ(hipStreamSynchronize(opener), hipSuccess);
+  ASSERT_EQ(
+      hipStreamWaitValue64(nullptr, gate, 1, hipStreamWaitValueGte),
+      hipSuccess);
+  // Runs on every exit, so no failure leaves the legacy stream waiting.
+  auto open_gate = c10::make_scope_exit(
+      [&] { (void)hipStreamWriteValue64(opener, gate, 1, 0); });
+
+  // Shared with the creating thread, which may outlive this function if the
+  // creation never returns.
+  const auto created = std::make_shared<std::atomic<bool>>(false);
+  std::thread creator([created, fresh] {
+    c10::cuda::CUDAStreamGuard stream_guard(
+        c10::cuda::getStreamFromExternal(fresh, 0));
+    (void)at::cuda::getCurrentCUDABlasLtHandle();
+    *created = true;
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  const bool created_while_held = *created;
+  ASSERT_EQ(hipStreamWriteValue64(opener, gate, 1, 0), hipSuccess);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!*created && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  // The parent of a death test shows this process's stderr, not its failures.
+  const auto fail = [](const char* why) {
+    std::cerr << why << std::endl;
+    ADD_FAILURE() << why;
+  };
+  if (!*created) {
+    creator.detach();
+    fail("Creating the handle did not return within 10 s of the gate opening");
+    return;
+  }
+  creator.join();
+  if (created_while_held) {
+    fail("Creating the handle returned while the legacy stream was held");
+  }
+}
+
+} // namespace
+
+// hipblasLtCreate zeroes a new handle's synchronizer with a hipMemset still
+// queued on the legacy stream (see Note [hipblaslt handles]), so creating a
+// handle must not return while the legacy stream is held.
+TEST(CUDABlasHandlePoolDeathTest, LtHandleCreationWaitsForLegacyStream) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+  int can_wait = 0;
+  ASSERT_EQ(
+      hipDeviceGetAttribute(
+          &can_wait, hipDeviceAttributeCanUseStreamWaitValue, 0),
+      hipSuccess);
+  if (can_wait == 0) {
+    GTEST_SKIP() << "requires hipStreamWaitValue64";
+  }
+  // Re-exec for a fresh pool, so that the handle is created rather than taken
+  // from the spares other tests stocked.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ASSERT_EXIT(
+      {
+        expectLtHandleCreationWaitsForLegacyStream();
+        // Propagate child assertion failures to the parent.
+        std::_Exit(::testing::Test::HasFailure() ? EXIT_FAILURE : EXIT_SUCCESS);
+      },
+      ::testing::ExitedWithCode(EXIT_SUCCESS),
+      "");
 }
 
 // A thread that first needs a handle mid-capture, like an autograd worker in

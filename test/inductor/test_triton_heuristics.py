@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import functools
 import hashlib
 import json
@@ -7,6 +8,7 @@ import math
 import os
 import sys
 import tempfile
+import types
 import unittest
 from unittest import skipUnless
 from unittest.mock import MagicMock, patch, PropertyMock
@@ -52,16 +54,19 @@ from torch._inductor.runtime.hints import (
     native_matmul_block_numel,
     native_matmul_persistent_rblock,
     ReductionHint,
+    TileHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_TENSOR_NUMEL,
 )
 from torch._inductor.runtime.runtime_utils import triton_config_to_hashable
+from torch._inductor.runtime.tiling import block_to_prefix, get_max_block
 from torch._inductor.runtime.triton_helpers import math as tl_math
 from torch._inductor.runtime.triton_heuristics import (
     _check_max_grid_x,
     _enforce_native_matmul_config_min_xblock,
     _enforce_reduction_config_block_minimums,
     _find_names,
+    _get_nd_pointwise_numels,
     _num_warps,
     _persistent_reduction_configs,
     _reduction_configs,
@@ -70,13 +75,21 @@ from torch._inductor.runtime.triton_heuristics import (
     CachingAutotuner,
     CachingAutotunerPlugin,
     check_autotune_cache,
+    check_config,
+    config_to_dict,
     DEFER,
+    Grid3D,
+    GridExpr,
+    GridND,
     make_matmul_triton_config,
+    PrecomputedGrid,
     template,
     triton_config,
+    triton_config_reduction,
+    triton_config_tiled_reduction,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import fresh_cache
+from torch._inductor.utils import fresh_cache, get_code
 
 
 class _FindNamesProbe:
@@ -252,11 +265,240 @@ class TestTritonHeuristics(TestCase):
         Make sure block size does not exceed the maximum defined in inductor config.
         """
         cfg = triton_config({"x": 2048, "y": 2}, 64, 64)
-        for label in "XYZ":
-            key = f"{label}BLOCK"
-            if key not in cfg.kwargs:
-                continue
-            self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+        for key, block in cfg.kwargs.items():
+            if key.endswith("BLOCK"):
+                self.assertLessEqual(
+                    block, get_max_block(block_to_prefix(key), TRITON_MAX_BLOCK)
+                )
+
+    @parametrize("rank", [1, 3, 4])
+    @parametrize("reduction_prefix", ["r0_", "r3_"])
+    def test_pointwise_config_ignores_reduction_size_hints(
+        self, rank, reduction_prefix
+    ):
+        hints = {"x": 64}
+        if rank > 1:
+            hints["y"] = 8
+        for index in range(rank - 2):
+            hints[f"z{index}_"] = 8
+        budgets = (16, 16, 16)[: min(rank, 3)]
+        expected = triton_config(hints, *budgets)
+        actual = triton_config({**hints, reduction_prefix: 32}, *budgets)
+        self.assertEqual(
+            triton_config_to_hashable(actual), triton_config_to_hashable(expected)
+        )
+
+    @parametrize("axis", ["y", "z0_"])
+    def test_3d_config_rounded_size_hint(self, axis):
+        hints = {"x": 8, "y": 8, "z0_": 8, axis: 1 << 26}
+        cfg = triton_config(hints, 16, 16, 16)
+        expected_blocks = {"XBLOCK": 8, "YBLOCK": 8, "Z0_BLOCK": 8}
+        expected_blocks[f"{axis.upper()}BLOCK"] = 1024
+        self.assertEqual(cfg.kwargs, expected_blocks)
+
+        numels = {"x": 8, "y": 8, "z0_": 8, axis: 40_000_000}
+        grid = Grid3D(inductor_meta={})
+        grid.generate(cfg.kwargs)
+        launch = grid.eval_slow({f"{p}numel": n for p, n in numels.items()})
+        expected_grid = (1, 39063, 1) if axis == "y" else (1, 1, 39063)
+        self.assertEqual(launch, expected_grid)
+
+    @parametrize("rank", [4, 5])
+    def test_nd_pointwise_autotune_hint(self, rank):
+        hints = {"x": 64, "y": 8, **{f"z{i}_": 8 for i in range(rank - 2)}}
+        props = DeviceProperties(
+            type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=32
+        )
+        configs = autotune_hints_to_configs(
+            {AutotuneHint.ONE_ELEMENT_PER_THREAD}, hints, 256, props
+        )
+        self.assertEqual(len(configs), 3)
+        for cfg in configs:
+            self.assertEqual(set(cfg.kwargs), {f"{p.upper()}BLOCK" for p in hints})
+            check_config(cfg.kwargs, size_hints=hints)
+
+    @parametrize(
+        "hints",
+        [
+            {"x": 8, "y": 1 << 20, "z0_": 8},
+            {"x": 8, "y": 8, "z0_": 1 << 20},
+            {"x": 8, "y": 8, "z0_": 512, "z1_": 512},
+        ],
+    )
+    def test_nd_pointwise_and_reduction_grid_limits(self, hints):
+        configs = [
+            triton_config(hints, 8, 1, 1),
+            triton_config_tiled_reduction({**hints, "r0_": 32}, 8, 1, 32, z=1),
+        ]
+        for cfg in configs:
+            grid = GridND(inductor_meta={"rank": len(hints)})
+            grid.generate(cfg.kwargs)
+            launch = grid.eval_slow({f"{p}numel": n for p, n in hints.items()})
+            self.assertGreater(launch[1], 0)
+            self.assertGreater(launch[2], 0)
+            self.assertLessEqual(launch[1], 65535)
+            self.assertLessEqual(launch[2], 65535)
+
+    @parametrize(
+        "z_sizes, expected_z_blocks",
+        [
+            ((64,), {"Z0_BLOCK": 32}),
+            ((4, 8), {"Z0_BLOCK": 4, "Z1_BLOCK": 8}),
+            ((4, 2, 16), {"Z0_BLOCK": 4, "Z1_BLOCK": 2, "Z2_BLOCK": 4}),
+        ],
+    )
+    def test_tiled_reduction_z_budget(self, z_sizes, expected_z_blocks):
+        cfg = triton_config_tiled_reduction(
+            {
+                "x": 64,
+                "y": 64,
+                **{f"z{i}_": n for i, n in enumerate(z_sizes)},
+                "r0_": 32,
+            },
+            4,
+            2,
+            32,
+            z=32,
+        )
+        self.assertEqual(
+            cfg.kwargs,
+            {"XBLOCK": 4, "YBLOCK": 2, **expected_z_blocks, "R0_BLOCK": 32},
+        )
+
+    def test_persistent_tiling_score_ties_prefer_inner_axes(self):
+        configs = _persistent_reduction_configs(
+            size_hints={"y": 64, "x": 64, "r0_": 32},
+            inductor_meta={},
+            triton_meta={
+                "device": DeviceProperties(
+                    type="cuda", index=0, multi_processor_count=80, cc=80, warp_size=32
+                )
+            },
+        )
+        self.assertTrue(configs)
+        for cfg in configs:
+            self.assertGreaterEqual(cfg.kwargs["XBLOCK"], cfg.kwargs["YBLOCK"])
+        self.assertTrue(
+            any(cfg.kwargs["XBLOCK"] > cfg.kwargs["YBLOCK"] for cfg in configs)
+        )
+
+    @parametrize("axis", ["x", "y", "z1_", "r3_"])
+    def test_config_requires_nd_blocks(self, axis):
+        with self.assertRaisesRegex(
+            AssertionError, f"Missing required block size {axis.upper()}BLOCK"
+        ):
+            check_config({}, size_hints={axis: 8})
+
+    @parametrize("axis", ["y", "z0_"])
+    def test_nd_grid_limit_error(self, axis):
+        hints = {"x": 1, "y": 1, "z0_": 1, "z1_": 1, axis: 1 << 27}
+        label = "Y" if axis == "y" else "Z"
+        with self.assertRaisesRegex(
+            AssertionError,
+            rf"{label} launch-grid limit: extent=.*limit=65535.*triton.max_tiles",
+        ):
+            triton_config(hints, 1, 1, 1)
+
+    def test_pointwise_budget_expansion(self):
+        hints = {"z1_": 8, "z0_": 8, "y": 8, "x": 64, "r0_": 512}
+        cases = [
+            ([8, 8, 32], {"x": 8, "y": 8, "z0_": 8, "z1_": 4}),
+            ([8, 32], {"x": 8, "y": 8, "z0_": 4, "z1_": 1}),
+            ([128], {"x": 64, "y": 2, "z0_": 1, "z1_": 1}),
+            ([8, 8, 128], {"x": 8, "y": 8, "z0_": 8, "z1_": 8}),
+            ([8, 8, 4, 2], {"x": 8, "y": 8, "z0_": 4, "z1_": 2}),
+        ]
+        for budgets, expected in cases:
+            with self.subTest(budgets=budgets):
+                self.assertEqual(_get_nd_pointwise_numels(hints, budgets), expected)
+        hints["z0_"] = 1
+        self.assertEqual(
+            _get_nd_pointwise_numels(hints, [8, 8, 4]),
+            {"x": 8, "y": 8, "z0_": 1, "z1_": 4},
+        )
+
+    def test_existing_pointwise_config_budgets(self):
+        for hints, budgets, expected in [
+            ({"x": 4096}, (1024,), {"XBLOCK": 1024}),
+            ({"y": 128, "x": 128}, (64, 64), {"XBLOCK": 64, "YBLOCK": 64}),
+            (
+                {"z0_": 32, "y": 32, "x": 32},
+                (16, 16, 16),
+                {"XBLOCK": 16, "YBLOCK": 16, "Z0_BLOCK": 16},
+            ),
+        ]:
+            with self.subTest(hints=hints):
+                cfg = triton_config(hints, *budgets)
+                self.assertEqual(cfg.kwargs, expected)
+                self.assertEqual(cfg.num_warps, 4 if len(hints) == 1 else 8)
+
+    @parametrize(
+        "hints, budgets",
+        [({"x": 128}, (64, 32)), ({"x": 128, "y": 64}, (64, 32, 16))],
+    )
+    def test_pointwise_config_rejects_extra_budgets(self, hints, budgets):
+        with self.assertRaisesRegex(
+            AssertionError, "More pointwise budgets than pointwise dimensions"
+        ):
+            triton_config(hints, *budgets)
+
+    def test_pointwise_budget_expansion_at_block_limit(self):
+        max_y = TRITON_MAX_BLOCK["Y"]
+        hints = {"x": 8, "y": 2 * max_y, "z0_": 8}
+        self.assertEqual(
+            _get_nd_pointwise_numels(hints, [8, 8 * max_y]),
+            {"x": 8, "y": max_y, "z0_": 8},
+        )
+
+    def test_tiled_reduction_pointwise_budget_expansion(self):
+        cfg = triton_config_tiled_reduction(
+            {"z0_": 8, "y": 8, "x": 64, "r0_": 8, "r1_": 32},
+            8,
+            32,
+            64,
+        )
+        self.assertEqual(
+            cfg.kwargs,
+            {"XBLOCK": 8, "YBLOCK": 8, "Z0_BLOCK": 4, "R0_BLOCK": 2, "R1_BLOCK": 32},
+        )
+
+    @parametrize(
+        "reduction_hints, budget, expected",
+        [
+            ({"r0_": 32}, 8, {"R0_BLOCK": 8}),
+            ({"r0_": 8, "r1_": 32}, 64, {"R0_BLOCK": 2, "R1_BLOCK": 32}),
+            ({"r0_": 8, "r1_": 32}, 1024, {"R0_BLOCK": 8, "R1_BLOCK": 32}),
+            ({"r0_": 8, "r1_": 1}, 4, {"R0_BLOCK": 4, "R1_BLOCK": 1}),
+            (
+                {"r0_": 8, "r1_": 4, "r2_": 16},
+                128,
+                {"R0_BLOCK": 2, "R1_BLOCK": 4, "R2_BLOCK": 16},
+            ),
+            (
+                {"r0_": 8, "r1_": 4, "r2_": 16, "r3_": 32},
+                1024,
+                {"R0_BLOCK": 1, "R1_BLOCK": 2, "R2_BLOCK": 16, "R3_BLOCK": 32},
+            ),
+            (
+                {"r0_": 8, "r1_": 4, "r2_": 16, "r3_": 8, "r4_": 32},
+                1024,
+                {
+                    "R0_BLOCK": 1,
+                    "R1_BLOCK": 1,
+                    "R2_BLOCK": 4,
+                    "R3_BLOCK": 8,
+                    "R4_BLOCK": 32,
+                },
+            ),
+        ],
+    )
+    def test_reduction_config_budget_expansion(self, reduction_hints, budget, expected):
+        cfg = triton_config_reduction({"x": 64, **reduction_hints}, 8, budget)
+        self.assertEqual(cfg.kwargs, {"XBLOCK": 8, **expected})
+        cfg = triton_config_tiled_reduction(
+            {"y": 8, "x": 64, **reduction_hints}, 8, 4, budget
+        )
+        self.assertEqual(cfg.kwargs, {"XBLOCK": 8, "YBLOCK": 4, **expected})
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(
@@ -272,7 +514,7 @@ class TestTritonHeuristics(TestCase):
 
         for size_hints in (
             {"x": 1, "y": 1, "r0_": 1},
-            {"x": 1, "y": 1, "z": 1, "r0_": 1},
+            {"x": 1, "y": 1, "z0_": 1, "r0_": 1},
         ):
             cfgs = _reduction_configs(
                 size_hints=size_hints,
@@ -306,10 +548,10 @@ class TestTritonHeuristics(TestCase):
                 {"x": 4096, "y": 4096, "r0_": 64},
                 {"native_matmul_persistent_rblock": 1024},
             ),
-            ({"x": 4096, "y": 4096, "z": 128, "r0_": 1}, {}),
-            ({"x": 16384, "y": 2048, "z": 128, "r0_": 2048}, {}),
+            ({"x": 4096, "y": 4096, "z0_": 128, "r0_": 1}, {}),
+            ({"x": 16384, "y": 2048, "z0_": 128, "r0_": 2048}, {}),
             (
-                {"x": 4096, "y": 4096, "z": 128, "r0_": 64},
+                {"x": 4096, "y": 4096, "z0_": 128, "r0_": 64},
                 {"native_matmul_persistent_rblock": 1024},
             ),
         ):
@@ -382,7 +624,10 @@ class TestTritonHeuristics(TestCase):
             (2048, 2048, ReductionHint.INNER, None, [(1, 8)]),
         ],
     )
-    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    @parametrize(
+        "max_autotune_flag",
+        ["max_autotune", "max_autotune_pointwise", "max_autotune_reduction"],
+    )
     def test_persistent_max_autotune_includes_default_config(
         self,
         xnumel,
@@ -418,6 +663,88 @@ class TestTritonHeuristics(TestCase):
             expected_max_configs,
         )
 
+    def test_max_autotune_reduction_false_keeps_default_reduction_configs(self):
+        from torch._inductor.runtime import triton_heuristics
+
+        triton_meta = {"device": self._fake_cuda_device_properties()}
+        pointwise_only = {
+            "max_autotune_pointwise": True,
+            "max_autotune_reduction": False,
+        }
+
+        def keys(configs):
+            return [triton_config_to_hashable(c) for c in configs]
+
+        def persistent(meta):
+            return keys(
+                _persistent_reduction_configs(
+                    size_hints={"x": 2048, "r0_": 256},
+                    reduction_hint=ReductionHint.INNER,
+                    inductor_meta=meta,
+                    triton_meta=triton_meta,
+                )
+            )
+
+        def looped(meta):
+            return keys(
+                _reduction_configs(
+                    size_hints={"x": 2048, "r0_": 4096},
+                    inductor_meta={"reduction_hint": ReductionHint.OUTER, **meta},
+                    triton_meta=triton_meta,
+                )
+            )
+
+        def pointwise_square(meta):
+            return keys(
+                triton_heuristics.pointwise(
+                    {"y": 1024, "x": 1024},
+                    triton_meta,
+                    tile_hint=TileHint.SQUARE,
+                    inductor_meta=meta,
+                    return_configs=True,
+                )
+            )
+
+        for configs in (persistent, looped, pointwise_square):
+            self.assertNotEqual(configs({}), configs({"max_autotune_pointwise": True}))
+        self.assertEqual(persistent(pointwise_only), persistent({}))
+        self.assertEqual(looped(pointwise_only), looped({}))
+        self.assertEqual(
+            pointwise_square(pointwise_only),
+            pointwise_square({"max_autotune_pointwise": True}),
+        )
+        reduction_only = {"max_autotune_reduction": True}
+        self.assertEqual(
+            persistent(reduction_only), persistent({"max_autotune_pointwise": True})
+        )
+        self.assertEqual(pointwise_square(reduction_only), pointwise_square({}))
+        self.assertEqual(
+            persistent({"max_autotune": True, "max_autotune_reduction": False}),
+            persistent({"max_autotune": True}),
+        )
+
+    @parametrize(
+        "max_autotune_pointwise,max_autotune_reduction,expected",
+        [
+            (False, None, False),
+            (True, None, True),
+            (True, False, False),
+            (False, True, True),
+        ],
+    )
+    def test_max_autotune_reduction_inductor_meta(
+        self, max_autotune_pointwise, max_autotune_reduction, expected
+    ):
+        from torch._inductor.codegen.triton import TritonKernel
+
+        with config.patch(
+            max_autotune_pointwise=max_autotune_pointwise,
+            max_autotune_reduction=max_autotune_reduction,
+        ):
+            meta = TritonKernel.inductor_meta_common()
+        self.assertIs(meta["max_autotune_reduction"], expected)
+        self.assertIs(meta["max_autotune_pointwise"], max_autotune_pointwise)
+
     @parametrize(
         "heuristic_cls,device_type,warp_size,expected_max_configs",
         [
@@ -430,7 +757,10 @@ class TestTritonHeuristics(TestCase):
             (XPUReductionHeuristic, "xpu", 32, [(8, 8), (1, 2), (8, 2)]),
         ],
     )
-    @parametrize("max_autotune_flag", ["max_autotune", "max_autotune_pointwise"])
+    @parametrize(
+        "max_autotune_flag",
+        ["max_autotune", "max_autotune_pointwise", "max_autotune_reduction"],
+    )
     def test_backend_persistent_max_autotune_retains_candidates(
         self,
         heuristic_cls,
@@ -538,6 +868,66 @@ class TestTritonHeuristics(TestCase):
                 {"x": 256, "y": 256, "r0_": 4096},
                 {"min_xblock": 16},
             )
+
+    @parametrize(
+        "knob,num_load,expected",
+        [
+            (True, 3, (64, 8, 2)),
+            (False, 3, (64, 1, 2)),
+            (True, 2, (64, 1, 2)),
+        ],
+    )
+    def test_sm100_outer_reduction_r0_block_8(self, knob, num_load, expected):
+        inductor_meta = {"reduction_hint": ReductionHint.OUTER, "num_load": num_load}
+        if knob:
+            inductor_meta["sm100_outer_reduction_r0_block_8"] = True
+
+        configs = _reduction_configs(
+            size_hints={"x": 65536, "r0_": 128},
+            inductor_meta=inductor_meta,
+            triton_meta={"device": self._fake_cuda_device_properties()},
+            num_dynamic=1,
+        )
+
+        outer = configs[-1]
+        self.assertEqual(
+            (outer.kwargs["XBLOCK"], outer.kwargs["R0_BLOCK"], outer.num_warps),
+            expected,
+        )
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @parametrize(
+        "knob,cc,persistent,expected",
+        [
+            (True, 100, False, True),
+            (False, 100, False, False),
+            (True, 90, False, False),
+            (True, 100, True, False),
+        ],
+    )
+    def test_sm100_outer_reduction_r0_block_8_in_inductor_meta(
+        self, knob, cc, persistent, expected
+    ):
+        from torch._inductor.codegen import triton as triton_codegen
+
+        real_props = triton_codegen.triton_meta_device_props
+        x = torch.randn(64 if persistent else 256, 64, device=GPU_TYPE)
+        with (
+            config.patch(
+                {"triton.sm100_outer_reduction_r0_block_8": knob, "compile_threads": 1}
+            ),
+            patch.object(
+                triton_codegen,
+                "triton_meta_device_props",
+                lambda device: real_props(device)._replace(cc=cc),
+            ),
+            fresh_cache(),
+        ):
+            code = "\n".join(get_code(torch.compile(lambda t: t.sum(0)), x))
+
+        heuristic = "persistent_reduction" if persistent else "reduction"
+        self.assertIn(f"@triton_heuristics.{heuristic}(", code)
+        self.assertEqual("'sm100_outer_reduction_r0_block_8': True" in code, expected)
 
     @parametrize(
         "major,cc,expected_baseline_configs,expected_scalar_configs",
@@ -1206,6 +1596,7 @@ class TestTritonHeuristics(TestCase):
                         self.assertEqual(configs, [tuned], msg=arch)
                         self.assertNotEqual(configs, fallback, msg=arch)
 
+    @unittest.skipIf(not torch.version.hip, "ROCm-specific MFMA config pruning")
     @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
     @parametrize(
         "arch,f16_count,int8_count,int8_kpack",
@@ -1991,6 +2382,460 @@ class TestGridExprMaximum(TestCase):
         self.assertNotIn("(long)", result)
         # All ints: constant-folds
         self.assertEqual(grid.maximum([10, 20, 5]), 20)
+
+
+@instantiate_parametrized_tests
+class TestPrecomputedGridConfigMatching(TestCase):
+    # The default candidates differ only in BLOCK, and each grid string is
+    # its BLOCK value, so a grid assertion records which one was selected.
+    _GRID_BY_BLOCK = {64: "64", 128: "128"}
+
+    @staticmethod
+    def _cand(config, grid):
+        return {
+            "config": config,
+            "python": [grid, "1", "1"],
+            "cpp": [f"{grid}L", "1L", "1L"],
+            "python_slow": [grid, "1", "1"],
+        }
+
+    def _candidates(self, block_order=(64, 128)):
+        return [
+            self._cand(
+                {"BLOCK": block, "num_warps": 8, "num_stages": 2},
+                self._GRID_BY_BLOCK[block],
+            )
+            for block in block_order
+        ]
+
+    def _meta(self, candidates=None, declared_constexpr_names=()):
+        return {
+            "precomputed_grids": (
+                self._candidates() if candidates is None else candidates
+            ),
+            "declared_constexpr_names": list(declared_constexpr_names),
+        }
+
+    def _make_grid(self, declared_constexpr_names=()):
+        return PrecomputedGrid(
+            inductor_meta=self._meta(declared_constexpr_names=declared_constexpr_names),
+            mode="python",
+        )
+
+    @parametrize("block", [64, 128])
+    def test_exact_match_selects_by_kernel_kwargs(self, block):
+        grid = self._make_grid()
+        grid.generate({"BLOCK": block, "num_warps": 8, "num_stages": 2})
+        self.assertEqual(
+            (grid.x_grid, grid.y_grid, grid.z_grid),
+            (self._GRID_BY_BLOCK[block], "1", "1"),
+        )
+
+    def test_matches_pipelining_disabled_retry_config(self):
+        # compile_by_disabling_pipelining retries with num_stages=1 when
+        # the chosen config exceeds shared memory; the retry still
+        # selects the chosen config's candidate.
+        self.assertEqual(
+            PrecomputedGrid.find_candidate_index(
+                self._meta(), {"BLOCK": 128, "num_warps": 8, "num_stages": 1}
+            ),
+            1,
+        )
+        grid = self._make_grid()
+        grid.generate({"BLOCK": 128, "num_warps": 8, "num_stages": 1})
+        self.assertEqual((grid.x_grid, grid.y_grid, grid.z_grid), ("128", "1", "1"))
+
+    def test_configs_differing_only_in_num_stages_share_a_candidate(self):
+        # An undeclared num_stages cannot reach the grid, so candidates
+        # differing only in it carry the same grid and the first one wins.
+        candidates = [
+            self._cand({"BLOCK": 128, "num_warps": 8, "num_stages": 3}, "128"),
+            self._cand({"BLOCK": 128, "num_warps": 8, "num_stages": 2}, "128"),
+        ]
+        self.assertEqual(
+            PrecomputedGrid.find_candidate_index(
+                self._meta(candidates),
+                {"BLOCK": 128, "num_warps": 8, "num_stages": 2},
+            ),
+            0,
+        )
+
+    @parametrize("declared", [False, True])
+    def test_num_warps_must_match(self, declared):
+        # A kernel that declares num_warps can read it in its grid, so the
+        # key keeps num_warps, declared or not: the retry picks the candidate
+        # with its num_warps, not the first one with its BLOCK.
+        candidates = [
+            self._cand({"BLOCK": 128, "num_warps": 8, "num_stages": 2}, "8"),
+            self._cand({"BLOCK": 128, "num_warps": 4, "num_stages": 2}, "4"),
+        ]
+        meta = self._meta(candidates, ["num_warps"] if declared else [])
+        grid = PrecomputedGrid(inductor_meta=meta, mode="python")
+        grid.generate({"BLOCK": 128, "num_warps": 4, "num_stages": 1})
+        self.assertEqual((grid.x_grid, grid.y_grid, grid.z_grid), ("4", "1", "1"))
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            PrecomputedGrid.find_candidate_index(
+                meta, {"BLOCK": 128, "num_warps": 2, "num_stages": 2}
+            )
+
+    def test_NUM_STAGES_kwarg_must_match(self):
+        # NUM_STAGES is a kernel kwarg a grid can read, so it stays in
+        # the match key: a retried lookup (both stage values lowered to
+        # 1 by compile_by_disabling_pipelining) matches nothing.
+        candidates = [
+            self._cand(
+                {
+                    "BLOCK": 128,
+                    "NUM_STAGES": 3,
+                    "num_warps": 8,
+                    "num_stages": 3,
+                },
+                "128",
+            )
+        ]
+        meta = self._meta(candidates)
+        self.assertEqual(
+            PrecomputedGrid.find_candidate_index(
+                meta, {"BLOCK": 128, "NUM_STAGES": 3, "num_warps": 8, "num_stages": 3}
+            ),
+            0,
+        )
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            PrecomputedGrid.find_candidate_index(
+                meta, {"BLOCK": 128, "NUM_STAGES": 1, "num_warps": 8, "num_stages": 1}
+            )
+
+    def test_match_requires_equal_kernel_kwarg_keys(self):
+        # A candidate that omits a kernel kwarg the lookup carries (or
+        # vice versa) must not match, even when every shared kwarg
+        # agrees: key sets must be equal.
+        without_stages = self._meta(
+            [self._cand({"BLOCK": 128, "num_warps": 8, "num_stages": 3}, "128")]
+        )
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            PrecomputedGrid.find_candidate_index(
+                without_stages,
+                {"BLOCK": 128, "NUM_STAGES": 1, "num_warps": 8, "num_stages": 1},
+            )
+        with_stages = self._meta(
+            [
+                self._cand(
+                    {"BLOCK": 128, "NUM_STAGES": 3, "num_warps": 8, "num_stages": 3},
+                    "128",
+                )
+            ]
+        )
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            PrecomputedGrid.find_candidate_index(
+                with_stages, {"BLOCK": 128, "num_warps": 8, "num_stages": 3}
+            )
+
+    def test_make_launchers_retries_with_precomputed_grid(self):
+        # Drive _make_launchers -> compile_by_disabling_pipelining with
+        # a fake compile result whose make_launcher goes through
+        # GridExpr.from_meta (with a real triton.Config, so the
+        # config_to_dict conversion in from_meta runs).
+        from torch._inductor.runtime.triton_compat import OutOfResources
+
+        chosen = triton.Config({"BLOCK": 128}, num_warps=8, num_stages=3)
+        other = triton.Config({"BLOCK": 64}, num_warps=4, num_stages=3)
+        inductor_meta = {
+            "grid_type": "PrecomputedGrid",
+            "precomputed_grids": [
+                self._cand(config_to_dict(other), "64"),
+                self._cand(config_to_dict(chosen), "128"),
+            ],
+        }
+
+        class FakeResult:
+            def __init__(self, cfg):
+                self.config = cfg
+
+            def make_launcher(self):
+                if self.config.num_stages > 1:
+                    raise OutOfResources(999, 1, "shared memory")
+                grid = GridExpr.from_meta(inductor_meta, self.config)
+                return (grid.x_grid, grid.y_grid, grid.z_grid)
+
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.configs = [chosen]
+        autotuner.compile_results = [FakeResult(chosen)]
+        autotuner.launchers = []
+        autotuner.inductor_meta = inductor_meta
+        autotuner.device_props = types.SimpleNamespace(type="cuda", index=0)
+        autotuner._ensure_kernel_loaded = MagicMock()
+        autotuner.get_device_interface = MagicMock()
+        autotuner._precompile_config = MagicMock(
+            side_effect=lambda cfg: FakeResult(cfg)
+        )
+        with patch(
+            "torch._dynamo.device_interface.DeviceGuard",
+            return_value=contextlib.nullcontext(),
+        ):
+            autotuner._make_launchers()
+        self.assertEqual(autotuner.launchers, [("128", "1", "1")])
+        retried = autotuner._precompile_config.call_args.args[0]
+        self.assertEqual(retried.num_stages, 1)
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    def test_pipelining_disabled_retry_runs_autotuned_kernel(self):
+        self._run_autotuned_kernel_with_pipelining_retry()
+
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @config.patch({"cpp_wrapper": True, "triton.autotune_at_compile_time": False})
+    def test_pipelining_disabled_retry_runs_autotuned_kernel_cpp_wrapper(self):
+        # Compiling the generated C++ also compiles the lazy-grid
+        # switch, including its `default: throw` case.
+        self._run_autotuned_kernel_with_pipelining_retry()
+
+    def _run_autotuned_kernel_with_pipelining_retry(self):
+        # A user @triton.autotune kernel whose grid reads BLOCK_SIZE,
+        # run through torch.compile with every pipelined config made to
+        # fail launcher creation, so the real _make_launchers retry
+        # (compile_by_disabling_pipelining -> launcher codegen) runs.
+        from torch._inductor.runtime.triton_compat import OutOfResources
+        from torch._inductor.runtime.triton_heuristics import (
+            StaticTritonCompileResult,
+            TritonCompileResult,
+        )
+        from torch.testing._internal.triton_utils import add_kernel_autotuned
+
+        def add(x, y):
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            add_kernel_autotuned[grid](x, y, output, n_elements)
+            return output
+
+        def does_not_fit(cls, error):
+            orig = cls.make_launcher
+
+            def make_launcher(self):
+                if self.config.num_stages > 1:
+                    raise error
+                return orig(self)
+
+            return patch.object(cls, "make_launcher", make_launcher)
+
+        x = torch.randn(4096, device=GPU_TYPE)
+        y = torch.randn(4096, device=GPU_TYPE)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                does_not_fit(
+                    TritonCompileResult, OutOfResources(1 << 20, 1 << 16, "shared")
+                )
+            )
+            stack.enter_context(
+                does_not_fit(
+                    StaticTritonCompileResult,
+                    torch.cuda.OutOfMemoryError("out of shared memory"),
+                )
+            )
+            actual = torch.compile(add)(x, y)
+        self.assertEqual(actual, x + y)
+
+    def test_generate_keeps_declared_num_stages_in_match_key(self):
+        # generate passes its inductor_meta to find_candidate_index, which
+        # reads declared_constexpr_names from it.
+        grid = self._make_grid(declared_constexpr_names=["num_stages"])
+        grid.generate({"BLOCK": 128, "num_warps": 8, "num_stages": 2})
+        self.assertEqual((grid.x_grid, grid.y_grid, grid.z_grid), ("128", "1", "1"))
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            grid.generate({"BLOCK": 128, "num_warps": 8, "num_stages": 1})
+
+    def test_aoti_header_keeps_declared_num_stages_in_match_key(self):
+        # generate_aoti_kernel_config_header passes its inductor_meta to
+        # find_candidate_index, which reads declared_constexpr_names from it.
+        from torch._inductor.codecache import CudaKernelParamCache
+        from torch._inductor.codegen.cpp_wrapper_gpu import (
+            generate_aoti_kernel_config_header,
+        )
+
+        def header(num_stages):
+            params = self._aoti_params(
+                {"BLOCK": 128, "num_warps": 8, "num_stages": num_stages}
+            )
+            params["inductor_meta"]["declared_constexpr_names"] = ["num_stages"]
+            with patch.object(CudaKernelParamCache, "get", return_value=params):
+                return generate_aoti_kernel_config_header(["fake_kernel"])
+
+        self.assertIn("#define FAKE_KERNEL_CONFIG_INDEX 1", header(2))
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            header(1)
+
+    def test_declared_num_stages_constexpr_stays_in_match_key(self):
+        # A declared num_stages constexpr can reach the grid, so it stays
+        # in the key: only an equal num_stages matches.
+        meta = self._meta(declared_constexpr_names=["num_stages"])
+        self.assertEqual(
+            PrecomputedGrid.find_candidate_index(
+                meta, {"BLOCK": 128, "num_warps": 8, "num_stages": 2}
+            ),
+            1,
+        )
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            PrecomputedGrid.find_candidate_index(
+                meta, {"BLOCK": 128, "num_warps": 8, "num_stages": 1}
+            )
+
+    def _fake_lazy_autotuner(self, config, candidates, declared_constexpr_names=()):
+        autotuner = object.__new__(CachingAutotuner)
+        autotuner.triton_meta = {}
+        autotuner.inductor_meta = {
+            "grid_type": "PrecomputedGrid",
+            **self._meta(candidates, declared_constexpr_names),
+        }
+        autotuner.launchers = [types.SimpleNamespace(config=config)]
+        autotuner.run = MagicMock()
+        return autotuner
+
+    @staticmethod
+    def _lazy_cached_params():
+        from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
+
+        return {
+            get_cpp_wrapper_cubin_path_name(): "/tmp/fake.cubin",
+            "mangled_name": "fake_mangled",
+            "num_warps": 8,
+            "shared_mem": 0,
+        }
+
+    def test_lazy_autotune_selects_matching_candidate(self):
+        from torch._inductor.codecache import CudaKernelParamCache
+        from torch._inductor.runtime.triton_lazy_compile import (
+            run_triton_kernel_with_autotune,
+        )
+
+        autotuner = self._fake_lazy_autotuner(
+            triton.Config({"BLOCK": 128}, num_warps=8, num_stages=1),
+            self._candidates(),
+        )
+        with patch.object(
+            CudaKernelParamCache, "get", return_value=self._lazy_cached_params()
+        ):
+            result = run_triton_kernel_with_autotune(
+                {"fake_kernel": autotuner}, "fake_kernel", None, []
+            )
+        self.assertEqual(result.config_index, 1)
+
+    def test_lazy_autotune_raises_on_unmatched_config(self):
+        from torch._inductor.codecache import CudaKernelParamCache
+        from torch._inductor.runtime.triton_lazy_compile import (
+            run_triton_kernel_with_autotune,
+        )
+
+        autotuner = self._fake_lazy_autotuner(
+            triton.Config({"BLOCK": 32}, num_warps=8, num_stages=1),
+            self._candidates(),
+        )
+        with (
+            patch.object(
+                CudaKernelParamCache, "get", return_value=self._lazy_cached_params()
+            ),
+            self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"),
+        ):
+            run_triton_kernel_with_autotune(
+                {"fake_kernel": autotuner}, "fake_kernel", None, []
+            )
+
+    def test_lazy_autotune_keeps_declared_num_stages_in_match_key(self):
+        # run_triton_kernel_with_autotune passes its inductor_meta to
+        # find_candidate_index, which reads declared_constexpr_names from it.
+        from torch._inductor.codecache import CudaKernelParamCache
+        from torch._inductor.runtime.triton_lazy_compile import (
+            run_triton_kernel_with_autotune,
+        )
+
+        def run(num_stages):
+            autotuner = self._fake_lazy_autotuner(
+                triton.Config({"BLOCK": 128}, num_warps=8, num_stages=num_stages),
+                self._candidates(),
+                declared_constexpr_names=["num_stages"],
+            )
+            with patch.object(
+                CudaKernelParamCache, "get", return_value=self._lazy_cached_params()
+            ):
+                return run_triton_kernel_with_autotune(
+                    {"fake_kernel": autotuner}, "fake_kernel", None, []
+                )
+
+        self.assertEqual(run(2).config_index, 1)
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            run(1)
+
+    def test_lazy_grid_default_throws(self):
+        from torch._inductor.codegen.cpp_wrapper_gpu import DeferredTritonCallWrapper
+        from torch._inductor.utils import IndentedBuffer
+
+        wrapper = object.__new__(DeferredTritonCallWrapper)
+        wrapper.kernel_name = "fake_kernel"
+        wrapper.inductor_meta = {
+            "grid_type": "PrecomputedGrid",
+            "precomputed_grids": self._candidates(),
+            "extra_launcher_args": [],
+        }
+        prefix = IndentedBuffer()
+        wrapper._generate_lazy_grid(prefix)
+        code = prefix.getvalue()
+        self.assertIn("case 0:", code)
+        self.assertIn("case 1:", code)
+        self.assertIn(
+            'default: throw std::runtime_error("Invalid config_index " + std::to_string(fake_kernel_result.config_index) + " for kernel fake_kernel");',
+            code,
+        )
+
+    def test_still_rejects_different_block_sizes(self):
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            PrecomputedGrid.find_candidate_index(
+                self._meta(), {"BLOCK": 32, "num_warps": 8, "num_stages": 2}
+            )
+        grid = self._make_grid()
+        with self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"):
+            grid.generate({"BLOCK": 32, "num_warps": 8, "num_stages": 2})
+
+    def _aoti_params(self, config):
+        from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
+
+        return {
+            get_cpp_wrapper_cubin_path_name(): "/tmp/fake_kernel.cubin",
+            "mangled_name": "fake_kernel_mangled",
+            "num_warps": 8,
+            "shared_mem": 1024,
+            "config": config,
+            "inductor_meta": {
+                "grid_type": "PrecomputedGrid",
+                "precomputed_grids": self._candidates(),
+            },
+        }
+
+    def test_aoti_config_header_matches_pipelining_disabled_config(self):
+        # The AOTI lazy path must select the BLOCK=128 candidate (index
+        # 1) for a num_stages=1 retry config instead of CONFIG_INDEX=-1.
+        from torch._inductor.codecache import CudaKernelParamCache
+        from torch._inductor.codegen.cpp_wrapper_gpu import (
+            generate_aoti_kernel_config_header,
+        )
+
+        params = self._aoti_params({"BLOCK": 128, "num_warps": 8, "num_stages": 1})
+        with patch.object(CudaKernelParamCache, "get", return_value=params):
+            header = generate_aoti_kernel_config_header(["fake_kernel"])
+        self.assertIn("#define FAKE_KERNEL_CONFIG_INDEX 1", header)
+
+    def test_aoti_config_header_rejects_unmatched_config(self):
+        from torch._inductor.codecache import CudaKernelParamCache
+        from torch._inductor.codegen.cpp_wrapper_gpu import (
+            generate_aoti_kernel_config_header,
+        )
+
+        params = self._aoti_params({"BLOCK": 32, "num_warps": 8, "num_stages": 2})
+        with (
+            patch.object(CudaKernelParamCache, "get", return_value=params),
+            self.assertRaisesRegex(RuntimeError, "Precomputed grid not found"),
+        ):
+            generate_aoti_kernel_config_header(["fake_kernel"])
 
 
 class TestGrid2DWithYZOverflowZeroYnumel(TestCase):
