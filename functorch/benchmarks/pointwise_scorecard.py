@@ -8,7 +8,6 @@ from functorch import pointwise_operator
 
 
 torch.set_num_threads(1)
-torch._C._debug_set_fusion_group_inlining(False)
 
 
 def rand(*shape):
@@ -241,9 +240,6 @@ for shape, operator in itertools.product(shapes, operators):
         print(f"pointwise_operator failed on {operator.__name__}, {shape.__name__}")
         nope.add((operator, shape))
 
-    ts_op = torch.jit.script(operator)
-    torch.testing.assert_close(operator(*args), ts_op(*args))
-
 
 print("fuser,device,operator,shape,time")
 results = []
@@ -294,17 +290,4 @@ for shape, operator in itertools.product(shapes, operators):
             )
         )
 
-    ts_op = torch.jit.script(operator)
-    result = benchmark(ts_op, args)
-    print(
-        ",".join(
-            [
-                "fuser",
-                args[0].device.type,
-                operator.__name__,
-                shape.__name__,
-                micros(result),
-            ]
-        )
-    )
     sys.stdout.flush()
