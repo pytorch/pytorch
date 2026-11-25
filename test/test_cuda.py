@@ -17615,12 +17615,45 @@ class TestMemoryPlanner(TestCase):
         ]
         p = self._problem(allocs)
         strategy, arena, offsets = p.plan()
-        self.assertEqual((strategy, arena), ("breadth/best", 2048))
+        self.assertEqual((strategy, arena), ("breadth", 2048))
         self.assertEqual(self._peak_live(allocs), 2048)
         self.assertEqual(p.validate(offsets), arena)
         # no allocations
         p = self._problem([])
         self.assertEqual(p.plan(), ("size", 0, []))
+
+    def test_strategies(self):
+        names = torch._C._cuda_PlanningProblem.strategies()
+        self.assertEqual(
+            names, ["size", "size/best", "size_wdegree", "breadth", "breadth/best"]
+        )
+        p = self._problem([(256, 0, None, [], [])])
+        with self.assertRaisesRegex(ValueError, "unknown memory planning order"):
+            p.plan("nope/best")
+        with self.assertRaisesRegex(ValueError, "unknown memory planning strategy"):
+            p.plan("size/worst")
+        # every strategy is valid and at least the peak live bytes; the default
+        # plan is the first of the smallest
+        allocs = [
+            (768, 0, 6, [], []),
+            (1024, 1, 2, [], []),
+            (768, 3, 5, [], []),
+            (512, 4, 7, [], []),
+        ]
+        p = self._problem(allocs)
+        arenas = {}
+        for name in names:
+            got, arena, offsets = p.plan(name)
+            self.assertEqual(got, name)
+            self.assertEqual(p.validate(offsets), arena, name)
+            self.assertGreaterEqual(arena, self._peak_live(allocs), name)
+            arenas[name] = arena
+        self.assertEqual(arenas["size"], 2304)
+        self.assertEqual(arenas["breadth/best"], 2048)
+        best = min(arenas.values())
+        self.assertEqual(
+            p.plan()[:2], (next(n for n in names if arenas[n] == best), best)
+        )
 
     def test_invalid_problems(self):
         def check(msg, allocs, num_nodes=0, edges=()):
@@ -17710,9 +17743,14 @@ class TestMemoryPlanner(TestCase):
                         i != j and reference_conflict(allocs, ancestors, i, j),
                         (seed, i, j),
                     )
+            arenas = []
+            for name in torch._C._cuda_PlanningProblem.strategies():
+                _, arena, offsets = p.plan(name)
+                self.assertEqual(p.validate(offsets), arena, name)
+                self.assertGreaterEqual(arena, self._peak_live(allocs), name)
+                arenas.append(arena)
             _, arena, offsets = p.plan()
-            self.assertEqual(p.validate(offsets), arena)
-            self.assertGreaterEqual(arena, self._peak_live(allocs))
+            self.assertEqual(arena, min(arenas))
             # an overlapping conflicting pair, a misaligned offset and a plan
             # of the wrong length are rejected
             i, j = next(
