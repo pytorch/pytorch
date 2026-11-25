@@ -3400,6 +3400,23 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
+    @dtypes(torch.int32, torch.int64, torch.float, torch.double, torch.cfloat)
+    def test_cumsum_many_short_rows(self, device, dtype):
+        # Enough rows that ROCm gives each row to a group of lanes, with row ends at each position
+        # within a lane's elements, also in the first lane of a row's second tile (129 and 257
+        # elements). (655360, 4) int32 is 10 MiB, so it ends where its allocation does and a read
+        # past the end of the last row faults. The results are exact in `dtype`.
+        shapes = [(655360, 4), (40000, 9), (40000, 31), (40000, 47), (40000, 63), (40000, 129), (40000, 135),
+                  (40000, 257), (40000, 300)]
+        for shape in shapes:
+            x = torch.randint(-3, 4, shape).to(dtype)
+            expected = torch.cumsum(x, 1, dtype=dtype)
+            out = torch.empty(shape, dtype=dtype, device=device)
+            torch.cumsum(x.to(device), 1, dtype=dtype, out=out)
+            self.assertEqual(out, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfTorchInductor("inductor lowers cumsum / cumprod itself; this tests the ATen kernels")
     @skipCUDAIfNotRocm
     @runOnRocmArch(MI350_ARCH + MI450_ARCH)
     @dtypes(torch.int16, torch.half)

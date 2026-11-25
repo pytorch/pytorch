@@ -655,8 +655,8 @@ __device__ __forceinline__ void store_dwords_partial(const T (&x)[ITEMS], T* p, 
   }
 }
 
-// On gfx950, partial tiles of vector-aligned rows of 4-byte elements take vector loads where they can
-// (see load_items): with element loads, rows of 96 to 255 elements were slower than stock. On other
+// On gfx950, partial tiles of vector-aligned rows of 4-byte elements in scan_rows_block take vector
+// loads where they can (see load_items; scan_rows_warp takes load_items_row_end instead). On other
 // targets, and for other element sizes, the extra path makes some rows slower.
 #if defined(__gfx950__)
 template <typename T>
@@ -761,6 +761,79 @@ __device__ __forceinline__ void store_items(const T (&x)[ITEMS], T* p, uint64_t 
   }
 }
 
+// Partial tiles in scan_rows_warp, for rows of 4- and 8-byte elements that allow vector accesses
+// and have at least ITEMS elements. With many short rows, the element loads and stores of the lane
+// holding the row end were slower than stock once the rows no longer fit in the cache. Instead that
+// lane takes the vector accesses of the ITEMS elements ending at the row end: it loads them and
+// shifts its own into place, and it stores them, the ones before its own taken from the previous
+// lane, which stores the same values there.
+template <typename T>
+constexpr bool kRowEndVec = sizeof(T) == 4 || sizeof(T) == 8;
+
+template <int ITEMS, int VEC, typename T>
+__device__ __forceinline__ void load_items_row_end(T (&x)[ITEMS], const T* p, uint64_t col, uint64_t end,
+                                                   T fill) {
+  const bool whole = col + ITEMS <= end;
+  const T* q = p + (whole ? col : end - ITEMS);
+  T y[ITEMS];
+#pragma unroll
+  for (int i = 0; i < ITEMS / VEC; ++i) {
+    const auto t = *reinterpret_cast<const GVec<T, VEC>*>(q + i * VEC);
+#pragma unroll
+    for (int j = 0; j < VEC; ++j) {
+      y[i * VEC + j] = t.v[j];
+    }
+  }
+  // This lane's n elements are y[s ..]; lanes past the row end have none.
+  const uint32_t n = whole ? ITEMS : (col < end ? static_cast<uint32_t>(end - col) : 0);
+  const uint32_t s = ITEMS - n;
+#pragma unroll
+  for (int j = 0; j < ITEMS; ++j) {
+    T v = y[j];
+#pragma unroll
+    for (int k = 1; j + k < ITEMS; ++k) {
+      v = s == static_cast<uint32_t>(k) ? y[j + k] : v;
+    }
+    x[j] = static_cast<uint32_t>(j) < n ? v : fill;
+  }
+}
+
+// The lane holding the row end must not be the first of its tile, i.e. the tile must have more
+// than ITEMS elements.
+template <int ITEMS, int VEC, typename T>
+__device__ __forceinline__ void store_items_row_end(const T (&x)[ITEMS], T* p, uint64_t col, uint64_t end,
+                                                    bool valid, int group) {
+  // The previous lane's elements, then this lane's: the ITEMS elements ending at this lane's last
+  // one start at z[ITEMS - s].
+  T z[2 * ITEMS];
+#pragma unroll
+  for (int j = 0; j < ITEMS; ++j) {
+    z[j] = shfl_up(x[j], 1, group);
+    z[ITEMS + j] = x[j];
+  }
+  if (!valid || col >= end) {
+    return;
+  }
+  const bool whole = col + ITEMS <= end;
+  const uint32_t s = whole ? 0 : ITEMS - static_cast<uint32_t>(end - col);
+  T* q = p + (whole ? col : end - ITEMS);
+#pragma unroll
+  for (int i = 0; i < ITEMS / VEC; ++i) {
+    GVec<T, VEC> t;
+#pragma unroll
+    for (int j = 0; j < VEC; ++j) {
+      const int k = i * VEC + j;
+      T v = z[k + ITEMS];
+#pragma unroll
+      for (int m = 1; m < ITEMS; ++m) {
+        v = s == static_cast<uint32_t>(m) ? z[k + ITEMS - m] : v;
+      }
+      t.v[j] = v;
+    }
+    *reinterpret_cast<GVec<T, VEC>*>(q + i * VEC) = t;
+  }
+}
+
 // Inclusive scan of x in registers: runs of RUN items are scanned independently, then each run
 // is offset by the inclusive total of the runs before it. RUN == ITEMS is the plain serial scan.
 template <int RUN, int ITEMS, typename T, class BinaryFunction>
@@ -791,6 +864,7 @@ __global__ void scan_rows_warp(T* tgt, const T* src,
   const int group = blockDim.x;
   const int lane = threadIdx.x;
   const uint64_t tile = static_cast<uint64_t>(group) * ITEMS;
+  const bool row_end_vec = kRowEndVec<T> && vec_ok && row_size >= ITEMS;
   for (uint64_t block_row = static_cast<uint64_t>(blockIdx.x) * blockDim.y; block_row < num_rows;
        block_row += static_cast<uint64_t>(blockDim.y) * gridDim.x) {
     const uint64_t row = block_row + threadIdx.y;
@@ -806,6 +880,8 @@ __global__ void scan_rows_warp(T* tgt, const T* src,
       T x[ITEMS];
       if (full) {
         load_items<true, ITEMS, VEC>(x, row_src, col, row_size, vec_ok, init);
+      } else if (row_end_vec) {
+        load_items_row_end<ITEMS, VEC>(x, row_src, col, row_size, init);
       } else {
         load_items<false, ITEMS, VEC>(x, row_src, col, row_size, vec_ok, init);
       }
@@ -819,6 +895,8 @@ __global__ void scan_rows_warp(T* tgt, const T* src,
       }
       if (full) {
         store_items<true, ITEMS, VEC>(x, row_tgt, col, row_size, valid, vec_ok);
+      } else if (row_end_vec && row_size - base > ITEMS) {
+        store_items_row_end<ITEMS, VEC>(x, row_tgt, col, row_size, valid, group);
       } else {
         store_items<false, ITEMS, VEC>(x, row_tgt, col, row_size, valid, vec_ok);
       }
