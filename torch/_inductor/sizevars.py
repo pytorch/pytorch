@@ -1178,9 +1178,10 @@ class SizeVarAllocator:
         """
         overrides = self._optimization_hint_overrides
         if overrides is not None and isinstance(expr, Expr):
-            # Expand precomputed sizes first so that their symbols are overridden too.
+            # Expand precomputed sizes and apply the shape env's replacements first,
+            # so that the overrides (keyed by canonical symbols) reach every symbol.
             expanded = sympy_subs(expr, self.inv_precomputed_replacements)
-            expr = expanded.xreplace(overrides)
+            expr = expanded.xreplace(self.replacements).xreplace(overrides)
         state = _current_consistent_hints()
         if state is not None and state.shape_env is self.shape_env:
             # Hints differ inside this ShapeEnv's context, so skip the cache.
