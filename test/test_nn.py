@@ -60,6 +60,8 @@ import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
     GRADCHECK_NONDET_TOL, DeterministicGuard
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch._decomp.decompositions import _fused_rms_norm as _fused_rms_norm_decomp
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
@@ -7922,6 +7924,253 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(Y_ref, Y)
 
+    # Tolerances for rms_norm outputs, which are computed in float (double for float64) and
+    # rounded once: bfloat16 and float16 stay within one ulp of the correctly rounded float64
+    # result, plus float16's subnormal spacing.
+    _rms_norm_out_tols = {
+        torch.float64: (1e-12, 0.0),
+        torch.float32: (1e-5, 0.0),
+        torch.bfloat16: (2**-7, 0.0),
+        torch.float16: (2**-10, 2**-24),
+    }
+
+    @staticmethod
+    def _rms_norm_float64_reference(x, normalized_shape, weight, eps):
+        # Plain float64 ops, so the reference shares no code with any rms_norm kernel.
+        dims = tuple(range(-len(normalized_shape), 0))
+        x64 = x.detach().double()
+        rstd = (x64.square().mean(dims, keepdim=True) + eps).rsqrt()
+        y = x64 * rstd
+        if weight is not None:
+            y = y * weight.detach().double()
+        return y, rstd
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    @parametrize_test("N", [1, 7, 17, 33, 100, 4097])
+    @parametrize_test("has_weight", [True, False])
+    def test_fused_rms_norm_cpu_matches_float64(self, device, dtype, N, has_weight):
+        # N covers the tail of every vector width and, at 4097, several levels of the cascaded
+        # sum of squares. The 67 rows are split across threads.
+        x = torch.randn(67, N, dtype=dtype, device=device)
+        weight = torch.randn(N, dtype=dtype, device=device) if has_weight else None
+
+        y, rstd = torch._fused_rms_norm(x, [N], weight, 1e-5)
+        y_ref, rstd_ref = self._rms_norm_float64_reference(x, [N], weight, 1e-5)
+
+        # rstd is float for float, bfloat16 and float16 inputs, as in the decomposition that
+        # serves as the meta function.
+        opmath_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        self.assertEqual(rstd.dtype, opmath_dtype)
+        self.assertEqual(rstd.shape, (67, 1))
+        rstd_rtol = 1e-12 if dtype == torch.float64 else 1e-5
+        self.assertEqual(rstd, rstd_ref.to(opmath_dtype), rtol=rstd_rtol, atol=0)
+
+        rtol, atol = self._rms_norm_out_tols[dtype]
+        self.assertEqual(y, y_ref.to(dtype), rtol=rtol, atol=atol)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    def test_fused_rms_norm_cpu_default_eps(self, device, dtype):
+        # eps=None means the epsilon of the computation dtype (float for bfloat16 and float16),
+        # as in the composite, the decomposition and CUDA. With mean(x**2) close to that epsilon
+        # the output is about 1/sqrt(2); any other epsilon moves it far outside the tolerance.
+        opmath_dtype = torch.float64 if dtype == torch.float64 else torch.float32
+        eps = torch.finfo(opmath_dtype).eps
+        x = torch.full((3, 37), eps**0.5, dtype=dtype, device=device)
+        x[1] *= -1
+
+        y, rstd = torch._fused_rms_norm(x, [37], None, None)
+        y_ref, rstd_ref = self._rms_norm_float64_reference(x, [37], None, eps)
+
+        rstd_rtol = 1e-12 if dtype == torch.float64 else 1e-5
+        self.assertEqual(rstd, rstd_ref.to(opmath_dtype), rtol=rstd_rtol, atol=0)
+
+        rtol, atol = self._rms_norm_out_tols[dtype]
+        self.assertEqual(y, y_ref.to(dtype), rtol=rtol, atol=atol)
+
+    @onlyCPU
+    def test_fused_rms_norm_cpu_squares_in_float(self, device):
+        # 300**2 overflows float16, so the squares have to be summed in float.
+        x = torch.full((4, 33), 300.0, dtype=torch.float16, device=device)
+        x[:, ::2] *= -1
+
+        y, rstd = torch._fused_rms_norm(x, [33], None, 1e-5)
+        y_ref, rstd_ref = self._rms_norm_float64_reference(x, [33], None, 1e-5)
+
+        self.assertEqual(rstd, rstd_ref.float(), rtol=1e-5, atol=0)
+        rtol, atol = self._rms_norm_out_tols[torch.float16]
+        self.assertEqual(y, y_ref.half(), rtol=rtol, atol=atol)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_fused_rms_norm_cpu_special_values(self, device, dtype):
+        # Special values sit in the vectorized body (column 2) and in the scalar tail
+        # (column 18). The reference is the decomposition, which runs the same float math through
+        # separate kernels: an infinite mean square gives rstd == 0, so finite inputs map to 0 and
+        # infinities to NaN, and squares that overflow float do the same even though the exact
+        # result is finite.
+        N = 19
+        x = torch.zeros(9, N, dtype=dtype, device=device)
+        x[1] = -0.0
+        x[2, 2] = float("inf")
+        x[3, 18] = float("-inf")
+        x[4] = torch.randn(N)
+        x[4, 2] = float("nan")
+        x[5] = torch.randn(N)
+        x[5, 18] = float("nan")
+        x[6] = 1e-40 * torch.randn(N)  # subnormal
+        x[7] = torch.randn(N)
+        x[7, 2] = 2e19  # its square overflows float
+        x[8] = torch.randn(N)
+
+        y, rstd = torch._fused_rms_norm(x, [N], None, 1e-5)
+        y_ref, rstd_ref = _fused_rms_norm_decomp(x, [N], None, 1e-5)
+
+        rtol, atol = self._rms_norm_out_tols[dtype]
+        self.assertEqual(y, y_ref, rtol=rtol, atol=atol)
+        self.assertEqual(rstd, rstd_ref, rtol=1e-5, atol=0)
+
+        # assertEqual treats -0 and +0 as equal, so check that zero rows keep their sign.
+        self.assertEqual(torch.signbit(y[:2]), torch.signbit(x[:2]))
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_fused_rms_norm_cpu_noncontiguous(self, device, dtype):
+        x = torch.randn(40, 24, dtype=dtype, device=device).t()
+        weight = torch.randn(80, dtype=dtype, device=device)[::2]
+        self.assertFalse(x.is_contiguous())
+        self.assertFalse(weight.is_contiguous())
+
+        # The kernel copies strided inputs to contiguous ones, so the results match bit for bit.
+        out = torch._fused_rms_norm(x, [40], weight, 1e-5)
+        out_ref = torch._fused_rms_norm(x.contiguous(), [40], weight.contiguous(), 1e-5)
+        self.assertEqual(out, out_ref, atol=0, rtol=0)
+
+        # .sum() hands the backward a gradient whose strides are all zero.
+        x_req, weight_req = x.detach().requires_grad_(), weight.detach().requires_grad_()
+        grads = torch.autograd.grad(F.rms_norm(x_req, [40], weight_req, 1e-5).sum(), (x_req, weight_req))
+        x_ref, weight_ref = x.contiguous().requires_grad_(), weight.contiguous().requires_grad_()
+        grads_ref = torch.autograd.grad(
+            F.rms_norm(x_ref, [40], weight_ref, 1e-5), (x_ref, weight_ref), torch.ones(24, 40, dtype=dtype, device=device)
+        )
+        self.assertEqual(grads, grads_ref, atol=0, rtol=0)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.float16)
+    @parametrize_test("N", [1, 7, 17, 33, 100, 4097])
+    @parametrize_test("has_weight", [True, False])
+    def test_fused_rms_norm_backward_cpu_matches_float64(self, device, dtype, N, has_weight):
+        eps = 1e-5
+        x = torch.randn(67, N, dtype=dtype, device=device, requires_grad=True)
+        weight = torch.randn(N, dtype=dtype, device=device, requires_grad=True) if has_weight else None
+        grad_out = torch.randn(67, N, dtype=dtype, device=device)
+        inputs = (x, weight) if has_weight else (x,)
+
+        grads = torch.autograd.grad(F.rms_norm(x, [N], weight, eps), inputs, grad_out)
+
+        # With g = dy * w: dx = r * g - x * r**3 * mean(x * g) and dw = sum over rows of dy * x * r.
+        x64, dy64 = x.detach().double(), grad_out.double()
+        g = dy64 * weight.detach().double() if has_weight else dy64
+        r = (x64.square().mean(-1, keepdim=True) + eps).rsqrt()
+        grad_x_ref = r * g - x64 * r.pow(3) * (x64 * g).mean(-1, keepdim=True)
+        refs = (grad_x_ref, (dy64 * x64 * r).sum(0)) if has_weight else (grad_x_ref,)
+
+        # Both gradients are sums of terms that can cancel (for N == 1, dx is about r * g * eps / x**2),
+        # so the rounding error scales with the sum of the terms' magnitudes, not with the result.
+        grad_x_terms = (r * g).abs() + x64.abs() * r.pow(3) * (x64 * g).abs().mean(-1, keepdim=True)
+        terms = (grad_x_terms, (dy64 * x64 * r).abs().sum(0)) if has_weight else (grad_x_terms,)
+        rtol, atol = self._rms_norm_out_tols[dtype]
+        scale = 1e-12 if dtype == torch.float64 else 1e-4
+        for grad, ref, term in zip(grads, refs, terms):
+            self.assertEqual(grad, ref.to(dtype), rtol=rtol, atol=atol + scale * term.max().item())
+
+        if has_weight:
+            # Asking for one gradient must not change the other.
+            (grad_x,) = torch.autograd.grad(F.rms_norm(x, [N], weight, eps), x, grad_out)
+            (grad_weight,) = torch.autograd.grad(F.rms_norm(x, [N], weight, eps), weight, grad_out)
+            self.assertEqual(grad_x, grads[0], atol=0, rtol=0)
+            self.assertEqual(grad_weight, grads[1], atol=0, rtol=0)
+
+    @onlyCPU
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_fused_rms_norm_backward_cpu_weight_grad_accumulates_in_float(self, device, dtype):
+        # rstd is exactly 1 (eps vanishes next to 1 in float), so every row adds the increment
+        # to each weight-gradient entry and the exact total is representable. A running sum held
+        # in bfloat16 (float16) stops growing at 256 (2048) increments, so per-thread partial sums
+        # kept in the input dtype would lose most of it.
+        M, N = 2**20, 8
+        increment = 1.0 if dtype == torch.bfloat16 else 2.0**-5
+        x = torch.ones(M, N, dtype=dtype, device=device)
+        weight = torch.ones(N, dtype=dtype, device=device, requires_grad=True)
+        grad_out = torch.full((M, N), increment, dtype=dtype, device=device)
+
+        (grad_weight,) = torch.autograd.grad(F.rms_norm(x, [N], weight, 1e-10), weight, grad_out)
+        self.assertEqual(grad_weight, torch.full_like(grad_weight, M * increment), atol=0, rtol=0)
+
+    @onlyCPU
+    @parametrize_test("has_weight", [True, False])
+    def test_fused_rms_norm_cpu_gradcheck(self, device, has_weight):
+        # Normalizing over (2, 19) covers a full double vector and a tail on every ISA.
+        x = torch.randn(3, 2, 19, dtype=torch.double, device=device, requires_grad=True)
+        weight = torch.randn(2, 19, dtype=torch.double, device=device, requires_grad=True) if has_weight else None
+        inputs = (x, weight) if has_weight else (x,)
+
+        def fn(x, weight=None):
+            return F.rms_norm(x, (2, 19), weight, 1e-5)
+
+        self.assertTrue(gradcheck(fn, inputs, check_forward_ad=True))
+        self.assertTrue(gradgradcheck(fn, inputs))
+
+    @onlyCPU
+    def test_fused_rms_norm_cpu_dispatches_to_fused_kernels(self, device):
+        # The composite fallback runs pow/mean/rsqrt/mul; CPU should run the fused ops instead.
+        class RecordOps(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.ops = set()
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.ops.add(func)
+                return func(*args, **(kwargs or {}))
+
+        x = torch.randn(4, 16, device=device, requires_grad=True)
+        weight = torch.randn(16, device=device, requires_grad=True)
+        with RecordOps() as recorder:
+            F.rms_norm(x, [16], weight, 1e-5).sum().backward()
+
+        self.assertIn(torch.ops.aten._fused_rms_norm.default, recorder.ops)
+        self.assertIn(torch.ops.aten._fused_rms_norm_backward.default, recorder.ops)
+        self.assertNotIn(torch.ops.aten.pow.Tensor_Scalar, recorder.ops)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.bfloat16)
+    def test_fused_rms_norm_cpu_empty(self, device, dtype):
+        x = torch.randn(0, 8, dtype=dtype, device=device, requires_grad=True)
+        weight = torch.randn(8, dtype=dtype, device=device, requires_grad=True)
+        y, rstd = torch._fused_rms_norm(x, [8], weight, 1e-5)
+        self.assertEqual(y.shape, (0, 8))
+        self.assertEqual(rstd.shape, (0, 1))
+
+        # With no rows the weight gradient is an empty sum, so it must be zeros, not uninitialized memory.
+        grad_x, grad_weight = torch.autograd.grad(y, (x, weight), torch.empty_like(y))
+        self.assertEqual(grad_x.shape, (0, 8))
+        self.assertEqual(grad_weight, torch.zeros_like(weight), atol=0, rtol=0)
+
+        # The mean of no squares is NaN, as in the composite.
+        y, rstd = torch._fused_rms_norm(torch.randn(3, 0, dtype=dtype, device=device), [0], None, 1e-5)
+        self.assertEqual(y.shape, (3, 0))
+        self.assertEqual(rstd, torch.full((3, 1), float("nan"), device=device), atol=0, rtol=0)
+
+    @onlyCPU
+    def test_fused_rms_norm_cpu_rejects_mismatched_weight_dtype(self, device):
+        x = torch.randn(2, 8, dtype=torch.bfloat16, device=device)
+        weight = torch.randn(8, dtype=torch.float32, device=device)
+
+        # F.rms_norm sends mixed dtypes to the composite, but the private op must not read float32 weights as bfloat16.
+        with self.assertRaisesRegex(RuntimeError, "same dtype as the input"):
+            torch._fused_rms_norm(x, [8], weight, 1e-5)
+
     @skipMPS  # backward mismatches CPU reference at this size on MPS
     @onlyAccelerator
     def test_layer_norm_gamma_beta_backward_dispatch_bands(self, device):
@@ -7977,8 +8226,7 @@ class TestNNDeviceType(NNTestCase):
                             _, rstd = torch.ops.aten._fused_rms_norm.default(x, [N], weight, eps)
                             _, dgamma = torch.ops.aten._fused_rms_norm_backward.default(
                                 grad_out, x, [N], rstd, weight, [False, True])
-                            # aten::_fused_rms_norm_backward has no CPU kernel, so build the
-                            # reference through the decomposed rms_norm autograd path instead.
+                            # Reference: float32 rms_norm autograd on CPU.
                             x_cpu = x_cpu.requires_grad_(True)
                             weight_cpu = weight_cpu.requires_grad_(True)
                             out_cpu = torch.nn.functional.rms_norm(x_cpu, [N], weight_cpu, eps)
