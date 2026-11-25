@@ -130,11 +130,11 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
 
 void OperatorEntry::assertSignatureIsCorrect(const CppSignature& call_signature, bool has_symint) const {
   if (has_symint) {
-    if (C10_UNLIKELY(sym_cpp_signature_.has_value() && (call_signature != sym_cpp_signature_->signature))) {
+    if (sym_cpp_signature_.has_value() && (call_signature != sym_cpp_signature_->signature)) [[unlikely]] {
       reportSignatureError(call_signature, *sym_cpp_signature_);
     }
   } else {
-    if (C10_UNLIKELY(cpp_signature_.has_value() && (call_signature != cpp_signature_->signature))) {
+    if (cpp_signature_.has_value() && (call_signature != cpp_signature_->signature)) [[unlikely]] {
       reportSignatureError(call_signature, *cpp_signature_);
     }
   }
@@ -468,7 +468,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
   const auto dispatch_ix = getDispatchTableIndexForDispatchKey(dispatch_key);
-  if (C10_UNLIKELY(dispatch_ix == -1)) {
+  if (dispatch_ix == -1) [[unlikely]] {
     return;
   }
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
@@ -549,7 +549,7 @@ void OperatorEntry::checkInvariants() const {
   for (auto k : allDispatchKeysInFullSet()) {
     auto expected_k = computeDispatchTableEntry(c10::Dispatcher::singleton(), k);
     auto idx = getDispatchTableIndexForDispatchKey(k);
-    if (C10_UNLIKELY(idx == -1)) {
+    if (idx == -1) [[unlikely]] {
       continue;
     }
     TORCH_INTERNAL_ASSERT(expected_k._equalsBoxedAndUnboxed(dispatchTable_[idx]),
