@@ -31,12 +31,14 @@ def _fake(mode, x: Any) -> Any:
     if isinstance(x, torch.fx.Node):
         x = x.meta.get("val")
     if isinstance(x, TensorType):
-        if x.is_const:
-            return mode.from_tensor(x._const)
-        sizes = [d.seen for d in x.dims]
+        const = x._const
+        if const is not None:
+            return mode.from_tensor(const)
+        dtype, device, dims = x.concrete()
+        sizes = [d.seen for d in dims]
         with mode:
             return torch.empty_strided(
-                sizes, x.strides or _contiguous(sizes), dtype=x.dtype, device=x.device
+                sizes, x.strides or _contiguous(sizes), dtype=dtype, device=device
             )
     if is_fake_tensor(x):
         with mode:
@@ -643,9 +645,16 @@ class Mismatch(RuntimeError):
     """A kernel gave something else than the ops it replaced."""
 
 
+def _overload(node: torch.fx.Node) -> torch._ops.OpOverload:
+    """The operator ``node`` calls."""
+    if not isinstance(node.target, torch._ops.OpOverload):
+        raise TypeError(f"{node} doesn't call an operator")
+    return node.target
+
+
 def _operator(node: torch.fx.Node) -> str:
     """``aten::mul.Tensor`` for a node calling ``torch.ops.aten.mul.Tensor``."""
-    schema = node.target._schema
+    schema = _overload(node)._schema
     return (
         f"{schema.name}.{schema.overload_name}" if schema.overload_name else schema.name
     )
@@ -659,10 +668,8 @@ def _same_operator(wanted: str, found: str) -> bool:
 
 
 def _writes_or_draws(node: torch.fx.Node) -> bool:
-    return (
-        node.target._schema.is_mutable
-        or torch.Tag.nondeterministic_seeded in node.target.tags
-    )
+    op = _overload(node)
+    return op._schema.is_mutable or torch.Tag.nondeterministic_seeded in op.tags
 
 
 def _differs(want: Any, have: Any, rtol: float, atol: float) -> str | None:

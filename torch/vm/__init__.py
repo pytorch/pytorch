@@ -512,9 +512,9 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
     The executor's switches are process-wide (one function on the VM per
     process), and so is this report: it covers every function the VM ran.
     """
-    import torch._rust as rust
     import torch._rust_inductor as ri
 
+    rust = _runtime()
     program = _program(fn)
     places: dict[str, dict[str, Any]] = {}
     for t in ri.traces:

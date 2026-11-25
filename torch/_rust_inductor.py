@@ -24,6 +24,7 @@ training mode isn't entered in evaluation mode, which gets one of its own.
 import contextlib
 import dataclasses
 import functools
+import importlib
 import inspect
 import logging
 import operator
@@ -51,10 +52,9 @@ log = logging.getLogger(__name__)
 
 
 def _rust() -> Any:
-    """The torch._rust extension (it has no stubs)."""
-    import torch._rust as rust
-
-    return rust
+    """The torch._rust extension (it has no stubs, and a build may not have
+    it: see torch/__init__.py)."""
+    return importlib.import_module("torch._rust")
 
 
 class _Null:

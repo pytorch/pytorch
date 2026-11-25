@@ -16,7 +16,6 @@ that needs no gradients). Lower versions run their graphs as they are, and
 autograd differentiates the ops they run.
 """
 
-import copy
 import dataclasses
 import logging
 import os
@@ -28,7 +27,7 @@ import torch
 import torch.fx
 from torch.vm import _guards
 from torch.vm._graph import copy_graph_module, direct, specialize_floats
-from torch.vm._types import exact, Type
+from torch.vm._types import exact, TensorType, Type
 
 
 log = logging.getLogger(__name__)
@@ -101,7 +100,14 @@ def _target(ph: list[str], i: int) -> str:
 class Pipeline:
     """A function's block passes, split at ``Autograd`` and ``Partition``."""
 
-    def __init__(self, block_passes: Sequence[Any], autograd: Any, partition: Any, positions: dict[int, int], verify: bool = False) -> None:
+    def __init__(
+        self,
+        block_passes: Sequence[Any],
+        autograd: Any,
+        partition: Any,
+        positions: dict[int, int],
+        verify: bool = False,
+    ) -> None:
         # positions: index in block_passes -> how many of Autograd/Partition precede it.
         self.forward = [p for i, p in enumerate(block_passes) if positions[i] == 0]
         self.joint = [p for i, p in enumerate(block_passes) if positions[i] == 1]
@@ -110,9 +116,17 @@ class Pipeline:
         self.partition = partition
         self.reports: dict[str, Report] = {}
         self.verify = verify or VERIFY
-        self.step_begins = [p.step_begin for p in block_passes if hasattr(p, "step_begin")]
+        self.step_begins = [
+            p.step_begin for p in block_passes if hasattr(p, "step_begin")
+        ]
 
-    def __call__(self, name: str, gm: torch.fx.GraphModule, inputs: list[Any], input_types: list[Type]) -> tuple[Callable, bool]:
+    def __call__(
+        self,
+        name: str,
+        gm: torch.fx.GraphModule,
+        inputs: list[Any],
+        input_types: list[Type],
+    ) -> tuple[Callable, bool]:
         """The region's function of its inputs, and whether a pass read a
         weight's value (so it's only for these weights)."""
         if name in self.reports:
@@ -120,11 +134,15 @@ class Pipeline:
         report = Report(name, input_types)
         self.reports[name] = report
         for t in input_types:
-            if t.is_const:
+            if isinstance(t, TensorType) and t.is_const:
                 t._on_const = lambda: setattr(report, "const_read", True)
         gm.meta["vm_example_inputs"] = inputs
         gm.meta["vm_stage"] = "forward"
-        gm.meta["vm_const_inputs"] = [p.name for p, t in zip(gm.graph.find_nodes(op="placeholder"), input_types) if t.is_const]
+        gm.meta["vm_const_inputs"] = [
+            p.name
+            for p, t in zip(gm.graph.find_nodes(op="placeholder"), input_types)
+            if isinstance(t, TensorType) and t.is_const
+        ]
         versions = [Version("v1", [], gm, [])]
         for p in self.forward:
             out = self._apply(p, versions[-1].gm, input_types, inputs, report)
@@ -132,7 +150,14 @@ class Pipeline:
                 continue
             new, lifted = out
             if lifted.dynamic:
-                versions.append(Version(f"v{len(versions) + 1}", [_name(p)], new, versions[-1].checks + lifted.dynamic))
+                versions.append(
+                    Version(
+                        f"v{len(versions) + 1}",
+                        [_name(p)],
+                        new,
+                        versions[-1].checks + lifted.dynamic,
+                    )
+                )
             else:
                 versions[-1].gm = new
                 versions[-1].passes.append(_name(p))
@@ -143,7 +168,14 @@ class Pipeline:
                 # AOT Autograd bakes floats in: its version holds for these values.
                 special = specialize_floats(top.gm, inputs)
                 lifted = _guards.lift(special, inputs)
-                versions.append(Version(f"v{len(versions) + 1}", ["Autograd (floats specialized)"], special, top.checks + lifted.dynamic))
+                versions.append(
+                    Version(
+                        f"v{len(versions) + 1}",
+                        ["Autograd (floats specialized)"],
+                        special,
+                        top.checks + lifted.dynamic,
+                    )
+                )
                 top = versions[-1]
             top.run = self._autograd(top.gm, inputs, input_types, report)
         for v in versions:
@@ -160,27 +192,48 @@ class Pipeline:
         try:
             new = p(work, input_types)
             if not isinstance(new, torch.fx.GraphModule):
-                raise TypeError(f"a block pass returns a GraphModule, not {type(new).__name__} (vm.lower_to wraps a callable)")
+                raise TypeError(
+                    f"a block pass returns a GraphModule, not {type(new).__name__} (vm.lower_to wraps a callable)"
+                )
             lifted = _guards.lift(new, gm.meta["vm_example_inputs"])
         except Exception as e:
-            report.notes.append(f"{_name(p)} ({stage}): raised {type(e).__name__}: {e}; dropped")
-            warnings.warn(f"torch.vm: block pass {_name(p)} raised on {report.name} ({stage}), so it's skipped there: {type(e).__name__}: {e}", stacklevel=2)
+            report.notes.append(
+                f"{_name(p)} ({stage}): raised {type(e).__name__}: {e}; dropped"
+            )
+            warnings.warn(
+                f"torch.vm: block pass {_name(p)} raised on {report.name} ({stage}), so it's skipped there: {type(e).__name__}: {e}",
+                stacklevel=2,
+            )
             return None
         if lifted.failed:
             shown = ", ".join(f"{c!r} on {n}" for n, c in lifted.failed)
-            report.notes.append(f"{_name(p)} ({stage}): {shown} doesn't hold for this region's inputs; dropped")
+            report.notes.append(
+                f"{_name(p)} ({stage}): {shown} doesn't hold for this region's inputs; dropped"
+            )
             return None
         if lifted.held:
             shown = ", ".join(f"{c!r} on {n}" for n, c in lifted.held)
-            report.notes.append(f"{_name(p)} ({stage}): {shown} holds for every input this region runs on; merged")
-        changes = [r[0] for r in new.meta.get("vm_replacements", ())[len(gm.meta.get("vm_replacements", ())) :] if r[3] == "changes"]
+            report.notes.append(
+                f"{_name(p)} ({stage}): {shown} holds for every input this region runs on; merged"
+            )
+        changes = [
+            r[0]
+            for r in new.meta.get("vm_replacements", ())[
+                len(gm.meta.get("vm_replacements", ())) :
+            ]
+            if r[3] == "changes"
+        ]
         uneven = [c for _, c in lifted.dynamic if not c.rank_uniform]
         if changes and uneven:
             shown = ", ".join(map(repr, uneven))
-            report.notes.append(f"{_name(p)} ({stage}): it changes collectives, so its guards must agree on every rank, and {shown} may not; dropped")
+            report.notes.append(
+                f"{_name(p)} ({stage}): it changes collectives, so its guards must agree on every rank, and {shown} may not; dropped"
+            )
             return None
         if lifted.dynamic and stage != "forward":
-            report.notes.append(f"{_name(p)} ({stage}): guards that vary between calls are only supported before Autograd; dropped")
+            report.notes.append(
+                f"{_name(p)} ({stage}): guards that vary between calls are only supported before Autograd; dropped"
+            )
             return None
         return new, lifted
 
@@ -189,7 +242,12 @@ class Pipeline:
 
         def compile(g, ins):
             g.meta.update(vm_example_inputs=list(ins), vm_stage=stage)
-            types = [input_types[i] if stage != "backward" and i < len(input_types) else exact(x) for i, x in enumerate(ins)]
+            types = [
+                input_types[i]
+                if stage != "backward" and i < len(input_types)
+                else exact(x)
+                for i, x in enumerate(ins)
+            ]
             for p in passes:
                 out = self._apply(p, g, types, ins, report, stage)
                 if out is not None:
@@ -205,9 +263,13 @@ class Pipeline:
         from torch.vm.passes import Inductor
 
         def partition(joint, joint_inputs, **kwargs):
-            joint = self._stage(self.joint, "joint", report, input_types)(joint, joint_inputs)
+            joint = self._stage(self.joint, "joint", report, input_types)(
+                joint, joint_inputs
+            )
             if not isinstance(joint, torch.fx.GraphModule):
-                raise TypeError("a pass between Autograd and Partition lowered the joint graph")
+                raise TypeError(
+                    "a pass between Autograd and Partition lowered the joint graph"
+                )
             return self.partition.split(joint, joint_inputs, **kwargs)
 
         lowered_by_inductor = any(isinstance(p, Inductor) for p in self.post)
@@ -230,9 +292,17 @@ class Pipeline:
             for v in versions[1:]:
                 got = v.run(*inputs)
                 try:
-                    torch.testing.assert_close(list(got), list(want), **_tolerance(v.gm))
+                    tolerance = _tolerance(v.gm)
+                    torch.testing.assert_close(
+                        list(got),
+                        list(want),
+                        rtol=tolerance.get("rtol"),
+                        atol=tolerance.get("atol"),
+                    )
                 except AssertionError as e:
-                    report.notes.append(f"verify: {v.label} ({', '.join(v.passes)}) differs from the version below: {e}; dropped")
+                    report.notes.append(
+                        f"verify: {v.label} ({', '.join(v.passes)}) differs from the version below: {e}; dropped"
+                    )
                     v.checks = [(-1, _Never())]
                     continue
                 want = got
@@ -246,19 +316,24 @@ class _Never(_guards.Check):
 
 
 def _dispatch(versions: list[Version]) -> Callable:
-    base = versions[0]
-    guarded = list(reversed(versions[1:]))
+    def runner(v: Version) -> Callable:
+        if v.run is None:
+            raise AssertionError(f"version {v.label} has nothing to run")
+        return v.run
+
+    base, run_base = versions[0], runner(versions[0])
+    guarded = [(v, runner(v)) for v in reversed(versions[1:])]
 
     def run(*inputs):
-        for v in guarded:
+        for v, run_version in guarded:
             failed = _guards.failing(v.checks, inputs)
             if failed is None:
                 v.hits += 1
-                return v.run(*inputs)
+                return run_version(*inputs)
             key = repr(failed[1])
             v.misses[key] = v.misses.get(key, 0) + 1
         base.hits += 1
-        return base.run(*inputs)
+        return run_base(*inputs)
 
     return run
 
@@ -273,18 +348,28 @@ def versions(reports: dict[str, Report], block: int | None = None) -> list[Versi
         for k, v in enumerate(r.versions):
             ph = [p.name for p in v.gm.graph.find_nodes(op="placeholder")]
             guards = tuple((_target(ph, i), c) for i, c in v.checks)
-            out.append(VersionInfo(r.name, k + 1, tuple(v.passes), guards, v.hits, dict(v.misses)))
+            out.append(
+                VersionInfo(
+                    r.name, k + 1, tuple(v.passes), guards, v.hits, dict(v.misses)
+                )
+            )
     return out
 
 
-def explain(reports: dict[str, Report], block: int | None = None, view: str = "cfg") -> str:
+def explain(
+    reports: dict[str, Report], block: int | None = None, view: str = "cfg"
+) -> str:
     lines = []
     for r in _selected(reports, block):
-        lines.append(f"{r.name}: v0 = origin, plus {len(r.versions)} version(s); tried highest first")
+        lines.append(
+            f"{r.name}: v0 = origin, plus {len(r.versions)} version(s); tried highest first"
+        )
         lines.append(f"  input_types: [{', '.join(map(repr, r.input_types))}]")
         for v in reversed(r.versions):
             misses = f", misses {v.misses}" if v.misses else ""
-            lines.append(f"  version {v.label}  [{', '.join(v.passes) or 'traced graph'}]  hits {v.hits}{misses}")
+            lines.append(
+                f"  version {v.label}  [{', '.join(v.passes) or 'traced graph'}]  hits {v.hits}{misses}"
+            )
             ph = [p.name for p in v.gm.graph.find_nodes(op="placeholder")]
             for i, c in v.checks:
                 lines.append(f"    guard {c!r} on {_target(ph, i)}")

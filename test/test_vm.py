@@ -304,6 +304,14 @@ def writes_in_place(x, rate, box):
     return writes_tail(y, rate) + box.acc
 
 
+def writes_in_place_with_a_constant(x, rate, box):
+    y = writes_work(x, rate)
+    # As an optimizer counts its steps: a tensor the object holds, written in
+    # place, with a constant made in the call as the other operand.
+    box.steps.add_(torch.tensor(1.0))
+    return writes_tail(y, rate) + box.steps
+
+
 def writes_in_a_loop(x, rate, box):
     for i in range(3):
         x = writes_work(x, rate)
@@ -431,6 +439,19 @@ class TestVmWrites(TestCase):
             torch.zeros(4, device=device),
         )
         self.compare(writes_in_place, device, mine, theirs, lambda box: box.acc)
+
+    @isolated
+    def test_tensor_written_in_place_with_a_constant_made_in_the_call(self, device):
+        # The trace of the region propagates constants by running an op again
+        # on them: the object's tensor must not be written a second time.
+        mine, theirs = WritesBox(), WritesBox()
+        mine.steps, theirs.steps = (
+            torch.zeros((), device=device),
+            torch.zeros((), device=device),
+        )
+        self.compare(
+            writes_in_place_with_a_constant, device, mine, theirs, lambda box: box.steps
+        )
 
     @isolated
     def test_store_inside_a_loop(self, device):

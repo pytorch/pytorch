@@ -310,10 +310,10 @@ class Cfg:
     def branches(self) -> list[Branch]:
         self._function()
         return [
-            Branch(b, tuple(b.succs))
+            Branch(b, (b.succs[0], b.succs[1]))
             for b in self._blocks.values()
             if b.term == "branch" and len(b._succs) == 2
-        ]  # type: ignore[arg-type]
+        ]
 
     def effects(self, v: CfgValue) -> list[str]:
         """What the runs did at v: the torch ops it ran and Python frames it
