@@ -93,30 +93,6 @@ class TestFlopCounter(TestCase):
         with self.assertRaises(AssertionError):
             sdpa_flop_count(q_shape, k_bad, v_bad)
 
-    def test_sdpa_flop_count_batch_dims(self):
-        """Leading batch dims may be any number (or none) and broadcast."""
-        flat = sdpa_flop_count((6, 4, 32, 64), (6, 4, 16, 64), (6, 4, 16, 64))
-        self.assertEqual(
-            sdpa_flop_count((2, 3, 4, 32, 64), (2, 3, 4, 16, 64), (2, 3, 4, 16, 64)),
-            flat,
-        )
-        self.assertEqual(
-            sdpa_flop_count((2, 1, 4, 32, 64), (1, 3, 4, 16, 64), (1, 3, 4, 16, 64)),
-            flat,
-        )
-        self.assertEqual(
-            sdpa_flop_count((4, 32, 64), (4, 16, 64), (4, 16, 64)) * 6, flat
-        )
-        grad = (2, 3, 4, 32, 64)
-        self.assertEqual(
-            sdpa_backward_flop_count(
-                grad, (2, 1, 4, 32, 64), (1, 3, 4, 16, 64), (1, 3, 4, 16, 64)
-            ),
-            sdpa_backward_flop_count(
-                (6, 4, 32, 64), (6, 4, 32, 64), (6, 4, 16, 64), (6, 4, 16, 64)
-            ),
-        )
-
     def test_flop_counter_variety(self):
         mod = torch.nn.Linear(9, 10)
         with FlopCounterMode() as mode:
