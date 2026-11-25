@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorMeta.h>
@@ -8,6 +9,9 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/SoftmaxKernel.h>
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/detail/Softmax.h>
+#endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -320,6 +324,12 @@ TORCH_IMPL_FUNC(softmax_cpu_out)
   TORCH_CHECK(
       dim_ >= 0 && dim_ < input_.dim(),
       "dim must be non-negative and less than input dimensions");
+#if AT_MKLDNN_ENABLED()
+  if (mkldnn::dense_softmax_forward(
+          input_, output, static_cast<int>(dim_), false)) {
+    return;
+  }
+#endif
   if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
     softmax_lastdim_kernel(kCPU, output, input_);
   } else {
@@ -347,6 +357,12 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
     input_ = input_.view(1);
   }
 
+#if AT_MKLDNN_ENABLED()
+  if (mkldnn::dense_softmax_forward(
+          input_, output, static_cast<int>(dim_), true)) {
+    return;
+  }
+#endif
   if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
     log_softmax_lastdim_kernel(kCPU, output, input_);
   } else {

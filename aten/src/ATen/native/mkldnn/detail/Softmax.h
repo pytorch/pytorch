@@ -14,6 +14,12 @@ void softmax_forward(
     int softmax_axis,
     dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
 
+bool dense_softmax_forward(
+    const Tensor& src,
+    const Tensor& dst,
+    int softmax_axis,
+    bool log_softmax);
+
 } // namespace at::native::mkldnn
 
 #endif // AT_MKLDNN_ENABLED()
