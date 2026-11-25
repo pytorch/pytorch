@@ -2113,9 +2113,118 @@ class TagSafetyChecks(RecursiveDictTagTests):
         self.assertEqual(opt_fn(x), x * 9 + 1)
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_nn_module_tag_safe_with_list_tuple_and_partial_hook(self):
+        def hook(mod, args, out, scale):
+            return out * scale if scale != 1 else out
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dims = [4, 4]
+                self.shape = (4, 4)
+                self.register_forward_hook(functools.partial(hook, scale=2))
+
+            def forward(self, x):
+                return x.reshape(self.dims[0], self.shape[1]) + 1
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook_test(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_mgr = builder.get_guard_manager_from_source(LocalSource("mod"))
+            self.assertTrue(mod_mgr.is_tag_safe())
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook_test):
+            opt_fn(torch.randn(16))
+
 
 class RecursiveDictGuardTests(RecursiveDictTagTests):
     hw_classification = HardwareClassification.GENERIC
+
+    def _check_tag_hits_then_fail(self, mod, x, mutate):
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def fn(x):
+            return mod(x)
+
+        def hook_test(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_mgr = builder.get_guard_manager_from_source(LocalSource("mod"))
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+            for _ in range(5):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+            mutate()
+            self.assertFalse(guard_wrapper.check({"mod": mod, "x": x}))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook_test):
+            opt_fn(x)
+
+    def test_list_in_place_mutation_fails_guard(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dims = [4, 4]
+
+            def forward(self, x):
+                return x.reshape(self.dims[0], self.dims[1]) + 1
+
+        x = torch.randn(16)
+        for mutate in (
+            lambda mod: mod.dims.__setitem__(0, 2),
+            lambda mod: mod.dims.append(1),
+            lambda mod: mod.dims.pop(),
+        ):
+            torch.compiler.reset()
+            mod = Mod()
+            self._check_tag_hits_then_fail(mod, x, lambda: mutate(mod))
+
+    def test_partial_hook_keywords_mutation_fails_guard(self):
+        def hook(mod, args, out, scale):
+            return out * scale if scale != 1 else out
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        mod = Mod()
+        handle = mod.register_forward_hook(functools.partial(hook, scale=2))
+        partial_hook = mod._forward_hooks[handle.id]
+        self._check_tag_hits_then_fail(
+            mod, torch.randn(4), lambda: partial_hook.keywords.__setitem__("scale", 1)
+        )
+
+    def test_tuple_attr_rebind_fails_guard(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.shape = (4, 4)
+
+            def forward(self, x):
+                return x.reshape(self.shape) + 1
+
+        mod = Mod()
+
+        def rebind():
+            mod.shape = (2, 8)
+
+        self._check_tag_hits_then_fail(mod, torch.randn(16), rebind)
 
     def test_disabling(self):
         class Mod(torch.nn.Module):
