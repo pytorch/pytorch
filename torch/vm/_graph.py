@@ -389,6 +389,49 @@ def copy_graph_module(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return out
 
 
+def below_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    """``gm`` for a compiler that traces it again in the caller's state (AOT
+    Autograd, and Inductor through it). A region's graph holds what ran below
+    autocast, so traced with autocast on its operators would be treated a
+    second time. With autocast on, this gives a graph of one call that runs
+    ``gm`` with it off: the compiler traces the operators as they are, still
+    sees that autocast is on, and so keeps turning it off around what it
+    compiled, the backward included."""
+    from torch._rust_inductor import autocast_on
+
+    autocast = autocast_on()
+    if not autocast.raw_repr():
+        return gm
+    run = gm.forward
+
+    def below(*inputs):
+        with torch._C._ExcludeDispatchKeyGuard(autocast):
+            return run(*inputs)
+
+    out = lower_to(gm, below)
+    # The outputs one by one, as gm gives them: AOT Autograd reads how many
+    # there are off the graph.
+    (output,) = out.graph.find_nodes(op="output")
+    results = next(iter(gm.graph.find_nodes(op="output"))).args[0]
+    if isinstance(results, (list, tuple)):
+        with out.graph.inserting_before(output):
+            items = [
+                out.graph.call_function(operator.getitem, (output.args[0], k))
+                for k in range(len(results))
+            ]
+        output.args = (tuple(items) if isinstance(results, tuple) else items,)
+        out.recompile()
+    # As copy_graph_module: what AOT Autograd reads static inputs from.
+    if hasattr(gm, "_param_name_to_source"):
+        out._param_name_to_source = gm._param_name_to_source
+    for a, b in zip(
+        gm.graph.find_nodes(op="placeholder"), out.graph.find_nodes(op="placeholder")
+    ):
+        if hasattr(a, "_dynamo_source"):
+            b._dynamo_source = a._dynamo_source
+    return out
+
+
 def specialize_floats(
     gm: torch.fx.GraphModule, inputs: list[Any]
 ) -> torch.fx.GraphModule:

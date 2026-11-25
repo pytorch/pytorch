@@ -18,7 +18,7 @@ from typing import Any
 
 import torch
 from torch.vm._cfg import Cfg
-from torch.vm._graph import lower_to
+from torch.vm._graph import below_autocast, lower_to
 
 
 __all__ = [
@@ -226,12 +226,9 @@ class Inductor:
         if stage == "forward" and any(isinstance(x, float) for x in inputs):
             return _compile_without_floats(gm, inputs, self.config)
         if stage == "forward":
-            return lower_to(
-                gm,
-                _callable(
-                    compile_fx(gm, inputs, config_patches=dict(self.config) or None)
-                ),
-            )
+            patches = dict(self.config) or None
+            compiled = compile_fx(below_autocast(gm), inputs, config_patches=patches)
+            return lower_to(gm, _callable(compiled))
         with config.patch(self.config):
             boxed = compile_fx_inner(
                 gm,
@@ -281,11 +278,9 @@ def _compile_without_floats(
     nodes = [k for k, x in enumerate(items) if isinstance(x, torch.fx.Node)]
     out.args = ([items[k] for k in nodes],)
     inner.recompile()
-    compiled = _callable(
-        compile_fx(
-            inner, [inputs[i] for i in keep], config_patches=dict(config) or None
-        )
-    )
+    kept, patches = [inputs[i] for i in keep], dict(config) or None
+    code = compile_fx(below_autocast(inner), kept, config_patches=patches)
+    compiled = _callable(code)
 
     def inductor(*args):
         got = iter(compiled(*[args[i] for i in keep]))

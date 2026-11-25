@@ -26,7 +26,7 @@ from typing import Any
 import torch
 import torch.fx
 from torch.vm import _guards
-from torch.vm._graph import copy_graph_module, direct, specialize_floats
+from torch.vm._graph import below_autocast, copy_graph_module, direct, specialize_floats
 from torch.vm._types import exact, TensorType, Type
 
 
@@ -274,7 +274,7 @@ class Pipeline:
 
         lowered_by_inductor = any(isinstance(p, Inductor) for p in self.post)
         return aot_module_simplified(
-            gm,
+            below_autocast(gm),
             inputs,
             fw_compiler=self._stage(self.post, "forward_graph", report, input_types),
             bw_compiler=self._stage(self.post, "backward", report, input_types),
@@ -286,8 +286,12 @@ class Pipeline:
 
     def _verify(self, versions, inputs, report):
         """Compares each version with the one below on the traced run's inputs
-        and drops those that differ (within their replacements' tolerances)."""
-        with torch.no_grad():
+        and drops those that differ (within their replacements' tolerances).
+        They run as a region runs them: with autocast off (see
+        torch._rust_inductor.trace_region)."""
+        from torch._rust_inductor import autocast_on
+
+        with torch.no_grad(), torch._C._ExcludeDispatchKeyGuard(autocast_on()):
             want = versions[0].run(*inputs)
             for v in versions[1:]:
                 got = v.run(*inputs)

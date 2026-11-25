@@ -663,18 +663,45 @@ def _refusing_init(ctx, *a, **kw):
     raise _Refused(f"it calls the autograd.Function {ctx._forward_cls.__name__}")
 
 
+def autocast_on():
+    """The autocast dispatch keys that are on, on this thread: those the guard
+    that turns autocast off adds to the excluded keys."""
+    excluded = torch._C._dispatch_tls_local_exclude_set()
+    with torch._C._DisableAutocast():
+        return torch._C._dispatch_tls_local_exclude_set() - excluded
+
+
+def _under(autocast, fn):
+    """``fn``, run with the autocast keys ``autocast`` on again. A region's
+    graph runs with the autocast keys of its trace off (see trace_region); a
+    node that calls back into the program runs what the program ran, the way
+    the program ran it."""
+    if not autocast.raw_repr():
+        return fn
+
+    def call(*args, **kwargs):
+        included = torch._C._dispatch_tls_local_include_set()
+        excluded = torch._C._dispatch_tls_local_exclude_set() - autocast
+        with torch._C._ForceDispatchKeyGuard(included, excluded):
+            return fn(*args, **kwargs)
+
+    return call
+
+
 _function_apply = torch.autograd.Function.__dict__["apply"]
-# The graph's target for each autograd.Function's apply (one per class, so
-# that graphs of the same code are the same).
-_appliers: dict[type, Any] = {}
+# The graph's target for each autograd.Function's apply (one per class and
+# set of autocast keys it is called under, so that graphs of the same code
+# are the same).
+_appliers: dict[tuple[type, int], Any] = {}
 
 
-def _applier(cls):
-    fn = _appliers.get(cls)
+def _applier(cls, autocast):
+    fn = _appliers.get((cls, autocast.raw_repr()))
     if fn is None:
+        apply = _under(autocast, _function_apply.__get__(None, cls))
 
         def fn(*args):
-            return _function_apply.__get__(None, cls)(*args)
+            return apply(*args)
 
         name = f"apply_{cls.__name__}"
         if name in globals():
@@ -683,7 +710,7 @@ def _applier(cls):
         # A graph's code calls it as torch._rust_inductor.<name>, as it does
         # anything from torch.
         globals()[name] = fn
-        _appliers[cls] = fn
+        _appliers[cls, autocast.raw_repr()] = fn
     return fn
 
 
@@ -699,7 +726,7 @@ def _tracing_apply(cls, *args, **kwargs):
         return _function_apply.__get__(None, cls)(*args, **kwargs)
     if kwargs:
         raise _Refused(f"it calls the autograd.Function {cls.__name__} with keywords")
-    target = _applier(cls)
+    target = _applier(cls, autocast_on())
     Backward = torch.autograd.function.BackwardCFunction
     with disable_proxy_modes_tracing():
         del Backward.__init__
@@ -718,8 +745,9 @@ class _Effect:
     """The target of a graph node calling `fn`, a call torch.vm.Cfg.merge_across
     put in a region: the node runs it as it is (an effect the graph keeps)."""
 
-    def __init__(self, fn: Any, name: str) -> None:
+    def __init__(self, fn: Any, name: str, autocast: Any) -> None:
         self.fn = fn
+        self.call = _under(autocast, fn)
         self.__name__ = self.__qualname__ = name
 
     def __call__(self, *args, **kwargs):
@@ -734,13 +762,13 @@ class _Effect:
             raise RuntimeError(
                 f"{self!r} can't be traced into another graph: it must run as eager on every call"
             )
-        return self.fn(*args, **kwargs)
+        return self.call(*args, **kwargs)
 
     def __repr__(self) -> str:
         return f"opaque({getattr(self.fn, '__qualname__', self.fn)!r})"
 
 
-_effects: dict[int, _Effect] = {}
+_effects: dict[tuple[int, int], _Effect] = {}
 
 
 def _opaque_call(fn, *args, **kwargs):
@@ -749,10 +777,11 @@ def _opaque_call(fn, *args, **kwargs):
     mode = get_proxy_mode()
     if mode is None:
         return fn(*args, **kwargs)
-    target = _effects.get(id(fn))
+    autocast = autocast_on()
+    target = _effects.get((id(fn), autocast.raw_repr()))
     if target is None:
         name = f"opaque_{getattr(fn, '__name__', 'call')}_{len(_effects)}"
-        target = _effects[id(fn)] = _Effect(fn, name)
+        target = _effects[id(fn), autocast.raw_repr()] = _Effect(fn, name, autocast)
         # A graph's code calls it as torch._rust_inductor.<name>.
         globals()[name] = target
         torch.fx.node._side_effectful_functions.add(target)
@@ -1611,7 +1640,9 @@ def _vm_types():
 
 def _compile_vm(name, gm, example, consts, input_types):
     # Regions with the same graph and input metadata share the passes' output,
-    # unless a pass read a weight's value.
+    # unless a pass read a weight's value. Those traced in the same autocast
+    # state: a lowering compiles for the state it is called in (AOT Autograd
+    # turns autocast off around its backward only if it compiled under it).
     key = (
         block_pipeline,
         gm.code,
@@ -1619,6 +1650,7 @@ def _compile_vm(name, gm, example, consts, input_types):
             _meta(t) if isinstance(t, torch.Tensor) else float for t in example + consts
         ),
         torch.is_grad_enabled(),
+        autocast_on().raw_repr(),
     )
     own = (*key, tuple(map(id, consts)))
     for k in (key, own):
@@ -1925,6 +1957,13 @@ def trace_region(
 
     in_vm = block_pipeline is not None
     _skip_tracer_frames()
+    # The trace records below autocast: the graph holds the casts autocast
+    # made, and what an operator autocast treated ran with it off. Run with
+    # autocast on, its operators would be treated a second time: func runs it
+    # with the autocast keys that are on now turned off. (A region is only
+    # entered in the autocast state of its trace: see exec/reads.rs.)
+    autocast = autocast_on()
+    below_autocast = bool(autocast.raw_repr())
 
     def body(*xs):
         global _scalar_state, _trace_backups
@@ -2117,7 +2156,10 @@ def trace_region(
                 print(f"region {name}: miss on {what}")
             return None
         record.runs += 1
-        return compiled(*inputs, *consts)
+        if not below_autocast:
+            return compiled(*inputs, *consts)
+        with torch._C._ExcludeDispatchKeyGuard(autocast):
+            return compiled(*inputs, *consts)
 
     # For _dropped.
     func.record = record  # type: ignore[attr-defined]
