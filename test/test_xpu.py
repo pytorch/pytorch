@@ -154,6 +154,45 @@ class TestXpu(TestCase):
         self.assertEqual(solution, torch.tensor([[1.0], [2.0]], device="xpu"))
         self.assertEqual(cloned, a)
 
+    def test_mixed_dtype_binary_low_precision_out(self):
+        # The float input must not be rounded to the output dtype before the op.
+        for dtype in (torch.bfloat16, torch.half):
+            for n in (1, 16383, 16384, 65537):
+                a = torch.randn(n, device="xpu").to(dtype)
+                b = torch.randn(n, device="xpu")
+                out = torch.empty(n, device="xpu", dtype=dtype)
+                torch.add(a, b, out=out)
+                out, a, b = out.cpu(), a.cpu(), b.cpu()
+                expected = (a.float() + b).to(dtype)
+                self.assertEqual(out, expected, atol=0, rtol=0)
+
+    def test_vectorized_elementwise_remainder_sizes(self):
+        # Sizes around the CUDA vectorized kernel's 256 / 1024 / 4096 remainder
+        # boundaries, alone and after full blocks.
+        sizes = [1, 255, 256, 257, 1023, 1024, 1025, 2047, 4095, 4096, 4097]
+        sizes += [4096 + 256, 4096 + 1024, 3 * 4096 + 17, 65537]
+        for dtype in (torch.float32, torch.bfloat16, torch.float16, torch.uint8):
+            for n in sizes:
+                a, b, c = (
+                    torch.randint(0, 100, (n,), device="xpu").to(dtype)
+                    for _ in range(3)
+                )
+                a_cpu, b_cpu, c_cpu = a.cpu(), b.cpu(), c.cpu()
+                out = torch.full((n + 64,), 7, device="xpu", dtype=dtype)
+                torch.add(a, b, out=out[:n])
+                self.assertEqual(out[:n], a_cpu + b_cpu)
+                self.assertEqual(out[n:], torch.full((64,), 7, dtype=dtype))
+                self.assertEqual(
+                    torch.addcmul(a, b, c), torch.addcmul(a_cpu, b_cpu, c_cpu)
+                )
+                self.assertEqual(torch.square(a), torch.square(a_cpu))
+                self.assertEqual(a.float(), a_cpu.float())
+        for n in sizes:
+            # Same values through the strided kernel must give identical results.
+            x, y = torch.randn(2, n, device="xpu")
+            x_nc = torch.empty(2 * n, device="xpu")[::2].copy_(x)
+            self.assertEqual(torch.atan2(x, y), torch.atan2(x_nc, y), atol=0, rtol=0)
+
     def test_get_device_properties(self):
         current_device = torch.xpu.current_device()
         device_properties = torch.xpu.get_device_properties(current_device)
@@ -960,6 +999,52 @@ print(torch.xpu.is_initialized())
         self.assertEqual(src_device, torch.xpu.current_device())
         self.assertEqual(src_prev_stream, torch.xpu.current_stream())
         self.assertEqual(dst_prev_stream, torch.xpu.current_stream(dst_device))
+
+    def test_sparse_multiple_threads_same_device(self):
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 500
+
+        def ones_sparse(size):
+            a = torch.arange(size, device="xpu")
+            indices = torch.cartesian_prod(a, a).t()
+            values = torch.ones(size * size, device="xpu")
+            return torch.sparse_coo_tensor(indices, values)
+
+        weight = ones_sparse(size)
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = torch.xpu.Stream()
+            # Hard sync so cross-stream tensor use is not what's being tested.
+            torch.xpu.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with torch.xpu.stream(my_stream):
+                for _ in range(test_iters):
+                    # A sparse mm racing onto another thread's stream would
+                    # race with this thread's div_.
+                    results[t] = weight.mm(results[t])
+                    results[t].div_(float(size))
+            torch.xpu.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device="xpu")
+
+            threads = [
+                threading.Thread(target=_worker, args=(t,)) for t in range(num_threads)
+            ]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
 
     @unittest.skipIf(not HAS_PYZES, "pyzes is required for this test")
     def test_sleep(self):
@@ -2551,6 +2636,79 @@ if __name__ == "__main__":
             raise self.failureException(
                 f"capture with a side-stream free must complete without error, got {e!r}"
             ) from e
+
+    @serialTest()
+    def test_graph_allocator_free_after_auxiliary_capture_invalidation(self):
+        torch.xpu.empty_cache()
+        g = torch.xpu.XPUGraph()
+        pool = torch.xpu.graph_pool_handle()
+        capture_stream = torch.xpu.Stream()
+        auxiliary_stream = torch.xpu.Stream()
+
+        torch.xpu.synchronize()
+        with torch.xpu.stream(capture_stream):
+            g.capture_begin(pool=pool)
+            root = torch.ones((), device="xpu")
+            auxiliary_stream.wait_stream(capture_stream)
+            with torch.xpu.stream(auxiliary_stream):
+                temporary = root + 1
+                self.assertEqual(live_blocks(pool), 2)
+                with self.assertRaises(RuntimeError):
+                    temporary.item()
+                # Destruction on an invalidated captured stream must not throw.
+                del temporary
+                self.assertEqual(live_blocks(pool), 1)
+            with self.assertRaises(RuntimeError):
+                capture_stream.synchronize()
+            # XPU doesn't invalidate the capture on a failed sync (intel/torch-xpu-ops#6337).
+            capture_stream.wait_stream(auxiliary_stream)
+            g.capture_end()
+        del root
+        self.assertEqual(live_blocks(pool), 0)
+        g.reset()
+
+        # Invalidated capture metadata must not poison the next capture.
+        recovery = torch.xpu.XPUGraph()
+        with torch.xpu.graph(recovery, stream=capture_stream):
+            recovered = torch.ones(1, device="xpu") + 1
+        recovery.replay()
+        torch.xpu.synchronize()
+        self.assertEqual(recovered, torch.full_like(recovered, 2))
+
+    @serialTest()
+    @parametrize("allocation_capture_ended", [False, True])
+    def test_graph_allocator_free_in_unrelated_capture(self, allocation_capture_ended):
+        torch.xpu.empty_cache()
+        allocation_graph = torch.xpu.XPUGraph()
+        free_graph = torch.xpu.XPUGraph()
+        allocation_stream = torch.xpu.Stream()
+        free_stream = torch.xpu.Stream()
+
+        torch.xpu.synchronize()
+        with torch.xpu.stream(allocation_stream):
+            allocation_graph.capture_begin()
+            temporary = torch.ones(64, device="xpu")
+            allocation_output = temporary + 1
+            if allocation_capture_ended:
+                allocation_graph.capture_end()
+
+        with torch.xpu.stream(free_stream):
+            free_graph.capture_begin()
+            # Free in a different root, either while the allocation's capture
+            # is still active or after its tracking metadata has been removed.
+            del temporary
+            free_output = torch.full((64,), 3, device="xpu")
+            free_graph.capture_end()
+
+        if not allocation_capture_ended:
+            with torch.xpu.stream(allocation_stream):
+                allocation_graph.capture_end()
+
+        allocation_graph.replay()
+        free_graph.replay()
+        torch.xpu.synchronize()
+        self.assertEqual(allocation_output, torch.full_like(allocation_output, 2))
+        self.assertEqual(free_output, torch.full_like(free_output, 3))
 
     def test_graph_memory_stats_and_use_result_after_destroy_graph(self):
         kSmallSize = 1048576
