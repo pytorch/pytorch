@@ -1363,6 +1363,46 @@ class TestRegistryRuntime(TestCase):
         finally:
             self.registry.reenable_op_overrides(enable_dsl_names="test_dsl")
 
+    def test_router_declines_covered_calls_once(self) -> None:
+        from test_aot_manifest import ManifestFixture
+
+        from torch._native import aot_manifest
+
+        with ManifestFixture():
+            cond_calls: list[int] = []
+            axes_calls: list[int] = []
+            coverage = aot_manifest.get_coverage("fakeop", "CUDA")
+            inner_axes = coverage._covered_axes
+
+            def counting_axes(*args: Any, **kwargs: Any) -> dict[str, Any]:
+                axes_calls.append(1)
+                return inner_axes(*args, **kwargs)
+
+            coverage._covered_axes = counting_axes
+            aot_manifest._load_coverage()[("topk", "CPU")] = coverage
+
+            def probe_cond(*args: Any, **kwargs: Any) -> bool:
+                cond_calls.append(1)
+                return False
+
+            for index in range(2):
+                self.registry.register_op_override(
+                    f"coverage_count_{index}",
+                    "aten",
+                    "topk",
+                    "CPU",
+                    probe_cond,
+                    torch.topk,
+                    allow_multiple_override=True,
+                )
+            self._install("topk", "CPU")
+            torch.topk(torch.empty(4, 1024), 8)
+            self.assertEqual(axes_calls, [1])
+            self.assertEqual(cond_calls, [])
+            torch.topk(torch.empty(4, 512), 8)
+            self.assertEqual(axes_calls, [1, 1])
+            self.assertEqual(cond_calls, [1, 1])
+
 
 @skipIfTorchDynamo("Runtime registry tests exercise the dispatcher directly")
 class TestRegistryNonAtenNamespace(TestCase):

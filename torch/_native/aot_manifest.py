@@ -38,17 +38,23 @@ _SPEC_DTYPES: dict[str, torch.dtype] = {
 
 
 class _Coverage:
-    def __init__(self, op: str, covered_axes: Callable[..., dict], grid: list[dict]):
-        self._op = op
-        self._covered_axes = covered_axes
-        self._grid = grid
-        # Declarations with cpp_covers() get a C++ predicate in the AOT library,
-        # registered as torch.ops._native_aot.covers_<op>. Its declaration body
-        # mirrors the Python matching below, and codegen adds the artifact-target
-        # and ABI gates. Resolved lazily because the library loads after coverage
-        # is built.
+    def __init__(
+        self,
+        op: str,
+        covered_axes: Callable[..., dict[str, Any]],
+        grid: list[dict[str, Any]],
+        *,
+        structured: bool = True,
+        exact: bool = False,
+    ) -> None:
+        self._op: str = op
+        self.structured: bool = structured
+        self.exact: bool = exact
+        self._covered_axes: Callable[..., dict[str, Any]] = covered_axes
+        self._grid: list[dict[str, Any]] = grid
+        # Resolve the authoritative C++ predicate after its library loads.
         self._cpp_covers: Callable[..., bool] | None = None
-        self._cpp_probed = False
+        self._cpp_probed: bool = False
         self._archs: tuple[int, ...] | None = None
         self._available: dict[int, bool] = {}
 
@@ -84,12 +90,24 @@ class _Coverage:
                     pass
         return self._cpp_covers
 
-    def covers(self, args: tuple, kwargs: dict) -> bool:
-        # Gate on the same Context switch the stub consultations read: with AOT
-        # masked, a covered call must keep its JIT route rather than decline into a
-        # stub that will not fire, which would lose both accelerated routes.
+    def covers(
+        self,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        *,
+        op_symbol: str | None = None,
+    ) -> bool:
+        """Normalize the supplied variant before consulting native coverage."""
+        # Keep JIT eligible when the C++ AOT consultation is disabled.
         if not torch._C._get_native_aot_enabled():
             return False
+        if (
+            self.structured
+            and op_symbol
+            and op_symbol.split(".")[0] != _base_name(op_symbol)
+            and args
+        ):
+            kwargs = dict(kwargs, out=args[0])
         cpp = self._resolve_cpp_covers()
         if cpp is not None:
             try:
@@ -134,16 +152,28 @@ def _load_coverage() -> dict[tuple[str, str], _Coverage]:
         path = os.path.join(_OPS_DIR, entry, "aot.py")
         if not os.path.exists(path):
             continue
-        # Loaded by file path, not package import, so tests can point _OPS_DIR at
-        # fixtures, and without the validating loader, since codegen already checked
-        # the contract. A module is one declaration or a family exporting
-        # declarations().
+        # Codegen already validated the contract; load fixtures without package imports.
         mod = load_by_path(f"{entry}_aot", path)
         family = getattr(mod, "declarations", None)
         for d in family() if family is not None else [mod]:
             coverage[(d.ATEN_OP, d.DISPATCH_KEY)] = _Coverage(
-                d.ATEN_OP, d.covered_axes, expand_specs(d.kernel_precompile_grid())
+                d.ATEN_OP,
+                d.covered_axes,
+                expand_specs(d.kernel_precompile_grid()),
+                structured=getattr(d, "STRUCTURED", True),
+                exact=getattr(d, "EXACT", False),
             )
+    from .utils.operator import variant_aten_name
+
+    for (op, key), c in list(coverage.items()):
+        if c.structured:
+            for variant in ("out", "inplace"):
+                try:
+                    name = variant_aten_name(op, variant)
+                except AttributeError:
+                    continue
+                if name is not None:
+                    coverage.setdefault((name, key), c)
     return coverage
 
 
@@ -155,22 +185,24 @@ def _base_name(op_symbol: str) -> str:
 
 
 def get_coverage(op_symbol: str, dispatch_key: str) -> _Coverage | None:
-    """The op's AOT coverage, or None if it has no declaration.
-
-    The exact registration symbol wins over the base name, since a declaration may
-    be overload-qualified ("gt.Tensor") while a base-named one serves every overload
-    of its structured group. The router calls ``covers`` once per call rather than
-    per cond, which would pay the check N times on a multi-path op for the same
-    answer.
-    """
+    r"""Resolve declared coverage, using base-name fallback for non-exact structured declarations."""
     table = _load_coverage()
     c = table.get((op_symbol, dispatch_key))
     if c is not None:
         return c
-    return table.get((_base_name(op_symbol), dispatch_key))
+    base = _base_name(op_symbol)
+    candidate = table.get((base, dispatch_key))
+    if candidate is not None and candidate.structured and not candidate.exact:
+        return candidate
+    return None
 
 
-def covers(op_symbol: str, dispatch_key: str, args: tuple, kwargs: dict) -> bool:
-    """True if an AOT-embedded kernel serves this call of aten::<op_symbol>."""
+def covers(
+    op_symbol: str,
+    dispatch_key: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> bool:
+    r"""True if an AOT-embedded kernel serves this call of aten::<op_symbol>."""
     c = get_coverage(op_symbol, dispatch_key)
-    return c is not None and c.covers(args, kwargs)
+    return c is not None and c.covers(args, kwargs, op_symbol=op_symbol)

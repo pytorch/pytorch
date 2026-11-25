@@ -373,9 +373,9 @@ def _clamp_max(x: StorageScalar, y: StorageScalar) -> ComputeScalar:
 
 
 @cute.jit
-def _clamp(x: StorageScalar, lo: ComputeScalar, hi: ComputeScalar) -> ComputeScalar:
+def _clamp(x: StorageScalar, lo: StorageScalar, hi: StorageScalar) -> ComputeScalar:
     # The table supplies dtype limits for omitted bounds.
-    x = _opmath(x)
+    x, lo, hi = _opmath(x), _opmath(lo), _opmath(hi)
     t = _clamp_min(x, lo)
     return _clamp_max(t, hi)
 

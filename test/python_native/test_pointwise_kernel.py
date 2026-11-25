@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Annotated, Any, TYPE_CHECKING
 
 import torch
-from torch._native.cutedsl.config import POINTWISE_HOST_CACHE_LIMIT
+from torch._native.cutedsl.config import (
+    POINTWISE_ARCH_MAJORS,
+    POINTWISE_HOST_CACHE_LIMIT,
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -30,6 +33,18 @@ if TYPE_CHECKING:
 @instantiate_parametrized_tests
 class TestPointwiseIndexing(TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @parametrize("name,allowed", (("add.Tensor", True), ("rsub.Tensor", False)))
+    def test_output_dtype_policy_without_cuda(self, name: str, allowed: bool) -> None:
+        from torch._native.ops.pointwise import overrides, table
+
+        row = next(row for row in table.POINTWISE_DEF_TABLE if row.aten == name)
+        inputs = [torch.ones(4, device="cpu")] * row.nin
+        result = getattr(torch, name.partition(".")[0])(*inputs)
+        out = torch.empty(result.shape, dtype=torch.float64, device="cpu")
+        self.assertEqual(
+            overrides._make_dtype_cond(row, "out")(inputs, result.dtype, out), allowed
+        )
 
     def test_row_first_grid_limit(self) -> None:
         from torch._native.ops.pointwise.layout import tma_layout
@@ -60,6 +75,23 @@ class TestPointwiseIndexing(TestCase):
         value = torch.empty_strided(shape, strides, device="meta")
         self.assertEqual(can_use_32bit_indexing(value), expected)
 
+    @parametrize("operation", ("floor_divide", "pow.Tensor_Tensor"))
+    def test_inplace_variant_mutates_its_input(self, operation: str) -> None:
+        from torch._native.utils.operator import variant_aten_name
+
+        value = torch.tensor([7, -7] if operation == "floor_divide" else [2, 3])
+        other = torch.full_like(value, 2)
+        expected = value // other if operation == "floor_divide" else value**other
+        name = variant_aten_name(operation, "inplace")
+        if name is None:
+            self.fail(f"missing in-place variant for {operation}")
+        packet, _, overload = name.partition(".")
+        result = getattr(getattr(torch.ops.aten, packet), overload or "default")(
+            value, other
+        )
+        self.assertIs(result, value)
+        self.assertEqual(value, expected)
+
 
 class TestPointwiseKernel(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -88,6 +120,118 @@ class TestPointwiseKernel(TestCase):
             out_dtypes,
             **kwargs,
         )
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize(
+        "name,out_dtype",
+        [
+            (name, torch.float64)
+            for name in (
+                "isnan",
+                "isinf",
+                "rsub.Tensor",
+                "add.Tensor",
+                "bitwise_and.Tensor",
+                "bitwise_or.Tensor",
+                "bitwise_xor.Tensor",
+                "logical_not",
+            )
+        ]
+        + [("logical_not", torch.uint16), ("bitwise_and.Tensor", torch.int8)],
+    )
+    def test_output_dtype_admission_matches_native(
+        self, device: str, name: str, out_dtype: torch.dtype
+    ) -> None:
+        from torch._native.ops.pointwise import overrides, table
+        from torch._native.registry import _resolve_overload
+        from torch._native.utils.operator import variant_aten_name
+
+        row = next(row for row in table.POINTWISE_DEF_TABLE if row.aten == name)
+        symbol = variant_aten_name(name, "out")
+        op = _resolve_overload("aten", symbol) if symbol is not None else None
+        if op is None:
+            self.fail(f"missing out overload for {name}")
+        dtype = torch.int32 if name.startswith("bitwise") else torch.float32
+        inputs = [torch.ones(4, device=device, dtype=dtype)] * row.nin
+        with torch.backends.python_native.cutedsl.disabled():
+            result = getattr(torch, name.partition(".")[0])(*inputs)
+            storage = torch.int16 if out_dtype is torch.uint16 else out_dtype
+            wide = torch.full(result.shape, 7, dtype=storage, device=device).view(
+                out_dtype
+            )
+            before = wide.clone()
+            try:
+                reference = op(*inputs, out=torch.empty_like(wide))
+                allowed = True
+            except RuntimeError:
+                allowed = False
+        policy = overrides._make_dtype_cond(row, "out")
+        self.assertEqual(policy(inputs, result.dtype, wide), allowed)
+        self.assertTrue(policy(inputs, result.dtype, torch.empty_like(result)))
+        supported = torch.cuda.get_device_capability(device)[0] in POINTWISE_ARCH_MAJORS
+        self.assertEqual(
+            overrides._make_cond(row, "out")(*inputs, out=wide), allowed and supported
+        )
+        self.assertEqual(wide.view(torch.uint8), before.view(torch.uint8))
+        if allowed:
+            actual = overrides._make_impl(row, "out")(*inputs, out=wide)
+            self.assertEqual(actual, reference, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("operation", ("logaddexp", "bitwise_left_shift.Tensor"))
+    def test_mixed_dtype_adapter(self, device: str, operation: str) -> None:
+        from torch._native.ops.pointwise import overrides, table
+
+        if torch.cuda.get_device_capability(device)[0] not in POINTWISE_ARCH_MAJORS:
+            self.skipTest("pointwise overrides require a supported architecture")
+        row = next(r for r in table.POINTWISE_DEF_TABLE if r.aten == operation)
+        integer = operation.startswith("bitwise_")
+        with torch.backends.python_native.cutedsl.disabled():
+            x = torch.full(
+                (32,),
+                1 if integer else 0,
+                device=device,
+                dtype=torch.int32 if integer else torch.float32,
+            )
+            y = (
+                torch.tensor(3, dtype=torch.int64)
+                if integer
+                else torch.zeros(32, device=device, dtype=torch.float64)
+            )
+            expected = (
+                torch.bitwise_left_shift(x, y) if integer else torch.logaddexp(x, y)
+            )
+        self.assertTrue(overrides._make_cond(row, "functional")(x, y))
+        actual = overrides._make_impl(row, "functional")(x, y)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("case", ("float64_inputs", "integer_output", "cuda_scalar_input"))
+    def test_adapter_declines_double_rounding(self, device: str, case: str) -> None:
+        from torch._native.ops.pointwise import overrides, table
+
+        if torch.cuda.get_device_capability(device)[0] not in POINTWISE_ARCH_MAJORS:
+            self.skipTest("pointwise overrides require a supported architecture")
+        row = next(r for r in table.POINTWISE_DEF_TABLE if r.aten == "add.Tensor")
+        with torch.backends.python_native.cutedsl.disabled():
+            dtype = torch.int32 if case == "integer_output" else torch.float64
+            x = torch.ones(32, device=device, dtype=dtype)
+            y = torch.zeros_like(x)
+            out = torch.empty_like(
+                x, dtype=torch.bfloat16 if case == "integer_output" else torch.float16
+            )
+            if case == "cuda_scalar_input":
+                x = x.half()
+                y = torch.zeros((), device=device, dtype=torch.float64)
+                out = None
+        variant = "functional" if out is None else "out"
+        kwargs = {} if out is None else {"out": out}
+        cond = overrides._make_cond(row, variant)
+        self.assertFalse(cond(x, y, **kwargs))
+        self.assertTrue(cond(x.float(), y.float(), **kwargs))
 
     @onlyCUDA
     @skipIfNoCuteDSL
@@ -971,6 +1115,21 @@ class TestPointwiseKernel(TestCase):
             result_dtypes=sig.results,
         )
         self.assertEqual(actual.view(torch.int16), expected.view(torch.int16))
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    def test_logical_narrow_output_preserves_native_values(self, device: str) -> None:
+        from torch._native.ops.pointwise import overrides, table
+
+        x = torch.tensor([0.5, 0.0, -0.5, 1.0], device=device)
+        out = torch.empty(x.shape, dtype=torch.int8, device=device)
+        row = next(
+            row for row in table.POINTWISE_DEF_TABLE if row.aten == "logical_not"
+        )
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = torch.logical_not(x, out=torch.empty_like(out))
+        self.assertFalse(overrides._make_cond(row, "out")(x, out=out))
+        self.assertEqual(torch.logical_not(x, out=out), expected)
 
 
 instantiate_device_type_tests(TestPointwiseKernel, globals(), only_for=("cuda",))
