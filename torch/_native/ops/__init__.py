@@ -6,6 +6,7 @@ from . import (
     polar,
     quantize_tensor,
     reductions,
+    scaled_mm,
     scatter_add,
     topk,
 )

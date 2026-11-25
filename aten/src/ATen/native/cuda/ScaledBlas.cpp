@@ -37,6 +37,8 @@
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_scaled_addmm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
+#include <ATen/ops/_scaled_mm_mxfp6.h>
+#include <ATen/ops/_scaled_mm_mxfp6_native.h>
 #include <ATen/ops/_scaled_mm_v2_native.h>
 #include <ATen/ops/abs.h>
 #include <ATen/ops/addmm_native.h>
@@ -1717,6 +1719,32 @@ void scaled_mm_cuda_v2_impl(
           const Scalar& beta,
           const Scalar& alpha) {
   const char* op_name = accumulator ? "torch._scaled_addmm" : "torch._scaled_mm";
+  if (mat_a.scalar_type() == kFloat6_e2m3fn_x4) {
+    // validate_scaled_mm_v2_inputs checked the operands and scales.
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !accumulator && !bias, op_name, " does not support bias or an accumulator for MXFP6");
+#ifdef USE_ROCM
+    TORCH_CHECK_NOT_IMPLEMENTED(false, op_name, " does not support MXFP6 on ROCm");
+#endif
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        at::cuda::getDeviceProperties(mat_a.get_device())->major == 10,
+        op_name, " supports MXFP6 only on SM100-family GPUs");
+    if (out.numel() == 0) {
+      return;
+    }
+    if (mat_a.size(1) == 0) {
+      out.zero_();
+      return;
+    }
+    at::_scaled_mm_mxfp6_out(
+        const_cast<Tensor&>(out),
+        mat_a,
+        mat_b,
+        *scale_a_list.begin(),
+        *scale_b_list.begin(),
+        out.scalar_type());
+    return;
+  }
   bool allowed_device = scaled_mm_arch_allowed();
   TORCH_CHECK_NOT_IMPLEMENTED(
       allowed_device,
@@ -2004,6 +2032,34 @@ void scaled_mm_cuda_v2_impl(
 }
 
 } // namespace
+
+Tensor& _scaled_mm_mxfp6_out_cuda(
+    const Tensor& /*mat_a*/,
+    const Tensor& /*mat_b*/,
+    const Tensor& /*scale_a*/,
+    const Tensor& /*scale_b*/,
+    ScalarType /*out_dtype*/,
+    Tensor& out) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "MXFP6 scaled_mm needs an SM100-family NVIDIA GPU and runs through the "
+      "CuTeDSL override in torch._native, which is not active: it needs the "
+      "nvidia-cutlass-dsl and apache-tvm-ffi packages at a supported version "
+      "(TORCH_LOGS=+native_dsl shows why registration was skipped), and "
+      "TORCH_DISABLE_NATIVE_JIT=1 or a disabled torch.backends.python_native "
+      "context turns it off.");
+  return out;
+}
+
+Tensor _scaled_mm_mxfp6_cuda(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    ScalarType out_dtype) {
+  Tensor out;
+  return _scaled_mm_mxfp6_out_cuda(mat_a, mat_b, scale_a, scale_b, out_dtype, out);
+}
 
 // V2: Computes matrix multiply + bias while applying scaling to input and output matrices.
 // Shape inference + output allocation happens in TORCH_META_FUNC(_scaled_mm_v2);

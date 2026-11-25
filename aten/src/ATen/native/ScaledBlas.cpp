@@ -158,6 +158,11 @@ TORCH_META_FUNC(_scaled_mm_v2)(
       "Bias must be size ", mat2.sym_size(1), " but got ", bias->sym_numel());
 
   const auto out_dtype_ = out_dtype.value_or(self.scalar_type());
+  TORCH_CHECK_VALUE(
+      self.scalar_type() != kFloat6_e2m3fn_x4 || out_dtype_ == kBFloat16 ||
+          out_dtype_ == kFloat,
+      "MXFP6 scaled_mm requires out_dtype to be BFloat16 or Float, got ",
+      out_dtype_);
   set_output_raw_strided(
       0,
       {self.size(0), mat2.size(1)},
@@ -572,6 +577,9 @@ TORCH_IMPL_FUNC(_scaled_mm_cpu_v2_out)(
     IntArrayRef contraction_dim,
     bool use_fast_accum,
     const Tensor& out) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      mat_a.scalar_type() != kFloat6_e2m3fn_x4,
+      "MXFP6 scaled_mm requires an NVIDIA CUDA device");
   // Materialize the scale lists so the existing acceptance helpers (which
   // take ArrayRef<Tensor>) work unchanged.
   std::vector<Tensor> scale_a(scale_a_list.begin(), scale_a_list.end());

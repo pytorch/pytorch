@@ -7568,6 +7568,13 @@ def scaled_mm(
     Each scale buffer has ``16 * ceil(O / 4) * ceil(K / (4 * B))`` elements.
     M need not be a multiple of four; K and N must be divisible by 16. Padding entries are ignored.
 
+    MXFP6 takes two ``float6_e2m3fn_x4`` inputs, ``mat_a`` ``[M, K/4]`` and ``mat_b``
+    ``[K/4, N]``, both contiguous along K, with K a multiple of 128. Each takes one
+    contiguous ``float8_e8m0fnu`` scale with ``BlockWise1x32`` and ``SWIZZLE_32_4_4``.
+    The output is bfloat16 or float32, and bias is not supported. It runs on
+    SM10.x GPUs through a CuTeDSL kernel, which needs the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled

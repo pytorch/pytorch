@@ -357,6 +357,8 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
  const Tensor& out) {
   using namespace mps;
   check_mm_shapes(mat_a, mat_b, "_scaled_mm_v2");
+  TORCH_CHECK_NOT_IMPLEMENTED(mat_a.scalar_type() != kFloat6_e2m3fn_x4,
+                              "MXFP6 scaled_mm requires an NVIDIA CUDA device");
   const auto m = mat_a.size(0);
   const auto n = mat_b.size(1);
   const auto k = mat_a.size(1);

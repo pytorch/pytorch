@@ -1173,6 +1173,9 @@ TORCH_IMPL_FUNC(_scaled_mm_xpu_v2_out)
  IntArrayRef contraction_dim,
  bool use_fast_accum,
  const Tensor& out) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      mat_a.scalar_type() != kFloat6_e2m3fn_x4,
+      "MXFP6 scaled_mm requires an NVIDIA CUDA device");
   // Materialize the scale lists so the existing acceptance helpers (which
   // take ArrayRef<Tensor>) work unchanged.
   std::vector<Tensor> scale_a(scale_a_list.begin(), scale_a_list.end());
