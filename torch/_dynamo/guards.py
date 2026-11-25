@@ -75,6 +75,7 @@ from torch._C._dynamo.guards import (
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
+    ListGetItemGuardAccessor,
     ORDERED_DICT_ORDER_MATCH,
     profile_guard_manager,
     RelationalGuard,
@@ -406,6 +407,10 @@ dunder_attrs_assumed_constants = (
     "__func__",
     "__mro__",
 )
+
+# functools.partial exposes func/args/keywords as read-only attributes; only
+# partial.__setstate__ can rebind them.
+partial_attrs_assumed_constants = ("func", "args", "keywords")
 
 
 def get_framelocals_idx(code: types.CodeType, var_name: str) -> int:
@@ -774,6 +779,33 @@ class GuardManagerWrapper:
                 is_subtree_tag_safe &= all(
                     isinstance(accessor, GetAttrGuardAccessor)
                     and accessor.get_attr_name() == "cell_contents"
+                    for accessor in node.get_accessors()
+                )
+                if is_subtree_tag_safe:
+                    node.mark_tag_safe()
+            elif node.get_type_of_guarded_value() is tuple:
+                # A tuple can't change in place. Rebinding the attribute or key
+                # that holds it is caught by the parent, which is itself tag
+                # safe (a recorded dict, a function dunder or a partial slot).
+                if check_tag_safety(node, (TupleGetItemGuardAccessor,)):
+                    node.mark_tag_safe()
+            elif node.get_type_of_guarded_value() is list:
+                # Lists have no version tag. The C++ recording pass snapshots
+                # the length and element identities of a tag safe list and
+                # compares them on every tag hit.
+                if check_tag_safety(node, (ListGetItemGuardAccessor,)):
+                    node.mark_tag_safe()
+            elif (
+                node.get_type_of_guarded_value() is functools.partial
+                and config.assume_dunder_attributes_remain_unchanged
+            ):
+                # e.g. nn.Module hooks registered as functools.partial objects.
+                # keywords is a dict, so it is tag checked like any other dict.
+                is_subtree_tag_safe = check_tag_safety(
+                    node, (GetAttrGuardAccessor,)
+                ) and all(
+                    isinstance(accessor, GetAttrGuardAccessor)
+                    and accessor.get_attr_name() in partial_attrs_assumed_constants
                     for accessor in node.get_accessors()
                 )
                 if is_subtree_tag_safe:
