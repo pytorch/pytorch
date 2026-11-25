@@ -631,6 +631,76 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         with self.assertRaisesRegex(RuntimeError, regex):
             root_state._lazy_init()
 
+    def test_lazy_init_public_api(self):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0].in_proj)
+        fully_shard(model[0].out_proj)
+        fully_shard(model)
+
+        model.lazy_init()
+        # Repeated call on the initialized root is a no-op
+        model.lazy_init()
+
+        root_state = fully_shard.state(model)
+        in_proj_state = fully_shard.state(model[0].in_proj)
+        out_proj_state = fully_shard.state(model[0].out_proj)
+        self.assertTrue(root_state._is_root)
+        self.assertFalse(in_proj_state._is_root)
+        self.assertFalse(out_proj_state._is_root)
+        self.assertEqual(
+            root_state._state_ctx.all_states,
+            [root_state, in_proj_state, out_proj_state],
+        )
+        # Resources created at lazy init are available before the first forward
+        stream = model.get_all_gather_copy_in_stream()
+        self.assertEqual(model[0].in_proj.get_all_gather_copy_in_stream(), stream)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "lazy_init must be called on the root FSDP module"
+        ):
+            model[0].in_proj.lazy_init()
+
+    def test_lazy_init_public_api_multi_module_root_raises(self):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard([model[0], model[1]])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"(?s)FSDP requires a single root module but got .*call lazy_init\(\) on the root module first",
+        ):
+            model[0].lazy_init()
+
+    def test_lazy_init_public_api_after_submodule_init_raises(self):
+        model = nn.Sequential(MLP(8), MLP(8))
+        fully_shard(model[0])
+        fully_shard(model)
+        model[0].lazy_init()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "FSDP state has already been lazily initialized for 0\n"
+            "FSDP requires running forward through the root module first, "
+            "or calling lazy_init\\(\\) on the root module before running submodules",
+        ):
+            model.lazy_init()
+
+    def test_lazy_init_public_api_replicate(self):
+        from torch.distributed._composable.replicate_with_fsdp import (
+            replicate as replicate_with_fsdp,
+        )
+
+        model = nn.Sequential(MLP(8), MLP(8))
+        replicate_with_fsdp(model[0])
+        replicate_with_fsdp(model)
+
+        model.lazy_init()
+        model.lazy_init()
+
+        self.assertTrue(replicate_with_fsdp.state(model)._is_root)
+        self.assertFalse(replicate_with_fsdp.state(model[0])._is_root)
+        with self.assertRaisesRegex(
+            RuntimeError, "lazy_init must be called on the root Replicate module"
+        ):
+            model[0].lazy_init()
+
     def test_reset_sharded_param_in_lazy_init(self):
         class MyModel(nn.Module):
             def __init__(self):

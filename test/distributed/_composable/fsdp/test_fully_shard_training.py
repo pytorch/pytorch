@@ -3449,6 +3449,91 @@ class TestFullyShardCustomForwardMethod(FSDPTest):
             dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
         check_sharded_parity(self, ref_model, model)
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_lazy_init_submodules_run_without_root(self):
+        """
+        Tests calling ``model.lazy_init()`` on the root module and then calling
+        the FSDP submodules directly without running the root module, including
+        when the first module to run belongs to a multi-module group.
+        """
+
+        class TiedLM(nn.Module):
+            def __init__(self, vocab_size: int, dim: int) -> None:
+                super().__init__()
+                self.tok_embeddings = nn.Embedding(vocab_size, dim)
+                self.layers = nn.ModuleList(MLP(dim) for _ in range(2))
+                self.norm = nn.LayerNorm(dim)
+                self.output = nn.Linear(dim, vocab_size, bias=False)
+                self.output.weight = self.tok_embeddings.weight
+
+            def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+                h = self.tok_embeddings(tokens)
+                for layer in self.layers:
+                    h = layer(h)
+                return self.output(self.norm(h))
+
+        torch.manual_seed(42)
+        vocab_size = 32
+        model = TiedLM(vocab_size, dim=16)
+        ref_model = copy.deepcopy(model).to(device_type)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        fully_shard([model.tok_embeddings, model.norm, model.output])
+        for layer in model.layers:
+            fully_shard(layer)
+        fully_shard(model)
+        model.lazy_init()
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank + 1)
+        tokens = torch.randint(0, vocab_size, (2, 8), device=device_type.type)
+        for _ in range(2):
+            h = model.tok_embeddings(tokens)
+            for layer in model.layers:
+                h = layer(h)
+            loss = model.output(model.norm(h)).sum()
+            ref_loss = ref_model(tokens).sum()
+            self.assertEqual(loss, ref_loss)
+            loss.backward()
+            ref_loss.backward()
+            for param in ref_model.parameters():
+                dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+            check_sharded_parity(self, ref_model, model)
+            optim.step()
+            ref_optim.step()
+            optim.zero_grad()
+            ref_optim.zero_grad()
+        self.assertTrue(fully_shard.state(model)._is_root)
+        self.assertFalse(fully_shard.state(model.tok_embeddings)._is_root)
+        self.assertEqual(model(tokens), ref_model(tokens))
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_lazy_init_submodule_forward_before_root_forward(self):
+        """
+        Tests calling ``model.lazy_init()`` so a submodule can run forward
+        before the root module's first forward.
+        """
+        torch.manual_seed(42)
+        lin_dim = 16
+        model = nn.Sequential(*[MLP(lin_dim, torch.device("cpu")) for _ in range(3)])
+        ref_model = copy.deepcopy(model).to(device_type)
+        for mlp in model:
+            fully_shard(mlp)
+        fully_shard(model)
+        model.lazy_init()
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((8, lin_dim), device=device_type.type)
+        with torch.no_grad():
+            self.assertEqual(model[0](inp), ref_model[0](inp))
+        ref_loss = ref_model(inp).sum()
+        loss = model(inp).sum()
+        self.assertEqual(ref_loss, loss)
+        ref_loss.backward()
+        loss.backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+        check_sharded_parity(self, ref_model, model)
+
 
 class TestFullyShardShareCommContext(FSDPTest):
     @property
