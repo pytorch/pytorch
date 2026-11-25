@@ -45,6 +45,11 @@ def register_flash_attention_impl(
             and should register custom kernels with the PyTorch dispatcher.
             It may optionally return a handle implementing
             :class:`FlashAttentionHandle` to keep any necessary state alive.
+            Overrides of ``aten::_flash_attention_backward`` receive the
+            ``grad_logsumexp`` keyword argument only when it is set; declare it as
+            ``grad_logsumexp=None`` and raise ``NotImplementedError`` when it is
+            unsupported rather than ignore it. An override without the parameter fails
+            with ``TypeError`` when a gradient is passed.
 
     Example:
         >>> def my_impl_register(module_path: str = "my_flash_impl"):

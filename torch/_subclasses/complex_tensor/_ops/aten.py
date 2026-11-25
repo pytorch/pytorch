@@ -64,8 +64,16 @@ def register_binary_linear_inplace(
     op: OpType, out_of_place_impl: Callable[..., Any]
 ) -> Callable[..., Any]:
     def impl(
-        lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
-    ) -> ComplexTensor:
+        lhs: ComplexTensor | torch.Tensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
+    ) -> ComplexTensor | torch.Tensor:
+        # Like native, the complex result can't be written into a real `lhs`.
+        torch._check(
+            lhs.dtype.is_complex,
+            lambda: (
+                f"result type {torch.promote_types(lhs.dtype, rhs.dtype)} "
+                f"can't be cast to the desired output type {lhs.dtype}"
+            ),
+        )
         result = out_of_place_impl(lhs, rhs, *args, **kwargs)
         lhs.copy_(result)
         return lhs
@@ -216,7 +224,6 @@ INDUCTOR_OPS = [
     aten._fft_c2r,
     aten._fft_r2c,
     aten._linalg_det,
-    aten._linalg_eigh,
     aten._linalg_eigvals,
     aten._linalg_slogdet,
     aten._linalg_solve_ex,
@@ -243,9 +250,7 @@ INDUCTOR_OPS = [
     aten.fft_rfftn,
     aten.linalg_cholesky_ex,
     aten.linalg_cross,
-    aten.linalg_eig,
     aten.linalg_eigvals,
-    aten.linalg_householder_product,
     aten.linalg_inv_ex,
     aten.linalg_ldl_factor_ex,
     aten.linalg_ldl_solve,
@@ -258,12 +263,26 @@ INDUCTOR_OPS = [
     aten.linalg_qr,
     aten.linalg_solve_triangular,
     aten.linalg_vector_norm,
+    aten.lu_unpack,
 ]
 
 for inductor_op in INDUCTOR_OPS:
     globals()[_get_func_name(inductor_op)] = register_inductor(inductor_op)
 
 del inductor_op
+
+# Their backward formulas write in-place through views, which don't alias for
+# `ComplexTensor`, so they'd give silently wrong gradients.
+_linalg_eigh_impl = register_inductor(
+    aten._linalg_eigh,
+    backward_unsupported=lambda A, UPLO="L", compute_v=True, **kwargs: compute_v,
+)
+linalg_eig_impl = register_inductor(
+    aten.linalg_eig, backward_unsupported=lambda *args, **kwargs: True
+)
+linalg_householder_product_impl = register_inductor(
+    aten.linalg_householder_product, backward_unsupported=lambda *args, **kwargs: True
+)
 
 # some binary ops which we can stamp out
 mul_impl = register_binary_nonlinear(aten.mul)
@@ -290,7 +309,16 @@ sub_impl = register_binary_linear(aten.sub)
 sub__impl = register_binary_linear_inplace(aten.sub_, sub_impl)
 diagonal_scatter_impl = register_binary_linear(aten.diagonal_scatter)
 fill_impl = register_binary_linear(aten.fill)
-fill__impl = register_binary_linear_inplace(aten.fill_, fill_impl)
+
+
+# Not `register_binary_linear_inplace`: like native, filling a real `self` with a complex
+# value discards the imaginary part (with a warning, via `copy_`) instead of raising.
+@register_complex(aten.fill_)
+def fill__impl(
+    self: ComplexTensor | torch.Tensor, value: ComplexTensor
+) -> ComplexTensor | torch.Tensor:
+    self.copy_(fill_impl(self, value))
+    return self
 
 
 @register_complex(aten.copy)
@@ -340,6 +368,16 @@ def div_impl(
         (num_r / den).to(out_dt),
         (num_i / den).to(out_dt),
     )
+
+
+div__impl = register_binary_linear_inplace(aten.div_, div_impl)
+
+
+@register_complex(aten.tril_)
+def tril__impl(self: ComplexTensor, diagonal: int = 0) -> ComplexTensor:
+    self.re.tril_(diagonal)
+    self.im.tril_(diagonal)
+    return self
 
 
 @register_complex(aten.reciprocal)

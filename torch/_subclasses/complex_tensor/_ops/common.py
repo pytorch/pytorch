@@ -353,10 +353,25 @@ def register_simple(
     return register_complex(op, impl)
 
 
-def _inductor_impl(op: OpOverload) -> Callable[..., Any]:
+def _inductor_impl(
+    op: OpOverload, backward_unsupported: Callable[..., bool] | None
+) -> Callable[..., Any]:
     out_names = [arg.name for arg in op._schema.arguments if arg.is_out]
 
     def impl(*args: Any, **kwargs: Any) -> Any:
+        if (
+            backward_unsupported is not None
+            and torch.is_grad_enabled()
+            and any(
+                isinstance(t, ComplexTensor) and t.requires_grad
+                for t in tree_flatten((args, kwargs))[0]
+            )
+            and backward_unsupported(*args, **kwargs)
+        ):
+            raise NotImplementedError(
+                f"The backward of `{op}` writes in-place through views, which don't "
+                f"alias for `{ComplexTensor.__name__}`, so it isn't supported."
+            )
         outs = [kwargs[name] for name in out_names]
         args, kwargs = tree_map(_as_interleaved, (args, kwargs))
         # `__torch_dispatch__` runs with the Conjugate/Negative fallbacks excluded, but
@@ -384,10 +399,17 @@ def _inductor_impl(op: OpOverload) -> Callable[..., Any]:
     return impl
 
 
-def register_inductor(op: OpOverloadPacket) -> Callable[..., Any]:
-    """Run every overload of `op` on interleaved inputs, writing `out=` results back."""
+def register_inductor(
+    op: OpOverloadPacket, backward_unsupported: Callable[..., bool] | None = None
+) -> Callable[..., Any]:
+    """Run every overload of `op` on interleaved inputs, writing `out=` results back.
+
+    If `backward_unsupported(*args, **kwargs)` is true, raise when grad is needed.
+    """
     impls = {
-        name: register_force_test(getattr(op, name), _inductor_impl(getattr(op, name)))
+        name: register_force_test(
+            getattr(op, name), _inductor_impl(getattr(op, name), backward_unsupported)
+        )
         for name in op.overloads()
     }
     return impls["default"]
