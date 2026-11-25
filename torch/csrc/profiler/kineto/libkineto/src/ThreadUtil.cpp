@@ -230,19 +230,31 @@ std::string processName([[maybe_unused]] int32_t pid) {
       inherit_handle,
       static_cast<DWORD>(pid));
   if (process != nullptr) {
-    char path[MAX_PATH];
-    DWORD size = MAX_PATH;
+    std::wstring path(MAX_PATH, L'\0');
+    DWORD size = 0;
+    BOOL ok = FALSE;
     constexpr DWORD use_win32_path_format =
         0; // 0 means use the Win32 path format 1 means PROCESS_NAME_NATIVE
-    const BOOL ok =
-        QueryFullProcessImageNameA(process, use_win32_path_format, path, &size);
+    while (true) {
+      size = static_cast<DWORD>(path.size());
+      ok = QueryFullProcessImageNameW(
+          process, use_win32_path_format, path.data(), &size);
+      if (ok || GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        break;
+      }
+      path.resize(path.size() * 2);
+    }
     CloseHandle(process);
     if (ok && size > 0) {
-      const std::string ret(path, size);
-      const auto sep = ret.find_last_of("\\/"); // '\' or '/'
+      path.resize(size);
+      std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv;
+      const std::string ret = conv.to_bytes(path);
+      const auto sep = ret.find_last_of("\\/");
       return sep == std::string::npos ? ret : ret.substr(sep + 1);
     }
   }
+  // NOLINTNEXTLINE(performance-avoid-endl)
+  std::cerr << "Failed to read process name for pid " << pid << std::endl;
 #endif
   return "";
 }
