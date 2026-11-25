@@ -637,52 +637,76 @@ void ProcessGroupTCCL::runLoop() {
 c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueCollective(
     OpType opType,
     std::vector<at::Tensor> outputs,
-    std::function<void()> fn) {
+    std::function<void()> fn,
+    std::function<void(std::exception_ptr)> onFail) {
   const auto refused = [this]() {
     return "TCCL: an earlier operation on this process group failed (" +
         brokenReason_ +
         "), so the group refuses new work. Destroy it and create a new one.";
   };
+  // A collective would run before the batch's deferred sends and recvs. With no
+  // p2p recorded it runs as usual (the coalescing manager's fast path).
+  if (coalescing_ && !coalescedOps_.empty()) {
+    std::exception_ptr ep;
+    try {
+      TORCH_CHECK_WITH(
+          DistBackendError,
+          false,
+          "TCCL: a batch of sends and recvs cannot also run a collective; "
+          "the batch is dropped.");
+    } catch (...) {
+      ep = std::current_exception();
+    }
+    closeCoalescing(ep);
+    std::rethrow_exception(ep);
+  }
   TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refused());
   const uint32_t mpsEventId = mpsEventRecord();
   const uint64_t mySeq = ++seq_;
   auto work = c10::make_intrusive<TCCLWork>(opType, mySeq, std::move(outputs));
   {
     std::lock_guard<std::mutex> lock(workMutex_);
-    workQueue_.push_back(
-        [this, mpsEventId, fn = std::move(fn), work, refused]() mutable {
-          std::exception_ptr ep;
+    workQueue_.push_back([this,
+                          mpsEventId,
+                          fn = std::move(fn),
+                          work,
+                          refused,
+                          onFail = std::move(onFail)]() mutable {
+      std::exception_ptr ep;
+      try {
+        // Block only this worker until the GPU flushes writes to the inputs
+        mpsEventWait(mpsEventId);
+        // The group may have broken while this work was queued.
+        TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refused());
+        fn();
+      } catch (...) {
+        ep = std::current_exception();
+        if (!broken_.load()) {
           try {
-            // Block only this worker until the GPU flushes writes to the inputs
-            mpsEventWait(mpsEventId);
-            // The group may have broken while this work was queued.
-            TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refused());
-            fn();
+            std::rethrow_exception(ep);
+          } catch (const c10::Error& e) {
+            brokenReason_ = e.what_without_backtrace();
+          } catch (const std::exception& e) {
+            brokenReason_ = e.what();
           } catch (...) {
-            ep = std::current_exception();
-            if (!broken_.load()) {
-              try {
-                std::rethrow_exception(ep);
-              } catch (const c10::Error& e) {
-                brokenReason_ = e.what_without_backtrace();
-              } catch (const std::exception& e) {
-                brokenReason_ = e.what();
-              } catch (...) {
-                brokenReason_ = "unknown error";
-              }
-              // Flush whatever the failed operation left posted, so a peer
-              // cannot receive it later.
-              for (auto& connection : connections_) {
-                if (connection) {
-                  connection->abort();
-                }
-              }
-              broken_.store(true);
+            brokenReason_ = "unknown error";
+          }
+          // Flush whatever the failed operation left posted, so a peer
+          // cannot receive it later.
+          for (auto& connection : connections_) {
+            if (connection) {
+              connection->abort();
             }
           }
-          // Store any exception and wake threads blocked on Work::wait().
-          work->finishWork(ep);
-        });
+          broken_.store(true);
+        }
+        if (onFail) {
+          onFail(ep);
+        }
+      }
+      // Store any exception and wake threads blocked on Work::wait().
+      work->finishWork(ep);
+    });
   }
   workCV_.notify_one();
   return work;
@@ -1580,44 +1604,75 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::alltoall_base(
       });
 }
 
-c10::intrusive_ptr<Work> ProcessGroupTCCL::send(
-    std::vector<at::Tensor>& tensors,
-    int dstRank,
-    int /*tag*/) {
+void ProcessGroupTCCL::checkP2p(
+    const std::vector<at::Tensor>& tensors,
+    int peer,
+    bool isSend) const {
+  const char* op = isSend ? "send" : "recv";
+  const char* arg = isSend ? "dstRank" : "srcRank";
   TORCH_CHECK_WITH(
       DistBackendError,
       tensors.size() == 1,
-      "TCCL send: expected exactly one tensor, got ",
+      "TCCL ",
+      op,
+      ": expected exactly one tensor, got ",
       tensors.size());
-  auto& tensor = tensors[0];
   TORCH_CHECK_WITH(
       DistBackendError,
-      tensor.device().is_mps() && tensor.is_contiguous(),
-      "TCCL send: tensor must be a contiguous MPS tensor.");
+      tensors[0].device().is_mps() && tensors[0].is_contiguous(),
+      "TCCL ",
+      op,
+      ": tensor must be a contiguous MPS tensor.");
   TORCH_CHECK_WITH(
       DistBackendError,
-      dstRank >= 0 && dstRank < size_ && dstRank != rank_,
-      "TCCL send: invalid dstRank ",
-      dstRank,
+      peer >= 0 && peer < size_ && peer != rank_,
+      "TCCL ",
+      op,
+      ": invalid ",
+      arg,
+      " ",
+      peer,
       " for rank ",
       rank_,
       " (world size ",
       size_,
       ").");
-  // Ring topology only connects the two neighbors ((rank+/-1)%world); a send to
-  // any other rank has a null connection slot.
+  // Ring topology only connects the two neighbors ((rank+/-1)%world); any
+  // other peer has a null connection slot.
   TORCH_CHECK_WITH(
       DistBackendError,
-      !engine_->ringTopology() || dstRank == (rank_ + 1) % size_ ||
-          dstRank == (rank_ - 1 + size_) % size_,
-      "TCCL send: ring topology only permits sends to a ring neighbor "
-      "((rank+/-1)%world); dstRank ",
-      dstRank,
+      !engine_->ringTopology() || peer == (rank_ + 1) % size_ ||
+          peer == (rank_ - 1 + size_) % size_,
+      "TCCL ",
+      op,
+      ": ring topology only connects a rank to its ring neighbors "
+      "((rank+/-1)%world); ",
+      arg,
+      " ",
+      peer,
       " is not a neighbor of rank ",
       rank_,
       ".");
+}
+
+c10::intrusive_ptr<Work> ProcessGroupTCCL::send(
+    std::vector<at::Tensor>& tensors,
+    int dstRank,
+    int /*tag*/) {
+  try {
+    checkP2p(tensors, dstRank, /*isSend=*/true);
+  } catch (...) {
+    closeCoalescing(std::current_exception());
+    throw;
+  }
+  auto& tensor = tensors[0];
   // Byte movement - any dtype. tag is accepted but not hardware-matched (UC has
   // no tag matching); ordering is the per-peer FIFO of matched send/recv pairs.
+  if (coalescing_) {
+    auto work = c10::make_intrusive<TCCLWork>(OpType::SEND, ++seq_);
+    coalescedOps_.push_back({/*isSend=*/true, dstRank, tensor, work});
+    return work;
+  }
   return enqueueCollective(
       OpType::SEND,
       std::vector<at::Tensor>{},
@@ -1634,38 +1689,19 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int /*tag*/) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensors.size() == 1,
-      "TCCL recv: expected exactly one tensor, got ",
-      tensors.size());
+  try {
+    checkP2p(tensors, srcRank, /*isSend=*/false);
+  } catch (...) {
+    closeCoalescing(std::current_exception());
+    throw;
+  }
   auto& tensor = tensors[0];
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensor.device().is_mps() && tensor.is_contiguous(),
-      "TCCL recv: tensor must be a contiguous MPS tensor.");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      srcRank >= 0 && srcRank < size_ && srcRank != rank_,
-      "TCCL recv: invalid srcRank ",
-      srcRank,
-      " for rank ",
-      rank_,
-      " (world size ",
-      size_,
-      ").");
-  // Ring topology only connects the two neighbors ((rank+/-1)%world); a recv
-  // from any other rank has a null connection slot.
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      !engine_->ringTopology() || srcRank == (rank_ + 1) % size_ ||
-          srcRank == (rank_ - 1 + size_) % size_,
-      "TCCL recv: ring topology only permits recvs from a ring neighbor "
-      "((rank+/-1)%world); srcRank ",
-      srcRank,
-      " is not a neighbor of rank ",
-      rank_,
-      ".");
+  if (coalescing_) {
+    auto work = c10::make_intrusive<TCCLWork>(
+        OpType::RECV, ++seq_, std::vector<at::Tensor>{tensor});
+    coalescedOps_.push_back({/*isSend=*/false, srcRank, tensor, work});
+    return work;
+  }
   return enqueueCollective(
       OpType::RECV,
       std::vector<at::Tensor>{tensor},
@@ -1694,6 +1730,83 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::barrier(
   auto work = c10::make_intrusive<TCCLWork>(OpType::BARRIER, mySeq);
   work->finishWork();
   return work;
+}
+
+// batch_isend_irecv
+
+void ProcessGroupTCCL::startCoalescing() {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      !coalescing_,
+      "TCCL: startCoalescing called while a batch is already open.");
+  coalescing_ = true;
+}
+
+void ProcessGroupTCCL::closeCoalescing(const std::exception_ptr& ep) {
+  if (!coalescing_) {
+    return;
+  }
+  coalescing_ = false;
+  for (auto& op : coalescedOps_) {
+    op.work->finishWork(ep);
+  }
+  coalescedOps_.clear();
+}
+
+c10::intrusive_ptr<Work> ProcessGroupTCCL::endCoalescing() {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      coalescing_,
+      "TCCL: endCoalescing called without startCoalescing.");
+  coalescing_ = false;
+  std::vector<P2POp> ops = std::move(coalescedOps_);
+  coalescedOps_.clear();
+  if (ops.empty()) {
+    // Nothing to run. _abort_process_group opens an empty batch, which must not
+    // wait behind queued work.
+    auto work = c10::make_intrusive<TCCLWork>(OpType::COALESCED, ++seq_);
+    work->finishWork();
+    return work;
+  }
+  auto failOps = [ops](const std::exception_ptr& ep) {
+    for (const auto& op : ops) {
+      op.work->finishWork(ep);
+    }
+  };
+  try {
+    return enqueueCollective(
+        OpType::COALESCED,
+        std::vector<at::Tensor>{},
+        [this, ops]() mutable {
+          // One stream per (peer, direction), in the batch's order: the i-th
+          // send to a peer pairs with that peer's i-th recv from this rank.
+          std::vector<std::vector<TCCLEngine::SendSeg>> sends(size_);
+          std::vector<std::vector<TCCLEngine::RecvSeg>> recvs(size_);
+          std::vector<at::Tensor> views;
+          views.reserve(ops.size());
+          for (const auto& op : ops) {
+            views.push_back(mpsSharedCpuView(op.tensor));
+            const at::Tensor& v = views.back();
+            const auto bytes = static_cast<std::size_t>(v.nbytes());
+            if (op.isSend) {
+              sends[op.peer].push_back(
+                  {static_cast<const char*>(v.data_ptr()), bytes});
+            } else {
+              recvs[op.peer].push_back(
+                  {static_cast<char*>(v.data_ptr()), bytes});
+            }
+          }
+          engine_->exchange(sends, recvs, "TCCL p2p batch");
+          for (auto& op : ops) {
+            op.work->finishWork();
+          }
+        },
+        failOps);
+  } catch (...) {
+    // Refused at enqueue: the batch never runs.
+    failOps(std::current_exception());
+    throw;
+  }
 }
 
 } // namespace c10d

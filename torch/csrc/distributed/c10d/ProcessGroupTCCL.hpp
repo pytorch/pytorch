@@ -189,7 +189,24 @@ class TORCH_API ProcessGroupTCCL : public Backend {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
+  // batch_isend_irecv: the sends and recvs issued between start and end run
+  // as one exchange, so a pair or a ring shift does not wait on itself.
+  bool supportsCoalescing() const override {
+    return true;
+  }
+  void startCoalescing() override;
+  c10::intrusive_ptr<Work> endCoalescing() override;
+
  protected:
+  struct P2POp {
+    bool isSend;
+    int peer;
+    at::Tensor tensor;
+    c10::intrusive_ptr<TCCLWork> work;
+  };
+  bool coalescing_{false};
+  std::vector<P2POp> coalescedOps_;
+
   c10::intrusive_ptr<Store> store_;
   c10::intrusive_ptr<Options> options_;
   // Resolved in ctor from options_ + TCCL_TOPOLOGY
@@ -235,11 +252,21 @@ class TORCH_API ProcessGroupTCCL : public Backend {
   // to flush writes to the inputs, enqueues `fn`, and returns a TCCLWork whose
   // Future completes with `outputs` when `fn` returns. `fn` does the
   // mpsSharedCpuView + engine_ call; `outputs` are what the Future carries (DDP
-  // getFuture() chaining).
+  // getFuture() chaining). `onFail`, if set, runs on the worker with the error
+  // when the queued work fails or is refused.
   c10::intrusive_ptr<Work> enqueueCollective(
       OpType opType,
       std::vector<at::Tensor> outputs,
-      std::function<void()> fn);
+      std::function<void()> fn,
+      std::function<void(std::exception_ptr)> onFail = nullptr);
+
+  // send/recv argument checks, shared by both directions.
+  void checkP2p(const std::vector<at::Tensor>& tensors, int peer, bool isSend)
+      const;
+  // Drops an open batch, failing its recorded ops with `ep`. The coalescing
+  // manager has no finally, so after a rejected op an open batch would record
+  // every later send/recv and never run it.
+  void closeCoalescing(const std::exception_ptr& ep);
 
   void runLoop();
 };
