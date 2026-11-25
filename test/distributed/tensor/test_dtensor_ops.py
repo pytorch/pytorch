@@ -295,7 +295,6 @@ if not torch._dynamo.config.use_cpp_fake_tensor:
         # FakeTensor dispatches prim::device into PlacementTrackingMode, where
         # sharding propagation fails. C++ FakeTensor answers it from the
         # TensorImpl without dispatching.
-        xfail("nn.functional.binary_cross_entropy_with_logits"),
         xfail("nn.functional.logsigmoid"),
         xfail("nn.functional.multilabel_soft_margin_loss"),
     }
@@ -844,7 +843,6 @@ ops_unbacked_dtensor_dde = {
     xfail("nn.functional.multilabel_soft_margin_loss"),
     xfail("nn.functional.pad", "constant"),
     xfail("nn.functional.poisson_nll_loss"),
-    xfail("nn.functional.soft_margin_loss"),
     xfail("nn.functional.triplet_margin_loss"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
     xfail("nn.functional.upsample_nearest"),
