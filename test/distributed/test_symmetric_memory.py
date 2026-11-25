@@ -2,6 +2,7 @@
 
 import itertools
 import json
+import math
 import os
 import random
 import re
@@ -44,7 +45,7 @@ from torch.distributed._symmetric_memory._nccl import (
     NcclCommRegistration,
     register_external_nccl_comm,
 )
-from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -57,12 +58,15 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
     requires_multicast_support,
-    requires_nccl,
-    setup_torchcomms_pg,
     skip_if_lt_x_gpu,
     skip_if_rocm_arch_multiprocess,
     skip_if_rocm_multiprocess,
     skip_if_rocm_ver_lessthan_multiprocess,
+)
+from torch.testing._internal.common_quantized import (
+    from_blocked_format,
+    to_blocked,
+    to_mxfp,
 )
 from torch.testing._internal.common_symmem import (
     captured_graph_kernels_and_edges,
@@ -94,6 +98,12 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 test_contexts = [nullcontext, _test_mode]
+
+
+def _mxfp8_quantize(t: torch.Tensor):
+    """Returns (dequantized bf16, fp8 data, e8m0 scales in the swizzled 32x4x4 layout)."""
+    scale, q = to_mxfp(t, format="mxfp8")
+    return from_blocked_format(q, scale, blocksize=32), q, to_blocked(scale)
 
 
 # Each op touches the signal pad through one guarded call site. The mixed pairs
@@ -220,6 +230,102 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertIsNotNone(backend)
         backend = symm_mem.get_backend(device_type)
         self.assertIsNotNone(backend)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    @parametrize("persistent", [False, True])
+    @parametrize(
+        "size,stride,expected_bytes",
+        [
+            ((2, 2), (1024, 1), 4104),
+            ((2, 2), (1, 2), 16),
+            ((2, 2), (0, 1), 8),
+            ((), (), 4),
+        ],
+    )
+    def test_empty_strided_p2p_storage_size(
+        self, persistent, size, stride, expected_bytes
+    ) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        alloc_id = random.SystemRandom().getrandbits(64) if persistent else None
+        tensor = _SymmetricMemory.empty_strided_p2p(
+            size,
+            stride,
+            torch.float32,
+            self.device,
+            group_name=group_name,
+            alloc_id=alloc_id,
+        )
+        self.assertEqual(tensor.size(), size)
+        self.assertEqual(tensor.stride(), stride)
+        self.assertEqual(tensor.untyped_storage().nbytes(), expected_bytes)
+        handle = _SymmetricMemory.rendezvous(tensor)
+        self.assertEqual(handle.buffer_size, expected_bytes)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("persistent", [False, True])
+    @parametrize("size", [-1, -(2**63)])
+    def test_empty_strided_p2p_negative_size(self, persistent, size) -> None:
+        self._init_process()
+        alloc_id = random.SystemRandom().getrandbits(64) if persistent else None
+        with self.assertRaisesRegex(RuntimeError, "negative dimension"):
+            _SymmetricMemory.empty_strided_p2p(
+                (size,),
+                (0,),
+                torch.float32,
+                self.device,
+                group_name=dist.group.WORLD.group_name,
+                alloc_id=alloc_id,
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("stride", [(2048, 1), (2, 1)])
+    def test_empty_strided_p2p_persistent_storage_size(self, stride) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        alloc_id = random.SystemRandom().getrandbits(64)
+        tensor = _SymmetricMemory.empty_strided_p2p(
+            (2, 2),
+            (1024, 1),
+            torch.float32,
+            self.device,
+            group_name=group_name,
+            alloc_id=alloc_id,
+        )
+        data_ptr = tensor.data_ptr()
+        del tensor
+
+        tensor = _SymmetricMemory.empty_strided_p2p(
+            (2, 2),
+            (1, 1024),
+            torch.float32,
+            self.device,
+            group_name=group_name,
+            alloc_id=alloc_id,
+        )
+        self.assertEqual(tensor.data_ptr(), data_ptr)
+        self.assertEqual(tensor.stride(), (1, 1024))
+        del tensor
+
+        with self.assertRaisesRegex(RuntimeError, "requested allocation size"):
+            _SymmetricMemory.empty_strided_p2p(
+                (2, 2),
+                stride,
+                torch.float32,
+                self.device,
+                group_name=group_name,
+                alloc_id=alloc_id,
+            )
 
     @skip_if_rocm_multiprocess
     @skipIf(device_type != "cuda", "NVLink DMA connectivity detection is CUDA-specific")
@@ -594,7 +700,9 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             list(range(self.world_size)), backend="cpu:gloo,cuda:ncclx_stub"
         )
 
-        torch._C._distributed_c10d._reset_fr_recording_nccl()
+        # NCCLXStub is not a natively recording backend, so the FlightRecorder
+        # hook records its ops in a recorder keyed by its backend name.
+        torch._C._distributed_c10d._reset_fr_trace(backend="ncclx_stub")
 
         t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
         symm_mem_hdl = symm_mem.rendezvous(t, group=pg)
@@ -602,15 +710,17 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(symm_mem_hdl.rank, self.rank)
         self.assertEqual(symm_mem_hdl.world_size, self.world_size)
 
-        entries = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())["entries"]
-        ag_entries = [
-            e for e in entries if e["profiling_name"] == "nccl:_all_gather_base"
-        ]
+        trace = torch._C._distributed_c10d._dump_fr_trace(backend="ncclx_stub")
+        entries = pickle.loads(trace)["entries"]
+        ag_name = "ncclx_stub:_all_gather_base"
+        ag_entries = [e for e in entries if e["profiling_name"] == ag_name]
         self.assertGreaterEqual(
             len(ag_entries),
             1,
-            lambda msg: f"{msg}\nexpected NCCL _all_gather_base from PG rendezvous, "
-            f"got: {[e['profiling_name'] for e in entries]}",
+            lambda msg: (
+                f"{msg}\nexpected {ag_name} from PG rendezvous, "
+                f"got: {[e['profiling_name'] for e in entries]}"
+            ),
         )
 
         symm_mem_hdl.barrier()
@@ -1993,16 +2103,25 @@ class AsyncTPTest(MultiProcContinuousTest):
             out_dtypes = [torch.bfloat16] * 3
         else:
             raise AssertionError(f"Invalid scale_mode: {scale_mode}")
+        scaling_type = (
+            ScalingType.TensorWise
+            if scale_mode == "tensor-wise"
+            else ScalingType.RowWise
+        ).value
+        no_swizzle = SwizzleType.NO_SWIZZLE.value
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_scaled_matmul_fallback(
             A_shard,
             Bs,
             A_scale,
+            scaling_type,
+            no_swizzle,
             B_scales,
+            scaling_type,
+            no_swizzle,
             gather_dim=gather_dim,
             group_name=group.group_name,
             biases=[None] * len(Bs),
-            result_scales=[None] * len(Bs),
             out_dtypes=out_dtypes,
             use_fast_accum=[None] * len(Bs),
         )
@@ -2010,11 +2129,14 @@ class AsyncTPTest(MultiProcContinuousTest):
             A_shard,
             Bs,
             A_scale,
+            scaling_type,
+            no_swizzle,
             B_scales,
+            scaling_type,
+            no_swizzle,
             gather_dim=gather_dim,
             group_name=group.group_name,
             biases=[None] * len(Bs),
-            result_scales=[None] * len(Bs),
             out_dtypes=out_dtypes,
             use_fast_accum=[None] * len(Bs),
         )
@@ -2143,6 +2265,10 @@ class AsyncTPTest(MultiProcContinuousTest):
             B_scale = torch.tensor(0.1, device=device_type)
 
         output_shape = [*A.shape[:-1], B.shape[1]]
+        scaling_type = (
+            ScalingType.RowWise if rowwise else ScalingType.TensorWise
+        ).value
+        no_swizzle = SwizzleType.NO_SWIZZLE.value
 
         outputs = []
         for context in test_contexts:
@@ -2152,7 +2278,11 @@ class AsyncTPTest(MultiProcContinuousTest):
                         A,
                         B,
                         A_scale,
+                        scaling_type,
+                        no_swizzle,
                         B_scale,
+                        scaling_type,
+                        no_swizzle,
                         "avg",
                         scatter_dim,
                         scatter_dim,
@@ -2167,6 +2297,209 @@ class AsyncTPTest(MultiProcContinuousTest):
                 f"Expected strides to match: {outputs[0].stride()} vs {outputs[1].stride()}"
             )
         self.assertEqual(outputs[0], outputs[1])
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipIf(not SM100OrLater or TEST_WITH_ROCM, "MXFP8 async-TP requires NVIDIA SM100+")
+    @parametrize("shard_shape", [(256,), (2, 128)])
+    def test_fused_all_gather_scaled_matmul_mxfp8(self, shard_shape) -> None:
+        self._init_process()
+        group = dist.group.WORLD
+        # K=256 spans two K tiles of the swizzled scale.
+        K, N = 256, 64
+        mx, sw = ScalingType.BlockWise1x32.value, SwizzleType.SWIZZLE_32_4_4.value
+
+        A_hp, A_q, A_scale = _mxfp8_quantize(
+            torch.randn(math.prod(shard_shape), K, device=device_type)
+        )
+        A_q = A_q.view(*shard_shape, K)
+        Bs_hp, Bs_q, B_scales = [], [], []
+        for _ in range(3):
+            b_hp, b_q, b_scale = _mxfp8_quantize(torch.randn(N, K, device=device_type))
+            Bs_hp.append(b_hp)
+            Bs_q.append(b_q.t())
+            B_scales.append(b_scale)
+        # With MXFP8, None means bf16.
+        out_dtypes = [None, torch.bfloat16, torch.float32]
+
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(
+                    torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                        A_q,
+                        Bs_q,
+                        A_scale,
+                        mx,
+                        sw,
+                        B_scales,
+                        mx,
+                        sw,
+                        gather_dim=0,
+                        group_name=group.group_name,
+                        biases=[None] * 3,
+                        out_dtypes=out_dtypes,
+                        use_fast_accum=[False] * 3,
+                    )
+                )
+        (ag_0, mms_0), (ag_1, mms_1) = outputs
+        self.assertEqual(ag_0, ag_1)
+
+        A_hp_gathered = torch.empty(
+            A_hp.shape[0] * self.world_size, K, device=device_type
+        )
+        dist.all_gather_into_tensor(A_hp_gathered, A_hp.float().contiguous())
+        out_shape = (shard_shape[0] * self.world_size, *shard_shape[1:], N)
+        for mm_0, mm_1, b_hp, out_dtype in zip(mms_0, mms_1, Bs_hp, out_dtypes):
+            self.assertEqual(mm_0.dtype, out_dtype or torch.bfloat16)
+            self.assertEqual(mm_0.shape, out_shape)
+            self.assertEqual(mm_0, mm_1)
+            ref = A_hp_gathered @ b_hp.float().t()
+            torch.testing.assert_close(
+                mm_0.flatten(0, -2).float(), ref, rtol=1e-2, atol=1e-2
+            )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipIf(not SM100OrLater or TEST_WITH_ROCM, "MXFP8 async-TP requires NVIDIA SM100+")
+    def test_fused_scaled_matmul_reduce_scatter_mxfp8(self) -> None:
+        self._init_process()
+        group = dist.group.WORLD
+        # K=256 spans two K tiles of the swizzled scale.
+        M, K, N = 256 * self.world_size, 256, 64
+        mx, sw = ScalingType.BlockWise1x32.value, SwizzleType.SWIZZLE_32_4_4.value
+
+        A_hp, A_q, A_scale = _mxfp8_quantize(torch.randn(M, K, device=device_type))
+        B_hp, B_q, B_scale = _mxfp8_quantize(torch.randn(N, K, device=device_type))
+
+        outputs = []
+        for context in test_contexts:
+            with context():
+                outputs.append(
+                    torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+                        A_q,
+                        B_q.t(),
+                        A_scale,
+                        mx,
+                        sw,
+                        B_scale,
+                        mx,
+                        sw,
+                        "sum",
+                        0,
+                        0,
+                        group.group_name,
+                        [M, N],
+                    )
+                )
+
+        # Compare each against the dequantized reference, not each other: they
+        # reduce the rank partials in different orders (the op in fp32, the
+        # fallback in bf16 through NCCL). Both round each partial (|x| up to ~70
+        # here, a 0.5 bf16 ulp) to bf16 first, which near zero costs up to about
+        # an ulp per partial.
+        ref = torch.empty(M // self.world_size, N, device=device_type)
+        dist.reduce_scatter_tensor(ref, A_hp.float() @ B_hp.float().t())
+        for out in outputs:
+            self.assertEqual(out.dtype, torch.bfloat16)
+            torch.testing.assert_close(out.float(), ref, rtol=1e-2, atol=1.0)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skipIf(not SM100OrLater or TEST_WITH_ROCM, "MXFP8 async-TP requires NVIDIA SM100+")
+    def test_fused_scaled_matmul_mxfp8_rejections(self) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        K, N = 128, 64
+        mx, sw = ScalingType.BlockWise1x32.value, SwizzleType.SWIZZLE_32_4_4.value
+        _, B_q, B_scale = _mxfp8_quantize(torch.randn(N, K, device=device_type))
+
+        def all_gather(A_q, A_scale, gather_dim=0, swizzle=sw):
+            return torch.ops.symm_mem.fused_all_gather_scaled_matmul(
+                A_q,
+                [B_q.t()],
+                A_scale,
+                mx,
+                swizzle,
+                [B_scale],
+                mx,
+                swizzle,
+                gather_dim,
+                group_name,
+                [None],
+                [torch.bfloat16],
+                [False],
+            )
+
+        def reduce_scatter(A_q, A_scale, scatter_dim=0):
+            shape = [*A_q.shape[:-1], N]
+            return torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter(
+                A_q,
+                B_q.t(),
+                A_scale,
+                mx,
+                sw,
+                B_scale,
+                mx,
+                sw,
+                "sum",
+                scatter_dim,
+                scatter_dim,
+                group_name,
+                shape,
+            )
+
+        for context in test_contexts:
+            with context():
+                # Per-rank rows not a multiple of 128.
+                _, A_q, A_scale = _mxfp8_quantize(
+                    torch.randn(64, K, device=device_type)
+                )
+                with self.assertRaisesRegex(ValueError, "multiple of 128"):
+                    all_gather(A_q, A_scale)
+                rows = 64 * self.world_size
+                _, A_q, A_scale = _mxfp8_quantize(
+                    torch.randn(rows, K, device=device_type)
+                )
+                with self.assertRaisesRegex(ValueError, "multiple of 128"):
+                    reduce_scatter(A_q, A_scale)
+
+                # Scale of the wrong size.
+                _, A_q, A_scale = _mxfp8_quantize(
+                    torch.randn(256, K, device=device_type)
+                )
+                with self.assertRaisesRegex(ValueError, "expected"):
+                    all_gather(A_q, A_scale[: A_scale.numel() // 2])
+
+                # Scale that is not e8m0.
+                with self.assertRaisesRegex(ValueError, "float8_e8m0fnu"):
+                    all_gather(A_q, A_scale.view(torch.uint8))
+
+                # Only the 32x4x4 layout can be gathered and sliced per rank.
+                mn_k4 = SwizzleType.SWIZZLE_MN_K4.value
+                with self.assertRaisesRegex(ValueError, "SWIZZLE_32_4_4"):
+                    all_gather(A_q, A_scale, swizzle=mn_k4)
+
+                # A 2-D shard gathered along its last dim takes the
+                # last-gather-dim path, which must validate too.
+                with self.assertRaisesRegex(ValueError, "along dim 0"):
+                    all_gather(A_q, A_scale, gather_dim=1)
+
+                # Non-leading gather/scatter dim reorders rows under the scale.
+                rows = 128 * self.world_size
+                _, A_q, A_scale = _mxfp8_quantize(
+                    torch.randn(2 * rows, K, device=device_type)
+                )
+                with self.assertRaisesRegex(ValueError, "along dim 0"):
+                    all_gather(A_q.view(2, rows, K), A_scale, gather_dim=1)
+                with self.assertRaisesRegex(ValueError, "along dim 0"):
+                    reduce_scatter(A_q.view(2, rows, K), A_scale, scatter_dim=1)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -3893,7 +4226,15 @@ class SymmMemCleanupTest(TestCase):
             """,
         )
 
-    def _run_cleanup(self, device, backend, body, env_overrides=None):
+    def _run_cleanup(
+        self,
+        device,
+        backend,
+        body,
+        env_overrides=None,
+        *,
+        expected_returncodes=(0,),
+    ):
         if backend == "NCCL" and (
             not dist.is_nccl_available() or torch.cuda.nccl.version() < (2, 27, 0)
         ):
@@ -3926,7 +4267,11 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
             text=True,
             timeout=120,
         )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            result.returncode,
+            expected_returncodes,
+            result.stdout + result.stderr,
+        )
         return result
 
     @parametrize("backend", ["CUDA", "NCCL", "NVSHMEM"])
@@ -3956,6 +4301,7 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
     @parametrize("backend", ["CUDA", "NCCL", "NVSHMEM"])
     @parametrize("observed", [False, True])
     def test_free_after_device_assert(self, device, backend, observed):
+        expected_returncodes = (0, 255) if backend == "NVSHMEM" else (0,)
         result = self._run_cleanup(
             device,
             backend,
@@ -3979,8 +4325,9 @@ tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device
                 with test.assertRaisesRegex(torch.AcceleratorError, "device-side assert"):
                     torch.cuda.synchronize(device)
             del tensor, handle
-            print("cleanup completed")
+            print("cleanup completed", flush=True)
             """,
+            expected_returncodes=expected_returncodes,
         )
         self.assertIn("skipping cleanup after CUDA error", result.stderr)
         self.assertIn("cleanup completed", result.stdout)
@@ -4294,59 +4641,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
             ptr2,
             "symm_mem.empty() should reuse the same storage block via the implicit MemPool",
         )
-
-
-@instantiate_parametrized_tests
-@requires_accelerator_p2p_access()
-class TorchCommsCudaSymmMemTest(MultiProcContinuousTest):
-    """CUDA symm_mem rendezvous against a torchcomms-backed PG.
-
-    Builds a torchcomms comm, wraps it in _BackendWrapper, registers it as
-    the NCCL backend on a bare ProcessGroup, and exercises symm_mem on the
-    CUDA backend (cuMemMap/IPC).
-    """
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device(device_type, self.rank)
-
-    @requires_nccl()
-    @skipIf(
-        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
-    )
-    @skipIf(not _TORCHCOMM_AVAILABLE, "torchcomms not installed")
-    @skipIf(TEST_WITH_ROCM, "torchcomms nccl backend not available on ROCm")
-    @skip_if_lt_x_gpu(2)
-    @parametrize("use_pg_for_rendezvous", [True, False])
-    def test_cuda_symm_mem_rendezvous_nccl(self, use_pg_for_rendezvous: bool) -> None:
-        device_module.set_device(self.device)
-        suffix = f"usepg_{use_pg_for_rendezvous}"
-        group_name = f"torchcomms_cuda_symm_mem_nccl_{suffix}"
-        store_path = os.environ.get(
-            "TORCHCOMM_STORE_PATH",
-            f"/tmp/test_torchcomms_cuda_symm_mem_"
-            f"{os.environ.get('MASTER_PORT', '0')}_{suffix}",
-        )
-        pg = setup_torchcomms_pg(
-            backend=dist.get_default_backend_for_device(device_type),
-            rank=self.rank,
-            world_size=self.world_size,
-            device=self.device,
-            store_path=store_path,
-            group_name=group_name,
-        )
-        pg.use_pg_for_symm_mem_rendezvous = use_pg_for_rendezvous
-
-        t = symm_mem.empty(64, dtype=torch.float32, device=self.device).fill_(self.rank)
-        symm_mem_hdl = symm_mem.rendezvous(t, group=group_name)
-        self.assertEqual(symm_mem_hdl.rank, self.rank)
-        self.assertEqual(symm_mem_hdl.world_size, self.world_size)
-
-        symm_mem_hdl.barrier()
-        for peer in range(self.world_size):
-            buf = symm_mem_hdl.get_buffer(peer, (64,), torch.float32)
-            self.assertTrue(buf.eq(peer).all())
-        symm_mem_hdl.barrier()
 
 
 @requires_cuda

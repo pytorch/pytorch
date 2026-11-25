@@ -1202,6 +1202,37 @@ class FSDPModule:
                 for fsdp_param_group in state._fsdp_param_groups:
                     fsdp_param_group.unshard_async_op = unshard_in_current_stream
 
+    def get_all_gather_copy_in_stream(self) -> torch.Stream:
+        """
+        Returns the stream FSDP issues its all-gather copy-ins on. A copy-in
+        copies the parameter shards into the all-gather input; under
+        :class:`CPUOffloadPolicy`, it first copies them host-to-device.
+
+        Waiting on this stream orders work after the copy-ins issued so far.
+        For example, FSDP issues the previous module's prefetch in each
+        pre-backward hook, so other host-to-device copies issued after that
+        hook can wait on this stream to load after FSDP's parameter shards
+        instead of sharing the bandwidth with them.
+
+        FSDP uses this stream for its pre-forward and pre-backward unshards
+        and their prefetches. With :meth:`set_unshard_in_current_stream`, or
+        with a single rank, those copy-ins run on the current stream instead,
+        and this stream carries none of them.
+
+        The stream is shared by the FSDP modules under one root, and created
+        at lazy initialization, in the root module's first forward.
+
+        Raises:
+            RuntimeError: If called before lazy initialization.
+        """
+        state = self._get_fsdp_state()
+        if state._is_root is None:
+            raise RuntimeError(
+                "The all-gather copy-in stream is created at lazy initialization. "
+                "Call this after the root FSDP module's first forward."
+            )
+        return state._comm_ctx.all_gather_copy_in_stream
+
     def _set_unshard_async_op(self, async_op: bool):
         """
         Sets whether to use ``async_op=True`` or ``False`` for the pre-forward

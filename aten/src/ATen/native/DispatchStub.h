@@ -199,9 +199,7 @@ struct TORCH_API DispatchStubImpl {
     void* hip_dispatch_ptr;
     void* mps_dispatch_ptr;
     void* mtia_dispatch_ptr;
-  #if defined(USE_XPU)
     void* xpu_dispatch_ptr;
-  #endif
     void* hpu_dispatch_ptr;
     void* privateuse1_dispatch_ptr;
   #else
@@ -210,9 +208,7 @@ struct TORCH_API DispatchStubImpl {
     void* hip_dispatch_ptr = nullptr;
     void* mps_dispatch_ptr = nullptr;
     void* mtia_dispatch_ptr = nullptr;
-  #if defined(USE_XPU)
     void* xpu_dispatch_ptr = nullptr;
-  #endif
     void* hpu_dispatch_ptr = nullptr;
     void* privateuse1_dispatch_ptr = nullptr;
   #endif
@@ -274,11 +270,9 @@ public:
     impl.cuda_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
 
-  #if defined(USE_XPU)
   void set_xpu_dispatch_ptr(FnPtr fn_ptr){
     impl.xpu_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
   }
-  #endif
 
   void set_hpu_dispatch_ptr(FnPtr fn_ptr) {
     impl.hpu_dispatch_ptr = reinterpret_cast<void*>(fn_ptr);
