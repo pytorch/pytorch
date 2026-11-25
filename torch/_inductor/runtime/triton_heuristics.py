@@ -293,12 +293,17 @@ def _warn_host_tma_clone(name: str) -> None:
     )
 
 
-def _host_tma_aligned(tensor, name):
+def _host_tma_aligned(tensor, name, is_output=False):
     """Return a TMA_ALIGNMENT-aligned view of `tensor`, cloning (with a one-time
     warning) only if its base address is not aligned. Used by the host-side TMA
-    launcher to build TensorDescriptors from aligned storage."""
+    launcher to build TensorDescriptors from aligned storage. An output can't be
+    cloned, since the kernel's writes would land in the copy."""
     if tensor.data_ptr() % TMA_ALIGNMENT == 0:
         return tensor
+    if is_output:
+        raise RuntimeError(
+            f"host-side TMA: output {name} is not {TMA_ALIGNMENT}-byte aligned"
+        )
     _warn_host_tma_clone(name)
     return tensor.clone()
 
@@ -1484,7 +1489,7 @@ class CachingAutotuner(KernelInterface):
             all_constants = compile_meta["constants"]
             # The launchers build exactly these descriptors, with these dims, so
             # whether an arg is compiled as tensordesc<> is decided once, here.
-            resolved_descs: dict[str, dict[str, list[int | str]]] = {}
+            resolved_descs: dict[str, dict[str, Any]] = {}
             for key in list(compile_meta["signature"]):
                 desc_info = host_tma_args.get(key)
                 if desc_info is None or not isinstance(desc_info, dict):
@@ -1528,6 +1533,8 @@ class CachingAutotuner(KernelInterface):
                     "strides": stride_vals,
                     "launch_args": launch_args,
                 }
+                if desc_info.get("is_output"):
+                    resolved_descs[key]["is_output"] = True
             compile_meta["host_tma_descriptors"] = resolved_descs
 
         compile_meta["debug"] = _should_enable_triton_debug_asserts(self.inductor_meta)
@@ -2429,6 +2436,24 @@ class CachingAutotuner(KernelInterface):
         # Currently num_ctas is already captured via config_to_dict(launcher.config)
         # for scratch space scaling, but is not used in the actual kernel launch.
         binary_metadata = binary.metadata
+        triton_meta = self.triton_meta
+        compiled_signature = getattr(launcher, "signature", None)
+        if compiled_signature and triton_meta is not None:
+            # Host-side TMA operands are tensordesc<> in the compiled kernel;
+            # the C++ wrapper must launch them as descriptors.
+            signature = triton_meta.get("signature", {})
+            tma_rewrites = {
+                name: sig
+                for name, sig in compiled_signature.items()
+                if isinstance(sig, str)
+                and sig.startswith("tensordesc<")
+                and signature.get(name) != sig
+            }
+            if tma_rewrites:
+                triton_meta = {
+                    **triton_meta,
+                    "signature": {**signature, **tma_rewrites},
+                }
         legacy_tensordesc_meta = (
             binary_metadata.get("tensordesc_meta")
             if isinstance(binary_metadata, dict)
@@ -2443,7 +2468,7 @@ class CachingAutotuner(KernelInterface):
                 "stream": stream,
                 "config": config_to_dict(launcher.config),
                 "inductor_meta": self.inductor_meta,
-                "triton_meta": self.triton_meta,
+                "triton_meta": triton_meta,
                 "def_args": launcher.def_args,
                 "call_args": launcher.call_args,
                 "global_scratch": launcher.global_scratch,
@@ -2474,7 +2499,7 @@ class CachingAutotuner(KernelInterface):
                 "stream": stream,
                 "config": config_to_dict(launcher.config),
                 "inductor_meta": self.inductor_meta,
-                "triton_meta": self.triton_meta,
+                "triton_meta": triton_meta,
                 "def_args": launcher.def_args,
                 "call_args": launcher.call_args,
                 "global_scratch": launcher.global_scratch,
@@ -3080,9 +3105,7 @@ class CompileResult(Generic[_T]):
 
     def make_launcher(self) -> LauncherType: ...
 
-    def _host_tma_descriptors(
-        self, call_args: list[str]
-    ) -> dict[str, dict[str, list[int | str]]]:
+    def _host_tma_descriptors(self, call_args: list[str]) -> dict[str, dict[str, Any]]:
         """The host-side TMA descriptors to build at launch, keyed by arg.
 
         _create_compile_meta decided which args were compiled as tensordesc<> and
@@ -3123,9 +3146,11 @@ class CompileResult(Generic[_T]):
             stride_vals = dims["strides"]
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
-            # _host_tma_aligned clones (warning once) only if misaligned.
+            # _host_tma_aligned clones a misaligned input (warning once) and
+            # raises for a misaligned output.
             pre_runner_lines.append(
-                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}"'
+                + (", is_output=True)" if dims.get("is_output") else ")")
             )
             pre_runner_lines.append(
                 f"{desc_var} = TensorDescriptor({aligned_var}, {_launcher_dims(shape_vals)},"
@@ -3176,7 +3201,8 @@ class CompileResult(Generic[_T]):
             desc_var = f"{inner_name}_host_tma_desc"
             aligned_var = f"{inner_name}_aligned"
             pre_runner_lines.append(
-                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}")'
+                f'{aligned_var} = _host_tma_aligned({inner_name}, "{inner_name}"'
+                + (", is_output=True)" if dims.get("is_output") else ")")
             )
             pre_runner_lines.append(
                 f"{desc_var} = expand_host_tma_descriptor(_tma_cache, {idx}, "
@@ -3756,6 +3782,10 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
                 ]
             launcher.def_args = def_args
             launcher.call_args = call_args
+            # The compiled signature: host-side TMA operands are tensordesc<>
+            # here though triton_meta still has them as pointers. The C++
+            # wrapper launches from it (save_gpu_kernel).
+            launcher.signature = dict(compile_meta["signature"])
             kernel_metadata = getattr(self.kernel, "metadata", None)
 
             # for the scratch arguments: None indicates that the kernel doesn't

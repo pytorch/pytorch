@@ -140,7 +140,9 @@ class MicroPipelineTPTest(TestCase):
     @fresh_cache()
     @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/5966
     @parametrize("with_reshape", (False, True))
-    def test_scaled_mm_output_scale_preserves_all_gather_fusion(self, with_reshape):
+    def test_scaled_mm_output_scale_folds_before_unfusible_all_gather(
+        self, with_reshape
+    ):
         group = dist.group.WORLD
 
         def func(A_shard, B, A_scale, B_scale, output_scale):
@@ -157,21 +159,18 @@ class MicroPipelineTPTest(TestCase):
         A_shard_shape = (2, 16, packed_k) if with_reshape else (32, packed_k)
         inputs = self._make_nvfp4_inputs(A_shard_shape, packed_k)
         gm = _make_post_grad_fx(func, *inputs)
-        self._apply_scaled_mm_output_scale_fold(gm, expected_folds=int(with_reshape))
+        self._apply_scaled_mm_output_scale_fold(gm, expected_folds=1)
         with (
             _test_mode(),
             mock.patch.object(dist, "is_nccl_available", return_value=True),
         ):
             micro_pipeline_tp_pass(gm.graph)
 
-        if with_reshape:
-            # The existing collective pattern does not cross the explicit
-            # multiply and reshape.
-            self.assertNotIn("fused_all_gather_scaled_matmul", str(gm.graph))
-            self.assertIn("all_gather_into_tensor", str(gm.graph))
-        else:
-            self.assertIn("fused_all_gather_scaled_matmul", str(gm.graph))
-            self.assertNotIn("all_gather_into_tensor", str(gm.graph))
+        # The output-scale fold only rewrites NVFP4 _scaled_mm, which the
+        # symm_mem scaled-matmul ops do not support, so folding never preempts
+        # a collective fusion.
+        self.assertNotIn("fused_all_gather_scaled_matmul", str(gm.graph))
+        self.assertIn("all_gather_into_tensor", str(gm.graph))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "Test requires FP8 support")
@@ -197,9 +196,8 @@ class MicroPipelineTPTest(TestCase):
         ):
             micro_pipeline_tp_pass(gm.graph)
 
-        # The explicit multiply prevents the current reduce-scatter pattern
-        # from matching, so it is safe to use the private NVGEMM output-scale
-        # contract without preempting an available collective fusion.
+        # NVFP4 is not supported by the symm_mem scaled-matmul ops, so the fold
+        # does not preempt a collective fusion.
         self.assertNotIn("fused_scaled_matmul_reduce_scatter", str(gm.graph))
         self.assertIn("reduce_scatter_tensor", str(gm.graph))
 
