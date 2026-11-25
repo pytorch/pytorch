@@ -1,3 +1,4 @@
+#include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
@@ -17,5 +18,19 @@ AOTITorchError torch_mps_set_arg_bytes(
         ". Metal setBytes only supports transient data up to 4 KB. Pass larger data as a tensor.");
     auto func = reinterpret_cast<at::native::mps::MetalKernelFunction*>(handle);
     func->setArg(idx, ptr, size);
+  });
+}
+
+AOTITorchError torch_get_mps_stream_from_pool(
+    bool is_high_priority,
+    int32_t device_index,
+    void** ret_stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        !is_high_priority, "MPS stream pool does not support high priority");
+    TORCH_CHECK(
+        device_index == -1 || device_index == 0,
+        "MPS stream pool requires device index -1 or 0");
+    *ret_stream = at::mps::getStreamFromPool()->commandQueue();
   });
 }

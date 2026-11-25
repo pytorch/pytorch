@@ -1,3 +1,4 @@
+#include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/c/shim.h>
 
@@ -12,9 +13,8 @@ void my_set_current_cuda_stream(void* stream, int32_t device_index) {
 }
 
 void* my_get_cuda_stream_from_pool(bool isHighPriority, int32_t device_index) {
-  void* ret_stream;
-  TORCH_ERROR_CODE_CHECK(torch_get_cuda_stream_from_pool(isHighPriority, device_index, &ret_stream));
-  return ret_stream;
+  return torch::stable::accelerator::getStreamFromPool<
+      torch::headeronly::DeviceType::CUDA>(isHighPriority, device_index);
 }
 
 void my_cuda_stream_synchronize(void* stream, int32_t device_index) {

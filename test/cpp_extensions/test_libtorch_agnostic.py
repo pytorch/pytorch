@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    onlyXPU,
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
@@ -945,6 +946,22 @@ class TestLibtorchAgnostic(TestCase):
             stream_id = libtorch_agnostic.ops.test_stream(device)
 
         self.assertEqual(stream_id, expected_stream_id)
+
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyXPU
+    @parametrize("high_priority", [False, True])
+    @parametrize("use_current_device", [False, True])
+    def test_get_xpu_stream_from_pool(self, device, high_priority, use_current_device):
+        device_index = torch.device(device).index
+        with torch.xpu.device(device_index):
+            previous = torch.xpu.current_stream(device_index)
+            handle = torch.ops.libtorch_agn_2_16.get_xpu_stream_from_pool(
+                high_priority, -1 if use_current_device else device_index
+            )
+            self.assertNotEqual(handle, 0)
+            stream = torch.xpu.get_stream_from_external(handle, device_index)
+            self.assertEqual(stream.sycl_queue, handle)
+            self.assertEqual(torch.xpu.current_stream(device_index), previous)
 
     @skipIfTorchVersionLessThan(2, 13)
     @onlyCUDA
@@ -3033,6 +3050,29 @@ class TestLibtorchAgnosticMetal(TestCase):
             install_cpp_extension(
                 extension_root=base_dir / "libtorch_agn_2_14_extension"
             )
+
+    @skipIfTorchVersionLessThan(2, 16)
+    def test_get_mps_stream_from_pool(self, device):
+        try:
+            importlib.import_module("libtorch_agn_2_16")
+        except ImportError:
+            install_cpp_extension(
+                extension_root=Path(__file__).parent / "libtorch_agn_2_16_extension"
+            )
+            importlib.import_module("libtorch_agn_2_16")
+
+        get_stream = torch.ops.libtorch_agn_2_16.get_mps_stream_from_pool
+        previous = torch.mps.current_stream()
+        explicit = get_stream(False, 0)
+        current = get_stream(False, -1)
+        self.assertNotEqual(explicit, 0)
+        self.assertNotEqual(current, 0)
+        self.assertNotEqual(explicit, current)
+        self.assertEqual(torch.mps.current_stream(), previous)
+        with self.assertRaisesRegex(RuntimeError, "does not support high priority"):
+            get_stream(True, 0)
+        with self.assertRaisesRegex(RuntimeError, "requires device index -1 or 0"):
+            get_stream(False, 1)
 
     @parametrize("scale,negate", [(0.5, False), (2.0, True)])
     def test_mps_set_arg_bytes(self, device, scale, negate):

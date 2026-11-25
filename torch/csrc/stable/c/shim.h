@@ -384,6 +384,23 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
+#ifdef USE_MPS
+// Returns a borrowed Metal command queue. Acquiring it does not commit pending
+// PyTorch work. Callers must establish dependencies for separate submissions.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_mps_stream_from_pool(
+    bool is_high_priority,
+    int32_t device_index,
+    void** ret_stream);
+#endif // USE_MPS
+
+#ifdef USE_XPU
+// Returns a borrowed pointer to the pooled stream's SYCL queue.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_xpu_stream_from_pool(
+    bool is_high_priority,
+    int32_t device_index,
+    void** ret_stream);
+#endif // USE_XPU
+
 // Reads an integer from at::cpu::get_cpu_capabilities().
 // Key is borrowed and NUL-terminated. Outputs are caller-owned.
 // A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
