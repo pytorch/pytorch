@@ -559,6 +559,8 @@ aten::_scaled_grouped_mm_v2
 aten::_scaled_grouped_mm_v2.out
 aten::_scaled_mm
 aten::_scaled_mm.out
+aten::_scaled_mm_mxfp6
+aten::_scaled_mm_mxfp6.out
 aten::_scaled_mm_v2
 aten::_scaled_mm_v2.out
 aten::_segment_reduce_backward

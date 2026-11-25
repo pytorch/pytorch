@@ -7158,6 +7158,21 @@
     MPS: _scaled_mm_mps_v2_out
     XPU: _scaled_mm_xpu_v2_out
 
+# MXFP6 kernel for _scaled_mm_v2, which validates its inputs and calls the .out
+# overload. The CuTeDSL override in torch/_native/ops/scaled_mm implements it;
+# these kernels only report that the override is unavailable.
+- func: _scaled_mm_mxfp6(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, ScalarType out_dtype) -> Tensor
+  variants: function
+  tags: needs_exact_strides
+  dispatch:
+    CUDA: _scaled_mm_mxfp6_cuda
+
+- func: _scaled_mm_mxfp6.out(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  tags: needs_exact_strides
+  dispatch:
+    CUDA: _scaled_mm_mxfp6_out_cuda
+
 - func: _scaled_addmm(Tensor self, Tensor mat1, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, int[] contraction_dim=[], *, Scalar beta=1, Scalar alpha=1, bool use_fast_accum=False) -> Tensor
   structured_delegate: _scaled_addmm.out
   variants: function
