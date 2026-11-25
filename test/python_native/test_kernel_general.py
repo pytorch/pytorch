@@ -3,6 +3,7 @@
 # column view and so force the general path. Override OpInfo suites provide full
 # numerical coverage.
 
+import itertools
 import pathlib
 import sys
 import unittest
@@ -442,6 +443,41 @@ class TestKernelGeneral(TestCase):
                 self.assertEqual(lo.item(), shape[1], atol=0, rtol=1e-4)
                 self.assertEqual(hi.item(), shape[1], atol=0, rtol=1e-4)
                 del x, got
+
+    def test_norm2_tree_leaves_match_across_trees(self):
+        """Round norm2 tree leaves alike in the row and indexed trees, whose row bits
+        test_inner_tree_order pins."""
+        dtypes = (
+            (torch.float32, cutlass.Float32, torch.int32),
+            (torch.float64, cutlass.Float64, torch.int64),
+        )
+        # N = 2000 plans one looped stage and N = 100003 a two-stage split.
+        shapes = ((64, 2000, ("",)), (8, 100003, ("1", "2")))
+        for (dtype, acc, bits), (m, n, stages) in itertools.product(dtypes, shapes):
+            with self.subTest(dtype=dtype, n=n):
+                x = torch.randn(m, 2 * n, device="cuda", dtype=dtype)[:, ::2]
+                trait, kw = T.NormOps(2, acc=acc), {"order": "inner_tree"}
+                key = f"norm2_{dtype}_{n}"
+                row_key, idx_key = f"{key}_rows", f"{key}_indexed"
+                rows = kg.reduce_dim(trait, row_key, x.contiguous(), [1], dtype, **kw)
+                indexed = kg.reduce_dim(trait, idx_key, x, [1], dtype, **kw)
+                row_tags = {k[0] for k in rt._CACHE if k[1] == row_key}
+                self.assertEqual(row_tags, {f"rowitree{s}" for s in stages})
+                self.assertEqual(_plan_tags(idx_key), {f"genitree{s}" for s in stages})
+                self.assertEqual(rows.view(bits), indexed.view(bits))
+                self.assertEqual(rows, torch.linalg.vector_norm(x, dim=1))
+
+    def test_all_folds_zero_flags_serially(self):
+        """Fold all()'s flags through the serial reduce of the unordered kernels."""
+        x = torch.ones(64, 4096, device="cuda")
+        x[::2, 6] = 0
+        trait, i32 = T.AllOps(acc=cutlass.Float32), torch.int32
+        # Contiguous rows take the row kernel; strided rows take the general kernel.
+        for key, view in (("all_rows", x), ("all_strided", x[:, ::2])):
+            got = kg.reduce_dim(trait, key, view, [1], i32, order="unordered")
+            self.assertEqual(got, (view != 0).all(1).to(i32))
+        self.assertEqual({k[0] for k in rt._CACHE if k[1] == "all_rows"}, {"rowtile"})
+        self.assertEqual(_plan_tags("all_strided"), {"gensplit1", "gensplit2"})
 
     def test_int64_mixed_radix_decode(self):
         """Decode logical indices beyond INT32_MAX without truncating strides or extents."""
