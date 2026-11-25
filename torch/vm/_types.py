@@ -32,7 +32,9 @@ class Interval:
         """Up to ``n`` sizes spread over ``lo..hi``, both ends included."""
         if n <= 1 or self.exact:
             return [self.seen] if n == 1 else [self.lo]
-        return sorted({self.lo + round((self.hi - self.lo) * i / (n - 1)) for i in range(n)})
+        return sorted(
+            {self.lo + round((self.hi - self.lo) * i / (n - 1)) for i in range(n)}
+        )
 
     def as_set(self) -> set[int] | range:
         return {self.lo} if self.exact else range(self.lo, self.hi + 1)
@@ -98,7 +100,9 @@ class DimSet:
         ordered = sorted(self.values)
         if n >= len(ordered):
             return ordered
-        return sorted({ordered[round((len(ordered) - 1) * i / max(n - 1, 1))] for i in range(n)})
+        return sorted(
+            {ordered[round((len(ordered) - 1) * i / max(n - 1, 1))] for i in range(n)}
+        )
 
     def as_set(self) -> set[int]:
         return set(self.values)
@@ -112,7 +116,13 @@ class Type:
     join of every value it saw there."""
 
     def join(self, other: "Type") -> "Type":
-        return self if self == other else UnionType((self, other)) if other is not AnyType else other
+        return (
+            self
+            if self == other
+            else UnionType((self, other))
+            if other is not AnyType
+            else other
+        )
 
     def __contains__(self, value: object) -> bool:
         raise NotImplementedError
@@ -155,6 +165,18 @@ class TensorType(Type):
     def is_const(self) -> bool:
         return self._const is not None
 
+    def concrete(self) -> tuple[torch.dtype, torch.device, tuple[Interval, ...]]:
+        """Its dtype, device and dims when each was the same on every call
+        the VM saw: what making a tensor of this type needs. TypeError when
+        the rank, the dtype or the device varied."""
+        if (
+            isinstance(self.dtype, _Varies)
+            or isinstance(self.device, _Varies)
+            or self.dims is None
+        ):
+            raise TypeError(f"{self}: its rank, dtype or device varied")
+        return self.dtype, self.device, self.dims
+
     def dim(self, d: int) -> Interval:
         if self.dims is None:
             raise ValueError(f"{self}: its rank varied")
@@ -168,7 +190,7 @@ class TensorType(Type):
 
     def nbytes(self, at: str = "hi") -> int:
         """Its bytes at the ``"lo"`` or ``"hi"`` end of every range."""
-        if self.dims is None or self.dtype is Varies:
+        if self.dims is None or isinstance(self.dtype, _Varies):
             raise ValueError(f"{self}: its rank or dtype varied")
         return math.prod(getattr(s, at) for s in self.dims) * self.dtype.itemsize
 
@@ -177,16 +199,28 @@ class TensorType(Type):
             return False
         if self.is_const:
             return value is self._const
-        if (self.dtype is not Varies and value.dtype != self.dtype) or (self.device is not Varies and value.device != self.device):
+        if (self.dtype is not Varies and value.dtype != self.dtype) or (
+            self.device is not Varies and value.device != self.device
+        ):
             return False
-        return self.dims is None or (value.dim() == len(self.dims) and all(n in s for n, s in zip(value.shape, self.dims)))
+        return self.dims is None or (
+            value.dim() == len(self.dims)
+            and all(n in s for n, s in zip(value.shape, self.dims))
+        )
 
     def join(self, other: Type) -> Type:
         if not isinstance(other, TensorType) or other.cls is not self.cls:
             return super().join(other)
         dims = None
-        if self.dims is not None and other.dims is not None and len(self.dims) == len(other.dims):
-            dims = tuple(Interval(min(a.lo, b.lo), max(a.hi, b.hi), a.seen) for a, b in zip(self.dims, other.dims))
+        if (
+            self.dims is not None
+            and other.dims is not None
+            and len(self.dims) == len(other.dims)
+        ):
+            dims = tuple(
+                Interval(min(a.lo, b.lo), max(a.hi, b.hi), a.seen)
+                for a, b in zip(self.dims, other.dims)
+            )
         return TensorType(
             self.cls,
             self.dtype if self.dtype == other.dtype else Varies,
@@ -203,18 +237,26 @@ class TensorType(Type):
         from torch.vm._guards import Device, Dim, Dtype
 
         checks: list[Any] = []
-        if self.dtype is not Varies:
+        if not isinstance(self.dtype, _Varies):
             checks.append(Dtype(self.dtype))
-        if self.device is not Varies:
+        if not isinstance(self.device, _Varies):
             checks.append(Device(self.device))
         for d, s in enumerate(self.dims or ()):
             checks.append(Dim(d, s.as_set()))
         return checks
 
     def __repr__(self) -> str:
-        dtype = _SHORT.get(self.dtype, str(self.dtype).removeprefix("torch.")) if self.dtype is not Varies else "?"
+        dtype = (
+            "?"
+            if isinstance(self.dtype, _Varies)
+            else _SHORT.get(self.dtype, str(self.dtype).removeprefix("torch."))
+        )
         dims = "[...]" if self.dims is None else f"[{', '.join(map(repr, self.dims))}]"
-        device = "" if self.device is Varies or self.device.type == "cpu" else f" {self.device}"
+        device = (
+            ""
+            if isinstance(self.device, _Varies) or self.device.type == "cpu"
+            else f" {self.device}"
+        )
         return f"{dtype}{dims}{device}{' const' if self.is_const else ''}"
 
 
@@ -385,31 +427,43 @@ def _scaled_strides(t: TensorType, sizes: list[int]) -> list[int]:
     return strides
 
 
-def materialize(t: TensorType, *, at: str | None = None, dim0: int | None = None, sizes: list[int] | None = None) -> torch.Tensor:
+def materialize(
+    t: TensorType,
+    *,
+    at: str | None = None,
+    dim0: int | None = None,
+    sizes: list[int] | None = None,
+) -> torch.Tensor:
     """Random data of type ``t``, with its strides (a weight's type gives the
     weight itself). Sizes: ``sizes``, else each dimension's traced size, or
     its smallest or largest with ``at="lo"``/``"hi"``; ``dim0`` sets the
     first. Never runs the region."""
-    if t.is_const:
-        return t._const  # type: ignore[return-value]
-    if t.dims is None or t.dtype is Varies or t.device is Varies:
+    const = t._const
+    if const is not None:
+        return const
+    dtype, device, dims = t.dtype, t.device, t.dims
+    if dims is None or isinstance(dtype, _Varies) or isinstance(device, _Varies):
         raise ValueError(f"can't materialize {t}: it varied in rank, dtype or device")
     if sizes is None:
         pick = {"lo": lambda s: s.lo, "hi": lambda s: s.hi, None: lambda s: s.seen}[at]
-        sizes = [pick(s) for s in t.dims]
+        sizes = [pick(s) for s in dims]
         if dim0 is not None:
             sizes[0] = dim0
-    out = torch.empty_strided(sizes, _scaled_strides(t, sizes), dtype=t.dtype, device=t.device)
+    out = torch.empty_strided(
+        sizes, _scaled_strides(t, sizes), dtype=dtype, device=device
+    )
     if out.dtype.is_floating_point or out.dtype.is_complex:
-        out.copy_(torch.randn(sizes, dtype=t.dtype, device=t.device))
+        out.copy_(torch.randn(sizes, dtype=dtype, device=device))
     elif out.dtype == torch.bool:
-        out.copy_(torch.rand(sizes, device=t.device) < 0.5)
+        out.copy_(torch.rand(sizes, device=device) < 0.5)
     else:
-        out.copy_(torch.randint(0, 2, sizes, dtype=t.dtype, device=t.device))
+        out.copy_(torch.randint(0, 2, sizes, dtype=dtype, device=device))
     return out
 
 
-def type_of(gm: torch.fx.GraphModule, input_types: list[TensorType], node: torch.fx.Node) -> TensorType:
+def type_of(
+    gm: torch.fx.GraphModule, input_types: list[TensorType], node: torch.fx.Node
+) -> TensorType:
     """``node``'s type: an input's from ``input_types``; an intermediate's by
     propagating the input types through the graph (fake tensors at each end
     of the inputs' ranges, joined with the traced run's value)."""
@@ -421,14 +475,24 @@ def type_of(gm: torch.fx.GraphModule, input_types: list[TensorType], node: torch
     t = dataclasses.replace(exact(val), requires_grad=Varies)
     if all(s.exact for it in input_types if it.dims is not None for s in it.dims):
         return t
-    ends = [_propagate(gm, input_types, at).get(node) for at in ("lo", "hi")]
-    if any(not isinstance(e, torch.Tensor) or e.dim() != val.dim() for e in ends):
+    lo, hi = (_propagate(gm, input_types, at).get(node) for at in ("lo", "hi"))
+    if (
+        not isinstance(lo, torch.Tensor)
+        or not isinstance(hi, torch.Tensor)
+        or lo.dim() != val.dim()
+        or hi.dim() != val.dim()
+    ):
         return t
-    dims = tuple(Interval(min(a, b, s), max(a, b, s), s) for a, b, s in zip(ends[0].shape, ends[1].shape, val.shape))
+    dims = tuple(
+        Interval(min(a, b, s), max(a, b, s), s)
+        for a, b, s in zip(lo.shape, hi.shape, val.shape)
+    )
     return dataclasses.replace(t, dims=dims)
 
 
-def _propagate(gm: torch.fx.GraphModule, input_types: list[TensorType], at: str) -> dict[torch.fx.Node, Any]:
+def _propagate(
+    gm: torch.fx.GraphModule, input_types: list[TensorType], at: str
+) -> dict[torch.fx.Node, Any]:
     """Every node's fake value with each input at the ``at`` end of its range
     (cached on the graph, per input types); empty if that doesn't run."""
     from torch._subclasses.fake_tensor import FakeTensorMode
@@ -448,13 +512,19 @@ def _propagate(gm: torch.fx.GraphModule, input_types: list[TensorType], at: str)
 
     try:
         with mode:
-            args = []
+            args: list[torch.Tensor] = []
             for t in input_types:
-                if t.is_const:
-                    args.append(mode.from_tensor(t._const))
+                const = t._const
+                if const is not None:
+                    args.append(mode.from_tensor(const))
                     continue
-                sizes = [getattr(s, at) for s in t.dims]
-                args.append(torch.empty_strided(sizes, _scaled_strides(t, sizes), dtype=t.dtype, device=t.device))
+                dtype, device, dims = t.concrete()
+                sizes = [getattr(s, at) for s in dims]
+                args.append(
+                    torch.empty_strided(
+                        sizes, _scaled_strides(t, sizes), dtype=dtype, device=device
+                    )
+                )
             Recorder(gm).run(*args)
     except (RuntimeError, TypeError, ValueError, IndexError):
         env = {}

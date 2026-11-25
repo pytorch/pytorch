@@ -175,6 +175,14 @@ class Partition:
         return (self.fn or _inductor_partition)(joint, joint_inputs, **kwargs)
 
 
+def _callable(compiled: Any) -> Callable:
+    """What compile_fx gave, which is a callable unless it was asked for
+    something else (a list of output code, a weights file)."""
+    if not callable(compiled):
+        raise TypeError(f"compile_fx gave a {type(compiled).__name__}, not a callable")
+    return compiled
+
+
 class Inductor:
     """Compiles the graph with Inductor and returns a graph that calls the
     result. Before ``Autograd`` (or without it), Inductor differentiates the
@@ -201,7 +209,10 @@ class Inductor:
             return _compile_without_floats(gm, inputs, self.config)
         if stage == "forward":
             return lower_to(
-                gm, compile_fx(gm, inputs, config_patches=dict(self.config) or None)
+                gm,
+                _callable(
+                    compile_fx(gm, inputs, config_patches=dict(self.config) or None)
+                ),
             )
         with config.patch(self.config):
             boxed = compile_fx_inner(
@@ -252,8 +263,10 @@ def _compile_without_floats(
     nodes = [k for k, x in enumerate(items) if isinstance(x, torch.fx.Node)]
     out.args = ([items[k] for k in nodes],)
     inner.recompile()
-    compiled = compile_fx(
-        inner, [inputs[i] for i in keep], config_patches=dict(config) or None
+    compiled = _callable(
+        compile_fx(
+            inner, [inputs[i] for i in keep], config_patches=dict(config) or None
+        )
     )
 
     def inductor(*args):
@@ -288,7 +301,8 @@ def static_parameters(
     from torch._dynamo.source import LocalSource
 
     gm.meta["dynamo_compile_id"] = None
-    gm._param_name_to_source = {}
+    # Not through Module.__setattr__, which is typed for modules and tensors.
+    vars(gm)["_param_name_to_source"] = {}
     for i, (node, t) in enumerate(
         zip(gm.graph.find_nodes(op="placeholder"), input_types)
     ):

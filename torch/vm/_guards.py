@@ -29,7 +29,9 @@ class Check:
     # Whether it reads the thread's state rather than the guarded value.
     state = False
 
-    def holds(self, t: torch.Tensor, value_of) -> bool:
+    def holds(self, t: torch.Tensor | None, value_of) -> bool:
+        """Whether the check holds of ``t`` (None for a check that reads the
+        thread's state rather than a value)."""
         raise NotImplementedError
 
 
@@ -79,7 +81,11 @@ class Dim(Check):
 
     def __repr__(self):
         s = self.sizes
-        shown = f"{s.start}..{s.stop - 1}" if isinstance(s, range) and s.step == 1 else repr(set(s) if not isinstance(s, range) else s)
+        shown = (
+            f"{s.start}..{s.stop - 1}"
+            if isinstance(s, range) and s.step == 1
+            else repr(set(s) if not isinstance(s, range) else s)
+        )
         return f"Dim({self.d}, {shown})"
 
 
@@ -104,7 +110,9 @@ class StrideOrder(Check):
     perm: tuple[int, ...]
 
     def holds(self, t, value_of):
-        return t.dim() == len(self.perm) and all(t.stride(a) >= t.stride(b) for a, b in zip(self.perm, self.perm[1:]))
+        return t.dim() == len(self.perm) and all(
+            t.stride(a) >= t.stride(b) for a, b in zip(self.perm, self.perm[1:])
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -167,12 +175,25 @@ class TensorMeta(Check):
 
     def holds(self, t, value_of):
         s = self.spec
-        sizes = tuple(s.shape) if isinstance(s, torch.Tensor) else tuple(d.lo for d in s.dims)
+        sizes = (
+            tuple(s.shape)
+            if isinstance(s, torch.Tensor)
+            else tuple(d.lo for d in s.dims)
+        )
         strides = tuple(s.stride()) if isinstance(s, torch.Tensor) else s.strides
-        return t.dtype == s.dtype and t.device == s.device and tuple(t.shape) == sizes and tuple(t.stride()) == tuple(strides)
+        return (
+            t.dtype == s.dtype
+            and t.device == s.device
+            and tuple(t.shape) == sizes
+            and tuple(t.stride()) == tuple(strides)
+        )
 
     def __repr__(self):
-        return f"TensorMeta({self.spec!r})" if not isinstance(self.spec, torch.Tensor) else f"TensorMeta({self.spec.dtype}, {list(self.spec.shape)})"
+        return (
+            f"TensorMeta({self.spec!r})"
+            if not isinstance(self.spec, torch.Tensor)
+            else f"TensorMeta({self.spec.dtype}, {list(self.spec.shape)})"
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -195,7 +216,11 @@ class Ints(Check):
     dynamic = True
 
     def holds(self, t, value_of):
-        return type(t) is self.seq and len(t) == len(self.values) and all(type(x) is int and x == v for x, v in zip(t, self.values))
+        return (
+            type(t) is self.seq
+            and len(t) == len(self.values)
+            and all(type(x) is int and x == v for x, v in zip(t, self.values))
+        )
 
 
 class _State(Check):
@@ -315,7 +340,9 @@ def guard_node(x: Any) -> Any:
 guard_node.__name__ = "vm_guard"
 
 
-def guard(gm: torch.fx.GraphModule, node: torch.fx.Node, *checks: Check) -> torch.fx.Node:
+def guard(
+    gm: torch.fx.GraphModule, node: torch.fx.Node, *checks: Check
+) -> torch.fx.Node:
     """Adds a guard node: this version of the block runs only on calls where
     every check holds for ``node``'s value (else the version below runs)."""
     for c in checks:
@@ -358,10 +385,14 @@ def lift(gm: torch.fx.GraphModule, example_inputs: list[Any]) -> Lifted:
                 out.dynamic.append((-1, c))
             elif c.dynamic:
                 if x not in index:
-                    raise NotImplementedError(f"{c!r} on {x.name}: guards that vary between calls go on the block's inputs (placeholders) for now")
+                    raise NotImplementedError(
+                        f"{c!r} on {x.name}: guards that vary between calls go on the block's inputs (placeholders) for now"
+                    )
                 if isinstance(c, NotOverlapping):
                     if any(o not in index for o in c.others):
-                        raise NotImplementedError(f"{c!r}: NotOverlapping compares the block's inputs (placeholders) for now")
+                        raise NotImplementedError(
+                            f"{c!r}: NotOverlapping compares the block's inputs (placeholders) for now"
+                        )
                     # By input index, as holds() reads them.
                     c = NotOverlapping(*(index[o] for o in c.others))
                 out.dynamic.append((index[x], c))
