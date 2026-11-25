@@ -4057,7 +4057,6 @@ class TestDistributionsDevice(DistributionsTestCase):
         self._check_log_prob(StudentT(df), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
     def test_studentT_sample(self):
         # See Note [Randomized statistical tests]
