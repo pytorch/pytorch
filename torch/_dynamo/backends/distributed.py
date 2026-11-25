@@ -192,7 +192,10 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         self,
         module: fx.GraphModule,
         compiler: CompilerFn,
-        fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+        fake_mode: (
+            torch._subclasses.fake_tensor.FakeTensorMode
+            | torch._subclasses.fake_tensor.CppFakeTensorMode
+        ),
         **compiler_configs: Any,
     ) -> None:
         super().__init__(module)

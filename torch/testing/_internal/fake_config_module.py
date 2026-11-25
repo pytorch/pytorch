@@ -1,6 +1,10 @@
 import sys
 
-from torch.utils._config_module import Config, install_config_module
+from torch.utils._config_module import (
+    Config,
+    deprecated_alias_fields_from,
+    install_config_module,
+)
 
 
 e_bool = True
@@ -44,6 +48,11 @@ e_deprecated_alias: bool = Config(
 
 class nested:
     e_bool = True
+
+
+@deprecated_alias_fields_from(nested)
+class nested_alias:
+    pass
 
 
 _cache_config_ignore_prefix = ["magic_cache_config"]

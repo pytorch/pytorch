@@ -89,6 +89,7 @@ endif()
 # except the ones listed here.
 set(ATen_HIP_TEST_EXCLUDE
   cuda_cudnn_test # cuDNN only
+  cuda_exchange_device_test # lazy-context ExchangeDevice is CUDA_VERSION >= 12000 only
   )
 foreach(test_src ${ATen_CUDA_TEST_SRCS})
   get_filename_component(test_name ${test_src} NAME_WE)
@@ -101,15 +102,6 @@ foreach(test_src ${ATen_CUDA_TEST_SRCS})
   string(REGEX REPLACE "^\\.cu$" ".hip" test_ext ${test_ext})
   list(APPEND ATen_HIP_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/hip/${test_name}${test_ext})
 endforeach()
-
-list(APPEND ATen_VULKAN_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
-
-list(APPEND ATen_MOBILE_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_caching_allocator_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp)
 
 list(APPEND ATen_VEC_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vec_test_all_types.cpp
@@ -136,8 +128,6 @@ list(APPEND ATen_XPU_TEST_SRCS
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)
-set(ATen_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS} PARENT_SCOPE)
-set(ATen_MOBILE_TEST_SRCS ${ATen_MOBILE_TEST_SRCS} PARENT_SCOPE)
 set(ATen_VEC_TEST_SRCS ${ATen_VEC_TEST_SRCS} PARENT_SCOPE)
 set(ATen_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS} PARENT_SCOPE)
 set(ATen_XPU_TEST_SRCS ${ATen_XPU_TEST_SRCS} PARENT_SCOPE)
