@@ -2491,6 +2491,16 @@ class TritonTemplateKernel(TritonKernel):
                     first_red = next(
                         (j for j, n in enumerate(nodes) if n.is_reduction()), len(nodes)
                     )
+                    if first_red < len(nodes) and self.output_tiles[i][1][2] == 1:
+                        # Nodes over rows only can't be generated in the
+                        # output's (M * N) space, but the tile pass handles them
+                        # when it isn't looped over subtiles.
+                        rows = (self.output_node.get_size()[0], sympy.S.One)
+                        first_red = next(
+                            j
+                            for j, n in enumerate(nodes)
+                            if n.is_reduction() or n.group[1] == rows
+                        )
                     for node in nodes[:first_red]:
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
                     row_loads = {}
