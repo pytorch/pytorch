@@ -3312,7 +3312,7 @@
       "Context": "context",
       "Explanation": "Dynamo cannot establish the stable receiver identity required by this operation.",
       "Hints": [
-        "Use a stable receiver or pass the result into the saved graph or reuse hash function."
+        "Compute the result outside compilation and pass it as an input."
       ]
     }
   ],
