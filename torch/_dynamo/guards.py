@@ -619,7 +619,8 @@ class GuardManagerWrapper:
             accessors = node.get_accessors()
             child_mgrs = node.get_child_managers()
             return all(
-                isinstance(accessor, accepted_accessors) and mgr.is_tag_safe()
+                isinstance(accessor, accepted_accessors)
+                and mgr.is_structurally_tag_safe()
                 for accessor, mgr in zip(accessors, child_mgrs)
             )
 
@@ -633,9 +634,63 @@ class GuardManagerWrapper:
                 )
             )
 
+        # OBJECT_ALIASING relates two managers through one shared guard
+        # object. Skipping the subtree that holds both is safe: nothing in it
+        # changed, so the identity still holds. Skipping only one side is not,
+        # because the guard is stateful. So an aliasing guard stays "open"
+        # until a subtree contains every manager that holds it, and no tag safe
+        # root may have open aliasing guards. Other unoptimized relational
+        # guards still block every ancestor.
+        def child_managers(node: GuardManager) -> list[GuardManager]:
+            if isinstance(node, DictGuardManager):
+                return [
+                    mgr
+                    for pair in node.get_key_value_managers().values()
+                    for mgr in pair
+                    if mgr is not None
+                ]
+            return list(node.get_child_managers())
+
+        aliasing_guard_counts: collections.Counter[int] = collections.Counter()
+        stack: list[GuardManager] = [self.root]
+        while stack:
+            mgr = stack.pop()
+            aliasing_guard_counts.update(mgr.get_object_aliasing_guard_ids())
+            stack.extend(child_managers(mgr))
+
+        def own_relational_state(
+            node: GuardManager,
+        ) -> tuple[bool, collections.Counter[int]]:
+            return (
+                node.has_non_aliasing_unoptimized_relational_guard(),
+                collections.Counter(node.get_object_aliasing_guard_ids()),
+            )
+
+        def merge_relational_state(
+            state: tuple[bool, collections.Counter[int]],
+            child_state: tuple[bool, collections.Counter[int]],
+        ) -> tuple[bool, collections.Counter[int]]:
+            blocked, open_guards = state
+            child_blocked, child_open = child_state
+            open_guards = open_guards + child_open
+            for guard_id in child_open:
+                if open_guards[guard_id] == aliasing_guard_counts[guard_id]:
+                    del open_guards[guard_id]
+            return blocked or child_blocked, open_guards
+
+        def mark_safe(
+            node: GuardManager, state: tuple[bool, collections.Counter[int]]
+        ) -> None:
+            if state[1]:
+                # Safe only once a subtree also holds the other managers of
+                # its aliasing guards; see the tag safe roots pass below.
+                node.mark_structurally_tag_safe()
+            else:
+                node.mark_tag_safe()
+
         def visit_dict_manager(
             node: DictGuardManager,
-        ) -> tuple[list[GuardManager], bool]:
+        ) -> tuple[list[GuardManager], tuple[bool, collections.Counter[int]]]:
             # Just recurse through the key and value dict managers and check if
             # all of them are tag safe nodes.
             if not issubclass(node.get_type_of_guarded_value(), dict):
@@ -644,43 +699,42 @@ class GuardManagerWrapper:
                 )
 
             tag_safe_roots = []
-            has_unoptimized_relational_guard = node.has_unoptimized_relational_guard()
+            relational_state = own_relational_state(node)
 
             # Recurse to get the tag safe roots from subtree.
             for _idx, (key_mgr, val_mgr) in sorted(
                 node.get_key_value_managers().items()
             ):
                 if key_mgr is not None:
-                    _, child_has_unoptimized_relational_guard = visit(key_mgr)
-                    has_unoptimized_relational_guard |= (
-                        child_has_unoptimized_relational_guard
+                    _, child_state = visit(key_mgr)
+                    relational_state = merge_relational_state(
+                        relational_state, child_state
                     )
                 if val_mgr is not None:
-                    (
-                        child_tag_safe_roots,
-                        child_has_unoptimized_relational_guard,
-                    ) = visit(val_mgr)
+                    child_tag_safe_roots, child_state = visit(val_mgr)
                     tag_safe_roots.extend(child_tag_safe_roots)
-                    has_unoptimized_relational_guard |= (
-                        child_has_unoptimized_relational_guard
+                    relational_state = merge_relational_state(
+                        relational_state, child_state
                     )
 
-            if has_unoptimized_relational_guard:
-                return tag_safe_roots, has_unoptimized_relational_guard
+            if relational_state[0]:
+                return tag_safe_roots, relational_state
 
             is_subtree_tag_safe = ordered_dict_tag_safe(node)
             for key_mgr, val_mgr in node.get_key_value_managers().values():
                 if key_mgr:
-                    is_subtree_tag_safe &= key_mgr.is_tag_safe()
+                    is_subtree_tag_safe &= key_mgr.is_structurally_tag_safe()
 
                 if val_mgr:
-                    is_subtree_tag_safe &= val_mgr.is_tag_safe()
+                    is_subtree_tag_safe &= val_mgr.is_structurally_tag_safe()
 
             if is_subtree_tag_safe:
-                node.mark_tag_safe()
-            return tag_safe_roots, has_unoptimized_relational_guard
+                mark_safe(node, relational_state)
+            return tag_safe_roots, relational_state
 
-        def visit_manager(node: GuardManager) -> tuple[list[GuardManager], bool]:
+        def visit_manager(
+            node: GuardManager,
+        ) -> tuple[list[GuardManager], tuple[bool, collections.Counter[int]]]:
             if isinstance(node, DictGuardManager):
                 raise AssertionError(
                     f"Expected non-DictGuardManager node, got {type(node)}"
@@ -688,19 +742,14 @@ class GuardManagerWrapper:
 
             # Collect the subtree tag safe roots
             tag_safe_roots = []
-            has_unoptimized_relational_guard = node.has_unoptimized_relational_guard()
+            relational_state = own_relational_state(node)
             for child_mgr in node.get_child_managers():
-                (
-                    child_tag_safe_roots,
-                    child_has_unoptimized_relational_guard,
-                ) = visit(child_mgr)
+                child_tag_safe_roots, child_state = visit(child_mgr)
                 tag_safe_roots.extend(child_tag_safe_roots)
-                has_unoptimized_relational_guard |= (
-                    child_has_unoptimized_relational_guard
-                )
+                relational_state = merge_relational_state(relational_state, child_state)
 
-            if has_unoptimized_relational_guard:
-                return tag_safe_roots, has_unoptimized_relational_guard
+            if relational_state[0]:
+                return tag_safe_roots, relational_state
 
             if node.is_guarded_value_immutable():
                 # If the node guards a tensor, mark it tag safe only if there
@@ -708,7 +757,7 @@ class GuardManagerWrapper:
                 # symbolic shape guards.
                 if issubclass(node.get_type_of_guarded_value(), torch.Tensor):
                     if node.has_no_accessors():
-                        node.mark_tag_safe()
+                        mark_safe(node, relational_state)
                 elif any(
                     a.repr() == "PythonLambdaGuardAccessor"
                     for a in node.get_accessors()
@@ -719,25 +768,27 @@ class GuardManagerWrapper:
                     # recording pass since they are freed after each check.
                     pass
                 else:
-                    node.mark_tag_safe()
+                    mark_safe(node, relational_state)
             elif issubclass(node.get_type_of_guarded_value(), dict):
                 accessors = node.get_accessors()
                 child_mgrs = node.get_child_managers()
                 is_subtree_tag_safe = all(
-                    isinstance(accessor, DictGetItemGuardAccessor) and mgr.is_tag_safe()
+                    isinstance(accessor, DictGetItemGuardAccessor)
+                    and mgr.is_structurally_tag_safe()
                     for accessor, mgr in zip(accessors, child_mgrs)
                 ) and ordered_dict_tag_safe(node)
                 if is_subtree_tag_safe:
-                    node.mark_tag_safe()
+                    mark_safe(node, relational_state)
             elif issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 is_subtree_tag_safe = check_tag_safety(
                     node, (GetGenericDictGuardAccessor, TypeGuardAccessor)
                 )
                 if is_subtree_tag_safe:
-                    node.mark_tag_safe()
-                    # Return the current node as tag safe root, discarding the
-                    # subtree tag safe roots.
-                    return [node], has_unoptimized_relational_guard
+                    mark_safe(node, relational_state)
+                    if not relational_state[1]:
+                        # Return the current node as tag safe root, discarding
+                        # the subtree tag safe roots.
+                        return [node], relational_state
             elif (
                 node.get_type_of_guarded_value()
                 in (
@@ -772,7 +823,7 @@ class GuardManagerWrapper:
                         )
 
                 if is_subtree_tag_safe:
-                    node.mark_tag_safe()
+                    mark_safe(node, relational_state)
             elif issubclass(node.get_type_of_guarded_value(), types.CellType):
                 is_subtree_tag_safe = check_tag_safety(node, (GetAttrGuardAccessor,))
 
@@ -782,19 +833,19 @@ class GuardManagerWrapper:
                     for accessor in node.get_accessors()
                 )
                 if is_subtree_tag_safe:
-                    node.mark_tag_safe()
+                    mark_safe(node, relational_state)
             elif node.get_type_of_guarded_value() is tuple:
                 # A tuple can't change in place. Rebinding the attribute or key
                 # that holds it is caught by the parent, which is itself tag
                 # safe (a recorded dict, a function dunder or a partial slot).
                 if check_tag_safety(node, (TupleGetItemGuardAccessor,)):
-                    node.mark_tag_safe()
+                    mark_safe(node, relational_state)
             elif node.get_type_of_guarded_value() is list:
                 # Lists have no version tag. The C++ recording pass snapshots
                 # the length and element identities of a tag safe list and
                 # compares them on every tag hit.
                 if check_tag_safety(node, (ListGetItemGuardAccessor,)):
-                    node.mark_tag_safe()
+                    mark_safe(node, relational_state)
             elif (
                 node.get_type_of_guarded_value() is functools.partial
                 and config.assume_dunder_attributes_remain_unchanged
@@ -809,7 +860,7 @@ class GuardManagerWrapper:
                     for accessor in node.get_accessors()
                 )
                 if is_subtree_tag_safe:
-                    node.mark_tag_safe()
+                    mark_safe(node, relational_state)
             elif (
                 issubclass(node.get_type_of_guarded_value(), tuple)
                 and node.get_source().endswith(dunder_attrs_assumed_constants)
@@ -828,19 +879,21 @@ class GuardManagerWrapper:
                     node, (TupleGetItemGuardAccessor,)
                 )
                 if is_subtree_tag_safe:
-                    node.mark_tag_safe()
+                    mark_safe(node, relational_state)
             elif issubclass(node.get_type_of_guarded_value(), type):
                 is_subtree_tag_safe = check_tag_safety(
                     node, (TypeDictGuardAccessor, TypeMROGuardAccessor)
                 )
                 if is_subtree_tag_safe:
-                    node.mark_tag_safe()
+                    mark_safe(node, relational_state)
 
-            return tag_safe_roots, has_unoptimized_relational_guard
+            return tag_safe_roots, relational_state
 
-        def visit(node: GuardManager) -> tuple[list[GuardManager], bool]:
+        def visit(
+            node: GuardManager,
+        ) -> tuple[list[GuardManager], tuple[bool, collections.Counter[int]]]:
             if node is None:
-                return [], False
+                return [], (False, collections.Counter())
             if isinstance(node, DictGuardManager):
                 return visit_dict_manager(node)
             return visit_manager(node)
@@ -849,6 +902,14 @@ class GuardManagerWrapper:
         for node in tag_safe_roots:
             if issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 node.mark_tag_safe_root()
+                # Every aliasing guard below a root is closed within it, so its
+                # structurally safe nodes are tag safe.
+                stack = [node]
+                while stack:
+                    mgr = stack.pop()
+                    if mgr.is_structurally_tag_safe() and not mgr.is_tag_safe():
+                        mgr.mark_tag_safe()
+                    stack.extend(child_managers(mgr))
 
     def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)

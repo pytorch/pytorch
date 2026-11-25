@@ -3825,6 +3825,24 @@ class GuardManager {
     return _has_unoptimized_relational_guard;
   }
 
+  // True if this manager holds an unoptimized relational guard other than
+  // OBJECT_ALIASING (or is flagged as if it did).
+  bool has_non_aliasing_unoptimized_relational_guard() {
+    return _has_non_aliasing_unoptimized_relational_guard;
+  }
+
+  // Identities of the OBJECT_ALIASING guards on this manager. One guard object
+  // is shared by every manager it relates, so equal ids mean the same guard.
+  std::vector<uintptr_t> get_object_aliasing_guard_ids() {
+    std::vector<uintptr_t> ids;
+    for (const auto& guard : _leaf_guards) {
+      if (dynamic_cast<OBJECT_ALIASING*>(guard.get()) != nullptr) {
+        ids.push_back(reinterpret_cast<uintptr_t>(guard.get()));
+      }
+    }
+    return ids;
+  }
+
  public:
   // type related helpers
   bool is_guarded_value_immutable() {
@@ -3850,6 +3868,17 @@ class GuardManager {
   // Seen docstring in guards.py ``find_tag_safe_roots`` for full context
   void mark_tag_safe() {
     _is_tag_safe = true;
+    _is_structurally_tag_safe = true;
+  }
+
+  // Tag safe except for OBJECT_ALIASING guards whose other managers lie
+  // outside this subtree. See find_tag_safe_roots in guards.py.
+  void mark_structurally_tag_safe() {
+    _is_structurally_tag_safe = true;
+  }
+
+  bool is_structurally_tag_safe() {
+    return _is_structurally_tag_safe;
   }
 
   void mark_tag_safe_root() {
@@ -3975,6 +4004,9 @@ class GuardManager {
         if (std::dynamic_pointer_cast<NO_TENSOR_ALIASING>(relational_guard) ==
             nullptr) {
           cloned_mgr->_has_unoptimized_relational_guard = true;
+          // A clone may keep only some of a guard's managers, so don't treat
+          // its aliasing guards as closed within a subtree.
+          cloned_mgr->_has_non_aliasing_unoptimized_relational_guard = true;
         }
         add_relational_guard_resetter_to_cloned_root(
             cloned_root, relational_guard);
@@ -4638,6 +4670,7 @@ class GuardManager {
     // Replay requires live watched dictionaries and the GIL. Python 3.11 has
     // no watchers; a replacement can free the cached borrowed pointer.
     _has_unoptimized_relational_guard = true;
+    _has_non_aliasing_unoptimized_relational_guard = true;
 #else
     _dict_tag_replay_guards.push_back(guard);
 #endif
@@ -4663,6 +4696,10 @@ class GuardManager {
       _has_no_tensor_aliasing_guard = true;
     } else {
       _has_unoptimized_relational_guard = true;
+      if (std::dynamic_pointer_cast<OBJECT_ALIASING>(relational_guard) ==
+          nullptr) {
+        _has_non_aliasing_unoptimized_relational_guard = true;
+      }
     }
   }
 
@@ -4705,6 +4742,7 @@ class GuardManager {
   bool _has_object_aliasing_guard = false;
   bool _has_no_tensor_aliasing_guard = false;
   bool _has_unoptimized_relational_guard = false;
+  bool _has_non_aliasing_unoptimized_relational_guard = false;
 
   bool _is_dict = false;
   bool _is_immutable = false;
@@ -4715,6 +4753,7 @@ class GuardManager {
 
   // tag safe markers
   bool _is_tag_safe = false;
+  bool _is_structurally_tag_safe = false;
   bool _is_tag_safe_root = false;
   bool _disable_dict_tag_matching = false;
   std::unordered_map<PyObject*, std::vector<std::pair<PyObject*, uint64_t>>>
@@ -8583,10 +8622,20 @@ PyObject* torch_c_dynamo_guards_init() {
           "has_unoptimized_relational_guard",
           &GuardManager::has_unoptimized_relational_guard)
       .def(
+          "has_non_aliasing_unoptimized_relational_guard",
+          &GuardManager::has_non_aliasing_unoptimized_relational_guard)
+      .def(
+          "get_object_aliasing_guard_ids",
+          &GuardManager::get_object_aliasing_guard_ids)
+      .def(
           "is_guarded_value_immutable",
           &GuardManager::is_guarded_value_immutable)
       .def("has_no_accessors", &GuardManager::has_no_accessors)
       .def("mark_tag_safe", &GuardManager::mark_tag_safe)
+      .def(
+          "mark_structurally_tag_safe",
+          &GuardManager::mark_structurally_tag_safe)
+      .def("is_structurally_tag_safe", &GuardManager::is_structurally_tag_safe)
       .def("mark_tag_safe_root", &GuardManager::mark_tag_safe_root)
       .def("is_tag_safe", &GuardManager::is_tag_safe)
       .def("is_tag_safe_root", &GuardManager::is_tag_safe_root)
