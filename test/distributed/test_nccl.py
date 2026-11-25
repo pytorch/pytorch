@@ -2096,12 +2096,7 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC="100",
         )
         symm_mem.set_backend("NCCL")
-        # Only the peer's watchdog may time out: the holding rank's abort waits
-        # for its held-back work, which a short timeout would cut off.
-        self._init_process_group(
-            "_watchdog_abort",
-            timeout=timedelta(seconds=2) if self.rank == 1 else None,
-        )
+        self._init_process_group("_watchdog_abort")
         _tensor, handle = self._retained_handle()
         side_store = c10d.FileStore(self.file_name + "_watchdog_side", self.world_size)
         if self.rank == 0:
@@ -2111,6 +2106,10 @@ class NCCLSymmetricMemoryLifecycleTest(MultiProcessTestCase):
             c10d.distributed_c10d._abort_process_group()
             return
         try:
+            # Only the peer's watchdog may time out, and only on the held-back
+            # collective: the holding rank's abort waits for its held-back work,
+            # and the setup collectives above can take longer than 2s.
+            c10d.set_timeout(timedelta(seconds=2))
             c10d.all_reduce(torch.ones(1, device=self.device), async_op=True)
             deadline = time.monotonic() + 60
             while True:
