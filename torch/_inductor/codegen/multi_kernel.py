@@ -657,8 +657,9 @@ class ConditionalMultiKernel(MultiKernelBase):
 
     @property
     def kernel_name(self) -> str:
-        # There is no dispatcher object to name, so this names the first (fastest)
-        # choice; the wrapper comment, profiling scope and provenance tracing use it.
+        # There is no dispatcher object to name, so this names the first
+        # (highest-priority) choice; the wrapper comment and profiling scope use it,
+        # and _record_other_choices_provenance records the other choices.
         return self.kernels[0].kernel_name
 
     def call_kernel(self, kernel_name):
