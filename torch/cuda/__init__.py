@@ -30,6 +30,7 @@ from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
 
 from . import _device_limits, gds
+from ._memory_planning import MemoryPlannedGraph
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -2279,6 +2280,7 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
+    "MemoryPlannedGraph",
     "MemPool",
     "LocalizedAllocator",
     "use_mem_pool",
