@@ -19,7 +19,9 @@ def get_offset_for_next_block(
 
 @triton.jit
 def get_bounded_indices(indices, max_len=None):
-    return indices % max_len if max_len is not None else indices
+    # Keeps score_mod / mask_mod loads from captured buffers in bounds when a block extends past max_len.
+    # Out-of-range positions are masked or never stored, so any in-bounds index works.
+    return tl.minimum(indices, max_len - 1) if max_len is not None else indices
 
 @triton.jit
 def load_checked_block(block_ptr, IS_DIVISIBLE: tl.constexpr, SAFE_HEAD_DIM: tl.constexpr):
