@@ -1,8 +1,8 @@
 # Owner(s): ["module: rocm"]
 name: linux-binary-test-rocm
 
-# Reusable ROCm manywheel binary test. setup-rocm prepares the runner
-# and logs into ECR. The test image is started with docker run.
+# Reusable ROCm manywheel binary test. The builder image is the job container,
+# so no step needs a host docker CLI or an ECR login.
 
 on:
   workflow_call:
@@ -41,8 +41,8 @@ on:
         type: string
         description: |
           Registry host prefix (with trailing slash) prepended to the
-          pytorch/<image> path. Empty means Docker Hub. setup-rocm logs
-          into ECR before the pull.
+          pytorch/<image> path: empty for Docker Hub, or ghcr.io/. The image is
+          pulled before any step runs, so it must not need an in-job login.
       DESIRED_PYTHON:
         required: false
         type: string
@@ -60,9 +60,72 @@ permissions:
   contents: read
 
 jobs:
+  # Wait for the GHCR mirror on a CPU runner, so a missing tag never holds a
+  # GPU runner until the container pull or pod start times out.
+  resolve-image:
+    runs-on: ubuntu-24.04
+    permissions: {}
+    outputs:
+      docker-image: ${{ steps.resolve.outputs.docker-image }}
+    steps:
+      - name: Resolve builder image
+        id: resolve
+        shell: bash
+        env:
+          REGISTRY_HOST: ${{ inputs.DOCKER_IMAGE_REGISTRY_HOST }}
+          REPOSITORY: pytorch/${{ inputs.DOCKER_IMAGE }}
+          TAG: ${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY_HOST}${REPOSITORY}:${TAG}"
+          case "${REGISTRY_HOST}" in
+            "")
+              ;;
+            ghcr.io/)
+              # build-manywheel-images may still be rebuilding the builder, so
+              # wait up to 60 min for the tag, as get-docker-tag does for ECR.
+              deadline=$(( SECONDS + 60 * 60 ))
+              token_file="$(mktemp)"
+              while true; do
+                token_status="$(curl -sS -o "${token_file}" -w '%{http_code}' \
+                  "https://ghcr.io/token?scope=repository:${REPOSITORY}:pull" || true)"
+                if [[ "${token_status}" == "401" || "${token_status}" == "403" ]]; then
+                  echo "::error::ghcr.io/${REPOSITORY} is not a public package (HTTP ${token_status}); a pytorch org admin must make it public."
+                  exit 1
+                fi
+                status="token HTTP ${token_status}"
+                if [[ "${token_status}" == "200" ]] && token="$(jq -er .token "${token_file}")"; then
+                  status="$(curl -sS -o /dev/null -w 'HTTP %{http_code}' \
+                    -H "Authorization: Bearer ${token}" \
+                    -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json' \
+                    "https://ghcr.io/v2/${REPOSITORY}/manifests/${TAG}" || true)"
+                fi
+                if [[ "${status}" == "HTTP 200" ]]; then
+                  break
+                fi
+                if (( SECONDS > deadline )); then
+                  echo "::error::${image} was not mirrored within 60 min (${status}). build-manywheel-images mirrors ROCm builders on ciflow/docker runs; rerun ciflow/docker on this PR."
+                  exit 1
+                fi
+                echo "${image} not pullable yet (${status}); retrying in 60s..."
+                sleep 60
+              done
+              ;;
+            *)
+              echo "::error::Unsupported registry host '${REGISTRY_HOST}'; the job container cannot log in before it is pulled."
+              exit 1
+              ;;
+          esac
+          echo "docker-image=${image}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved ${image}"
+
   test:
+    needs: resolve-image
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    container:
+      image: ${{ needs.resolve-image.outputs.docker-image }}
+      options: --device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
@@ -70,7 +133,7 @@ jobs:
       INDEX_SUBFOLDER: ${{ inputs.INDEX_SUBFOLDER }}
       GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
-      DOCKER_IMAGE: ${{ format('{0}pytorch/{1}:{2}', inputs.DOCKER_IMAGE_REGISTRY_HOST, inputs.DOCKER_IMAGE, inputs.DOCKER_IMAGE_TAG_PREFIX) }}
+      DOCKER_IMAGE: ${{ needs.resolve-image.outputs.docker-image }}
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -92,9 +155,6 @@ jobs:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           show-progress: false
-
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
 
       - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
         name: Download Build Artifacts
@@ -127,47 +187,17 @@ jobs:
             echo "SHA1=${SHA1}"
           } >> "${GITHUB_ENV}"
 
+      - name: Populate binary env
+        shell: bash
+        run: bash .ci/pytorch/binary_populate_env.sh
+
       - name: Test PyTorch binary
         shell: bash
+        env:
+          OUTPUT_SCRIPT: /run.sh
         run: |
-          set -x
-          # shellcheck disable=SC2086
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILD_ENVIRONMENT \
-            -e DESIRED_CUDA \
-            -e DESIRED_PYTHON \
-            -e DOCKER_IMAGE \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e INDEX_SUBFOLDER \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" \
-            -v "${PYTORCH_FINAL_PACKAGE_DIR}:${PYTORCH_FINAL_PACKAGE_DIR}" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          # Cleanup removes only this container; shared runners may run other jobs.
-          echo "BINARY_CONTAINER=${container_name}" >> "${GITHUB_ENV}"
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .ci/pytorch/binary_populate_env.sh"
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT=/run.sh "${container_name}" bash -c "
-            ln -sf '${GITHUB_WORKSPACE}' /pytorch
-            ln -sf '${PYTORCH_FINAL_PACKAGE_DIR}' /final_pkgs
-            bash .ci/pytorch/binary_linux_test.sh
-          "
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-
-      - name: Cleanup docker
-        if: always()
-        shell: bash
-        run: |
-          if [[ -n "${BINARY_CONTAINER:-}" ]]; then
-            docker rm -f "${BINARY_CONTAINER}" || true
-          fi
+          ln -sf "${GITHUB_WORKSPACE}" /pytorch
+          ln -sf "${PYTORCH_FINAL_PACKAGE_DIR}" /final_pkgs
+          bash .ci/pytorch/binary_linux_test.sh
+          source "${BINARY_ENV_FILE}"
+          bash -x /run.sh

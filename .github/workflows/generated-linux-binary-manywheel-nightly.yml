@@ -79,6 +79,7 @@ jobs:
     outputs:
       docker_image_suffix: ${{ steps.calc.outputs.docker_image_suffix }}
       docker_registry_host: ${{ steps.calc.outputs.docker_registry_host }}
+      test_registry_host: ${{ steps.calc.outputs.test_registry_host }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -122,6 +123,9 @@ jobs:
           fi
           echo "docker_image_suffix=${suffix}" >> "${GITHUB_OUTPUT}"
           echo "docker_registry_host=${registry_host}" >> "${GITHUB_OUTPUT}"
+          # ROCm test jobs pull the job container before any step can log in to
+          # ECR, so they read the GHCR mirror of the same ECR tag.
+          echo "test_registry_host=${registry_host:+ghcr.io/}" >> "${GITHUB_OUTPUT}"
       # ciflow/binaries with a tree Docker Hub lacks: the builder images are
       # pushed to ECR by build-manywheel-images / build-almalinux-images, which
       # run concurrently on the same PR. Log in (read-only) and wait for the
@@ -161,7 +165,7 @@ jobs:
           echo "Found ${repo}:${tag}"
   # A missing preview image must not redirect or block the stable lanes. PRs
   # that change .ci/docker (e.g. pin bumps) build and extract from their own
-  # ECR image; ROCm test runners cannot pull ECR, so preview tests are skipped.
+  # ECR image and test from its GHCR mirror, skipping preview tests without one.
   get-preview-docker-tag:
     needs: get-label-type
     if: ${{ github.repository_owner == 'pytorch' && !startsWith(github.ref, 'refs/tags/v') }}
@@ -173,6 +177,7 @@ jobs:
     outputs:
       docker_image_suffix: ${{ steps.calc.outputs.docker_image_suffix }}
       docker_registry_host: ${{ steps.ecr.outputs.docker_registry_host }}
+      test_registry_host: ${{ steps.ecr.outputs.test_registry_host }}
       image_available: ${{ steps.ecr.outputs.image_available || steps.calc.outputs.image_available }}
       test_available: ${{ steps.ecr.outputs.test_available || steps.calc.outputs.test_available }}
     steps:
@@ -277,9 +282,31 @@ jobs:
             echo "  ${repo}:${tag} not in ECR yet; retrying in 5 min..."
             sleep 300
           done
-          echo "Found ${repo}:${tag} in ECR; preview tests are skipped (no ECR access on ROCm runners)."
+          echo "Found ${repo}:${tag} in ECR"
           echo "docker_registry_host=308535385114.dkr.ecr.us-east-1.amazonaws.com/" >> "${GITHUB_OUTPUT}"
           echo "image_available=true" >> "${GITHUB_OUTPUT}"
+          # ROCm test runners cannot log in to ECR before pulling the job
+          # container, so preview tests need the GHCR mirror pushed right after.
+          for attempt in 1 2 3 4 5 6; do
+            status="token request failed"
+            if token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -er .token)"; then
+              status="$(curl -sS -o /dev/null -w 'HTTP %{http_code}' \
+                -H "Authorization: Bearer ${token}" \
+                -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json' \
+                "https://ghcr.io/v2/${repo}/manifests/${tag}" || true)"
+            fi
+            if [[ "${status}" == "HTTP 200" ]]; then
+              echo "ghcr.io/${repo}:${tag} is pullable; preview tests use it."
+              echo "test_registry_host=ghcr.io/" >> "${GITHUB_OUTPUT}"
+              echo "test_available=true" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "  ghcr.io/${repo}:${tag} not pullable yet (${status})"
+            if (( attempt < 6 )); then
+              sleep 60
+            fi
+          done
+          echo "::warning::ghcr.io/${repo}:${tag} is not publicly pullable; skipping preview tests."
           echo "test_available=false" >> "${GITHUB_OUTPUT}"
 
   manywheel-cpu-build:
@@ -1392,7 +1419,7 @@ jobs:
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
-      DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-docker-tag.outputs.docker_registry_host }}"
+      DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-docker-tag.outputs.test_registry_host }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
 
@@ -1456,7 +1483,7 @@ jobs:
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-preview-docker-tag.outputs.docker_image_suffix }}
-      DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-preview-docker-tag.outputs.docker_registry_host }}"
+      DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-preview-docker-tag.outputs.test_registry_host }}"
       DESIRED_PYTHON: ${{ matrix.desired_python }}
       build_name: ${{ matrix.build_name }}
 
