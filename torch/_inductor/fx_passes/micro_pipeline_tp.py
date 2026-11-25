@@ -170,6 +170,14 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
         make_all_gather_split_pattern(KeywordArg("shard")),
     )
 
+    # Matches funcol.all_gather_single when _maybe_view_chunk_cat optimizes
+    # split+cat to a reshape over leading singleton dimensions.
+    reshape_all_gather_pattern = CallFunction(
+        aten.reshape.default,
+        make_zero_dim_all_gather_pattern(KeywordArg("shard")),
+        Ignored(),
+    )
+
     # Match a zero-dim all-gather in which the data is transferred as uint8 and
     # viewed back as the original dtype.
     zero_dim_type_erased_all_gather_pattern = CallFunction(
@@ -203,6 +211,9 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
     res_node_target_to_patterns = {
         aten.cat.default: [
             (non_zero_dim_all_gather_pattern, 0),
+        ],
+        aten.reshape.default: [
+            (reshape_all_gather_pattern, 0),
         ],
         aten.view.dtype: [
             (non_zero_dim_type_erased_all_gather_pattern, 0),
@@ -295,6 +306,53 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
             group_name=cast("torch.distributed.distributed_c10d.GroupName", group_name),
         )
 
+    def _infer_reshape_gather_dim(
+        shard_node: torch.fx.Node,
+        res_node: torch.fx.Node,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+    ) -> int | None:
+        from torch.distributed.distributed_c10d import _get_group_size_by_name
+
+        shard_val = shard_node.meta.get("val")
+        res_val = res_node.meta.get("val")
+        if not isinstance(shard_val, torch.Tensor) or not isinstance(
+            res_val, torch.Tensor
+        ):
+            return None
+
+        shard_shape = shard_val.shape
+        res_shape = res_val.shape
+        if len(shard_shape) != len(res_shape) or len(shard_shape) < 2:
+            return None
+        if any(not isinstance(d, int) or d <= 0 for d in shard_shape) or any(
+            not isinstance(d, int) or d <= 0 for d in res_shape
+        ):
+            return None
+
+        try:
+            group_size = _get_group_size_by_name(group_name)
+        except Exception:
+            return None
+        if group_size <= 1:
+            return None
+
+        changed_dims = [
+            i
+            for i, (s_dim, r_dim) in enumerate(zip(shard_shape, res_shape))
+            if s_dim != r_dim
+        ]
+        if len(changed_dims) != 1:
+            return None
+
+        gather_dim = changed_dims[0]
+        if (
+            gather_dim == 0
+            or res_shape[gather_dim] != shard_shape[gather_dim] * group_size
+            or any(d != 1 for d in shard_shape[:gather_dim])
+        ):
+            return None
+        return gather_dim
+
     for node in reversed(graph.nodes):
         if ag_match := _match_slice_cat_all_gather(node):
             if ag_match.ag_node not in visited_ag_nodes:
@@ -323,6 +381,18 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
 
                 if ag_node in visited_ag_nodes:
                     continue
+
+                if node.target is aten.reshape.default:
+                    gather_dim = _infer_reshape_gather_dim(
+                        match.kwargs["shard"],
+                        node,
+                        match.kwargs["group_name"],
+                    )
+                    if gather_dim is None:
+                        continue
+                else:
+                    gather_dim = match.kwargs.get("gather_dim", 0)
+
                 visited_ag_nodes.add(ag_node)
 
                 ag_match = _AllGatherMatch(
@@ -330,7 +400,7 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
                     shard_node=match.kwargs["shard"],
                     ag_node=ag_node,
                     res_node=node,
-                    gather_dim=match.kwargs.get("gather_dim", 0),
+                    gather_dim=gather_dim,
                     group_name=match.kwargs["group_name"],
                 )
                 all_gathers.append(ag_match)
