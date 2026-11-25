@@ -1660,13 +1660,7 @@ impl Act<'_> {
             Ok(ver.outputs.iter().map(|o| xincref(this.val(*o))).collect())
         };
         let c = self.c.expect("checked by the caller");
-        let f = super::ffi::tr_current_frame(pyo3::ffi::PyThreadState_Get());
-        let lines: Vec<i32> = if f.is_null() {
-            vec![]
-        } else {
-            let code = super::ffi::tr_frame_code(f);
-            ver.body.iter().map(|v| super::ffi::PyCode_Addr2Line(code, cfg[*v].origin as c_int * 2)).filter(|l| *l > 0).collect()
-        };
+        let lines: Vec<i32> = ver.body.iter().map(|v| c.line(cfg[*v].origin)).filter(|l| *l > 0).collect();
         let name = format!("{}:bb{} lines {}-{}", c.qualname, b.0, lines.iter().min().unwrap_or(&0), lines.iter().max().unwrap_or(&0));
         // What the region needn't check: what the version doesn't read, or only
         // passes on.
@@ -1765,8 +1759,15 @@ impl Act<'_> {
             // the callable's, or the one its (or the receiver's) class runs.
             let direct = match (callee, &ins.op) {
                 (Some(c), _) if !c.is_null() => {
-                    let via_type = tr_type_function(c, 0);
-                    Some(if via_type.is_null() { (c, effects::Via::Callable) } else { (via_type, effects::Via::Call) })
+                    let func = tr_partial_func(c);
+                    let via_type = if func.is_null() { tr_type_function(c, 0) } else { std::ptr::null_mut() };
+                    Some(if !func.is_null() {
+                        (func, effects::Via::Partial)
+                    } else if via_type.is_null() {
+                        (c, effects::Via::Callable)
+                    } else {
+                        (via_type, effects::Via::Call)
+                    })
                 }
                 (None, Op::LoadAttr(_) | Op::LoadMethod(_)) => {
                     let f = tr_type_function(self.val(ins.args[0]), 1);
@@ -1778,7 +1779,9 @@ impl Act<'_> {
                 effects::record_callee(&self.p.callees, *v, f, via);
             }
             (*rec).at(Site::Instr(*v));
-            (*rec).set_callee(direct.map_or(std::ptr::null_mut(), |(f, _)| f));
+            // A partial's function is entered by the partial, not by the
+            // instr: its frames stay indirect ones.
+            (*rec).set_callee(direct.map_or(std::ptr::null_mut(), |(f, via)| if via == effects::Via::Partial { callee.unwrap_or(f) } else { f }));
         }
         let clone = if self.p.clones.is_empty() { None } else { self.p.clones.get(v) };
         if let Some(cl) = clone {

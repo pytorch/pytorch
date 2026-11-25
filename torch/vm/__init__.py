@@ -304,6 +304,10 @@ def configure(base: Iterable[Any] = DEFAULT_PASSES, **changes: Any) -> tuple[Any
     return tuple(out)
 
 
+# The callables the executor was last told to take as pure (PureCalls.pure).
+_pure_set: tuple[Callable, ...] = ()
+
+
 class _Program:
     """A function on the VM with its passes."""
 
@@ -373,6 +377,12 @@ class _Program:
         rust._set_cfg_optimize(self.optimize)
         rust._set_cfg_elide("elide" in builtin)
         rust._set_cfg_pure_calls("pure_calls" in builtin)
+        pure = builtin["pure_calls"].pure if "pure_calls" in builtin else ()
+        global _pure_set
+        if pure is not _pure_set:
+            # A bound method is called through its function.
+            rust._set_cfg_pure_callables([getattr(f, "__func__", f) for f in pure])
+            _pure_set = pure
         rust._set_cfg_spans("spans" in builtin)
         rust._set_cfg_pass_hook(self._cfg_hook if self.cfg_passes else None)
         rust._set_cfg_scalar_reads(True)

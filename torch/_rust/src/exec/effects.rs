@@ -153,6 +153,9 @@ pub enum Via {
     Call,
     // type(receiver).__getattr__.
     Getattr,
+    // The function a functools.partial calls (its `func`): the callable of
+    // the call is the partial, which may be made anew for every call.
+    Partial,
 }
 
 pub type Callees = IdMap<ValueId, Callee>;
