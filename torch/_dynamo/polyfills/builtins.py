@@ -18,7 +18,7 @@ from ..decorators import substitute_in_graph
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
 
 
 __all__ = [
@@ -56,9 +56,14 @@ def enumerate(iterable: Iterable[_T], start: int = 0) -> Iterable[tuple[int, _T]
             f"{type(start).__name__!r} object cannot be interpreted as an integer"
         )
 
-    for x in iterable:
-        yield start, x
-        start += 1
+    it = iter(iterable)
+
+    def _enumerate(start: int) -> Iterator[tuple[int, _T]]:
+        for x in it:
+            yield start, x
+            start += 1
+
+    return _enumerate(start)
 
 
 @substitute_in_graph(builtins.sum, can_constant_fold_through=True)  # type: ignore[arg-type]

@@ -274,6 +274,10 @@ class WrapperDescriptorVariable(DescriptorVariable):
         # and find Python overrides on subclasses. Routing through the class
         # mirrors CPython's wrapperdescr_call which invokes the C slot directly.
         obj = obj.realize()
+        if self.descriptor is object.__getattribute__ and isinstance(
+            obj, UserDefinedObjectVariable
+        ):
+            return obj.call_base_method(tx, name, rest, kwargs)
         if name in ("__setattr__", "__delattr__"):
             setattr_hackcheck(tx, obj, self.descriptor)
         if self.descriptor is object.__eq__ and len(rest) == 1 and not kwargs:
