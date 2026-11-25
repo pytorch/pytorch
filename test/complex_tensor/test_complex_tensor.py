@@ -303,75 +303,6 @@ class TestComplexTensorGeneric(TestCase):
         self.assertEqual(xc.re.shape, (2,))
         self.assertEqual(xc.im.shape, (2,))
 
-    @parametrize(
-        "divisor",
-        [
-            "complex_tensor",
-            "complex_tensor_broadcast",
-            "real_tensor",
-            "real_tensor_broadcast",
-            "real_scalar",
-            "complex_scalar",
-        ],
-    )
-    def test_div_inplace(self, divisor: str):
-        from torch._subclasses.complex_tensor import ComplexTensor
-
-        divisors = {
-            "complex_tensor": torch.randn(2, 3, dtype=torch.complex128),
-            "complex_tensor_broadcast": torch.randn(1, dtype=torch.complex128),
-            "real_tensor": torch.randn(2, 3, dtype=torch.float64),
-            "real_tensor_broadcast": torch.randn(1, dtype=torch.float64),
-            "real_scalar": 2.0,
-            "complex_scalar": 2.0 - 1.0j,
-        }
-        rhs = divisors[divisor]
-        xrhs = (
-            ComplexTensor.from_interleaved(rhs)
-            if isinstance(rhs, torch.Tensor) and rhs.dtype.is_complex
-            else rhs
-        )
-        a = torch.randn(2, 3, dtype=torch.complex128)
-        xa = ComplexTensor.from_interleaved(a)
-        result = xa.div_(xrhs)
-
-        self.assertIs(result, xa)
-        self.assertEqual(xa.as_interleaved(), a / rhs)
-
-    @parametrize("op", ["add_", "sub_", "mul_", "div_"])
-    def test_binary_inplace_real_self_raises(self, op: str):
-        from torch._subclasses.complex_tensor import ComplexTensor
-
-        a = torch.randn(3, dtype=torch.float64)
-        b = torch.randn(3, dtype=torch.complex128)
-        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
-            getattr(a.clone(), op)(b)
-        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
-            getattr(a.clone(), op)(ComplexTensor.from_interleaved(b))
-
-    def test_fill_inplace_real_self(self):
-        from torch._subclasses.complex_tensor import ComplexTensor
-
-        a = torch.zeros(3, dtype=torch.float64)
-        value = ComplexTensor.from_interleaved(torch.tensor(1 + 2j))
-        with self.assertWarnsRegex(UserWarning, "discards the imaginary part"):
-            result = a.fill_(value)
-
-        self.assertIs(result, a)
-        self.assertEqual(a, torch.ones(3, dtype=torch.float64))
-
-    @parametrize("shape", [(3, 3), (3, 5), (2, 4, 3)])
-    @parametrize("diagonal", [-1, 0, 1])
-    def test_tril_inplace(self, shape: tuple[int, ...], diagonal: int):
-        from torch._subclasses.complex_tensor import ComplexTensor
-
-        a = torch.randn(shape, dtype=torch.complex128)
-        xa = ComplexTensor.from_interleaved(a)
-        result = xa.tril_(diagonal)
-
-        self.assertIs(result, xa)
-        self.assertEqual(xa.as_interleaved(), a.tril(diagonal))
-
     def test_out_overload_writes_destination(self):
         from torch._subclasses.complex_tensor import ComplexTensor
 
@@ -725,6 +656,75 @@ class TestComplexTensorGeneric(TestCase):
 
         with self.assertRaises(TypeError):
             InterleavedComplexTensor(torch.randn(3))
+
+    @parametrize(
+        "divisor",
+        [
+            "complex_tensor",
+            "complex_tensor_broadcast",
+            "real_tensor",
+            "real_tensor_broadcast",
+            "real_scalar",
+            "complex_scalar",
+        ],
+    )
+    def test_div_inplace(self, divisor: str):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        divisors = {
+            "complex_tensor": torch.randn(2, 3, dtype=torch.complex128),
+            "complex_tensor_broadcast": torch.randn(1, dtype=torch.complex128),
+            "real_tensor": torch.randn(2, 3, dtype=torch.float64),
+            "real_tensor_broadcast": torch.randn(1, dtype=torch.float64),
+            "real_scalar": 2.0,
+            "complex_scalar": 2.0 - 1.0j,
+        }
+        rhs = divisors[divisor]
+        xrhs = (
+            ComplexTensor.from_interleaved(rhs)
+            if isinstance(rhs, torch.Tensor) and rhs.dtype.is_complex
+            else rhs
+        )
+        a = torch.randn(2, 3, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.div_(xrhs)
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a / rhs)
+
+    @parametrize("op", ["add_", "sub_", "mul_", "div_"])
+    def test_binary_inplace_real_self_raises(self, op: str):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(3, dtype=torch.float64)
+        b = torch.randn(3, dtype=torch.complex128)
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            getattr(a.clone(), op)(b)
+        with self.assertRaisesRegex(RuntimeError, "can't be cast"):
+            getattr(a.clone(), op)(ComplexTensor.from_interleaved(b))
+
+    def test_fill_inplace_real_self(self):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.zeros(3, dtype=torch.float64)
+        value = ComplexTensor.from_interleaved(torch.tensor(1 + 2j))
+        with self.assertWarnsRegex(UserWarning, "discards the imaginary part"):
+            result = a.fill_(value)
+
+        self.assertIs(result, a)
+        self.assertEqual(a, torch.ones(3, dtype=torch.float64))
+
+    @parametrize("shape", [(3, 3), (3, 5), (2, 4, 3)])
+    @parametrize("diagonal", [-1, 0, 1])
+    def test_tril_inplace(self, shape: tuple[int, ...], diagonal: int):
+        from torch._subclasses.complex_tensor import ComplexTensor
+
+        a = torch.randn(shape, dtype=torch.complex128)
+        xa = ComplexTensor.from_interleaved(a)
+        result = xa.tril_(diagonal)
+
+        self.assertIs(result, xa)
+        self.assertEqual(xa.as_interleaved(), a.tril(diagonal))
 
 
 @unMarkDynamoStrictTest
