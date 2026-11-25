@@ -46,7 +46,7 @@ def _newtonschulz_iterations(
     return ortho_update.T if tall else ortho_update
 
 
-def _zeropower_via_newtonschulz(
+def _single_tensor_zeropower_via_newtonschulz(
     update: Tensor,
     ns_coefficients: tuple[float, float, float],
     ns_steps: int,
@@ -68,6 +68,29 @@ def _zeropower_via_newtonschulz(
     # Ensure spectral norm is at most 1
     ortho_update.div_(ortho_update.norm().clamp(min=eps))
     return _newtonschulz_iterations(ortho_update, ns_coefficients, ns_steps)
+
+
+def _multi_tensor_zeropower_via_newtonschulz(
+    updates: list[Tensor],
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
+) -> list[Tensor]:
+    """
+    Multi-tensor version of :func:`_single_tensor_zeropower_via_newtonschulz`.
+
+    The cast and normalization are fused across tensors, but the Newton-Schulz
+    iterations still run in a for loop: they are built on matmuls (``mm`` /
+    ``addmm``), which have no ``_foreach_*`` counterpart.
+    """
+    ortho_updates = [torch.empty_like(u, dtype=torch.bfloat16) for u in updates]
+    torch._foreach_copy_(ortho_updates, updates)
+    norms = torch._foreach_norm(ortho_updates)
+    torch._foreach_clamp_min_(norms, eps)
+    torch._foreach_div_(ortho_updates, norms)
+    return [
+        _newtonschulz_iterations(u, ns_coefficients, ns_steps) for u in ortho_updates
+    ]
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
@@ -290,10 +313,9 @@ Muon.__doc__ = (
         ns_steps (int, optional): number of Newton–Schulz iteration steps. (default: {DEFAULT_NS_STEPS})
         adjust_lr_fn (str, optional): function to adjust learning rate. One of "original", "match_rms_adamw", and "spectral_unclamped".
             If not specified, we will default to use "original". (default: None)
-        foreach (bool, optional): whether to use the multi-tensor (``torch._foreach_*``) implementation. The
-            multi-tensor path fuses the momentum and parameter updates across same-shape 2D params; the
-            Newton-Schulz iteration itself is still performed per-tensor, so numerics match the single-tensor
-            path. If ``None`` (the default), foreach is used on supported devices. (default: None)
+        foreach (bool, optional): whether to use the multi-tensor (``torch._foreach_*``) implementation.
+            It fuses all operations across parameters except the Newton-Schulz iterations, which still run
+            per parameter. If ``None`` (the default), foreach is used on supported devices. (default: None)
 
     Example:
         >>> # xdoctest: +SKIP
@@ -359,7 +381,9 @@ def _single_tensor_muon(
         if update.ndim != 2:
             raise ValueError("Muon update must be a 2D matrix")
 
-        update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
+        update = _single_tensor_zeropower_via_newtonschulz(
+            update, ns_coefficients, ns_steps, eps
+        )
 
         adjusted_lr = _adjust_lr(lr, adjust_lr_fn, param.shape)
 
@@ -403,11 +427,12 @@ def _multi_tensor_muon(
         if u.ndim != 2:
             raise ValueError("Muon update must be a 2D matrix")
 
-    # Phase 2: Newton-Schulz per tensor. Standard NS has no natural batching,
-    # so per-tensor preserves bit-for-bit numerics with _single_tensor_muon.
-    updates = [
-        _zeropower_via_newtonschulz(u, ns_coefficients, ns_steps, eps) for u in updates
-    ]
+    # Phase 2: Newton-Schulz. The cast and normalization are fused across
+    # tensors; the iterations themselves run per tensor since standard NS has
+    # no natural batching.
+    updates = _multi_tensor_zeropower_via_newtonschulz(
+        updates, ns_coefficients, ns_steps, eps
+    )
 
     # Phase 3: weight-decay shrink (uniform scale across all params) followed
     # by the shape-grouped negative-lr add. Group by shape, dtype, and device
