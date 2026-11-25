@@ -42,7 +42,11 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._custom_class_base import CustomClassBase
-from torch._dispatch.python import enable_python_dispatcher
+from torch._dispatch.python import enable_python_dispatcher, no_python_dispatcher
+from torch._functorch.predispatch import (
+    _functorch_predispatch_functions,
+    _jvp_predispatch_functions,
+)
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     get_reconstruct_fn,
@@ -55,12 +59,17 @@ from torch._logging import trace_structured
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
     FakeTensor,
     FakeTensorMode,
     get_plain_tensors,
+    in_kernel_invocation_manager,
     is_fake,
     is_fake_tensor,
+    maybe_get_fake_dispatch_keys,
+    maybe_get_fake_constant,
     maybe_get_fake_mode,
+    maybe_get_real_tensor,
     track_fake_tensor_for_export,
     unset_fake_temporarily,
 )
@@ -693,14 +702,59 @@ def _build_proxy_for_sym_expr(
     return out
 
 
+def _unwrap_functorch(t: Tensor) -> Tensor:
+    functorch = torch._C._functorch
+    while functorch.is_batchedtensor(t) or functorch.is_gradtrackingtensor(t):
+        t = functorch.get_unwrapped(t)
+    return t
+
+
 def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # val.detach() will also eventually call fast_detach(),
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
     if is_fake_tensor(val):
         return fast_detach(maybe_get_fake_mode(val), val, include_real)
-    else:
-        return val.detach()
+    # Pre-dispatch tracing inside vmap or jvp sees functorch wrappers, which
+    # have no storage and outlive their level. Record a view of the fake tensor
+    # they wrap, with the sizes, strides and storage offset the wrapper reports,
+    # so passes still see which storage it aliases. Functorch is disabled so
+    # that an outer jvp does not wrap the view again. Sparse tensors and
+    # wrapped subclasses such as DTensor keep their wrapper.
+    inner = _unwrap_functorch(val)
+    fake_mode = maybe_get_fake_mode(inner) if is_fake_tensor(inner) else None
+    # A value whose real tensor is kept, such as a placeholder of a cond branch
+    # inside vmap under real tensor propagation, keeps its wrapper as before,
+    # which carries the real tensor. Its real view would need the real layout
+    # at each functorch level, while the view below uses the fake one.
+    if (
+        fake_mode is not None
+        and not is_sparse_any(inner)
+        and not (include_real and maybe_get_real_tensor(inner) is not None)
+    ):
+        # The view is made on the meta tensor inside the fake tensor, as
+        # fast_detach does, so real tensor propagation does not also run it on
+        # the real tensor, which has no storage for it when the batch is empty.
+        with torch._C._DisableFuncTorch():
+            with no_python_dispatcher(), in_kernel_invocation_manager(fake_mode):
+                view = torch.ops.aten.as_strided.default(
+                    torch.ops.aten.detach.default(inner),
+                    val.shape,
+                    val.stride(),
+                    val.storage_offset(),
+                )
+            dispatch_keys = maybe_get_fake_dispatch_keys(inner)
+            if isinstance(fake_mode, CppFakeTensorMode):
+                return fake_mode.fake_tensor_converter.from_meta_and_device(
+                    fake_mode, view, inner.device, dispatch_keys=dispatch_keys
+                )
+            return FakeTensor(
+                fake_mode,
+                view,
+                inner.device,
+                dispatch_keys=dispatch_keys,
+            )
+    return val.detach()
 
 
 _ExtractValType: TypeAlias = (
@@ -1276,9 +1330,9 @@ def _coor_current_device_index_impl() -> int:
 def _coor_current_device_index_fake() -> torch.SymInt:
     from torch.fx.experimental.symbolic_shapes import constrain_range
 
-    # Unbacked, but not a size, so not ctx.new_dynamic_size(): that files the
-    # symbol under ShapeEnv.size_like, whose size-oblivious reasoning assumes a
-    # value is never 0 or 1 -- here, that this rank is never cuda:0 or cuda:1.
+    # Allocate directly so device-index reads work even when
+    # allow_dynamic_output_shape_ops is disabled; ctx.new_dynamic_size()
+    # requires that permission.
     ctx = torch.library.get_ctx()
     index = ctx._shape_env.create_unbacked_symint()
     constrain_range(index, min=0)  # an accelerator index is non-negative
@@ -2205,6 +2259,71 @@ def _replay_original_aten_view(
     return target(native, *args, **kwargs)
 
 
+def _original_aten_mutation_storages(graph: fx.Graph) -> set[int]:
+    return {
+        mutation[0].untyped_storage()._cdata
+        for node in graph.nodes
+        if isinstance(mutation := node.meta.get("original_aten_mutation"), tuple)
+        and isinstance(mutation[0], Tensor)
+        and is_fake_tensor(mutation[0])
+    }
+
+
+def _preserve_original_aten_mutation_storage(
+    node: fx.Node,
+    old: Any,
+    new: Any,
+    native_storages: set[int],
+    args_kwargs: Any,
+) -> bool:
+    from torch.fx.passes.reinplace import _is_view_op
+    from torch.utils._python_dispatch import _disable_current_modes
+
+    from .symbolic_shapes import statically_known_true, sym_eq
+
+    if not (
+        isinstance(old, Tensor)
+        and isinstance(new, Tensor)
+        and is_fake_tensor(old)
+        and is_fake_tensor(new)
+        and node.op == "call_function"
+        and not _is_view_op(node.target)
+        and (mode := maybe_get_fake_mode(new)) is not None
+        and maybe_get_fake_mode(old) is mode
+        and maybe_get_fake_constant(old) is None
+        and maybe_get_fake_constant(new) is None
+        and maybe_get_real_tensor(old) is None
+        and maybe_get_real_tensor(new) is None
+        and old.untyped_storage()._cdata in native_storages
+        and old.layout == new.layout == torch.strided
+        and old.dtype == new.dtype
+        and old.device == new.device
+        and old.is_neg() == new.is_neg()
+        and old.is_conj() == new.is_conj()
+        and statically_known_true(sym_eq(old.size(), new.size()))
+        and statically_known_true(sym_eq(old.stride(), new.stride()))
+        and statically_known_true(old.storage_offset() == new.storage_offset())
+    ):
+        return False
+    input_storages = {
+        value.untyped_storage()._cdata
+        for value in pytree.tree_leaves(args_kwargs)
+        if isinstance(value, Tensor)
+    }
+    old_storage = old.untyped_storage()._cdata
+    new_storage = new.untyped_storage()._cdata
+    if (
+        old_storage in input_storages
+        or new_storage in input_storages
+        or old_storage == new_storage
+    ):
+        return False
+    # Keep fresh value/symbol metadata; preserve only the existing allocation token.
+    with disable_proxy_modes_tracing(), _disable_current_modes(), mode, torch.no_grad():
+        new.set_(old.untyped_storage(), new.storage_offset(), new.size(), new.stride())
+    return True
+
+
 def _original_aten_view_mutation_base(node: fx.Node) -> Tensor | None:
     from torch.fx.passes.reinplace import _VIEW_INVERSE_MAP
     from torch.utils._python_dispatch import _disable_current_modes
@@ -2215,8 +2334,86 @@ def _original_aten_view_mutation_base(node: fx.Node) -> Tensor | None:
         sym_eq,
     )
 
+    canonical_reference = None
     original = node.meta.get("original_aten")
     mutation = node.meta.get("original_aten_mutation")
+    result = (
+        mutation[1]
+        if isinstance(mutation, tuple) and isinstance(mutation[1], Tensor)
+        else node.meta.get("val")
+    )
+    if (
+        node.target in _VIEW_INVERSE_MAP
+        and isinstance(original, OpOverload)
+        and original._schema.is_mutable
+        and isinstance(mutation, tuple)
+        and isinstance(native := mutation[0], Tensor)
+        and isinstance(result, Tensor)
+        and node.args
+        and isinstance(base := node.args[0], fx.Node)
+        and isinstance(base_value := base.meta.get("val"), Tensor)
+    ):
+        native_device = native.device
+
+        def matches_base(candidate: Tensor, metadata: Tensor = base_value) -> bool:
+            return (
+                candidate.dtype == metadata.dtype == result.dtype
+                and candidate.device
+                == metadata.device
+                == result.device
+                == native_device
+                and all(
+                    statically_known_true(sym_eq(a, b))
+                    for a, b in (
+                        (candidate.size(), metadata.size()),
+                        (candidate.stride(), metadata.stride()),
+                        (candidate.storage_offset(), metadata.storage_offset()),
+                        (candidate.size(), result.size()),
+                    )
+                )
+            )
+
+        if isinstance(mutation[1], Tensor) and matches_base(native):
+            return native
+        reference = base
+        while reference is not None:
+            reference_value = reference.meta.get("val")
+            if not isinstance(reference_value, Tensor):
+                break
+            native_base = _original_mutation_destination(
+                reference_value, node=reference
+            )
+            if (
+                isinstance(native_base, Tensor)
+                and native.untyped_storage()._cdata
+                == native_base.untyped_storage()._cdata
+            ):
+                if matches_base(native_base):
+                    return native_base
+                if matches_base(native_base, reference_value):
+                    # Materialization may change layout; replay below must
+                    # reproduce the captured mutation view of its native owner.
+                    canonical_reference = native_base
+                    break
+            reference_mutation = reference.meta.get("original_aten_mutation")
+            if not (
+                reference.meta.get("original_aten") == original
+                and isinstance(reference_mutation, tuple)
+                and isinstance(reference_mutation[0], Tensor)
+                and isinstance(reference_mutation[1], Tensor)
+                and reference_mutation[0].untyped_storage()._cdata
+                == native.untyped_storage()._cdata
+                and reference.args
+                and isinstance(reference.args[0], fx.Node)
+                and isinstance(input_value := reference.args[0].meta.get("val"), Tensor)
+                and input_value.dtype == reference_value.dtype
+                and input_value.device == reference_value.device
+                and statically_known_true(
+                    sym_eq(input_value.size(), reference_value.size())
+                )
+            ):
+                break
+            reference = reference.args[0]
     if not (
         node.target in _VIEW_INVERSE_MAP
         and isinstance(original, OpOverload)
@@ -2240,7 +2437,9 @@ def _original_aten_view_mutation_base(node: fx.Node) -> Tensor | None:
         and mutation[0].untyped_storage() == source_mutation[0].untyped_storage()
     ):
         return None
-    if mutation[1] is None:
+    if canonical_reference is not None:
+        native = canonical_reference
+    elif mutation[1] is None:
         native = _original_mutation_destination(base.meta["val"], node=base)
     else:
         # The completed writeback already captured its canonical base.
@@ -2311,11 +2510,17 @@ def _original_mutation_destination(
     views = []
     while node is not None:
         mutation = node.meta.get("original_aten_mutation")
+        canonical_base = (
+            _original_aten_view_mutation_base(node)
+            if isinstance(mutation, tuple)
+            else None
+        )
         if isinstance(mutation, tuple) and (
-            _is_original_aten_mutation(node)
-            or _original_aten_view_mutation_base(node) is not None
+            _is_original_aten_mutation(node) or canonical_base is not None
         ):
             original, result = mutation[:2]
+            if canonical_base is not None:
+                original = canonical_base
             if isinstance(original, Tensor) and isinstance(result, Tensor):
                 # Replay describes metadata, not graph operations or fresh outputs.
                 with (
@@ -2435,20 +2640,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         # We need more complicated handling here because the inputs
         # to these functions are sometimes tensors or symints where
         # we need to fetch the proxies properly.
-        if func in [
-            torch._functorch.predispatch._add_batch_dim,
-            torch._functorch.predispatch._remove_batch_dim,
-            torch._functorch.predispatch._vmap_increment_nesting,
-            torch._functorch.predispatch._vmap_decrement_nesting,
-            torch._functorch.vmap.lazy_load_decompositions,
-            torch._functorch.predispatch._make_dual,
-            torch._functorch.predispatch._unpack_dual,
-            torch._functorch.predispatch._jvp_increment_nesting,
-            torch._functorch.predispatch._jvp_decrement_nesting,
-            torch._functorch.predispatch._unwrap_for_grad,
-            torch._functorch.predispatch._enter_dual_level,
-            torch._functorch.predispatch._exit_dual_level,
-        ]:
+        if func in _functorch_predispatch_functions:
             _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
             out_proxy = self.tracer.create_proxy(
                 "call_function",
@@ -2457,11 +2649,12 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 kwargs,
             )
             res = func(*args, **kwargs)
-            # When JVP transforms are active, snapshot_fake calls detach
-            # which goes through C++ functorch dispatch keys, potentially
-            # re-wrapping the result as a grad tracking tensor.
-            # Temporarily disable functorch transforms during tracking to
-            # prevent this corruption of meta["val"].
+            # Inside jvp, the detach that snapshot_fake calls on a wrapped
+            # tensor subclass goes through C++ functorch dispatch keys, which
+            # could wrap the result as a grad tracking tensor again, so the jvp
+            # calls track their results with functorch disabled. The vmap calls
+            # do not need that, and nested vmap over a wrapped subclass fails
+            # with it.
             if func in _jvp_predispatch_functions:
                 with torch._C._DisableFuncTorch():
                     track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
@@ -2473,37 +2666,6 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
 
 _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_manager(
     PreDispatchTorchFunctionMode
-)
-
-
-# JVP predispatch functions need special handling during tracing:
-# _DisableFuncTorch prevents grad tracking tensor corruption in snapshot_fake.
-_jvp_predispatch_functions = frozenset(
-    {
-        torch._functorch.predispatch._make_dual,
-        torch._functorch.predispatch._unpack_dual,
-        torch._functorch.predispatch._jvp_increment_nesting,
-        torch._functorch.predispatch._jvp_decrement_nesting,
-        torch._functorch.predispatch._unwrap_for_grad,
-        torch._functorch.predispatch._enter_dual_level,
-        torch._functorch.predispatch._exit_dual_level,
-    }
-)
-
-# These JVP predispatch wrappers manage transform nesting/level state
-# and must survive FX dead code elimination even with zero output users.
-# Registered here rather than in predispatch.py to avoid circular imports
-# (predispatch.py loads before torch.fx during torch.autograd init).
-from torch.fx.node import _side_effectful_functions
-
-
-_side_effectful_functions.update(
-    {
-        torch._functorch.predispatch._jvp_increment_nesting,
-        torch._functorch.predispatch._jvp_decrement_nesting,
-        torch._functorch.predispatch._enter_dual_level,
-        torch._functorch.predispatch._exit_dual_level,
-    }
 )
 
 
@@ -3333,7 +3495,7 @@ class _MakefxTracer:
         # and configurations. After tracing, their states should be cleaned except for shape_env.
         # Remember to specify how to initialize it from user inputs and from parent tracer whenever
         # adding new modes in _MakefxTracer.
-        self.fake_tensor_mode: FakeTensorMode | None = None
+        self.fake_tensor_mode: FakeTensorMode | CppFakeTensorMode | None = None
         self.proxy_mode: nullcontext[None] | ProxyTorchDispatchMode = nullcontext()
         self.proxy_function_mode: nullcontext[None] | PreDispatchTorchFunctionMode = (
             nullcontext()
@@ -3383,7 +3545,7 @@ class _MakefxTracer:
 
     def _restore_modes(
         self,
-        prev_fake_tensor_mode: FakeTensorMode | None,
+        prev_fake_tensor_mode: FakeTensorMode | CppFakeTensorMode | None,
         prev_proxy_mode: nullcontext[None] | ProxyTorchDispatchMode,
         prev_proxy_function_mode: nullcontext[None] | PreDispatchTorchFunctionMode,
         prev_fx_tracer: PythonKeyTracer | None,
@@ -3988,7 +4150,7 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
     fake_mode = typing.cast(
-        "FakeTensorMode | None",
+        "FakeTensorMode | CppFakeTensorMode | None",
         torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE),
     )
     if fake_mode and fake_mode.shape_env:

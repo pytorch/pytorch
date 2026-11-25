@@ -4137,8 +4137,15 @@ class AOTAutogradArtifactTests(InductorTestCase):
             artifact_format = "binary" if bundled else "unpacked"
             artifact.save(path=path, format=artifact_format)
             loaded = type(artifact).load(path=path, format=artifact_format)
-            (grad,) = torch.autograd.grad(loaded(x)[0], x, torch.ones(4))
-            self.assertEqual(grad, x.detach() * 2 + 1)
+            backward_compiler = torch.compile(backend="eager", fullgraph=True)
+            for compiled_autograd in (False, True):
+                with (
+                    torch._dynamo.compiled_autograd._enable(backward_compiler)
+                    if compiled_autograd
+                    else contextlib.nullcontext()
+                ):
+                    (grad,) = torch.autograd.grad(loaded(x)[0], x, torch.ones(4))
+                self.assertEqual(grad, x.detach() * 2 + 1)
             if preserve:
                 with self.assertRaisesRegex(RuntimeError, "no compiled variant"):
                     torch.autograd.grad(loaded(x)[0], x, torch.ones(1).expand(4))

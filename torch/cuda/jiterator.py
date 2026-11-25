@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import re
 from collections.abc import Callable
+from importlib import import_module
 
 import torch
 from torch import Tensor
@@ -67,6 +68,8 @@ class _JittedFunction:
 
         self.kwargs_dict = kwargs
         self.is_cuda_available = torch.cuda.is_available()
+        # torch.cuda is imported before torch.library during torch initialization.
+        import_module("torch.cuda._jiterator_custom_op")
 
     def __call__(self, *tensors: Tensor, **kwargs):
         # Jiterator follow torch.cuda's lazy initialization behavior
@@ -87,6 +90,23 @@ class _JittedFunction:
                 expanded_kwargs[key] = value
             else:
                 raise KeyError(f"{key} is not declared in function definition")
+
+        if torch.compiler.is_compiling():
+            values = list(expanded_kwargs.values())
+            outputs = torch.ops.jiterator._launch(
+                self.code_string,
+                self.kernel_name,
+                self.return_by_ref,
+                self.num_outputs,
+                list(tensors),
+                [t.is_conj() for t in tensors],
+                [t.is_neg() for t in tensors],
+                list(expanded_kwargs),
+                [v for v in values if not isinstance(v, Tensor)],
+                [v for v in values if isinstance(v, Tensor)],
+                [i for i, v in enumerate(values) if isinstance(v, Tensor)],
+            )
+            return outputs[0] if self.num_outputs == 1 else tuple(outputs)
 
         return torch._C._cuda_jiterator_compile_and_launch_kernel(
             self.code_string,

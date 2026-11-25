@@ -1,0 +1,66 @@
+{% if PHASE == 0 %}
+{{def_kernel("MASK")}}
+    block = tl.program_id(0)
+    index = block.to(tl.int64) * BLOCK + tl.arange(0, BLOCK)
+    selected = tl.load(MASK + index, index < N, False)
+    count = tl.sum(selected.to(tl.int64), 0)[None]
+    {{store_output(("block",), "count", "True", val_shape=("1",))}}
+{% elif PHASE == 1 %}
+{{def_kernel("X", "MASK", "PREFIX")}}
+    block = tl.program_id(0)
+    index = block.to(tl.int64) * BLOCK + tl.arange(0, BLOCK)
+    selected = tl.load(MASK + index, index < N, False)
+    local_prefix = tl.associative_scan(selected.to(tl.int64), 0, triton_helpers.cuda_masked_sum_combine)
+    before = tl.load(PREFIX + block - 1, block > 0, 0)
+    destination = before + local_prefix - 1
+    {% if COMPLEX %}
+    component = tl.program_id(1)
+    value = tl.load(X + 2 * index + component, selected, 0)
+    {{store_output(("component", "destination"), "value", "selected", val_shape=("BLOCK",))}}
+    {% else %}
+    value = tl.load(X + index, selected, 0)
+    {{store_output(("destination",), "value", "selected", val_shape=("BLOCK",))}}
+    {% endif %}
+{% else %}
+{% if FINAL %}
+{{def_kernel("X", "PREFIX", "PARTIAL")}}
+{% else %}
+{{def_kernel("X", "PREFIX")}}
+    PARTIAL = X
+{% endif %}
+    {% if COMPLEX %}
+    component = tl.program_id(1)
+    X = X + component.to(tl.int64) * N
+    PARTIAL = PARTIAL + component.to(tl.int64) * MAX_CTAS
+    {% endif %}
+    count = tl.load(PREFIX + BLOCKS - 1)
+    output = tl.full((), 0, tl.int64)
+    cta = tl.program_id(0)
+    value = tl.full((), 0, ACC_TYPE)
+    active = cta == 0
+    {% for branch in BRANCHES %}
+    {% if loop.first %}if{% else %}elif{% endif %} count >= {{branch[0]}} and count < {{branch[1]}}:
+        vpt = tl.cdiv(count, {{branch[2]}})
+        ctas = tl.where(vpt >= 256, tl.minimum(tl.maximum({{branch[4]}}, tl.cdiv(vpt, 256)), tl.cdiv(vpt, 16)), 1)
+        active = cta < ctas
+        if active:
+            value = triton_helpers.cuda_native_sum(
+                X, PARTIAL, output, cta, (N,), (1,), (0,), 1, count, 1,
+                {{branch[2]}}, 1, {{branch[3]}}, IV, True, False,
+                ctas, MAX_CTAS, FINAL, True, {{branch[2]}}, {% if COMPLEX %}0{% else %}-1{% endif %})
+    {% endfor %}
+    value = value[None]
+    {% if FINAL %}
+    {% if COMPLEX %}
+    {{store_output(("component", "0"), "value", "active", val_shape=("1",))}}
+    {% else %}
+    {{store_output(("0",), "value", "active", val_shape=("1",))}}
+    {% endif %}
+    {% else %}
+    {% if COMPLEX %}
+    {{store_output(("component", "cta"), "value", "active", val_shape=("1",))}}
+    {% else %}
+    {{store_output(("cta",), "value", "active", val_shape=("1",))}}
+    {% endif %}
+    {% endif %}
+{% endif %}

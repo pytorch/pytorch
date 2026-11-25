@@ -618,6 +618,26 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         # FxGraphHashDetails contains all the keys related to inductor. Also
         # includes some system info.
         self.aot_config = aot_config
+        self.input_view_metadata = (
+            tuple(
+                (
+                    i,
+                    arg.is_leaf,
+                    arg.storage_offset(),
+                    (
+                        arg._base.is_leaf,
+                        arg._base.storage_offset(),
+                        extract_tensor_metadata_for_cache_key(arg._base),
+                    )
+                    if arg._base is not None
+                    else None,
+                )
+                for i, arg in enumerate(example_inputs)
+                if isinstance(arg, torch.Tensor)
+            )
+            if aot_config.preserve_tangent_layout
+            else ()
+        )
         self.act_input_paths = tuple(act_input_paths)
         self._record_runtime_state(gm)
         self.saved_tensors_hooks_fx_wrap_cache_hashes = (
@@ -1490,32 +1510,39 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult[Any, Any]]):
             CacheArtifactRecorder(
                 AOTAutogradCacheArtifact.type(), key
             ).record_if_present(pickled_content)
-            if pickled_content is not None:
-                if (
-                    should_bundle_autograd_cache()
-                    and aot_config is not None
-                    and aot_config.precompile_backend_id is not None
-                ):
-                    # NB: We don't want to use the cached aot_config.precompile_backend_id
-                    # 1. because we set it to None on save 2. even if we didn't, this new run
-                    # that cache hit has a *new* backend id associated with it.
-                    PrecompileContext.record_artifact(
-                        BundledAOTAutogradCacheArtifact(
-                            aot_config.precompile_backend_id, entry
-                        ),
-                    )
+            if entry is not None:
+                AOTAutogradCache._record_precompile_artifact(entry, aot_config)
         except Exception as e:
             log.info("AOTAutograd cache unable to load compiled graph: %s", e)
             if config.strict_autograd_cache:
                 raise e
-        if entry is not None:
-            if pickled_content is None:
-                raise AssertionError(
-                    "pickled_content must not be None when entry is not None"
-                )
-            return (entry, pickled_content)
-        else:
+        if entry is None:
             return None
+        if pickled_content is None:
+            raise AssertionError(
+                "pickled_content must not be None when entry is not None"
+            )
+        return (entry, pickled_content)
+
+    @staticmethod
+    def _record_precompile_artifact(
+        entry: GenericAOTAutogradResult[Any, Any], aot_config: AOTConfig | None
+    ) -> None:
+        """
+        On a cache hit while bundling for precompile, record the entry under the
+        current run's precompile backend id.
+        """
+        if (
+            should_bundle_autograd_cache()
+            and aot_config is not None
+            and aot_config.precompile_backend_id is not None
+        ):
+            # NB: We don't want to use the cached aot_config.precompile_backend_id
+            # 1. because we set it to None on save 2. even if we didn't, this new run
+            # that cache hit has a *new* backend id associated with it.
+            PrecompileContext.record_artifact(
+                BundledAOTAutogradCacheArtifact(aot_config.precompile_backend_id, entry)
+            )
 
     @staticmethod
     def _write_to_local_cache(key: str, content: bytes) -> None:

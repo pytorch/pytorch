@@ -128,16 +128,26 @@
   _(cuMemGetAllocationPropertiesFromHandle, 12000) \
   _(cuMemsetD32Async, 12000)                       \
   _(cuStreamWriteValue32, 12000)                   \
+  _(cuGraphGetNodes, 11000)                        \
+  _(cuGraphNodeGetType, 11000)                     \
+  _(cuGraphKernelNodeGetParams, 11000)             \
   _(cuGetErrorString, 12000)
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
 #define C10_LIBCUDA_DRIVER_API_12_3(_) \
+  _(cuFuncGetName, 12030)              \
   _(cuMulticastAddDevice, 12030)       \
   _(cuMulticastBindMem, 12030)         \
   _(cuMulticastCreate, 12030)          \
   _(cuMulticastUnbind, 12030)
 #else
 #define C10_LIBCUDA_DRIVER_API_12_3(_)
+#endif
+
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12040)
+#define C10_LIBCUDA_DRIVER_API_12_4(_) _(cuFuncGetParamInfo, 12040)
+#else
+#define C10_LIBCUDA_DRIVER_API_12_4(_)
 #endif
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12080)
@@ -167,6 +177,7 @@
 
 #define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
   C10_LIBCUDA_DRIVER_API_12_3(_)           \
+  C10_LIBCUDA_DRIVER_API_12_4(_)           \
   C10_LIBCUDA_DRIVER_API_12_8(_)           \
   C10_LIBCUDA_DRIVER_API_12_9(_)
 

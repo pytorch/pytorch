@@ -17,6 +17,11 @@
 #include <ATen/BlasBackend.h>
 #include <ATen/Context.h>
 #include <ATen/OpMathType.h>
+#include <array>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <vector>
 
 namespace at::cuda::blas {
 
@@ -71,13 +76,13 @@ template <typename Dtype, typename C_Dtype, typename std::enable_if<CUDABLAS_GEM
 void gemm(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype));
 
 template <>
-void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
+TORCH_CUDA_CU_API void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double));
 template <>
-void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
+TORCH_CUDA_CU_API void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 template <>
-void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
+TORCH_CUDA_CU_API void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>));
 template <>
-void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
+TORCH_CUDA_CU_API void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>));
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
 template <>
@@ -195,6 +200,32 @@ void scaled_gemm(
     float alpha_multiplier = 1.0f,
     const Tensor* device_beta = nullptr);
 
+enum class CublasGroupedScaleLayout : uint8_t {
+  Scalar,
+  PerBatchScalar,
+  Vec128F32,
+  Block128x128F32,
+  Vec32MnK4UE8M0,
+  Vec128MnK4UE8M0,
+};
+
+inline bool cublaslt_grouped_gemm_arch_supported() {
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+  const auto major = at::cuda::getCurrentDeviceProperties()->major;
+  return major >= 9 && major <= 11;
+#else
+  return false;
+#endif
+}
+
+struct GroupedGemmScaleOptions {
+  const void* A_scale_ptr = nullptr;
+  const void* B_scale_ptr = nullptr;
+  bool use_fast_accum = false;
+  CublasGroupedScaleLayout A_layout = CublasGroupedScaleLayout::Scalar;
+  CublasGroupedScaleLayout B_layout = CublasGroupedScaleLayout::Scalar;
+};
+
 void grouped_gemm(
       char transa,
       char transb,
@@ -206,9 +237,10 @@ void grouped_gemm(
       int64_t avgK,
       const int64_t* alphaArrayDev,
       const float* alphaScalar,
-      ScalarType input_dtype,
+      ScalarType A_dtype,
       const int64_t* APtrArrayDev,
       const void* ldaArrayDev,
+      ScalarType B_dtype,
       const int64_t* BPtrArrayDev,
       const void* ldbArrayDev,
       const int64_t* betaArrayDev,
@@ -219,7 +251,8 @@ void grouped_gemm(
       int64_t* DPtrArrayDev,
       const void* lddArrayDev,
       int batchCount,
-      bool use_int64_dims);
+      bool use_int64_dims,
+      const std::optional<GroupedGemmScaleOptions>& scales = std::nullopt);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)  CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, Dtype)
 
@@ -341,6 +374,25 @@ template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
+
+#if !defined(USE_ROCM) && CUDART_VERSION >= 12040
+using GemvLaunch = std::tuple<
+    std::string,
+    std::array<int64_t, 3>,
+    std::array<int64_t, 3>,
+    int64_t,
+    std::array<int64_t, 3>>;
+
+TORCH_CUDA_CU_API std::vector<GemvLaunch> getGemvLaunchPlan(
+    at::ScalarType dtype,
+    int64_t rows,
+    int64_t columns,
+    int64_t lda,
+    int64_t incx,
+    bool transposed,
+    int64_t matrix_alignment,
+    int64_t vector_alignment);
+#endif
 
 /* LEVEL 1 BLAS FUNCTIONS */
 
