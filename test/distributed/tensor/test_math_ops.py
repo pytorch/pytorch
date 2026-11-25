@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
+import functools
 import itertools
 from pprint import pformat
 from typing import NamedTuple
@@ -260,6 +261,68 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         partial = distribute_tensor(rows, device_mesh, [Shard(0)]).sum(0)
         self.assertEqual(partial.placements, (Partial("sum"),))
         self.assertEqual(partial.nansum().full_tensor(), partial.full_tensor().nansum())
+
+    @with_comms
+    @parametrize(
+        "op_str",
+        [
+            "sum",
+            "mean",
+            "amax",
+            "amin",
+            "nansum",
+            "std",
+            "var",
+            "logsumexp",
+            "norm",
+            "norm_inf",
+        ],
+    )
+    @parametrize("shard_dim", [0, 1])
+    def test_reduction_empty_dim(self, op_str, shard_dim):
+        device_mesh = self.build_device_mesh()
+        # 3 * world_size - 1 columns: uneven shards, none of them empty.
+        tensor = torch.randn(
+            2 * self.world_size, 3 * self.world_size - 1, device=self.device_type
+        )
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(shard_dim)])
+        if op_str.startswith("norm"):
+            norm_ord = float("inf") if op_str == "norm_inf" else 2
+            fn = functools.partial(torch.linalg.vector_norm, ord=norm_ord)
+        else:
+            fn = getattr(torch, op_str)
+
+        for keepdim in (True, False):
+            # Eager logsumexp(dim=[], keepdim=False) raises: amax reads the empty
+            # list as all dims but squeeze reads it as none, so the shapes mismatch.
+            # https://github.com/pytorch/pytorch/issues/206379
+            if op_str == "logsumexp" and not keepdim:
+                continue
+            out = fn(dtensor, dim=[], keepdim=keepdim)
+            self.assertFalse(any(p.is_shard() for p in out.placements))
+            self.assertEqual(out.full_tensor(), fn(tensor, dim=[], keepdim=keepdim))
+
+            # Eager var/std(dim=[]) backward is itself wrong (var_backward counts an
+            # empty dim list as one element), so there is no reference gradient:
+            # https://github.com/pytorch/pytorch/issues/206384
+            if op_str in ("std", "var"):
+                continue
+            ref = tensor.clone().requires_grad_()
+            fn(ref, dim=[], keepdim=keepdim).sum().backward()
+            grad_dt = dtensor.detach().requires_grad_()
+            fn(grad_dt, dim=[], keepdim=keepdim).sum().backward()
+            self.assertEqual(grad_dt.grad.full_tensor(), ref.grad)
+
+    @with_comms
+    def test_bool_reduction_empty_dim(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(2 * self.world_size, 3, device=self.device_type) > 0
+        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
+        # any/all read dim=[] as no reduction.
+        for op_str in ("any", "all"):
+            out = getattr(dtensor, op_str)(dim=[])
+            self.assertEqual(out.placements, (Shard(0),))
+            self.assertEqual(out.full_tensor(), getattr(tensor, op_str)(dim=[]))
 
     @with_comms
     def test_prims_amax_amin(self):
@@ -2135,6 +2198,19 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         dt_B = distribute_tensor(B, device_mesh, [Partial()])
         expected = torch.linalg.solve(A, B)
         result = torch.linalg.solve(dt_A, dt_B)
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
+    def test_inter_area_uint8_partial(self):
+        if self.device_type != "cpu":
+            self.skipTest("inter-area is CPU only")
+        mesh = self.build_device_mesh()
+        local = torch.tensor([0, 1], dtype=torch.uint8, device=self.device_type)
+        local = local.reshape(1, 1, 1, 2).repeat(1, 5, 1, 1)
+        partial = DTensor.from_local(local, mesh, [Partial("sum")])
+
+        result = F.interpolate(partial, size=(1, 1), mode="inter-area")
+        expected = F.interpolate(partial.full_tensor(), size=(1, 1), mode="inter-area")
         self.assertEqual(result.full_tensor(), expected)
 
     @with_comms
