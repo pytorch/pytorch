@@ -31,7 +31,10 @@ DEFAULT_NS_STEPS = 5
 
 
 def _zeropower_via_newtonschulz(
-    grad: Tensor, ns_coefficients: tuple[float, float, float], ns_steps: int, eps: float
+    update: Tensor,
+    ns_coefficients: tuple[float, float, float],
+    ns_steps: int,
+    eps: float,
 ) -> Tensor:
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
@@ -49,27 +52,27 @@ def _zeropower_via_newtonschulz(
         raise ValueError(
             "Number of steps must be less than 100 for computational efficiency"
         )
-    if len(grad.shape) != 2:
-        raise ValueError("Input tensor gradient must be a 2D matrix")
+    if len(update.shape) != 2:
+        raise ValueError("Input tensor update must be a 2D matrix")
     if len(ns_coefficients) != 3:
         raise ValueError("Coefficients must be a tuple of exactly 3 values")
     a, b, c = ns_coefficients
-    ortho_grad = grad.to(dtype=torch.bfloat16, copy=True)
-    if grad.size(0) > grad.size(1):
-        ortho_grad = ortho_grad.T
+    ortho_update = update.to(dtype=torch.bfloat16, copy=True)
+    if update.size(0) > update.size(1):
+        ortho_update = ortho_update.T
     # Ensure spectral norm is at most 1
-    ortho_grad.div_(ortho_grad.norm().clamp(min=eps))
+    ortho_update.div_(ortho_update.norm().clamp(min=eps))
     # Perform the NS iterations
     for _ in range(ns_steps):
-        gram_matrix = ortho_grad @ ortho_grad.T
+        gram_matrix = ortho_update @ ortho_update.T
         gram_update = torch.addmm(
             gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
         )
-        ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
+        ortho_update = torch.addmm(ortho_update, gram_update, ortho_update, beta=a)
 
-    if grad.size(0) > grad.size(1):
-        ortho_grad = ortho_grad.T
-    return ortho_grad
+    if update.size(0) > update.size(1):
+        ortho_update = ortho_update.T
+    return ortho_update
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
