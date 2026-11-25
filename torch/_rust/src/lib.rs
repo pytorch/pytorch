@@ -29,27 +29,27 @@ fn collect_into<'py>(
     obj: &Bound<'py, PyAny>,
     out: &mut Vec<Bound<'py, Tensor>>,
 ) -> PyResult<()> {
-    if let Ok(t) = obj.downcast::<Tensor>() {
+    if let Ok(t) = obj.cast::<Tensor>() {
         out.push(t.clone());
         return Ok(());
     }
-    if let Ok(d) = obj.downcast::<PyDict>() {
+    if let Ok(d) = obj.cast::<PyDict>() {
         for (_, v) in d.iter() {
             collect_into(&v, out)?;
         }
-    } else if let Ok(seq) = obj.downcast::<PyList>() {
+    } else if let Ok(seq) = obj.cast::<PyList>() {
         for item in seq.iter() {
             collect_into(&item, out)?;
         }
-    } else if let Ok(seq) = obj.downcast::<PyTuple>() {
+    } else if let Ok(seq) = obj.cast::<PyTuple>() {
         for item in seq.iter() {
             collect_into(&item, out)?;
         }
-    } else if let Ok(s) = obj.downcast::<PySet>() {
+    } else if let Ok(s) = obj.cast::<PySet>() {
         for item in s.iter() {
             collect_into(&item, out)?;
         }
-    } else if let Ok(s) = obj.downcast::<PyFrozenSet>() {
+    } else if let Ok(s) = obj.cast::<PyFrozenSet>() {
         for item in s.iter() {
             collect_into(&item, out)?;
         }

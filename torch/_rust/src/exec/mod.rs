@@ -496,8 +496,8 @@ impl Compiled {
         let info = crate::cfg::python::code_info(code)?;
         let outline = *OUTLINE.lock().unwrap();
         let cfg = crate::cfg::build(info, true, outline).map_err(crate::cfg::python::to_pyerr)?;
-        let consts = code.getattr("co_consts")?.downcast_into::<PyTuple>()?.unbind();
-        let names = code.getattr("co_names")?.downcast_into::<PyTuple>()?.unbind();
+        let consts = code.getattr("co_consts")?.cast_into::<PyTuple>()?.unbind();
+        let names = code.getattr("co_names")?.cast_into::<PyTuple>()?.unbind();
         let mut plan = Box::new(Plan::new(cfg, None, true, vec![], &consts, &names)?);
         Ok(Compiled {
             plan: AtomicPtr::new(&mut *plan),
@@ -1419,19 +1419,17 @@ impl Elisions<'_> {
                             || *opcode == opcodes::CALL_FUNCTION_EX && (movable.contains(x) || nest(self))
                     }
                     Op::Call { .. } => {
-                        movable.contains(x) || nest(self) || {
-                            let a = &cfg[*x].args;
-                            let target = resolve(&cfg, a[1], &fglobals, &fbuiltins).filter(|_| a[0] == crate::cfg::ir::NULL || matches!(cfg[a[0]].op, Op::Project(0)));
-                            match target {
-                                Some(t) if quiet(*x) && is_in_graph(&t) => {
-                                    let name = t.getattr("__qualname__").map_or("?".into(), |q| q.to_string());
-                                    let has_torch_function = is_has_torch_function(&t);
-                                    quiet_calls.insert(*x, crate::cfg::optimize::PinnedCall { name, args: None, has_torch_function });
-                                    quiet_objects.push((*x, t.unbind()));
-                                    true
-                                }
-                                _ => false,
+                        let a = &cfg[*x].args;
+                        let target = resolve(&cfg, a[1], &fglobals, &fbuiltins).filter(|_| a[0] == crate::cfg::ir::NULL || matches!(cfg[a[0]].op, Op::Project(0)));
+                        match target {
+                            Some(t) if quiet(*x) && is_in_graph(&t) => {
+                                let name = t.getattr("__qualname__").map_or("?".into(), |q| q.to_string());
+                                let has_torch_function = is_has_torch_function(&t);
+                                quiet_calls.insert(*x, crate::cfg::optimize::PinnedCall { name, args: None, has_torch_function });
+                                quiet_objects.push((*x, t.unbind()));
+                                true
                             }
+                            _ => movable.contains(x) || nest(self),
                         }
                     }
                     _ => false,
@@ -2192,13 +2190,13 @@ enum TreeNode {
 impl TreeChecks {
     fn build(&mut self, x: &Bound<'_, PyAny>) -> PyResult<TreeNode> {
         use pyo3::types::{PyList, PyTuple};
-        if let Ok(l) = x.downcast_exact::<PyList>() {
+        if let Ok(l) = x.cast_exact::<PyList>() {
             return Ok(TreeNode::List(l.iter().map(|y| self.build(&y)).collect::<PyResult<_>>()?));
         }
-        if let Ok(t) = x.downcast_exact::<PyTuple>() {
+        if let Ok(t) = x.cast_exact::<PyTuple>() {
             return Ok(TreeNode::Tuple(t.iter().map(|y| self.build(&y)).collect::<PyResult<_>>()?));
         }
-        if let Ok(d) = x.downcast_exact::<PyDict>() {
+        if let Ok(d) = x.cast_exact::<PyDict>() {
             return Ok(TreeNode::Dict(d.iter().map(|(k, v)| Ok((k.unbind(), self.build(&v)?))).collect::<PyResult<_>>()?));
         }
         if x.is_none() || is_value_type(x) {
@@ -2207,7 +2205,7 @@ impl TreeChecks {
         if x.extract::<&crate::bindings::ffi::Tensor>().is_err() {
             let py = x.py();
             let nodes = py.import("torch.utils._pytree")?.getattr("SUPPORTED_NODES")?;
-            if let Some(node) = nodes.downcast::<PyDict>()?.get_item(x.get_type())? {
+            if let Some(node) = nodes.cast::<PyDict>()?.get_item(x.get_type())? {
                 let flatten = node.getattr("flatten_fn")?;
                 let (children, context): (Bound<'_, PyAny>, Bound<'_, PyAny>) = flatten.call1((x,))?.extract()?;
                 let kids = children.try_iter()?.map(|y| self.build(&y?)).collect::<PyResult<_>>()?;
@@ -2226,9 +2224,9 @@ impl TreeChecks {
     fn walk<'py>(&self, node: &TreeNode, x: &Bound<'py, PyAny>, out: &mut Vec<Bound<'py, PyAny>>) -> bool {
         use pyo3::types::{PyList, PyTuple};
         match node {
-            TreeNode::List(kids) => x.downcast_exact::<PyList>().is_ok_and(|l| l.len() == kids.len() && l.iter().zip(kids).all(|(y, k)| self.walk(k, &y, out))),
-            TreeNode::Tuple(kids) => x.downcast_exact::<PyTuple>().is_ok_and(|t| t.len() == kids.len() && t.iter().zip(kids).all(|(y, k)| self.walk(k, &y, out))),
-            TreeNode::Dict(kids) => x.downcast_exact::<PyDict>().is_ok_and(|d| {
+            TreeNode::List(kids) => x.cast_exact::<PyList>().is_ok_and(|l| l.len() == kids.len() && l.iter().zip(kids).all(|(y, k)| self.walk(k, &y, out))),
+            TreeNode::Tuple(kids) => x.cast_exact::<PyTuple>().is_ok_and(|t| t.len() == kids.len() && t.iter().zip(kids).all(|(y, k)| self.walk(k, &y, out))),
+            TreeNode::Dict(kids) => x.cast_exact::<PyDict>().is_ok_and(|d| {
                 d.len() == kids.len() && d.iter().zip(kids).all(|((k, v), (want, kid))| (k.is(want) || k.eq(want).unwrap_or(false)) && self.walk(kid, &v, out))
             }),
             TreeNode::Tensor(i) => {

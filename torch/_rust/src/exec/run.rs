@@ -1502,7 +1502,6 @@ impl Act<'_> {
     // traced: torch._rust_inductor._opaque_call(callee, *args) records it as
     // one graph node.
     unsafe fn opaque_call(&self, args: *const *mut PyObject, argc: c_int, kw: *mut PyObject) -> *mut PyObject {
-        use pyo3::types::PyAnyMethods;
         let py = pyo3::Python::assume_attached();
         let helper = match opaque_helper(py) {
             Ok(h) => h,
@@ -1526,7 +1525,6 @@ impl Act<'_> {
 
     // opaque_call for CALL_FUNCTION_EX: `callee(*args, **kwargs)`.
     unsafe fn opaque_call_ex(&self, callee: *mut PyObject, args: *mut PyObject, kwargs: *mut PyObject) -> *mut PyObject {
-        use pyo3::types::PyAnyMethods;
         let py = pyo3::Python::assume_attached();
         let helper = match opaque_helper(py) {
             Ok(h) => h,

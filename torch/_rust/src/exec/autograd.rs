@@ -559,7 +559,7 @@ impl Bootstrap {
                 }
                 continue;
             };
-            let (new, t) = match obj.downcast_exact::<PyTuple>() {
+            let (new, t) = match obj.cast_exact::<PyTuple>() {
                 Ok(tuple) => {
                     let (ns, ts): (Vec<New>, Vec<Option<Template>>) =
                         tuple.iter().map(&mut classify).collect::<PyResult<Vec<_>>>()?.into_iter().unzip();
