@@ -2789,6 +2789,10 @@ void initCusparseltBindings(PyObject* module);
 
 } // namespace shared
 
+namespace memory_planner {
+void initMemoryPlanningUtilsBindings(PyObject* module);
+} // namespace memory_planner
+
 void initModule(PyObject* module) {
   python::initCommMethods(module);
   // As weird as it seems, this file is also compiled for ROCm,
@@ -2804,6 +2808,7 @@ void initModule(PyObject* module) {
   shared::initGdsBindings(module);
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
+  memory_planner::initMemoryPlanningUtilsBindings(module);
   initCudaMethodBindings(module);
 }
 
