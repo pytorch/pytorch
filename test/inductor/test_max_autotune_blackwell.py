@@ -81,6 +81,16 @@ def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     return a.new_empty((a.shape[0] * a.shape[1], b.shape[2]))
 
 
+@torch.library.custom_op("inductor_test::blackwell_mm", mutates_args={})
+def blackwell_mm(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return torch.mm(a, b)
+
+
+@blackwell_mm.register_fake
+def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.new_empty((a.shape[0], b.shape[1]))
+
+
 class _Test2CTABlackwellBMMHeuristic(CUDABlackwellBMMTemplateConfigHeuristic):
     bmm_configs = (BlackwellBMMConfig(128, 128, 64, 4, 8, two_ctas=True),)
 
@@ -1394,6 +1404,7 @@ class TestBlackwellExhaustiveConfigs(TestCase):
         )
 
 
+@instantiate_parametrized_tests
 class TestBlackwellAutoWSConstraints(TestCase):
     def test_two_ctas_allows_all_pipeline_depths(self):
         kwargs = {
@@ -1504,6 +1515,67 @@ class TestBlackwellAutoWSConstraints(TestCase):
             tile for pid in range(grid_size) for tile in range(pid, num_tiles, num_sms)
         }
         self.assertEqual(visited, set(range(num_tiles)))
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell mm requires MetaWS")
+    @parametrize("n,group_m", ((3840, 8), (4096, 16)))
+    def test_two_ctas_wide_n_group_m(self, n, group_m):
+        class TwoCTAHeuristic(CUDABlackwellPersistentTMATemplateConfigHeuristic):
+            def _generate_autows_configs(self):
+                return [
+                    BlackwellGPUGemmConfig(
+                        128,
+                        256,
+                        64,
+                        4,
+                        4,
+                        epilogue_subtile=4,
+                        separate_epilogue_store=True,
+                        two_ctas=True,
+                        use_meta_ws=True,
+                        flatten=False,
+                    )
+                ]
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_mm_template],
+                "mm",
+            )
+            return choices[0].output_node()
+
+        m, k = 1024, 512
+        a = torch.randint(-1, 2, (m, k), device=GPU_TYPE).bfloat16()
+        b = torch.randint(-1, 2, (k, n), device=GPU_TYPE).bfloat16()
+        with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(blackwell_ws_persistent_tma_mm_template.uid, "mm")],
+                override_heuristic_class=TwoCTAHeuristic,
+            ),
+            mock.patch("torch._inductor.heuristics.template.triton.USE_META_WS", True),
+            mock.patch.dict(
+                lowerings, {torch.ops.inductor_test.blackwell_mm.default: lowering}
+            ),
+            config.patch(
+                compile_threads=1,
+                **{
+                    "max_autotune": True,
+                    "triton.enable_template_autows": True,
+                    "triton.enable_template_tma_store": True,
+                },
+            ),
+        ):
+            actual, codes = run_and_get_code(
+                torch.compile(blackwell_mm, fullgraph=True), a, b
+            )
+
+        self.assertEqual(actual, torch.mm(a, b), atol=0, rtol=0)
+        self.assertIn(f"GROUP_M : tl.constexpr = {group_m}", codes[0])
 
 
 @unittest.skipIf(torch.version.hip is not None, "CUDA-specific template heuristics")
