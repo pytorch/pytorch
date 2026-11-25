@@ -192,9 +192,12 @@ class _CombineAutograd(torch.autograd.Function):
     ) -> tuple[None, None, torch.Tensor]:
         ts = ctx.ts
         H = ctx.expert_shape[-1]
-        grad_expert_full = grad_out_tokens.new_zeros(
-            ts.max_recv_tokens_per_rank, H, dtype=ctx.expert_dtype
-        )
+        if ctx.routing.layout == "expert_major":
+            bound = ts.max_expert_major_slots_per_rank
+        else:
+            bound = ts.max_recv_tokens_per_rank
+        rows = max(bound, ctx.expert_shape[0])
+        grad_expert_full = grad_out_tokens.new_zeros(rows, H, dtype=ctx.expert_dtype)
         ts._combine_backward(
             ctx.routing,
             grad_out_tokens.to(ctx.expert_dtype).contiguous(),
@@ -234,8 +237,21 @@ class TokenSwitch(abc.ABC):
     @property
     @abc.abstractmethod
     def max_recv_tokens_per_rank(self) -> int:
-        """Upper bound on receive slots per rank; sizes full dispatch outputs."""
+        """Upper bound on flat-layout receive slots per rank.
+
+        Full flat dispatch outputs have this many rows.
+        """
         raise NotImplementedError
+
+    @property
+    def max_expert_major_slots_per_rank(self) -> int:
+        """Upper bound on expert_major receive slots per rank.
+
+        Full expert_major dispatch outputs have this many rows. Defaults to
+        :attr:`max_recv_tokens_per_rank`; a backend whose expert_major layout needs
+        more slots (a token hitting several experts on one rank) overrides it.
+        """
+        return self.max_recv_tokens_per_rank
 
     @abc.abstractmethod
     def create_routing(
@@ -512,3 +528,6 @@ class TokenSwitchNCCL(TokenSwitch):
             out_token_grads,
             out_topk_weight_grads,
         )
+
+
+from torch.distributed._token_switch.mori import _import_mori, TokenSwitchMoRI

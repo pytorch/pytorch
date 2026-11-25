@@ -21,7 +21,6 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1520,12 +1519,12 @@ DistElementwiseOpsTestWithLocalTensor = create_local_tensor_test_class(
 
 class DistPartialNaNInfTest(DTensorTestBase):
     @with_comms
-    @skip_if_lt_x_gpu(2)
     def test_partial_input_matches_reducing_first(self):
         # Each case is an input that a removed Partial pass-through rule gets
         # wrong on NCCL: applying the op to each rank's local value and reducing
-        # afterwards must match reducing first. Rank 0 holds NaN, inf or an int
-        # at the dtype limit; the other ranks hold ordinary values. NCCL's
+        # afterwards must match reducing first. Gloo catches only some of these
+        # cases. Rank 0 holds NaN, inf or an int at the dtype limit; the other
+        # ranks hold ordinary values. NCCL's
         # all_reduce MAX/MIN ignores NaN (the result is NaN only if every rank
         # holds NaN). Rules that break only when NaN propagates are covered by
         # test_partial_max_min_with_nan and test_bucketize_partial_input, and
