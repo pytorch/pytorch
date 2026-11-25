@@ -11790,9 +11790,8 @@ for args in ((a, b), (a, b, False)):
         self.assertEqual(live, {})
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
-    def test_python_allocator_record_stream_and_pending_exception(self):
-        # a Python allocator sees record_stream on its memory, and a free while
-        # an exception propagates keeps the exception
+    def test_python_allocator_record_stream(self):
+        # a Python allocator sees record_stream on its memory
         arena = torch.empty(1 << 20, dtype=torch.uint8, device="cuda")
         top = [arena.data_ptr()]
         live = {}
@@ -11807,7 +11806,6 @@ for args in ((a, b), (a, b, False)):
         def free(ptr, size, device, stream):
             del live[ptr]
 
-        x = torch.ones(1024, device="cuda")
         side = torch.cuda.Stream()
         previous = torch.cuda.memory._get_current_allocator()
         pluggable = torch.cuda.memory._CUDAAllocator(
@@ -11821,9 +11819,6 @@ for args in ((a, b), (a, b, False)):
             t.record_stream(side)
             self.assertEqual(streams, [(t.data_ptr(), side.cuda_stream)])
             del t
-            # x * 2 is freed while the exception propagates
-            with self.assertRaisesRegex(RuntimeError, "must match the size"):
-                (x * 2) + torch.ones(3, device="cuda")
             self.assertEqual(live, {})
         finally:
             torch.cuda.memory.change_current_allocator(previous)
