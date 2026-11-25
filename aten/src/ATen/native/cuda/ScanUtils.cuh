@@ -269,15 +269,21 @@ void scan_dim_with_indices(const TensorBase& self, const TensorBase& values, con
 template<typename scalar_t, typename index_t, class BinaryOp>
 __global__ void tensor_kernel_scan_outer_dim(scalar_t *tgt_, const scalar_t *src_,
                                               const uint32_t num_orows, const uint32_t num_irows, const uint32_t row_size,
-                                              const scalar_t init, BinaryOp binary_op)
+                                              [[maybe_unused]] const scalar_t init, BinaryOp binary_op)
 {
   for (uint32_t orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
     for (uint32_t irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
       const scalar_t *src = src_ + static_cast<index_t>(orow) * row_size * num_irows + irow;
       scalar_t *tgt = tgt_ + (index_t) orow * row_size * num_irows + irow;
-      scalar_t acc = init;
 
-      for (uint32_t col = 0; col < row_size; ++col) {
+      // Seed from the first element instead of init: combining the first element with
+      // init (e.g. +0.0 for cumsum) would turn -0.0 into +0.0.
+      scalar_t acc = c10::load(src);
+      *tgt = acc;
+      src += num_irows;
+      tgt += num_irows;
+
+      for (uint32_t col = 1; col < row_size; ++col) {
         acc = binary_op(acc, c10::load(src));
         *tgt = acc;
 
@@ -334,7 +340,9 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
         }
 
         // Add the total value of all previous blocks to the first value of this block.
-        if (threadIdx.x == 0) {
+        // Skip on the first block: combining the first element with init (e.g. +0.0 for
+        // cumsum) would turn -0.0 into +0.0.
+        if (threadIdx.x == 0 && block_col > 0) {
           row_buf[0] = binary_op(row_buf[0], block_total);
         }
       }
