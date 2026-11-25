@@ -7,7 +7,13 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_CUTEDSL,
+    TestCase,
+)
 
 
 if not TEST_CUTEDSL:
@@ -22,9 +28,45 @@ from torch._native.cutedsl import launch as _L
 from torch._native.ops.reductions import (
     kernel_coltile as ct,
     kernel_general as kg,
+    kernel_rowtile as rt,
     tile,
     traits as T,
 )
+
+
+_DTYPES = (torch.float32, torch.bfloat16, torch.float16)
+_TOL = {
+    torch.float32: {"atol": 1e-3, "rtol": 1e-4},
+    torch.bfloat16: {"atol": 1e-1, "rtol": 1.6e-2},
+    torch.float16: {"atol": 1e-2, "rtol": 1e-3},
+}
+_VALUE_INDEX = {
+    "max": (T.MaxDimOps(acc=cutlass.Float32), 10.0),
+    "min": (T.MinDimOps(acc=cutlass.Float32), -10.0),
+}
+# Single-field traits and their references over dim d.
+_ONE_FIELD = {
+    "sum": (T.SumOps, {}, lambda x, d: x.sum(d)),
+    "mean": (T.MeanOps, {}, lambda x, d: x.mean(d)),
+    "amax": (T.AMaxOps, {}, lambda x, d: x.amax(d)),
+    "amin": (T.AMinOps, {}, lambda x, d: x.amin(d)),
+    "prod": (T.ProdOps, {}, lambda x, d: x.prod(d)),
+    "norm2": (T.NormOps, {"p": 2.0}, lambda x, d: x.norm(2, d)),
+    "nansum": (T.NanSumOps, {}, lambda x, d: x.nansum(d)),
+    "any": (T.AnyOps, {}, lambda x, d: x.any(d)),
+    "all": (T.AllOps, {}, lambda x, d: x.all(d)),
+    "count_nonzero": (T.CountNonzeroOps, {}, lambda x, d: x.count_nonzero(d)),
+    "absmax": (T.AbsMaxOps, {}, lambda x, d: x.abs().amax(d)),
+    "absmin": (T.AbsMinOps, {}, lambda x, d: x.abs().amin(d)),
+}
+# The batched and two-output column routes serve only H100 and B200.
+_BATCHED_ROUTE = TEST_CUDA and torch.cuda.get_device_capability() in kg._BATCHED_COL_CCS
+_batched_route = unittest.skipUnless(_BATCHED_ROUTE, "batched column route")
+
+
+def _tags(trait_key):
+    """Tags of the column plans compiled for trait_key."""
+    return {k[0] for k in ct._CACHE if k[1] == trait_key}
 
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
@@ -74,10 +116,9 @@ class TestKernelColTile(TestCase):
     def test_stage2_combine_body(self):
         # Only wide, split inputs select the otherwise untested shared combine body.
         c = ct._C_THREAD_STAGE2 + 256  # over the thread-per-column crossover
-        x = torch.randn(4096, c, device="cuda")  # tall enough that _split_p splits it
-        self.assertGreater(
-            ct._split_p(4096), 1, "the shape no longer splits -- test is stale"
-        )
+        x = torch.randn(4096, c, device="cuda")  # tall enough that stage one splits it
+        npar, _ = ct._col_geometry(4096, c, 1, x.element_size())
+        self.assertGreater(npar, 1, "the shape no longer splits -- test is stale")
         with mock.patch.object(tile, "TileReduce", wraps=tile.TileReduce) as built:
             out = ct.reduce_col_tile(
                 T.SumOps(acc=cutlass.Float32), "combine2", x, torch.float32
@@ -109,6 +150,23 @@ class TestKernelColTile(TestCase):
                 )
                 self.assertEqual(got, ref)
 
+    @parametrize("rows,cols", [(64, 1000), (1000, 16)])
+    def test_fp32_column_sum_error_is_no_worse_than_aten(self, rows, cols):
+        """Sum fp32 columns with no more absolute error against fp64 than ATen, summed
+        over a few seeds."""
+        trait = T.SumOps(acc=cutlass.Float32)
+        ours = aten = 0.0
+        for seed in range(8):
+            gen = torch.Generator("cuda").manual_seed(seed)
+            x = torch.randn(rows, cols, device="cuda", generator=gen)
+            got = ct.reduce_col_tile(trait, "fp32_error", x, torch.float32)
+            with torch.backends.python_native.cutedsl.disabled():
+                ref = x.sum(0)
+            want = x.double().sum(0)
+            ours += (got.double() - want).abs().mean().item()
+            aten += (ref.double() - want).abs().mean().item()
+        self.assertLessEqual(ours, aten, f"CuTeDSL {ours:.3e} vs ATen {aten:.3e}")
+
     def test_three_field_welford_launch(self):
         # Three fields select the otherwise untested high-register-pressure launch.
         x = torch.randn(4096, 256, device="cuda")
@@ -137,6 +195,251 @@ class TestKernelColTile(TestCase):
             got_nd, nd.double().sum(dim=(0, 1)).float(), atol=1e-3, rtol=1e-4
         )
 
+    # 4 mod 8 columns declare 16-byte fp32 rows but 8-byte 16-bit rows.
+    @parametrize("columns", [260, ct._C_THREAD_STAGE2 + 4], name_fn=lambda c: f"c{c}")
+    @parametrize("npar", [1, 4])
+    @parametrize("dtype", _DTYPES)
+    def test_batched_columns_split_and_combine(self, dtype, npar, columns):
+        # (B, R, C) stage one offsets each batch's rows; cover both splits and combines.
+        x = torch.randn(3, 515, columns, device="cuda").to(dtype)
+        (got,) = ct.reduce_batched_col_tile(
+            T.SumOps(acc=cutlass.Float32), "batched_col", x, [dtype], 1, npar=npar
+        )
+        want = x.double().sum(dim=1).to(dtype)
+        self.assertEqual(got, want, **_TOL[dtype])
+
+    @_batched_route
+    def test_batched_argmax_reports_the_reduced_index(self):
+        # Batched views must report positions along the reduced axis, first tie winning.
+        x = torch.randn(2, 2048, 256, device="cuda")
+        x[:, 100, :] = 5.0
+        x[:, 900, :] = 5.0
+        got = kg.reduce_dim(
+            T.ArgMaxOps(acc=cutlass.Float32), "batched_argmax", x, 1, torch.int32
+        )
+        self.assertIn("coltile", _tags("batched_argmax"))
+        self.assertEqual(
+            got, torch.full((2, 256), 100, device="cuda", dtype=torch.int32)
+        )
+
+    @parametrize("name", ["var_mean", "aminmax"])
+    @parametrize("dtype", _DTYPES)
+    def test_two_output_columns(self, dtype, name):
+        x = torch.randn(4097, 260, device="cuda").to(dtype)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = (
+                torch.var_mean(x, dim=0) if name == "var_mean" else x.aminmax(dim=0)
+            )
+        trait = (
+            T.VarMeanOps(correction=1, acc=cutlass.Float32)
+            if name == "var_mean"
+            else T.AMinMaxOps(acc=cutlass.Float32)
+        )
+        got = ct.reduce_col_tile_2out(trait, f"{name}_col", x, [dtype, dtype])
+        for g, e in zip(got, expected):
+            self.assertEqual(g, e, **_TOL[dtype])
+
+    # 4 mod 8 columns declare 16-byte fp32 rows but 8-byte 16-bit rows.
+    @parametrize("columns", [260, ct._C_THREAD_STAGE2 + 4], name_fn=lambda c: f"c{c}")
+    @parametrize("dtype", _DTYPES)
+    def test_batched_two_output_columns(self, dtype, columns):
+        # Two-output batched views fold both outputs in stage two; cover both combines.
+        trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+        x = torch.randn(3, 515, columns, device="cuda").to(dtype)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = torch.var_mean(x, dim=1)
+        got = ct.reduce_batched_col_tile(
+            trait, "batched_var_mean", x, [dtype, dtype], 2, npar=4
+        )
+        for g, e in zip(got, expected):
+            self.assertEqual(g, e, **_TOL[dtype])
+
+    @parametrize(
+        "shape,nouts",
+        [
+            ((4, 64, 2), 1),
+            ((4, 1024, 2), 1),
+            ((4, 1024, 16), 1),
+            ((4, 64, 16), 2),
+            ((4, 1024, 16), 2),
+            ((4, 1024, 2048), 2),
+        ],
+        name_fn=lambda s, n: f"{'x'.join(map(str, s))}_nouts{n}",
+    )
+    def test_middle_axis_reductions_match_aten(self, shape, nouts):
+        # One- and two-output middle-axis reductions over short and long reduced runs
+        # and narrow and wide kept columns match ATen through dispatch.
+        f32 = torch.float32
+        x = torch.randn(shape, device="cuda")
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = (x.sum(dim=1),) if nouts == 1 else torch.var_mean(x, dim=1)
+        key = f"gate_{'x'.join(map(str, shape))}_{nouts}"
+        if nouts == 1:
+            got = (kg.reduce_dim(T.SumOps(acc=cutlass.Float32), key, x, 1, f32),)
+        else:
+            two = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+            got = kg.reduce_dim2(two, key, x, 1, [f32, f32])
+        for g, e in zip(got, expected):
+            self.assertEqual(g, e, atol=1e-3, rtol=1e-4)
+
+    @_batched_route
+    def test_batched_view_collapses_adjacent_axes(self):
+        # Leading, reduced and trailing runs each fold into one (B, R, C) axis and back.
+        x = torch.randn(2, 3, 32, 5, 16, device="cuda")
+        got = kg.reduce_dim(
+            T.SumOps(acc=cutlass.Float32), "collapse", x, [2, 3], torch.float32
+        )
+        self.assertIn("coltile", _tags("collapse"))
+        self.assertEqual(got, x.double().sum(dim=(2, 3)).float(), atol=1e-4, rtol=1e-4)
+
+    @parametrize("layout", ["dim0", "transposed"])
+    @_batched_route
+    def test_two_output_columns_route_to_coltile(self, layout):
+        # Dense dim-0 and transposed two-output reductions reach the column kernel when
+        # they pass the batched gate as B == 1.
+        trait = T.VarMeanOps(correction=1, acc=cutlass.Float32)
+        x, dim = {
+            "dim0": (torch.randn(1100, 8192, device="cuda"), 0),
+            "transposed": (torch.randn(1100, 8192, device="cuda").t(), 1),
+        }[layout]
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = torch.var_mean(x, dim=dim)
+        f32 = [torch.float32, torch.float32]
+        got = kg.reduce_dim2(trait, f"var_mean_{layout}", x, dim, f32)
+        self.assertIn("coltile", _tags(f"var_mean_{layout}"))
+        for g, e in zip(got, expected):
+            self.assertEqual(g, e, atol=1e-4, rtol=1e-4)
+
+    @parametrize(
+        "batches,columns",
+        [(3, 260), (1, ct._C_THREAD_STAGE2 + 4)],
+        name_fn=lambda b, c: f"{b}x{c}",
+    )
+    @parametrize("op", ["max", "min"])
+    @parametrize("dtype", _DTYPES)
+    def test_value_index_columns_keep_the_first_tie(self, dtype, op, batches, columns):
+        # max.dim/min.dim project a value and the first tied index through stage two.
+        trait, tie = _VALUE_INDEX[op]
+        x = torch.randn(batches, 1100, columns, device="cuda").to(dtype)
+        x[:, 100] = tie
+        x[:, 900] = tie
+        vals, idx = ct.reduce_batched_col_tile(
+            trait, f"{op}dim_batched", x, [dtype, torch.int32], 2, npar=4
+        )
+        self.assertEqual(vals, torch.full_like(vals, tie))
+        self.assertEqual(idx, torch.full_like(idx, 100))
+
+    @parametrize(
+        "shape,dim",
+        [((1100, 8196), 0), ((2, 1100, 4100), 1)],
+        name_fn=lambda s, d: f"{len(s)}d",
+    )
+    @parametrize("op", ["max", "min"])
+    @parametrize("dtype", _DTYPES)
+    @_batched_route
+    def test_value_index_columns_route_to_coltile(self, dtype, op, shape, dim):
+        # Dispatch reaches the 2D two-output or batched kernel and keeps the first tie.
+        trait, tie = _VALUE_INDEX[op]
+        x = torch.randn(shape, device="cuda").to(dtype)
+        x.select(dim, 100).fill_(tie)
+        x.select(dim, 900).fill_(tie)
+        key = f"{op}dim_route_{x.dim()}d"
+        vals, idx = kg.reduce_dim2(trait, key, x, dim, [dtype, torch.int32])
+        served = {(k[0], k[2]) for k in ct._CACHE if k[1] == key}
+        self.assertIn(("coltile", dtype), served)
+        self.assertEqual(vals, torch.full_like(vals, tie))
+        self.assertEqual(idx, torch.full_like(idx, 100))
+
+    def test_transposed_dense_columns_route_to_coltile(self):
+        # A transposed view whose kept axis is dense is served by the column kernel.
+        x = torch.randn(256, 4096, device="cuda").t()
+        got = kg.reduce_dim(
+            T.SumOps(acc=cutlass.Float32), "transposed_col", x, 1, torch.float32
+        )
+        self.assertIn("coltile", _tags("transposed_col"))
+        self.assertEqual(got, x.double().sum(dim=1).float(), atol=1e-3, rtol=1e-4)
+
+    @parametrize("name", list(_ONE_FIELD))
+    @parametrize("dtype", _DTYPES)
+    def test_single_field_tree_fold(self, dtype, name):
+        """Fold every single-field trait's rows as trees at each vector width, from
+        chunks whose length is not a multiple of the tree group."""
+        trait, kwargs, ref = _ONE_FIELD[name]
+        op = trait(acc=cutlass.Float32, **kwargs)
+        vec = 4 if dtype == torch.float32 else 8
+        # Four chunks of 37 rows: 37 is odd, so no tree group divides it.
+        x = (torch.rand(3, 148, 64, device="cuda") + 0.5).to(dtype)
+        x[:, ::3, ::5] = 0
+        x[:, :, 0] = 0
+        if name in ("amax", "amin"):
+            x[:, 50, 1] = float("nan")
+        f32 = torch.float32
+        got2 = ct.reduce_col_tile(op, f"tree_{name}", x[0], f32, npar=4, vec=vec)
+        (got3,) = ct.reduce_batched_col_tile(
+            op, f"tree3_{name}", x, [f32], 1, npar=4, vec=vec
+        )
+        with torch.backends.python_native.cutedsl.disabled():
+            want = ref(x.double(), 1).to(f32)
+        self.assertEqual(got2, want[0], atol=1e-3, rtol=1e-4)
+        self.assertEqual(got3, want, atol=1e-3, rtol=1e-4)
+
+    def test_index_traits_through_column_views(self):
+        """Report logical indices for transposed and pitched column views."""
+        y = torch.randn(256, 512, device="cuda")
+        y[100] = 5.0
+        y[200] = 5.0
+        base = torch.randn(300, 72, device="cuda")
+        base[7, :64] = 5.0
+        for key, x, dim in (
+            ("index_col_t", y.t(), 1),
+            ("index_col_pitch", base[:, :64], 0),
+        ):
+            with self.subTest(key):
+                got = kg.reduce_dim(
+                    T.ArgMaxOps(acc=cutlass.Float32), key, x, dim, torch.int32
+                )
+                self.assertIn("coltile", _tags(key))
+                with torch.backends.python_native.cutedsl.disabled():
+                    want = x.argmax(dim).to(torch.int32)
+                self.assertEqual(got, want)
+
+    def test_misaligned_row_pitch_declines(self):
+        """Rows at a pitch of partial vectors leave the vector row and column kernels."""
+        trait = T.SumOps(acc=cutlass.Float32)
+        f32 = torch.float32
+        # 100 columns at a pitch of 101 sit below the ragged-row band on every GPU.
+        rows = torch.randn(64, 101, device="cuda")[:, :100]
+        self.assertIsNone(kg._try_fast_row(trait, "pitch_row", rows, [f32], 1))
+        with self.assertRaisesRegex(ValueError, "rows need a pitch of whole vectors"):
+            rt.reduce_row_tile(trait, "pitch_row", rows, [f32])
+        cols = torch.randn(64, 66, device="cuda")[:, :64]
+        with self.assertRaisesRegex(ValueError, "vec must divide the row pitch"):
+            ct.reduce_col_tile(trait, "pitch_col", cols, f32, vec=4)
+
+    def test_over_reported_split_stays_correct(self):
+        # 64 chunks of ceil(65 / 64) = 2 rows leave the last 31 empty; they must load
+        # nothing and combine identities.
+        x = torch.randn(65, 8, device="cuda")
+        out = ct.reduce_col_tile(
+            T.SumOps(acc=cutlass.Float32), "overrep", x, torch.float32, npar=64
+        )
+        torch.testing.assert_close(
+            out, x.double().sum(dim=0).float(), atol=2e-3, rtol=1e-4
+        )
+        # Index traits expose stray partials as wrong indices.
+        idx = ct.reduce_col_tile(
+            T.ArgMaxOps(acc=cutlass.Float32), "overrep_idx", x, torch.int32, npar=64
+        )
+        self.assertEqual(idx, x.argmax(dim=0).to(torch.int32))
+
+    def test_default_split_fits_grid_y(self):
+        # Two lanes would want 65536 chunks; the default caps npar at grid y's 65535.
+        x = torch.randn(1 << 20, 2, device="cuda")
+        out = ct.reduce_col_tile(
+            T.SumOps(acc=cutlass.Float32), "grid_y", x, torch.float32
+        )
+        self.assertEqual(out, x.double().sum(dim=0).float(), atol=2e-3, rtol=1e-4)
+
 
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
@@ -152,39 +455,56 @@ class TestColTileHost(TestCase):
         with self.assertRaisesRegex(AssertionError, "no tile"):
             col.tilemap
 
-    def test_over_reported_split_stays_correct(self):
-        # A capped split can leave blocks empty; they must load nothing and combine identities.
-        r = ct._P_MAX * ct._Q_TARGET + 1  # the smallest R whose split over-reports
-        self.assertEqual(ct._split_p(r), ct._P_MAX, "shape no longer over-reports")
-        x = torch.randn(r, 8, device="cuda")
-        out = ct.reduce_col_tile(
-            T.SumOps(acc=cutlass.Float32), "overrep", x, torch.float32
-        )
-        torch.testing.assert_close(
-            out, x.double().sum(dim=0).float(), atol=2e-3, rtol=1e-4
-        )
-        # Index traits expose stray partials as wrong indices.
-        idx = ct.reduce_col_tile(
-            T.ArgMaxOps(acc=cutlass.Float32), "overrep_idx", x, torch.int32
-        )
-        self.assertEqual(idx, x.argmax(dim=0).to(torch.int32))
-
-    def test_explicit_vec_must_divide_the_column_count(self):
-        # Explicit vec must divide C or trailing outputs remain uninitialized.
-        x = torch.randn(64, 30, device="cuda")
-        with self.assertRaisesRegex(AssertionError, "vec must divide"):
-            ct.reduce_col_tile(
-                T.SumOps(acc=cutlass.Float32), "badvec", x, torch.float32, vec=4
-            )
-
-    def test_explicit_sizes_must_be_positive(self):
-        x = torch.randn(64, 32, device="cuda")
+    @parametrize(
+        "shape,arg,value,error",
+        [
+            # Explicit vec must divide C or trailing outputs remain uninitialized.
+            ((64, 30), "vec", 4, "vec must divide"),
+            ((1, 1 << 20), "npar", 4096, "overflows Int32"),
+            ((64, 32), "vec", 0, "vec must be positive"),
+            ((64, 32), "npar", 0, "npar must be positive"),
+        ],
+        name_fn=lambda shape, arg, value, error: f"{arg}{value}",
+    )
+    def test_explicit_sizes_are_validated(self, shape, arg, value, error):
+        x = torch.randn(shape, device="cuda")
         trait = T.SumOps(acc=cutlass.Float32)
-        with self.assertRaisesRegex(ValueError, "vec must be positive"):
-            ct.reduce_col_tile(trait, "badvec0", x, torch.float32, vec=0)
-        with self.assertRaisesRegex(ValueError, "npar must be positive"):
-            ct.reduce_col_tile(trait, "badnpar0", x, torch.float32, npar=0)
+        with self.assertRaisesRegex(ValueError, error):
+            ct.reduce_col_tile(trait, "badsize", x, torch.float32, **{arg: value})
 
+    def test_rows_must_fit_int32(self):
+        # Stage one indexes rows as batch * R + row in Int32; stride-0 views reach the
+        # check without allocating them.
+        trait = T.SumOps(acc=cutlass.Float32)
+        f32 = torch.float32
+        tall = torch.zeros(1, 4, device="cuda").expand(2**31, 4)
+        batched = torch.zeros(1, 1, 4, device="cuda").expand(2, 2**30, 4)
+        with self.assertRaisesRegex(AssertionError, r"want B \* R < 2\^31"):
+            ct.reduce_col_tile(trait, "rows", tall, f32)
+        with self.assertRaisesRegex(AssertionError, r"want B \* R < 2\^31"):
+            ct.reduce_batched_col_tile(trait, "rows", batched, [f32], 1)
+        unpacked = torch.randn(4, 10, 32, device="cuda")[:, :8]
+        with self.assertRaisesRegex(AssertionError, "want 2D/3D CUDA rows"):
+            ct.reduce_batched_col_tile(trait, "rows", unpacked, [f32], 1)
+
+    @parametrize(
+        "launcher, rank, args",
+        [
+            ("reduce_col_tile", 3, (torch.float32,)),
+            ("reduce_col_tile_2out", 3, ([torch.float32] * 2,)),
+            ("reduce_batched_col_tile", 2, ([torch.float32], 1)),
+        ],
+        name_fn=lambda launcher, rank, args: launcher,
+    )
+    def test_launchers_check_rank(self, launcher, rank, args):
+        x = torch.randn((4,) * rank, device="cuda")
+        fn, trait = getattr(ct, launcher), T.SumOps(acc=cutlass.Float32)
+        with self.assertRaisesRegex(AssertionError, "want [23]D x"):
+            fn(trait, "badrank", x, *args)
+
+
+instantiate_parametrized_tests(TestKernelColTile)
+instantiate_parametrized_tests(TestColTileHost)
 
 if __name__ == "__main__":
     run_tests()

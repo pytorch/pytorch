@@ -913,6 +913,12 @@ def reduce_row_tile(
         )
     if itree is not None:
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
+    if M == 1:
+        x = x.as_strided((1, N), (N, 1))  # one row's pitch is free
+    if tile.align_bytes(x.stride(0), x.element_size()) < tile.align_bytes(
+        N, x.element_size()
+    ):
+        raise ValueError(f"rows need a pitch of whole vectors, got {N=} {x.stride(0)=}")
     cfg = row_config(N, x.element_size() * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
     # the measured optimum across 4/8/16/32.
@@ -977,7 +983,8 @@ def reduce_row_tile(
     )
 
     def _fake():
-        # TMA bakes N; runtime folds share a vector class.
+        # TMA bakes N; runtime folds share a vector class at any pitch of whole vectors,
+        # so packed and pitched rows run one kernel.
         if use_tma:
             fake_in = cute.runtime.make_fake_tensor(
                 dt,
@@ -989,12 +996,7 @@ def reduce_row_tile(
                 assumed_align=align,
             )
         else:
-            fake_in = _L.fake_compact(
-                dt,
-                (_L.sym(), _L.sym(op.vec)),
-                stride_order=(1, 0),
-                align=align,
-            )
+            fake_in = _L.fake_rows(dt, _L.sym(op.vec), op.vec, align=align)
         return _row_args(
             [fake_in],
             [_L.fake_compact(torch2cute[o.dtype], (_L.sym(),)) for o in outs],

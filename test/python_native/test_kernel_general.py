@@ -1,6 +1,7 @@
 # Owner(s): ["module: dsl-native-ops"]
-# Smoke-test K0 compilation and dispatch on a middle-dimension reduction, which forces
-# the general path. Override OpInfo suites provide full numerical coverage.
+# Smoke-test K0 compilation and dispatch on non-adjacent reduced axes, which have no
+# column view and so force the general path. Override OpInfo suites provide full
+# numerical coverage.
 
 import pathlib
 import re
@@ -96,11 +97,13 @@ class TestKernelGeneral(TestCase):
         self.assertEqual({k[0] for k in keys}, {1})
 
     def test_reduce_dim_general_path(self):
-        x = torch.randn(8, 16, 32, device="cuda")
+        # Non-adjacent reduced axes have no column view, so the general kernel serves them.
+        x = torch.randn(8, 16, 16, device="cuda")
         out = kg.reduce_dim(
-            T.SumOps(acc=cutlass.Float32), "smoke", x, [1], torch.float32
+            T.SumOps(acc=cutlass.Float32), "general_smoke", x, [0, 2], torch.float32
         )
-        torch.testing.assert_close(out, x.sum(dim=1), atol=1e-2, rtol=1e-2)
+        self.assertEqual(_plan_tags("general_smoke"), {"reduce"})
+        torch.testing.assert_close(out, x.sum(dim=(0, 2)), atol=1e-2, rtol=1e-2)
 
     def test_extent_one_reduced_axis(self):
         # TensorIterator coalesces away the reduced run; the kernel must fold one value.
@@ -312,6 +315,47 @@ class TestKernelGeneral(TestCase):
             torch.int32,
         )
         self.assertEqual(out, 1)
+
+    def test_ti_row_and_column_views_take_the_fast_kernels(self):
+        """TI views pitched, offset and channels-last layouts as rows or columns at a
+        runtime pitch, so they run the row and column kernels, not the general decode."""
+        from torch._native.ops.reductions import kernel_coltile as ct
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        base = torch.randn(256, 1032, device="cuda")
+        cl = torch.randn(8, 64, 14, 14, device="cuda")
+        cl = cl.contiguous(memory_format=torch.channels_last)
+        cases = (
+            ("pitched_rows", base[:, :1024], [1], rt._CACHE, "rowtile"),
+            ("offset_rows", base[:, 8:], [1], rt._CACHE, "rowtile"),
+            ("channels_last_c", cl, [1], rt._CACHE, "rowtile"),
+            ("pitched_cols", base[:, :1024], [0], ct._CACHE, "coltile"),
+            ("channels_last_nhw", cl, [0, 2, 3], ct._CACHE, "coltile"),
+        )
+        for name, x, dims, cache, tag in cases:
+            with self.subTest(name):
+                key = f"ti_view_{name}"
+                got = kg.reduce_dim(trait, key, x, dims, torch.float32)
+                want = x.double().sum(dims).float()
+                self.assertEqual(got, want, atol=1e-4, rtol=1e-5)
+                self.assertIn(tag, {k[0] for k in cache if k[1] == key})
+
+    def test_overlapping_ti_views_keep_the_general_path(self):
+        """Expanded rows and columns overlap: rows would pick TMA at a zero row stride and
+        columns would lose the general split's broadcast rotation, so both decline."""
+        from torch._native.ops.reductions import kernel_coltile as ct
+
+        trait = T.SumOps(acc=cutlass.Float32)
+        t = torch.randn(64, device="cuda")
+        for name, x, dim in (
+            ("rows", t.expand(16384, 64), 1),
+            ("cols", t.expand(4096, 64), 0),
+        ):
+            with self.subTest(name):
+                key = f"ti_overlap_{name}"
+                got = kg.reduce_dim(trait, key, x, [dim], torch.float32)
+                self.assertEqual(got, x.double().sum(dim).float(), atol=1e-3, rtol=1e-5)
+                self.assertFalse({k[1] for k in (*rt._CACHE, *ct._CACHE)} & {key})
 
     @unittest.skipIf(
         rt.inner_tree_order_enabled(), "requires unordered reduction order"

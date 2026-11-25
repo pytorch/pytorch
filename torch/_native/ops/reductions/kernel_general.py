@@ -274,20 +274,71 @@ def _flat_outs(outs: Sequence[torch.Tensor]) -> list[torch.Tensor]:
     return [out.reshape(-1) for out in outs]
 
 
-# Fast-path classification shared by routing and condition gates, after TI coalescing.
-
-
-def fast_kind(red_pairs: Pairs, kept_pairs: Pairs, nouts: int) -> str | None:
-    """Select row or single-output column reduction by a dense 2D TI view's stride-one pair."""
-    if len(kept_pairs) == 0:
-        return "all"
-    if len(red_pairs) != 1 or len(kept_pairs) != 1:
+def _physical_col_view(
+    x: torch.Tensor,
+    red_axes: set[int],
+    red_pairs: Pairs,
+    kept_pairs: Pairs,
+    count: int,
+    num_o: int,
+) -> torch.Tensor | None:
+    """Return TI's column view, or None: one reduced pair (count, row stride) over kept
+    (C, 1) is (count, C), and a second kept pair (B, count * row stride), batches that
+    pack their rows, makes it (B, count, C). Rows may be pitched but must keep C's vector
+    alignment and not overlap, and several reduced axes must merge in logical order (index traits number
+    reduced positions logically)."""
+    if len(red_pairs) != 1 or not 1 <= len(kept_pairs) <= 2 or kept_pairs[0][1] != 1:
         return None
-    if red_pairs[0][1] == 1:  # reduced run is innermost/contiguous -> row
-        return "row"
-    if kept_pairs[0][1] == 1 and nouts == 1:  # kept innermost -> col
-        return "col"
-    return None
+    strides = [x.stride(a) for a in sorted(red_axes) if x.shape[a] != 1]
+    if strides != sorted(set(strides), reverse=True):
+        return None
+    pitch, C = red_pairs[0][1], kept_pairs[0][0]
+    if pitch < C:
+        return (
+            None  # overlapping (e.g. expanded) rows keep the general split's rotation
+        )
+    if tile.align_bytes(pitch, x.element_size()) < tile.align_bytes(
+        C, x.element_size()
+    ):
+        return None
+    if len(kept_pairs) == 1:
+        return torch.as_strided(x, (count, C), (pitch, 1), x.storage_offset())
+    B, batch_stride = num_o // C, kept_pairs[1][1]
+    # Stage one indexes batched rows as batch * R + row in Int32.
+    if batch_stride != count * pitch or B * count >= _INT32_LIMIT:
+        return None
+    shape, strides = (B, count, C), (batch_stride, pitch, 1)
+    return torch.as_strided(x, shape, strides, x.storage_offset())
+
+
+# CUDA-graph timings of the batched column kernel against the general kernel (sum, amax,
+# argmax, var_mean, max.dim and aminmax; fp32/bf16/fp16; 8-512 MiB): R <= 64 wins at
+# every C (B200 2.3-21x, H100 2.5-18x). Longer R needs C >= 16, and two outputs also
+# need B * C >= 8192 kept outputs; past those, views of 16 MiB and up run 0.92-12x on
+# B200 and 1.2-12x on H100. Every admitted regression sits at R = 1024, C = 16: argmax,
+# amax and sum on 8 MiB inputs (B200 0.73-0.94x, H100 0.83-1.0x), and B200 fp32 argmax
+# and fp16 var_mean at 16 MiB (0.92-0.94x); the same shapes run 2.0-3.6x at 512 MiB.
+# Earlier B200 timings put narrower C at 0.24-1.0x. Other architectures keep the general
+# kernel.
+_BATCHED_COL_CCS = ((9, 0), (10, 0))
+_BATCHED_COL_SHORT_R = 64
+_BATCHED_COL_MIN_C = 16
+_BATCHED_COL_2OUT_MIN_OUTPUTS = 8192
+
+
+def _col_route_ok(view: torch.Tensor, nouts: int, cc: tuple[int, int]) -> bool:
+    """Whether the unordered column kernels beat the general kernel on this view."""
+    if view.dim() == 2 and nouts == 1:
+        # The single-output 2D route predates the measured batched and two-output routes.
+        return True
+    if cc not in _BATCHED_COL_CCS:
+        return False
+    B, R, C = (1, *view.shape) if view.dim() == 2 else view.shape
+    if R <= _BATCHED_COL_SHORT_R:
+        return True
+    return C >= _BATCHED_COL_MIN_C and (
+        nouts == 1 or B * C >= _BATCHED_COL_2OUT_MIN_OUTPUTS
+    )
 
 
 def _ti_rows(
@@ -393,7 +444,8 @@ def _try_fast_row(
     out_dtypes: Sequence[torch.dtype],
     nouts: int,
 ) -> tuple[torch.Tensor, ...] | None:
-    # Fast contiguous 2D last-dimension path. It needs no index remap, so index traits work.
+    # Fast 2D last-dimension path over TI's row view, packed or pitched. It needs no index
+    # remap, so index traits work.
     if x.dim() != 2 or x.stride(-1) != 1:
         return None
     N = x.shape[-1]
@@ -405,6 +457,9 @@ def _try_fast_row(
 
     # Callers resolve any required order first, so this only serves unordered requests.
     M, itemsize = x.shape[0], x.element_size()
+    # Row kernels load N's vector width from every row start.
+    if tile.align_bytes(x.stride(0), itemsize) < tile.align_bytes(N, itemsize):
+        return None
     kernel_order = rt.select_row_order(
         _hw.caps(x.device).cc,
         x.dtype,
@@ -427,6 +482,8 @@ def _try_fast_row(
     if _oneshot_ok(x):
         return rt.reduce_row_tile(trait, trait_key, x, out_dtypes, nouts=nouts)
 
+    if not x.is_contiguous():
+        return None  # the splits below take rows packed at stride N
     from . import kernel_xcta as xc
 
     if nouts == 2:
@@ -740,33 +797,40 @@ def _reduce(
             return (_as_shape(out, out_shape),)
         outs = reduce_all2(trait, trait_key, xa, out_dtypes, order=order)
         return tuple(_as_shape(o, out_shape) for o in outs)
+    cc = _hw.caps(x.device).cc
 
-    # Reshape post-TI contiguous innermost reductions onto a fast kernel; general remains
-    # the fallback for direct calls and declines.
-    if (
-        len(out_shape) > 0
-        and x.is_contiguous()
-        and count < _INT32_LIMIT
-        and num_o < _INT32_LIMIT
-    ):
-        kind = fast_kind(red_pairs, kept_pairs, nouts)
+    # Reshape dense TensorIterator row/column views onto fast kernels; general remains
+    # the fallback for other layouts and declines.
+    if len(out_shape) > 0 and count < _INT32_LIMIT and num_o < _INT32_LIMIT:
         red_n = x.numel() // max(1, math.prod(out_shape))
-        if kind == "row":
-            x2 = x.reshape(math.prod(out_shape), red_n)
-            fast = _try_fast_row(trait, trait_key, x2, out_dtypes, nouts)
+        if rows is not None:
+            fast = _try_fast_row(trait, trait_key, rows, out_dtypes, nouts)
             if fast is not None:
                 return tuple(_as_shape(o, out_shape) for o in fast)
-        elif kind == "col":
-            # Splitting the reduced axis supplies parallelism for tall-narrow inputs:
-            # 7.24x, 2.53x, and 1.49x of ATen at (65536, 256), (16384, 1024), and (4096, 4096).
+        col_view = _physical_col_view(x, red_axes, red_pairs, kept_pairs, red_n, num_o)
+        if col_view is not None and _col_route_ok(col_view, nouts, cc):
             from . import kernel_coltile as ct
 
-            x2 = x.reshape(red_n, math.prod(out_shape))
-            out = ct.reduce_col_tile(trait, trait_key, x2, out_dtypes[0])
-            return (_as_shape(out, out_shape),)
+            if col_view.dim() == 2:
+                # Splitting the reduced axis supplies parallelism for tall-narrow
+                # inputs: 7.24x, 2.53x, and 1.49x of ATen at (65536, 256),
+                # (16384, 1024), and (4096, 4096).
+                if nouts == 1:
+                    fast = (
+                        ct.reduce_col_tile(trait, trait_key, col_view, out_dtypes[0]),
+                    )
+                else:
+                    fast = ct.reduce_col_tile_2out(
+                        trait, trait_key, col_view, out_dtypes
+                    )
+            else:
+                fast = ct.reduce_batched_col_tile(
+                    trait, trait_key, col_view, out_dtypes, nouts
+                )
+            return tuple(_as_shape(out, out_shape) for out in fast)
 
     config = select_general_config(
-        _hw.caps(x.device).cc,
+        cc,
         x.dtype,
         trait_key,
         count,
