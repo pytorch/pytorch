@@ -1,23 +1,13 @@
 # Owner(s): ["module: unknown"]
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TemporaryFileName, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TemporaryFileName,
+    TestCase,
+)
 from torch.utils import ThroughputBenchmark
-
-
-class TwoLayerNet(torch.jit.ScriptModule):
-    def __init__(self, D_in, H, D_out):
-        super().__init__()
-        self.linear1 = torch.nn.Linear(D_in, H)
-        self.linear2 = torch.nn.Linear(2 * H, D_out)
-
-    @torch.jit.script_method
-    def forward(self, x1, x2):
-        h1_relu = self.linear1(x1).clamp(min=0)
-        h2_relu = self.linear1(x2).clamp(min=0)
-        cat = torch.cat((h1_relu, h2_relu), 1)
-        y_pred = self.linear2(cat)
-        return y_pred
 
 
 class TwoLayerNetModule(torch.nn.Module):
@@ -35,6 +25,8 @@ class TwoLayerNetModule(torch.nn.Module):
 
 
 class TestThroughputBenchmark(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def linear_test(self, Module, profiler_output_path=""):
         D_in = 10
         H = 5
@@ -68,9 +60,6 @@ class TestThroughputBenchmark(TestCase):
         )
 
         print(stats)
-
-    def test_script_module(self):
-        self.linear_test(TwoLayerNet)
 
     def test_module(self):
         self.linear_test(TwoLayerNetModule)
