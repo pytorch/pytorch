@@ -464,6 +464,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed input."""
         if name not in self.fixed_inputs:
+            self.kernel._record_negative_offset(name, index)
             index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
@@ -984,6 +985,26 @@ class TritonTemplateKernel(TritonKernel):
                     return V.graph.sizevars.optimization_hint(f, fallback=0)
         return 0
 
+    def body_fixed_blocks(self, sig_arg_names: OrderedSet[str]) -> dict[str, int]:
+        fixed_blocks: dict[str, int] = {}
+        # prologue_cache maps a block name to the size expression that emitted its
+        # constexpr line; it also caches var -> descriptor name, which won't evaluate.
+        numeric_meta = {
+            k: v
+            for k, v in self.meta.items()
+            if isinstance(v, int) and not isinstance(v, bool)
+        }
+        for block_name, block_size in self.prologue_cache.items():
+            if block_name in sig_arg_names:
+                continue
+            try:
+                val = sympy.sympify(block_size).subs(numeric_meta)
+            except (sympy.SympifyError, TypeError, SyntaxError):
+                continue
+            if val.is_Integer:
+                fixed_blocks[block_name] = int(val)
+        return fixed_blocks
+
     def jit_lines(self):
         """Render decorators and metadata for the generated Triton template."""
         if self.use_jit:
@@ -1001,7 +1022,8 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         # Rendered from a deferred hook, so the body -- including any subgraph
-        # modifications that emit atomics -- already exists at this point.
+        # modifications that emit atomics and the accesses that record negative
+        # offsets -- already exists at this point.
         triton_meta["configs"] = [
             config_of(signature, pointer_range_override=self.pointer_range_override())
         ]
@@ -1036,12 +1058,12 @@ class TritonTemplateKernel(TritonKernel):
             **self.inductor_meta_common(),
             **FixedGrid.setup_grid_as_args(),
         }
+        resolved_host_tma: dict[str, Any] = {}
         if self.host_tma_descriptor_args:
             # This meta is repr'd into the generated module, so epilogue-registered
             # TensorDescriptorOptions must be resolved to plain dims first.
-            inductor_meta["host_tma_descriptor_args"] = (
-                self.resolved_host_tma_descriptor_args()
-            )
+            resolved_host_tma = self.resolved_host_tma_descriptor_args()
+            inductor_meta["host_tma_descriptor_args"] = resolved_host_tma
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
@@ -1074,8 +1096,21 @@ class TritonTemplateKernel(TritonKernel):
                 """
                 triton_meta_extra[k] = v
 
+        # The signature below still shows these as pointers; _precompile_config
+        # rewrites them per config, so spell out what it will produce.
+        signature = self.triton_meta["signature"]
+        upgrades = [
+            f"#   {name} -> tensordesc<{signature[name][1:]}{desc['block_shape']}>"
+            for name, desc in resolved_host_tma.items()
+            if isinstance(signature.get(name), str) and signature[name].startswith("*")
+        ]
+        host_tma_note = ""
+        if upgrades:
+            body = "\n            ".join(upgrades)
+            host_tma_note = f"# host-side TMA, rewritten at precompile:\n            {body}\n\n            "
+
         return f"""
-            @triton_heuristics.template(
+            {host_tma_note}@triton_heuristics.template(
                 {template_args}
             )
             @triton.jit
@@ -1144,11 +1179,13 @@ class TritonTemplateKernel(TritonKernel):
                 continue
 
             arg_name = self.args.input_buffers[input_node.get_name()]
-            if input_node.get_layout().offset == 0:
+            offset = input_node.get_layout().offset
+            if offset == 0:
                 renames.writeline(f"{name} = {arg_name}")
             else:
-                offset = texpr(self.rename_indexing(input_node.get_layout().offset))
-                renames.writeline(f"{name} = {arg_name} + {offset}")
+                self._record_negative_offset(input_node.get_name(), offset)
+                offset_expr = texpr(self.rename_indexing(offset))
+                renames.writeline(f"{name} = {arg_name} + {offset_expr}")
 
         for input_node in self.input_nodes[len(self.input_nodes) - self.suffix_args :]:
             # get args in correct order
@@ -2421,9 +2458,13 @@ class TritonTemplateKernel(TritonKernel):
                                 self.prologue_fused_inputs_preserve_zero |= (
                                     prologue_node.get_buffer_names()
                                 )
-                        prologue_node.codegen(
-                            self.split_and_set_ranges(prologue_node.get_ranges())
-                        )
+                        # Masked lanes of a prologue load reach the template's tl.dot,
+                        # and zero-preserving prologues are not re-masked, so the load
+                        # itself must fill them with zeros.
+                        with patch.object(self, "_load_other", 0):
+                            prologue_node.codegen(
+                                self.split_and_set_ranges(prologue_node.get_ranges())
+                            )
                     self.cse.invalidate(OrderedSet())
 
     def _finalize_partial_render(
@@ -4457,6 +4498,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "kpack",
                 "matrix_instr_nonkdim",
                 "waves_per_eu",
+                "NUM_XCCS",
             ]
         )
     )

@@ -2099,6 +2099,30 @@ class TestMaxAutotune(TestCase):
             if not same(expect, actual, tol=1e-2):
                 raise AssertionError(f"ref:\n{expect}\nact:\n{actual}")
 
+    @config.patch(
+        force_shape_pad=True,
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON,ATEN",
+    )
+    def test_addmm_layout_conflict_extern_fallback(self):
+        """
+        Padding K freezes A at its original row stride, which conflicts with the
+        layout the template expects, so the scheduler falls back to the fastest
+        extern choice. addmm has two extern choices, and only the fastest one
+        has a timing.
+        """
+        M, K, N = 256, 1778, 640
+        a = torch.randn(M * 1792, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, K), (1792, 1)
+        )
+        b = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+        bias = torch.randn(N, device=GPU_TYPE, dtype=torch.float16).as_strided(
+            (M, N), (0, 1)
+        )
+
+        out = torch.compile(torch.addmm)(bias, a, b)
+        torch.testing.assert_close(out, torch.addmm(bias, a, b), atol=5e-2, rtol=1e-2)
+
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -3440,6 +3464,77 @@ class TestMaxAutotune(TestCase):
             any(name.startswith("decompose_k_mm") for name in names), names
         )
 
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    @fresh_cache()
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="ATEN,TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_decompose_k_max_k_per_split_numerics(self):
+        # With K = 2**18, split 2 (chunks of 131072) misses this tolerance on B200;
+        # whether it does depends on the BLAS kernel, so only the bounded path is
+        # checked numerically.
+        M, N, K = 64, 64, 2**18
+        torch.manual_seed(0)
+        a = torch.randn(M, K, device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randn(K, N, device=GPU_TYPE).to(torch.bfloat16)
+        ref = a.float() @ b.float()
+
+        def compile_decompose_k_only(max_k_per_split):
+            names: list[str] = []
+
+            def keep_decompose_k(choices):
+                # Also runs for the partial bmm inside the decompose_k subgraph,
+                # which has no decompose_k choices; leave that one alone.
+                kept = [c for c in choices if c.name.startswith("decompose_k_mm")]
+                names.extend(c.name for c in kept)
+                return kept or choices
+
+            torch._dynamo.reset()
+            get_k_splits.cache_clear()
+            use_decompose_k_choice.cache_clear()
+            add_preprocessing_fn(keep_decompose_k)
+            try:
+                with config.patch(
+                    {
+                        "triton.num_decompose_k_splits": 1,
+                        "triton.decompose_k_max_k_per_split": max_k_per_split,
+                    }
+                ):
+                    out = torch.compile(lambda x, y: x @ y)(a, b)
+            finally:
+                clear_preprocessing_fns(clear_defaults=False)
+                get_k_splits.cache_clear()
+                use_decompose_k_choice.cache_clear()
+            return out, names
+
+        def within_tolerance(out):
+            # bf16 tolerances used by TritonBench accuracy checks
+            err = (out.float() - ref).abs()
+            return bool((err <= 1e-2 + 1e-1 * ref.abs()).all())
+
+        # Default bound: chunks of at most 16384, so the single split is 16.
+        out, names = compile_decompose_k_only(16384)
+        self.assertTrue(names, names)
+        self.assertTrue(
+            all(n.startswith("decompose_k_mm_16_split") for n in names), names
+        )
+        self.assertTrue(within_tolerance(out))
+
+        # Unbounded: the single split is 2.
+        _, names = compile_decompose_k_only(0)
+        self.assertTrue(names, names)
+        self.assertTrue(
+            all(n.startswith("decompose_k_mm_2_split") for n in names), names
+        )
+
     @config.patch(
         {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "TRITON"}
     )
@@ -3908,11 +4003,7 @@ class TestMaxAutotune(TestCase):
         ):
             result = torch.compile(mm, fullgraph=True)(x, w)
 
-        # Loads before the graph input pointer read back 0 on ROCm, so the
-        # negative case computes zeros there and cannot be compared. Same
-        # limitation as test_as_strided_past_input_extent in test_torchinductor.py.
-        if view_offset >= 0 or not TEST_WITH_ROCM:
-            torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(result, mm(x, w), rtol=1e-2, atol=1e-2)
 
         self.assertTrue(autotune_args, "autotuning did not build benchmark inputs")
         # The fake input has to satisfy as_strided with the data pointer placed
@@ -6470,6 +6561,44 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    @config.patch({"test_configs.autotune_choice_desc_regex": "EVEN_K=False"})
+    @parametrize("prologue", ("cast", "relu_cast"))
+    def test_prologue_masked_k_load_fills_zero(self, prologue):
+        # Only configs whose BLOCK_K does not divide K=48 are admitted, so the last
+        # K step masks lanes of the fused B load. Those lanes feed tl.dot, and
+        # zero-preserving prologues are not re-masked, so the load itself must fill
+        # them with zeros.
+        M, K, N = 64, 48, 128
+
+        def foo(a, b_storage):
+            b = b_storage[:, :K].t()
+            if prologue == "relu_cast":
+                b = b.relu()
+            return a @ b.float()
+
+        a = torch.randn(M, K, device=GPU_TYPE)
+        # Pad every row of B's storage with NaN past column K.
+        b_storage = torch.full(
+            (N, 64), float("nan"), dtype=torch.float16, device=GPU_TYPE
+        )
+        b_storage[:, :K] = torch.randn(N, K, dtype=torch.float16, device=GPU_TYPE)
+
+        out, code = run_and_get_code(torch.compile(foo), a, b_storage)
+        self.assertEqual(out, foo(a, b_storage), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=None, num_deallocs=None)
+        masked_b_loads = [
+            line
+            for line in code[0].splitlines()
+            if "tl.load(" in line and "b_mask" in line
+        ]
+        self.assertTrue(masked_b_loads, "expected a masked prologue load of B")
+        for line in masked_b_loads:
+            self.assertIn("other=", line)
 
 
 def autotune_select_algorithm_wrapper_return_multi():

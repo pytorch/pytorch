@@ -88,7 +88,7 @@ from torch.testing._internal.common_cuda import (
     _get_torch_rocm_version,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
-    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     SM90OrLater,
@@ -172,6 +172,7 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_MULTIGPU,
     HAS_TPU,
     IS_BIG_GPU,
+    platform_supports_tensor_descriptor,
     requires_block_ptr,
     requires_gpu,
     RUN_CPU,
@@ -1116,6 +1117,15 @@ def check_model_gpu(
 
 
 check_model_cuda = check_model_gpu
+
+
+def _run_and_assert_direct_indexing_unless_avoided(test_case, func, *args, **kwargs):
+    # a backend that keeps %, // and abs of an index tensor behind an indirect
+    # variable (InductorChoices.use_modular_indexing) does not fold them into
+    # the address
+    if not V.choices.use_modular_indexing(test_case.device, kind="index"):
+        return func(*args)
+    return _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs)
 
 
 def _run_and_assert_no_indirect_indexing(
@@ -2369,7 +2379,7 @@ class CommonTemplate:
         # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
         has_assert = ifdynstaticdefault(False, True)
         # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(
+        actual = _run_and_assert_direct_indexing_unless_avoided(
             self, repeat_interleave_opt, x, 3, has_assert=has_assert
         )
         expect = torch.repeat_interleave(x, 3, dim=0)
@@ -2388,7 +2398,7 @@ class CommonTemplate:
         # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
         has_assert = ifdynstaticdefault(False, True)
         # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(
+        actual = _run_and_assert_direct_indexing_unless_avoided(
             self, repeat_opt, x, 3, has_wrapping=False, has_assert=has_assert
         )
         expect = x.repeat(3, 1)
@@ -2407,7 +2417,7 @@ class CommonTemplate:
         # With static shapes we can prove the bound, our dynamic shapes reasoning is not good enough
         has_assert = ifdynstaticdefault(False, True)
         # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(
+        actual = _run_and_assert_direct_indexing_unless_avoided(
             self, opt_fn, x, 3, has_wrapping=False, has_assert=has_assert
         )
         expect = reflection_pad_left(x, 3)
@@ -2435,6 +2445,11 @@ class CommonTemplate:
             fn, inps, has_assert: bool, has_wrapping: bool, vectorize: bool = True
         ):
             fn_opt = torch.compile(fn)
+            if not V.choices.use_modular_indexing(self.device, kind="index"):
+                # the wrapping stays behind an indirect variable; the codegen
+                # checks below describe the inlined index
+                self.assertEqual(fn_opt(*inps), fn(*inps))
+                return
             if is_halide_backend(self.device):
                 pass  # no device asserts in halide
             elif is_mps_backend(self.device):
@@ -6219,6 +6234,11 @@ for dtype in (torch.int32, torch.int64):
             raise unittest.SkipTest(
                 "only the native CPU kernel preserves the input memory format"
             )
+        if config.avoid_modular_indexing and is_halide_backend(self.device):
+            # idx // W and idx % W no longer fold back into idx, and Halide
+            # refuses to reorder the RVars of a scatter indexed by two
+            # indirect variables
+            raise unittest.SkipTest("Halide cannot schedule the scatter")
 
         def fn(p, i):
             return torch.nn.functional.max_unpool2d(p, i, (8, 8))
@@ -7953,7 +7973,6 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.arange(6, dtype=torch.float32),))
 
-    @skipIfRocm(msg="loads before the graph input pointer read back 0 on ROCm")
     def test_as_strided_past_input_extent(self):
         # A graph input aliasing a larger storage may legitimately be
         # as_strided'd past its own extent: Inductor rebases the storage-relative
@@ -10015,7 +10034,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
             self.common(fn, (x,))
-            assertGeneratedKernelCountEqual(self, 1)
+            if V.choices.use_modular_indexing(self.device, kind="view"):
+                # otherwise the merge after the stack is realized
+                assertGeneratedKernelCountEqual(self, 1)
 
     def test_hardtanh(self):
         def fn(x):
@@ -12578,6 +12599,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
+    @skip_if_halide
+    @skip_if_pallas
+    def test_index_put_duplicate_indices_single_element(self):
+        def fn(x):
+            x = x * 1
+            x[[0, 0]] += x[[0, 0]]
+            x[[0, 0]] += x[[0, 0]]
+            return x
+
+        for shape in [(1,), (1, 1), (1, 1, 1)]:
+            self.common(fn, (torch.randn(shape),))
+
     @skip_if_pallas
     def test_index_put_duplicate_indices_accumulate(self):
         # accumulate=True is well-defined with duplicate indices.
@@ -14892,6 +14925,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (
                 aten.roll(a, [-3, 10], [1, 2]),
                 aten.roll(a, [5]),
+                aten.roll(a, [60], [1]),
             )
 
         self.common(
@@ -15905,12 +15939,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
-    def test_float_repr_dynamic_shapes(self):
+    @parametrize("prefer_nd_tiling", (False, True))
+    def test_float_repr_dynamic_shapes(self, prefer_nd_tiling):
         @torch.compile(dynamic=True)
         def fn(x):
             return F.interpolate(x, scale_factor=1 / 300, mode="linear")
 
-        self.common(fn, [torch.randn(1, 8, 396 * 300)])
+        with torch._inductor.config.patch(
+            {"triton.prefer_nd_tiling": prefer_nd_tiling}
+        ):
+            self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
     def test_broadcast_symbolic_size_one_dynamic_shapes(self):
         # y has symbolic size trunc(s0 / 300) which the shape env knows is 1.
@@ -16007,7 +16045,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
-    def test_index_dynamic_shapes(self):
+    @parametrize("prefer_nd_tiling", [False, True])
+    def test_index_dynamic_shapes(self, prefer_nd_tiling):
+        if prefer_nd_tiling and not is_triton_backend(self.device):
+            self.skipTest("prefer_nd_tiling requires a Triton backend")
+
         # Repro from vision_maskrcnn
         def fn(arg0_1):
             unsqueeze = arg0_1.unsqueeze(0)
@@ -16064,10 +16106,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (select,)
 
         x = torch.randn(15, 20, 3)
-        self.common(
-            fn,
-            [x],
-        )
+        with config.patch({"triton.prefer_nd_tiling": prefer_nd_tiling}):
+            self.common(
+                fn,
+                [x],
+            )
 
     @skip_if_halide  # log2 not yet implemented
     @skip_if_triton_cpu  # log2 implemented only in Dec 2024
@@ -16455,8 +16498,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 )
                 return clone
 
-        # DeterministicGuard locks MIOpen's solver choice on gfx950. atol/rtol
-        # cover the fp16 hgemm noise floor on gfx90a. Derivation:
+        # The conv is an aten call on both sides. On ROCm, MIOpen times its
+        # solvers even in deterministic mode and may pick an fp16 Winograd
+        # solver whose error against an fp32 reference exceeds atol, so compare
+        # with an fp16 eager reference that runs the same MIOpen conv.
+        # DeterministicGuard keeps both runs off nondeterministic solvers.
+        # atol/rtol cover the fp16 hgemm noise floor against an fp32 reference:
         # https://github.com/pytorch/pytorch/issues/183581
         with DeterministicGuard(True, warn_only=True):
             self.common(
@@ -16465,6 +16512,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=not is_halide_backend(self.device),
                 atol=2e-3,
                 rtol=2e-3,
+                reference_in_float=not torch.version.hip,
             )
 
     def test_inplace_where_pointwise(self):
@@ -16706,7 +16754,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         args = [rand_strided(sh, st) for (sh, st) in args]
         args.append(256)
 
-        if is_cpp_backend(self.device):
+        # the realized merged view changes the C++ kernels
+        if is_cpp_backend(self.device) and not config.avoid_modular_indexing:
             opt_fn = torch.compile(fn, backend="inductor")
             _, code = run_and_get_cpp_code(opt_fn, *args)
             num = (
@@ -23201,6 +23250,11 @@ if RUN_GPU:
             eager_out = apply_rotary_pos_emb(q, k, cos, sin, pos_ids)
             self.assertEqual(compiled_out, eager_out)
 
+            if not V.choices.use_modular_indexing(GPU_TYPE, kind="reindex"):
+                # the pointwise dim expansion that fuses rope indexes the
+                # expanded dim with Mod and is undone
+                return
+
             # make sure that rope is fused into 1 kernel
             code = run_and_get_triton_code(compiled_fn, q, k, cos, sin, pos_ids)
             if config.cpp_wrapper:
@@ -23845,6 +23899,9 @@ if RUN_GPU:
             torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0),
             "Triton does not support fp8 on A100",
         )
+        @unittest.skipIf(
+            not IS_BIG_GPU, "split heuristics depend on SM count; needs a big GPU"
+        )
         def test_red_followed_by_transposed_pointwise(self):
             bs = 26624
             dim = 1024
@@ -24179,7 +24236,7 @@ if RUN_GPU:
             ).run(code[0])
 
         @unittest.skipIf(
-            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8)),
+            not (IS_SM90 or (TEST_WITH_ROCM and PLATFORM_SUPPORTS_FP8_GROUPED_GEMM)),
             "no scaled_grouped_mm support",
         )
         def test_respect_scaled_grouped_mm_layout_tag(self):
@@ -24354,16 +24411,25 @@ if RUN_GPU:
                 "triton.prefer_nd_tiling": True,
                 "triton.max_tiles": 3,
                 "triton.tile_reductions": True,
+                "assume_aligned_inputs": True,
             }
         )
-        def test_3d_reduction_respects_tensor_rank_limit(self):
-            """Keep three reduction tiles while limiting total tensor rank to five.
-
-            max_tiles=3 applies independently to the pointwise and reduction
-            tilings. With R0/R1/R2 present, the three pointwise dimensions must
-            therefore collapse to Y/X rather than producing a sixth tensor axis.
-            """
-
+        @parametrize(
+            "tensor_descriptor",
+            [
+                False,
+                subtest(
+                    True,
+                    decorators=[
+                        unittest.skipUnless(
+                            platform_supports_tensor_descriptor(),
+                            "requires CUDA tensor descriptor support",
+                        )
+                    ],
+                ),
+            ],
+        )
+        def test_3d_pointwise_and_reduction_tiling(self, tensor_descriptor):
             def reduce_3d(x):
                 return torch.sum(x, dim=(3, 4, 5))
 
@@ -24373,13 +24439,25 @@ if RUN_GPU:
                 device=GPU_TYPE,
             ).normal_()
 
-            actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
+            with config.patch({"triton.use_tensor_descriptor": tensor_descriptor}):
+                actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
 
             torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
-            for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
+            for block_arg in (
+                "Z0_BLOCK",
+                "YBLOCK",
+                "XBLOCK",
+                "R0_BLOCK",
+                "R1_BLOCK",
+                "R2_BLOCK",
+            ):
                 self.assertIn(block_arg, code[0])
-            self.assertNotIn("Z0_BLOCK", code[0])
-            self.assertIn("tl.load", code[0])
+            self.assertIn("tl.load(in_ptr0", code[0])
+            self.assertNotIn("tl.make_tensor_descriptor(in_ptr0", code[0])
+            if tensor_descriptor:
+                self.assertIn("tl.make_tensor_descriptor(out_ptr0", code[0])
+            else:
+                self.assertIn("tl.store(out_ptr0", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_median_decompose_sort_ops(self):
@@ -24452,6 +24530,9 @@ if RUN_GPU:
                 self.assertEqual(result, f(x), atol=1e-4, rtol=1e-4)
                 self.assertEqual(" ".join(code).count("@triton.jit"), 1)
 
+        @unittest.skipIf(
+            not IS_BIG_GPU, "split heuristics depend on SM count; needs a big GPU"
+        )
         def test_small_strided_read_keeps_outer_reduction(self):
             # Only reads constant across the whole reduction abstain from the
             # INNER/OUTER vote; a transposed (strided) read still votes OUTER,
@@ -24460,8 +24541,10 @@ if RUN_GPU:
             def fn(x, mask):
                 return (x * mask.t()).sum(1)
 
-            x = torch.randn(1024, 1024, device=GPU_TYPE)
-            mask = torch.rand(1024, 1024, device=GPU_TYPE) < 0.5
+            # num_splits skips the vote when numel >= num_sm * 64; keep numel
+            # below that even on small MIG slices (14-16 SMs).
+            x = torch.randn(256, 1024, device=GPU_TYPE)
+            mask = torch.rand(1024, 256, device=GPU_TYPE) < 0.5
             result, code = run_and_get_code(torch.compile(fn), x, mask)
             self.assertEqual(result, fn(x, mask))
             self.assertIn("reduction_hint=ReductionHint.OUTER", " ".join(code))
