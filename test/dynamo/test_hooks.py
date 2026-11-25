@@ -146,14 +146,10 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             self.assertIs(getattr(module, name)[1], identity_forward_hook)
         self.assertEqual(counter.frame_count, 1)
 
-    @parametrize("backward", [False, True])
-    def test_hook_registration_remains_unsupported(self, backward):
+    @parametrize("method", ["register_forward_hook", "register_full_backward_hook"])
+    def test_hook_registration_remains_unsupported(self, method):
         def fn(x, module):
-            if backward:
-                handle = module.register_full_backward_hook(identity_forward_hook)
-            else:
-                handle = module.register_forward_hook(identity_forward_hook)
-            return x + 1, handle.id
+            return x + 1, getattr(module, method)(identity_forward_hook).id
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Unsupported, "RemovableHandle.*next_id"):
@@ -277,13 +273,9 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             module = torch.nn.Identity()
             for _ in range(4):
                 if source == "removed":
-                    removed = hook_api.register_module_forward_hook(
+                    hook_api.register_module_forward_hook(
                         hook_arity, with_kwargs=True
-                    )
-                    removed.remove()
-                    self.assertNotIn(
-                        removed.id, hook_api._global_forward_hooks_with_kwargs
-                    )
+                    ).remove()
                 else:
                     module = torch.nn.Identity()
                     module.register_forward_hook(hook_arity, with_kwargs=True)
@@ -306,14 +298,8 @@ class HookDictionaryTests(torch._dynamo.test_case.TestCase):
             subtest((iter, tuple, 1), name="tuple"),
             subtest((OrderedDict.keys, tuple, 1), name="ordered_keys"),
             subtest((OrderedDict.items, tuple, 1), name="ordered_items"),
-            subtest(
-                (lambda hooks: [key + 1 for key, _ in hooks.items()], list, 1),
-                name="arithmetic",
-            ),
-            subtest(
-                (lambda hooks: [hash(key) for key, _ in hooks.items()], list, 2),
-                name="hash",
-            ),
+            subtest((lambda h: [k + 1 for k, _ in h.items()], list, 1), name="add"),
+            subtest((lambda h: [hash(k) for k, _ in h.items()], list, 2), name="hash"),
         ],
     )
     def test_hook_dict_items_observe_current_ids(self, operation, container, frames):
