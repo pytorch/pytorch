@@ -4164,11 +4164,6 @@ class TestVmapBatchedGradientDevice(Namespace.TestVmapBase):
                 randomness=randomness,
             )(query, key, value)
 
-            if device_type == "xpu" and backend == SDPBackend.FLASH_ATTENTION:
-                # can_use_flash_attention rejects any non-zero dropout on XPU, so the
-                # call below would fail on the missing kernel, not on vmap randomness.
-                self.skipTest("XPU flash attention does not support dropout")
-
             fail_with_randomness = randomness == "error"
             if backend != SDPBackend.MATH:
                 fail_with_randomness |= randomness == "same"

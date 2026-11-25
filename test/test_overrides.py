@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TORCHDYNAMO,
     skipIfTorchDynamo,
 )
+from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.common_subclass import RedispatchTensor
 from torch._dynamo.utils import clone_input
 from torch.testing._internal.inductor_utils import clone_preserve_strides_offset
@@ -2089,6 +2090,13 @@ class TestTorchFunctionRedispatchOpsDevice(TestCase):
     def test_redispatch(self, device, dtype, op):
         if op.has_nondeterministic_output:
             self.skipTest("output is nondeterministic; not comparable across calls")
+        if (
+            self.device_type == "xpu"
+            and op.name == "nn.functional.scaled_dot_product_attention"
+            and dtype in (torch.float16, torch.bfloat16)
+            and not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
+        ):
+            self.skipTest("XPU Flash Attention is not supported")
 
         def clone_and_wrap(x):
             if isinstance(x, torch.Tensor):
