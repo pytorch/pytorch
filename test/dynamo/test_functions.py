@@ -7663,8 +7663,8 @@ class GraphModule(torch.nn.Module):
             torch.compile(as_key, backend="eager", fullgraph=True)(x), as_key(x)
         )
 
-        escaped = lambda x, _: x + hash(receiver.count)
-        self._check_key_fallback(escaped, (None,), "FakeIdVariable")
+        escaped = lambda x, _: (x + 1, hash(receiver.count))
+        self._check_key_fallback(escaped, (None,), _HASH_ESCAPE)
         self._check_key_reuse(lambda x, _: x + len({receiver.count}), (None,), frames=1)
 
     @parametrize(
@@ -8777,7 +8777,6 @@ class GraphModule(torch.nn.Module):
         compiled = torch.compile(fn, backend="eager")
         if base is not object:
             self._check_key_reuse(fn, (label,), frames=1)
-            self.assertEqual(compiled(x, label), fn(x, label))
         for mutate, label.tag in ((True, "a"), (False, "b")):
             if base in (int, object) and mutate:
                 with self.assertRaisesRegex(Unsupported, f"class mutation: {mutate}"):
@@ -8791,31 +8790,29 @@ class GraphModule(torch.nn.Module):
             build = builder.SourcelessBuilder.create
             build(tx, type(member)).call_function(tx, [build(tx, member.value)], {})
 
-        def fn(offset, x):
+        def fn(offset, x, obj):
             key = re.RegexFlag.IGNORECASE
             comptime(lookup_member)
             spec = "{:>4} {!r} {!s} {} {!r} {} {!a}"
             text = spec.format(key, x, x, re.RegexFlag(4), x.shape[0], x.shape, [x])
-            return x + offset, format(torch._C.DispatchKey.CPU), text
+            mixed = "{:>{}} {o!r} {o!s} {o!a}".format(key, x.shape[0], o=obj)
+            return x + offset, format(torch._C.DispatchKey.CPU), text, mixed
 
-        self._check_key_reuse(fn, map(torch.arange, (2, 4)), frames=1, dynamic=True)
+        inputs = map(torch.arange, (2, 4))
+        self._check_key_reuse(fn, inputs, MyCls(), frames=1, dynamic=True)
 
-    def test_format_pending_class_mutation(self):
-        class Label:
-            pass
+    @parametrize("render", [lambda v: str.format("{!s}", v), format, lambda v: f"{v}"])
+    def test_format_pending_class_mutation(self, render):
+        Label = type("Label", (), {})
 
         def fn(x, member):
             Label.__str__ = lambda self: "changed"
-            return x + 1, str.format("{} {!s}", member, member)
+            Label.__format__ = lambda self, spec: spec
+            return x + 1, render(member)
 
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(
-            compiled(torch.ones(1), re.IGNORECASE)[1],
-            f"{re.IGNORECASE} {re.IGNORECASE!s}",
-        )
-        self.assertEqual(str(Label()), "changed")
-        del Label.__str__
         self._check_key_fallback(fn, (Label(),), "pending class mutation: True")
+        self._check_key_reuse(fn, (re.IGNORECASE,), frames=1)
+        self.assertEqual(str(Label()), "changed")
 
     @parametrize("template", ["{1!r}", "{0!é}", "{} {0.real}", "{0:{0:{}}}"])
     def test_format_sourced_enum_errors(self, template):

@@ -75,7 +75,6 @@ from torch._C._dynamo.guards import (
     install_no_tensor_aliasing_guard,
     install_object_alias_pattern_guard,
     install_object_aliasing_guard,
-    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -131,7 +130,6 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
-    StorageOverlapPartition,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -163,6 +161,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc
 from .eval_frame import set_guard_error_hook
+from .exc import unimplemented
 from .source import (
     AttrProxySource,
     AttrSource,
@@ -411,13 +410,11 @@ def _method_identity_guards_filtered(
 
 
 def _untracked_method_identity(context: str, *, skip_frame: bool = False) -> NoReturn:
-    exc.unimplemented(
+    unimplemented(
         gb_type="Builtin method operation requires identity guards",
         context=context,
         explanation="Dynamo cannot establish the stable receiver identity required by this operation.",
-        hints=[
-            "Use a stable receiver or pass the result into the saved graph or reuse hash function."
-        ],
+        hints=["Compute the result outside compilation and pass it as an input."],
         skip_frame=skip_frame,
         preserve_skip_frame_after_inline=skip_frame,
     )
@@ -1794,7 +1791,7 @@ class GuardBuilder(GuardBuilderBase):
         # Save the guard managers to avoid repeatedly traversing sources.
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
-        self._builtin_object_sources: set[Source] = set()
+        self._pinned_immutable_types: dict[Source, type] = {}
         self._cached_distinct_inputs: set[frozenset[Source]] = set()
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
@@ -2929,13 +2926,11 @@ class GuardBuilder(GuardBuilderBase):
             return
         self._set_guard_export_info(guard, [code])
         source = guard.originating_source
-        if (
-            isinstance(source, TypeDictSource)
-            and source.base in self._builtin_object_sources
-            and key not in object.__dict__
-        ):
-            # A retained class guard already pins the immutable object dictionary.
-            return
+        if isinstance(source, TypeDictSource):
+            owner = self._pinned_immutable_types.get(source.base)
+            if owner is not None and key not in get_type_dict_no_user_code(owner):
+                # The retained class guard pins this immutable namespace after filtering.
+                return
         reason = (
             f"Dictionary {dict_ref} must not contain key {key!r}; Dynamo specialized "
             "the compiled code on this key being absent."
@@ -3659,8 +3654,10 @@ class GuardBuilder(GuardBuilderBase):
                 f"{guard.name} is not a class, but CLASS_MATCH is used"
             )
         self.id_match_unchecked(guard)
-        if val is object:
-            self._builtin_object_sources.add(guard.originating_source)
+        from .variables.object_protocol import type_is_immutable
+
+        if type_is_immutable(val):
+            self._pinned_immutable_types[guard.originating_source] = val
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
@@ -4106,7 +4103,9 @@ class GuardBuilder(GuardBuilderBase):
         hooks_name: str,
         flags_source: Source,
     ) -> None:
-        """Guard flag membership by each key's storage position in the hook registry."""
+        """Guard flag membership in storage order. Callers that iterate an OrderedDict
+        in linked order must also guard that order.
+        """
         hooks_source = AttrSource(guard.originating_source, hooks_name)
         flags = self.get(flags_source)
         if self.save_guards:
@@ -5362,7 +5361,7 @@ class GuardsStatePickler(FunctionPicklerBase):
                 continue
             if checking_copy and obj_id in self._dropped_state:
                 raise torch._dynamo.exc.PackageError(
-                    f"A mapping proxy copy exposed a constructor dependency on pruned {type(value).__qualname__} state"
+                    f"A mapping proxy copy needs pruned {type(value).__qualname__} state. Expose the dependency as a guarded input"
                 )
             self._whole_compared_values[obj_id] = value
             self.missing_values.pop(obj_id, None)
@@ -5607,6 +5606,7 @@ class GuardsStatePickler(FunctionPicklerBase):
         local_scope: dict[str, Any],
         global_scope: dict[str, Any],
         dictionaries: collections.abc.Collection[dict[Any, Any]],
+        modes: collections.abc.Sequence[torch.overrides.TorchFunctionMode] = (),
     ) -> None:
         """Retain keys and constructor dependencies before freezing unused dictionary slots."""
         value: Any
@@ -5616,11 +5616,11 @@ class GuardsStatePickler(FunctionPicklerBase):
                 self._retain_required_state(k for k in keys if type(k) is not str)
         dictionaries = tuple(v for v in dictionaries if _can_prune_dict_values(v))
         self._pruned_dictionary_ids.update(map(id, dictionaries))
+        self._verbatim_elements.update(map(id, modes))
         self._prune_local_scope(local_scope)
-        if dictionaries:
-            self._retain_dict_aliases(
-                itertools.chain(local_scope.values(), global_scope.values())
-            )
+        if dictionaries or modes:
+            roots = itertools.chain(local_scope.values(), global_scope.values(), modes)
+            self._retain_dict_aliases(roots)
         for value in dictionaries:
             if type(value) is dict:
                 # Freeze slots before other reducers run. Rehash user keys only at load.
@@ -5645,19 +5645,14 @@ class GuardsStatePickler(FunctionPicklerBase):
                 seen.add(obj_id)
                 if obj_id in self._whole_compared_values:
                     continue
-                if whole:
-                    if (
-                        checking_copy
-                        or obj_id in self._pruned_dictionary_ids
-                        or obj_id in self.missing_values
-                        or obj_id in self.empty_values
-                    ):
-                        self._retain_required_state(
-                            (value,), checking_copy=checking_copy
-                        )
-                    else:
-                        pending.extend(self._constructor_referents(value))
-                elif obj_id in self.missing_values or obj_id in self.empty_values:
+                pruned = obj_id in self.missing_values or obj_id in self.empty_values
+                if whole and (
+                    pruned or checking_copy or obj_id in self._pruned_dictionary_ids
+                ):
+                    self._retain_required_state((value,), checking_copy=checking_copy)
+                elif whole:
+                    pending.extend(self._constructor_referents(value))
+                elif pruned:
                     continue
                 elif obj_id in self._pruned_dictionary_ids:
                     pending.extend(v for v in dict.values(value) if id(v) in retained)
@@ -6695,6 +6690,7 @@ def pickle_guards_state(
             state.output_graph.local_scope,
             state.output_graph.global_scope,
             required_dicts.values(),
+            state.output_graph.torch_function_mode_stack,
         )
 
         pickler.dump(state)
@@ -7439,23 +7435,6 @@ class CheckFunctionManager:
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
-                    [code_part],
-                    None,
-                )
-                add_code_part(code_part, None, True)
-            elif isinstance(guard, StorageOverlapPartition):
-                partition_guard_managers = [
-                    builder.get_guard_manager_from_source(s)
-                    for s in guard.input_sources
-                ]
-                code_part = (
-                    "___check_storage_overlap_partition("
-                    f"[{', '.join(source.name for source in guard.input_sources)}], "
-                    f"{guard.overlapping_indices})"
-                )
-                install_storage_overlap_partition_guard(
-                    partition_guard_managers,
-                    guard.overlapping_indices,
                     [code_part],
                     None,
                 )

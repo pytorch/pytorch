@@ -1722,11 +1722,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 hooks_type = type(hooks_dict)
+                is_subclass = (
+                    hooks_type is not dict and hooks_type is not collections.OrderedDict
+                )
                 if self.source is not None and hooks_dict in tx.output.side_effects:
                     return VariableTracker.build(
                         tx, hooks_dict, source=AttrSource(self.source, name)
                     )
-                if issubclass(type(hooks_dict), dict) and dict.__len__(hooks_dict) == 0:
+                if issubclass(hooks_type, dict) and dict.__len__(hooks_dict) == 0:
                     hooks_source = (
                         AttrSource(self.source, name) if self.source else None
                     )
@@ -1738,9 +1741,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         )
                     lazy_ids = hooks_source is not None
                     if hooks_source is not None and (
-                        not torch._dynamo.config.skip_nnmodule_hook_guards
-                        or hooks_type is not dict
-                        and hooks_type is not collections.OrderedDict
+                        is_subclass
+                        or not torch._dynamo.config.skip_nnmodule_hook_guards
                     ):
                         install_guard(hooks_source.make_guard(GuardBuilder.TYPE_MATCH))
                     # Validate even empty OrderedDicts, whose raw storage may have orphaned links.
@@ -1753,13 +1755,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                         flags=name.endswith(("with_kwargs", "always_called")),
                     )
                     # The private length probe cannot expose or mutate this tracker.
-                    if hooks_source is not None and (
-                        _track_empty_hooks
-                        or (
-                            hooks_type is not dict
-                            and hooks_type is not collections.OrderedDict
-                        )
-                    ):
+                    if hooks_source is not None and (_track_empty_hooks or is_subclass):
                         if isinstance(result, UserDefinedObjectVariable):
                             return tx.output.side_effects.track_object_existing(
                                 hooks_dict,

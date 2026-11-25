@@ -64,6 +64,7 @@ from ..utils import (
     dict_keys,
     dict_values,
     istype,
+    lazily_unpack,
     odict_items,
     odict_keys,
     odict_values,
@@ -91,6 +92,7 @@ from .hashable import (
     HashableTracker,
     invalidate_key_summary,
     is_hashable,
+    ordered_key_iteration,
     store_item,
 )
 from .object_protocol import (
@@ -267,7 +269,16 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         storage_cls = dict if items_cls is collections.defaultdict else items_cls
         self.items: dict[HashableTracker, VariableTracker]
         try:
-            if storage_cls is collections.OrderedDict and isinstance(
+            if (
+                self.source
+                and storage_cls is collections.OrderedDict
+                and type(items) is dict
+            ):
+                # Input keys already occupy distinct slots. Copying them must not run equality.
+                pairs = [(make_hashable(key), value) for key, value in items.items()]
+                with ordered_key_iteration("identity"):
+                    self.items = collections.OrderedDict(pairs)
+            elif storage_cls is collections.OrderedDict and isinstance(
                 items, collections.OrderedDict
             ):
                 # Preserve storage and linked order without hashing twice.
@@ -294,7 +305,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self.should_reconstruct_all = (
             not is_from_local_source(self.source) if self.source else True
         )
-        self.original_items = {key.vt: value for key, value in self.items.items()}
+        self.original_items = {key.vt: value for key, value in dict.items(self.items)}
         # Reinserting deleted keys still invalidates existing OrderedDict iterators.
         self.has_deleted_keys = has_deleted_keys
         self.has_reordered_keys = has_reordered_keys
@@ -1250,6 +1261,11 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         ):
             install_guard(self.make_guard(GuardBuilder.ORDERED_DICT_ORDER_MATCH))
 
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        return list(lazily_unpack(tx, self.tp_iter_impl(tx)))
+
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         from .iter import DictIterator
 
@@ -1314,13 +1330,19 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
                 and effects.is_modified(var)
                 for var in effects.id_to_variable.values()
             ):
-                unimplemented(
-                    gb_type="Unsupported OrderedDict instance state",
-                    context=f"OrderedDict.{name}",
-                    explanation=f"Dynamo cannot trace {name} on an OrderedDict with nonempty or potentially modified instance attributes.",
-                    hints=["Move the copy or attribute lookup outside compiled code."],
-                )
+                self.unsupported_instance_state(f"OrderedDict.{name}")
             install_guard(instance_dict.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+        elif tx.output.side_effects.has_pending_mutation(self):
+            self.unsupported_instance_state(f"OrderedDict.{name}")
+
+    @staticmethod
+    def unsupported_instance_state(operation: str) -> None:
+        unimplemented(
+            gb_type="Unsupported OrderedDict instance state",
+            context=operation,
+            explanation=f"Dynamo cannot preserve instance attributes while tracing {operation}.",
+            hints=["Move this OrderedDict operation outside compiled code."],
+        )
 
     def call_getattr_fallback(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1403,17 +1425,22 @@ class OrderedDictVariable(ConstDictVariable):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if len(args) + len(kwargs) > 1 or (kwargs and "last" not in kwargs):
+            # Run the native argument parser without inspecting any symbolic values.
+            try:
+                collections.OrderedDict().popitem(
+                    *[True] * len(args), **dict.fromkeys(kwargs, True)
+                )
+            except TypeError as exc:
+                raise_type_error(tx, str(exc))
+        last_arg = args[0] if args else kwargs.get("last")
+        last = (
+            last_arg is None
+            or specialize_symnode(generic_is_true(tx, last_arg)).as_python_constant()
+        )
         self.install_dict_order_guard(tx)
         if not self.items:
-            raise_observed_exception(
-                KeyError, tx, args=["popitem(): dictionary is empty"]
-            )
-
-        last = True
-        if len(args) == 1 and args[0].is_python_constant():
-            last = args[0].as_python_constant()
-        if "last" in kwargs and kwargs["last"].is_python_constant():
-            last = kwargs["last"].as_python_constant()
+            raise_observed_exception(KeyError, tx, args=["dictionary is empty"])
 
         k, v = self.items.popitem(last=last)
         invalidate_key_summary(self.items)
@@ -1920,6 +1947,8 @@ class DictViewVariable(VariableTracker):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
+        if self.is_ordered:
+            return list(lazily_unpack(tx, self.tp_iter_impl(tx)))
         self.install_order_guard(tx)
         return self.view_items_vt
 
@@ -1965,15 +1994,9 @@ class DictViewVariable(VariableTracker):
         with repr_guard(self) as recursive:
             if recursive:
                 return VariableTracker.build(tx, "...")
-            if self.kv == "keys":
-                items = ", ".join(tracked_repr(tx, key.vt) for key in self.view_items)
-            elif self.kv == "values":
-                items = ", ".join(tracked_repr(tx, value) for value in self.view_items)
-            else:  # items
-                items = ", ".join(
-                    f"({tracked_repr(tx, key.vt)}, {tracked_repr(tx, value)})"
-                    for key, value in self.view_items
-                )
+            items = ", ".join(
+                tracked_repr(tx, item) for item in self.unpack_var_sequence(tx)
+            )
         return VariableTracker.build(tx, f"{self.python_type_name()}([{items}])")
 
     def dict_view_reversed(
@@ -1985,6 +2008,12 @@ class DictViewVariable(VariableTracker):
         # dict_keys/values/items __reversed__: reverse insertion order.
         # Not a C-level slot, so it lives in tp_methods rather than call_method.
         self.install_order_guard(tx)
+        if self.is_ordered:
+            from .iter import OrderedDictIterator
+
+            return OrderedDictIterator.create_reversed(
+                self.dv_dict.items, cast(str, self.kv)
+            )
         return variables.ListIteratorVariable(
             list(reversed(self.view_items_vt)),
             mutation_type=ValueMutationNew(),

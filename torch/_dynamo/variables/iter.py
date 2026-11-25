@@ -38,7 +38,7 @@ from ..exc import (
 from ..utils import raise_args_mismatch, tracked_repr, unpack_iterable
 from .base import Method, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .hashable import HashableTracker
+from .hashable import HashableTracker, ordered_key_iteration
 from .object_protocol import generic_getiter, pyiter_next
 
 
@@ -965,22 +965,16 @@ class DictViewIterator(IteratorVariable):
         items: dict[HashableTracker, VariableTracker],
         *,
         view_type: str,
+        reverse: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.view_type = view_type
         if not self.linked_order and isinstance(items, dict):
-            self._iter = iter(getattr(dict, self.view_type)(items))
-        elif self.view_type == "keys":
-            self._iter = iter(items)
-        elif self.view_type == "values":
-            self._iter = iter(items.values())  # type: ignore[bad-assignment]
+            view = getattr(dict, view_type)(items)
         else:
-            if self.view_type != "items":
-                raise AssertionError(
-                    f"Expected view_type 'items', got {self.view_type!r}"
-                )
-            self._iter = iter(items.items())  # type: ignore[bad-assignment]
+            view = items if view_type == "keys" else getattr(items, view_type)()
+        self._iter = reversed(view) if reverse else iter(view)
 
     @classmethod
     def create(
@@ -994,7 +988,11 @@ class DictViewIterator(IteratorVariable):
         # dictiter_iternextkey: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5125-L5144
         # dictiter_iternextvalue: https://github.com/python/cpython/blob/v3.13.3/Objects/dictobject.c#L5248-L5267
         try:
-            item = next(self._iter)
+            if self.linked_order:
+                with ordered_key_iteration("trace"):
+                    item = next(self._iter)
+            else:
+                item = next(self._iter)
 
             if self.view_type == "keys":
                 return item.vt
@@ -1003,6 +1001,10 @@ class DictViewIterator(IteratorVariable):
             else:  # items
                 k, v = item  # type: ignore[not-iterable]
                 return VariableTracker.build(tx, (k.vt, v))
+        except TorchDynamoException:
+            raise
+        except KeyError as e:
+            raise_observed_exception(KeyError, tx, args=[e.args[0].vt])
         except (RuntimeError, StopIteration) as e:
             raise_observed_exception(
                 type(e),
@@ -1063,6 +1065,10 @@ class OrderedDictIterator(DictViewIterator):
     linked_order = True
     _cpython_type = _ORDERED_DICT_ITERATOR_TYPE
     view_type = "items"
+
+    @classmethod
+    def create_reversed(cls, items, view_type: str) -> "OrderedDictIterator":
+        return cls(items, view_type=view_type, reverse=True)
 
     def python_type(self) -> type:
         return _ORDERED_DICT_ITERATOR_TYPE
