@@ -318,7 +318,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         qk_head_dim,
         v_head_dim,
         V.graph.sizevars,
-        allow_head_dim_tiling=device.type == "xpu",
+        # Splitting 128 + x is slower than padding to 256 for GQA decode.
+        allow_head_dim_tiling=device.type == "xpu" and not 128 < head_dim < 256,
     )
 
     # Mark SPARSE_Q_BLOCK_SIZE as static: the default BLOCK_M below depends on it.

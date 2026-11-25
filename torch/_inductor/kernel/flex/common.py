@@ -514,6 +514,7 @@ MIN_HEAD_DIM_CHUNK = 16
 
 
 def exact_power_of_2_split(n):
+    """Return (c0, c1) when n is the sum of two powers of two c0 > c1 >= MIN_HEAD_DIM_CHUNK, else None."""
     if n <= 0 or is_power_of_2(n):
         return None
     c0 = 1 << (n.bit_length() - 1)
