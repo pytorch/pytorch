@@ -2630,6 +2630,18 @@ def object_generic_getattr(
     )
 
 
+def unimplemented_deleted_global_getattr(name: str) -> NoReturn:
+    unimplemented(
+        gb_type="DELETE_GLOBAL in module with __getattr__",
+        context=name,
+        explanation=(
+            "Dynamo cannot safely replay global deletes for a module "
+            "that defines __getattr__."
+        ),
+        hints=[*graph_break_hints.SUPPORTABLE],
+    )
+
+
 def generic_getattr(
     tx: "InstructionTranslatorBase",
     obj: VariableTracker,
@@ -2649,11 +2661,18 @@ def generic_getattr(
         name = "grad"
 
     # Side effects: check for pending attribute mutations.
-    if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
+    side_effects = tx.output.side_effects
+    if side_effects.has_pending_mutation_of_attr(obj, name):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
             is_module = isinstance(obj, variables.PythonModuleVariable)
-            value = tx.output.side_effects.load_attr(obj, name, deleted_ok=is_module)
+            value = side_effects.load_attr(obj, name, deleted_ok=is_module)
             if isinstance(value, variables.DeletedVariable):
+                if is_module and side_effects.has_pending_mutation_of_attr(
+                    obj, "__getattr__"
+                ):
+                    hook = side_effects.load_attr(obj, "__getattr__", deleted_ok=True)
+                    if not isinstance(hook, variables.DeletedVariable):
+                        unimplemented_deleted_global_getattr(name)
                 if default is _NO_DEFAULT:
                     raise_observed_exception(AttributeError, tx)
                 return default  # type: ignore[return-value]

@@ -229,6 +229,7 @@ from .variables.object_protocol import (
     pyiter_send,
     pysequence_contains,
     type_is_immutable,
+    unimplemented_deleted_global_getattr,
 )
 from .variables.sets import SetVariable
 from .variables.streams import SymbolicStreamState
@@ -3525,8 +3526,11 @@ class InstructionTranslatorBase(
                 result = generic_getattr(self, obj, attr)
                 self.push(result)
                 return
-        except Unsupported:
-            if not obj.is_python_constant():
+        except Unsupported as exc:
+            if (
+                exc.gb_type == "DELETE_GLOBAL in module with __getattr__"
+                or not obj.is_python_constant()
+            ):
                 raise
             if isinstance(
                 obj, variables.UserDefinedClassVariable
@@ -6737,15 +6741,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # not. The same gap opens when __getattr__ is stored in the
             # trace: the later read consults the real module and misses the
             # hook.
-            unimplemented(
-                gb_type="DELETE_GLOBAL in module with __getattr__",
-                context=name,
-                explanation=(
-                    "Dynamo cannot safely replay global deletes for a module "
-                    "that defines __getattr__."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            unimplemented_deleted_global_getattr(name)
         self._delete_global(name, fglobals_vt)
         self.output.side_effects.store_attr(
             fglobals_vt, name, variables.DeletedVariable()
