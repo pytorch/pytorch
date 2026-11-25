@@ -179,7 +179,9 @@ inline PointwiseAotMatch pointwise_aot_match(
         return f"pointwise_aot_match({{{inputs}}}, {out}, _naot_props, {{{presets}}})"
 
     def _checks(self) -> str:
-        check = ""
+        name = self._argument_names("Tensor")[0]
+        types = " || ".join(f"{name}.scalar_type() == {v}" for v in _DTYPES.values())
+        check = f"if (!({types})) return false;\n"
         for scalar in self._argument_names("Scalar"):
             check += f"if ({scalar}.isComplex() || !std::isfinite({scalar}.to<double>()) || ({self._argument_names('Tensor')[0]}.scalar_type() != at::kDouble && std::abs({scalar}.to<double>()) > std::numeric_limits<float>::max())) return false;\n"
             if self.ATEN_OP in ("add.Tensor", "sub.Tensor", "rsub.Tensor"):
@@ -187,16 +189,9 @@ inline PointwiseAotMatch pointwise_aot_match(
         return check
 
     def cpp_covers(self) -> str:
-        names = self._argument_names("Tensor")
-        types = " || ".join(
-            f"{names[0]}.scalar_type() == {v}" for v in _DTYPES.values()
-        )
         out = "out ? &*out : nullptr" if self.STRUCTURED else "nullptr"
         layouts = "== 1" if self.ATEN_OP == "rsub.Tensor" else "!= 0"
-        return (
-            self._checks()
-            + f"if (!({types})) return false;\nreturn {self._match_call(out)}.layout {layouts};"
-        )
+        return self._checks() + f"return {self._match_call(out)}.layout {layouts};"
 
     def cpp_dispatch_prelude(self) -> str:
         out = "&out" if self.STRUCTURED else "nullptr"

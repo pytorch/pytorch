@@ -185,7 +185,7 @@ def _base_name(op_symbol: str) -> str:
 
 
 def get_coverage(op_symbol: str, dispatch_key: str) -> _Coverage | None:
-    r"""Resolve declared coverage; only non-exact structured declarations share variants."""
+    r"""Resolve declared coverage, using base-name fallback for non-exact structured declarations."""
     table = _load_coverage()
     c = table.get((op_symbol, dispatch_key))
     if c is not None:

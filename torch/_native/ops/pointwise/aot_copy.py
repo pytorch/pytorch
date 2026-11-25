@@ -112,6 +112,8 @@ inline TransposeAotMatch transpose_aot_match(const at::Tensor& out, const at::Te
   const bool vec = tiled && bytes >= (p.word == 1 ? {vector[1]} : p.word == 2 ? {vector[2]} : {vector[4]});
   const bool use_tma = tiled && p.outer * p.middle > 1 && props->major == 10 &&
       p.outer * p.middle * p.a * p.b >= (p.word == 1 ? {tma[1]} : p.word == 2 ? {tma[2]} : {tma[4]});
+  const int view_word = !use_tma && vec ? 4 : p.word;
+  if (src.storage_offset() * item % view_word || out.storage_offset() * item % view_word) return p;
   const int pack = vec ? 4 / p.word : p.lanes;
   const int actual_tile = vec && p.word < 4 ? 32 : tile;
   p.full = aligned && p.a % (actual_tile * pack) == 0 && p.b % (actual_tile * pack) == 0;
