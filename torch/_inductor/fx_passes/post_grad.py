@@ -92,7 +92,7 @@ from .b2b_gemm import B2B_GEMM_PASS
 from .control_dependencies import control_deps, preserve_node_ordering
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
-from .micro_pipeline_tp import is_micro_pipeline_tp_candidate, micro_pipeline_tp_pass
+from .micro_pipeline_tp import micro_pipeline_tp_pass
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reduced_atomic_contention import partitioned_scatter_optimization_pass
 from .reinplace import reinplace_inplaceable_ops
@@ -3079,7 +3079,7 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     normalized = _normalized_scaled_mm(match)
     if normalized is None:
         return False
-    scaled_mm, normalized_kwargs = normalized
+    _, normalized_kwargs = normalized
 
     # The native alpha argument is currently implemented only by the vendored
     # NVFP4 provider.  The packed FP4 dtype is shared with MXFP4, so include the
@@ -3108,8 +3108,6 @@ def _can_fold_scaled_mm_output_scale(match: Match) -> bool:
     ):
         return False
 
-    if config._micro_pipeline_tp and is_micro_pipeline_tp_candidate(scaled_mm):
-        return False
     # Leave a fully lowerable pointwise chain to scheduler epilogue fusion.
     # Fold early when that chain reaches an opaque/non-pointwise consumer,
     # since the scheduler cannot carry the scale across that boundary.
