@@ -4622,39 +4622,39 @@ class SIMDScheduling(BaseScheduling):
                 kernel.codegen_body()
 
     @staticmethod
+    def indexing_sizes(
+        numel: sympy.Expr,
+        buffers: Iterable[ir.Buffer | ir.TensorBox | ir.TorchBindObject | ir.IRNode],
+    ) -> list[sympy.Expr]:
+        """numel and the storage size of every buffer: 32-bit indexing is valid
+        when all of them fit in int32."""
+        # Any use of a MultiOutputLayout will create a buffer with a
+        # Layout whose sizes are accounted for
+        sizes = [numel]
+        for buf in buffers:
+            if buf.has_tensor_output():
+                sizes.append(buf.get_layout().storage_size())
+            elif isinstance(buf, ir.MutationOutput):
+                sizes += [
+                    mutated.get_layout().storage_size()
+                    for mutated in buf.get_mutation_buffers()
+                    if mutated.has_tensor_output()
+                ]
+        return sizes
+
+    @staticmethod
     def can_use_32bit_indexing(
         numel: sympy.Expr,
         buffers: Iterable[ir.Buffer | ir.TensorBox | ir.TorchBindObject | ir.IRNode],
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
-
-        if not expr_fits_within_32bit(numel):
-            return False
-
-        # Any use of a MultiOutputLayout will create a buffer with a
-        # Layout whose sizes are accounted for
-        buf_sizes = [
-            buf.get_layout().storage_size()
-            for buf in buffers
-            if buf.has_tensor_output()
-        ]
-
-        for buf in buffers:
-            if not buf.has_tensor_output() and isinstance(buf, ir.MutationOutput):
-                mutated_bufs = buf.get_mutation_buffers()
-                buf_sizes += [
-                    buf.get_layout().storage_size()
-                    for buf in mutated_bufs
-                    if buf.has_tensor_output()
-                ]
-
-        if not all(expr_fits_within_32bit(size) for size in buf_sizes):
+        sizes = SIMDScheduling.indexing_sizes(numel, buffers)
+        if not all(expr_fits_within_32bit(size) for size in sizes):
             return False
 
         # Only install guards for 32-bit indexing as there is no correctness
         # issue with using 64-bit for everything
-        V.graph.sizevars.check_leq(numel, int_max)  # type: ignore[arg-type]
-        for size in buf_sizes:
+        for size in sizes:
             V.graph.sizevars.check_leq(size, int_max)  # type: ignore[arg-type]
         return True
 
@@ -4691,38 +4691,28 @@ class SIMDScheduling(BaseScheduling):
 
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         """
-        Generate code for nodes in kernel_features
+        Generate code for one fused scheduler node. kernel_features holds its
+        SchedulerNodes in codegen order (node_schedule) and its sizes; every kernel
+        built below computes all of them, and one is launched. In three steps:
+
+        1. Build (_create_node_schedule_kernel): pick the tiling, create the kernel
+           objects (one, or a multi-kernel wrapping several leaf kernels) and generate
+           each leaf's body: the Triton lines for the nodes' loads, compute and stores.
+           A leaf has no signature, decorator or name yet, and nothing is written to
+           the wrapper, so this can run more than once.
+        2. Define (_define_node_schedule_kernels), on the leaf kernels from step 1:
+           merge their workspaces, then turn each leaf into its complete Triton source
+           (decorator with size_hints, signature, setup lines, body) and write its
+           definition (`name = async_compile.triton(...)`) into the output module,
+           which sets its kernel_name. This runs once, after every leaf exists,
+           because the merged workspace size is part of each source.
+        3. Emit: allocate the nodes' output buffers in the wrapper (mark_run) and
+           write the launch of the kernel from step 1.
         """
         node_schedule = kernel_features.node_schedule
-
-        tiling, tiling_score = self.get_tiling_and_scores(
-            node_schedule,
-            kernel_features.numel,
-            kernel_features.reduction_numel,
-            kernel_features.coalesce_analysis,
-        )
-        final_kernel = self.create_kernel_choices(
-            kernel_features,
-            [tiling],
-            {"features": kernel_features, "tiling_scores": tiling_score},
-        )
+        final_kernel = self._create_node_schedule_kernel(kernel_features)
         kernels = leaf_kernels(final_kernel)
-        for kernel in kernels:
-            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        MultiKernelBase.merge_workspaces_inplace(kernels)
-
-        # Collect config_patches from operations (e.g., decomposition ops with
-        # coordinate_descent_tuning) and apply during kernel codegen
-        config_patches = self._collect_config_patches(node_schedule)
-
-        for kernel in kernels:
-            with V.set_kernel_handler(kernel), config.patch(**config_patches):
-                src_code = kernel.codegen_kernel()
-            kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-            log.debug("Generating kernel code with kernel_name: %s", kernel_name)
-            kernel.kernel_name = kernel_name
-            kernel.code_hash = code_hash(src_code)
-        del kernel
+        self._define_node_schedule_kernels(kernels, node_schedule)
 
         with V.set_kernel_handler(final_kernel):
             for node in kernel_features.scheduler_nodes():
@@ -4760,6 +4750,61 @@ class SIMDScheduling(BaseScheduling):
 
         self.free_buffers_in_scheduler()
         return final_kernel
+
+    def _create_node_schedule_kernel(
+        self, kernel_features: SIMDKernelFeatures
+    ) -> SIMDKernel | MultiKernelBase:
+        """Build step of codegen_node_schedule: pick the tiling, create the kernel
+        objects (one kernel, or a multi-kernel over several leaf kernels) and generate
+        each leaf's body: the Triton source lines for the nodes' loads, compute and
+        stores, kept in buffers on the leaf.
+
+        Returns the kernel (or multi-kernel) whose leaves hold those bodies. Nothing
+        is written to the wrapper and no graph state changes, so this can run more
+        than once for one schedule.
+        """
+        node_schedule = kernel_features.node_schedule
+        tiling, tiling_score = self.get_tiling_and_scores(
+            node_schedule,
+            kernel_features.numel,
+            kernel_features.reduction_numel,
+            kernel_features.coalesce_analysis,
+        )
+        final_kernel = self.create_kernel_choices(
+            kernel_features,
+            [tiling],
+            {"features": kernel_features, "tiling_scores": tiling_score},
+        )
+        for kernel in leaf_kernels(final_kernel):
+            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        return final_kernel
+
+    def _define_node_schedule_kernels(
+        self, kernels: list[SIMDKernel], node_schedule: list[NodeScheduleEntry]
+    ) -> None:
+        """Define step of codegen_node_schedule, on every leaf kernel built by
+        _create_node_schedule_kernel for one launch: merge their workspaces, then
+        turn each leaf into its complete Triton source (codegen_kernel adds the
+        decorator with size_hints, the signature and the setup lines around the
+        body) and write its definition (`name = async_compile.triton(...)`) into the
+        output module, setting its kernel_name and code_hash.
+
+        Runs once, after all the leaves exist: the merged workspace size is part of
+        each source.
+        """
+        MultiKernelBase.merge_workspaces_inplace(kernels)
+
+        # Collect config_patches from operations (e.g., decomposition ops with
+        # coordinate_descent_tuning) and apply during kernel codegen
+        config_patches = self._collect_config_patches(node_schedule)
+
+        for kernel in kernels:
+            with V.set_kernel_handler(kernel), config.patch(**config_patches):
+                src_code = kernel.codegen_kernel()
+            kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+            log.debug("Generating kernel code with kernel_name: %s", kernel_name)
+            kernel.kernel_name = kernel_name
+            kernel.code_hash = code_hash(src_code)
 
     def _launch_kernel_and_cleanup(
         self,
