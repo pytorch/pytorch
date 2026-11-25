@@ -173,7 +173,7 @@ class TORCH_API OperatorEntry final {
 
   const KernelFunction& lookup(DispatchKeySet ks) const {
     const auto idx = ks.getDispatchTableIndexForDispatchKeySet();
-    if (C10_UNLIKELY(idx == -1)) {
+    if (idx == -1) [[unlikely]] {
       reportError(ks.highestPriorityTypeId());
     }
     const auto& kernel = dispatchTable_[idx];
@@ -183,7 +183,7 @@ class TORCH_API OperatorEntry final {
     // should have an unboxed kernel. Checking the unboxed kernel
     // first will allow us to avoid touching the boxed kernel at all
     // in the common case.
-    if (C10_UNLIKELY(!kernel.isValidUnboxed())) {
+    if (!kernel.isValidUnboxed()) [[unlikely]] {
       if (!kernel.isValid()) {
         reportError(ks.highestPriorityTypeId());
       }
