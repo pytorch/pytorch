@@ -1392,6 +1392,49 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, "a", "b"), (t, "c", "d")], expected_frames=1)
 
+    def test_unused_fstring_does_not_recompile(self):
+        t = torch.ones(2)
+        ints = [(t, 255), (t, 16)]
+        cases = [
+            ("plain", lambda t, a: (t.sin(), f"{a}"), ints),
+            ("concat", lambda t, a: (t.sin(), f"x{a}y{a}"), ints),
+            ("debug", lambda t, a: (t.sin(), f"{a=}"), ints),
+            ("conversions", lambda t, a: (t.sin(), f"{a!r}{a!s}{a!a}"), ints),
+            ("spec", lambda t, a: (t.sin(), f"{a:>6}|{a:x}"), ints),
+            ("computed", lambda t, a: (t.sin(), f"{a + 1} {a * 2}"), ints),
+            ("str", lambda t, a: (t.sin(), f"<{a}>"), [(t, "ab"), (t, "cde")]),
+            ("float", lambda t, a: (t.sin(), f"{a:.2f}"), [(t, 1.5), (t, 2.25)]),
+            ("isinstance", lambda t, a: (t.sin(), isinstance(f"x{a}", str)), ints),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1, fullgraph=True)
+
+    def test_used_fstring_recompiles(self):
+        t = torch.ones(2)
+        d = {"k255": 1, "k16": 2}
+        cases = [
+            ("branch", lambda t, a: t + 1 if "5" in f"x{a}" else t - 1),
+            ("dict_key", lambda t, a: t * d[f"k{a}"]),
+            # "c" raises for out of range values, so it isn't computed lazily
+            ("char_spec", lambda t, a: (t.sin(), f"{a:c}")),
+        ]
+        for name, fn in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, [(t, 255), (t, 16)], expected_frames=2)
+
+    @torch._dynamo.config.patch(specialize_int=False, assume_static_by_default=False)
+    def test_fstring_symbolic_operand_realizes(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            s = f"{a:x}-{a + 1}"
+            return t * a, s, "f" in s
+
+        self._check(fn, [(t, 255), (t, 16)], expected_frames=2, fullgraph=True)
+
 
 if __name__ == "__main__":
     run_tests()

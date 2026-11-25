@@ -11547,6 +11547,29 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(guard_failure is not None)
         self.assertIn("""tensor 'x' size mismatch at index 0""", guard_failure[0])
 
+    def test_sym_node_string_conversions(self):
+        def fn(x):
+            n = x.shape[0]
+            return (
+                f"{n:x} {n:.2f} {n:>6} {n=} {n!r} {n!a}",
+                str(n),
+                repr(n),
+                format(n, "x"),
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        for size in (255, 16):
+            x = torch.randn(size)
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_builtin_format(self):
+        def fn(x, n):
+            return x.sin(), format(255, "x"), format(1.25, ".1f"), format(n, ">4")
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(2)
+        self.assertEqual(fn(x, 7), opt_fn(x, 7))
+
     def test_fstring_dynamic_symint_across_graph_break(self):
         class Arch(torch.nn.Module):
             def __init__(self, n):
