@@ -7,13 +7,13 @@
 // then gets a version in front of the others whose guard adds what the trace
 // depended on (each tensor's dtype, device, sizes, strides and requires_grad,
 // each scalar's value, each object's identity, grad mode) and whose body is
-// one Op::Region: the compiled graph, called on the tensors among the block's
-// params and inputs. A run whose guard fails falls through to the version
+// one Op::Region: the compiled graph, called (from Python, which checks the
+// containers among them) on the block's params and inputs. A run whose guard fails falls through to the version
 // the trace came from, which traces again (another variant) when it has run
-// often enough again, up to MAX_REGIONS variants per block.
+// often enough again, up to max_regions() variants per block.
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use pyo3::ffi;
 use pyo3::ffi::PyObject;
@@ -24,15 +24,22 @@ use crate::cfg::ir::{RegionOut, RegionSpec};
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
 static AFTER: AtomicU32 = AtomicU32::new(2);
-pub const MAX_REGIONS: usize = 8;
+static MAX_REGIONS: AtomicUsize = AtomicUsize::new(4);
 
 /// Compile pure blocks into regions (see exec/region.rs) once a version has
-/// run `after` times.
+/// run `after` times, up to `variants` per block (a loop body over different
+/// modules needs one per module).
 #[pyfunction]
-#[pyo3(signature = (on, after=2))]
-pub fn _set_cfg_regions(on: bool, after: u32) {
+#[pyo3(signature = (on, after=2, variants=4))]
+pub fn _set_cfg_regions(on: bool, after: u32, variants: usize) {
     ENABLED.store(on, Ordering::Relaxed);
     AFTER.store(after.max(1), Ordering::Relaxed);
+    MAX_REGIONS.store(variants.max(1), Ordering::Relaxed);
+}
+
+#[inline]
+pub fn max_regions() -> usize {
+    MAX_REGIONS.load(Ordering::Relaxed)
 }
 
 #[inline]
@@ -52,6 +59,14 @@ pub type Body<'a> = dyn FnMut(&[*mut PyObject]) -> Result<Vec<*mut PyObject>, ()
 
 thread_local! {
     static BODY: Cell<Option<*mut Body<'static>>> = const { Cell::new(None) };
+    static TRACING: Cell<bool> = const { Cell::new(false) };
+}
+
+// Whether a trace is running on this thread. Regions don't run then (the
+// trace wouldn't see their ops), nor are others traced.
+#[inline]
+pub fn tracing() -> bool {
+    TRACING.get()
 }
 
 fn null_sentinel(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
@@ -88,9 +103,11 @@ pub struct Traced {
 }
 
 // Traces a run of a block's version. `args`: its params then inputs
-// (borrowed, NULL allowed), of which those at `unused` aren't read by the
-// version (NULL here); `body` runs it. Ok(None): not worth a region.
-pub unsafe fn trace(name: &str, args: &[*mut PyObject], unused: &[u32], body: &mut Body<'_>) -> PyResult<Option<Traced>> {
+// (borrowed, NULL allowed), of which those at `unread` aren't read by the
+// version's instrs (NULL if not used at all); `body` runs it. Ok(None): not
+// worth a region. With `span` (a span's run, which no guard checks first),
+// the region makes all its checks itself.
+pub unsafe fn trace(name: &str, args: &[*mut PyObject], unread: &[u32], span: bool, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
     let py = Python::assume_attached();
     let null = null_sentinel(py)?;
     let items: Vec<Bound<'_, PyAny>> =
@@ -98,19 +115,19 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], unused: &[u32], body: &m
     let args = PyTuple::new(py, items)?;
     let body: *mut Body<'_> = body;
     BODY.set(Some(std::mem::transmute::<*mut Body<'_>, *mut Body<'static>>(body)));
-    let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unused.to_vec())));
+    TRACING.set(true);
+    let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span)));
+    TRACING.set(false);
     BODY.set(None);
     let r = r?;
     if r.is_none() {
         return Ok(None);
     }
-    let (func, tensor_args, outputs, objects, checks): (Bound<'_, PyAny>, Vec<u32>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyTuple>>) =
-        r.extract()?;
+    let (func, outputs, objects, checks): (Bound<'_, PyAny>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyTuple>>) = r.extract()?;
     let outputs = outputs.iter().map(parse_out).collect::<PyResult<Vec<_>>>()?;
     Ok(Some(Traced {
         spec: RegionSpec {
             func: func.unbind(),
-            tensor_args,
             outputs,
             objects: objects.into_iter().map(Bound::unbind).collect(),
             name: name.to_string(),
@@ -131,19 +148,33 @@ fn parse_out(o: &Bound<'_, PyAny>) -> PyResult<RegionOut> {
             let items = t.get_item(1)?.try_iter()?.map(|x| parse_out(&x?)).collect::<PyResult<Vec<_>>>()?;
             if kind == "tuple" { RegionOut::Tuple(items) } else { RegionOut::List(items) }
         }
+        "dict" => {
+            let keys: Vec<u32> = t.get_item(1)?.extract()?;
+            let items = t.get_item(2)?.try_iter()?.map(|x| parse_out(&x?)).collect::<PyResult<Vec<_>>>()?;
+            RegionOut::Dict(keys, items)
+        }
+        "iter" => RegionOut::Iter(Box::new(parse_out(&t.get_item(1)?)?)),
+        "call" => {
+            let items = t.get_item(2)?.try_iter()?.map(|x| parse_out(&x?)).collect::<PyResult<Vec<_>>>()?;
+            RegionOut::Call(t.get_item(1)?.extract()?, items)
+        }
         _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("bad region output {o}"))),
     })
 }
 
-// Runs an Op::Region on `args` (borrowed): the block's outputs (owned), or
-// Err with an exception set.
-pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Vec<*mut PyObject>, ()> {
-    let list = ffi::PyList_New(spec.tensor_args.len() as ffi::Py_ssize_t);
+// Runs an Op::Region on `args` (borrowed: the block's params, then the
+// version's inputs): Some(the block's outputs, owned), None if the region's
+// own checks failed (run the version it was traced from), or Err with an
+// exception set.
+pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
+    let py = Python::assume_attached();
+    let Ok(null) = null_sentinel(py) else { return Err(()) };
+    let list = ffi::PyList_New(args.len() as ffi::Py_ssize_t);
     if list.is_null() {
         return Err(());
     }
-    for (i, k) in spec.tensor_args.iter().enumerate() {
-        let a = args[*k as usize];
+    for (i, a) in args.iter().enumerate() {
+        let a = if a.is_null() { null.as_ptr() } else { *a };
         ffi::Py_INCREF(a);
         ffi::PyList_SET_ITEM(list, i as ffi::Py_ssize_t, a);
     }
@@ -152,6 +183,10 @@ pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Vec<*mut
     ffi::Py_DECREF(list);
     if r.is_null() {
         return Err(());
+    }
+    if r == ffi::Py_None() {
+        ffi::Py_DECREF(r);
+        return Ok(None);
     }
     let outs = if ffi::PyList_CheckExact(r) != 0 || ffi::PyTuple_CheckExact(r) != 0 { r } else { ffi::PySequence_Fast(r, c"region outputs".as_ptr()) };
     if outs.is_null() {
@@ -186,6 +221,20 @@ pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Vec<*mut
                 x
             }
             RegionOut::Null => std::ptr::null_mut(),
+            RegionOut::Call(f, items) => {
+                let list = ffi::PyList_New(items.len() as isize);
+                for (i, it) in items.iter().enumerate() {
+                    let x = make(spec, it, args, item, n);
+                    if x.is_null() {
+                        ffi::Py_DECREF(list);
+                        return std::ptr::null_mut();
+                    }
+                    ffi::PyList_SET_ITEM(list, i as isize, x);
+                }
+                let r = ffi::PyObject_CallOneArg(spec.objects[*f as usize].as_ptr(), list);
+                ffi::Py_DECREF(list);
+                r
+            }
             RegionOut::Tuple(items) | RegionOut::List(items) => {
                 let tuple = matches!(o, RegionOut::Tuple(_));
                 let c = if tuple { ffi::PyTuple_New(items.len() as isize) } else { ffi::PyList_New(items.len() as isize) };
@@ -202,6 +251,28 @@ pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Vec<*mut
                     }
                 }
                 c
+            }
+            RegionOut::Dict(keys, items) => {
+                let d = ffi::PyDict_New();
+                for (k, it) in keys.iter().zip(items) {
+                    let x = make(spec, it, args, item, n);
+                    if x.is_null() || ffi::PyDict_SetItem(d, spec.objects[*k as usize].as_ptr(), x) < 0 {
+                        ffi::Py_XDECREF(x);
+                        ffi::Py_DECREF(d);
+                        return std::ptr::null_mut();
+                    }
+                    ffi::Py_DECREF(x);
+                }
+                d
+            }
+            RegionOut::Iter(items) => {
+                let c = make(spec, items, args, item, n);
+                if c.is_null() {
+                    return c;
+                }
+                let it = ffi::PyObject_GetIter(c);
+                ffi::Py_DECREF(c);
+                it
             }
         }
     }
@@ -223,5 +294,5 @@ pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Vec<*mut
         result.into_iter().for_each(|x| ffi::Py_XDECREF(x));
         return Err(());
     }
-    Ok(result)
+    Ok(Some(result))
 }

@@ -186,9 +186,42 @@ int tr_load_method(PyObject* name, PyObject* owner, PyObject** out) {
   return 0;
 }
 
+// descrobject.c's wrapperobject: a slot wrapper bound to an object.
+typedef struct {
+  PyObject_HEAD
+  PyWrapperDescrObject* descr;
+  PyObject* self;
+} tr_wrapperobject;
+
 // CALL: in = [method|NULL, self|callable, args...].
-// The function a call to `callable` runs, if it's a bound method.
+// The function a call to `callable` runs, if it's a bound method, or the
+// descriptor of a bound slot wrapper or builtin method. Borrowed.
 PyObject* tr_bound_function(PyObject* callable) {
+  if (Py_IS_TYPE(callable, &_PyMethodWrapper_Type)) {
+    return (PyObject*)((tr_wrapperobject*)callable)->descr;
+  }
+  if (PyCFunction_Check(callable)) {
+    // Bound to an object (a method), or to a class (a classmethod).
+    PyObject* self = PyCFunction_GET_SELF(callable);
+    if (self != NULL && !PyModule_Check(self)) {
+      int cls = PyType_Check(self);
+      PyMethodDef* ml = ((PyCFunctionObject*)callable)->m_ml;
+      PyObject* name = PyUnicode_InternFromString(ml->ml_name);
+      PyObject* d = name == NULL
+          ? NULL
+          : _PyType_Lookup(cls ? (PyTypeObject*)self : Py_TYPE(self), name);
+      Py_XDECREF(name);
+      if (d == NULL) {
+        PyErr_Clear();
+      } else if (
+          Py_IS_TYPE(
+              d, cls ? &PyClassMethodDescr_Type : &PyMethodDescr_Type) &&
+          ((PyMethodDescrObject*)d)->d_method == ml) {
+        return d;
+      }
+    }
+    return callable;
+  }
   return PyMethod_Check(callable) ? PyMethod_GET_FUNCTION(callable) : callable;
 }
 

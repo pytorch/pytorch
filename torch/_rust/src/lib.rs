@@ -82,9 +82,12 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_cfg_misses, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_region_stats, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_set_cfg_regions, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_spans, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_pure_calls, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_set_cfg_reoptimize_after, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_reoptimize_all, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_bypass_cold, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_skip, m)?)?;
     m.add_function(wrap_pyfunction!(exec::region::_region_body, m)?)?;
     m.add_function(wrap_pyfunction!(exec::graph::_run_aten_graph, m)?)?;
     m.add_class::<exec::graph::Ref>()?;
