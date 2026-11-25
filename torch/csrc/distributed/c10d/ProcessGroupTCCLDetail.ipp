@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <c10/util/Exception.h>
+#include <fmt/format.h>
 
 #include <torch/csrc/distributed/c10d/TCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/exception.h>
@@ -60,6 +61,34 @@ inline int slot(uint64_t wr_id) {
 }
 
 } // namespace tccl_wr
+
+inline void checkCompletion(const ibv_wc& wc, const char* what, int peer) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      wc.status == IBV_WC_SUCCESS,
+      fmt::format(
+          "{}: WC failed status={} (peer={}, wr_id={})",
+          what,
+          static_cast<int>(wc.status),
+          peer,
+          wc.wr_id));
+}
+
+[[noreturn]] inline void throwTimeout(
+    const char* what,
+    std::chrono::milliseconds timeout,
+    const std::string& detail) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      false,
+      fmt::format(
+          "{}: timed out after {} ms{}. The poll bound is the process-group "
+          "timeout; a persistent stall indicates a dropped UC packet (no "
+          "hardware retransmission).",
+          what,
+          timeout.count(),
+          detail));
+}
 
 // mesh_exchange
 //
@@ -144,22 +173,22 @@ void TCCLEngine::mesh_exchange(
       int n = connections_[peer]->pollCq(
           static_cast<int>(wcs.size()), wcs.data());
       if (n == 0) {
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            std::chrono::steady_clock::now() <= deadline,
-            "TCCL mesh(2-node): timed out after ", timeout_.count(),
-            " ms (send ", send_done, "/", do_send ? total_bytes : 0,
-            ", recv ", recv_done, "/", do_recv ? total_bytes : 0, " peer ", peer,
-            "). The poll bound is the process-group timeout; a persistent stall "
-            "here indicates a dropped UC packet (no hardware retransmission).");
+        if (std::chrono::steady_clock::now() > deadline) {
+          throwTimeout(
+              "TCCL mesh(2-node)",
+              timeout_,
+              fmt::format(
+                  " (send {}/{}, recv {}/{}, peer {})",
+                  send_done,
+                  do_send ? total_bytes : 0,
+                  recv_done,
+                  do_recv ? total_bytes : 0,
+                  peer));
+        }
         continue;
       }
       for (int i = 0; i < n; ++i) {
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            wcs[i].status == IBV_WC_SUCCESS,
-            "TCCL mesh(2-node): WC failed status=",
-            static_cast<int>(wcs[i].status), " (peer=", peer, ").");
+        checkCompletion(wcs[i], "TCCL mesh(2-node)", peer);
         const int s = tccl_wr::slot(wcs[i].wr_id);
         const std::size_t idx = static_cast<std::size_t>(peer) * D + s;
         if (tccl_wr::isSend(wcs[i].wr_id)) {
@@ -256,10 +285,7 @@ void TCCLEngine::mesh_exchange(
         made_progress = true;
         for (int i = 0; i < n; ++i) {
           const ibv_wc& wc = wcs[i];
-          TORCH_CHECK_WITH(
-              DistBackendError, wc.status == IBV_WC_SUCCESS,
-              "TCCL mesh(pipe): WC failed status=", static_cast<int>(wc.status),
-              " (peer=", p, ", wr_id=", wc.wr_id, ")");
+          checkCompletion(wc, "TCCL mesh(pipe)", p);
           const int s = tccl_wr::slot(wc.wr_id);
           const std::size_t idx = static_cast<std::size_t>(p) * D + s;
           if (tccl_wr::isSend(wc.wr_id)) {
@@ -287,11 +313,11 @@ void TCCLEngine::mesh_exchange(
           if (recvs_from[p] && recv_done[p] < total_bytes)
             outstanding += " recv<-" + std::to_string(p);
         }
-        TORCH_CHECK_WITH(
-            DistBackendError, false,
-            "TCCL mesh(pipe): timed out after ", timeout_.count(),
-            " ms (total_bytes=", total_bytes, "). outstanding:", outstanding,
-            ". A persistent stall here indicates a dropped UC packet.");
+        throwTimeout(
+            "TCCL mesh(pipe)",
+            timeout_,
+            fmt::format(
+                " (total_bytes={}). outstanding:{}", total_bytes, outstanding));
       }
     }
     return;
@@ -363,16 +389,7 @@ void TCCLEngine::mesh_exchange(
 
         for (int i = 0; i < n; ++i) {
           const ibv_wc& wc = wcs[i];
-          TORCH_CHECK_WITH(
-              DistBackendError,
-              wc.status == IBV_WC_SUCCESS,
-              "TCCL mesh: WC failed status=",
-              static_cast<int>(wc.status),
-              " (peer=",
-              peer,
-              ", wr_id=",
-              wc.wr_id,
-              ")");
+          checkCompletion(wc, "TCCL mesh", peer);
 
           const int wc_peer = tccl_wr::peer(wc.wr_id);
           TORCH_INTERNAL_ASSERT(
@@ -413,26 +430,19 @@ void TCCLEngine::mesh_exchange(
           if (will_recv[p] && !recv_done[p])
             outstanding += " recv<-" + std::to_string(p);
         }
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            false,
-            "TCCL mesh: timed out after ",
-            timeout_.count(),
-            " ms waiting for completions at offset ",
-            offset,
-            " (total_bytes=",
-            total_bytes,
-            ", chunk_bytes=",
-            chunk_bytes,
-            "). Saw ",
-            completions_seen,
-            "/",
-            expected_completions,
-            " completions; outstanding WRs:",
-            outstanding,
-            ". The poll bound is the process-group timeout "
-            "(init_process_group(timeout=) / set_timeout); a persistent stall "
-            "here indicates a dropped UC packet (no hardware retransmission).");
+        throwTimeout(
+            "TCCL mesh",
+            timeout_,
+            fmt::format(
+                " waiting for completions at offset {} (total_bytes={}, "
+                "chunk_bytes={}). Saw {}/{} completions; outstanding WRs:{}. "
+                "Timeout set by init_process_group(timeout=) / set_timeout",
+                offset,
+                total_bytes,
+                chunk_bytes,
+                completions_seen,
+                expected_completions,
+                outstanding));
       }
     }
 
@@ -537,16 +547,7 @@ void TCCLEngine::ring_step(
       made_progress = true;
       for (int i = 0; i < n; ++i) {
         const ibv_wc& wc = wcs[i];
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            wc.status == IBV_WC_SUCCESS,
-            "TCCL ring: WC failed status=",
-            static_cast<int>(wc.status),
-            " (peer=",
-            peer,
-            ", wr_id=",
-            wc.wr_id,
-            ")");
+        checkCompletion(wc, "TCCL ring", peer);
         if (tccl_wr::isSend(wc.wr_id)) {
           send_off += send_inflight;
           send_inflight = 0;
@@ -561,26 +562,18 @@ void TCCLEngine::ring_step(
     }
     if (!made_progress) {
       if (std::chrono::steady_clock::now() > deadline) {
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            false,
-            "TCCL ring: timed out after ",
-            timeout_.count(),
-            " ms. send ",
-            send_off,
-            "/",
-            send_bytes,
-            " to peer ",
-            send_peer,
-            ", recv ",
-            recv_off,
-            "/",
-            recv_bytes,
-            " from peer ",
-            recv_peer,
-            ". The poll bound is the process-group timeout "
-            "(init_process_group(timeout=) / set_timeout); a persistent stall "
-            "here indicates a dropped UC packet (no hardware retransmission).");
+        throwTimeout(
+            "TCCL ring",
+            timeout_,
+            fmt::format(
+                " (send {}/{} to peer {}, recv {}/{} from peer {}). Timeout "
+                "set by init_process_group(timeout=) / set_timeout",
+                send_off,
+                send_bytes,
+                send_peer,
+                recv_off,
+                recv_bytes,
+                recv_peer));
       }
     }
   }
@@ -685,16 +678,7 @@ void TCCLEngine::bidir_ring_step(
           static_cast<int>(wcs.size()), wcs.data());
       for (int i = 0; i < n; ++i) {
         const ibv_wc& wc = wcs[i];
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            wc.status == IBV_WC_SUCCESS,
-            "TCCL bidir-ring: WC failed status=",
-            static_cast<int>(wc.status),
-            " (peer=",
-            right,
-            ", wr_id=",
-            wc.wr_id,
-            ")");
+        checkCompletion(wc, "TCCL bidir-ring", right);
         made_progress = true;
         const int s = tccl_wr::slot(wc.wr_id);
         if (tccl_wr::isSend(wc.wr_id)) {
@@ -721,16 +705,7 @@ void TCCLEngine::bidir_ring_step(
           static_cast<int>(wcs.size()), wcs.data());
       for (int i = 0; i < n; ++i) {
         const ibv_wc& wc = wcs[i];
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            wc.status == IBV_WC_SUCCESS,
-            "TCCL bidir-ring: WC failed status=",
-            static_cast<int>(wc.status),
-            " (peer=",
-            left,
-            ", wr_id=",
-            wc.wr_id,
-            ")");
+        checkCompletion(wc, "TCCL bidir-ring", left);
         made_progress = true;
         const int s = tccl_wr::slot(wc.wr_id);
         if (tccl_wr::isSend(wc.wr_id)) {
@@ -755,37 +730,24 @@ void TCCLEngine::bidir_ring_step(
     if (made_progress) {
       deadline = std::chrono::steady_clock::now() + timeout_;
     } else if (std::chrono::steady_clock::now() > deadline) {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          false,
-          "TCCL bidir-ring: timed out after ",
-          timeout_.count(),
-          " ms. A send ",
-          asend_done,
-          "/",
-          sendA_bytes,
-          "->",
-          right,
-          ", A recv ",
-          arecv_done,
-          "/",
-          recvA_bytes,
-          "<-",
-          left,
-          ", B send ",
-          bsend_done,
-          "/",
-          sendB_bytes,
-          "->",
-          left,
-          ", B recv ",
-          brecv_done,
-          "/",
-          recvB_bytes,
-          "<-",
-          right,
-          ". The poll bound is the process-group timeout; a persistent stall "
-          "here indicates a dropped UC packet (no hardware retransmission).");
+      throwTimeout(
+          "TCCL bidir-ring",
+          timeout_,
+          fmt::format(
+              " (A send {}/{}->{}, A recv {}/{}<-{}, B send {}/{}->{}, "
+              "B recv {}/{}<-{})",
+              asend_done,
+              sendA_bytes,
+              right,
+              arecv_done,
+              recvA_bytes,
+              left,
+              bsend_done,
+              sendB_bytes,
+              left,
+              brecv_done,
+              recvB_bytes,
+              right));
     }
   }
 }
@@ -1088,22 +1050,20 @@ inline void TCCLEngine::ring_broadcast(
     while (true) {
       int n = connections_[peer]->pollCq(static_cast<int>(wcs.size()), wcs.data());
       for (int i = 0; i < n; ++i) {
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            wcs[i].status == IBV_WC_SUCCESS,
-            "TCCL ring_broadcast: WC failed status=",
-            static_cast<int>(wcs[i].status),
-            " (peer=", peer, ")");
+        checkCompletion(wcs[i], "TCCL ring_broadcast", peer);
         if (tccl_wr::isSend(wcs[i].wr_id) == want_send) {
           return;
         }
       }
       if (n == 0 && std::chrono::steady_clock::now() > deadline) {
-        TORCH_CHECK_WITH(
-            DistBackendError, false,
-            "TCCL ring_broadcast: timed out after ", timeout_.count(),
-            " ms (root=", root, ", pos=", pos, "). The poll bound is the process-"
-            "group timeout (init_process_group(timeout=) / set_timeout).");
+        throwTimeout(
+            "TCCL ring_broadcast",
+            timeout_,
+            fmt::format(
+                " (root={}, pos={}). Timeout set by "
+                "init_process_group(timeout=) / set_timeout",
+                root,
+                pos));
       }
     }
   };
@@ -1428,11 +1388,7 @@ inline bool TCCLEngine::P2pStreams::poll(
     if (send_[p].inflight.empty() && recv_[p].inflight.empty()) continue;
     const int n = e_.connections_[p]->pollCq(2 * D + 2, wcs);
     for (int i = 0; i < n; ++i) {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          wcs[i].status == IBV_WC_SUCCESS,
-          what, ": WC failed status=",
-          static_cast<int>(wcs[i].status), " (peer=", p, ").");
+      checkCompletion(wcs[i], what, p);
       const bool isSend = tccl_wr::isSend(wcs[i].wr_id);
       Stream& s = isSend ? send_[p] : recv_[p];
       // A QP completes each direction in post order, and finished segments
@@ -1520,13 +1476,8 @@ inline void TCCLEngine::exchange(
   while (!streams.empty()) {
     if (streams.poll(done, what)) {
       deadline = std::chrono::steady_clock::now() + timeout_;
-    } else {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          std::chrono::steady_clock::now() <= deadline,
-          what, ": timed out after ", timeout_.count(),
-          " ms. The poll bound is the process-group timeout; a persistent stall "
-          "indicates a dropped UC packet (no hardware retransmission).");
+    } else if (std::chrono::steady_clock::now() > deadline) {
+      throwTimeout(what, timeout_, "");
     }
   }
 }

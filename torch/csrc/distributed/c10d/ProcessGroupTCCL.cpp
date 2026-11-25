@@ -3,15 +3,19 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupTCCL.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupTCCLDetail.hpp>
 #include <torch/csrc/distributed/c10d/TCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/util/thread_name.h>
 
 #include <ATen/Context.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
+
+#include <fmt/format.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -36,7 +40,8 @@ namespace {
 // Zero-copy CPU view over an MPS tensor's unified memory: getSharedBufferPtr
 // gives the shared CPU pointer, from_blob wraps it. Uses the storage base
 // pointer, NOT data_ptr() - on MPS data_ptr() folds storage_offset into
-// MTLBuffer arithmetic, unmappable for offset views (e.g. _allgather_base).
+// MTLBuffer arithmetic, unmappable for offset views (e.g.
+// all_gather_into_tensor).
 at::Tensor mpsSharedCpuView(const at::Tensor& mpsTensor) {
   // A zero-element MPS tensor has no buffer at all; there is nothing to view.
   if (mpsTensor.numel() == 0) {
@@ -50,17 +55,14 @@ at::Tensor mpsSharedCpuView(const at::Tensor& mpsTensor) {
   const void* cpu_ptr = allocator->getSharedBufferPtr(storage_ptr).first;
   TORCH_INTERNAL_ASSERT(
       cpu_ptr != nullptr,
-      "MPS tensor does not have a shared (unified memory) backing buffer. ",
-      "storage_ptr=",
-      storage_ptr,
-      " data_ptr=",
-      mpsTensor.data_ptr(),
-      " size=",
-      mpsTensor.nbytes(),
-      " storage_offset=",
-      mpsTensor.storage_offset(),
-      " device=",
-      mpsTensor.device());
+      fmt::format(
+          "MPS tensor does not have a shared (unified memory) backing buffer: "
+          "storage_ptr={} data_ptr={} size={} storage_offset={} device={}",
+          storage_ptr,
+          mpsTensor.data_ptr(),
+          mpsTensor.nbytes(),
+          mpsTensor.storage_offset(),
+          mpsTensor.device().str()));
   void* offset_ptr = static_cast<char*>(const_cast<void*>(cpu_ptr)) +
       mpsTensor.storage_offset() * mpsTensor.itemsize();
   return at::from_blob(
@@ -91,16 +93,10 @@ void mpsEventWait(uint32_t eid) {
   hooks.releaseEvent(eid);
 }
 
-constexpr const char* kNotImplementedHint =
-    "is not implemented for the TCCL backend. Implemented collectives: "
-    "allreduce, broadcast, allgather, _allgather_base, "
-    "allgather_into_tensor_coalesced, reduce_scatter, _reduce_scatter_base, "
-    "reduce_scatter_tensor_coalesced, alltoall_base, send, recv, and barrier "
-    "(reductions: SUM/MIN/MAX/PRODUCT for float32/float16/bfloat16 + "
-    "int8/16/32/64/uint8/bool, AVG float-only; broadcast/allgather/alltoall/send/"
-    "recv are byte-copy, any dtype).";
+// The dtypes TCCL reduces; isSupportedReduceDtype checks the same set.
+#define TCCL_REDUCE_DTYPES \
+  AT_EXPAND(AT_INTEGRAL_TYPES), at::kFloat, at::kHalf, at::kBFloat16, at::kBool
 
-// SUM-capable reduce dtypes
 inline bool isSupportedReduceDtype(at::ScalarType st) {
   return st == at::kFloat || st == at::kHalf || st == at::kBFloat16 ||
       st == at::kChar || st == at::kShort || st == at::kInt ||
@@ -111,6 +107,73 @@ inline bool isSupportedReduceDtype(at::ScalarType st) {
 // AVG is gated to the float dtypes
 inline bool isFloatReduceDtype(at::ScalarType st) {
   return st == at::kFloat || st == at::kHalf || st == at::kBFloat16;
+}
+
+// Argument checks shared by the collectives, raising DistBackendError.
+// invalidArgument adapts the Utils.hpp asserts, as Gloo does; all_to_all's
+// split checks are c10d's own (checkSplitSizes), with their error type.
+std::function<void(const std::string&)> invalidArgument(const char* op) {
+  return [op](const std::string& msg) {
+    TORCH_CHECK_WITH(DistBackendError, false, "TCCL ", op, ": ", msg);
+  };
+}
+
+void checkMpsTensor(const at::Tensor& t, const char* op) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      t.device().is_mps() && t.is_contiguous(),
+      fmt::format(
+          "TCCL {}: expected a contiguous MPS tensor, got a {} tensor on {}. "
+          "Call .to(\"mps\").contiguous() first.",
+          op,
+          t.is_contiguous() ? "contiguous" : "non-contiguous",
+          t.device().str()));
+}
+
+// A tensor-list entry: a contiguous MPS tensor with the dtype and numel of
+// `like`.
+void checkMatches(const at::Tensor& t, const at::Tensor& like, const char* op) {
+  checkMpsTensor(t, op);
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      t.scalar_type() == like.scalar_type() && t.numel() == like.numel(),
+      fmt::format(
+          "TCCL {}: every list entry must have dtype {} and numel {}, got {} "
+          "and {}.",
+          op,
+          c10::toString(like.scalar_type()),
+          like.numel(),
+          c10::toString(t.scalar_type()),
+          t.numel()));
+}
+
+void checkReduce(const char* op, at::ScalarType st, const ReduceOp& reduceOp) {
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      reduceOp == ReduceOp::SUM || reduceOp == ReduceOp::AVG ||
+          reduceOp == ReduceOp::MIN || reduceOp == ReduceOp::MAX ||
+          reduceOp == ReduceOp::PRODUCT,
+      "TCCL ",
+      op,
+      ": only SUM, AVG, MIN, MAX and PRODUCT are supported.");
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      isSupportedReduceDtype(st),
+      "TCCL ",
+      op,
+      ": dtype ",
+      st,
+      " cannot be reduced; supported: float32, float16, bfloat16, int8, "
+      "int16, int32, int64, uint8 and bool.");
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      reduceOp != ReduceOp::AVG || isFloatReduceDtype(st),
+      "TCCL ",
+      op,
+      ": AVG needs float32, float16 or bfloat16 (integer AVG is undefined, as "
+      "in NCCL), got ",
+      st,
+      ". Use SUM for integer dtypes.");
 }
 
 // Ring-vs-mesh selection for all_reduce (N>2): bf16 -> ring at any size,
@@ -303,38 +366,13 @@ void dispatchReduceScatter(
     at::Tensor& outView,
     ReduceOp::RedOpType op,
     int worldSize) {
-  switch (inView.scalar_type()) {
-    case at::kFloat:
-      runMeshReduceScatter<float>(mesh, inView, outView, op, worldSize);
-      break;
-    case at::kHalf:
-      runMeshReduceScatter<at::Half>(mesh, inView, outView, op, worldSize);
-      break;
-    case at::kBFloat16:
-      runMeshReduceScatter<at::BFloat16>(mesh, inView, outView, op, worldSize);
-      break;
-    case at::kChar:
-      runMeshReduceScatter<int8_t>(mesh, inView, outView, op, worldSize);
-      break;
-    case at::kShort:
-      runMeshReduceScatter<int16_t>(mesh, inView, outView, op, worldSize);
-      break;
-    case at::kInt:
-      runMeshReduceScatter<int32_t>(mesh, inView, outView, op, worldSize);
-      break;
-    case at::kLong:
-      runMeshReduceScatter<int64_t>(mesh, inView, outView, op, worldSize);
-      break;
-    case at::kByte:
-      runMeshReduceScatter<uint8_t>(mesh, inView, outView, op, worldSize);
-      break;
-    case at::kBool:
-      runMeshReduceScatter<bool>(mesh, inView, outView, op, worldSize);
-      break;
-    // Unreachable - validated by caller
-    default:
-      break;
-  }
+  AT_DISPATCH_V2(
+      inView.scalar_type(),
+      "tccl_reduce_scatter",
+      AT_WRAP([&] {
+        runMeshReduceScatter<scalar_t>(mesh, inView, outView, op, worldSize);
+      }),
+      TCCL_REDUCE_DTYPES);
 }
 
 // Runtime-dtype dispatch for list-form reduce-scatter (worldSize separate input
@@ -345,47 +383,14 @@ void dispatchReduceScatterList(
     at::Tensor& outView,
     ReduceOp::RedOpType op,
     int worldSize) {
-  switch (outView.scalar_type()) {
-    case at::kFloat:
-      runMeshReduceScatterList<float>(
-          mesh, inChunkViews, outView, op, worldSize);
-      break;
-    case at::kHalf:
-      runMeshReduceScatterList<at::Half>(
-          mesh, inChunkViews, outView, op, worldSize);
-      break;
-    case at::kBFloat16:
-      runMeshReduceScatterList<at::BFloat16>(
-          mesh, inChunkViews, outView, op, worldSize);
-      break;
-    case at::kChar:
-      runMeshReduceScatterList<int8_t>(
-          mesh, inChunkViews, outView, op, worldSize);
-      break;
-    case at::kShort:
-      runMeshReduceScatterList<int16_t>(
-          mesh, inChunkViews, outView, op, worldSize);
-      break;
-    case at::kInt:
-      runMeshReduceScatterList<int32_t>(
-          mesh, inChunkViews, outView, op, worldSize);
-      break;
-    case at::kLong:
-      runMeshReduceScatterList<int64_t>(
-          mesh, inChunkViews, outView, op, worldSize);
-      break;
-    case at::kByte:
-      runMeshReduceScatterList<uint8_t>(
-          mesh, inChunkViews, outView, op, worldSize);
-      break;
-    case at::kBool:
-      runMeshReduceScatterList<bool>(
-          mesh, inChunkViews, outView, op, worldSize);
-      break;
-    // Unreachable - validated by caller
-    default:
-      break;
-  }
+  AT_DISPATCH_V2(
+      outView.scalar_type(),
+      "tccl_reduce_scatter_list",
+      AT_WRAP([&] {
+        runMeshReduceScatterList<scalar_t>(
+            mesh, inChunkViews, outView, op, worldSize);
+      }),
+      TCCL_REDUCE_DTYPES);
 }
 } // namespace
 
@@ -480,17 +485,15 @@ ProcessGroupTCCL::ProcessGroupTCCL(
     TORCH_CHECK_WITH(
         DistBackendError,
         qps <= 10,
-        "ProcessGroupTCCL: device '",
-        dev,
-        "' would host num_wires=",
-        num_wires,
-        " * ",
-        peers,
-        " peer(s) = ",
-        qps,
-        " QPs, exceeding the 10-UC-QP-per-device Thunderbolt limit "
-        "(TN3205 sec. 12.1). Spread peers across more devices (full mesh) or "
-        "reduce num_wires.");
+        fmt::format(
+            "ProcessGroupTCCL: device '{}' would host num_wires={} * {} "
+            "peer(s) = {} QPs, exceeding the 10-UC-QP-per-device Thunderbolt "
+            "limit (TN3205 sec. 12.1). Spread peers across more devices (full "
+            "mesh) or reduce num_wires.",
+            dev,
+            num_wires,
+            peers,
+            qps));
   }
 
   // 4. Reserve a unique init-sequence number from the Store. The keys we
@@ -674,16 +677,10 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueCollective(
   // A collective would run before the batch's deferred sends and recvs. With no
   // p2p recorded it runs as usual (the coalescing manager's fast path).
   if (coalescing_ && !coalescedOps_.empty()) {
-    std::exception_ptr ep;
-    try {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          false,
-          "TCCL: a batch of sends and recvs cannot also run a collective; "
-          "the batch is dropped.");
-    } catch (...) {
-      ep = std::current_exception();
-    }
+    const auto ep = std::make_exception_ptr(C10_BUILD_ERROR(
+        DistBackendError,
+        "TCCL: a batch of sends and recvs cannot also run a collective; "
+        "the batch is dropped."));
     closeCoalescing(ep);
     std::rethrow_exception(ep);
   }
@@ -816,14 +813,8 @@ void ProcessGroupTCCL::runP2p(Task first) {
       // collective's mpsEventWait; the timeout bounds waiting for peers.
       if (progress || !done.empty() || !pending.empty()) {
         deadline = std::chrono::steady_clock::now() + options_->timeout;
-      } else {
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            std::chrono::steady_clock::now() <= deadline,
-            "TCCL p2p: timed out after ",
-            options_->timeout.count(),
-            " ms. The poll bound is the process-group timeout; a persistent "
-            "stall indicates a dropped UC packet (no hardware retransmission).");
+      } else if (std::chrono::steady_clock::now() > deadline) {
+        throwTimeout("TCCL p2p", options_->timeout, "");
       }
     }
   } catch (...) {
@@ -848,47 +839,10 @@ void ProcessGroupTCCL::runP2p(Task first) {
 c10::intrusive_ptr<Work> ProcessGroupTCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensors.size() == 1,
-      "TCCL allreduce: expected exactly one tensor, got ",
-      tensors.size());
+  assertSingleElementInput(invalidArgument("allreduce"), tensors);
   auto& tensor = tensors[0];
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensor.device().is_mps(),
-      "TCCL allreduce: tensor must be on MPS device, got ",
-      tensor.device());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      isSupportedReduceDtype(tensor.scalar_type()),
-      "TCCL allreduce: unsupported dtype. Supported: float32/float16/bfloat16 "
-      "and int8/int16/int32/int64/uint8/bool (SUM); uint16/32/64 have no MPS add "
-      "and are unsupported. ",
-      kNotImplementedHint,
-      " Got dtype=",
-      tensor.scalar_type());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.reduceOp == ReduceOp::SUM || opts.reduceOp == ReduceOp::AVG ||
-          opts.reduceOp == ReduceOp::MIN || opts.reduceOp == ReduceOp::MAX ||
-          opts.reduceOp == ReduceOp::PRODUCT,
-      "TCCL allreduce: only SUM, AVG (= SUM / world_size), MIN, MAX and "
-      "PRODUCT are supported. ",
-      kNotImplementedHint);
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.reduceOp != ReduceOp::AVG ||
-          isFloatReduceDtype(tensor.scalar_type()),
-      "TCCL allreduce: AVG is only supported for float32/float16/bfloat16 "
-      "(integer/bool AVG is undefined; matches NCCL). Use SUM for integer dtypes. ",
-      " Got dtype=",
-      tensor.scalar_type());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensor.is_contiguous(),
-      "TCCL allreduce: non-contiguous tensors are not supported. "
-      "Call .contiguous() before allreduce.");
+  checkMpsTensor(tensor, "allreduce");
+  checkReduce("allreduce", tensor.scalar_type(), opts.reduceOp);
 
   const ReduceOp::RedOpType op = opts.reduceOp;
   const int worldSize = size_;
@@ -898,40 +852,13 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allreduce(
       std::vector<at::Tensor>{tensor},
       [this, tensor, op, worldSize, st]() mutable {
         at::Tensor cpuView = mpsSharedCpuView(tensor);
-        switch (st) {
-          case at::kFloat:
-            runMeshAllreduce<float>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kHalf:
-            runMeshAllreduce<at::Half>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kBFloat16:
-            runMeshAllreduce<at::BFloat16>(*engine_, cpuView, op, worldSize);
-            break;
-          // Integer/bool: SUM (native add / OR) and MIN/MAX (std::min/max).
-          // AVG is gated to floats above, so op is never AVG here.
-          case at::kChar:
-            runMeshAllreduce<int8_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kShort:
-            runMeshAllreduce<int16_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kInt:
-            runMeshAllreduce<int32_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kLong:
-            runMeshAllreduce<int64_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kByte:
-            runMeshAllreduce<uint8_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kBool:
-            runMeshAllreduce<bool>(*engine_, cpuView, op, worldSize);
-            break;
-          default:
-            // Unreachable - validated above
-            break;
-        }
+        AT_DISPATCH_V2(
+            st,
+            "tccl_allreduce",
+            AT_WRAP([&] {
+              runMeshAllreduce<scalar_t>(*engine_, cpuView, op, worldSize);
+            }),
+            TCCL_REDUCE_DTYPES);
       });
 }
 
@@ -940,35 +867,12 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allreduce(
 c10::intrusive_ptr<Work> ProcessGroupTCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensors.size() == 1,
-      "TCCL broadcast: expected exactly one tensor, got ",
-      tensors.size());
+  const auto invalid = invalidArgument("broadcast");
+  assertSingleElementInput(invalid, tensors);
   auto& tensor = tensors[0];
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensor.device().is_mps(),
-      "TCCL broadcast: tensor must be on MPS device, got ",
-      tensor.device());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensor.is_contiguous(),
-      "TCCL broadcast: non-contiguous tensors are not supported. "
-      "Call .contiguous() first.");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.rootRank >= 0 && opts.rootRank < size_,
-      "TCCL broadcast: invalid rootRank ",
-      opts.rootRank,
-      " for world size ",
-      size_);
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.rootTensor == 0,
-      "TCCL broadcast: rootTensor must be 0 (one tensor per rank), got ",
-      opts.rootTensor);
-
+  checkMpsTensor(tensor, "broadcast");
+  assertRootRank(invalid, opts.rootRank, size_);
+  assertRootTensor(invalid, opts.rootTensor, 1);
   // Byte-copy collective - any dtype. DDP construction broadcasts int32/int64
   // metadata tensors through this path.
   const int root = opts.rootRank;
@@ -992,60 +896,15 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::broadcast(
       });
 }
 
-c10::intrusive_ptr<Work> ProcessGroupTCCL::allreduce_coalesced(
-    std::vector<at::Tensor>& /*tensors*/,
-    const AllreduceCoalescedOptions& /*opts*/) {
-  TORCH_CHECK(
-      false, "ProcessGroupTCCL::allreduce_coalesced ", kNotImplementedHint);
-}
-
 c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensors.size() == 1,
-      "TCCL reduce: expected exactly one tensor, got ",
-      tensors.size());
+  const auto invalid = invalidArgument("reduce");
+  assertSingleElementInput(invalid, tensors);
   auto& tensor = tensors[0];
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensor.device().is_mps(),
-      "TCCL reduce: tensor must be on MPS device, got ",
-      tensor.device());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.rootRank >= 0 && opts.rootRank < size_,
-      "TCCL reduce: invalid rootRank ",
-      opts.rootRank,
-      " (world size ",
-      size_,
-      ").");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      isSupportedReduceDtype(tensor.scalar_type()),
-      "TCCL reduce: unsupported dtype. Supported: float32/float16/bfloat16 and "
-      "int8/int16/int32/int64/uint8/bool. ",
-      kNotImplementedHint,
-      " Got dtype=",
-      tensor.scalar_type());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.reduceOp == ReduceOp::SUM || opts.reduceOp == ReduceOp::AVG ||
-          opts.reduceOp == ReduceOp::MIN || opts.reduceOp == ReduceOp::MAX ||
-          opts.reduceOp == ReduceOp::PRODUCT,
-      "TCCL reduce: only SUM, AVG, MIN, MAX and PRODUCT are supported. ",
-      kNotImplementedHint);
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.reduceOp != ReduceOp::AVG ||
-          isFloatReduceDtype(tensor.scalar_type()),
-      "TCCL reduce: AVG is only supported for float32/float16/bfloat16. Got dtype=",
-      tensor.scalar_type());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensor.is_contiguous(),
-      "TCCL reduce: non-contiguous tensors are not supported. Call .contiguous().");
+  checkMpsTensor(tensor, "reduce");
+  assertRootRank(invalid, opts.rootRank, size_);
+  checkReduce("reduce", tensor.scalar_type(), opts.reduceOp);
   // Runs as all-reduce - reduced value on every rank (reduce guarantees only
   // the root). rootRank is validated, not used in the reduction.
   const ReduceOp::RedOpType op = opts.reduceOp;
@@ -1056,38 +915,13 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce(
       std::vector<at::Tensor>{tensor},
       [this, tensor, op, worldSize, st]() mutable {
         at::Tensor cpuView = mpsSharedCpuView(tensor);
-        switch (st) {
-          case at::kFloat:
-            runMeshAllreduce<float>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kHalf:
-            runMeshAllreduce<at::Half>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kBFloat16:
-            runMeshAllreduce<at::BFloat16>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kChar:
-            runMeshAllreduce<int8_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kShort:
-            runMeshAllreduce<int16_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kInt:
-            runMeshAllreduce<int32_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kLong:
-            runMeshAllreduce<int64_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kByte:
-            runMeshAllreduce<uint8_t>(*engine_, cpuView, op, worldSize);
-            break;
-          case at::kBool:
-            runMeshAllreduce<bool>(*engine_, cpuView, op, worldSize);
-            break;
-          default:
-            // Unreachable - validated above
-            break;
-        }
+        AT_DISPATCH_V2(
+            st,
+            "tccl_allreduce",
+            AT_WRAP([&] {
+              runMeshAllreduce<scalar_t>(*engine_, cpuView, op, worldSize);
+            }),
+            TCCL_REDUCE_DTYPES);
       });
 }
 
@@ -1097,39 +931,15 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& /*opts*/) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      inputTensors.size() == 1,
-      "TCCL allgather: expected exactly one input tensor, got ",
-      inputTensors.size());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      outputTensors.size() == 1,
-      "TCCL allgather: expected exactly one output list, got ",
-      outputTensors.size());
+  const auto invalid = invalidArgument("allgather");
+  assertSingleElementInput(invalid, inputTensors);
+  assertGatherOutputTensorList(invalid, outputTensors, size_);
   auto& input = inputTensors[0];
   auto& outList = outputTensors[0];
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      static_cast<int>(outList.size()) == size_,
-      "TCCL allgather: output list must have world_size (",
-      size_,
-      ") tensors, got ",
-      outList.size());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      input.device().is_mps() && input.is_contiguous(),
-      "TCCL allgather: input must be a contiguous MPS tensor.");
+  checkMpsTensor(input, "allgather");
   for (const auto& o : outList) {
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        o.device().is_mps() && o.is_contiguous() &&
-            o.numel() == input.numel() &&
-            o.scalar_type() == input.scalar_type(),
-        "TCCL allgather: every output slot must be a contiguous MPS tensor "
-        "matching the input shape and dtype.");
+    checkMatches(o, input, "allgather");
   }
-
   // Byte-copy collective - any dtype (DDP construction allgathers kLong
   // param-size vectors).
   return enqueueCollective(
@@ -1163,141 +973,87 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather(
       });
 }
 
-// _allgather_base
+// all_gather_into_tensor, single and coalesced (TP all-gather)
 
-c10::intrusive_ptr<Work> ProcessGroupTCCL::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupTCCL::all_gather_single(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const AllgatherOptions& /*opts*/) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      inputBuffer.device().is_mps() && inputBuffer.is_contiguous() &&
-          outputBuffer.device().is_mps() && outputBuffer.is_contiguous(),
-      "TCCL _allgather_base: input and output must be contiguous MPS tensors.");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      outputBuffer.scalar_type() == inputBuffer.scalar_type(),
-      "TCCL _allgather_base: output/input dtype mismatch.");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      outputBuffer.numel() == inputBuffer.numel() * size_,
-      "TCCL _allgather_base: output numel (",
-      outputBuffer.numel(),
-      ") must equal input numel (",
-      inputBuffer.numel(),
-      ") * world_size (",
-      size_,
-      ").");
-
-  // Byte-copy, any dtype. Output is one contiguous rank-major buffer.
-  return enqueueCollective(
-      OpType::_ALLGATHER_BASE,
-      std::vector<at::Tensor>{outputBuffer},
-      [this, inputBuffer, outputBuffer]() mutable {
-        at::Tensor inView = mpsSharedCpuView(inputBuffer);
-        at::Tensor outView = mpsSharedCpuView(outputBuffer);
-        const std::size_t per_rank_bytes =
-            static_cast<std::size_t>(inView.nbytes());
-
-        std::vector<void*> outPtrs(static_cast<std::size_t>(size_));
-        char* ob = reinterpret_cast<char*>(outView.data_ptr());
-        for (int r = 0; r < size_; ++r) {
-          outPtrs[r] = ob + static_cast<std::size_t>(r) * per_rank_bytes;
-        }
-
-        if (tcclUseRing(
-                size_,
-                /*autoEnable=*/false,
-                /*isBf16=*/false,
-                per_rank_bytes * static_cast<std::size_t>(size_),
-                1,
-                engine_->ringTopology())) {
-          engine_->ring_all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
-        } else {
-          engine_->all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
-        }
-      });
+  std::vector<at::Tensor> outputs{outputBuffer};
+  std::vector<at::Tensor> inputs{inputBuffer};
+  return allGatherIntoTensors(outputs, inputs, OpType::_ALLGATHER_BASE);
 }
 
-// allgather_into_tensor_coalesced (TP all-gather)
-
-c10::intrusive_ptr<Work> ProcessGroupTCCL::allgather_into_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupTCCL::all_gather_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& /*opts*/) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      outputs.size() == inputs.size(),
-      "TCCL allgather_into_tensor_coalesced: outputs/inputs size mismatch (",
-      outputs.size(),
-      " vs ",
-      inputs.size(),
-      ").");
+  return allGatherIntoTensors(outputs, inputs, OpType::ALLGATHER_COALESCED);
+}
+
+c10::intrusive_ptr<Work> ProcessGroupTCCL::allGatherIntoTensors(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    OpType opType) {
+  constexpr const char* name = "all_gather_into_tensor";
+  assertInputOutputTensorListsSameSize(
+      invalidArgument(name), outputs.size(), inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
+    checkMpsTensor(inputs[i], name);
+    checkMpsTensor(outputs[i], name);
     TORCH_CHECK_WITH(
         DistBackendError,
-        inputs[i].device().is_mps() && inputs[i].is_contiguous() &&
-            outputs[i].device().is_mps() && outputs[i].is_contiguous() &&
-            outputs[i].scalar_type() == inputs[i].scalar_type() &&
+        outputs[i].scalar_type() == inputs[i].scalar_type() &&
             outputs[i].numel() == inputs[i].numel() * size_,
-        "TCCL allgather_into_tensor_coalesced: each (output, input) pair must "
-        "be contiguous MPS, same dtype, with output numel = input numel * "
-        "world_size.");
+        fmt::format(
+            "TCCL all_gather_into_tensor: the output must have the input's "
+            "dtype {} and world_size ({}) times its numel {}, got {} and {}.",
+            c10::toString(inputs[i].scalar_type()),
+            size_,
+            inputs[i].numel(),
+            c10::toString(outputs[i].scalar_type()),
+            outputs[i].numel()));
   }
 
-  return enqueueCollective(
-      OpType::ALLGATHER_COALESCED, outputs, [this, inputs, outputs]() mutable {
-        for (size_t i = 0; i < inputs.size(); ++i) {
-          at::Tensor inView = mpsSharedCpuView(inputs[i]);
-          at::Tensor outView = mpsSharedCpuView(outputs[i]);
-          const std::size_t per_rank_bytes =
-              static_cast<std::size_t>(inView.nbytes());
+  // Byte-copy, any dtype. Each output is one contiguous rank-major buffer.
+  return enqueueCollective(opType, outputs, [this, inputs, outputs]() mutable {
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      at::Tensor inView = mpsSharedCpuView(inputs[i]);
+      at::Tensor outView = mpsSharedCpuView(outputs[i]);
+      const std::size_t per_rank_bytes =
+          static_cast<std::size_t>(inView.nbytes());
 
-          std::vector<void*> outPtrs(static_cast<std::size_t>(size_));
-          char* ob = reinterpret_cast<char*>(outView.data_ptr());
-          for (int r = 0; r < size_; ++r) {
-            outPtrs[r] = ob + static_cast<std::size_t>(r) * per_rank_bytes;
-          }
+      std::vector<void*> outPtrs(static_cast<std::size_t>(size_));
+      char* ob = reinterpret_cast<char*>(outView.data_ptr());
+      for (int r = 0; r < size_; ++r) {
+        outPtrs[r] = ob + static_cast<std::size_t>(r) * per_rank_bytes;
+      }
 
-          if (tcclUseRing(
-                  size_,
-                  /*autoEnable=*/false,
-                  /*isBf16=*/false,
-                  per_rank_bytes * static_cast<std::size_t>(size_),
-                  1,
-                  engine_->ringTopology())) {
-            engine_->ring_all_gather(
-                inView.data_ptr(), outPtrs, per_rank_bytes);
-          } else {
-            engine_->all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
-          }
-        }
-      });
+      if (tcclUseRing(
+              size_,
+              /*autoEnable=*/false,
+              /*isBf16=*/false,
+              per_rank_bytes * static_cast<std::size_t>(size_),
+              1,
+              engine_->ringTopology())) {
+        engine_->ring_all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
+      } else {
+        engine_->all_gather(inView.data_ptr(), outPtrs, per_rank_bytes);
+      }
+    }
+  });
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      inputTensors.size() == 1,
-      "TCCL gather: expected exactly one input tensor, got ",
-      inputTensors.size());
+  const auto invalid = invalidArgument("gather");
+  assertSingleElementInput(invalid, inputTensors);
   auto& input = inputTensors[0];
   const int root = opts.rootRank;
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      root >= 0 && root < size_,
-      "TCCL gather: invalid rootRank ",
-      root,
-      " (world size ",
-      size_,
-      ").");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      input.device().is_mps() && input.is_contiguous(),
-      "TCCL gather: input must be a contiguous MPS tensor.");
+  assertRootRank(invalid, root, size_);
+  checkMpsTensor(input, "gather");
   // Root needs a QP to every rank - mesh-only (ring has no non-neighbor link).
   TORCH_CHECK_WITH(
       DistBackendError,
@@ -1307,22 +1063,10 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::gather(
   const bool isRoot = (rank_ == root);
   std::vector<at::Tensor> outList;
   if (isRoot) {
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        outputTensors.size() == 1 &&
-            static_cast<int>(outputTensors[0].size()) == size_,
-        "TCCL gather: the root must supply one output list of world_size (",
-        size_,
-        ") tensors.");
+    assertGatherOutputTensorList(invalid, outputTensors, size_);
     outList = outputTensors[0];
     for (const auto& o : outList) {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          o.device().is_mps() && o.is_contiguous() &&
-              o.numel() == input.numel() &&
-              o.scalar_type() == input.scalar_type(),
-          "TCCL gather: every output slot must be a contiguous MPS tensor "
-          "matching the input shape and dtype.");
+      checkMatches(o, input, "gather");
     }
   }
   // Byte-copy - any dtype.
@@ -1351,25 +1095,12 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      outputTensors.size() == 1,
-      "TCCL scatter: expected exactly one output tensor, got ",
-      outputTensors.size());
+  const auto invalid = invalidArgument("scatter");
+  assertSingleElementOutput(invalid, outputTensors);
   auto& output = outputTensors[0];
   const int root = opts.rootRank;
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      root >= 0 && root < size_,
-      "TCCL scatter: invalid rootRank ",
-      root,
-      " (world size ",
-      size_,
-      ").");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      output.device().is_mps() && output.is_contiguous(),
-      "TCCL scatter: output must be a contiguous MPS tensor.");
+  assertRootRank(invalid, root, size_);
+  checkMpsTensor(output, "scatter");
   TORCH_CHECK_WITH(
       DistBackendError,
       !engine_->ringTopology(),
@@ -1378,22 +1109,10 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::scatter(
   const bool isRoot = (rank_ == root);
   std::vector<at::Tensor> inList;
   if (isRoot) {
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        inputTensors.size() == 1 &&
-            static_cast<int>(inputTensors[0].size()) == size_,
-        "TCCL scatter: the root must supply one input list of world_size (",
-        size_,
-        ") tensors.");
+    assertScatterInputTensorList(invalid, inputTensors, size_);
     inList = inputTensors[0];
     for (const auto& in : inList) {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          in.device().is_mps() && in.is_contiguous() &&
-              in.numel() == output.numel() &&
-              in.scalar_type() == output.scalar_type(),
-          "TCCL scatter: every input slot must be a contiguous MPS tensor "
-          "matching the output shape and dtype.");
+      checkMatches(in, output, "scatter");
     }
   }
   // Byte-copy - any dtype.
@@ -1429,57 +1148,19 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      outputTensors.size() == inputTensors.size(),
-      "TCCL reduce_scatter: outputs/inputs size mismatch (",
-      outputTensors.size(),
-      " vs ",
-      inputTensors.size(),
-      ").");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.reduceOp == ReduceOp::SUM || opts.reduceOp == ReduceOp::AVG ||
-          opts.reduceOp == ReduceOp::MIN || opts.reduceOp == ReduceOp::MAX ||
-          opts.reduceOp == ReduceOp::PRODUCT,
-      "TCCL reduce_scatter: only SUM, AVG, MIN, MAX and PRODUCT are supported. ",
-      kNotImplementedHint);
+  const auto invalid = invalidArgument("reduce_scatter");
+  assertInputOutputTensorListsSameSize(
+      invalid, outputTensors.size(), inputTensors.size());
   for (size_t i = 0; i < outputTensors.size(); ++i) {
     auto& out = outputTensors[i];
-    auto& inList = inputTensors[i];
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        static_cast<int>(inList.size()) == size_,
-        "TCCL reduce_scatter: input list ",
-        i,
-        " must have world_size (",
-        size_,
-        ") tensors, got ",
-        inList.size());
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        out.device().is_mps() && out.is_contiguous() &&
-            isSupportedReduceDtype(out.scalar_type()),
-        "TCCL reduce_scatter: each output must be a contiguous MPS tensor of a "
-        "supported dtype (float32/float16/bfloat16, int8/16/32/64, uint8, bool). ",
-        kNotImplementedHint);
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        opts.reduceOp != ReduceOp::AVG || isFloatReduceDtype(out.scalar_type()),
-        "TCCL reduce_scatter: AVG is only supported for float32/float16/bfloat16 "
-        "(integer/bool AVG is undefined; matches NCCL). Use SUM for integer "
-        "dtypes.");
-    for (const auto& chunk : inList) {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          chunk.device().is_mps() && chunk.is_contiguous() &&
-              chunk.scalar_type() == out.scalar_type() &&
-              chunk.numel() == out.numel(),
-          "TCCL reduce_scatter: every input chunk must be a contiguous MPS "
-          "tensor matching the output dtype and numel.");
+    assertInputTensorListSizeEqualsWorldSize(
+        invalid, inputTensors[i].size(), size_);
+    checkMpsTensor(out, "reduce_scatter");
+    checkReduce("reduce_scatter", out.scalar_type(), opts.reduceOp);
+    for (const auto& chunk : inputTensors[i]) {
+      checkMatches(chunk, out, "reduce_scatter");
     }
   }
-
   const ReduceOp::RedOpType op = opts.reduceOp;
   const int worldSize = size_;
   return enqueueCollective(
@@ -1501,117 +1182,56 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter(
       });
 }
 
-// _reduce_scatter_base (FSDP reduce_scatter_tensor)
+// reduce_scatter_tensor, single and coalesced (FSDP, TP / sequence parallel)
 
-c10::intrusive_ptr<Work> ProcessGroupTCCL::_reduce_scatter_base(
+c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter_single(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ReduceScatterOptions& opts) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.reduceOp == ReduceOp::SUM || opts.reduceOp == ReduceOp::AVG ||
-          opts.reduceOp == ReduceOp::MIN || opts.reduceOp == ReduceOp::MAX ||
-          opts.reduceOp == ReduceOp::PRODUCT,
-      "TCCL _reduce_scatter_base: only SUM, AVG, MIN, MAX and PRODUCT are supported. ",
-      kNotImplementedHint);
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      inputBuffer.device().is_mps() && inputBuffer.is_contiguous() &&
-          outputBuffer.device().is_mps() && outputBuffer.is_contiguous() &&
-          isSupportedReduceDtype(inputBuffer.scalar_type()) &&
-          outputBuffer.scalar_type() == inputBuffer.scalar_type(),
-      "TCCL _reduce_scatter_base: unsupported dtype or layout. Supported: "
-      "float32/float16/bfloat16 and int8/int16/int32/int64/uint8/bool (SUM); "
-      "in/out dtype must match; contiguous MPS. ",
-      kNotImplementedHint);
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.reduceOp != ReduceOp::AVG ||
-          isFloatReduceDtype(inputBuffer.scalar_type()),
-      "TCCL _reduce_scatter_base: AVG is only supported for "
-      "float32/float16/bfloat16 (integer/bool AVG is undefined; matches NCCL). "
-      "Use SUM for integer dtypes.");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      inputBuffer.numel() == outputBuffer.numel() * size_,
-      "TCCL _reduce_scatter_base: input numel (",
-      inputBuffer.numel(),
-      ") must equal output numel (",
-      outputBuffer.numel(),
-      ") * world_size (",
-      size_,
-      ").");
-
-  const ReduceOp::RedOpType op = opts.reduceOp;
-  const int worldSize = size_;
-  return enqueueCollective(
-      OpType::_REDUCE_SCATTER_BASE,
-      std::vector<at::Tensor>{outputBuffer},
-      [this, inputBuffer, outputBuffer, op, worldSize]() mutable {
-        at::Tensor inView = mpsSharedCpuView(inputBuffer);
-        at::Tensor outView = mpsSharedCpuView(outputBuffer);
-        dispatchReduceScatter(*engine_, inView, outView, op, worldSize);
-      });
+  std::vector<at::Tensor> outputs{outputBuffer};
+  std::vector<at::Tensor> inputs{inputBuffer};
+  return reduceScatterTensors(
+      outputs, inputs, opts, OpType::_REDUCE_SCATTER_BASE);
 }
 
-// reduce_scatter_tensor_coalesced (TP / sequence-parallel)
-
-c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter_tensor_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter_single_coalesced(
     std::vector<at::Tensor>& outputs,
     std::vector<at::Tensor>& inputs,
     const ReduceScatterOptions& opts) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      outputs.size() == inputs.size(),
-      "TCCL reduce_scatter_tensor_coalesced: outputs/inputs size mismatch (",
-      outputs.size(),
-      " vs ",
-      inputs.size(),
-      ").");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      opts.reduceOp == ReduceOp::SUM || opts.reduceOp == ReduceOp::AVG ||
-          opts.reduceOp == ReduceOp::MIN || opts.reduceOp == ReduceOp::MAX ||
-          opts.reduceOp == ReduceOp::PRODUCT,
-      "TCCL reduce_scatter_tensor_coalesced: only SUM, AVG, MIN, MAX and "
-      "PRODUCT are supported. ",
-      kNotImplementedHint);
+  return reduceScatterTensors(
+      outputs, inputs, opts, OpType::REDUCE_SCATTER_TENSOR_COALESCED);
+}
+
+c10::intrusive_ptr<Work> ProcessGroupTCCL::reduceScatterTensors(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const ReduceScatterOptions& opts,
+    OpType opType) {
+  constexpr const char* name = "reduce_scatter_tensor";
+  assertInputOutputTensorListsSameSize(
+      invalidArgument(name), outputs.size(), inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
+    checkMpsTensor(inputs[i], name);
+    checkMpsTensor(outputs[i], name);
+    checkReduce(name, inputs[i].scalar_type(), opts.reduceOp);
     TORCH_CHECK_WITH(
         DistBackendError,
-        inputs[i].device().is_mps() && inputs[i].is_contiguous() &&
-            outputs[i].device().is_mps() && outputs[i].is_contiguous() &&
-            isSupportedReduceDtype(inputs[i].scalar_type()) &&
-            outputs[i].scalar_type() == inputs[i].scalar_type(),
-        "TCCL reduce_scatter_tensor_coalesced: unsupported dtype. Supported: "
-        "float32/float16/bfloat16 and int8/int16/int32/int64/uint8/bool (SUM); "
-        "in/out dtype must match; contiguous MPS. ",
-        kNotImplementedHint);
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        opts.reduceOp != ReduceOp::AVG ||
-            isFloatReduceDtype(inputs[i].scalar_type()),
-        "TCCL reduce_scatter_tensor_coalesced: AVG is only supported for "
-        "float32/float16/bfloat16 (integer/bool AVG is undefined; matches NCCL). "
-        "Use SUM for integer dtypes.");
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        inputs[i].numel() == outputs[i].numel() * size_,
-        "TCCL reduce_scatter_tensor_coalesced: input numel (",
-        inputs[i].numel(),
-        ") must equal output numel (",
-        outputs[i].numel(),
-        ") * world_size (",
-        size_,
-        ").");
+        outputs[i].scalar_type() == inputs[i].scalar_type() &&
+            inputs[i].numel() == outputs[i].numel() * size_,
+        fmt::format(
+            "TCCL reduce_scatter_tensor: the input must have the output's "
+            "dtype {} and world_size ({}) times its numel {}, got {} and {}.",
+            c10::toString(outputs[i].scalar_type()),
+            size_,
+            outputs[i].numel(),
+            c10::toString(inputs[i].scalar_type()),
+            inputs[i].numel()));
   }
 
   const ReduceOp::RedOpType op = opts.reduceOp;
   const int worldSize = size_;
   return enqueueCollective(
-      OpType::REDUCE_SCATTER_TENSOR_COALESCED,
-      outputs,
-      [this, inputs, outputs, op, worldSize]() mutable {
+      opType, outputs, [this, inputs, outputs, op, worldSize]() mutable {
         for (size_t i = 0; i < inputs.size(); ++i) {
           at::Tensor inView = mpsSharedCpuView(inputs[i]);
           at::Tensor outView = mpsSharedCpuView(outputs[i]);
@@ -1620,76 +1240,36 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::reduce_scatter_tensor_coalesced(
       });
 }
 
-c10::intrusive_ptr<Work> ProcessGroupTCCL::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupTCCL::all_to_all_single(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     std::vector<int64_t>& outputSplitSizes,
     std::vector<int64_t>& inputSplitSizes,
     const AllToAllOptions& /*opts*/) {
+  checkMpsTensor(inputBuffer, "all_to_all_single");
+  checkMpsTensor(outputBuffer, "all_to_all_single");
   TORCH_CHECK_WITH(
       DistBackendError,
-      inputBuffer.device().is_mps() && inputBuffer.is_contiguous() &&
-          outputBuffer.device().is_mps() && outputBuffer.is_contiguous() &&
-          inputBuffer.dim() >= 1 && outputBuffer.dim() >= 1,
-      "TCCL alltoall_base: input/output must be contiguous MPS tensors with dim >= 1.");
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      outputBuffer.scalar_type() == inputBuffer.scalar_type(),
-      "TCCL alltoall_base: input/output dtype mismatch.");
+      inputBuffer.dim() >= 1 && outputBuffer.dim() >= 1 &&
+          outputBuffer.scalar_type() == inputBuffer.scalar_type(),
+      "TCCL all_to_all_single: input and output need dim >= 1 and one dtype.");
+  checkSplitSizes(inputSplitSizes, inputBuffer, size_);
+  checkSplitSizes(outputSplitSizes, outputBuffer, size_);
 
+  // Split along dim 0, in elements, then in bytes for the engine.
   const int ws = size_;
-  // Split is along dim 0; a "row" is the trailing-dims slab. in/out row bytes
-  // match (same dtype + trailing dims for a valid all-to-all).
-  const int64_t inDim0 = inputBuffer.size(0);
-  const int64_t outDim0 = outputBuffer.size(0);
-  const std::size_t inRow =
-      inDim0 > 0 ? static_cast<std::size_t>(inputBuffer.nbytes()) / inDim0 : 0;
-  const std::size_t outRow = outDim0 > 0
-      ? static_cast<std::size_t>(outputBuffer.nbytes()) / outDim0
-      : 0;
-
-  const bool equal = inputSplitSizes.empty() && outputSplitSizes.empty();
   std::vector<std::size_t> sOff(ws), sBytes(ws), rOff(ws), rBytes(ws);
-  if (equal) {
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        inDim0 % ws == 0 && outDim0 % ws == 0,
-        "TCCL alltoall_base: equal split requires dim-0 (",
-        inDim0,
-        "/",
-        outDim0,
-        ") divisible by world_size ",
-        ws,
-        ".");
-    const std::size_t sb = static_cast<std::size_t>(inDim0 / ws) * inRow;
-    const std::size_t rb = static_cast<std::size_t>(outDim0 / ws) * outRow;
-    for (int p = 0; p < ws; ++p) {
-      sOff[p] = static_cast<std::size_t>(p) * sb;
-      sBytes[p] = sb;
-      rOff[p] = static_cast<std::size_t>(p) * rb;
-      rBytes[p] = rb;
-    }
-  } else {
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        static_cast<int>(inputSplitSizes.size()) == ws &&
-            static_cast<int>(outputSplitSizes.size()) == ws,
-        "TCCL alltoall_base: split-size vectors must have world_size entries.");
-    std::size_t so = 0, ro = 0;
-    for (int p = 0; p < ws; ++p) {
-      sOff[p] = so;
-      sBytes[p] = static_cast<std::size_t>(inputSplitSizes[p]) * inRow;
-      so += sBytes[p];
-      rOff[p] = ro;
-      rBytes[p] = static_cast<std::size_t>(outputSplitSizes[p]) * outRow;
-      ro += rBytes[p];
-    }
-    TORCH_CHECK_WITH(
-        DistBackendError,
-        so == static_cast<std::size_t>(inputBuffer.nbytes()) &&
-            ro == static_cast<std::size_t>(outputBuffer.nbytes()),
-        "TCCL alltoall_base: split sizes do not sum to the buffer sizes.");
+  computeLengthsAndOffsets(inputSplitSizes, inputBuffer, &sBytes, &sOff);
+  computeLengthsAndOffsets(outputSplitSizes, outputBuffer, &rBytes, &rOff);
+  const auto inElem = static_cast<std::size_t>(inputBuffer.element_size());
+  const auto outElem = static_cast<std::size_t>(outputBuffer.element_size());
+  for (int p = 0; p < ws; ++p) {
+    sOff[p] *= inElem;
+    sBytes[p] *= inElem;
+    rOff[p] *= outElem;
+    rBytes[p] *= outElem;
   }
+  const bool equal = inputSplitSizes.empty() && outputSplitSizes.empty();
 
   // Ring requires equal (uniform) segments + ws > 2; tcclUseRing only returns
   // true under TCCL_FORCE_ALGO=ring or ring topology. Everything else (the
@@ -1699,7 +1279,7 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::alltoall_base(
   TORCH_CHECK_WITH(
       DistBackendError,
       !ringTop || (equal && sBytes[0] == rBytes[0]),
-      "TCCL alltoall_base: ring topology supports only uniform (equal-split) "
+      "TCCL all_to_all_single: ring topology supports only uniform (equal-split) "
       "all-to-all; uneven splits require the full mesh (non-neighbor peers are "
       "not connected on a ring).");
   const bool ringOk = equal && sBytes[0] == rBytes[0] &&
@@ -1741,49 +1321,31 @@ void ProcessGroupTCCL::checkP2p(
     bool isSend) const {
   const char* op = isSend ? "send" : "recv";
   const char* arg = isSend ? "dstRank" : "srcRank";
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensors.size() == 1,
-      "TCCL ",
-      op,
-      ": expected exactly one tensor, got ",
-      tensors.size());
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      tensors[0].device().is_mps() && tensors[0].is_contiguous(),
-      "TCCL ",
-      op,
-      ": tensor must be a contiguous MPS tensor.");
+  assertSingleElement(invalidArgument(op), tensors);
+  checkMpsTensor(tensors[0], op);
   TORCH_CHECK_WITH(
       DistBackendError,
       peer >= 0 && peer < size_ && peer != rank_,
-      "TCCL ",
-      op,
-      ": invalid ",
-      arg,
-      " ",
-      peer,
-      " for rank ",
-      rank_,
-      " (world size ",
-      size_,
-      ").");
+      fmt::format(
+          "TCCL {}: invalid {} {} for rank {} (world size {}).",
+          op,
+          arg,
+          peer,
+          rank_,
+          size_));
   // Ring topology only connects the two neighbors ((rank+/-1)%world); any
   // other peer has a null connection slot.
   TORCH_CHECK_WITH(
       DistBackendError,
       !engine_->ringTopology() || peer == (rank_ + 1) % size_ ||
           peer == (rank_ - 1 + size_) % size_,
-      "TCCL ",
-      op,
-      ": ring topology only connects a rank to its ring neighbors "
-      "((rank+/-1)%world); ",
-      arg,
-      " ",
-      peer,
-      " is not a neighbor of rank ",
-      rank_,
-      ".");
+      fmt::format(
+          "TCCL {}: ring topology only connects a rank to its ring neighbors "
+          "((rank+/-1)%world); {} {} is not a neighbor of rank {}.",
+          op,
+          arg,
+          peer,
+          rank_));
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::send(
@@ -1882,12 +1444,8 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::endCoalescing() {
     return work;
   }
   if (broken_.load()) {
-    std::exception_ptr ep;
-    try {
-      TORCH_CHECK_WITH(DistBackendError, false, refusedMessage());
-    } catch (...) {
-      ep = std::current_exception();
-    }
+    const auto ep = std::make_exception_ptr(
+        C10_BUILD_ERROR(DistBackendError, refusedMessage()));
     for (auto& op : ops) {
       op.work->finishWork(ep);
     }

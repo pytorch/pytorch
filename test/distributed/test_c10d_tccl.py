@@ -1174,6 +1174,14 @@ class ProcessGroupTcclContractTest(TcclTestBase):
         with self.assertRaises(Exception):
             c10d.all_reduce(t, op=c10d.ReduceOp.AVG)
 
+    def test_all_to_all_single_negative_split_rejects(self):
+        # [3, -1] still sums to dim 0; it must be rejected before any copy.
+        ws, dev = self.world_size, self.device
+        out = torch.zeros(ws, device=dev)
+        inp = torch.zeros(2, device=dev)
+        with self.assertRaisesRegex(Exception, "non-negative"):
+            c10d.all_to_all_single(out, inp, [1] * ws, [3, -1] + [0] * (ws - 2))
+
     def test_uint16_reduce_rejects(self):
         # uint16/32/64 have no MPS add kernel -> reduce must reject.
         t = self._full(torch.uint16)

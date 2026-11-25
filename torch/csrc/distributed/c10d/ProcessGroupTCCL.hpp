@@ -40,7 +40,7 @@ class TORCH_API ProcessGroupTCCL : public Backend {
    public:
     TCCLWork(OpType opType, uint64_t seq, std::vector<at::Tensor> outputs = {});
 
-    uint64_t seq() const noexcept {
+    uint64_t getSequencenumber() const override {
       return seq_;
     }
 
@@ -116,11 +116,6 @@ class TORCH_API ProcessGroupTCCL : public Backend {
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  c10::intrusive_ptr<Work> allreduce_coalesced(
-      std::vector<at::Tensor>& tensors,
-      const AllreduceCoalescedOptions& opts =
-          AllreduceCoalescedOptions()) override;
-
   c10::intrusive_ptr<Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
@@ -130,14 +125,12 @@ class TORCH_API ProcessGroupTCCL : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  c10::intrusive_ptr<Work> _allgather_base(
+  c10::intrusive_ptr<Work> all_gather_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  // Coalesced all-gather-into-tensor. The virtual DTensor / TP reach via
-  // _functional_collectives (all_gather_into_tensor), NOT _allgather_base.
-  c10::intrusive_ptr<Work> allgather_into_tensor_coalesced(
+  c10::intrusive_ptr<Work> all_gather_single_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& opts = AllgatherOptions()) override;
@@ -157,20 +150,17 @@ class TORCH_API ProcessGroupTCCL : public Backend {
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> _reduce_scatter_base(
+  c10::intrusive_ptr<Work> reduce_scatter_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  // Coalesced reduce-scatter-tensor. The virtual DTensor / sequence-parallel
-  // reach via _functional_collectives (reduce_scatter_tensor), NOT
-  // _reduce_scatter_base.
-  c10::intrusive_ptr<Work> reduce_scatter_tensor_coalesced(
+  c10::intrusive_ptr<Work> reduce_scatter_single_coalesced(
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  c10::intrusive_ptr<Work> alltoall_base(
+  c10::intrusive_ptr<Work> all_to_all_single(
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       std::vector<int64_t>& outputSplitSizes,
@@ -278,6 +268,17 @@ class TORCH_API ProcessGroupTCCL : public Backend {
       std::function<void()> fn);
   // Queues a send or recv; see Task.
   c10::intrusive_ptr<Work> enqueueP2p(P2POp op);
+  // The single and coalesced forms share these; opType is what the Work
+  // reports (flight recorder, retrieveOpType).
+  c10::intrusive_ptr<Work> allGatherIntoTensors(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      OpType opType);
+  c10::intrusive_ptr<Work> reduceScatterTensors(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const ReduceScatterOptions& opts,
+      OpType opType);
   // Runs `first` and the p2p ops queued behind it until all have completed.
   void runP2p(Task first);
   static void finishP2p(P2POp& op, const std::exception_ptr& ep);

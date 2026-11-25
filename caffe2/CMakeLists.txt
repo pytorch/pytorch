@@ -1614,8 +1614,9 @@ if(USE_DISTRIBUTED)
   endif()
   if(USE_TCCL AND USE_C10D_TCCL)
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_TCCL)
+    # Headers only: TCCL dlopens librdma at runtime (TCCLIBVWrapper), so
+    # libtorch still loads where librdma is missing.
     target_include_directories(torch_cpu PRIVATE ${LIBRDMA_INCLUDE_DIR})
-    target_link_libraries(torch_cpu PRIVATE ${LIBRDMA_LIBRARY})
   endif()
   # Pass USE_RPC in order to reduce use of
   # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)

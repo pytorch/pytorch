@@ -14,6 +14,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/exception.h>
 
@@ -257,36 +258,33 @@ std::vector<std::string> resolveTcclPeerDevices(
     TORCH_CHECK_WITH(
         DistBackendError,
         static_cast<int>(parts.size()) == size,
-        "TCCL: TCCL_PEER_DEVICES has ",
-        parts.size(),
-        " comma-separated entries; expected world_size=",
-        size,
-        " (self-slot empty). Value: '",
-        s,
-        "'.");
+        fmt::format(
+            "TCCL: TCCL_PEER_DEVICES has {} comma-separated entries; expected "
+            "world_size={} (self-slot empty). Value: '{}'.",
+            parts.size(),
+            size,
+            s));
     for (int p = 0; p < size; p++) {
       if (isConnectedPeer(p)) {
         TORCH_CHECK_WITH(
             DistBackendError,
             !parts[p].empty(),
-            "TCCL: TCCL_PEER_DEVICES entry for peer ",
-            p,
-            " is empty; this peer must name a device (",
-            ring_topology ? "ring neighbor" : "mesh peer",
-            "). Value: '",
-            s,
-            "'.");
+            fmt::format(
+                "TCCL: TCCL_PEER_DEVICES entry for peer {} is empty; this peer "
+                "must name a device ({}). Value: '{}'.",
+                p,
+                ring_topology ? "ring neighbor" : "mesh peer",
+                s));
       } else {
         TORCH_CHECK_WITH(
             DistBackendError,
             parts[p].empty(),
-            "TCCL: TCCL_PEER_DEVICES entry for peer ",
-            p,
-            " must be empty (",
-            p == rank ? "self-slot" : "non-neighbor under ring topology",
-            "), got '",
-            parts[p],
-            "'.");
+            fmt::format(
+                "TCCL: TCCL_PEER_DEVICES entry for peer {} must be empty ({}), "
+                "got '{}'.",
+                p,
+                p == rank ? "self-slot" : "non-neighbor under ring topology",
+                parts[p]));
       }
       devices[static_cast<size_t>(p)] = parts[p];
     }
@@ -413,26 +411,23 @@ TCCLConnection::TCCLConnection(const std::string& device_name) {
     TORCH_CHECK_WITH(
         DistBackendError,
         port_attr.state == IBV_PORT_ACTIVE,
-        "TCCL: port ",
-        kQpPort,
-        " on device '",
-        device_name,
-        "' is not ACTIVE (state=",
-        static_cast<int>(port_attr.state),
-        "). Check that the Thunderbolt cable is connected and the BSD "
-        "interface is up.");
+        fmt::format(
+            "TCCL: port {} on device '{}' is not ACTIVE (state={}). Check that "
+            "the Thunderbolt cable is connected and the BSD interface is up.",
+            kQpPort,
+            device_name,
+            static_cast<int>(port_attr.state)));
 
     ibv_gid gid{};
     int gid_ret = ibv.query_gid(ctx_, kQpPort, kGidIndex, &gid);
     TORCH_CHECK_WITH(
         DistBackendError,
         gid_ret == 0,
-        "TCCL: ibv_query_gid(port=",
-        kQpPort,
-        ", index=",
-        kGidIndex,
-        ") failed with errno=",
-        gid_ret);
+        fmt::format(
+            "TCCL: ibv_query_gid(port={}, index={}) failed with errno={}",
+            kQpPort,
+            kGidIndex,
+            gid_ret));
 
     local_destination_.lid = port_attr.lid;
     local_destination_.qp_num = qp_->qp_num;
@@ -545,17 +540,16 @@ void TCCLConnection::transitionToRTR(const TCCLDestination& remote) {
   TORCH_CHECK_WITH(
       DistBackendError,
       ret == 0,
-      "TCCL: ibv_modify_qp(QP -> RTR) failed with errno=",
-      ret,
-      ". remote: lid=",
-      remote.lid,
-      ", qp_num=",
-      remote.qp_num,
-      ", psn=",
-      remote.psn,
-      ". errno=60 (ETIMEDOUT) usually means the link-layer subnet is not "
-      "configured - call check_tccl_link_layer() before init, or configure a "
-      "static /30 on the Thunderbolt interface.");
+      fmt::format(
+          "TCCL: ibv_modify_qp(QP -> RTR) failed with errno={}. remote: "
+          "lid={}, qp_num={}, psn={}. errno=60 (ETIMEDOUT) usually means the "
+          "link-layer subnet is not configured - call check_tccl_link_layer() "
+          "before init, or configure a static /30 on the Thunderbolt "
+          "interface.",
+          ret,
+          remote.lid,
+          remote.qp_num,
+          remote.psn));
 }
 
 void TCCLConnection::transitionToRTS() {
@@ -625,13 +619,11 @@ void TCCLConnection::postSend(
   TORCH_CHECK_WITH(
       DistBackendError,
       rc == 0,
-      "TCCL: ibv_post_send returned ",
-      rc,
-      " (length=",
-      length,
-      ", wr_id=",
-      wr_id,
-      ").");
+      fmt::format(
+          "TCCL: ibv_post_send returned {} (length={}, wr_id={}).",
+          rc,
+          length,
+          wr_id));
 }
 
 void TCCLConnection::postRecv(
@@ -656,13 +648,11 @@ void TCCLConnection::postRecv(
   TORCH_CHECK_WITH(
       DistBackendError,
       rc == 0,
-      "TCCL: ibv_post_recv returned ",
-      rc,
-      " (length=",
-      length,
-      ", wr_id=",
-      wr_id,
-      ").");
+      fmt::format(
+          "TCCL: ibv_post_recv returned {} (length={}, wr_id={}).",
+          rc,
+          length,
+          wr_id));
 }
 
 int TCCLConnection::pollCq(int max_completions, ibv_wc* wcs) {
@@ -695,12 +685,11 @@ TCCLSharedBuffer::TCCLSharedBuffer(size_t num_bytes) : size_(num_bytes) {
   TORCH_CHECK_WITH(
       DistBackendError,
       rc == 0 && data_ != nullptr,
-      "TCCL: posix_memalign(align=",
-      page_size,
-      ", size=",
-      num_bytes,
-      ") returned ",
-      rc);
+      fmt::format(
+          "TCCL: posix_memalign(align={}, size={}) returned {}",
+          page_size,
+          num_bytes,
+          rc));
   std::memset(data_, 0, num_bytes);
 }
 
@@ -830,21 +819,18 @@ void checkLinkLayer(const std::string& rdma_device) {
   TORCH_CHECK_WITH(
       DistBackendError,
       ifaceHasStaticIPv4(bsd_iface),
-      "TCCL: interface '",
-      bsd_iface,
-      "' has no non-link-local IPv4 address. Thunderbolt RDMA requires a "
-      "static /30 subnet on this interface or ibv_modify_qp(QP -> RTR) "
-      "will time out with errno=60 (ETIMEDOUT). Run on each node "
-      "(one-time per boot, requires sudo):\n"
-      "  sudo ifconfig bridge0 down\n"
-      "  sudo ifconfig ",
-      bsd_iface,
-      " inet 192.168.0.X netmask 255.255.255.252\n"
-      "  sudo route change 192.168.0.Y -interface ",
-      bsd_iface,
-      "\nwhere X is this node's address (e.g. 1) and Y is the peer's "
-      "(e.g. 2). The /30 is only on the TB cable and does not affect LAN "
-      "routing.");
+      fmt::format(
+          "TCCL: interface '{0}' has no non-link-local IPv4 address. "
+          "Thunderbolt RDMA requires a static /30 subnet on this interface or "
+          "ibv_modify_qp(QP -> RTR) will time out with errno=60 (ETIMEDOUT). "
+          "Run on each node (one-time per boot, requires sudo):\n"
+          "  sudo ifconfig bridge0 down\n"
+          "  sudo ifconfig {0} inet 192.168.0.X netmask 255.255.255.252\n"
+          "  sudo route change 192.168.0.Y -interface {0}\n"
+          "where X is this node's address (e.g. 1) and Y is the peer's "
+          "(e.g. 2). The /30 is only on the TB cable and does not affect LAN "
+          "routing.",
+          bsd_iface));
 }
 
 int64_t tcclInitSequence(
@@ -954,18 +940,15 @@ void allgatherDestinationsViaStore(
     TORCH_CHECK_WITH(
         DistBackendError,
         results[r].size() == bytes_per_rank,
-        "TCCL: peer rank ",
-        r,
-        " published ",
-        results[r].size(),
-        " bytes; expected ",
-        bytes_per_rank,
-        " (",
-        local.size(),
-        " destinations * ",
-        sizeof(TCCLDestination),
-        " bytes). Most likely a num_wires mismatch between ranks or a "
-        "TCCLDestination ABI mismatch between builds.");
+        fmt::format(
+            "TCCL: peer rank {} published {} bytes; expected {} ({} "
+            "destinations * {} bytes). Most likely a num_wires mismatch "
+            "between ranks or a TCCLDestination ABI mismatch between builds.",
+            r,
+            results[r].size(),
+            bytes_per_rank,
+            local.size(),
+            sizeof(TCCLDestination)));
     remote[r].assign(local.size(), TCCLDestination{});
     std::memcpy(remote[r].data(), results[r].data(), bytes_per_rank);
   }
