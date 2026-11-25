@@ -406,6 +406,8 @@ class MultiKernelPlan:
 
     @staticmethod
     def _union_call_args(plans):
+        from .wrapper import SymbolicCallArg
+
         call_args = []
         arg_types = []
         arg_to_index = {}
@@ -414,13 +416,18 @@ class MultiKernelPlan:
             plan_indices = []
             for kernel in plan:
                 _, kernel_args, _, kernel_arg_types = kernel.args.python_argdefs()
+                # A per-kernel name keeps each kernel's symbolic numel
+                # expressions in their own wrapper variables.
                 kernel.add_numel_to_call_args(
-                    "multi_kernel_plan", kernel_args, kernel_arg_types
+                    kernel.kernel_name, kernel_args, kernel_arg_types
                 )
                 indices = []
                 for arg, arg_type in zip(kernel_args, kernel_arg_types):
-                    if arg in arg_to_index:
-                        index = arg_to_index[arg]
+                    # Symbolic numels arrive as unhashable SymbolicCallArg;
+                    # the same symbol names the same value in every kernel.
+                    key = str(arg) if isinstance(arg, SymbolicCallArg) else arg
+                    if key in arg_to_index:
+                        index = arg_to_index[key]
                         if arg_types[index] != arg_type:
                             raise AssertionError(
                                 f"inconsistent type for plan argument {arg}: "
@@ -428,7 +435,7 @@ class MultiKernelPlan:
                             )
                     else:
                         index = len(call_args)
-                        arg_to_index[arg] = index
+                        arg_to_index[key] = index
                         call_args.append(arg)
                         arg_types.append(arg_type)
                     indices.append(index)
