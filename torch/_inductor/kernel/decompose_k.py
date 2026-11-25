@@ -49,7 +49,7 @@ def _decompose_k_choice_name(
         tuple(
             (
                 tuple(node.get_size()),
-                tuple(node.get_stride()),
+                tuple(node.get_stride_hint()),
                 node.get_dtype(),
                 node.get_device(),
             )
@@ -57,7 +57,7 @@ def _decompose_k_choice_name(
         ),
         (
             tuple(layout.size),
-            tuple(layout.stride),
+            tuple(layout.stride_hint()),
             layout.dtype,
             layout.device,
         ),

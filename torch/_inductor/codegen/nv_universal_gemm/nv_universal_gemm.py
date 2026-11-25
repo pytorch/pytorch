@@ -46,6 +46,7 @@ from torch._inductor.heuristics.template.nv_universal_gemm import (
 from torch._inductor.ir import (
     Buffer,
     ChoiceCaller,
+    fixed_layout_snapshot,
     FixedLayout,
     Layout,
     PermuteView,
@@ -474,6 +475,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.output_scale_node = output_scale_node
         self._kernel_layout = kernel_layout or layout
         self._cached_output_node: TensorBox | None = None
+        # the operator was chosen by supports() checks against these layouts
+        self.snapshot_input_layouts()
 
         output_buffer = Buffer(name=f"{variant.op_name}_out", layout=layout)
 
@@ -506,6 +509,8 @@ class NVUniversalGemmCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
+
+        self.freeze_inputs_to_snapshot()
 
         # Without memoization, each call registers a new buffer (via
         # TemplateBuffer.__init__ → V.graph.register_buffer), leaking orphan
@@ -809,7 +814,7 @@ def _add_nv_gemm_choices_impl(
     # Pass node dtype to handle FP4 ReinterpretView (uint8 storage viewed as float4_e2m1fn_x2).
     dummy_tensors = [
         _create_dummy_tensor_from_layout(
-            node.get_layout(), dtype_override=node.get_dtype()
+            fixed_layout_snapshot(node), dtype_override=node.get_dtype()
         )
         for node in input_nodes
     ]
@@ -1223,13 +1228,13 @@ def add_nv_universal_scaled_gemm_choices(
 
     if scale_type_a is None or scale_type_b is None:
         mat_a_hint = _create_dummy_tensor_from_layout(
-            mat_a.get_layout(), dtype_override=mat_a.get_dtype()
+            fixed_layout_snapshot(mat_a), dtype_override=mat_a.get_dtype()
         )
         mat_b_hint = _create_dummy_tensor_from_layout(
-            mat_b.get_layout(), dtype_override=mat_b.get_dtype()
+            fixed_layout_snapshot(mat_b), dtype_override=mat_b.get_dtype()
         )
-        scale_a_hint = _create_dummy_tensor_from_layout(scale_a.get_layout())
-        scale_b_hint = _create_dummy_tensor_from_layout(scale_b.get_layout())
+        scale_a_hint = _create_dummy_tensor_from_layout(fixed_layout_snapshot(scale_a))
+        scale_b_hint = _create_dummy_tensor_from_layout(fixed_layout_snapshot(scale_b))
         if (
             mat_a_hint is not None
             and mat_b_hint is not None

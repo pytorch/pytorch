@@ -14,7 +14,14 @@ from torch.nn.functional import ScalingType, SwizzleType
 from torch.utils._triton import has_triton
 
 from ..codegen.wrapper import PythonWrapperCodegen
-from ..ir import ChoiceCaller, FlexibleLayout, is_unaligned, Layout, TensorBox
+from ..ir import (
+    ChoiceCaller,
+    fixed_layout_snapshot,
+    FlexibleLayout,
+    is_unaligned,
+    Layout,
+    TensorBox,
+)
 from ..lowering import fallback_handler, register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -165,8 +172,9 @@ def use_flydsl_grouped_mm_template(
         return False
 
     sizevars = V.graph.sizevars
-    mat1_stride = mat_a.get_stride()
-    mat2_stride = mat_b.get_stride()
+    # FlyDSLTemplateCaller freezes the inputs to these layouts if selected
+    mat1_stride = fixed_layout_snapshot(mat_a).stride
+    mat2_stride = fixed_layout_snapshot(mat_b).stride
     out_stride = layout.stride
     if not sizevars.statically_known_equals(mat1_stride[-1], 1):
         return False
@@ -562,8 +570,8 @@ def _tuned_grouped_mm_common(
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
         and (not scaled or has_scaled_grouped_mm_triton_support(mat_a, mat_b))
     ):
-        a_is_k_major = mat_a.get_stride()[-1] == 1
-        b_is_k_major = mat_b.get_stride()[-2] == 1
+        a_is_k_major = mat_a.get_stride_hint()[-1] == 1
+        b_is_k_major = mat_b.get_stride_hint()[-2] == 1
 
         triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
         triton_has_experimental_make_tensor_descriptor = hasattr(
@@ -843,10 +851,11 @@ def get_flydsl_mxfp8_grouped_mm_template_kwargs(
         return []
     scale_k = k_static // MXFP8_SCALE_BLOCK
 
-    mat_a_stride = mat_a.get_stride()
-    mat_b_stride = mat_b.get_stride()
-    scale_a_stride = scale_a.get_stride()
-    scale_b_stride = scale_b.get_stride()
+    # FlyDSLTemplateCaller freezes the inputs to these layouts if selected
+    mat_a_stride = fixed_layout_snapshot(mat_a).stride
+    mat_b_stride = fixed_layout_snapshot(mat_b).stride
+    scale_a_stride = fixed_layout_snapshot(scale_a).stride
+    scale_b_stride = fixed_layout_snapshot(scale_b).stride
     out_stride = layout.stride
 
     # A is (M, K) row-major and its scales are (M, K // 32) row-major.
@@ -977,7 +986,7 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
         return []
     sizevars = V.graph.sizevars
     # The kernel reads offs[i] at byte 4 * i, so the offsets must be dense.
-    if not sizevars.statically_known_equals(offs.get_stride()[0], 1):
+    if not sizevars.statically_known_equals(offs.get_stride_hint()[0], 1):
         return []
 
     statically_known = PythonWrapperCodegen.statically_known_int_or_none
@@ -998,7 +1007,7 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
     scale_m = m // 32
 
     def is_row_major(node: TensorBox) -> bool:
-        size, stride = node.get_size(), node.get_stride()
+        size, stride = node.get_size(), node.get_stride_hint()
         return sizevars.statically_known_equals(
             stride[0], size[1]
         ) and sizevars.statically_known_equals(stride[1], 1)
@@ -1007,8 +1016,8 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
     if not is_row_major(mat_a):
         return []
     if not (
-        sizevars.statically_known_equals(mat_b.get_stride()[0], 1)
-        and sizevars.statically_known_equals(mat_b.get_stride()[1], m_b)
+        sizevars.statically_known_equals(mat_b.get_stride_hint()[0], 1)
+        and sizevars.statically_known_equals(mat_b.get_stride_hint()[1], m_b)
     ):
         return []
     for scale, rows in ((scale_a, n), (scale_b, k)):
@@ -1039,7 +1048,7 @@ def get_flydsl_mxfp8_wgrad_template_kwargs(
     # exactly (a plain freeze could pad them).
     for node in operands:
         if isinstance(node.get_layout(), FlexibleLayout):
-            node.freeze_layout_with_exact_strides(node.get_stride())
+            node.freeze_layout_with_exact_strides(node.get_stride_hint())
 
     # gfx950 has 32 CUs per XCD; a partitioned part exposes fewer XCDs.
     num_xcd = max(1, _flydsl_device_cu_count(layout.device) // 32)

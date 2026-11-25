@@ -3,6 +3,7 @@ import logging
 from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 
+import torch
 import torch._inductor.config as config
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.utils import do_bench_using_profiling
@@ -247,6 +248,10 @@ class ROCmTemplateCaller(ChoiceCaller):
         self.bmreq = bmreq
         self.template = template
         self.info_kwargs = info_kwargs
+        # the template renders against snapshots of the input layouts
+        self.input_layout_snapshot = [
+            node.get_layout() for node in template.input_nodes
+        ]
 
     def precompile(self) -> None:
         if self.bmreq is None:
@@ -256,10 +261,31 @@ class ROCmTemplateCaller(ChoiceCaller):
     def benchmark(self, *args, out) -> float:
         if self.bmreq is None:
             raise AssertionError("expected self.bmreq to be set")
+        from ...select_algorithm import get_strides_with_layout_constraints
+
+        nodes_by_name = {node.get_name(): node for node in self.input_nodes}
+        sizevars = V.graph.sizevars
+        benchmark_inputs = []
+        for arg, meta in zip(args, self.bmreq.input_tensor_meta, strict=True):
+            if meta.name is None:
+                raise AssertionError("ROCm benchmark inputs must have buffer names")
+            node = nodes_by_name[meta.name]
+            source_strides = get_strides_with_layout_constraints(node)
+            strides = sizevars.optimization_hints(source_strides)
+            if tuple(strides) != tuple(meta.strides):
+                offset = sizevars.optimization_hint(node.get_layout().offset)
+                source = arg.as_strided(meta.sizes, strides, offset)
+                numel = torch._prims_common.compute_required_storage_length(
+                    meta.sizes, meta.strides, meta.offset
+                )
+                storage = torch.empty(numel, dtype=meta.dtype, device=meta.device)
+                arg = storage.as_strided(meta.sizes, meta.strides)
+                arg.as_strided(meta.sizes, meta.strides, meta.offset).copy_(source)
+            benchmark_inputs.append(arg)
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            algo = self.bmreq.make_run_fn(*args, out=out)
+            algo = self.bmreq.make_run_fn(*benchmark_inputs, out=out)
             return do_bench_using_profiling(algo)
-        return self.bmreq.benchmark(*args, out=out)
+        return self.bmreq.benchmark(*benchmark_inputs, out=out)
 
     def __str__(self) -> str:
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"
@@ -284,6 +310,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         }
 
     def output_node(self) -> TensorBox:
+        self.freeze_inputs_to_snapshot()
         self.bmreq.update_workspace_size()
         buffer = ROCmTemplateBuffer(
             layout=self.layout,
