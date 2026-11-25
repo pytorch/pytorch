@@ -2856,9 +2856,9 @@ class TritonTemplateKernel(TritonKernel):
         """Shared memory autoWS can free for epilogue staging by giving the
         operand ring fewer copies: its memory planner grows the ring only into
         what's left, down to 2 copies when loads and MMAs are in different
-        stages. 0 for templates that aren't warp-specialized."""
+        stages. 0 for templates autoWS doesn't plan (USE_META_WS off)."""
         tile = [self.meta.get(k) for k in ("BLOCK_M", "BLOCK_N", "BLOCK_K")]
-        if not self.meta.get("WARP_SPECIALIZE") or None in tile:
+        if not self.meta.get("USE_META_WS") or None in tile:
             return 0
         bm, bn, bk = tile
         operands = self.input_nodes[

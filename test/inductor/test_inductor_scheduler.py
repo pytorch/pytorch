@@ -1640,6 +1640,32 @@ class TestScheduler(TestCase):
             kept([("a", fp32)], [], 81919, template_removed=True, columns=True), []
         )
 
+    def test_operand_ring_slack(self):
+        """autoWS can shorten a meta-WS template's operand ring to 2 copies,
+        freeing the other stages' A and B tiles for epilogue staging."""
+
+        def slack(num_stages, meta_ws=True, dtype=torch.bfloat16):
+            kernel = Mock(
+                meta={
+                    "BLOCK_M": 128,
+                    "BLOCK_N": 64,
+                    "BLOCK_K": 64,
+                    "USE_META_WS": meta_ws,
+                },
+                input_nodes=[Mock(get_dtype=Mock(return_value=dtype))] * 2,
+                prefix_args=0,
+                suffix_args=0,
+                num_stages=num_stages,
+            )
+            return TritonTemplateKernel._operand_ring_slack(kernel)
+
+        stage = (128 * 64 + 64 * 64) * 2
+        self.assertEqual(slack(8), 6 * stage)
+        self.assertEqual(slack(2), 0)
+        self.assertEqual(slack(1), 0)
+        self.assertEqual(slack(8, meta_ws=False), 0)
+        self.assertEqual(slack(8, dtype=torch.float32), 12 * stage)
+
     def test_full_tile_epilogue_outputs(self):
         m, n = 64, 32
         layouts = {
