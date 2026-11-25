@@ -140,7 +140,9 @@ class TestKernelGeneral(TestCase):
             T.SumOps(acc=cutlass.Float32), "general_smoke", x, [0, 2], torch.float32
         )
         self.assertEqual(_plan_tags("general_smoke"), {"reduce"})
-        torch.testing.assert_close(out, x.sum(dim=(0, 2)), atol=1e-2, rtol=1e-2)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=(0, 2))
+        torch.testing.assert_close(out, want, atol=1e-2, rtol=1e-2)
 
     def test_extent_one_reduced_axis(self):
         # TensorIterator coalesces away the reduced run; the kernel must fold one value.
@@ -156,7 +158,9 @@ class TestKernelGeneral(TestCase):
         )
         self.assertEqual(op.npairs_red, 0)
         kg._launch(op, ("unit_red", "unit_red"), [kg._flat(x)], [out.reshape(-1)])
-        self.assertEqual(out, x.sum(dim=1))
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=1)
+        self.assertEqual(out, want)
 
     def test_wide_geometry_runs_kernel(self):
         trait = T.SumOps(acc=cutlass.Float32)
@@ -175,7 +179,9 @@ class TestKernelGeneral(TestCase):
             limit=4096,
         )
         kg._launch(wide_count, ("wide", "wide_count"), [x], [out])
-        self.assertEqual(out, x[:4096].sum().reshape(1), atol=0, rtol=0)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x[:4096].sum().reshape(1)
+        self.assertEqual(out, want, atol=0, rtol=0)
 
         # Lower only the selection and grid limits to run the real wide-output split.
         # 7 outputs on a 3-wide grid leave two dead slots, which must not store.
@@ -213,7 +219,9 @@ class TestKernelGeneral(TestCase):
         (out,) = kg._two_stage_row(
             T.SumOps(acc=cutlass.Float32), "smoke_rag", x, [torch.float32], 1
         )
-        torch.testing.assert_close(out, x.sum(dim=1), atol=1e-1, rtol=1e-3)
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.sum(dim=1)
+        torch.testing.assert_close(out, want, atol=1e-1, rtol=1e-3)
 
     def test_two_stage_row_index_is_global(self):
         # Chunk-local reductions must report global columns and preserve first-wins ties.

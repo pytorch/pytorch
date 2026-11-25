@@ -572,7 +572,9 @@ class TestInnerTreeOrder(TestCase):
         ):
             with _order_on():
                 got = kg.reduce_dim(T.SumOps(acc=acc), key, src, [1], dtype)
-            self.assertEqual(got, src.sum(dim=1, dtype=dtype))
+            with torch.backends.python_native.cutedsl.disabled():
+                want = src.sum(dim=1, dtype=dtype)
+            self.assertEqual(got, want)
         # Each ran the indexed split path with its own stage-one kernel.
         stage1 = [k for k in kg._COMPILE_CACHE if k[1:3] == ("genitree1", key)]
         self.assertEqual(len(stage1), 3)

@@ -7,7 +7,9 @@ registered separately because structured delegation occurs below the dispatcher.
 Eligibility mirrors the former ``try_inner_tree_reduction``: TensorIterator must
 coalesce the input to one contiguous reduced dimension and at most one outer
 dimension. Unsupported geometry, dtype conversion, and integer or complex inputs
-fall through to ATen.
+fall through to the next registration: the CuTeDSL reduction overrides
+(``overrides.py``) for ``sum.dim_IntList`` and ``prod.dim_int``, then ATen if those
+decline too, and ATen directly for the ``out=`` overloads.
 
 Accepted calls canonicalize to ``(M, N)``. The ordered adapter uses the shared
 fixed-DAG kernel with dynamic input and output row strides.
@@ -185,6 +187,11 @@ def _out_cond(self, dim, keepdim=False, *, dtype=None, out) -> bool:
     if d is None:
         return False
     if out.dtype != self.dtype or not out.is_cuda or is_fake_tensor(out):
+        return False
+    # ATen serves copy-on-write outs, whose mutable data pointers TensorIterator would
+    # materialize, and subclass outs, on whose Python-key instances _is_cow_tensor
+    # raises. Check out, not its keepdim view, which is plain for a Parameter.
+    if type(out) is not torch.Tensor or torch._C._is_cow_tensor(out):
         return False
     # The kernel writes ``out`` directly via a keepdim-aligned view; ``out``
     # must already have the reduced shape. Reject mis-shaped ``out`` and let

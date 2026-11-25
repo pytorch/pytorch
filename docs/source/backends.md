@@ -481,6 +481,31 @@ The `torch.backends.python_native` module provides user control over native oper
 via. DSLs (Domain Specific Languages) that are defined in `torch._native`. This allows users to selectively
 enable or disable high-performance implementations from various DSLs like Triton and CuteDSL.
 
+### CuTeDSL reductions
+
+On CUDA GPUs with compute capability 10.x and a supported CuTeDSL runtime version
+installed, `torch.sum`, `torch.mean`, `torch.amax`, `torch.amin` and `torch.prod` (with
+`dim`) are overridden by default for float16, bfloat16 and float32 inputs. `sum`, `mean`
+and `prod` results can differ bitwise from ATen's, since the kernels accumulate in FP32 in
+a different reduction order; `amax` and `amin` results are equal in value, though the sign
+of zero and NaN payloads can differ. By default the Python `out=` overloads
+(`sum.IntList_out`, `mean.out`, `mean.dtype_out`, `amax.out`, `amin.out` and
+`prod.int_out`), full `prod()` and declined inputs (such as 0-d, empty or not 16-byte
+aligned ones) stay on ATen, so `torch.sum(x, 1)` and `torch.sum(x, 1, out=o)` can differ
+bitwise; `aten::sum.out` routes through `sum.dim_IntList` and is served. Setting
+`PYTORCH_NATIVE_INNER_TREE` to `1` puts served calls in inner-tree order, warning once
+per reason and running unordered where a layout cannot take it; `strict` raises there
+instead, `""` or `0` leaves the order off, and any other value makes served calls raise
+`ValueError`. Declined calls and the Python `out=` overloads go to ATen and ignore it.
+To keep ATen, pass the overload names `sum.dim_IntList`, `mean.dim`,
+`prod.dim_int`, `amax` and `amin` to `disable_operations`, or set
+`torch.backends.python_native.cutedsl.enabled = False`, which turns off every
+conditional CuTeDSL override, not only these reductions (unconditional ones, such as
+`quantize_tensor`'s, stay). The `cutedsl.disabled()` context manager does the
+same while its block runs (process-wide), along with native AOT for every DSL except
+unconditional kernels. Setting `TORCH_DISABLE_NATIVE_JIT=1` before `import torch`
+registers no CuTeDSL, Triton, Helion or FlyDSL overrides.
+
 ### Module-level Functions
 
 ```{eval-rst}
@@ -539,7 +564,7 @@ Each DSL controller (e.g., `torch.backends.python_native.triton`) provides the f
 |----------|------|-------------|
 | `name` | `str` | The name of the DSL |
 | `available` | `bool` | Whether the DSL's runtime dependencies are available |
-| `enabled` | `bool` | Controls whether all operations from this DSL are enabled. Setting to `False` disables all operations from the DSL, while `True` re-enables them |
+| `enabled` | `bool` | Controls whether the conditional operations from this DSL are enabled. Setting to `False` disables the DSL's conditional overrides, while `True` re-enables them. Native AOT kernels stay on either way |
 | `version` | `Version` or `None` | The version of the DSL runtime, if available. Returns `None` if the DSL is not available |
 
 #### DSL Methods
@@ -547,14 +572,17 @@ Each DSL controller (e.g., `torch.backends.python_native.triton`) provides the f
 Each DSL controller provides the following methods:
 
 **disable()**
-    Disable all operations from this DSL.
+    Disable the conditional operations from this DSL. Native AOT kernels stay on;
+    `disabled()` masks those too.
 
 **enable()**
-    Re-enable all operations from this DSL.
+    Re-enable the conditional operations from this DSL.
 
 **disabled()**
-    Context manager that temporarily disables all operations from this DSL.
-    Operations are automatically re-enabled when exiting the context.
+    Context manager that temporarily disables the conditional operations from this DSL,
+    along with native AOT kernels for every DSL (except unconditional ones).
+    Both are process-wide while the block runs, and are automatically restored when
+    exiting the context.
 
     Example::
 
@@ -573,18 +601,18 @@ Each DSL controller provides the following methods:
     # Query available DSLs
     print(pn.available_dsls)  # ['triton', 'cutedsl']
 
-    # Disable all Triton operations
+    # Disable Triton's conditional operations
     pn.triton.enabled = False
 
-    # Temporarily disable CuteDSL operations
+    # Temporarily disable CuteDSL's conditional operations and every DSL's native AOT
     with pn.cutedsl.disabled():
-        result = model(input)  # CuteDSL ops disabled
+        result = model(input)  # both disabled here
 
     # Disable specific operations across all DSLs
-    pn.disable_operations('scaled_mm', '_flash_attention_forward')
+    pn.disable_operations('sum.dim_IntList', 'amax')
 
     # Query operations for a specific DSL
-    triton_ops = pn.get_dsl_operations('triton')
+    cutedsl_ops = pn.get_dsl_operations('cutedsl')
 ```
 
 ## torch.backends.xeon
