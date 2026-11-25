@@ -119,9 +119,6 @@ class _Missing:
     def __repr__(self) -> str:
         return f"_Missing({self._reason})"
 
-    def __str__(self) -> str:
-        return f"_Missing({self._reason})"
-
     # Sometimes _Missing object is used as the callable with functools.partial,
     # so we add a dummy __call__ here to bypass TypeError from partial().
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
@@ -1131,9 +1128,7 @@ class PrecompileCacheEntry:
 
 
 def _hash_source(source: str) -> str:
-    sha256_hash = hashlib.sha256()
-    sha256_hash.update(source.encode())
-    return sha256_hash.hexdigest()
+    return hashlib.sha256(source.encode()).hexdigest()
 
 
 def _get_sourcelines(
@@ -1737,15 +1732,11 @@ class CompilePackage:
             with context:
                 module = sys.modules[entry.python_module]
                 self._install_import_sources(module, entry.import_sources)
-                target_code = code
                 if entry.install_to_global:
                     self._install_resume_functions(module, code, entry.function_names)
-                if entry.code_source:
-                    target_code = _lookup_code(entry)
+                target_code = _lookup_code(entry) if entry.code_source else code
 
                 if entry.bypassed:
-                    # If the entry is bypassed, do not install backends
-                    # or guarded codes.
                     continue
 
                 input_codes.add(target_code)
@@ -1753,7 +1744,7 @@ class CompilePackage:
 
                 # Dynamo generates empty graph for trivial functions, should just skip them
                 # in these cases.
-                if entry.skip_recursive or len(entry.guarded_codes) == 0:
+                if entry.skip_recursive or not entry.guarded_codes:
                     _update_skip_hold(target_code, entry.skip_recursive, hold=True)
                     self._skipped_codes.append((target_code, entry.skip_recursive))
 
@@ -1778,12 +1769,8 @@ class CompilePackage:
     def source_id_from_fn(fn: Callable[..., Any]) -> str:
         from .eval_frame import innermost_fn
 
-        innermost_fn_ = innermost_fn(fn)
-
-        sha256_hash = hashlib.sha256()
-        sha256_hash.update(innermost_fn_.__qualname__.encode())
-        sha256_hash.update(str(innermost_fn_.__code__.co_firstlineno).encode())
-        return sha256_hash.hexdigest()
+        inner = innermost_fn(fn)
+        return _hash_source(f"{inner.__qualname__}{inner.__code__.co_firstlineno}")
 
 
 _Backends = dict[_BackendId, Any]
@@ -1937,10 +1924,10 @@ class InMemoryDynamoStore(DynamoStore):
         """
         Read dynamo cache entry and backends from memory.
         """
-        if path not in self.packages:
+        entry = self.packages.get(path)
+        if entry is None:
             raise RuntimeError(f"No package found with key {path}")
-
-        return self.packages[path]
+        return entry
 
 
 class DiskDynamoStore(DynamoStore):

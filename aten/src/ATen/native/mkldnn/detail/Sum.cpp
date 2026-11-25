@@ -8,8 +8,8 @@ namespace at::native::mkldnn {
 
 void sum(
     const std::vector<float>& scales,
-    const std::vector<ITensor>& srcs,
-    ITensor& dst) {
+    const std::vector<MkldnnMemory>& srcs,
+    MkldnnMemory& dst) {
   const auto& engine = ideep::engine::cpu_engine();
   std::vector<dnnl::memory::desc> src_descs;
   src_descs.reserve(srcs.size());
@@ -24,7 +24,7 @@ void sum(
 
   // May replace dst's buffer and layout when they differ from pd.dst_desc().
   dst.reinit_if_possible(pd.dst_desc());
-  ITensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
   std::unordered_map<int, dnnl::memory> args{
       {DNNL_ARG_DST, dst}, {DNNL_ARG_SCRATCHPAD, scratchpad}};
   for (size_t i = 0; i < srcs.size(); ++i) {

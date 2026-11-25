@@ -11,7 +11,7 @@ namespace at::native::mkldnn {
 
 // oneDNN tensor (memory descriptor, buffer, scales/zero points, workspace).
 // Alias for ideep::tensor until the tensor class is ported.
-using ITensor = ideep::tensor;
+using MkldnnMemory = ideep::tensor;
 
 } // namespace at::native::mkldnn
 
