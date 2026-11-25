@@ -57,7 +57,7 @@ def copysign(x: Scalar, y: Scalar, dtype: cutlass.Constexpr = None) -> ScalarRes
 
 @cute.jit
 def frexp(x: Scalar) -> tuple[ScalarResult, ScalarResult]:
-    r"""Decompose IEEE floats exactly, including subnormals and signed zero."""
+    r"""Decompose FP32/FP64 exactly, including subnormals and signed zero."""
     dt = type(x)
     if const_expr(dt is Float64):
         integer, mantissa_bits, exponent_max, bias = Int64, 52, 2047, 1022
