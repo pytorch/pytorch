@@ -3349,6 +3349,7 @@ pub fn call_with_cfg_execution<'py>(
     kwargs: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     trampoline::init(func.py())?;
+    region::next_call();
     let _guard = ExecGuard::new();
     let _ops = (RECORD.load(Ordering::Relaxed) || torch_ops::printing()).then(torch_ops::OpHookGuard::new);
     func.call(args, kwargs)

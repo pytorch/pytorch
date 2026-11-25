@@ -1290,7 +1290,12 @@ impl Act<'_> {
             }
             match super::region::call(&v.spec, args) {
                 Ok(None) => {}
-                r => return r,
+                r => {
+                    if matches!(r, Ok(Some(_))) {
+                        variants.ran(&v);
+                    }
+                    return r;
+                }
             }
         }
         Ok(None)

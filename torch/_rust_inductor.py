@@ -1803,6 +1803,19 @@ def _keys(args, plan, checks):
     return out
 
 
+def _dropped(func) -> None:
+    """The region whose function is ``func`` was dropped by its place (see
+    exec/region.rs's Variants::room): it never ran, and neither did the
+    regions traced after it, each for another object or value where the
+    place tells its regions apart. Its trace is no region any more, and what
+    the trace read is let go."""
+    record = func.record
+    record.state = "refused"
+    record.why = "it is found by which object (or value) an argument is, and that was another on every call: its regions never ran, so they were dropped and the place takes no new one"
+    record.reads = None
+    stats["refused"] += 1
+
+
 def _span_holds(checks, args) -> bool:
     for kind, i, want in checks:
         if kind == "grad_enabled":
@@ -2106,6 +2119,8 @@ def trace_region(
         record.runs += 1
         return compiled(*inputs, *consts)
 
+    # For _dropped.
+    func.record = record  # type: ignore[attr-defined]
     quick = _quick(args, plan, own_checks)
     keys = _keys(args, plan, checks)
     return func, result["outputs"], result["objects"], checks, reads, quick, keys
