@@ -21,6 +21,7 @@ import typing
 from collections.abc import Callable, Generator
 from functools import lru_cache, partial
 from typing import NoReturn, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch
 from torch._C._dynamo import (
@@ -77,7 +78,14 @@ from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
-    from ..symbolic_convert import InstructionTranslatorBase
+    from ..symbolic_convert import (
+        ExceptionTypes,
+        ExceptionVals,
+        InstructionTranslatorBase,
+    )
+    from .dicts import ConstDictVariable
+    from .lists import SliceVariable
+    from .sets import BaseSetVariable, SetVariable
 
 
 def vt_identity_compare(
@@ -410,6 +418,56 @@ def pylist_check(obj: VariableTracker) -> bool:
 def pytuple_check(obj: VariableTracker) -> bool:
     """Implements PyTuple_Check semantics for VariableTracker objects."""
     return issubclass(obj.python_type(), tuple)
+
+
+def pytuple_checkexact(obj: VariableTracker) -> bool:
+    return obj.python_type() is tuple
+
+
+def pylist_checkexact(obj: VariableTracker) -> bool:
+    return obj.python_type() is list
+
+
+def pyslice_check(obj: VariableTracker) -> TypeIs["SliceVariable"]:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/sliceobject.h (PySlice_Check)
+    return obj.python_type() is slice
+
+
+def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
+    # This is a simplified version of the CPython's PyDict_Check function:
+    return issubclass(obj.python_type(), dict)
+
+
+def pydict_checkexact(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
+    return obj.python_type() is dict
+
+
+def pyanyset_check(obj: VariableTracker) -> TypeIs["BaseSetVariable"]:
+    return issubclass(obj.python_type(), (set, frozenset))
+
+
+def pyanyset_checkexact(obj: VariableTracker) -> TypeIs["BaseSetVariable"]:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L28-L29
+    return obj.python_type() in (set, frozenset)
+
+
+def pyset_check(obj: VariableTracker) -> TypeIs["SetVariable"]:
+    # ref: https://github.com/python/cpython/blob/v3.13.0/Include/setobject.h#L36-L38
+    return issubclass(obj.python_type(), set)
+
+
+def pyexception_class_check(val: VariableTracker) -> TypeIs["ExceptionTypes"]:
+    # Mirror's CPython PyExceptionClass_Check: PyType_Check(x) && PyType_FastSubclass(x, ...)
+    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L60-L62
+    if not issubclass(maybe_get_python_type(val), type):
+        return False
+    return issubclass(val.as_python_constant(), BaseException)
+
+
+def pyexception_instance_check(val: VariableTracker) -> TypeIs["ExceptionVals"]:
+    # Mirror's CPython PyExceptionInstance_Check: PyType_FastSubclass(Py_TYPE(x), ...)
+    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L64-L65
+    return issubclass(maybe_get_python_type(val), BaseException)
 
 
 def mappingproxy_check_mapping(
