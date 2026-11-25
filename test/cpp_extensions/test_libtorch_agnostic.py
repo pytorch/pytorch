@@ -3063,14 +3063,12 @@ class TestLibtorchAgnosticMetal(TestCase):
 
         get_stream = torch.ops.libtorch_agn_2_16.get_mps_stream_from_pool
         previous = torch.mps.current_stream()
-        explicit = get_stream(0)
-        current = get_stream(-1)
-        self.assertNotEqual(explicit, 0)
-        self.assertNotEqual(current, 0)
-        self.assertNotEqual(explicit, current)
+        first = get_stream()
+        second = get_stream()
+        self.assertNotEqual(first, 0)
+        self.assertNotEqual(second, 0)
+        self.assertNotEqual(first, second)
         self.assertEqual(torch.mps.current_stream(), previous)
-        with self.assertRaisesRegex(RuntimeError, "requires device index -1 or 0"):
-            get_stream(1)
 
     @parametrize("scale,negate", [(0.5, False), (2.0, True)])
     def test_mps_set_arg_bytes(self, device, scale, negate):

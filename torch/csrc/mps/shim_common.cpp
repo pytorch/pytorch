@@ -21,15 +21,7 @@ AOTITorchError torch_mps_set_arg_bytes(
   });
 }
 
-AOTITorchError torch_get_mps_stream_from_pool(
-    int32_t device_index,
-    void** ret_stream) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    TORCH_CHECK(
-        !is_high_priority, "MPS stream pool does not support high priority");
-    TORCH_CHECK(
-        device_index == -1 || device_index == 0,
-        "MPS stream pool requires device index -1 or 0");
-    *ret_stream = at::mps::getStreamFromPool()->commandQueue();
-  });
+AOTITorchError torch_get_mps_stream_from_pool(void** ret_stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *ret_stream = at::mps::getStreamFromPool()->commandQueue(); });
 }
