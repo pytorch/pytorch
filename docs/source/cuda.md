@@ -359,6 +359,7 @@ Save after instantiation and before resetting or destroying the graph.
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
+     HostMemPool
      LocalizedAllocator
 ```
 
@@ -672,14 +673,6 @@ device/domain are deliberately retained through interpreter shutdown. Reclaiming
 physical memory waits for the allocation stream. Cleanup failures are logged, not
 raised; memory still in use after a failed stream wait is left for process exit
 to reclaim. During interpreter shutdown, callbacks skip CUDA cleanup entirely.
-
-```{warning}
-Concurrent allocator activity is unsupported. Other threads must not allocate,
-free, or query allocator state (including `MemPool.use_count()`) concurrently
-with this allocator. The ctypes callbacks acquire the GIL while holding the
-native allocator mutex; an allocator-state query can acquire these locks in the
-opposite order and deadlock.
-```
 
 #### Fork/join execution with localized outputs
 
