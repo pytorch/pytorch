@@ -162,6 +162,9 @@ pub struct Prepared {
     // traced into a region, and whether it can't be (see region.rs).
     pub region_runs: Box<[AtomicU32]>,
     pub region_off: Box<[AtomicBool]>,
+    // By block: the types of its last version's params then inputs over its
+    // runs while observing (see region::observing; torch.vm's input_types).
+    pub region_types: Box<[ffi::GilCell<Vec<types::Slot>>]>,
     // The Prepareds (by address; Compiled::plans keeps them) whose Cfgs this
     // one's derives from by adding regions only.
     pub region_lineage: ffi::GilCell<Vec<usize>>,
@@ -314,6 +317,7 @@ impl Prepared {
             trainings,
             region_runs: (0..cfg_blocks).map(|_| AtomicU32::new(0)).collect(),
             region_off: (0..cfg_blocks).map(|_| AtomicBool::new(false)).collect(),
+            region_types: (0..cfg_blocks).map(|_| ffi::GilCell::new(vec![])).collect(),
             region_lineage: ffi::GilCell::new(vec![]),
             record: true,
             // The pins the previous Cfg already had (pins are only added).
@@ -456,6 +460,21 @@ pub struct Compiled {
     pub consts: Py<PyTuple>,
     pub names: Py<PyTuple>,
     pub qualname: String,
+    pub filename: String,
+    // (start, end, line) of the code's units, from co_lines.
+    pub lines: Vec<(u32, u32, i32)>,
+    // The code object's address: with an instr's origin, a call site (see
+    // _cfg_opaque_site).
+    pub code: usize,
+}
+
+fn code_lines(code: &Bound<'_, PyAny>) -> PyResult<Vec<(u32, u32, i32)>> {
+    let mut out = vec![];
+    for item in code.call_method0("co_lines")?.try_iter()? {
+        let (start, end, line): (u32, u32, Option<i32>) = item?.extract()?;
+        out.push((start / 2, end / 2, line.unwrap_or(0)));
+    }
+    Ok(out)
 }
 
 // Every Compiled made (codes' own and clones), for whole-process reports
@@ -492,7 +511,15 @@ impl Compiled {
             consts,
             names,
             qualname: code.getattr("co_qualname")?.extract()?,
+            filename: code.getattr("co_filename")?.extract()?,
+            lines: code_lines(code)?,
+            code: code.as_ptr() as usize,
         })
+    }
+
+    // The source line of code unit `unit` (0 if none).
+    pub fn line(&self, unit: u32) -> i32 {
+        self.lines.iter().find(|(s, e, _)| *s <= unit && unit < *e).map_or(0, |x| x.2)
     }
 
     pub fn plan(&self) -> &Plan {
@@ -637,6 +664,31 @@ pub fn _cfg_skip(f: &Bound<'_, PyAny>) -> PyResult<()> {
     Ok(())
 }
 
+// gc.callbacks (the same list object for the process's life), once looked up.
+static GC_CALLBACKS: AtomicPtr<pyo3::ffi::PyObject> = AtomicPtr::new(std::ptr::null_mut());
+
+// Whether `frame` runs one of gc.callbacks. The collector calls them from
+// whatever allocation set it off, so they run outside the executor: neither
+// recorded as an effect of the instr that allocated, nor traced into a region.
+unsafe fn gc_callback(frame: *mut Frame) -> bool {
+    let mut list = GC_CALLBACKS.load(Ordering::Relaxed);
+    if list.is_null() {
+        let py = Python::assume_attached();
+        let Ok(l) = py.import("gc").and_then(|m| m.getattr("callbacks")) else {
+            pyo3::ffi::PyErr_Clear();
+            return false;
+        };
+        list = l.into_ptr();
+        GC_CALLBACKS.store(list, Ordering::Relaxed);
+    }
+    let n = pyo3::ffi::PyList_GET_SIZE(list);
+    if n == 0 {
+        return false;
+    }
+    let func = tr_frame_func(frame);
+    (0..n).any(|i| tr_bound_function(pyo3::ffi::PyList_GET_ITEM(list, i)) == func)
+}
+
 unsafe extern "C" fn eval_frame(
     tstate: *mut pyo3::ffi::PyThreadState,
     frame: *mut Frame,
@@ -654,6 +706,9 @@ unsafe extern "C" fn eval_frame(
         if NEXT_CLONE.get().0 == code as usize {
             NEXT_CLONE.set((0, 0, 0));
         }
+        return outside_executor(|| prev(tstate, frame, throwflag));
+    }
+    if !gen_frame && gc_callback(frame) {
         return outside_executor(|| prev(tstate, frame, throwflag));
     }
     let pending = NEXT_CLONE.get();
@@ -933,9 +988,9 @@ pub fn _reoptimize_all(py: Python<'_>) -> usize {
 static BYPASSED: AtomicBool = AtomicBool::new(false);
 
 /// Run the frames of every code (and clone) the executor ran whose Cfg has no
-/// region or training version, nor any of its clones' (recursively), on
-/// CPython from now on, and of code it hadn't run yet: the executor alone
-/// runs Python slower. Returns how many there are.
+/// region (of a block or a span) or training version, nor any of its clones'
+/// (recursively), on CPython from now on, and of code it hadn't run yet: the
+/// executor alone runs Python slower. Returns how many there are.
 #[pyfunction]
 pub fn _cfg_bypass_cold() -> usize {
     BYPASSED.store(true, Ordering::Relaxed);
@@ -946,7 +1001,9 @@ pub fn _cfg_bypass_cold() -> usize {
         }
         memo.insert(key, false);
         let prep = &c.plan().prep;
-        let h = !prep.cfg.regions.is_empty() || !prep.cfg.trainings.is_empty() || prep.clones.values().any(|cl| hot(&cl.compiled, memo));
+        let cfg = &prep.cfg;
+        let spans = cfg.spans.iter().any(|s| !s.state.off.load(Ordering::Relaxed) && !s.state.regions.lock().unwrap().is_empty());
+        let h = !cfg.regions.is_empty() || !cfg.trainings.is_empty() || spans || prep.clones.values().any(|cl| hot(&cl.compiled, memo));
         memo.insert(key, h);
         h
     }
@@ -1056,11 +1113,23 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
     }
     let (mut pins, inline_objects) = (std::mem::take(&mut el.pins), std::mem::take(&mut el.objects));
     // Generators suspend in their frames, which a region can't replay.
-    let found = if SPANS.load(Ordering::Relaxed) && block.is_none() && c.flags & (0x20 | 0x80 | 0x200) == 0 {
-        spans::find(py, &plan.prep, &movable)
-    } else {
-        vec![]
-    };
+    let spannable = block.is_none() && c.flags & (0x20 | 0x80 | 0x200) == 0;
+    let none = HashSet::new();
+    let mut found = if SPANS.load(Ordering::Relaxed) && spannable { spans::find(py, &plan.prep, &movable, &c.qualname, &[], &none) } else { vec![] };
+    let hook = CFG_HOOK.lock().unwrap().as_ref().map(|h| h.clone_ref(py));
+    if let Some(hook) = hook.filter(|_| block.is_none()) {
+        let view = cfg_view(py, c, &plan.prep, &movable, &found)?;
+        let (more, forced, split) = cfg_edits(&hook.call1(py, (view,))?.into_bound(py))?;
+        let changed = !more.is_empty() || !forced.is_empty() || !split.is_empty();
+        movable.extend(more);
+        if changed && spannable {
+            found = spans::find(py, &plan.prep, &movable, &c.qualname, &forced, &split);
+            if !SPANS.load(Ordering::Relaxed) {
+                let entries: HashSet<BlockId> = forced.iter().map(|(e, _)| *e).collect();
+                found.retain(|f| entries.contains(&f.entry));
+            }
+        }
+    }
     let obs = crate::cfg::optimize::Observed { movable, aten, calls, nulls };
     let (mut pinned, mut elided) = (vec![], vec![]);
     let renumbered = crate::cfg::optimize::optimize_blocks(&mut cfg, &blocks, &obs, &inlines, &mut pinned, &mut elided, block.is_some())
@@ -1537,6 +1606,7 @@ pub(crate) fn add_region(c: &Compiled, prep: usize, b: BlockId, traced: region::
     let new = &c.plan().prep;
     for (i, flag) in plan.prep.region_off.iter().enumerate() {
         new.region_off[i].store(flag.load(Ordering::Relaxed), Ordering::Relaxed);
+        unsafe { *new.region_types[i].get() = (*plan.prep.region_types[i].get()).clone() };
     }
     unsafe { *new.region_lineage.get() = lineage.iter().copied().chain([here]).collect() };
     Ok(true)
@@ -1921,6 +1991,155 @@ fn observed_ops(
 static PURE_CALLS: AtomicBool = AtomicBool::new(false);
 static SPANS: AtomicBool = AtomicBool::new(false);
 
+// torch.vm's cfg passes: called (see cfg_view) on each Cfg about to be
+// optimized, returning edits.
+static CFG_HOOK: Mutex<Option<Py<PyAny>>> = Mutex::new(None);
+
+/// Call `hook(view)` on each function's CFG before it's optimized (see
+/// torch.vm.Cfg); None stops.
+#[pyfunction]
+#[pyo3(signature = (hook=None))]
+pub fn _set_cfg_pass_hook(hook: Option<Py<PyAny>>) {
+    *CFG_HOOK.lock().unwrap() = hook;
+}
+
+// Callables a region trace records as one graph node calling them, rather
+// than tracing what they do (see torch.vm.Cfg.merge_across), by address.
+static OPAQUE: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+static OPAQUE_ANY: AtomicBool = AtomicBool::new(false);
+
+/// Record calls of `f` in region traces as one node calling it (`on`), or
+/// stop.
+#[pyfunction]
+pub fn _cfg_opaque(f: &Bound<'_, PyAny>, on: bool) {
+    let mut o = OPAQUE.lock().unwrap();
+    let p = f.as_ptr() as usize;
+    o.retain(|x| *x != p);
+    if on {
+        o.push(p);
+    }
+    OPAQUE_ANY.store(!o.is_empty(), Ordering::Relaxed);
+}
+
+#[inline]
+pub(crate) fn opaque(f: *mut pyo3::ffi::PyObject) -> bool {
+    OPAQUE_ANY.load(Ordering::Relaxed) && OPAQUE.lock().unwrap().contains(&(f as usize))
+}
+
+// Call sites a region trace records as one node calling their callee, by
+// (code object address, code unit): only that call, not every call of the
+// same callee.
+static OPAQUE_SITES: Mutex<Vec<(usize, u32)>> = Mutex::new(Vec::new());
+static OPAQUE_SITES_ANY: AtomicBool = AtomicBool::new(false);
+
+/// Record the call at code unit `origin` of code object `code` (the `code`
+/// and an instr's `origin` in a cfg view) in region traces as one node
+/// calling its callee (`on`), or stop.
+#[pyfunction]
+pub fn _cfg_opaque_site(code: usize, origin: u32, on: bool) {
+    let mut o = OPAQUE_SITES.lock().unwrap();
+    o.retain(|x| *x != (code, origin));
+    if on {
+        o.push((code, origin));
+    }
+    OPAQUE_SITES_ANY.store(!o.is_empty(), Ordering::Relaxed);
+}
+
+#[inline]
+pub(crate) fn opaque_site(code: usize, origin: u32) -> bool {
+    OPAQUE_SITES_ANY.load(Ordering::Relaxed) && OPAQUE_SITES.lock().unwrap().contains(&(code, origin))
+}
+
+// What a cfg pass sees of c's Cfg as observed (see torch.vm.Cfg): its
+// blocks, their instrs (op, args, line, effects, type, callee, whether
+// movable) and the spans found.
+fn cfg_view<'py>(py: Python<'py>, c: &Compiled, prep: &Prepared, movable: &HashSet<ValueId>, found: &[spans::Found]) -> PyResult<Bound<'py, PyDict>> {
+    use pyo3::types::PyList;
+    let cfg = &prep.cfg;
+    let effects = unsafe { &*prep.effects.get() };
+    let types = unsafe { &*prep.types.get() };
+    let callees = unsafe { &*prep.callees.get() };
+    let view = PyDict::new(py);
+    view.set_item("qualname", &c.qualname)?;
+    view.set_item("filename", &c.filename)?;
+    view.set_item("code", c.code)?;
+    let blocks = PyList::empty(py);
+    let instrs = PyDict::new(py);
+    for b in cfg.block_ids() {
+        let blk = &cfg[b];
+        if blk.removed {
+            continue;
+        }
+        let body: Vec<ValueId> = blk.versions.first().map_or(vec![], |v| v.body.clone());
+        let seen = body.iter().any(|v| types.get(v.idx()).is_some_and(|t| t.ty.is_some()));
+        let d = PyDict::new(py);
+        d.set_item("id", b.0)?;
+        d.set_item("params", cfg.explicit_params(b).iter().map(|p| p.0).collect::<Vec<_>>())?;
+        d.set_item("instrs", body.iter().map(|v| v.0).collect::<Vec<_>>())?;
+        d.set_item("succs", blk.term.successors().iter().map(|s| s.0).collect::<Vec<_>>())?;
+        let term = match &blk.term {
+            Terminator::Jump(Exit::Return(_)) => "return",
+            Terminator::Jump(_) => "jump",
+            Terminator::Branch { .. } => "branch",
+            Terminator::Raise { .. } | Terminator::Reraise { .. } => "raise",
+            Terminator::Unreachable => "unreachable",
+        };
+        d.set_item("term", term)?;
+        d.set_item("seen", seen || body.is_empty())?;
+        blocks.append(d)?;
+        for v in &body {
+            let ins = &cfg[*v];
+            let i = PyDict::new(py);
+            i.set_item("block", b.0)?;
+            i.set_item("op", cfg.op_text(*v))?;
+            i.set_item("kind", format!("{:?}", ins.op).split([' ', '(', '{']).next().unwrap_or(""))?;
+            i.set_item("args", ins.args.iter().map(|a| a.0).collect::<Vec<_>>())?;
+            i.set_item("line", c.line(ins.origin))?;
+            i.set_item("origin", ins.origin)?;
+            i.set_item("movable", movable.contains(v))?;
+            let mut seq: Vec<String> = vec![];
+            for (visit, _) in effects.get(Site::Instr(*v)) {
+                for e in visit {
+                    let e = e.to_string();
+                    if !seq.contains(&e) {
+                        seq.push(e);
+                    }
+                }
+            }
+            i.set_item("effects", seq)?;
+            i.set_item("varies", effects.varies(Site::Instr(*v)))?;
+            i.set_item("type", types.get(v.idx()).and_then(|t| t.ty.as_ref()).map(|t| t.to_string()))?;
+            i.set_item("callee", callees.get(v).and_then(|f| f.get(py)))?;
+            instrs.set_item(v.0, i)?;
+        }
+    }
+    view.set_item("blocks", blocks)?;
+    view.set_item("instrs", instrs)?;
+    let spans = PyList::empty(py);
+    for f in found {
+        spans.append((f.entry.0, f.exit.map(|x| x.0)))?;
+    }
+    view.set_item("spans", spans)?;
+    Ok(view)
+}
+
+// The edits a cfg pass returned: instrs to make movable, spans to make
+// (entry, exit) and blocks no span may hold.
+#[allow(clippy::type_complexity)]
+fn cfg_edits(edits: &Bound<'_, PyAny>) -> PyResult<(Vec<ValueId>, Vec<(BlockId, Option<BlockId>)>, HashSet<BlockId>)> {
+    if edits.is_none() {
+        return Ok((vec![], vec![], HashSet::new()));
+    }
+    let movable: Vec<u32> = edits.get_item("movable")?.extract()?;
+    let spans: Vec<(u32, Option<u32>)> = edits.get_item("spans")?.extract()?;
+    let split: Vec<u32> = edits.get_item("split")?.extract()?;
+    Ok((
+        movable.into_iter().map(ValueId).collect(),
+        spans.into_iter().map(|(e, x)| (BlockId(e), x.map(BlockId))).collect(),
+        split.into_iter().map(BlockId).collect(),
+    ))
+}
+
 /// Find spans when optimizing (see cfg::ir::Span): stretches of blocks, across
 /// branches and loops, run as one region.
 #[pyfunction]
@@ -1935,9 +2154,144 @@ pub fn _set_cfg_pure_calls(on: bool) {
     PURE_CALLS.store(on, Ordering::Relaxed);
 }
 
+// Whether reading a CPU tensor's value (.item() of a step count) may sit in a
+// region: torch.vm's traces make the value a graph node, and refuse a trace
+// that branches on it.
+static SCALAR_READS: AtomicBool = AtomicBool::new(false);
+
+/// Let reads of CPU tensors' values sit in regions (see impure_op).
+#[pyfunction]
+pub fn _set_cfg_scalar_reads(on: bool) {
+    SCALAR_READS.store(on, Ordering::Relaxed);
+}
+
+/// A tree arg a region reads (exact lists, tuples and dicts, and registered
+/// pytree nodes, of tensors and immutable values), checked as the guard
+/// checks a tensor arg: the same structure, dict keys and pytree contexts,
+/// each tensor's exact type, dtype, device, sizes, strides and
+/// requires_grad, and each value's exact type and value.
+#[pyclass(frozen)]
+pub struct TreeChecks {
+    root: TreeNode,
+    types: Vec<Py<pyo3::types::PyType>>,
+    specs: Vec<(TensorSpec, bool)>,
+}
+
+enum TreeNode {
+    List(Vec<TreeNode>),
+    Tuple(Vec<TreeNode>),
+    Dict(Vec<(Py<PyAny>, TreeNode)>),
+    Tensor(usize),
+    // An int, bool, str, bytes, None or torch.Size: by exact type and value.
+    Value(Py<PyAny>),
+    // A registered pytree node of exactly this type, flattened by its
+    // flatten_fn to children and a context equal to this one.
+    Pytree { ty: Py<pyo3::types::PyType>, flatten: Py<PyAny>, context: Py<PyAny>, kids: Vec<TreeNode> },
+}
+
+impl TreeChecks {
+    fn build(&mut self, x: &Bound<'_, PyAny>) -> PyResult<TreeNode> {
+        use pyo3::types::{PyList, PyTuple};
+        if let Ok(l) = x.downcast_exact::<PyList>() {
+            return Ok(TreeNode::List(l.iter().map(|y| self.build(&y)).collect::<PyResult<_>>()?));
+        }
+        if let Ok(t) = x.downcast_exact::<PyTuple>() {
+            return Ok(TreeNode::Tuple(t.iter().map(|y| self.build(&y)).collect::<PyResult<_>>()?));
+        }
+        if let Ok(d) = x.downcast_exact::<PyDict>() {
+            return Ok(TreeNode::Dict(d.iter().map(|(k, v)| Ok((k.unbind(), self.build(&v)?))).collect::<PyResult<_>>()?));
+        }
+        if x.is_none() || is_value_type(x) {
+            return Ok(TreeNode::Value(x.clone().unbind()));
+        }
+        if x.extract::<&crate::bindings::ffi::Tensor>().is_err() {
+            let py = x.py();
+            let nodes = py.import("torch.utils._pytree")?.getattr("SUPPORTED_NODES")?;
+            if let Some(node) = nodes.downcast::<PyDict>()?.get_item(x.get_type())? {
+                let flatten = node.getattr("flatten_fn")?;
+                let (children, context): (Bound<'_, PyAny>, Bound<'_, PyAny>) = flatten.call1((x,))?.extract()?;
+                let kids = children.try_iter()?.map(|y| self.build(&y?)).collect::<PyResult<_>>()?;
+                return Ok(TreeNode::Pytree { ty: x.get_type().unbind(), flatten: flatten.unbind(), context: context.unbind(), kids });
+            }
+        }
+        let t: &crate::bindings::ffi::Tensor = x.extract()?;
+        let mut m = crate::bindings::ffi::TensorMeta::default();
+        crate::bindings::ffi::tensor_meta(t, &mut m);
+        self.types.push(x.get_type().unbind());
+        let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: t.sizes().to_vec(), strides: t.strides().to_vec() };
+        self.specs.push((spec, t.requires_grad()));
+        Ok(TreeNode::Tensor(self.specs.len() - 1))
+    }
+
+    fn walk<'py>(&self, node: &TreeNode, x: &Bound<'py, PyAny>, out: &mut Vec<Bound<'py, PyAny>>) -> bool {
+        use pyo3::types::{PyList, PyTuple};
+        match node {
+            TreeNode::List(kids) => x.downcast_exact::<PyList>().is_ok_and(|l| l.len() == kids.len() && l.iter().zip(kids).all(|(y, k)| self.walk(k, &y, out))),
+            TreeNode::Tuple(kids) => x.downcast_exact::<PyTuple>().is_ok_and(|t| t.len() == kids.len() && t.iter().zip(kids).all(|(y, k)| self.walk(k, &y, out))),
+            TreeNode::Dict(kids) => x.downcast_exact::<PyDict>().is_ok_and(|d| {
+                d.len() == kids.len() && d.iter().zip(kids).all(|((k, v), (want, kid))| (k.is(want) || k.eq(want).unwrap_or(false)) && self.walk(kid, &v, out))
+            }),
+            TreeNode::Tensor(i) => {
+                let (m, rg) = &self.specs[*i];
+                let ok = x.get_type().is(&self.types[*i])
+                    && unsafe { crate::bindings::ffi::tensor_by_type(x.as_ptr() as usize).as_ref() }.is_some_and(|t| {
+                        t.requires_grad() == *rg && crate::bindings::ffi::tensor_matches(t, m.dtype, m.device_type, m.device_index, &m.sizes, &m.strides)
+                    });
+                if ok {
+                    out.push(x.clone());
+                }
+                ok
+            }
+            TreeNode::Value(want) => x.get_type().is(want.bind(x.py()).get_type()) && (x.is(want) || x.eq(want).unwrap_or(false)),
+            TreeNode::Pytree { ty, flatten, context, kids } => {
+                x.get_type().is(ty)
+                    && flatten.bind(x.py()).call1((x,)).and_then(|r| r.extract::<(Bound<'py, PyAny>, Bound<'py, PyAny>)>()).is_ok_and(|(children, ctx)| {
+                        ctx.eq(context).unwrap_or(false)
+                            && children.len().is_ok_and(|n| n == kids.len())
+                            && children.try_iter().is_ok_and(|it| it.zip(kids).all(|(y, k)| y.is_ok_and(|y| self.walk(k, &y, out))))
+                    })
+            }
+        }
+    }
+}
+
+// Whether x's type is exactly one TreeNode::Value takes (not a subclass).
+fn is_value_type(x: &Bound<'_, PyAny>) -> bool {
+    use pyo3::types::{PyBool, PyBytes, PyInt, PyString};
+    x.is_exact_instance_of::<PyInt>()
+        || x.is_exact_instance_of::<PyBool>()
+        || x.is_exact_instance_of::<PyString>()
+        || x.is_exact_instance_of::<PyBytes>()
+        || x.get_type().qualname().is_ok_and(|q| q == "Size") && x.get_type().module().is_ok_and(|m| m == "torch")
+}
+
+#[pymethods]
+impl TreeChecks {
+    #[new]
+    fn new(example: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let mut c = TreeChecks { root: TreeNode::Tuple(vec![]), types: vec![], specs: vec![] };
+        c.root = c.build(example)?;
+        Ok(c)
+    }
+
+    /// The tensors in `x`, in order, if it matches; else None.
+    fn leaves<'py>(&self, py: Python<'py>, x: &Bound<'py, PyAny>) -> PyResult<Option<Bound<'py, pyo3::types::PyList>>> {
+        let mut out = Vec::with_capacity(self.specs.len());
+        if !self.walk(&self.root, x, &mut out) {
+            return Ok(None);
+        }
+        Ok(Some(pyo3::types::PyList::new(py, out)?))
+    }
+}
+
 // Torch ops a pure callee mustn't run: they read a tensor's value into
-// Python (so the path taken may depend on it), or are collectives.
-fn impure_op(op: &str) -> bool {
+// Python (so the path taken may depend on it; with SCALAR_READS, only a
+// GPU tensor's, which also syncs), or are collectives. `args` as recorded:
+// a tensor not on the CPU shows its device after an @.
+fn impure_op(op: &str, args: &str) -> bool {
+    if SCALAR_READS.load(Ordering::Relaxed) && matches!(op, "aten::_local_scalar_dense" | "aten::item") && !args.contains('@') {
+        return false;
+    }
     matches!(
         op,
         "aten::_local_scalar_dense" | "aten::is_nonzero" | "aten::item" | "aten::equal" | "aten::allclose" | "aten::_assert_async" | "aten::_assert_async.msg"
@@ -2321,7 +2675,7 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
     for (seq, _) in effects.get(Site::Instr(v)) {
         for e in seq {
             match e {
-                effects::Effect::TorchOp { op, .. } if impure_op(op) => return Err(format!("{} ran {op}", here())),
+                effects::Effect::TorchOp { op, args } if impure_op(op, args) => return Err(format!("{} ran {op}", here())),
                 effects::Effect::TorchOp { .. } => torch_ops = true,
                 effects::Effect::Frame { func, how: effects::How::Direct } => frames = Some(func.clone()),
                 effects::Effect::Frame { func, how: effects::How::Indirect } => {
@@ -2498,7 +2852,7 @@ fn pure_compiled(py: Python<'_>, c: &Compiled, own: Own, depth: u32, memo: &mut 
             return Ok(());
         }
         body.iter().try_for_each(|v| pure_instr(py, prep, *v, clones, depth, &own, memo))?;
-        let ok = effects.get(Site::Block(b)).iter().all(|(seq, _)| seq.iter().all(|e| matches!(e, effects::Effect::TorchOp { op, .. } if !impure_op(op))));
+        let ok = effects.get(Site::Block(b)).iter().all(|(seq, _)| seq.iter().all(|e| matches!(e, effects::Effect::TorchOp { op, args } if !impure_op(op, args))));
         if ok { Ok(()) } else { Err(format!("bb{} has effects", b.0)) }
     });
     if let Err(e) = &r

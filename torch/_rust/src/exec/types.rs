@@ -13,6 +13,9 @@
 use std::fmt;
 
 use pyo3::ffi::{self, PyObject};
+use pyo3::prelude::*;
+use pyo3::types::PyList;
+use pyo3::IntoPyObjectExt;
 
 use crate::bindings::ffi::{device_name, dtype_name, tensor_by_type, tensor_meta, TensorMeta};
 
@@ -494,6 +497,53 @@ unsafe fn tensor_ty(obj: *mut PyObject, t: &crate::bindings::ffi::Tensor) -> Ten
         } else {
             Shape::Unknown
         },
+    }
+}
+
+impl Ty {
+    // As data for torch.vm's Type: None for Any, else a list of the
+    // alternatives, each a tuple led by its kind's name.
+    pub fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        match self.kinds() {
+            None => Ok(py.None().into_bound(py)),
+            Some(kinds) => PyList::new(py, kinds.iter().map(|k| k.to_py(py)).collect::<PyResult<Vec<_>>>()?)?.into_bound_py_any(py),
+        }
+    }
+}
+
+impl Kind {
+    fn to_py<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        fn konst<T: Clone>(k: &Konst<T>) -> Option<T> {
+            match k {
+                Konst::Is(v) => Some(v.clone()),
+                Konst::Varies => None,
+            }
+        }
+        let len = |name: &str, i: &Interval| (name, i.lo, i.hi).into_bound_py_any(py);
+        match self {
+            Kind::Null => ("null",).into_bound_py_any(py),
+            Kind::None => ("none",).into_bound_py_any(py),
+            Kind::Bool(b) => ("bool", konst(b)).into_bound_py_any(py),
+            Kind::Int(i) => len("int", i),
+            Kind::Float => ("float",).into_bound_py_any(py),
+            Kind::Str(s) => ("str", konst(s)).into_bound_py_any(py),
+            Kind::Tensor(t) => {
+                let dtype = konst(&t.dtype).map(|d| dtype_name(d).to_string());
+                let device = konst(&t.device).map(|(ty, i)| device_name(ty, i).to_string());
+                let shape = match &t.shape {
+                    Shape::Dims(d) => Some(d.iter().map(|i| (i.lo, i.hi)).collect::<Vec<_>>()),
+                    Shape::Unknown => None,
+                };
+                ("tensor", t.class.name.as_str(), dtype, device, shape, konst(&t.requires_grad)).into_bound_py_any(py)
+            }
+            Kind::Tuple(elems) => ("tuple", PyList::new(py, elems.iter().map(|e| e.to_py(py)).collect::<PyResult<Vec<_>>>()?)?).into_bound_py_any(py),
+            Kind::VarTuple(i) => len("tuple", i),
+            Kind::List(i) => len("list", i),
+            Kind::Set(i) => len("set", i),
+            Kind::FrozenSet(i) => len("frozenset", i),
+            Kind::Dict(i) => len("dict", i),
+            Kind::Object(c) => ("object", c.name.as_str()).into_bound_py_any(py),
+        }
     }
 }
 

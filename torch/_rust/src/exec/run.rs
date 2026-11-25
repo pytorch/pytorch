@@ -13,6 +13,15 @@ use super::effects::{self, Recorder};
 use super::ffi::*;
 use super::{Compiled, Prepared};
 
+// torch._rust_inductor._opaque_call (see Act::opaque_call), once looked up.
+fn opaque_helper(py: pyo3::Python<'_>) -> pyo3::PyResult<pyo3::Bound<'_, pyo3::PyAny>> {
+    use pyo3::types::PyAnyMethods;
+    static HELPER: pyo3::sync::PyOnceLock<pyo3::Py<pyo3::PyAny>> = pyo3::sync::PyOnceLock::new();
+    HELPER
+        .get_or_try_init(py, || Ok::<_, pyo3::PyErr>(py.import("torch._rust_inductor")?.getattr("_opaque_call")?.unbind()))
+        .map(|h| h.bind(py).clone())
+}
+
 // How an exception was raised: Error adds a traceback entry for this frame
 // (the default loop's `error:`); Reraise doesn't (`exception_unwind:`).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1156,17 +1165,16 @@ impl Act<'_> {
             let ver = &blk.versions[vi];
             let code = &self.p.code[b.idx()][vi];
             let fast = self.rec.is_null();
-            if first == 0
-                && super::region::enabled()
-                && !super::region::tracing()
-                && vi + 1 == blk.versions.len()
-                && blk.versions.len() <= super::region::max_regions()
-                && blk.origin.is_some()
-                && self.c.is_some()
-                && super::region::due(&self.p.region_runs[b.idx()], &self.p.region_off[b.idx()])
-                && self.region_worthy(b, vi)
-            {
-                if self.region_trace(b, vi) {
+            if first == 0 && vi + 1 == blk.versions.len() && blk.origin.is_some() && self.c.is_some() && !super::region::tracing() {
+                if super::region::observing() {
+                    self.region_observe(b, vi);
+                }
+                if super::region::enabled()
+                    && blk.versions.len() <= super::region::max_regions()
+                    && super::region::due(&self.p.region_runs[b.idx()], &self.p.region_off[b.idx()])
+                    && self.region_worthy(b, vi)
+                    && self.region_trace(b, vi)
+                {
                     i = code.steps.len();
                 }
             }
@@ -1294,7 +1302,15 @@ impl Act<'_> {
     unsafe fn span(&mut self, si: usize) -> Option<Result<BlockId, Outcome>> {
         let cfg = self.cfg;
         let sp = &cfg.spans[si];
-        if !super::region::enabled() || super::region::tracing() || self.c.is_none() {
+        if super::region::tracing() || self.c.is_none() {
+            return None;
+        }
+        if !super::region::enabled() {
+            if super::region::observing() && !sp.state.off.load(std::sync::atomic::Ordering::Relaxed) {
+                let args = self.span_args(sp)?;
+                super::region::observe(&mut sp.state.types.lock().unwrap(), &args);
+                args.into_iter().for_each(|a| ffi::Py_XDECREF(a));
+            }
             return None;
         }
         let args = self.span_args(sp)?;
@@ -1310,7 +1326,16 @@ impl Act<'_> {
             }
         }
         let traced = match called {
-            None if regions.len() < super::region::max_regions() && super::region::due(&sp.state.runs, &sp.state.off) => self.span_trace(sp, &args),
+            None if regions.len() < super::region::max_regions() && !sp.state.off.load(std::sync::atomic::Ordering::Relaxed) => {
+                if super::region::observing() {
+                    super::region::observe(&mut sp.state.types.lock().unwrap(), &args);
+                }
+                if super::region::due(&sp.state.runs, &sp.state.off) {
+                    self.span_trace(sp, &args)
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
         args.into_iter().for_each(|a| ffi::Py_XDECREF(a));
@@ -1333,6 +1358,7 @@ impl Act<'_> {
             let x = *self.local(*slot);
             let a = match attr {
                 None => xincref(x),
+                Some(CELL) if !x.is_null() => PyCell_Get(x),
                 Some(n) if !x.is_null() && (*n as usize) < self.p.names.0.len() => ffi::PyObject_GetAttr(x, self.name(*n)),
                 Some(_) => std::ptr::null_mut(),
             };
@@ -1343,18 +1369,24 @@ impl Act<'_> {
             }
             args.push(a);
         }
+        args.extend(self.cfg.explicit_params(sp.entry).into_iter().map(|p| xincref(self.val(p))));
         Some(args)
     }
 
     // Leaves span sp with a region's outputs (owned): the locals it leaves,
-    // then what it returns if it does.
+    // then the exit's explicit params, or what it returns if it does.
     unsafe fn span_leave(&mut self, sp: &Span, outs: Vec<*mut PyObject>) -> Result<BlockId, Outcome> {
         for (s, o) in sp.live_out.iter().zip(&outs) {
             let old = std::mem::replace(&mut *self.local(*s), *o);
             ffi::Py_XDECREF(old);
         }
         match sp.exit {
-            Some(x) => Ok(x),
+            Some(x) => {
+                for (q, o) in self.cfg.explicit_params(x).into_iter().zip(&outs[sp.live_out.len()..]) {
+                    self.set(q, *o);
+                }
+                Ok(x)
+            }
             None => Err(Outcome::Return(outs[sp.live_out.len()])),
         }
     }
@@ -1366,6 +1398,8 @@ impl Act<'_> {
     // again from the start is the same).
     unsafe fn span_trace(&mut self, sp: &Span, args: &[*mut PyObject]) -> Option<Result<BlockId, Outcome>> {
         let held: Vec<*mut PyObject> = sp.live_in.iter().map(|s| xincref(*self.local(*s))).collect();
+        // The cells it reads hold what the trace passes while it runs.
+        let cells: Vec<(*mut PyObject, *mut PyObject)> = sp.inputs.iter().filter(|(_, a)| *a == Some(CELL)).map(|(s, _)| (*self.local(*s), PyCell_Get(*self.local(*s)))).collect();
         let mut ran = false;
         let mut ended: Option<Outcome> = None;
         let this = self as *mut Self;
@@ -1376,14 +1410,22 @@ impl Act<'_> {
                 if attr.is_none() {
                     let old = std::mem::replace(&mut *this.local(*s), xincref(*o));
                     ffi::Py_XDECREF(old);
+                } else if *attr == Some(CELL) && PyCell_Set(*this.local(*s), *o) < 0 {
+                    return Err(());
                 }
+            }
+            for (p, o) in this.cfg.explicit_params(sp.entry).into_iter().zip(&objs[sp.inputs.len()..]) {
+                this.set(p, xincref(*o));
             }
             this.stop = sp;
             let out = this.run_blocks(sp.entry, None);
             this.stop = std::ptr::null();
             let mut outs: Vec<*mut PyObject> = sp.live_out.iter().map(|s| xincref(*this.local(*s))).collect();
             let done = match &out {
-                Outcome::Stopped(x) => Some(*x) == sp.exit && !sp.never.contains(x),
+                Outcome::Stopped(x) => {
+                    outs.extend(this.cfg.explicit_params(*x).into_iter().map(|q| xincref(this.val(q))));
+                    Some(*x) == sp.exit && !sp.never.contains(x)
+                }
                 Outcome::Return(v) => {
                     outs.push(xincref(*v));
                     sp.exit.is_none()
@@ -1400,7 +1442,13 @@ impl Act<'_> {
             }
             Err(())
         };
-        let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &[], true, &mut body));
+        let types = sp.state.types.lock().unwrap().clone();
+        let passed: Vec<u32> = sp.passed.iter().map(|k| sp.inputs.len() as u32 + k).collect();
+        let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, &mut body));
+        for (cell, old) in cells {
+            PyCell_Set(cell, old);
+            ffi::Py_XDECREF(old);
+        }
         let debug = std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some();
         sp.state.runs.store(0, std::sync::atomic::Ordering::Relaxed);
         let leave = match ended {
@@ -1448,6 +1496,72 @@ impl Act<'_> {
             }
         }
         Some(leave)
+    }
+
+    // A call of a callable merge_across made opaque, while a region is
+    // traced: torch._rust_inductor._opaque_call(callee, *args) records it as
+    // one graph node.
+    unsafe fn opaque_call(&self, args: *const *mut PyObject, argc: c_int, kw: *mut PyObject) -> *mut PyObject {
+        use pyo3::types::PyAnyMethods;
+        let py = pyo3::Python::assume_attached();
+        let helper = match opaque_helper(py) {
+            Ok(h) => h,
+            Err(e) => {
+                e.restore(py);
+                return std::ptr::null_mut();
+            }
+        };
+        let (callee, rest, total) = if (*args).is_null() { (*args.add(1), args.add(2), argc) } else { (*args, args.add(1), argc + 1) };
+        let mut all: Vec<*mut PyObject> = vec![callee];
+        all.extend((0..total as usize).map(|i| *rest.add(i)));
+        let nkw = if kw.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(kw) as usize };
+        ffi::PyObject_Vectorcall(helper.as_ptr(), all.as_ptr(), all.len() - nkw, kw)
+    }
+
+    // Whether the call at code unit `origin` of this frame's code was made
+    // opaque (see _cfg_opaque_site).
+    fn opaque_site(&self, origin: u32) -> bool {
+        self.c.is_some_and(|c| super::opaque_site(c.code, origin))
+    }
+
+    // opaque_call for CALL_FUNCTION_EX: `callee(*args, **kwargs)`.
+    unsafe fn opaque_call_ex(&self, callee: *mut PyObject, args: *mut PyObject, kwargs: *mut PyObject) -> *mut PyObject {
+        use pyo3::types::PyAnyMethods;
+        let py = pyo3::Python::assume_attached();
+        let helper = match opaque_helper(py) {
+            Ok(h) => h,
+            Err(e) => {
+                e.restore(py);
+                return std::ptr::null_mut();
+            }
+        };
+        let items = ffi::PySequence_Tuple(args);
+        if items.is_null() {
+            return std::ptr::null_mut();
+        }
+        let n = ffi::PyTuple_GET_SIZE(items);
+        let all = ffi::PyTuple_New(n + 1);
+        ffi::Py_INCREF(callee);
+        ffi::PyTuple_SET_ITEM(all, 0, callee);
+        for i in 0..n {
+            let x = ffi::PyTuple_GET_ITEM(items, i);
+            ffi::Py_INCREF(x);
+            ffi::PyTuple_SET_ITEM(all, i + 1, x);
+        }
+        ffi::Py_DECREF(items);
+        let out = ffi::PyObject_Call(helper.as_ptr(), all, kwargs);
+        ffi::Py_DECREF(all);
+        out
+    }
+
+    // Joins this run's params and inputs of block b's version vi (the last)
+    // into the types its trace gets.
+    unsafe fn region_observe(&mut self, b: BlockId, vi: usize) {
+        if !self.p.region_off[b.idx()].load(std::sync::atomic::Ordering::Relaxed) {
+            let blk = &self.cfg[b];
+            let args: Vec<*mut PyObject> = blk.params.iter().chain(&blk.versions[vi].inputs).map(|x| self.val(*x)).collect();
+            super::region::observe(&mut *self.p.region_types[b.idx()].get(), &args);
+        }
     }
 
     // Traces this run of version vi of block b into a region (see
@@ -1500,7 +1614,8 @@ impl Act<'_> {
         // passes on.
         let read: std::collections::HashSet<ValueId> = ver.body.iter().flat_map(|v| cfg[*v].args.iter().copied()).collect();
         let unread: Vec<u32> = (0..ids.len() as u32).filter(|i| unused.contains(i) || !read.contains(&ids[*i as usize])).collect();
-        let traced = super::outside_executor(|| super::region::trace(&name, &args, &unread, false, &mut body));
+        let types = (*self.p.region_types[b.idx()].get()).clone();
+        let traced = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, &mut body));
         let debug = std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some();
         if failed {
             // The body raised under tracing (which also raises on what only
@@ -1697,7 +1812,13 @@ impl Act<'_> {
             }
             Op::Call { argc, kw_names } => {
                 let kw = kw_names.map_or(std::ptr::null_mut(), |k| self.konst(k));
-                check(tr_call(self.args(ins), *argc as c_int, kw))?
+                let args = self.args(ins);
+                let callee = if (*args).is_null() { *args.add(1) } else { *args };
+                if super::region::tracing() && (super::opaque(callee) || self.opaque_site(ins.origin)) {
+                    check(self.opaque_call(args, *argc as c_int, kw))?
+                } else {
+                    check(tr_call(args, *argc as c_int, kw))?
+                }
             }
             Op::Binary(k) => check(tr_binary_op(*k as c_int, a(0), a(1)))?,
             Op::Aten { .. } => {
@@ -1797,6 +1918,11 @@ impl Act<'_> {
             }
             Op::LoadFromDictOrDeref { slot } => {
                 check(tr_load_from_dict_or_deref(self.f, a(0), *slot as c_int))?
+            }
+            Op::Bytecode { opcode: crate::cfg::opcodes::CALL_FUNCTION_EX, .. }
+                if super::region::tracing() && (super::opaque(a(0)) || self.opaque_site(ins.origin)) =>
+            {
+                check(self.opaque_call_ex(a(0), a(1), if ins.args.len() > 2 { a(2) } else { std::ptr::null_mut() }))?
             }
             Op::Bytecode { opcode, arg } if super::trampoline::needed(*opcode, *arg) => {
                 let args = self.args(ins);

@@ -3478,6 +3478,7 @@ else:
         "_dynamo",
         "_inductor",
         "_export",
+        "vm",
         # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
         "onnx",
     }

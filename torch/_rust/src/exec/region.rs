@@ -21,8 +21,10 @@ use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
 use crate::cfg::ir::{RegionOut, RegionSpec};
+use crate::exec::types::Slot;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
+static OBSERVE: AtomicBool = AtomicBool::new(false);
 static AFTER: AtomicU32 = AtomicU32::new(2);
 static MAX_REGIONS: AtomicUsize = AtomicUsize::new(4);
 
@@ -35,6 +37,19 @@ pub fn _set_cfg_regions(on: bool, after: u32, variants: usize) {
     ENABLED.store(on, Ordering::Relaxed);
     AFTER.store(after.max(1), Ordering::Relaxed);
     MAX_REGIONS.store(variants.max(1), Ordering::Relaxed);
+}
+
+/// Record the types of the args of the blocks and spans that would be
+/// traced, for their traces (torch.vm's input_types), whether or not regions
+/// are on.
+#[pyfunction]
+pub fn _set_cfg_region_observe(on: bool) {
+    OBSERVE.store(on, Ordering::Relaxed);
+}
+
+#[inline]
+pub fn observing() -> bool {
+    OBSERVE.load(Ordering::Relaxed)
 }
 
 #[inline]
@@ -51,6 +66,16 @@ pub fn enabled() -> bool {
 // be traced on this run.
 pub fn due(runs: &AtomicU32, off: &AtomicBool) -> bool {
     !off.load(Ordering::Relaxed) && runs.fetch_add(1, Ordering::Relaxed) + 1 == AFTER.load(Ordering::Relaxed)
+}
+
+// Joins a run's args (borrowed, NULL allowed) into their types.
+pub unsafe fn observe(types: &mut Vec<Slot>, args: &[*mut PyObject]) {
+    types.resize_with(args.len(), Slot::default);
+    for (slot, a) in types.iter_mut().zip(args) {
+        if !slot.skips(*a) {
+            slot.observe(*a, false);
+        }
+    }
 }
 
 // Runs the body being traced on the given args (borrowed); Ok(its outputs,
@@ -70,7 +95,8 @@ pub fn tracing() -> bool {
 }
 
 fn null_sentinel(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-    py.import("torch._rust_inductor")?.getattr("NULL")
+    static NULL: pyo3::sync::PyOnceLock<Py<PyAny>> = pyo3::sync::PyOnceLock::new();
+    NULL.get_or_try_init(py, || Ok::<_, PyErr>(py.import("torch._rust_inductor")?.getattr("NULL")?.unbind())).map(|n| n.bind(py).clone())
 }
 
 /// Runs the body of the block being traced (see torch._rust_inductor), once.
@@ -104,19 +130,26 @@ pub struct Traced {
 
 // Traces a run of a block's version. `args`: its params then inputs
 // (borrowed, NULL allowed), of which those at `unread` aren't read by the
-// version's instrs (NULL if not used at all); `body` runs it. Ok(None): not
-// worth a region. With `span` (a span's run, which no guard checks first),
-// the region makes all its checks itself.
-pub unsafe fn trace(name: &str, args: &[*mut PyObject], unread: &[u32], span: bool, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
+// version's instrs (NULL if not used at all), and `types` their types over
+// the runs observed (see observing); `body` runs it. Ok(None): not worth a
+// region. With `span` (a span's run, which no guard checks first), the region
+// makes all its checks itself.
+pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
     let py = Python::assume_attached();
     let null = null_sentinel(py)?;
     let items: Vec<Bound<'_, PyAny>> =
         args.iter().map(|a| Bound::from_borrowed_ptr_or_opt(py, *a).unwrap_or_else(|| null.clone())).collect();
     let args = PyTuple::new(py, items)?;
+    let types = (0..args.len())
+        .map(|i| match types.get(i).and_then(|s| s.ty.as_ref()) {
+            Some(t) => t.to_py(py),
+            None => Ok(py.None().into_bound(py)),
+        })
+        .collect::<PyResult<Vec<_>>>()?;
     let body: *mut Body<'_> = body;
     BODY.set(Some(std::mem::transmute::<*mut Body<'_>, *mut Body<'static>>(body)));
     TRACING.set(true);
-    let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span)));
+    let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types)));
     TRACING.set(false);
     BODY.set(None);
     let r = r?;

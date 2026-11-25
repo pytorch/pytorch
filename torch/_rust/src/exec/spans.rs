@@ -22,6 +22,7 @@ pub struct Found {
     pub live_in: Vec<u32>,
     pub live_out: Vec<u32>,
     pub inputs: Vec<(u32, Option<u32>)>,
+    pub passed: Vec<u32>,
 }
 
 fn read_slot(op: &Op) -> Option<u32> {
@@ -199,7 +200,9 @@ fn made_here(py: Python<'_>, prep: &Prepared, x: ValueId, made: &HashSet<ValueId
     }
 }
 
-pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>) -> Vec<Found> {
+// `forced`: spans a cfg pass asked for, (entry, exit), tried first and kept
+// whatever their size; `split`: blocks no span may hold.
+pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>, qualname: &str, forced: &[(BlockId, Option<BlockId>)], split: &HashSet<BlockId>) -> Vec<Found> {
     let cfg = &prep.cfg;
     let types = unsafe { &*prep.types.get() };
     let effects = unsafe { &*prep.effects.get() };
@@ -215,19 +218,20 @@ pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>) -> Vec<
     let frame_state = |v: &ValueId| {
         matches!(
             cfg[*v].op,
-            Op::LoadDeref { .. } | Op::StoreDeref { .. } | Op::DeleteDeref { .. } | Op::MakeCell { .. } | Op::CopyFreeVars(_) | Op::LoadFromDictOrDeref { .. } | Op::Resume
+            Op::StoreDeref { .. } | Op::DeleteDeref { .. } | Op::MakeCell { .. } | Op::CopyFreeVars(_) | Op::LoadFromDictOrDeref { .. }
         )
     };
     let ok = |b: BlockId| {
         let blk = &cfg[b];
-        blk.versions.len() == 1
+        !split.contains(&b)
+            && blk.versions.len() == 1
             && blk.origin.is_none()
             && matches!(blk.term, Terminator::Jump(Exit::Block(_) | Exit::Return(_)) | Terminator::Branch { .. })
             && !body(b).iter().any(frame_state)
             && (never(b)
                 || body(b).iter().all(|v| {
                     movable.contains(v)
-                        || matches!(cfg[*v].op, Op::LoadLocal { .. } | Op::LoadLocalChecked { .. } | Op::StoreLocal { .. } | Op::Project(_))
+                        || matches!(cfg[*v].op, Op::LoadLocal { .. } | Op::LoadLocalChecked { .. } | Op::StoreLocal { .. } | Op::DeleteLocal { .. } | Op::Project(_) | Op::Resume | Op::LoadDeref { .. })
                         || changed_container(py, prep, *v).is_some()
                 }))
     };
@@ -236,8 +240,47 @@ pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>) -> Vec<
     let idom = dominators(cfg);
     let mut used: HashSet<BlockId> = HashSet::new();
     let mut found = vec![];
-    for &e in &all {
-        if used.contains(&e) || e == ENTRY || !ok(e) || never(e) || !cfg.explicit_params(e).is_empty() {
+    let debug = std::env::var_os("TORCH_RUST_SPAN_DEBUG").is_some();
+    let why = |e: BlockId, what: &str| {
+        if debug {
+            eprintln!("span {qualname} bb{} (unit {}): {what}", e.0, cfg[e].versions.first().and_then(|v| v.body.first()).map_or(0, |v| cfg[*v].origin));
+        }
+    };
+    // Implicit params (an exception, lasti) only come from a raise.
+    let explicit_only = |b: BlockId| cfg[b].params.len() == cfg.explicit_params(b).len();
+    let candidates = forced.iter().map(|(e, x)| (*e, Some(*x))).chain(all.iter().map(|e| (*e, None)));
+    for (e, forced_exit) in candidates {
+        // The function's entry only for a span a cfg pass asked for.
+        if used.contains(&e) || (e == ENTRY && forced_exit.is_none()) || never(e) || !explicit_only(e) {
+            if forced_exit.is_some() {
+                why(e, "can't be a span's entry (never run, taking an exception, or in another span)");
+            }
+            continue;
+        }
+        if !ok(e) {
+            if debug {
+                let blk = &cfg[e];
+                let mut bad: Vec<String> = body(e)
+                    .iter()
+                    .filter(|v| {
+                        frame_state(v)
+                            || !movable.contains(v)
+                                && !matches!(cfg[**v].op, Op::LoadLocal { .. } | Op::LoadLocalChecked { .. } | Op::StoreLocal { .. } | Op::DeleteLocal { .. } | Op::Project(_) | Op::Resume | Op::LoadDeref { .. })
+                                && changed_container(py, prep, **v).is_none()
+                    })
+                    .map(|v| format!("%{} {:?}", v.0, cfg[*v].op))
+                    .collect();
+                if split.contains(&e) {
+                    bad.push("split by a cfg pass".into());
+                }
+                if blk.versions.len() != 1 || blk.origin.is_some() {
+                    bad.push("optimized into versions".into());
+                }
+                if !matches!(blk.term, Terminator::Jump(Exit::Block(_) | Exit::Return(_)) | Terminator::Branch { .. }) {
+                    bad.push(format!("ends with {:?}", blk.term));
+                }
+                why(e, &format!("not movable: {}", bad.join(", ")));
+            }
             continue;
         }
         // A block never seen run is a dead end: a trace gives up on entering
@@ -254,33 +297,83 @@ pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>) -> Vec<
             for s in cfg[b].term.successors() {
                 if s == e {
                     back_to_entry = true;
-                } else if !r.contains(&s) && !used.contains(&s) && (ok(s) || never(s)) && dominates(&idom, e, s) {
+                } else if forced_exit != Some(Some(s)) && !r.contains(&s) && !used.contains(&s) && (ok(s) || never(s)) && dominates(&idom, e, s) {
                     r.push(s);
                 }
             }
         }
         if back_to_entry {
+            why(e, "loops back to its entry");
             continue;
+        }
+        // Leaving to several places: drop the blocks reachable from where it
+        // leaves (they run after a block that can't be in it), until it
+        // leaves to one, ending at the first such block on each path.
+        let exits_of = |r: &[BlockId]| -> HashSet<BlockId> {
+            let in_r: HashSet<BlockId> = r.iter().copied().collect();
+            r.iter().filter(|b| !never(**b)).flat_map(|b| cfg[*b].term.successors()).filter(|s| !in_r.contains(s)).collect()
+        };
+        while forced_exit.is_none() {
+            let exits = exits_of(&r);
+            if exits.len() <= 1 {
+                break;
+            }
+            let in_r: HashSet<BlockId> = r.iter().copied().collect();
+            let mut after: HashSet<BlockId> = HashSet::new();
+            let mut work: Vec<BlockId> = exits.into_iter().collect();
+            while let Some(b) = work.pop() {
+                for s in cfg[b].term.successors() {
+                    if in_r.contains(&s) && s != e && after.insert(s) {
+                        work.push(s);
+                    }
+                }
+            }
+            if after.is_empty() {
+                break;
+            }
+            r.retain(|b| !after.contains(b));
         }
         let in_r: HashSet<BlockId> = r.iter().copied().collect();
         let seen_r: Vec<BlockId> = r.iter().copied().filter(|b| !never(*b)).collect();
         let exits: HashSet<BlockId> = seen_r.iter().flat_map(|b| cfg[*b].term.successors()).filter(|s| !in_r.contains(s)).collect();
         let returns = seen_r.iter().any(|b| matches!(cfg[*b].term, Terminator::Jump(Exit::Return(_))));
+        if let Some(want) = forced_exit
+            && (exits.len() > 1 || exits.iter().next().copied() != want || (want.is_some() && returns))
+        {
+            let mut xs: Vec<u32> = exits.iter().map(|b| b.0).collect();
+            xs.sort();
+            why(e, &format!("asked to end at {:?}, but it leaves to {xs:?} (returns: {returns})", want.map(|x| x.0)));
+            continue;
+        }
         let exit = match (exits.len(), returns) {
             (1, false) => {
                 let x = *exits.iter().next().unwrap();
-                if !cfg[x].params.is_empty() {
+                if !explicit_only(x) {
+                    why(e, "its exit takes an exception");
                     continue;
                 }
                 Some(x)
             }
             (0, true) => None,
-            _ => continue,
+            _ => {
+                let mut xs: Vec<String> = exits
+                    .iter()
+                    .map(|x| {
+                        let from: Vec<u32> = seen_r.iter().filter(|b| cfg[**b].term.successors().contains(x)).map(|b| b.0).collect();
+                        format!("bb{} from {from:?}", x.0)
+                    })
+                    .collect();
+                xs.sort();
+                let blocks: Vec<String> = r.iter().map(|b| format!("{}{}", b.0, if never(*b) { "n" } else { "" })).collect();
+                why(e, &format!("{} exits {xs:?}, returns: {returns}; blocks {blocks:?}", exits.len()));
+                continue;
+            }
         };
         let seen_blocks = seen_r;
         // Worth one region: several instrs that ran torch ops or entered frames.
         let work = seen_blocks.iter().flat_map(|b| body(*b)).filter(|v| effects.get(Site::Instr(**v)).iter().any(|(seq, _)| !seq.is_empty())).count();
-        if work < 4 || seen_blocks.len() < 2 {
+        if forced_exit.is_none() && (work < 4 || seen_blocks.len() < 2) {
+            why(e, &format!("too little: {work} ops in {} blocks", seen_blocks.len()));
             continue;
         }
         let seen_set: HashSet<BlockId> = seen_blocks.iter().copied().collect();
@@ -294,6 +387,7 @@ pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>) -> Vec<
             None => true,
         });
         if !own {
+            why(e, "changes a container it didn't make");
             continue;
         }
         let mut live_out: Vec<u32> = match exit {
@@ -310,11 +404,74 @@ pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>) -> Vec<
         live_in.extend(live_out.iter().filter(|s| !must.contains(s)));
         let mut live_in: Vec<u32> = live_in.into_iter().collect();
         live_in.sort();
-        let inputs = inputs(cfg, &seen_blocks, &live_in, movable);
+        let mut inputs = inputs(cfg, &seen_blocks, &live_in, movable);
+        let mut cells: Vec<u32> = seen_blocks.iter().flat_map(|b| body(*b)).filter_map(|v| if let Op::LoadDeref { slot } = cfg[*v].op { Some(slot) } else { None }).collect();
+        cells.sort();
+        cells.dedup();
+        inputs.extend(cells.into_iter().map(|s| (s, Some(CELL))));
+        let passed = passed_on(cfg, &seen_blocks, e, exit);
+        why(e, &format!("span to {:?}, {} blocks, {work} ops", exit.map(|x| x.0), seen_blocks.len()));
         used.extend(r.iter().copied());
-        found.push(Found { entry: e, exit, never: r.iter().copied().filter(|b| never(*b)).collect(), live_in, live_out, inputs });
+        found.push(Found { entry: e, exit, never: r.iter().copied().filter(|b| never(*b)).collect(), live_in, live_out, inputs, passed });
     }
     found
+}
+
+// The positions of the entry's explicit params that the span's blocks only
+// pass on, to its exit or to params that are only passed on themselves: a
+// loop's iterator, for a span in the loop's body. The region doesn't read
+// them (so doesn't check them); it hands them to the exit as they came.
+fn passed_on(cfg: &Cfg, blocks: &[BlockId], e: BlockId, exit: Option<BlockId>) -> Vec<u32> {
+    let mut used: HashSet<ValueId> = HashSet::new();
+    let mut flows: Vec<(ValueId, ValueId)> = vec![];
+    for &b in blocks {
+        let blk = &cfg[b];
+        let Some(ver) = blk.versions.first() else { continue };
+        for v in ver.body.iter().chain(&blk.reads) {
+            used.extend(cfg[*v].args.iter().copied());
+        }
+        used.extend(ver.guard.checks.iter().filter_map(|(t, _)| *t));
+        for seg in &ver.unwind {
+            if let Handler::Block(_, args) | Handler::Outer(_, args) = &seg.handler {
+                used.extend(args.iter().copied());
+            }
+        }
+        let out = |i: &OutIdx| ver.outputs[*i as usize];
+        let mut exits: Vec<&Exit> = vec![];
+        match &blk.term {
+            Terminator::Jump(x) => exits.push(x),
+            Terminator::Branch { cond, then, else_ } => {
+                used.insert(out(cond));
+                exits.extend([then, else_]);
+            }
+            Terminator::Raise { args, .. } => used.extend(args.iter().map(out)),
+            Terminator::Reraise { exc, lasti, .. } => used.extend(std::iter::once(exc).chain(lasti.as_ref()).map(out)),
+            Terminator::Unreachable => {}
+        }
+        if let Some(TermUnwind::Block(_, args)) = blk.term.unwind() {
+            used.extend(args.iter().map(out));
+        }
+        for x in exits {
+            match x {
+                Exit::Block(edge) if Some(edge.target) == exit => {}
+                Exit::Block(edge) => flows.extend(edge.args.iter().zip(cfg.explicit_params(edge.target)).map(|(a, p)| (out(a), p))),
+                Exit::Return(i) => {
+                    used.insert(out(i));
+                }
+                Exit::Leave(args) => used.extend(args.iter().map(out)),
+            }
+        }
+    }
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (from, to) in &flows {
+            if used.contains(to) && used.insert(*from) {
+                changed = true;
+            }
+        }
+    }
+    cfg.explicit_params(e).iter().enumerate().filter(|(_, p)| !used.contains(p)).map(|(k, _)| k as u32).collect()
 }
 
 // The locals every path through `order` (RPO, from `entry`) writes before
@@ -445,6 +602,7 @@ pub fn place(cfg: &Cfg, found: Vec<Found>, renumbered: &[Option<BlockId>], qualn
             live_in: f.live_in,
             live_out: f.live_out,
             inputs: f.inputs,
+            passed: f.passed,
             name: format!("{qualname}:span bb{}", entry.0),
             state: Default::default(),
         });
