@@ -364,7 +364,7 @@ bool is_two_level_nvfp4(
 
 namespace {
 
-// MXFP6 runs only through `_scaled_mm_mxfp6_helper` (see the CUDA
+// MXFP6 runs only through `aten::_scaled_mm_mxfp6` (see the CUDA
 // `_scaled_mm_v2` impl): two K-major float6_e2m3fn_x4 operands, each with one
 // BlockWise1x32 SWIZZLE_32_4_4 e8m0 scale. A float6_e2m3fn_x4 element packs 4
 // values along K.

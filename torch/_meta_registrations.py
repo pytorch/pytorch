@@ -7736,11 +7736,14 @@ def meta_scaled_mm_v2(
     )
 
     _out_dtype = out_dtype if out_dtype is not None else self.dtype
-    torch._check_value(
-        self.dtype != torch.float6_e2m3fn_x4
-        or _out_dtype in (torch.bfloat16, torch.float32),
-        lambda: f"MXFP6 scaled_mm requires out_dtype to be BFloat16 or Float, got {_out_dtype}",
-    )
+    if self.dtype == torch.float6_e2m3fn_x4:
+        torch._check_value(
+            _out_dtype in (torch.bfloat16, torch.float32),
+            lambda: f"MXFP6 scaled_mm requires out_dtype to be BFloat16 or Float, got {_out_dtype}",
+        )
+        torch._check_not_implemented(
+            bias is None, lambda: "MXFP6 scaled_mm does not support bias"
+        )
     return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
 
 
@@ -7779,6 +7782,10 @@ def meta_scaled_addmm(
             and contraction_dim[1] in (0, -2)
         ),
         lambda: "torch._scaled_addmm only supports contraction_dim=(1, 0)",
+    )
+    torch._check_not_implemented(
+        mat1.dtype != torch.float6_e2m3fn_x4,
+        lambda: "torch._scaled_addmm does not support MXFP6",
     )
     result = meta_scaled_mm_v2(
         mat1,

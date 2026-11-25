@@ -1721,6 +1721,12 @@ void scaled_mm_cuda_v2_impl(
   const char* op_name = accumulator ? "torch._scaled_addmm" : "torch._scaled_mm";
   if (mat_a.scalar_type() == kFloat6_e2m3fn_x4) {
     // validate_scaled_mm_v2_inputs checked the operands and scales.
+#ifdef USE_ROCM
+    TORCH_CHECK_NOT_IMPLEMENTED(false, op_name, " does not support MXFP6 on ROCm");
+#endif
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        at::cuda::getDeviceProperties(mat_a.get_device())->major == 10,
+        op_name, " supports MXFP6 only on SM100-family GPUs");
     TORCH_CHECK_NOT_IMPLEMENTED(
         !accumulator && !bias, op_name, " does not support bias or an accumulator for MXFP6");
     if (out.numel() == 0) {
@@ -2049,7 +2055,7 @@ Tensor _scaled_mm_mxfp6_cuda(
     const Tensor& scale_a,
     const Tensor& scale_b,
     ScalarType out_dtype) {
-  auto out = at::empty({mat_a.size(0), mat_b.size(1)}, mat_a.options().dtype(out_dtype));
+  Tensor out;
   return _scaled_mm_mxfp6_out_cuda(mat_a, mat_b, scale_a, scale_b, out_dtype, out);
 }
 

@@ -133,7 +133,7 @@ class TestScaledMmMXFP6CuTeDSL(TestCase):
             a, b, scale_a, scale_b, torch.bfloat16, out=out
         )
         self.assertMatches(out, reference)
-        with self.assertRaisesRegex(NotImplementedError, "out must be"):
+        with self.assertRaisesRegex(ValueError, "expected out"):
             torch.ops.aten._scaled_mm_mxfp6.out(
                 a, b, scale_a, scale_b, torch.bfloat16, out=out.cpu()
             )
@@ -143,6 +143,90 @@ class TestScaledMmMXFP6CuTeDSL(TestCase):
                 fake(a), fake(b), fake(scale_a), fake(scale_b), torch.float32
             )
             self.assertEqual((result.shape, result.dtype), ((128, 256), torch.float32))
+
+    def test_empty_and_zero_k(self):
+        a, b, scale_a, scale_b, _ = _operands(128, 256, 512)
+        self.assertEqual(_scaled_mm(a[:0], b, scale_a[:0], scale_b).shape, (0, 256))
+        zero_k = _scaled_mm(a[:, :0], b[:0], scale_a[:0], scale_b[:0])
+        self.assertEqual(
+            zero_k, torch.zeros(128, 256, device="cuda", dtype=torch.bfloat16)
+        )
+
+    def test_out_with_unaligned_row_stride(self):
+        # With M == 1 a row stride of 9 is still contiguous.
+        a, b, scale_a, scale_b, reference = _operands(1, 8, 512)
+        out = torch.empty_strided((1, 8), (9, 1), dtype=torch.bfloat16, device="cuda")
+        args = _scaled_mm_v2_args(a, b, scale_a, scale_b, torch.bfloat16)
+        torch.ops.aten._scaled_mm_v2.out(*args, out=out)
+        self.assertMatches(out, reference)
+
+    def test_mxfp6_op_validates_its_inputs(self):
+        a, b, scale_a, scale_b, _ = _operands(128, 256, 512)
+        op = torch.ops.aten._scaled_mm_mxfp6
+        cases = {
+            "on": (a, b, scale_a.cpu(), scale_b),
+            "multiple of 128": (a[:, :16], b[:16], scale_a, scale_b),
+            "float6_e2m3fn_x4": (a.view(torch.uint8), b, scale_a, scale_b),
+            "elements": (a, b, scale_a[:-1], scale_b),
+        }
+        for message, args in cases.items():
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                op(*args, torch.bfloat16)
+        with self.assertRaisesRegex(ValueError, "out_dtype"):
+            op(a, b, scale_a, scale_b, torch.int32)
+        # Scales are checked before ``out`` is touched, also for empty products.
+        strided = torch.empty(2 * scale_b.numel(), dtype=scale_b.dtype, device="cuda")
+        strided = strided[::2].copy_(scale_b)
+        bad_scales = {
+            "elements": (scale_b[:-1], scale_b),
+            "contiguous scale": (strided, None),
+            "on cuda": (scale_b.cpu(), scale_b[:0].cpu()),
+            "float8_e8m0fnu": (scale_b.float(), scale_b[:0].float()),
+        }
+        for message, (bad, bad_for_zero_k) in bad_scales.items():
+            with self.subTest(message):
+                out = torch.empty(0, dtype=torch.bfloat16, device="cuda")
+                with self.assertRaisesRegex(ValueError, message):
+                    op.out(a, b, scale_a, bad, torch.bfloat16, out=out)
+                self.assertEqual(out.shape, (0,))
+                if bad_for_zero_k is not None:
+                    with self.assertRaisesRegex(ValueError, message):
+                        op(a[:, :0], b[:0], scale_a[:0], bad_for_zero_k, torch.bfloat16)
+        # Freshly allocated K=0 operands have degenerate strides.
+        empty_a = torch.empty(128, 0, dtype=a.dtype, device="cuda")
+        empty_b = torch.empty(0, 256, dtype=a.dtype, device="cuda").t().contiguous().t()
+        none = torch.empty(0, dtype=scale_a.dtype, device="cuda")
+        self.assertEqual(
+            op(empty_a, empty_b, none, none, torch.bfloat16),
+            torch.zeros(128, 256, device="cuda", dtype=torch.bfloat16),
+        )
+
+    def test_single_row_operands(self):
+        # A single row's stride is arbitrary, e.g. (1, 1) from torch.empty(K/4, 1).
+        a, b, scale_a, scale_b, reference = _operands(128, 1, 512)
+        b = torch.empty(b.shape, dtype=b.dtype, device="cuda").copy_(b)
+        self.assertEqual(b.stride(), (1, 1))
+        self.assertMatches(_scaled_mm(a, b, scale_a, scale_b), reference)
+
+    def test_compile_dynamic(self):
+        from torch._dynamo.testing import CompileCounterWithBackend
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(_scaled_mm, backend=counter, dynamic=True)
+        # 200 and 384 also change the padded scale size. K/4 = 160 stays apart
+        # from M and N so duck sizing does not tie them.
+        for m in (128, 200, 384):
+            a, b, scale_a, scale_b, reference = _operands(m, 256, 640)
+            self.assertMatches(compiled(a, b, scale_a, scale_b), reference)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_fake_rejects_bias(self):
+        a, b, scale_a, scale_b, _ = _operands(128, 256, 512)
+        bias = torch.zeros(256, device="cuda", dtype=torch.bfloat16)
+        with FakeTensorMode() as mode:
+            args = [mode.from_tensor(t) for t in (a, b, scale_a, scale_b)]
+            with self.assertRaisesRegex(NotImplementedError, "bias"):
+                _scaled_mm(*args, bias=mode.from_tensor(bias))
 
     def test_contraction_dim(self):
         a, b, scale_a, scale_b, reference = _operands(128, 256, 512)
