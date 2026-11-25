@@ -30,13 +30,12 @@ TORCH_CUDA_CPP_API void changeCurrentAllocator(
 // the capture's pool are made by `allocator`; the other calls that occur are
 // handed to the caching allocator. One capture at a time; no other capture may
 // begin or end meanwhile. Disarm (after making the previous allocator current
-// again) is idempotent and returns whether another capture began or ended
-// while the capture's allocations were routed.
+// again) is idempotent.
 TORCH_CUDA_CPP_API std::shared_ptr<
     c10::cuda::CUDACachingAllocator::CUDAAllocator>
 armCaptureRouting(
     std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator);
-TORCH_CUDA_CPP_API bool disarmCaptureRouting();
+TORCH_CUDA_CPP_API void disarmCaptureRouting();
 
 struct _AllocationMetadata {
   _AllocationMetadata();

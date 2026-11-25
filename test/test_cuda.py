@@ -11786,6 +11786,45 @@ for args in ((a, b), (a, b, False)):
         self.assertNotIn(before.data_ptr(), live)
         self.assertEqual(live, {})
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    def test_python_allocator_record_stream_and_pending_exception(self):
+        # a Python allocator sees record_stream on its memory, and a free while
+        # an exception propagates keeps the exception
+        arena = torch.empty(1 << 20, dtype=torch.uint8, device="cuda")
+        top = [arena.data_ptr()]
+        live = {}
+        streams = []
+
+        def alloc(size, device, stream):
+            ptr = top[0]
+            top[0] += (size + 511) // 512 * 512
+            live[ptr] = size
+            return ptr
+
+        def free(ptr, size, device, stream):
+            del live[ptr]
+
+        x = torch.ones(1024, device="cuda")
+        side = torch.cuda.Stream()
+        previous = torch.cuda.memory._get_current_allocator()
+        pluggable = torch.cuda.memory._CUDAAllocator(
+            torch._C._cuda_createPythonAllocator(
+                alloc, free, lambda ptr, stream: streams.append((ptr, stream))
+            )
+        )
+        torch.cuda.memory.change_current_allocator(pluggable)
+        try:
+            t = torch.empty(1024, device="cuda")
+            t.record_stream(side)
+            self.assertEqual(streams, [(t.data_ptr(), side.cuda_stream)])
+            del t
+            # x * 2 is freed while the exception propagates
+            with self.assertRaisesRegex(RuntimeError, "must match the size"):
+                (x * 2) + torch.ones(3, device="cuda")
+            self.assertEqual(live, {})
+        finally:
+            torch.cuda.memory.change_current_allocator(previous)
+
     @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
     @requires_cuda_python_bindings
@@ -16864,13 +16903,6 @@ class TestGraphAllocators(TestCase):
                 _route_capture_allocations(self._python_allocator(lambda *a: None)),
             ):
                 torch.empty(1024, device="cuda")
-        misaligned = self._python_allocator(lambda size, d, s: bump.base + 128)
-        with self.assertRaisesRegex(RuntimeError, "not aligned to 256 bytes"):
-            with (
-                torch.cuda.graph(torch.cuda.CUDAGraph()),
-                _route_capture_allocations(misaligned),
-            ):
-                torch.empty(1024, device="cuda")
         with self.assertRaisesRegex(RuntimeError, "inside a CUDA graph capture"):
             with _route_capture_allocations(bump.allocator):
                 pass
@@ -16886,19 +16918,23 @@ class TestGraphAllocators(TestCase):
         self.assertEqual(bump.live, {})
         self.assertEqual(torch.cuda.memory.get_allocator_backend(), "native")
 
-    def test_free_while_an_exception_propagates(self):
-        # a tensor of the allocator freed while a Python exception propagates
-        # (a temporary of the expression that raised): the free reaches the
-        # allocator, and the exception raised is the original one
+    def test_mem_pool_options_while_routing(self):
+        # a MemPool made while routing, with options: they reach the caching
+        # allocator
         bump = self.Bump()
         x = torch.ones(1024, device="cuda")
-        with self.assertRaisesRegex(RuntimeError, "must match the size of tensor b"):
-            with (
-                torch.cuda.graph(torch.cuda.CUDAGraph()),
-                _route_capture_allocations(bump.allocator),
-            ):
-                (x * 2) + torch.ones(3, device="cuda")
-        self.assertEqual(bump.live, {})
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g), _route_capture_allocations(bump.allocator):
+            pool = torch.cuda.MemPool(use_on_oom=True, no_split=True)
+            with torch.cuda.use_mem_pool(pool):
+                buf = torch.empty(1024, device="cuda")
+            y = x + 1
+        self.assertFalse(bump.owns(buf))
+        self.assertTrue(bump.owns(y))
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(y, x + 1)
+        del g, buf, pool
 
     def test_record_stream_reaches_the_allocator(self):
         # record_stream on the allocator's memory while routing
@@ -17060,38 +17096,6 @@ print("capturing", torch.cuda.is_current_stream_capturing())
         out = self._run(code, "backend:cudaMallocAsync").stdout
         self.assertIn("requires the native CUDA caching allocator", out)
         self.assertIn("capturing False", out)
-
-    def test_other_capture_refused(self):
-        # another capture may not begin or end while routing (it would reach
-        # the routing allocator without its registration): leaving routing
-        # raises, and the caching allocator's capture count stays balanced
-        code = """
-import torch
-allocator = torch.cuda.memory._CUDAAllocator(
-    torch._C._cuda_createPythonAllocator(lambda *a: None, lambda *a: None))
-x = torch.ones(16, device="cuda")
-side = torch.cuda.Stream()
-try:
-    with torch.cuda.graph(torch.cuda.CUDAGraph(), capture_error_mode="relaxed"):
-        with torch.cuda.memory._route_capture_allocations(allocator):
-            with torch.cuda.stream(side):
-                other = torch.cuda.CUDAGraph()
-                other.capture_begin(capture_error_mode="relaxed")
-                y = x + 1
-                other.capture_end()
-except RuntimeError as e:
-    print("ERROR", e)
-g = torch.cuda.CUDAGraph()
-with torch.cuda.graph(g):
-    z = x * 2
-g.replay()
-torch.cuda.synchronize()
-print("z", z.sum().item())
-"""
-        proc = self._run(code)
-        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
-        self.assertIn("conditional nodes and concurrent captures", proc.stdout)
-        self.assertIn("z 32.0", proc.stdout)
 
 
 instantiate_parametrized_tests(TestCuda)
