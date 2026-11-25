@@ -194,7 +194,7 @@ static void _mkldnn_convolution_out(
     IntArrayRef padding,
     int64_t groups,
     bool is_channels_last,
-    const ideep::attr_t& op_attr,
+    const mkldnn::Attr& op_attr,
     const dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward) {
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
@@ -251,7 +251,7 @@ static Tensor _mkldnn_convolution(
         torch::List<std::optional<at::Scalar>>(),
     std::optional<std::string_view> algorithm = std::nullopt,
     const dnnl::prop_kind aprop_kind = dnnl::prop_kind::forward) {
-  ideep::attr_t op_attr = ideep::attr_t();
+  mkldnn::Attr op_attr = mkldnn::Attr();
   if (attr != "none") {
     auto it = fusion_unary_attr_map().find(attr);
     TORCH_CHECK(
@@ -466,7 +466,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     auto other_desc = ideep::tensor::desc(
         other.sizes().vec(), get_mkldnn_dtype(other.scalar_type()), format_tag);
 
-    ideep::attr_t op_attr;
+    mkldnn::Attr op_attr;
     ideep::post_ops po;
     po.append_binary(it_binary->second, other_desc);
     if (unary_attr_value != "none") {
@@ -612,11 +612,11 @@ Tensor& mkldnn_convolution_pointwise_binary_(
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
   if (can_be_fused) {
     ideep::tensor y = itensor_from_tensor(other_t);
-    ideep::attr_t op_attr;
+    mkldnn::Attr op_attr;
     if (unary_attr.has_value()) {
-      op_attr = ideep::attr_t::residual();
+      op_attr = mkldnn::Attr::residual();
     } else {
-      op_attr = ideep::attr_t::fuse_sum();
+      op_attr = mkldnn::Attr::fuse_sum();
     }
     auto aprop_kind = dnnl::prop_kind::forward_inference;
     if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
@@ -715,7 +715,7 @@ Tensor _mkldnn_convolution_transpose(
     torch::List<std::optional<at::Scalar>> scalars =
         torch::List<std::optional<at::Scalar>>(),
     std::optional<std::string_view> algorithm = std::nullopt) {
-  ideep::attr_t op_attr = ideep::attr_t();
+  mkldnn::Attr op_attr = mkldnn::Attr();
   if (attr != "none") {
     auto it = fusion_unary_attr_map().find(attr);
     TORCH_CHECK(it != fusion_unary_attr_map().end(), "Fusion behavior undefined.");
@@ -855,7 +855,7 @@ Tensor mkldnn_convolution_backward_input(
     grad_input.resize_(input_size, memory_format);
     grad_x = itensor_from_tensor(grad_input);
   }
-  ideep::attr_t op_attr = ideep::attr_t();
+  mkldnn::Attr op_attr = mkldnn::Attr();
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -914,7 +914,7 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
   const ideep::tensor x = itensor_from_const_tensor(input);
 
   ideep::tensor grad_w, grad_b;
-  ideep::attr_t op_attr = ideep::attr_t();
+  mkldnn::Attr op_attr = mkldnn::Attr();
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -1072,7 +1072,7 @@ Tensor mkldnn_convolution_transpose_backward_input(
     grad_input.resize_(input_size, memory_format);
     grad_x = itensor_from_tensor(grad_input);
   }
-  ideep::attr_t op_attr = ideep::attr_t();
+  mkldnn::Attr op_attr = mkldnn::Attr();
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
@@ -1118,7 +1118,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
   auto x = itensor_from_const_tensor(input);
 
   ideep::tensor grad_w, grad_b;
-  ideep::attr_t op_attr = ideep::attr_t();
+  mkldnn::Attr op_attr = mkldnn::Attr();
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);

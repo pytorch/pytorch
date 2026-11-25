@@ -167,10 +167,10 @@ mkldnn_gemm(
     return false;
   }
 
-  ideep::attr_t op_attr;
+  mkldnn::Attr op_attr;
   // Use mkldnn post ops to perform the add.
   if (beta != 0.0f) {
-    op_attr = ideep::attr_t::fuse_sum();
+    op_attr = mkldnn::Attr::fuse_sum();
   }
   if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
   if (tf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32); // tf32 path
@@ -243,10 +243,10 @@ mkldnn_gemm(
     return false;
   }
 
-  ideep::attr_t op_attr;
+  mkldnn::Attr op_attr;
   // Use mkldnn post ops to perform the add.
   if (beta != 0.0f) {
-    op_attr = ideep::attr_t::fuse_sum();
+    op_attr = mkldnn::Attr::fuse_sum();
   }
 
   // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
@@ -388,11 +388,11 @@ void mkldnn_matmul(
   bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
   bool tf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_tf32_matmul();
 
-  ideep::attr_t op_attr;
+  mkldnn::Attr op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
   // but mkldnn matmul primitive only support bias be 1-D tensors
   // to address their differences, we use mkldnn post ops to perform a fused "add" after matrix multiplication is over
-  if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
+  if (beta != 0.0f) op_attr = mkldnn::Attr::fuse_sum();
   if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
   if (tf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32); // tf32 path
   // If alpha = 0, dose not need actually do gemm computation
@@ -558,7 +558,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
       result.mutable_data_ptr());
   // Create primitive desc
   auto engine = ideep::engine::cpu_engine();
-  ideep::attr_t op_attr;
+  mkldnn::Attr op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto src_desc = src.get_desc();
 #if defined(__aarch64__)
