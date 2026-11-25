@@ -190,6 +190,9 @@ class TestKernelRowTile(TestCase):
                 with torch.backends.python_native.cutedsl.disabled():
                     ref = x.double().sum(1).to(out)
                 self.assertEqual(want, ref, atol=1e-5, rtol=1e-5)
+                if columns > 1 and not wide:
+                    # The planted rows sum exactly to subnormals, which a flush changes.
+                    self.assertEqual(want[:64].view(bits), ref[:64].view(bits))
                 # Padding would change a mean's count, so compare it with this sum's
                 # quotient; the kernel's division is not correctly rounded.
                 mean = T.MeanOps(acc=acc)

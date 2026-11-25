@@ -1272,7 +1272,7 @@ def reduce_all2(
 # An eager call with an earlier call's metadata replays that call's launches, skipping the
 # routing and planning that cost 40-85 us of host time per call on B200. Recordings hold
 # absolute storage offsets, so each offset view takes its own entry: a loop over more
-# than 1024 offsets of one storage records on every call.
+# distinct offsets than _REPLAYS holds records on every call.
 _REPLAYS = LRUCache(1024)
 _UNRECORDED = object()
 

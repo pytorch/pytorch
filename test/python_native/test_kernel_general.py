@@ -1075,6 +1075,10 @@ class TestKernelGeneral(TestCase):
         kg.replay_reduce(trait, "replay_copy", x, None, torch.int32)
         (replay,) = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_copy"]
         self.assertIsNone(replay)
+        # A contiguous input of the same length and dtype records: the copy declines.
+        kg.replay_reduce(trait, "replay_flat", x.contiguous(), None, torch.int32)
+        (replay,) = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_flat"]
+        self.assertIsNotNone(replay)
         x.normal_()
         got = kg.replay_reduce(trait, "replay_copy", x, None, torch.int32)
         with torch.backends.python_native.cutedsl.disabled():

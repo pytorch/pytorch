@@ -397,21 +397,24 @@ class TestSumCuteDSLOverride(TestCase):
         """Check out= in the condition without materializing a copy-on-write input or
         allocating the span a strided out's strides cover (here 32 MiB for 512 bytes of
         outputs). Copy-on-write and subclass outs decline, at either keepdim."""
-        x = torch._lazy_clone(torch.randn(128, 512, device="cuda"))
-        if not torch._C._is_cow_tensor(x):
-            self.skipTest("allocator does not support COW sharing")
+        x = torch.randn(128, 512, device="cuda")
         out = torch.empty(128, 65536, device="cuda")[:, 0]
         torch.cuda.synchronize()
         torch.cuda.reset_peak_memory_stats()
         before = torch.cuda.memory_allocated()
         self.assertTrue(cutedsl_impl._out_cond(x, [1], out=out))
         self.assertLess(torch.cuda.max_memory_allocated() - before, 1 << 20)
-        for keepdim in (False, True):
-            shape = (128, 1) if keepdim else (128,)
-            cow = torch._lazy_clone(torch.empty(shape, device="cuda"))
+        shapes = {False: (128,), True: (128, 1)}
+        for keepdim, shape in shapes.items():
             param = torch.nn.Parameter(torch.empty(shape, device="cuda"), False)
-            for declined in (cow, param):
-                self.assertFalse(cutedsl_impl._out_cond(x, [1], keepdim, out=declined))
+            self.assertFalse(cutedsl_impl._out_cond(x, [1], keepdim, out=param))
+        x = torch._lazy_clone(x)
+        if not torch._C._is_cow_tensor(x):
+            self.skipTest("allocator does not support COW sharing")
+        self.assertTrue(cutedsl_impl._out_cond(x, [1], out=out))
+        for keepdim, shape in shapes.items():
+            cow = torch._lazy_clone(torch.empty(shape, device="cuda"))
+            self.assertFalse(cutedsl_impl._out_cond(x, [1], keepdim, out=cow))
             self.assertTrue(torch._C._is_cow_tensor(cow))
         self.assertTrue(torch._C._is_cow_tensor(x))
 
