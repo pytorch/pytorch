@@ -1571,6 +1571,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if fn.dict_state_source is not None:
                     # Guard the flatten decision both ways: the dict state is
                     # None while the instance dict is unset, a dict once set.
+                    tx.output.current_tracer.traced_sources.add(fn.dict_state_source)
                     install_guard(
                         fn.dict_state_source.make_guard(GuardBuilder.TYPE_MATCH)
                     )
