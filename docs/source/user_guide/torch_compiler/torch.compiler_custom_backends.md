@@ -171,6 +171,42 @@ under `torch.compiler.set_stance(force_backend=...)`, resolution happens
 on the first call, so the hook fires -- and a failure surfaces -- from
 the call instead.
 
+## Resetting Backend State
+
+Backends that keep their own state across compilations (e.g. compiled
+kernel caches or device binaries) can clear it on `torch._dynamo.reset()`
+by defining a no-arg `reset` callable on the backend object.
+
+```python
+_kernel_cache = {}
+
+def my_backend(gm, example_inputs):
+    _kernel_cache[id(gm)] = gm.forward
+    return gm.forward
+
+my_backend.reset = _kernel_cache.clear
+
+@torch.compile(backend=my_backend)
+def fn(x):
+    return x + 1
+
+fn(torch.randn(3))
+torch._dynamo.reset()  # calls my_backend.reset()
+```
+
+A class-based backend can define `reset` as a method instead; see
+`CudagraphsBackend` in `torch/_dynamo/backends/cudagraphs.py`.
+
+The hook works whether the backend is passed directly or registered by name
+with `register_backend`. When using `aot_autograd(...)`, set `reset` on the
+object returned by `aot_autograd`, not on the inner `fw_compiler`.
+
+`torch._dynamo.reset()` calls `reset` once for every `torch.compile` call made
+with the backend since the previous reset, so `reset` should be idempotent.
+The hook runs under Dynamo's compile lock, after Dynamo's code caches have been
+cleared. If `reset` raises, the exception propagates out of
+`torch._dynamo.reset()`.
+
 
 ## Examples
 
