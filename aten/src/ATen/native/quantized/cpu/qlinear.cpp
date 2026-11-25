@@ -836,7 +836,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   const std::vector<float>& dst_scales = std::vector<float>(1, 1.0/output_scale);
   const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(1, input_zero_point);
   const std::vector<int32_t>& dst_zero_point = std::vector<int32_t>(1, output_zero_point);
-  // Compute: Use ideep::matmul_forward to support asymmetric quantization
+  // Compute: Use mkldnn::matmul_forward to support asymmetric quantization
   // Allocate output Tensor
   at::Tensor output = at::_empty_affine_quantized(
       dst_dims,
