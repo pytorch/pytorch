@@ -459,6 +459,129 @@ class TestVmCalleeState(TestCase):
 instantiate_device_type_tests(TestVmCalleeState, globals())
 
 
+SWAP_OPS = ["pow", "mean", "add", "rsqrt", "mul"]
+
+
+def swap_model(x, w):
+    h = torch.tanh(x @ w)
+    h = h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + 1e-6)
+    return (h.relu() + h.sigmoid()).sum(-1)
+
+
+def swap_rms_norm(h):
+    return h / h.square().mean(-1, keepdim=True).add(1e-6).sqrt()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmSwap(TestCase):
+    """vm.swap: a kernel in the place of a run of ops, checked against them."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def run_swapped(self, kernel, device, calls=8, **options):
+        # What each call gives (or the exception it raises), and eager's.
+        g = vm(swap_model, passes=(*EARLY, vm.swap(SWAP_OPS, kernel, **options)))
+        torch.manual_seed(0)
+        w = torch.randn(8, 8, device=device)
+        got = []
+        for _ in range(calls):
+            x = torch.randn(4, 8, device=device)
+            try:
+                got.append((g(x, w), swap_model(x, w)))
+            except vm.Mismatch as e:
+                got.append(e)
+        return got
+
+    @isolated
+    def test_kernel_runs_in_place_of_the_ops(self, device):
+        calls = []
+
+        def kernel(h):
+            calls.append(tuple(h.shape))
+            return swap_rms_norm(h)
+
+        for ours, eagers in self.run_swapped(kernel, device):
+            self.assertEqual(ours, eagers, rtol=1e-4, atol=1e-5)
+        # The fourth call is traced; the kernel runs from the fifth on.
+        self.assertEqual(calls, [(4, 8)] * 4)
+
+    @isolated
+    def test_kernel_that_gives_other_values_raises(self, device):
+        got = self.run_swapped(lambda h: swap_rms_norm(h) * 1.5, device)
+        self.assertNotIsInstance(got[3], Exception)
+        self.assertIsInstance(got[4], vm.Mismatch)
+        self.assertRegex(
+            str(got[4]),
+            r"result 0 differs by up to .* on call 1 \(the ops it replaced were run on the same inputs\)",
+        )
+
+    @isolated
+    def test_kernel_that_gives_another_shape_or_dtype_raises(self, device):
+        got = self.run_swapped(lambda h: swap_rms_norm(h)[:, :4], device)
+        self.assertRegex(str(got[4]), r"result 0 has shape \(4, 4\), not \(4, 8\)")
+        got = self.run_swapped(lambda h: swap_rms_norm(h).double(), device)
+        self.assertRegex(
+            str(got[4]), "result 0 is torch.float64 on .*, not torch.float32"
+        )
+
+    @isolated
+    def test_the_check_stops_after_as_many_calls_as_asked(self, device):
+        # Exact for the first two calls of the region, off by a factor after.
+        seen = []
+
+        def kernel(h):
+            seen.append(len(seen))
+            return swap_rms_norm(h) * (1.0 if len(seen) <= 2 else 1.5)
+
+        got = self.run_swapped(kernel, device, check=2)
+        self.assertFalse(any(isinstance(g, Exception) for g in got))
+        for ours, eagers in got[:6]:
+            self.assertEqual(ours, eagers, rtol=1e-4, atol=1e-5)
+        self.assertFalse(torch.allclose(got[6][0], got[6][1], rtol=1e-4, atol=1e-5))
+
+    @isolated
+    def test_unchecked_kernel_is_trusted(self, device):
+        got = self.run_swapped(lambda h: swap_rms_norm(h) * 1.5, device, check=False)
+        self.assertFalse(any(isinstance(g, Exception) for g in got))
+        self.assertFalse(torch.allclose(got[4][0], got[4][1], rtol=1e-4, atol=1e-5))
+
+    @isolated
+    def test_run_that_writes_in_place_is_left_as_it_is(self, device):
+        def writes(x, w):
+            h = torch.tanh(x @ w)
+            h = h.pow(2).mean(-1, keepdim=True).add_(1e-6).rsqrt() * h
+            return (h.relu() + h.sigmoid()).sum(-1)
+
+        calls = []
+
+        def kernel(*values):
+            calls.append(len(values))
+            return values[0]
+
+        g = vm(
+            writes,
+            passes=(*EARLY, vm.swap(["pow", "mean", "add_", "rsqrt", "mul"], kernel)),
+        )
+        w = torch.randn(8, 8, device=device)
+        for _ in range(8):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x, w), writes(x, w), atol=0, rtol=0)
+        self.assertEqual(calls, [])
+
+    @isolated
+    def test_gradients_go_through_the_kernel(self, device):
+        g = vm(swap_model, passes=(*EARLY, vm.swap(SWAP_OPS, swap_rms_norm)))
+        w = torch.randn(8, 8, device=device, requires_grad=True)
+        for _ in range(8):
+            x = torch.randn(4, 8, device=device)
+            (ours,) = torch.autograd.grad(g(x, w).sum(), w)
+            (eagers,) = torch.autograd.grad(swap_model(x, w).sum(), w)
+            self.assertEqual(ours, eagers, rtol=1e-4, atol=1e-5)
+
+
+instantiate_device_type_tests(TestVmSwap, globals())
+
+
 def call_outcome(fn, *args, **kwargs):
     """What a call returns, or the type and the message of what it raises."""
     try:
