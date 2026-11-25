@@ -1303,6 +1303,56 @@ class TestBlackwellTMALoadFusion(TestCase):
 
         _check_tma_descriptors(code[0], "triton_tem_fused", ".load([", host_side_tma)
 
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("K", (64, 128))
+    def test_blackwell_addmm_two_ctas_single_k_tile_no_epilogue_tma_load(self, K: int):
+        """A 2-CTA template whose K fits in one BLOCK_K tile loads the bias
+        with tl.load, as autoWS can hang on it with a TMA-loaded epilogue
+        input; with two K tiles the bias is TMA-loaded."""
+
+        def fn(bias, x, W):
+            return torch.addmm(bias, x, W.T)
+
+        M, N = 512, 256
+        x = torch.randn(M, K, dtype=torch.bfloat16, device=GPU_TYPE)
+        W = torch.randn(N, K, dtype=torch.bfloat16, device=GPU_TYPE)
+        bias = torch.randn(N, dtype=torch.bfloat16, device=GPU_TYPE)
+        test_config = BlackwellGPUGemmConfig(
+            128, 128, 64, 3, 4, two_ctas=True, warp_specialize=False, flatten=False
+        )
+        from torch._inductor.heuristics.template.registry import get_template_heuristic
+
+        keys = [
+            ("triton::blackwell_ws_persistent_tma", "cuda", "mm"),
+            ("triton::blackwell_ws_persistent_tma", "cuda", "addmm"),
+        ]
+        orig = {}
+        for key in keys:
+            h = get_template_heuristic(*key)
+            orig[key] = h.mm_configs
+            h.mm_configs = [test_config]
+        try:
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "triton.enable_tma_load_for_template_epilogue": True,
+                    "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+                }
+            ):
+                actual, code = run_and_get_code(torch.compile(fn), bias, x, W)
+        finally:
+            for key, configs in orig.items():
+                if key in _HEURISTIC_CACHE:
+                    _HEURISTIC_CACHE[key].mm_configs = configs
+        torch.testing.assert_close(actual, fn(bias, x, W), atol=1e-1, rtol=1e-1)
+        self.assertIn("TWO_CTAS", code[0])
+        self.assertEqual("tma_descriptor" in code[0], K > 64, code[0])
+
     @staticmethod
     @contextlib.contextmanager
     def _mm_config(
@@ -2405,6 +2455,35 @@ class TestBlackwellTMALoadFusion(TestCase):
         FileCheck().check("tl.make_tensor_descriptor").check(".load([").run(code)
         # The [N] weight is not a full tile.
         self.assertEqual(len(re.findall(r"\.load\(\[", code)), 1, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_tma_load_input_partial_tile(self):
+        """A row pass over a tile narrower than the output (BLOCK_N=64, N=256)
+        still TMA-loads a full-size input at the tile's origin. M=1000 leaves a
+        partial last row tile, whose out-of-bounds rows TMA zero-fills."""
+        M, N, K = 1000, 256, 128
+        grad = torch.randint(-1, 2, (M, N), device=GPU_TYPE).bfloat16()
+
+        def fn(a, b):
+            c = (a @ b).float()
+            return (c * grad.float()).sum(-1)
+
+        kernels, code = self._run_reduction(
+            fn,
+            M,
+            K,
+            N,
+            BlackwellGPUGemmConfig(128, 64, 64, 3, 8),
+            **{
+                "triton.template_reduction_epilogue": True,
+                "triton.enable_tma_load_for_template_epilogue": True,
+            },
+        )
+        self.assertEqual([k.split("_fused")[0] for k in kernels], ["triton_tem"])
+        FileCheck().check(f"shape=[{M}, {N}]").check(".load([").run(code)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
@@ -3542,6 +3621,35 @@ class TestBlackwellBMMReductionEpilogue(TestCase):
         )
         self.assertEqual(len(kernels), 1, kernels)
         self.assertNotRegex(code, r"tma_descriptor\d+\.load\(")
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("broadcast", (False, True))
+    def test_blackwell_bmm_row_pass_tma_loads_inputs(self, broadcast: bool):
+        """A row pass over a batched tile TMA-loads a (B, M, N) input through
+        its [B * M, N] view, and a (M, N) input broadcast over the batches
+        through a rank-2 descriptor at the tile's origin within its batch. M=96
+        under BLOCK_M=128 makes each tile read rows of the next batch (or past
+        the end), which the row pass masks out."""
+        B, M, N = 300, 96, 128
+        kernels, code = self._run_bmm_reduction(
+            lambda a, b, w: ((a @ b).float() * w).sum(-1),
+            B,
+            M,
+            64,
+            N,
+            BlackwellBMMConfig(128, 128, 64, 3, 8),
+            extra_input=(M, N) if broadcast else True,
+            **{
+                "triton.enable_template_tma_store": True,
+                "triton.enable_tma_load_for_template_epilogue": True,
+            },
+        )
+        self.assertEqual(len(kernels), 1, kernels)
+        rows = M if broadcast else B * M
+        FileCheck().check(f"shape=[{rows}, {N}]").check(".load([").run(code)
 
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),

@@ -1524,6 +1524,9 @@ class TestScheduler(TestCase):
             reads_tile=False,
             tma_load=False,
             readers=1,
+            inputs=(),
+            ring_slack=0,
+            which=0,
         ):
             kernel = Mock(
                 meta={"BLOCK_M": 128, "BLOCK_N": 128},
@@ -1533,8 +1536,9 @@ class TestScheduler(TestCase):
                 tma_load_for_template_epilogue=tma_load,
             )
             kernel._staged_tile_elems.return_value = 128 * 128
+            kernel._operand_ring_slack.return_value = ring_slack
             kernel._full_tile_epilogue_outputs.return_value = (outputs, plain)
-            kernel._full_tile_epilogue_inputs.return_value = []
+            kernel._full_tile_epilogue_inputs.return_value = list(inputs)
             kernel._epilogue_tma_store_budget = lambda stored: budget + (
                 0 if stored else 32768
             )
@@ -1580,7 +1584,7 @@ class TestScheduler(TestCase):
                 return list(
                     TritonTemplateKernel._tma_epilogue_accesses(
                         kernel, template_node, [reduction, *others]
-                    )[0]
+                    )[which]
                 )
 
         fp32, bf16 = 65536, 32768
@@ -1594,23 +1598,38 @@ class TestScheduler(TestCase):
         # So does reading a full-tile input in the epilogue.
         self.assertEqual(kept([("a", fp32)], [], 81919, reads_tile=True), [])
         self.assertEqual(kept([("a", fp32)], [], 81920, reads_tile=True), ["a"])
-        # A TMA-loaded input stages one bf16 tile, however many nodes read it.
+
+        # Full-tile inputs are TMA-loaded largest first in what the kept TMA
+        # stores leave, plus what autoWS frees from the operand ring.
+        def tma_inputs(budget, ring_slack=0):
+            return kept(
+                [("a", fp32)],
+                [],
+                budget,
+                reads_tile=True,
+                tma_load=True,
+                inputs=[("x", bf16), ("y", fp32)],
+                ring_slack=ring_slack,
+                which=1,
+            )
+
+        self.assertEqual(tma_inputs(81920), [])
+        self.assertEqual(tma_inputs(81920 + bf16), ["x"])
+        self.assertEqual(tma_inputs(81920 + fp32), ["y"])
+        self.assertEqual(tma_inputs(81920, ring_slack=fp32 + bf16), ["y", "x"])
+        # TMA-loaded inputs only take what the kept TMA stores leave.
         for readers in (1, 2):
             self.assertEqual(
                 kept(
                     [("a", fp32)],
                     [],
-                    114688,
+                    81920,
                     reads_tile=True,
                     tma_load=True,
                     readers=readers,
                 ),
                 ["a"],
             )
-        self.assertEqual(
-            kept([("a", fp32)], [], 114687, reads_tile=True, tma_load=True, readers=2),
-            [],
-        )
         # A removed template output frees its staging, unless a column pass
         # keeps it, and the column pass stages a transposed subtile.
         self.assertEqual(kept([("a", fp32)], [], 40000, template_removed=True), ["a"])
