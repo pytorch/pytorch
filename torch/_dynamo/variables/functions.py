@@ -46,7 +46,7 @@ from weakref import WeakKeyDictionary
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
 from torch._guards import Source
-from torch.utils._pytree import is_namedtuple_class
+from torch.utils._pytree import is_namedtuple_class, tree_leaves
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -2271,13 +2271,27 @@ def invoke_and_store_as_constant(
         source_name = tx.output.install_global_by_id(name, res)
         tx.output.update_co_names(source_name)
         source = ConstantSource(source_name)
-        # Process-local id-based globals and lifted constant tensors cannot be
-        # restored across precompile cache loads.
-        tx.output.bypass_package(
-            f"Frame uses assume_constant_result tensor {source_name} bound to a process-local global."
-        )
+        has_tensor = True
     else:
+        source_name = None
         source = ConstantSource(name)
+        has_tensor = any(isinstance(leaf, torch.Tensor) for leaf in tree_leaves(res))
+    if has_tensor:
+        # Unlike install_global_by_id names that _bind_unnamed_scopes can rebind
+        # at install time, a constant tensor's value cannot be recovered on
+        # precompile cache reload. Mark the frame as computing before bypassing
+        # so precompile capture does not silently skip it as non-computing.
+        if tx.output.package is not None:
+            tx.output.package.note_compute()
+        bypass_kwargs: dict[str, Any] = {"function_name": name}
+        if source_name is not None:
+            bypass_kwargs["global_name"] = source_name
+        tx.output.bypass_package(
+            f"Frame uses a constant-result tensor from `{name}`, which cannot be "
+            "restored across precompile cache loads. Return a Python value or "
+            "construct the tensor inside the compiled region instead.",
+            **bypass_kwargs,
+        )
     return tx.output.register_attr_or_module(
         res,
         name,
