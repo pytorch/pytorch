@@ -715,6 +715,7 @@ impl Act<'_> {
             return self.bootstrap_inputs(b);
         }
         let params = self.take_params(b);
+        self.p.kept.store(true, std::sync::atomic::Ordering::Relaxed);
         let at = super::autograd::Where { compiled: super::shared(self.c.expect("a frame's Act")), prep: self.p as *const Prepared as usize, block: b };
         // Params passed through as they are: those the guard pins down (a
         // NULL, a pinned callee) and those no op reads (only carried along).
@@ -825,6 +826,7 @@ impl Act<'_> {
                 .iter()
                 .map(|x| pins_down(&ver.guard, *x) || !compute_reads(*x) || matches!(cfg[*x].op, Op::Pinned(_) | Op::Const(_) | Op::Lit(_)))
                 .collect();
+            self.p.kept.store(true, std::sync::atomic::Ordering::Relaxed);
             let at = super::autograd::Where { compiled: super::shared(self.c.expect("a frame's Act")), prep: self.p as *const Prepared as usize, block: b };
             match super::outside_executor(|| super::autograd::Bootstrap::start(&args, &pinned, at)) {
                 Ok((boot, call)) => {

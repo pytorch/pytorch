@@ -166,9 +166,14 @@ pub struct Prepared {
     // By block: the types of its last version's params then inputs over its
     // runs while observing (see region::observing; torch.vm's input_types).
     pub region_types: Box<[ffi::GilCell<Vec<types::Slot>>]>,
-    // The Prepareds (by address; Compiled::plans keeps them) whose Cfgs this
-    // one's derives from by adding regions only.
+    // The Prepareds (by address) whose Cfgs this one's derives from by adding
+    // regions only. A frame that runs one of them is what keeps it (see
+    // Compiled::plans): an address here is only compared with a running
+    // frame's.
     pub region_lineage: ffi::GilCell<Vec<usize>>,
+    // Something refers to it by address for longer than a frame runs it (an
+    // autograd node: see autograd.rs's Where): its Plan is never freed.
+    pub kept: AtomicBool,
     // Whether running it records (see run.rs's recording): until every block
     // of the Cfg has been offered to the optimizer, which reads nothing
     // recorded after that. Optimized versions never record, and origins always
@@ -320,6 +325,7 @@ impl Prepared {
             region_off: (0..cfg_blocks).map(|_| AtomicBool::new(false)).collect(),
             region_types: (0..cfg_blocks).map(|_| ffi::GilCell::new(vec![])).collect(),
             region_lineage: ffi::GilCell::new(vec![]),
+            kept: AtomicBool::new(false),
             record: true,
             // The pins the previous Cfg already had (pins are only added).
             pins: Python::attach(|py| prev.map_or(vec![], |p| p.pins.iter().map(|o| o.clone_ref(py)).collect())),
@@ -392,6 +398,25 @@ pub struct Plan {
     // in the top-level Cfg, and a generator suspended under one Plan resumes
     // at the same place under its replacement.
     pub resume: HashMap<u32, (BlockId, usize, usize)>,
+    // How many frames are running it, and how many callers are reading it
+    // while they build its replacement (see Compiled::plans).
+    users: AtomicU32,
+}
+
+// Keeps a Plan from being freed while it is read outside a frame.
+struct Using<'a>(&'a Plan);
+
+impl<'a> Using<'a> {
+    fn new(plan: &'a Plan) -> Self {
+        plan.users.fetch_add(1, Ordering::Relaxed);
+        Using(plan)
+    }
+}
+
+impl Drop for Using<'_> {
+    fn drop(&mut self) {
+        self.0.users.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 impl Plan {
@@ -434,17 +459,20 @@ impl Plan {
             prep.names.0.extend(prep.extra_names.iter().map(|o| o.as_ptr()));
             Ok(())
         })?;
-        Ok(Plan { resume, prep })
+        Ok(Plan { resume, prep, users: AtomicU32::new(0) })
     }
 }
 
 // Per-code-object data, cached in co_extra and freed with the code object.
 pub struct Compiled {
     // The current Plan, the last of `plans`. Replaced when the Cfg is
-    // optimized; frames already running keep the Plan they started with, so
-    // every Plan lives as long as the Compiled.
+    // optimized or a block gets its first region; frames already running
+    // keep the Plan they started with. A Plan is freed (see Compiled::sweep)
+    // once it is neither the current one nor the first (optimizing again
+    // starts from that one), no frame runs it and nothing refers to it by
+    // address.
     plan: AtomicPtr<Plan>,
-    // Boxed so a Plan doesn't move when the Vec grows.
+    // Boxed so a Plan doesn't move when the Vec grows or shrinks.
     #[allow(clippy::vec_box)]
     plans: Mutex<Vec<Box<Plan>>>,
     // Whether the code was optimized after its first run (see OPTIMIZE), and
@@ -533,6 +561,18 @@ impl Compiled {
 
     pub fn plan(&self) -> &Plan {
         unsafe { &*self.plan.load(Ordering::Acquire) }
+    }
+
+    // Frees the Plans nothing uses any more (see `plan`).
+    fn sweep(&self) {
+        let mut plans = self.plans.lock().unwrap();
+        let current = self.plan.load(Ordering::Acquire) as *const Plan;
+        let mut first = true;
+        plans.retain(|p| {
+            let keep = first || std::ptr::eq(&**p, current) || p.users.load(Ordering::Relaxed) > 0 || p.prep.kept.load(Ordering::Relaxed);
+            first = false;
+            keep
+        });
     }
 }
 
@@ -832,13 +872,23 @@ unsafe extern "C" fn eval_frame(
         run::Start::Entry
     };
     let in_instr = tracing && reads::in_instr();
-    let outcome = run::run(c, &plan.prep, frame, start);
+    let outcome = {
+        let _using = Using::new(plan);
+        run::run(c, &plan.prep, frame, start)
+    };
+    // The plan was replaced while the frame ran it (the function was
+    // optimized, or a block of it got its first region): it goes with the
+    // last frame that runs it.
+    if !std::ptr::eq(plan, c.plan()) {
+        c.sweep();
+    }
     if matches!(outcome, run::Outcome::Return(_)) && OPTIMIZE.load(Ordering::Relaxed) && !OPTIMIZING.get() && !tracing {
         let py = Python::assume_attached();
         if !c.auto_optimized.swap(true, Ordering::Relaxed) {
             if let Err(e) = optimize(py, c, None) {
                 e.write_unraisable(py, None);
             }
+            c.sweep();
         } else if (ELIDE.load(Ordering::Relaxed) || region::enabled() || PURE_CALLS.load(Ordering::Relaxed))
             && c.returns.fetch_add(1, Ordering::Relaxed) + 1 == ELIDE_AFTER.load(Ordering::Relaxed)
             && !c.plan().prep.clones.is_empty()
@@ -848,6 +898,7 @@ unsafe extern "C" fn eval_frame(
             if let Err(e) = outside_executor(|| optimize_now(py, c, None, true)) {
                 e.write_unraisable(py, None);
             }
+            c.sweep();
         }
     }
     // What the frame held is dropped with no instr of the body running
@@ -1028,6 +1079,42 @@ fn optimize(py: Python<'_>, c: &Compiled, block: Option<BlockId>) -> PyResult<()
     outside_executor(|| optimize_now(py, c, block, false))
 }
 
+/// What the executor holds for the code it ran, as (what, how many): code
+/// objects; clones of them (one per call site that entered a Python
+/// function, see Prepared::clones); those among both whose frames run on
+/// CPython (see _cfg_bypass_cold); the plans of all of these; the instrs of
+/// the plans' CFGs, and of the CFGs of their blocks' origins; the bytes of
+/// the text every CFG carries (the reprs of the code's constants, its
+/// names).
+#[pyfunction]
+pub fn _cfg_plan_stats() -> Vec<(&'static str, usize)> {
+    fn origins(p: &Prepared) -> usize {
+        p.origins.iter().flatten().map(|o| o.cfg.instrs.len() + origins(o)).sum()
+    }
+    fn text(cfg: &Cfg) -> usize {
+        cfg.const_reprs.iter().chain(&cfg.names).chain(&cfg.slot_names).map(|s| s.len() + std::mem::size_of::<String>()).sum()
+    }
+    let (mut codes, mut clones, mut cold, mut plans, mut instrs, mut in_origins, mut bytes) = (0, 0, 0, 0, 0, 0, 0);
+    for c in registered() {
+        if c.depth == 0 {
+            codes += 1;
+        } else {
+            clones += 1;
+        }
+        if c.cold.load(Ordering::Relaxed) {
+            cold += 1;
+        }
+        let ps = c.plans.lock().unwrap();
+        plans += ps.len();
+        for p in ps.iter() {
+            instrs += p.prep.cfg.instrs.len();
+            in_origins += origins(&p.prep);
+            bytes += text(&p.prep.cfg) + p.prep.origins.iter().flatten().map(|o| text(&o.cfg)).sum::<usize>();
+        }
+    }
+    vec![("code objects", codes), ("clones", clones), ("cold", cold), ("plans", plans), ("instrs", instrs), ("instrs of origins", in_origins), ("bytes of text", bytes)]
+}
+
 /// Optimize every code the executor ran (and every clone) again, from what
 /// they observed (see _reoptimize). Returns how many were.
 #[pyfunction]
@@ -1045,6 +1132,8 @@ pub fn _reoptimize_all(py: Python<'_>) -> usize {
                 }
             }
         }
+        // A round doesn't keep the round before.
+        c.sweep();
     }
     n
 }
@@ -1115,7 +1204,9 @@ pub fn _cfg_bypass_cold() -> usize {
 #[pyo3(signature = (code, clone=vec![]))]
 pub fn _reoptimize(code: &Bound<'_, PyAny>, clone: Vec<u32>) -> PyResult<()> {
     let c = unsafe { resolve(code, &clone)? };
-    outside_executor(|| optimize_now(code.py(), c, None, true))
+    let r = outside_executor(|| optimize_now(code.py(), c, None, true));
+    c.sweep();
+    r
 }
 
 // With `again`, starts from the Cfg the code was converted to (the first
@@ -1133,7 +1224,10 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
     }
     let _reset = Reset(OPTIMIZING.replace(true));
     let current = c.plan();
-    // Plans are boxed and live as long as c.
+    // Read until the swap, across Python code that may let another thread
+    // replace it.
+    let _using = Using::new(current);
+    // Plans are boxed, and the first lives as long as c.
     let plan: &Plan = if again { unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) } } else { current };
     if again {
         let n = plan.prep.cfg.instrs.len();
@@ -1597,6 +1691,15 @@ fn swap_plan(
     }
     before(&base.prep);
     let mut new = Box::new(Plan::new(cfg, Some(base), record, pins, &c.consts, &c.names)?);
+    // The Plans replaced before this one that no frame runs go (see
+    // Compiled::plan). The one being replaced stays until the next sweep:
+    // the caller still reads it, and so may `base`.
+    let mut first = true;
+    plans.retain(|p| {
+        let keep = first || std::ptr::eq(&**p, current) || std::ptr::eq(&**p, base) || p.users.load(Ordering::Relaxed) > 0 || p.prep.kept.load(Ordering::Relaxed);
+        first = false;
+        keep
+    });
     Python::attach(|py| {
         for (v, cl) in &current.prep.clones {
             new.prep.clones.insert(*v, SiteClone { code: cl.code.clone_ref(py), compiled: cl.compiled.clone() });
