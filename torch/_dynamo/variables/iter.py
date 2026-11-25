@@ -14,6 +14,7 @@ handling of iterator operations during code transformation and optimization.
 """
 
 import collections
+import functools
 import inspect
 import itertools
 import operator
@@ -35,10 +36,18 @@ from ..exc import (
     TorchDynamoException,
     unimplemented,
 )
+from ..guards import _method_identity_guards_filtered, GuardBuilder, install_guard
+from ..source import (
+    GlobalSource,
+    is_from_global_source,
+    is_from_local_source,
+    is_from_skip_guard_source,
+    LocalSource,
+)
 from ..utils import raise_args_mismatch, tracked_repr, unpack_iterable
-from .base import Method, ValueMutationNew, VariableTracker
+from .base import Method, ValueMutationExisting, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .hashable import HashableTracker
+from .hashable import HashableTracker, ordered_key_iteration
 from .object_protocol import generic_getiter, pyiter_next
 
 
@@ -958,6 +967,7 @@ class DictViewIterator(IteratorVariable):
 
     _nonvar_fields = {
         "view_type",
+        "reverse",
         "_initial_size",
         *IteratorVariable._nonvar_fields,
     }
@@ -970,25 +980,20 @@ class DictViewIterator(IteratorVariable):
         items: dict[HashableTracker, VariableTracker],
         *,
         view_type: str,
+        reverse: bool = False,
         owner: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.view_type = view_type
+        self.reverse = reverse
         self.owner = owner
         self._initial_size = len(items)
         if not self.linked_order and isinstance(items, dict):
-            self._iter = iter(getattr(dict, self.view_type)(items))
-        elif self.view_type == "keys":
-            self._iter = iter(items)
-        elif self.view_type == "values":
-            self._iter = iter(items.values())  # type: ignore[bad-assignment]
+            view = getattr(dict, view_type)(items)
         else:
-            if self.view_type != "items":
-                raise AssertionError(
-                    f"Expected view_type 'items', got {self.view_type!r}"
-                )
-            self._iter = iter(items.items())  # type: ignore[bad-assignment]
+            view = items if view_type == "keys" else getattr(items, view_type)()
+        self._iter = reversed(view) if reverse else iter(view)
 
     @classmethod
     def create(
@@ -1001,13 +1006,68 @@ class DictViewIterator(IteratorVariable):
         iterator_cls = OrderedDictIterator if ordered else cls
         return iterator_cls(items, view_type=cls.view_type, owner=owner)
 
+    @staticmethod
+    def _can_reconstruct(
+        tx: "InstructionTranslatorBase", container: VariableTracker
+    ) -> bool:
+        from .dicts import ConstDictVariable, DunderDictVariable
+        from .sets import BaseSetVariable
+
+        if not container.source:
+            return True
+        # Stack reconstruction precedes replay of mutations to a live input.
+        side_effects = tx.output.side_effects
+        if side_effects.is_modified(container):
+            return False
+        if container.python_type() is dict and any(
+            attrs and not isinstance(var, variables.CellVariable)
+            for var, attrs in side_effects.store_attr_mutations.items()
+        ):
+            # A dict input can alias an instance namespace or the globals on a cache hit.
+            return False
+        if isinstance(container, DunderDictVariable):
+            owner = container.items.item
+            modified_sources = side_effects.mutated_dict_sources
+            if modified_sources:
+                namespace = container.items.get_example_value_dict(owner)
+                if type(namespace) is not dict:
+                    return False
+                # Only read frame bindings here. Resolving an arbitrary attribute
+                # could invoke user code while checking for an alias.
+                frame = tx.output.root_tx
+                for src in modified_sources:
+                    if type(src) is LocalSource:
+                        binding = frame.f_locals.get(src.local_name)
+                    elif type(src) is GlobalSource:
+                        binding = frame.f_globals.get(src.global_name)
+                    else:
+                        return False
+                    if type(binding) is not dict or binding is namespace:
+                        return False
+        else:
+            modified_sources = (
+                var.source
+                for var in side_effects.id_to_variable.values()
+                if isinstance(var, (ConstDictVariable, BaseSetVariable))
+                and isinstance(var.mutation_type, ValueMutationExisting)
+                and var.mutation_type.is_modified
+                and var.python_type() is container.python_type()
+                and var.source is not None
+            )
+        for source in modified_sources:
+            sources = (container.source, source)
+            if _method_identity_guards_filtered(tx) or any(
+                is_from_skip_guard_source(s)
+                or not (is_from_local_source(s) or is_from_global_source(s))
+                for s in sources
+            ):
+                return False
+            check = functools.partial(GuardBuilder.NOT_DUPLICATE_INPUT, source_b=source)
+            install_guard(container.make_guard(check))
+        return True
+
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        from .dicts import (
-            ConstDictVariable,
-            DictKeysVariable,
-            DictViewVariable,
-            DunderDictVariable,
-        )
+        from .dicts import ConstDictVariable, DictKeysVariable, DictViewVariable
         from .sets import BaseSetVariable
 
         owner = self.owner
@@ -1016,32 +1076,14 @@ class DictViewIterator(IteratorVariable):
         container = owner.dv_dict if isinstance(owner, DictViewVariable) else owner
         if not isinstance(container, (ConstDictVariable, BaseSetVariable)):
             return super().reconstruct(codegen)
-        # Stack reconstruction precedes replay of mutations to a live input.
-        side_effects = codegen.tx.output.side_effects
-        if container.source and (
-            side_effects.is_modified(container)
-            or (
-                isinstance(container, DunderDictVariable)
-                and (
-                    side_effects.has_pending_mutation(container.items.item)
-                    or side_effects.has_existing_dict_mutation()
-                )
-            )
-            or (
-                # A dict input can alias an instance namespace or the globals on a cache hit.
-                container.python_type() is dict
-                and any(
-                    attrs and not isinstance(var, variables.CellVariable)
-                    for var, attrs in side_effects.store_attr_mutations.items()
-                )
-            )
-        ):
+        if not self._can_reconstruct(codegen.tx, container):
             unimplemented(
                 gb_type="Iterator reconstruction before an input mutation",
                 context=str(container.source),
-                explanation="The iterator can refer to an input whose mutations are replayed after reconstruction.",
+                explanation="Reconstructing the iterator before pending mutations are replayed could change which elements it sees.",
                 hints=[
-                    "Create the iterator after returning from the compiled function."
+                    "Create the iterator after returning from the compiled function.",
+                    *graph_break_hints.SUPPORTABLE,
                 ],
             )
         if len(container.items) != self._initial_size:
@@ -1049,7 +1091,8 @@ class DictViewIterator(IteratorVariable):
         if self.linked_order:
             try:
                 # A move can invalidate an OrderedDict iterator without changing its size.
-                self._iter.__reduce__()
+                with ordered_key_iteration("identity"):
+                    self._iter.__reduce__()
             except RuntimeError:
                 return super().reconstruct(codegen)
         if isinstance(owner, ConstDictVariable):
@@ -1063,7 +1106,8 @@ class DictViewIterator(IteratorVariable):
 
             codegen.add_push_null(load_iter)
         else:
-            codegen.add_push_null(lambda: codegen.load_import_from("builtins", "iter"))
+            method = "reversed" if self.reverse else "iter"
+            codegen.add_push_null(lambda: codegen.load_import_from("builtins", method))
         codegen(owner)
         codegen.extend_output(create_call_function(1, False))
 
@@ -1074,7 +1118,11 @@ class DictViewIterator(IteratorVariable):
         # Reconstruct only fresh iterators, whose cursor is still at the beginning.
         self.owner = None
         try:
-            item = next(self._iter)
+            if self.linked_order:
+                with ordered_key_iteration("trace"):
+                    item = next(self._iter)
+            else:
+                item = next(self._iter)
 
             if self.view_type == "keys":
                 return item.vt
@@ -1083,6 +1131,10 @@ class DictViewIterator(IteratorVariable):
             else:  # items
                 k, v = item  # type: ignore[not-iterable]
                 return VariableTracker.build(tx, (k.vt, v))
+        except TorchDynamoException:
+            raise
+        except KeyError as e:
+            raise_observed_exception(KeyError, tx, args=[e.args[0].vt])
         except (RuntimeError, StopIteration) as e:
             raise_observed_exception(
                 type(e),
@@ -1143,6 +1195,14 @@ class OrderedDictIterator(DictViewIterator):
     linked_order = True
     _cpython_type = _ORDERED_DICT_ITERATOR_TYPE
     view_type = "items"
+
+    @classmethod
+    def create_reversed(
+        cls, view: "variables.DictViewVariable"
+    ) -> "OrderedDictIterator":
+        return cls(
+            view.dv_dict.items, view_type=cast(str, view.kv), reverse=True, owner=view
+        )
 
     def python_type(self) -> type:
         return _ORDERED_DICT_ITERATOR_TYPE

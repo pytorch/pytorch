@@ -8,10 +8,12 @@ during symbolic execution. Used by both ConstDictVariable and SetVariable.
 
 import functools
 import inspect
+import sys
 import types
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import cast, TYPE_CHECKING
+from typing import cast, Literal, TYPE_CHECKING
 
 import torch
 from torch._guards import TracingContext
@@ -59,9 +61,18 @@ _SAFE_KEY_EQUALITIES = (
 )
 
 
-_identity_key_iteration: ContextVar[bool] = ContextVar(
-    "identity_key_iteration", default=False
+_ordered_key_iteration: ContextVar[Literal["identity", "trace"] | None] = ContextVar(
+    "ordered_key_iteration", default=None
 )
+
+
+@contextmanager
+def ordered_key_iteration(mode: Literal["identity", "trace"] | None) -> Iterator[None]:
+    token = _ordered_key_iteration.set(mode)
+    try:
+        yield
+    finally:
+        _ordered_key_iteration.reset(token)
 
 
 def raise_unhashable(
@@ -754,7 +765,28 @@ class HashableTracker:
         return torch.Size(items)
 
     def __hash__(self) -> int:
-        return self._hash
+        if _ordered_key_iteration.get() != "trace":
+            return self._hash
+        key = self.vt
+        if variables.ConstantVariable.is_constant_vt(key):
+            return self._hash
+        if (
+            isinstance(key, variables.LazyVariableTracker)
+            and not key.is_realized()
+            and key.peek_type() is int
+        ):
+            return self._hash  # keep unobserved hook IDs lazy
+        # odictiter hashes the key again to find its node. Calls made by
+        # user callbacks have their own dictionary lookup semantics.
+        with ordered_key_iteration(None):
+            # CPython 3.14+ caches the tuple's first successful hash.
+            if sys.version_info >= (3, 14) and isinstance(key, variables.TupleVariable):
+                if (
+                    inspect.getattr_static(key.python_type(), "__hash__")
+                    is tuple.__hash__
+                ):
+                    return self._hash
+            return HashableTracker(key)._hash
 
     @staticmethod
     def iter_keys_by_identity(
@@ -763,13 +795,11 @@ class HashableTracker:
         # OrderedDict iteration compares known stored keys by identity, without callbacks.
         iterator = iter(mapping)
         while True:
-            token = _identity_key_iteration.set(True)
-            try:
-                key = next(iterator)
-            except StopIteration:
-                return
-            finally:
-                _identity_key_iteration.reset(token)
+            with ordered_key_iteration("identity"):
+                try:
+                    key = next(iterator)
+                except StopIteration:
+                    return
             yield key
 
     def __eq__(self, other: object) -> bool:
@@ -785,8 +815,12 @@ class HashableTracker:
         Returns:
             True if the underlying variable trackers are Python-equal, False otherwise
         """
-        if _identity_key_iteration.get():
+        mode = _ordered_key_iteration.get()
+        if mode == "identity":
             return self is other
+        if mode == "trace":
+            with ordered_key_iteration(None):
+                return self.__eq__(other)
         if not isinstance(other, HashableTracker):
             return False
         if self.vt is other.vt:
