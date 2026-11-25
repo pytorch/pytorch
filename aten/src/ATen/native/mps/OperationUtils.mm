@@ -1822,6 +1822,10 @@ void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::Optional
       "Dispatch grid ",
       c10::Join("x", length),
       " exceeds 2^32 - 1 threads along one axis");
+  // A (max, 1, 1) threadgroup leaves a grid that is narrow along x on tiny threadgroups, so pack the outer axes
+  if (!group_size.has_value() && length[0] > 0) {
+    return mtl_dispatch3DJob(encoder, cps, length[0], length.size() > 1 ? length[1] : 1, length.size() > 2 ? length[2] : 1);
+  }
   const auto max_tg_size = getMaxThreadsPerThreadgroup();
   const auto group_size_length = group_size.has_value() ? group_size->size() : 0;
   auto tg_size = MTLSizeMake(group_size_length > 0 ? group_size->at(0) : max_tg_size,
