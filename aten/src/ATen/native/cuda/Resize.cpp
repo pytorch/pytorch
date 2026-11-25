@@ -14,6 +14,25 @@
 
 namespace at::native {
 
+namespace {
+// An empty storage whose CUDA allocator is no longer the current one (the
+// current allocator was changed after it was made, change_current_allocator)
+// allocates from the current one. E.g. FSDP2's unsharded parameters, made once
+// and resized from 0 every step, follow the current allocator. A storage that
+// holds memory keeps its allocator.
+c10::Allocator* current_cuda_allocator_for(StorageImpl* storage) {
+  auto* allocator = storage->allocator();
+  auto* current = c10::cuda::CUDACachingAllocator::get();
+  if (C10_UNLIKELY(allocator != current) && !storage->data_ptr() &&
+      dynamic_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
+          allocator)) {
+    storage->set_allocator(current);
+    return current;
+  }
+  return allocator;
+}
+} // namespace
+
 void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
   auto allocator = storage->allocator();
@@ -26,6 +45,8 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
     storage->set_nbytes(0);
     return;
   }
+
+  allocator = current_cuda_allocator_for(storage);
 
   c10::cuda::CUDAGuard guard(device.index());
   at::DataPtr data = allocator->allocate(size_bytes);
@@ -67,7 +88,8 @@ void resize_bytes_cuda_with_addr(
       addr != nullptr,
       "_resize_with_addr_ expects a non-null addr when size is non-zero");
   TORCH_CHECK(
-      allocator == c10::cuda::CUDACachingAllocator::get(),
+      current_cuda_allocator_for(storage) ==
+          c10::cuda::CUDACachingAllocator::get(),
       "_resize_with_addr_ only supports storages allocated by the current CUDA caching allocator");
 
   c10::Device device = storage->device();
