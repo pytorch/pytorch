@@ -443,9 +443,11 @@ _ORDERED_COL_GENERAL_NORM_MIN_OUTPUTS = 16384
 # views route from R = 32768; C = 192 and 256 won 1.19-3.3x at every R from 24577.
 # General-p norms (an exp/log leaf; p = 3 and 0.5 measured) run 0.34-0.36x at C = 128
 # and R = 32768 but 1.0-2.1x from C = 1024. Routed views compile one stage-one kernel
-# per R, ragged last partitions included: on first call (B200), single-field split
-# views compiled in 1.5-2.4 s with whole partitions and about 3.7 s with a ragged last
-# one (R = 100003, C = 128), against 0.55 s for the indexed tree.
+# per mapping and whole or ragged last partition, not per R: on first call (B200),
+# single-field split views took 1.5-2.4 s with whole partitions and 3.2-3.8 s with a
+# ragged last one (C = 128), and a new R on a compiled kernel 0.13-0.34 s for the
+# stage-two combine of its partition count, against 0.55 s for the indexed tree, which
+# compiles per R.
 _ORDERED_SPLIT_MIN_R = _K_TWO_KERNEL_THRESHOLD * _K_INNER_TREE_THRESHOLD + 1
 _ORDERED_SPLIT_MIN_OUTPUTS = 128
 _ORDERED_SPLIT_GENERAL_NORM_MIN_OUTPUTS = 1024
