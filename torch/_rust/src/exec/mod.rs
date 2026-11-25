@@ -467,6 +467,12 @@ pub struct Compiled {
     // The code object's address: with an instr's origin, a call site (see
     // _cfg_opaque_site).
     pub code: usize,
+    // For a clone, the call sites that lead to it, outermost first: (the
+    // caller's qualname, the call's line). Empty for a code's own Compiled.
+    pub path: Vec<(String, i32)>,
+    // The origins of the calls a cfg pass made movable when this was last
+    // optimized: pure for its callers too (see pure_compiled).
+    declared: Mutex<HashSet<u32>>,
 }
 
 fn code_lines(code: &Bound<'_, PyAny>) -> PyResult<Vec<(u32, u32, i32)>> {
@@ -515,6 +521,8 @@ impl Compiled {
             filename: code.getattr("co_filename")?.extract()?,
             lines: code_lines(code)?,
             code: code.as_ptr() as usize,
+            path: vec![],
+            declared: Mutex::new(HashSet::new()),
         })
     }
 
@@ -1176,10 +1184,19 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
     let none = HashSet::new();
     let mut found = if SPANS.load(Ordering::Relaxed) && spannable { spans::find(py, &plan.prep, &movable, &c.qualname, &[], &none) } else { vec![] };
     let hook = CFG_HOOK.lock().unwrap().as_ref().map(|h| h.clone_ref(py));
+    let mut declared = HashSet::new();
     if let Some(hook) = hook.filter(|_| block.is_none()) {
         let view = cfg_view(py, c, &plan.prep, &movable, &found)?;
         let (more, forced, split) = cfg_edits(&hook.call1(py, (view,))?.into_bound(py))?;
         let changed = !more.is_empty() || !forced.is_empty() || !split.is_empty();
+        declared = more.iter().filter_map(|v| plan.prep.cfg.instrs.get(v.idx())).filter(|i| is_call(&i.op)).map(|i| i.origin).collect();
+        // What was said of them before the pass spoke no longer keeps
+        // anything out of a region.
+        let said: Vec<String> = IMPURE_NOW.with_borrow(|m| more.iter().filter_map(|v| m.get(&(&plan.prep as *const Prepared as usize, v.0)).cloned()).collect());
+        if !said.is_empty() {
+            let code = PURE_DEBUG_CODE.with_borrow(|q| q.clone());
+            IMPURE.lock().unwrap().retain(|(c, _, w)| *c != code || !said.contains(w));
+        }
         movable.extend(more);
         if changed && spannable {
             found = spans::find(py, &plan.prep, &movable, &c.qualname, &forced, &split);
@@ -1188,6 +1205,9 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
                 found.retain(|f| entries.contains(&f.entry));
             }
         }
+    }
+    if block.is_none() {
+        *c.declared.lock().unwrap() = declared;
     }
     let obs = crate::cfg::optimize::Observed { movable, aten, calls, nulls };
     let (mut pinned, mut elided) = (vec![], vec![]);
@@ -1238,6 +1258,7 @@ fn new_clones(py: Python<'_>, c: &Compiled, plan: &Plan, current: &Plan) -> Hash
             continue;
         }
         clone.depth = c.depth + 1;
+        clone.path = c.path.iter().cloned().chain([(c.qualname.clone(), c.line(prep.cfg[*v].origin))]).collect();
         let clone = Arc::new(clone);
         register(&clone);
         out.insert(*v, SiteClone { code: code.unbind(), compiled: clone });
@@ -1321,7 +1342,7 @@ impl Elisions<'_> {
                     effects::Via::Callable if method => Callable::Function,
                     effects::Via::Callable if is_class(ins.args[1], &raw const ffi::PyMethod_Type) => Callable::BoundMethod,
                     effects::Via::Callable => Callable::Function,
-                    effects::Via::Getattr => return None,
+                    effects::Via::Getattr | effects::Via::Partial => return None,
                 };
                 let n = n + matches!(callable, Callable::Instance | Callable::BoundMethod) as usize;
                 (How::Call { ex: false, method, callable }, n.checked_sub(kw.len())?, kw)
@@ -1338,7 +1359,7 @@ impl Elisions<'_> {
                     effects::Via::Call => Callable::Instance,
                     effects::Via::Callable if is_class(ins.args[0], &raw const ffi::PyMethod_Type) => Callable::BoundMethod,
                     effects::Via::Callable => Callable::Function,
-                    effects::Via::Getattr => return None,
+                    effects::Via::Getattr | effects::Via::Partial => return None,
                 };
                 let n = n + matches!(callable, Callable::Instance | Callable::BoundMethod) as usize;
                 (How::Call { ex: true, method: false, callable }, n, vec![])
@@ -2120,6 +2141,7 @@ fn cfg_view<'py>(py: Python<'py>, c: &Compiled, prep: &Prepared, movable: &HashS
     view.set_item("qualname", &c.qualname)?;
     view.set_item("filename", &c.filename)?;
     view.set_item("code", c.code)?;
+    view.set_item("path", c.path.clone())?;
     let blocks = PyList::empty(py);
     let instrs = PyDict::new(py);
     for b in cfg.block_ids() {
@@ -2210,6 +2232,24 @@ pub fn _set_cfg_spans(on: bool) {
 #[pyfunction]
 pub fn _set_cfg_pure_calls(on: bool) {
     PURE_CALLS.store(on, Ordering::Relaxed);
+}
+
+// Callables whose calls are taken as pure whatever they were seen doing (see
+// vm.passes.PureCalls's `pure`). Held, so that an address stays its callable's.
+static USER_PURE: Mutex<Vec<Py<PyAny>>> = Mutex::new(Vec::new());
+static USER_PURE_ANY: AtomicBool = AtomicBool::new(false);
+
+/// Take every call of these callables (functions, builtins, classes) as one
+/// that only computes: movable, and pure for the callers of the code it is
+/// in, without looking at what its runs did.
+#[pyfunction]
+pub fn _set_cfg_pure_callables(fs: Vec<Py<PyAny>>) {
+    USER_PURE_ANY.store(!fs.is_empty(), Ordering::Relaxed);
+    *USER_PURE.lock().unwrap() = fs;
+}
+
+fn user_pure(f: *mut pyo3::ffi::PyObject) -> bool {
+    USER_PURE_ANY.load(Ordering::Relaxed) && USER_PURE.lock().unwrap().iter().any(|x| x.as_ptr() == f)
 }
 
 // Whether reading a CPU tensor's value (.item() of a step count) may sit in a
@@ -2761,8 +2801,12 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
     if !ins.op.can_raise() {
         return Ok(());
     }
+    let callees = unsafe { &*prep.callees.get() };
+    if is_call(&ins.op) && callees.get(&v).and_then(|c| c.get(py)).is_some_and(|f| user_pure(f.as_ptr())) {
+        return Ok(());
+    }
     let effects = unsafe { &*prep.effects.get() };
-    let (mut frames, mut torch_ops) = (None, false);
+    let (mut frames, mut torch_ops, mut indirect) = (None, false, false);
     for (seq, _) in effects.get(Site::Instr(v)) {
         for e in seq {
             match e {
@@ -2771,6 +2815,7 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
                 effects::Effect::Frame { func, how: effects::How::Direct } => frames = Some(func.clone()),
                 effects::Effect::Frame { func, how: effects::How::Indirect } => {
                     pure_indirect(py, prep, v, func, depth, memo).map_err(|e| format!("{} entered {func} indirectly: {e}", here()))?;
+                    indirect = true;
                 }
                 // A generator's frame (one the site made, if pure).
                 effects::Effect::Frame { func, how: effects::How::Resume } => {
@@ -2798,11 +2843,9 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
             }
         };
     }
-    let is_call = matches!(ins.op, Op::Call { .. }) || matches!(ins.op, Op::Bytecode { opcode: opcodes::CALL_FUNCTION_EX, .. });
-    if !is_call || torch_ops {
+    if !is_call(&ins.op) || torch_ops {
         return Ok(());
     }
-    let callees = unsafe { &*prep.callees.get() };
     let Some(f) = callees.get(&v).and_then(|c| c.get(py)) else {
         let ran = unsafe { &*prep.types.get() }.get(v.idx()).is_some_and(|t| t.ty.is_some());
         let what = match callees.get(&v) {
@@ -2815,7 +2858,13 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
         let ty = |k: usize| ins.args.get(k).and_then(|a| types.get(a.idx())).and_then(|t| t.ty.as_ref()).map_or("?".into(), |t| t.to_string());
         return Err(format!("{} called something unknown ({what}; a {} or {})", here(), ty(1), ty(0)));
     };
+    // Through a functools.partial, `f` is what the partial calls, and the
+    // instr's args aren't f's alone.
+    let partial = callees.get(&v).and_then(|c| c.via()) == Some(effects::Via::Partial);
     if pure_builtins().contains(&(f.as_ptr() as usize)) || is_in_graph(&f) {
+        Ok(())
+    } else if partial && indirect && f.is_instance_of::<pyo3::types::PyFunction>() {
+        // A Python function, whose frames were judged above.
         Ok(())
     } else if plain_class(py, &f) {
         // A new object, whose __init__ (if Python's) entered a frame judged above.
@@ -2823,7 +2872,7 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
     } else if unsafe { effects::lru_cache_wrapper(f.as_ptr()) } {
         // A hit (a miss enters the function's frame, judged above).
         Ok(())
-    } else if depth > 0 && mutators().contains(&(f.as_ptr() as usize)) && ins.args.len() > 1 && own_container(ins.args[1]) {
+    } else if depth > 0 && !partial && mutators().contains(&(f.as_ptr() as usize)) && ins.args.len() > 1 && own_container(ins.args[1]) {
         // A method changing a container this frame made (CALL's [method, self, ...]).
         Ok(())
     } else {
@@ -2920,6 +2969,10 @@ fn plain_class(py: Python<'_>, f: &Bound<'_, PyAny>) -> bool {
     f.is_instance_of::<pyo3::types::PyType>() && same("__new__") && (same("__init__") || f.getattr("__init__").is_ok_and(|i| i.is_instance_of::<pyo3::types::PyFunction>()))
 }
 
+fn is_call(op: &Op) -> bool {
+    matches!(op, Op::Call { .. } | Op::Bytecode { opcode: opcodes::CALL_FUNCTION_EX, .. })
+}
+
 // Whether a site of the caller (instr v of `prep`) is pure (see pure_instr).
 fn pure_site(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<ValueId, SiteClone>, memo: &mut Memo) -> bool {
     match pure_instr(py, prep, v, clones, 0, &Own::default(), memo) {
@@ -2930,7 +2983,7 @@ fn pure_site(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Value
                 PURE_DEBUG_CODE.with_borrow(|q| eprintln!("impure: {q}: {why}"));
             }
             let ins = &prep.cfg[v];
-            let call = matches!(ins.op, Op::Call { .. } | Op::Bytecode { opcode: opcodes::CALL_FUNCTION_EX, .. });
+            let call = is_call(&ins.op);
             IMPURE_NOW.with_borrow_mut(|m| m.insert((prep as *const Prepared as usize, v.0), why.clone()));
             if effects || call {
                 let code = PURE_DEBUG_CODE.with_borrow(|q| q.clone());
@@ -2968,6 +3021,10 @@ fn pure_compiled(py: Python<'_>, c: &Compiled, own: Own, depth: u32, memo: &mut 
     let types = unsafe { &*prep.types.get() };
     let effects = unsafe { &*prep.effects.get() };
     let ran = |v: &ValueId| types.get(v.idx()).is_some_and(|t| t.ty.is_some());
+    // A call a cfg pass made movable in this code (Cfg.merge_across) is
+    // taken as the pass said, here as in the code's own blocks.
+    let declared = c.declared.lock().unwrap().clone();
+    let said = |v: &ValueId| is_call(&cfg[*v].op) && declared.contains(&cfg[*v].origin);
     let r = cfg.block_ids().try_for_each(|b| {
         let blk = &cfg[b];
         let body = blk.versions.first().map_or(&[][..], |ver| &ver.body[..]);
@@ -2975,7 +3032,7 @@ fn pure_compiled(py: Python<'_>, c: &Compiled, own: Own, depth: u32, memo: &mut 
         if !entered {
             return Ok(());
         }
-        body.iter().try_for_each(|v| pure_instr(py, prep, *v, clones, depth, &own, memo))?;
+        body.iter().filter(|v| !said(v)).try_for_each(|v| pure_instr(py, prep, *v, clones, depth, &own, memo))?;
         let ok = effects.get(Site::Block(b)).iter().all(|(seq, _)| seq.iter().all(|e| matches!(e, effects::Effect::TorchOp { op, args } if !impure_op(op, args))));
         if ok { Ok(()) } else { Err(format!("bb{} has effects", b.0)) }
     });

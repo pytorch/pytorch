@@ -86,9 +86,19 @@ OPTIMIZER = ("split", "pin_calls", "use_aten", "lift_guard")
 class PureCalls(_Builtin):
     """Widens pure code through calls whose callees' runs were pure, one call
     level deeper per re-optimization; ``rounds`` re-optimizations run in the
-    calls just before ``Regions`` starts observing."""
+    calls just before ``Regions`` starts observing.
+
+    ``pure``: callables (functions, builtins, classes) every call of which is
+    taken as one that only computes, without looking at what its runs did:
+    ``PureCalls(pure=(inspect.signature,))``. A region's trace then runs such
+    a call once and records the torch ops it runs; what it reads of the
+    program's state is checked before the region runs, as for any call in a
+    region. Only sound if the callable has no effect a later call would miss
+    (it writes nothing that outlives it) and its result depends on nothing
+    but its arguments and the state it reads."""
 
     rounds: int = 5
+    pure: tuple[Callable, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)

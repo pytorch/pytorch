@@ -193,6 +193,35 @@ typedef struct {
   PyObject* self;
 } tr_wrapperobject;
 
+// The callable a functools.partial calls (its `func`), if `callable` is
+// exactly one; else NULL. Borrowed: the partial holds it. Runs no Python.
+PyObject* tr_partial_func(PyObject* callable) {
+  static PyTypeObject* partial = NULL;
+  if (partial == NULL) {
+    PyObject* name = PyUnicode_FromString("functools");
+    PyObject* module = name == NULL ? NULL : PyImport_GetModule(name);
+    Py_XDECREF(name);
+    PyObject* type = module == NULL ? NULL : PyObject_GetAttrString(module, "partial");
+    Py_XDECREF(module);
+    if (type == NULL || !PyType_Check(type)) {
+      Py_XDECREF(type);
+      PyErr_Clear();
+      return NULL;
+    }
+    partial = (PyTypeObject*)type;
+  }
+  if (!Py_IS_TYPE(callable, partial)) {
+    return NULL;
+  }
+  PyObject* func = PyObject_GetAttrString(callable, "func");
+  if (func == NULL) {
+    PyErr_Clear();
+    return NULL;
+  }
+  Py_DECREF(func);
+  return func;
+}
+
 // CALL: in = [method|NULL, self|callable, args...].
 // The function a call to `callable` runs, if it's a bound method, or the
 // descriptor of a bound slot wrapper or builtin method. Borrowed.

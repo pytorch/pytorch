@@ -213,6 +213,11 @@ class Cfg:
         self.qualname: str | None = None
         self.filename: str | None = None
         self.code: int | None = None
+        # Which frames of the function this CFG is of: () for the CFG every
+        # frame without one of its own runs, else the call sites that lead to
+        # it, outermost first, as (the caller's qualname, the call's line).
+        # A call's callee has the caller's path with the call appended.
+        self.path: tuple[tuple[str, int], ...] = ()
         self.notes: list[str] = []
         self._edits: dict[str, list[Any]] = {
             "movable": [],
@@ -227,6 +232,7 @@ class Cfg:
             self.qualname = view["qualname"]
             self.filename = view["filename"]
             self.code = view["code"]
+            self.path = tuple(view["path"])
             for k, data in view["instrs"].items():
                 call = data["kind"] == "Call" or "CALL_FUNCTION_EX" in data["op"]
                 self._values[k] = (Call if call else CfgValue)(self, k, data)

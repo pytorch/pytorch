@@ -14,6 +14,7 @@ import dis
 import enum
 import functools
 import gc
+import inspect
 import math
 import os
 import shutil
@@ -1569,12 +1570,21 @@ class TestVmFunctionArguments(TestCase):
         self.assertEqual(traced[3], traced[1])
 
     @isolated
-    def test_partial_over_a_tensor(self, device):
+    def test_partial_made_on_every_call_over_that_calls_tensor(self, device):
         import torch._rust_inductor as ri
 
+        ri.COUNT = True
         g = vm(functions_apply, passes=EARLY)
-        for call in range(8):
-            x, factor = torch.randn(4, 8, device=device), torch.randn(8, device=device)
+        runs = []
+        # Other data on every call; then another dtype, and the first again.
+        for call, dtype in enumerate(
+            [torch.float32] * 6 + [torch.float64] * 3 + [torch.float32] * 2
+        ):
+            x, factor = (
+                torch.randn(4, 8, device=device),
+                torch.randn(8, device=device, dtype=dtype),
+            )
+            before = region_runs()
             got = g(functools.partial(functions_scale, factor), x)
             self.assertEqual(
                 got,
@@ -1583,10 +1593,21 @@ class TestVmFunctionArguments(TestCase):
                 rtol=0,
                 msg=f"call {call}",
             )
-        # A call through a partial made anew on every call is not one the
-        # executor takes into a region yet (it sees another callee each
-        # time), so the calls above ran as instructions. The guard itself
-        # reads a partial by its parts: the tensor it holds is an input.
+            runs.append(region_runs() - before)
+        # The call through the partial is judged by the function the partial
+        # calls, so it sits in the region, which computes with the tensor
+        # this call's partial holds.
+        self.assertGreater(runs[4], 0)
+        self.assertGreater(runs[8], 0)
+        self.assertEqual(runs[10], runs[4])
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["state"] == "region" and r["function"] == "functions_apply"
+        )
+        self.assertEqual((row["ops"], row["variants"]), (6, 2))
+        # The guard reads a partial by its parts: the tensor it holds is an
+        # input, another function or another dtype a miss.
         first, other = torch.randn(8, device=device), torch.randn(8, device=device)
         _, plan = ri._plan((functools.partial(functions_scale, first), x), set())
         self.assertEqual(plan[0][0], "tree")
@@ -1599,6 +1620,29 @@ class TestVmFunctionArguments(TestCase):
         self.assertIsNone(
             ri._inputs((functools.partial(functions_scale, other.double()), x), plan)
         )
+
+    @isolated
+    def test_partial_of_a_function_with_an_effect_is_not_taken(self, device):
+        seen = []
+
+        def noted(factor, y):
+            seen.append(tuple(y.shape))
+            return y * factor
+
+        g = vm(functions_apply, passes=EARLY)
+        for call in range(8):
+            x, factor = torch.randn(4, 8, device=device), torch.randn(8, device=device)
+            del seen[:]
+            got = g(functools.partial(noted, factor), x)
+            # The write is made once on every call, as eager makes it.
+            self.assertEqual(seen, [(4, 8)], msg=f"call {call}")
+            self.assertEqual(
+                got,
+                functions_apply(functools.partial(functions_scale, factor), x),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
 
     @isolated
     def test_bound_method_of_an_object_whose_state_changes(self, device):
@@ -1646,6 +1690,186 @@ class TestVmFunctionArguments(TestCase):
 
 
 instantiate_device_type_tests(TestVmFunctionArguments, globals())
+
+
+def purity_double(y):
+    return y * 2
+
+
+def purity_scaled(y, z=3):
+    return y * z
+
+
+def purity_counted(fn, x):
+    """Asks a library function about ``fn`` between tensor operations, as a
+    library checks a callback's arity before calling it."""
+    y = x.sin() + 1
+    n = len(inspect.signature(fn).parameters)
+    return fn(y).tanh().cos().exp() * n
+
+
+def purity_inner(fn, y):
+    n = len(inspect.signature(fn).parameters)
+    return fn(y).tanh() * n
+
+
+def purity_outer(fn, x):
+    return purity_inner(fn, x.sin() + 1).cos().exp()
+
+
+purity_seen = []
+
+
+def purity_note(y):
+    purity_seen.append(tuple(y.shape))
+
+
+def purity_inner_notes(y):
+    purity_note(y)
+    return y.tanh() * 2
+
+
+def purity_outer_notes(x):
+    return purity_inner_notes(x.sin() + 1).cos().exp()
+
+
+def purity_twice(x):
+    a = purity_double(x.sin())
+    b = purity_double(x.cos())
+    return (a + b).tanh()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmPurity(TestCase):
+    """What a pass list says only computes is taken as said: a callable named
+    in ``PureCalls(pure=...)``, and a call a cfg pass merged, which counts for
+    the callers of its function too. A cfg pass is told which call sites lead
+    to the CFG it looks at."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, g, fn, device):
+        """Eleven calls of ``g`` against ``fn``, the callback changed for calls
+        7 to 9 and changed back: how many regions ran in each."""
+        import torch._rust_inductor as ri
+
+        ri.COUNT = True
+        runs = []
+        for call, callback in enumerate(
+            [purity_double] * 6 + [purity_scaled] * 3 + [purity_double] * 2
+        ):
+            x = torch.randn(4, 8, device=device)
+            before = region_runs()
+            self.assertEqual(
+                g(callback, x), fn(callback, x), atol=0, rtol=0, msg=f"call {call}"
+            )
+            runs.append(region_runs() - before)
+        # Traced on the fourth call, run from the fifth; the other callback
+        # (with another count of parameters) has a region of its own.
+        self.assertGreater(runs[4], 0)
+        self.assertGreater(runs[8], 0)
+        self.assertEqual(runs[10], runs[4])
+        return runs
+
+    @isolated
+    def test_callable_the_pass_list_names_as_pure(self, device):
+        g = vm(
+            purity_counted,
+            passes=vm.configure(EARLY, pure_calls={"pure": (inspect.signature,)}),
+        )
+        self.calls(g, purity_counted, device)
+        rows = [r for r in vm.regions(g) if r["function"] == "purity_counted"]
+        # The call of inspect.signature no longer ends a region: one region
+        # holds the operations on both sides of it.
+        self.assertEqual([r["where"] for r in rows if r["state"] == "not movable"], [])
+        (row,) = (r for r in rows if r["state"] == "region")
+        self.assertEqual((row["ops"], row["variants"]), (7, 2))
+
+    @isolated
+    def test_call_a_cfg_pass_merged_counts_for_the_callers_of_its_function(
+        self, device
+    ):
+        def merge_signature(cfg: vm.Cfg) -> None:
+            for call in cfg.calls():
+                if call.callee is inspect.signature:
+                    cfg.merge_across(call, trace=True)
+
+        g = vm(
+            purity_outer, passes=(*vm.configure(EARLY, pure_calls=3), merge_signature)
+        )
+        self.calls(g, purity_outer, device)
+        rows = [
+            r
+            for r in vm.regions(g)
+            if r["function"] in ("purity_outer", "purity_inner")
+        ]
+        # The pass spoke in purity_inner; purity_outer's call of it is pure
+        # too, so the region is the caller's and holds both functions' work.
+        self.assertEqual([r["where"] for r in rows if r["state"] == "not movable"], [])
+        (row,) = (r for r in rows if r["state"] == "region")
+        self.assertEqual(
+            (row["function"], row["ops"], row["variants"]), ("purity_outer", 7, 2)
+        )
+
+    @isolated
+    def test_call_a_cfg_pass_merged_as_it_is_runs_on_every_call(self, device):
+        def merge_note(cfg: vm.Cfg) -> None:
+            for call in cfg.calls():
+                if call.callee is purity_note:
+                    cfg.merge_across(call)
+
+        import torch._rust_inductor as ri
+
+        ri.COUNT = True
+        g = vm(
+            purity_outer_notes, passes=(*vm.configure(EARLY, pure_calls=3), merge_note)
+        )
+        runs = []
+        for call in range(10):
+            # Two shapes in turn: each gets a region of its own.
+            x = torch.randn(4 + call % 2, 8, device=device)
+            del purity_seen[:]
+            before = region_runs()
+            got = g(x)
+            # The call with the effect is in the caller's region, and is made
+            # once on every call with that call's tensor, as eager makes it.
+            self.assertEqual(purity_seen, [tuple(x.shape)], msg=f"call {call}")
+            self.assertEqual(
+                got, purity_outer_notes(x), atol=0, rtol=0, msg=f"call {call}"
+            )
+            runs.append(region_runs() - before)
+        self.assertGreater(runs[8], 0)
+        self.assertGreater(runs[9], 0)
+        (row,) = (r for r in vm.regions(g) if r["state"] == "region")
+        self.assertEqual((row["function"], row["variants"]), ("purity_outer_notes", 2))
+
+    @isolated
+    def test_cfg_pass_is_told_which_calls_lead_to_a_cfg(self, device):
+        paths = {}
+
+        def look(cfg: vm.Cfg) -> None:
+            paths.setdefault(cfg.qualname, set()).add(cfg.path)
+
+        g = vm(purity_twice, passes=(*EARLY, look))
+        for _ in range(8):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), purity_twice(x), atol=0, rtol=0)
+        first = purity_twice.__code__.co_firstlineno
+        self.assertEqual(paths["purity_twice"], {()})
+        # One CFG per call site of purity_double, each told its site.
+        self.assertEqual(
+            paths["purity_double"] - {()},
+            {(("purity_twice", first + 1),), (("purity_twice", first + 2),)},
+        )
+        # A region of the function given to torch.vm is named by that
+        # function's lines (from its first, where the frame is entered).
+        (row,) = (r for r in vm.regions(g) if r["state"] == "region")
+        self.assertEqual(
+            (row["function"], row["lines"]), ("purity_twice", (first, first + 3))
+        )
+
+
+instantiate_device_type_tests(TestVmPurity, globals())
 
 
 class TestVmWithoutRuntime(TestCase):
