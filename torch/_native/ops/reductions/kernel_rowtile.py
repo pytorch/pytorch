@@ -449,10 +449,11 @@ class _ItreePlan(NamedTuple):
     combine_tile: int = 0
     # Staged fold unroll factor; 0 with a nonzero combine_tile unrolls a whole tile.
     combine_unroll: int = 0
-    # Staged COMBINE only: every partial holds split[1] values (tile.uniform_combine_ok). The
-    # fold derives counts from it, so the count field is not staged. With "weights", a row
-    # shared by the block holds the current tile's weights, 1 / (index + 1) for each
-    # partial's global index, in the count's slot.
+    # Staged COMBINE plans and their SPLIT: every partial holds split[1] values
+    # (tile.uniform_combine_ok). The fold derives counts from it, so the count field is not
+    # staged. With "weights", a row shared by the block holds the current tile's weights,
+    # 1 / (index + 1) for each partial's global index, in the count's slot. A SPLIT plan
+    # carries its combine's mode (split_partials), and its stage writes no count partial.
     uniform_combine: tile.UniformCombineMode = "off"
 
     @property
@@ -758,6 +759,9 @@ def itree_combine_plan(
     if not tile_n:
         # Narrow blocks pay off only for the staged combine; the global-memory chain keeps 128.
         rpb = _MULTIROW_ROWS_PER_BLOCK
+    # Without uniform counts the fold reads only the partition count, so ragged and whole
+    # splits of one partition count share a combine plan and its kernel.
+    bte, chunk = itree.split[1], itree.split[3]
     return _ItreePlan(
         "combine",
         1,
@@ -766,12 +770,38 @@ def itree_combine_plan(
         itree.depth,
         (),
         (),
-        itree.split,
+        (nbatch, bte, bte, chunk, chunk),
         combine_grp=g,
         combine_tile=tile_n,
         combine_unroll=min(arch.combine_unroll, tile_n),
         uniform_combine=mode if uniform and tile_n else "off",
     )
+
+
+def split_partials(
+    trait: Any,
+    itree: _ItreePlan,
+    nrows: int,
+    device: torch.device,
+    *,
+    arch: _ItreeArch | None = None,
+) -> tuple[_ItreePlan, _ItreePlan, list[torch.Tensor]]:
+    """Return a split plan's stage-1 plan, its combine plan and the stage-1 partials.
+
+    Partials hold one field-typed value per (row, partition) at row * partitions +
+    partition. A uniform combine derives counts, so the returned split plan carries its
+    mode and stage 1 writes no count partial. `arch` replaces the device's combine policy
+    (see itree_combine_plan).
+    """
+    itemsize = max(cute2torch[d].itemsize for d in trait.fdtypes)
+    combine = itree_combine_plan(
+        itree, itemsize, device, nrows=nrows, trait=trait, arch=arch
+    )
+    mode = combine.uniform_combine
+    fields = trait.fdtypes[: trait.nfields - (mode != "off")]
+    size = nrows * itree.split[0]
+    parts = [torch.empty(size, device=device, dtype=cute2torch[d]) for d in fields]
+    return itree._replace(uniform_combine=mode), combine, parts
 
 
 class _RowConfig(NamedTuple):
@@ -984,12 +1014,9 @@ def _run_itree(
             strided_outs=strided_outs,
         )
         return tuple(outs)
-    # Split writes one field-typed partial per (row, batch), then folds them linearly.
+    # Split writes one partial per (row, batch), then folds them linearly.
     nbatch = itree.split[0]
-    parts = [
-        torch.empty(M * nbatch, device=x.device, dtype=cute2torch[trait.fdtypes[f]])
-        for f in range(trait.nfields)
-    ]
+    itree, combine, parts = split_partials(trait, itree, M, x.device, arch=arch)
     _launch_itree(
         trait,
         trait_key,
@@ -1014,14 +1041,7 @@ def _run_itree(
     _launch_itree(
         trait,
         trait_key,
-        itree_combine_plan(
-            itree,
-            max(p.element_size() for p in parts),
-            x.device,
-            nrows=M,
-            trait=trait,
-            arch=arch,
-        ),
+        combine,
         dt,
         (
             [fake_1d(p, align=a) for p, a in zip(parts, paligns)],

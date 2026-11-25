@@ -258,6 +258,7 @@ Register a given implementation to a library.
 * `cond`: predicate choosing when `impl` applies. May be `None` if `unconditional_override=True`, in which case a trivially-true predicate is substituted.
 * `impl`: implementation callable; its signature matches the aten op.
 * `unconditional_override`: apply `impl` to every call, bypassing the cond check.
+* `try_initialize_runtime` (optional; a DSL may supply its own instead): run on eager calls after `cond` matches; returning `False` declines the call, e.g. when the runtime fails to import.
 
 For full argument details see the docstring for `register_op_override` in [registry.py](registry.py).
 

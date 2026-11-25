@@ -144,6 +144,9 @@ class LaunchRecord:
     launches' outputs, e.g. gensplit2 combines gensplit1's partials), that every
     compiled-kernel call goes through launch(), and that no torch op writes data to a
     launch buffer while recording (resizes that do not grow the storage are fine).
+    Non-tensor launch arguments (boxed geometry, plan values) are frozen at record time,
+    so they must depend only on the replay key (x's metadata above and the caller's own
+    key fields) or on state that stays fixed while the recording is live.
     finish() catches a direct call only when it writes a storage no launch has seen and a
     launch then reads that storage, or that storage is returned without a launch writing
     it.
