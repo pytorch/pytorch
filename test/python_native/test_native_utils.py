@@ -70,13 +70,17 @@ class TestNativeUtils(TestCase):
 
         from torch._native.utils import capability as cap
 
+        # _arch_ok swallows the query's AssertionError, so check the call count.
+        self.addCleanup(cap._arch_ok.cache_clear)
+        cap._arch_ok.cache_clear()
         with patch.object(
             torch.cuda,
             "get_device_capability",
             side_effect=AssertionError("queried the device"),
-        ):
+        ) as query:
             self.assertFalse(cap.device_ok(torch.empty(2), (9, 10)))
             self.assertFalse(cap.device_ok(torch.empty(2, device="meta"), (9, 10)))
+        query.assert_not_called()
 
     def test_device_ok_declines_hip(self):
         # ROCm reports device.type == "cuda"; patch torch.version.hip and make the architecture
@@ -87,15 +91,18 @@ class TestNativeUtils(TestCase):
 
         with FakeTensorMode():
             x = torch.empty(2, device="cuda")
+        self.addCleanup(cap._arch_ok.cache_clear)
+        cap._arch_ok.cache_clear()
         with (
             patch.object(torch.version, "hip", "6.0"),
             patch.object(
                 torch.cuda,
                 "get_device_capability",
                 side_effect=AssertionError("queried the device on a HIP build"),
-            ),
+            ) as query,
         ):
             self.assertFalse(cap.device_ok(x, (9, 10)))
+        query.assert_not_called()
 
     @unittest.skipUnless(TEST_CUDA, "needs a CUDA device to populate the arch cache")
     @skipIfRocm
