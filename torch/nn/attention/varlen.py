@@ -16,6 +16,7 @@ from . import _is_sdp_priority_order_active
 from ._registry import current_flash_attention_impl
 from ._utils import (
     _empty_with_matching_layout,
+    _FP8_DTYPES,
     _input_requires_grad,
     _validate_descale,
     DescaleType,
@@ -33,8 +34,6 @@ _CUDNN_SM100_FORWARD_LARGE_HEAD_DIMS = frozenset(
     {(192, 128), (192, 192), (256, 128), (256, 256)}
 )
 _CUDNN_SM100_BACKWARD_LARGE_HEAD_DIMS = frozenset({(192, 128)})
-# Flash attention runs these through the `.quantized` ops, which write a bf16 output.
-_FP8_DTYPES = (torch.float8_e4m3fn, torch.float8_e5m2)
 
 
 def _normalize_window_size(window_size: list[int] | None) -> list[int]:
@@ -778,7 +777,8 @@ def varlen_attn_out(
 
     Same as :func:`varlen_attn` but writes the attention output into the provided ``out`` tensor
     instead of allocating a new one. Backend selection follows :func:`varlen_attn`; the cuDNN
-    backend requires ``out`` to be 16-byte aligned with a contiguous last dimension.
+    backend requires ``out`` to be 16-byte aligned with a contiguous last dimension. With fp8
+    inputs (see ``q_descale`` in :func:`varlen_attn`), ``out`` must be ``bfloat16``.
 
     """
     num_heads_q = query.size(1)

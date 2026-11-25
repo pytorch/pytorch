@@ -9,6 +9,9 @@ import torch
 
 __all__: list[str] = []
 
+# fp8 dtypes that flash attention runs through its `.quantized` ops, with a bf16 output.
+_FP8_DTYPES = (torch.float8_e4m3fn, torch.float8_e5m2)
+
 
 def _empty_with_matching_layout(
     query: torch.Tensor, shape: tuple[int, ...], dtype: torch.dtype | None = None
@@ -85,8 +88,8 @@ def _validate_sdpa_input(
 class DescaleType(IntEnum):
     """Describes the scaling granularity for FP8 descale tensors.
 
-    Used with _scaled_dot_product_attention_quantized to explicitly specify
-    how the descale factors are applied to the quantized inputs.
+    Used by the fp8 attention APIs (_scaled_dot_product_attention_quantized, varlen_attn)
+    to specify how the descale factors are applied to the quantized inputs.
 
     .. warning::
         This enum is experimental and subject to change.
@@ -142,7 +145,7 @@ def _validate_descale(
 
         if descale.size(0) != batch_size:
             raise ValueError(
-                f"{name}_descale batch dimension must match query batch size, "
+                f"{name}_descale batch dimension must match the number of sequences, "
                 f"expected {batch_size}, got {descale.size(0)}"
             )
 

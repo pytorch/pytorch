@@ -6,12 +6,12 @@ from __future__ import annotations
 import importlib
 import inspect
 from dataclasses import dataclass
-from functools import cache
+from functools import cache, partial
 from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeVarTuple
 
 from . import _registry
-from ._utils import _empty_with_matching_layout
+from ._utils import _empty_with_matching_layout, _FP8_DTYPES
 
 
 if TYPE_CHECKING:
@@ -27,8 +27,6 @@ __all__ = [
 
 
 _FA4_MODULE_PATH: str | None = None
-
-_FP8_DTYPES = (torch.float8_e4m3fn, torch.float8_e5m2)
 
 
 @dataclass
@@ -90,9 +88,11 @@ def _fa4_tensorwise_scales_cls(module: ModuleType) -> type | None:
 def _fa4_register_kernels() -> Library:
     lib = Library("aten", "IMPL", "CUDA")
     lib.impl("_flash_attention_forward", _fa4_flash_attention_forward_impl, "CUDA")
+    # The flash .quantized ops take the descales right after return_debug_mask, as these impls do,
+    # so one impl serves both overloads.
     lib.impl(
         "_flash_attention_forward.quantized",
-        _fa4_flash_attention_forward_quantized_impl,
+        partial(_fa4_flash_attention_forward_impl, quantized=True),
         "CUDA",
     )
     lib.impl(
@@ -102,7 +102,7 @@ def _fa4_register_kernels() -> Library:
     )
     lib.impl(
         "_flash_attention_forward_no_dropout_inplace.quantized",
-        _fa4_flash_attention_forward_no_dropout_inplace_quantized_impl,
+        partial(_fa4_flash_attention_forward_no_dropout_inplace_impl, quantized=True),
         "CUDA",
     )
     lib.impl("_flash_attention_backward", _fa4_flash_attention_backward_impl, "CUDA")
@@ -288,8 +288,7 @@ def _fa4_run_forward(
         if tensorwise_scales_cls is not None:
             kwargs["scales"] = tensorwise_scales_cls(q_descale, k_descale, v_descale)
         else:
-            # TODO: drop when the oldest supported FA4 is 4.0.0b39 (CI pins 4.0.0b31 in
-            # .ci/pytorch/common_utils.sh). Older releases take the descales as separate arguments.
+            # flash-attn-4 releases before 4.0.0b39 (CI pins 4.0.0b31) take the descales as separate arguments.
             kwargs.update(q_descale=q_descale, k_descale=k_descale, v_descale=v_descale)
     out, lse, *_ = module._flash_attn_fwd(query, key, value, **kwargs)
     return out, lse.contiguous()
@@ -345,6 +344,9 @@ def _fa4_flash_attention_forward_impl(
     dropout_p: float,
     is_causal: bool,
     return_debug_mask: bool,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     *,
     scale: float | None = None,
     window_size_left: int | None = None,
@@ -355,9 +357,6 @@ def _fa4_flash_attention_forward_impl(
     block_table: torch.Tensor | None = None,
     compute_auxiliary: bool = True,
     num_splits: int | None = None,
-    q_descale: torch.Tensor | None = None,
-    k_descale: torch.Tensor | None = None,
-    v_descale: torch.Tensor | None = None,
     quantized: bool = False,
 ):
     error = _fa4_forward_support_error(
@@ -418,6 +417,9 @@ def _fa4_flash_attention_forward_no_dropout_inplace_impl(
     dropout_p: float,
     is_causal: bool,
     return_debug_mask: bool,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     *,
     scale: float | None = None,
     window_size_left: int | None = None,
@@ -426,9 +428,6 @@ def _fa4_flash_attention_forward_no_dropout_inplace_impl(
     alibi_slopes: torch.Tensor | None = None,
     block_table: torch.Tensor | None = None,
     num_splits: int | None = None,
-    q_descale: torch.Tensor | None = None,
-    k_descale: torch.Tensor | None = None,
-    v_descale: torch.Tensor | None = None,
     quantized: bool = False,
 ):
     _, lse, _, _, _ = _fa4_flash_attention_forward_impl(
@@ -457,106 +456,6 @@ def _fa4_flash_attention_forward_no_dropout_inplace_impl(
         quantized=quantized,
     )
     return lse
-
-
-def _fa4_flash_attention_forward_quantized_impl(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    cum_seq_q: torch.Tensor | None,
-    cum_seq_k: torch.Tensor | None,
-    max_q: int,
-    max_k: int,
-    dropout_p: float,
-    is_causal: bool,
-    return_debug_mask: bool,
-    q_descale: torch.Tensor | None,
-    k_descale: torch.Tensor | None,
-    v_descale: torch.Tensor | None,
-    *,
-    scale: float | None = None,
-    window_size_left: int | None = None,
-    window_size_right: int | None = None,
-    seqused_k: torch.Tensor | None = None,
-    alibi_slopes: torch.Tensor | None = None,
-    block_table: torch.Tensor | None = None,
-    num_splits: int | None = None,
-):
-    """``.quantized`` overload: fp8 query, key and value; a missing descale means 1."""
-    return _fa4_flash_attention_forward_impl(
-        query,
-        key,
-        value,
-        cum_seq_q,
-        cum_seq_k,
-        max_q,
-        max_k,
-        dropout_p,
-        is_causal,
-        return_debug_mask,
-        scale=scale,
-        window_size_left=window_size_left,
-        window_size_right=window_size_right,
-        seqused_k=seqused_k,
-        alibi_slopes=alibi_slopes,
-        block_table=block_table,
-        num_splits=num_splits,
-        q_descale=q_descale,
-        k_descale=k_descale,
-        v_descale=v_descale,
-        quantized=True,
-    )
-
-
-def _fa4_flash_attention_forward_no_dropout_inplace_quantized_impl(
-    out: torch.Tensor,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    cum_seq_q: torch.Tensor | None,
-    cum_seq_k: torch.Tensor | None,
-    max_q: int,
-    max_k: int,
-    dropout_p: float,
-    is_causal: bool,
-    return_debug_mask: bool,
-    q_descale: torch.Tensor | None,
-    k_descale: torch.Tensor | None,
-    v_descale: torch.Tensor | None,
-    *,
-    scale: float | None = None,
-    window_size_left: int | None = None,
-    window_size_right: int | None = None,
-    seqused_k: torch.Tensor | None = None,
-    alibi_slopes: torch.Tensor | None = None,
-    block_table: torch.Tensor | None = None,
-    num_splits: int | None = None,
-):
-    """``.quantized`` overload of the ``out=`` op: writes the bf16 output into ``out``, returns the lse."""
-    return _fa4_flash_attention_forward_no_dropout_inplace_impl(
-        out,
-        query,
-        key,
-        value,
-        cum_seq_q,
-        cum_seq_k,
-        max_q,
-        max_k,
-        dropout_p,
-        is_causal,
-        return_debug_mask,
-        scale=scale,
-        window_size_left=window_size_left,
-        window_size_right=window_size_right,
-        seqused_k=seqused_k,
-        alibi_slopes=alibi_slopes,
-        block_table=block_table,
-        num_splits=num_splits,
-        q_descale=q_descale,
-        k_descale=k_descale,
-        v_descale=v_descale,
-        quantized=True,
-    )
 
 
 def _fa4_flash_attention_backward_impl(
@@ -708,7 +607,7 @@ def _fa4_scaled_dot_product_flash_attention_forward_quantized_impl(
 ):
     """``.quantized`` SDPA overload: fp8 query, key and value; writes a bf16 output.
 
-    Its schema puts the descales before ``dropout_p``, so it can't be a ``functools.partial`` of the default impl.
+    Its schema puts the descales before ``dropout_p``, so it can't be a ``partial`` of the default impl.
     """
     return _fa4_scaled_dot_product_flash_attention_forward_impl(
         query,

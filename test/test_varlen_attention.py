@@ -18,6 +18,7 @@ from torch.nn.attention import (
 )
 from torch.nn.attention.varlen import AuxRequest, varlen_attn, varlen_attn_out
 from torch.testing._internal.common_cuda import (
+    IS_SM10X,
     IS_SM90,
     PLATFORM_SUPPORTS_CK_SDPA,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
@@ -135,10 +136,6 @@ def _varlen_backends(*, include_fa4_paged_kv: bool) -> list[str]:
         SM100OrLater if include_fa4_paged_kv else SM90OrLater
     ) and torch.cuda.get_device_capability()[0] in (9, 10)
     return ["fa2"] + (["fa3"] if IS_SM90 else []) + (["fa4"] if fa4_supported else [])
-
-
-# FA4's fp8 forward runs on the SM100 family only.
-_FA4_FP8_SUPPORTED = SM100OrLater and torch.cuda.get_device_capability()[0] == 10
 
 
 def _dequantize_fp8(x, descale, cu_seq, heads_per_kv_head=1):
@@ -1304,9 +1301,9 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         lambda p: TEST_WITH_ROCM and p["num_splits"] is not None,
     )
     @decorateIf(
-        unittest.skip("fp8 varlen attention runs on FA4 here"),
+        unittest.skip("fp8 rows run only on FA4 (SM100 family)"),
         lambda p: p["dtype"] == torch.float8_e4m3fn
-        and (p["backend"] != "fa4" or not _FA4_FP8_SUPPORTED),
+        and (p["backend"] != "fa4" or not IS_SM10X),
     )
     def test_batch_invariance(
         self, device, dtype, num_splits, window_size, backend, sdpa_backend=None
@@ -1786,7 +1783,7 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
                 )
             self.assertTrue(torch.equal(paged_num_splits, ref_num_splits))
 
-    @unittest.skipUnless(_FA4_FP8_SUPPORTED, "FA4 fp8 needs an SM100-family GPU")
+    @unittest.skipUnless(IS_SM10X, "FA4's fp8 forward needs an SM100-family GPU")
     @parametrize("dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     @parametrize("paged", [False, True])
     @parametrize("compile", [False, True])
@@ -1882,11 +1879,16 @@ class TestVarlenAttentionCUDA(_VarlenVsSdpaMixin, NNTestCase):
         args = (q, k_input, v_input, cu_seq_q, cu_seq_k_input, max_q, max_k)
         attn_kwargs = {"window_size": (-1, 0), "enable_gqa": True, **kv_cache_kwargs}
         attn = torch.compile(varlen_attn, fullgraph=True) if compile else varlen_attn
+        attn_out = (
+            torch.compile(varlen_attn_out, fullgraph=True)
+            if compile
+            else varlen_attn_out
+        )
         with _use_backend("fa4"), torch.no_grad():
             expected = reference(q_descale, k_descale, v_descale)
             output = attn(*args, **attn_kwargs, **descales)
             out = torch.empty(q.shape, device=device, dtype=torch.bfloat16)
-            returned = varlen_attn_out(out, *args, **attn_kwargs, **descales)
+            returned = attn_out(out, *args, **attn_kwargs, **descales)
 
             self.assertEqual(output.dtype, torch.bfloat16)
             self.assertEqual(returned.data_ptr(), out.data_ptr())
