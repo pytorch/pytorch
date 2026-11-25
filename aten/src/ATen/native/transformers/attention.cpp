@@ -3,7 +3,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/ExpandUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/mps/MPSDevice.h>
@@ -17,7 +16,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
-#include <c10/util/accumulate.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 
@@ -777,54 +775,6 @@ Tensor _safe_softmax(
 //     Ev: Embedding dimension of the value
 //     Hq: Number of heads of query
 //     H: Number of heads of key and value
-// The Metal kernels take any mask shape and broadcast batch dims and K/V heads
-// themselves, but other users of the efficient attention op (FLOP counter,
-// Inductor) expect 4-D inputs with one batch size, so N-D or broadcast batch
-// dims are flattened here; autograd then reduces the gradients back.
-static Tensor scaled_dot_product_efficient_attention_mps(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    const std::optional<Tensor>& attn_mask,
-    bool is_causal,
-    std::optional<double> scale) {
-  auto batch_dims = [](const Tensor& t) { return t.sym_sizes().slice(0, t.dim() - 3); };
-  auto batch_shape = at::infer_size_symdimvector(batch_dims(query), batch_dims(key));
-  batch_shape = at::infer_size_symdimvector(batch_shape, batch_dims(value));
-  const bool flatten = batch_shape.size() != 1 ||
-      !(batch_dims(query).equals(batch_shape) && batch_dims(key).equals(batch_shape) &&
-        batch_dims(value).equals(batch_shape));
-  const auto batch_numel = c10::multiply_integers(batch_shape);
-  auto flatten_batch = [&](const Tensor& t) {
-    auto shape = batch_shape;
-    shape.append(t.sym_sizes().end() - 3, t.sym_sizes().end());
-    return t.expand_symint(shape).reshape_symint({batch_numel, t.sym_size(-3), t.sym_size(-2), t.sym_size(-1)});
-  };
-  std::optional<Tensor> mask = attn_mask;
-  if (flatten && mask && mask->dim() > 3) {
-    // Only the batch dims of the mask are flattened; its own head, query and key dims keep broadcasting.
-    auto shape = batch_shape;
-    shape.append(mask->sym_sizes().end() - 3, mask->sym_sizes().end());
-    mask = mask->expand_symint(shape).reshape_symint(
-        {batch_numel, mask->sym_size(-3), mask->sym_size(-2), mask->sym_size(-1)});
-  }
-  const bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(query, key, value, mask);
-  auto out = std::get<0>(at::_scaled_dot_product_efficient_attention(
-      flatten ? flatten_batch(query) : query,
-      flatten ? flatten_batch(key) : key,
-      flatten ? flatten_batch(value) : value,
-      mask,
-      compute_logsumexp,
-      0.0 /*dropout_p*/,
-      is_causal,
-      scale));
-  if (!flatten) {
-    return out;
-  }
-  batch_shape.append({query.sym_size(-3), query.sym_size(-2), value.sym_size(-1)});
-  return out.view_symint(batch_shape);
-}
-
 Tensor scaled_dot_product_attention(
     const Tensor& query_,
     const Tensor& key,
@@ -926,10 +876,9 @@ Tensor scaled_dot_product_attention(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
     case SDPBackend::efficient_attention: {
-      if (query_device_type == DeviceType::MPS) {
-        return scaled_dot_product_efficient_attention_mps(query_, key, value, attn_mask, is_causal, scale);
-      }
-      if (attn_mask.has_value()) {
+      // The Metal kernels take any strided, broadcastable mask; the padding and
+      // 4-D expansion here are for the CUDA kernels.
+      if (attn_mask.has_value() && query_device_type != DeviceType::MPS) {
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);
       }
       bool compute_logsumexp = should_compute_logsumexp_with_attn_mask(
