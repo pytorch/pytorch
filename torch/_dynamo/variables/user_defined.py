@@ -55,7 +55,6 @@ from ..exc import (
     CompileOnOneRankUnsupported,
     handle_observed_exception,
     ObservedAttributeError,
-    ObservedKeyError,
     raise_attribute_error,
     raise_observed_exception,
     raise_type_error,
@@ -631,7 +630,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             list.__new__,
             int.__new__,
             float.__new__,
+            complex.__new__,
             str.__new__,
+            bytes.__new__,
             collections.deque.__new__,
             types.SimpleNamespace.__new__,
         }
@@ -1374,6 +1375,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         set,
         frozenset,
         list,
+        object,
     }
 
     @staticmethod
@@ -5239,26 +5241,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable, ConstDictVariable):
         # sq_length (sequence protocol). Redirect so generic_size works.
         return self.mp_length_impl(tx)
 
-    def mp_subscript_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: VariableTracker,
-    ) -> VariableTracker:
-        # dict_subscript: https://github.com/python/cpython/blob/62a6e898e01/Objects/dictobject.c#L3673-L3706
-        # TODO(follow-up): add test for unhashable/invalid key type, Counter missing key
-        method = self._maybe_get_baseclass_method("__getitem__")
-        if method in self._base_methods:
-            try:
-                return super().mp_subscript_impl(tx, key)
-            except ObservedKeyError:
-                if issubclass(
-                    self.python_type(), dict
-                ) and self._maybe_get_baseclass_method("__missing__"):
-                    return self.call_method(tx, "__missing__", [key], {})
-                else:
-                    raise
-        return super().mp_subscript_impl(tx, key)
-
     def tp_init_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -5441,18 +5423,6 @@ class DefaultDictVariable(ConstDictVariable):
         self.call_method(tx, "__setitem__", [key, default_var], {})
         return default_var
 
-    def mp_subscript_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: "VariableTracker",
-    ) -> "VariableTracker":
-        """defaultdict.__getitem__: dict lookup with __missing__ fallback."""
-        hashed = self._lookup_key(tx, key)
-        value = self.items.get(hashed)
-        if value is not None:
-            return value
-        return self.call_method(tx, "__missing__", [key], {})
-
     def nb_or_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -5532,13 +5502,6 @@ class DefaultDictVariable(ConstDictVariable):
         # Remaining args go to dict.__init__ (== dict.update) on this object.
         return ConstDictVariable.tp_init_impl(self, tx, args, kwargs)
 
-    def _getitem(
-        self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
-    ) -> "VariableTracker":
-        if len(args) != 1:
-            raise_args_mismatch(tx, "__getitem__", "1 args", f"{len(args)} args")
-        return self.mp_subscript_impl(tx, args[0])
-
     def _missing(
         self, tx: "InstructionTranslatorBase", args: list[VariableTracker], kwargs
     ) -> "VariableTracker":
@@ -5569,7 +5532,6 @@ class DefaultDictVariable(ConstDictVariable):
         return new_dd
 
     tp_methods = {
-        "__getitem__": Method(_getitem),
         "__missing__": Method(_missing),
         "copy": Method(_copy),
         "__copy__": Method(_copy),
