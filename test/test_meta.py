@@ -914,6 +914,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
 meta_dispatch_device_expected_failures['xpu'] = {
     # Same as cuda: the XPU kernel returns an empty buffer, while the meta decomp
     # follows the CPU branch (see Note [log_sigmoid_forward buffer contract]).
+    # https://github.com/intel/torch-xpu-ops/issues/5020
     aten.log_sigmoid_forward.default: {bf16, f16, f32, f64},
     aten.log_sigmoid_forward.output: {bf16, f16, f32, f64},  # aten::log_sigmoid_forward.output
 }
