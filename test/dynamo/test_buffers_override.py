@@ -3,9 +3,12 @@
 import torch
 import torch._dynamo.test_case
 import torch.nn as nn
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class TestBuffersOverride(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_buffers_override(self):
         class SomeModel(nn.Module):
             def __init__(self):
