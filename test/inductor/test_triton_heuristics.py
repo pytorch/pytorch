@@ -1064,6 +1064,7 @@ class TestTritonHeuristics(TestCase):
         self.assertEqual(first_r0_block(ROCmReductionHeuristic(), 12, 120), 2048)
         self.assertEqual(first_r0_block(ROCmReductionHeuristic(), 9, 95), 2048)
 
+    @skipIfRocm
     def test_blackwell_inner_reduction_candidates(self):
         device = self._fake_cuda_device_properties()._replace(major=10, cc=100)
         triton_meta = {"device": device}
