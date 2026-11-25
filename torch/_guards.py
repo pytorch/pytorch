@@ -1058,6 +1058,9 @@ class CompileContext:
                 f"compile_id must be None or CompileId, got {type(compile_id)}"
             )
         self.compile_id: CompileId | None = compile_id
+        # Whether guards the backend adds may never be checked (e.g. a
+        # guard_filter_fn may drop them), so it shouldn't rely on them.
+        self.guards_may_be_skipped = False
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
         self.shape_env_guards: list[str] = []

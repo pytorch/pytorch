@@ -1780,6 +1780,14 @@ class FxGraphHashDetails:
         self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
             config.post_grad_custom_pre_pass
         )
+        # a graph that guards on size divisibility mustn't serve a compile whose
+        # guards may be skipped, which wouldn't have guarded
+        from torch._inductor.codegen.triton_utils import (
+            may_add_size_divisibility_guards,
+        )
+
+        if not may_add_size_divisibility_guards():
+            self.no_size_divisibility_guards = True
         # TODO: change to more holistic config rather than bundled_autograd_cache
         self.precompile_enabled = torch._functorch.config.bundled_autograd_cache
         self.post_grad_custom_post_pass = self._get_custom_pass_detail(
@@ -2246,6 +2254,12 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         These don't always happen (i.e. on a cache miss, so they are in a separate function from
         CompiledFxGraph.post_compile)
         """
+        if graph.has_size_divisibility_guards:
+            from torch._inductor.codegen.triton_utils import (
+                note_size_divisibility_guards_loaded,
+            )
+
+            note_size_divisibility_guards_loaded()
         if bundle := graph._triton_bundle:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
