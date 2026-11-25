@@ -1055,6 +1055,16 @@ _EXTRA_TYPE_PROMOTION_RULE_SET = {
         promote_kwargs_names=(),
         promotion_kind=_prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     ),
+    # torch._refs.stack delegates to torch._refs.cat without its own
+    # elementwise_type_promotion_wrapper decorator, so the generated rule set
+    # only includes `aten.cat`.
+    ElementwiseTypePromotionRule(
+        "aten",
+        "stack",
+        promote_args_positions=(0,),
+        promote_kwargs_names=(),
+        promotion_kind=_prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    ),
     # torch.ops.aten.div.Tensor_mode applies different type promotion rules
     # depending on the value of the `mode` argument.
     DivElementwiseTypePromotionRule(),
