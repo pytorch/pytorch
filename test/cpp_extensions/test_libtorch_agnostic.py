@@ -1,6 +1,7 @@
 # Owner(s): ["module: cpp"]
 
 import gc
+import importlib
 import math
 import sysconfig
 import unittest
@@ -20,12 +21,14 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     install_cpp_extension,
     parametrize,
     run_tests,
     set_warn_always_context,
     skipIfTorchDynamo,
     skipIfWindows,
+    subtest,
     TemporaryFileName,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
@@ -1313,6 +1316,67 @@ for warning in w:
         for name in ("conj", "neg", "inference"):
             actual = getattr(libtorch_agnostic.ops, f"my_is_{name}")(t)
             self.assertEqual(actual, name == flag)
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_empty_strided(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        size, stride = (2, 3), (1, 4)
+        cases = [
+            {},
+            {"dtype": torch.int32},
+            {"device": device},
+            {"pin_memory": False},
+            {
+                "dtype": torch.int32,
+                "layout": torch.strided,
+                "device": device,
+                "pin_memory": False,
+            },
+        ]
+        # CUDA provides the pinning runtime. The allocation itself is on CPU.
+        if torch.device(device).type == "cuda":
+            cases.append({"device": "cpu", "pin_memory": True})
+
+        with DeterministicGuard(True):
+            for options in cases:
+                actual = libtorch_agnostic.ops.my_empty_strided(size, stride, **options)
+                expected = torch.empty_strided(size, stride, **options)
+                self.assertEqual(actual, expected, exact_device=True, exact_layout=True)
+                self.assertEqual(actual.stride(), expected.stride())
+                if options.get("pin_memory"):
+                    self.assertTrue(actual.is_pinned())
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize(
+        "target",
+        [
+            subtest("2_10", name="boxed"),
+            subtest(
+                "2_16", name="direct", decorators=[skipIfTorchVersionLessThan(2, 16)]
+            ),
+        ],
+    )
+    def test_my_slice(self, device, target):
+        libtorch_agnostic = importlib.import_module(f"libtorch_agn_{target}")
+
+        x = torch.arange(12, device=device).reshape(2, 6)
+        self.assertEqual(libtorch_agnostic.ops.my_slice(x), x[:])
+        view = libtorch_agnostic.ops.my_slice(x, -1, 1, 5, 2)
+        self.assertEqual(view, x[:, 1:5:2])
+        expected = x.clone()
+        expected[:, 1:5:2] = -1
+        view.fill_(-1)
+        self.assertEqual(x, expected)
 
     @skipIfTorchVersionLessThan(2, 10)
     @parametrize("layout", [None, torch.strided, torch.sparse_coo])
