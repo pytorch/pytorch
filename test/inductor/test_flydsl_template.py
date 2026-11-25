@@ -2250,6 +2250,7 @@ class TestFlyDSLTemplate(TestCase):
             return SimpleNamespace(
                 get_size=lambda: size,
                 get_stride=lambda: stride,
+                get_stride_hint=lambda: stride,
                 get_dtype=lambda: dtype,
                 get_layout=lambda: flexible,
                 freeze_layout_with_exact_strides=mock.Mock(),
