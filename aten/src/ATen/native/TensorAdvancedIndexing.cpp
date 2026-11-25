@@ -451,6 +451,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
  const Scalar& alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
   index_func_meta_impl(*this, self, dim, index, source, "index_add");
+  native::alpha_check(self.scalar_type(), alpha);
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
