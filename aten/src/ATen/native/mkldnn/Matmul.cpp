@@ -124,9 +124,9 @@ static bool use_mkldnn_tf32_matmul() {
 #endif
 }
 
-// returns an ideep::tensor
+// returns an MkldnnMemory
 // - dims: shape e.g: {M,N}
-// - idtype: ideep data type e.g: (f32, bf16, f16)
+// - idtype: oneDNN data type e.g: (f32, bf16, f16)
 // - strides: Memory layout
 // - data: data pointer
 template <typename scalar_t>
@@ -215,8 +215,8 @@ mkldnn_gemm(
   mkldnn::matmul_forward(src, a, c, alpha, beta, op_attr);
 
   if (c.get_data_handle() != c_data){
-    // ideep will query oneDNN expect format of output
-    // if given output format is not expected, ideep will re-init an output buffer
+    // matmul_forward will query oneDNN expect format of output
+    // if given output format is not expected, matmul_forward will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
     mkldnn::MkldnnMemory real_output = make_ideep_tensor<scalar_t>({n,m}, idtype, c_strides, c_data);
     c.reorder_to(real_output);
@@ -268,8 +268,8 @@ mkldnn_gemm(
   mkldnn::matmul_forward(b, a, c, alpha, beta, op_attr);
 
   if(c.get_data_handle() != c_data){
-    // ideep will query onednn expect format of output
-    // if given output format is not expected, ideep will re-init an output buffer
+    // matmul_forward will query onednn expect format of output
+    // if given output format is not expected, matmul_forward will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
     mkldnn::MkldnnMemory real_output = make_ideep_tensor<float>({n,m}, idtype, c_strides, c_data);
     c.reorder_to(real_output);
@@ -425,8 +425,8 @@ void mkldnn_matmul(
   mkldnn::MkldnnMemory y = itensor_view_from_dense(result_unsqueezed);
   mkldnn::matmul_forward(x, w, y, alpha, beta, op_attr);
   if (y.get_data_handle() != result.const_data_ptr()){
-    // ideep will query onednn expect format of output
-    // if given output format is not expected, ideep will re-init an output buffer
+    // matmul_forward will query onednn expect format of output
+    // if given output format is not expected, matmul_forward will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
     mkldnn::MkldnnMemory public_y = itensor_view_from_dense(result);
     y.reorder_to(public_y);
@@ -534,7 +534,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
-  // Create ideep tensors for oneDNN computation
+  // Create ITensors for oneDNN computation
   dnnl::memory::data_type src_dtype;
   if (mat1.scalar_type() == at::kByte) {
     src_dtype = dnnl::memory::data_type::u8;

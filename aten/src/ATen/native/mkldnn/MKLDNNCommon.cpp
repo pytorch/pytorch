@@ -94,8 +94,8 @@ at::Tensor mkldnn_tensor_from_data_ptr(
 }
 
 Tensor new_with_itensor_mkldnn(mkldnn::MkldnnMemory&& it, std::optional<ScalarType> dtype, std::optional<Device> device) {
-  // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
-  // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
+  // NOTE: int32_t dims from MkldnnMemory but sizes needs int64_t
+  // TODO: support int64_t dims in MkldnnMemory to avoid extra conversion
   auto dims = it.get_dims();
   IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
   caffe2::TypeMeta dtype_ = scalarTypeToTypeMeta(dtype_or_default(dtype));
@@ -230,11 +230,11 @@ mkldnn::MkldnnMemory itensor_view_from_const_dense(
   return itensor_view_from_dense_impl(tensor, desc, DenseViewAccess::Const);
 }
 
-// Helper function for getting an ideep tensor out of an aten Tensor.
-// Note in case the aten Tensor is a dense tensor, the returned ideep
-// tensor is just a view of the storage of the aten dense tensor, so
+// Helper function for getting an MkldnnMemory out of an aten Tensor.
+// Note in case the aten Tensor is a dense tensor, the returned
+// MkldnnMemory is just a view of the storage of the aten dense tensor, so
 // caller needs to make sure the aten dense tensor's lifetime is
-// longer than the ideep tensor.
+// longer than the MkldnnMemory.
 mkldnn::MkldnnMemory itensor_from_tensor(const Tensor& tensor) {
   if (tensor.is_mkldnn()) {
     return itensor_from_mkldnn(tensor);
