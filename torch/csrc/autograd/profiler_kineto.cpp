@@ -214,8 +214,9 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
         eventTree.push_back(e);
       }
 
-      // Unfinished events automatically have end time set to trace end time
-      if (!e->finished_) {
+      // Unfinished events automatically have end time set to trace end time.
+      // So do events that ended after an early stop.
+      if (!e->finished_ || e->endTimeNS() > trace_end_ns) {
         e->visit(c10::overloaded(
             [trace_end_ns](ExtraFields<EventType::TorchOp>& i) {
               i.end_time_ns_ = trace_end_ns;
