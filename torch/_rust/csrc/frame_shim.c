@@ -2,7 +2,9 @@
 // eval-frame hook runs a frame instead of _PyEval_EvalFrameDefault, so it has
 // to do the default loop's frame bookkeeping itself.
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <Python.h>
 
 #include <pthread.h>

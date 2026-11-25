@@ -12,7 +12,7 @@ pub struct Frame {
 
 pub type EvalFrameFn = unsafe extern "C" fn(*mut PyThreadState, *mut Frame, c_int) -> *mut PyObject;
 
-extern "C" {
+unsafe extern "C" {
     // frame_shim.c
     pub fn tr_frame_code(f: *mut Frame) -> *mut PyObject;
     pub fn tr_frame_qualname(f: *mut Frame) -> *mut PyObject;
