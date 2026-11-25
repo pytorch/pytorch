@@ -461,7 +461,8 @@ class FStringGraphBreakTests(TestCase):
             if reason.startswith("logging.Logger method not supported")
         )
         self.assertEqual(repr_breaks, 1)
-        self.assertEqual(logging_breaks, 2)
+        # The resume function doesn't specialize on the lazy repr string
+        self.assertEqual(logging_breaks, 1)
         self.assertEqual(sum(graph_breaks.values()), repr_breaks + logging_breaks)
 
     @unittest.skipIf(sys.version_info < (3, 13), "requires split f-string opcodes")

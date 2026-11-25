@@ -296,6 +296,8 @@ _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] =
             operator.invert,
             len,
             str,
+            repr,
+            ascii,
             bool,
         ]
     ),
@@ -318,6 +320,7 @@ _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] =
             operator.ge,
             min,
             max,
+            format,
         ]
     ),
 }
@@ -351,6 +354,15 @@ def _try_computed_lazy_constant(
     if not any_unrealized:
         return None
     return ComputedLazyConstantVariable.create(fn, args)
+
+
+def _lazy_sym_node_string(arg: SymNodeVariable, format_string: str) -> VariableTracker:
+    """format_string.format(arg), specializing on arg only if the result is used."""
+    from .lazy import LazySymNodeFormatString, LazyVariableTracker
+
+    return LazyVariableTracker.create(
+        LazySymNodeFormatString(arg, format_string), source=None
+    )
 
 
 def populate_builtin_to_tensor_fn_map() -> None:
@@ -2118,7 +2130,56 @@ class BuiltinVariable(TypeVariable):
     def call_repr(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker | None:
+        if isinstance(arg, SymNodeVariable):
+            return _lazy_sym_node_string(arg, "{!r}")
         return generic_repr(tx, arg)
+
+    def call_str(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        if isinstance(arg, SymNodeVariable):
+            return _lazy_sym_node_string(arg, "{!s}")
+        return generic_str(tx, arg)
+
+    def call_ascii(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker | None:
+        if isinstance(arg, SymNodeVariable):
+            return _lazy_sym_node_string(arg, "{!a}")
+        return None
+
+    def call_bytes(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if not args and not kwargs:
+            return variables.ConstantVariable.create(b"")
+        if all(a.is_python_constant() for a in args) and all(
+            v.is_python_constant() for v in kwargs.values()
+        ):
+            try:
+                res = bytes(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+                return VariableTracker.build(tx, res)
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
+        unimplemented(
+            gb_type="bytes() with non-constant arguments",
+            context=f"bytes(*{args}, **{kwargs})",
+            explanation="Attempted to call bytes() with non-constant args.",
+            hints=[
+                "Ensure that the args to bytes() are constant (int, str, etc.).",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
@@ -3004,6 +3065,16 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if self.fn is format:
+            # builtins.format(value, spec="") shares this handler with str.format
+            if kwargs or len(args) > 1:
+                raise_args_mismatch(tx, "format", "value, spec=''", f"{args} {kwargs}")
+            value = _format_string
+            spec = args[0].as_python_constant() if args else ""
+            format_string = "{:" + spec + "}"
+            if isinstance(value, SymNodeVariable):
+                return _lazy_sym_node_string(value, format_string)
+            return StringFormatVariable.create(tx, format_string, [value], {})
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(tx, format_string, list(args), kwargs)

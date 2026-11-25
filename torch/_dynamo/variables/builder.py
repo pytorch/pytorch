@@ -6040,7 +6040,7 @@ class SourcelessBuilder:
             ):
                 return StringFormatVariable.create(
                     tx,
-                    value.fmt_var.as_python_constant(),
+                    value.format_string,
                     [value.sym_node_var],
                     {},
                 )

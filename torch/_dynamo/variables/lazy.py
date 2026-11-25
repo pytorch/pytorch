@@ -106,15 +106,15 @@ class ComputedLazyCache:
             if isinstance(lazy_var.realize(), SymNodeVariable):
                 any_symbolic = True
 
-        if any_symbolic and self.op is str:
-            # SymNodeVariable has no tp_repr_impl; specialize instead
-            (arg,) = (arg.realize() for arg in self.args)
-            value = (
+        if any_symbolic and self.op in (str, repr, ascii, format):
+            # A string can't be symbolic; specialize instead
+            values = [
                 arg.evaluate_expr()
                 if isinstance(arg, SymNodeVariable)
                 else arg.as_python_constant()
-            )
-            self.vt = ConstantVariable.create(self.op(value))
+                for arg in (arg.realize() for arg in self.args)
+            ]
+            self.vt = ConstantVariable.create(self.op(*values))
         elif any_symbolic:
             # The precomputed constant is stale; recompute symbolically
             from .builder import SourcelessBuilder
@@ -627,6 +627,13 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
             divisor = args[1]
             if isinstance(divisor, LazyVariableTracker) and not divisor.is_realized():
                 return None
+        if op is format:
+            # an unguarded spec could become invalid, and "c" raises out of range
+            spec = args[1]
+            if (
+                isinstance(spec, LazyVariableTracker) and not spec.is_realized()
+            ) or values[1].endswith("c"):
+                return None
         if not ConstantVariable.is_base_literal(value):
             return None
         if not lazy_vars:
@@ -663,6 +670,9 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         # Mirrors LazyConstantVariable._maybe_realize_for_type
         from .tensor import SymNodeVariable
 
+        # Strings realize to constants, specializing any symbolic operands
+        if isinstance(self._cache.value, str):
+            return False
         for lazy_var in self._cache.lazy_vars:
             if lazy_var.is_realized():
                 if type.__instancecheck__(SymNodeVariable, lazy_var.realize()):
@@ -714,21 +724,12 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
 
 
 class LazySymNodeFormatString:
-    def __init__(
-        self, sym_node_variable: SymNodeVariable, fmt_spec_var: VariableTracker
-    ) -> None:
-        from .constant import ConstantVariable
-
+    def __init__(self, sym_node_variable: SymNodeVariable, format_string: str) -> None:
         self.sym_node_var = sym_node_variable
-        self.fmt_var = ConstantVariable.create(
-            "{:" + fmt_spec_var.as_python_constant() + "}"
-        )
+        self.format_string = format_string
 
     def __repr__(self) -> str:
-        return str.format(
-            self.fmt_var.as_python_constant(),
-            str(self.sym_node_var.evaluate_expr()),
-        )
+        return self.format_string.format(self.sym_node_var.evaluate_expr())
 
 
 def _create_realize_and_forward(
