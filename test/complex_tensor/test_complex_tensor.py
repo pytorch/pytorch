@@ -170,6 +170,22 @@ class TestComplexTensor(TestCase):
     def test_decompositions(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)
 
+    @ops(
+        implemented_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=list(COMPLEX_DTYPES),
+    )
+    def test_compiled(self, device, dtype, op: OpInfo):
+        self.check_consistency_compiled(device, dtype, op, Variant.Op)
+
+    @ops(
+        decomposed_op_db,
+        dtypes=OpDTypes.supported,
+        allowed_dtypes=list(COMPLEX_DTYPES),
+    )
+    def test_decompositions_compiled(self, device, dtype, op: OpInfo):
+        self.check_consistency_compiled(device, dtype, op, Variant.Op)
+
     @ops(force_test_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
     def test_maybe_error(self, device, dtype, op: OpInfo):
         self.check_consistency(device, dtype, op, Variant.Op)

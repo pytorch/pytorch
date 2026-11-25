@@ -188,10 +188,8 @@ def resize__impl(
     memory_format: torch.memory_format | None = None,
 ) -> ComplexTensor | InterleavedComplexTensor:
     if isinstance(self, InterleavedComplexTensor):
-        data = torch.view_as_complex(self._data)
-        data.resize_(size, memory_format=memory_format)
-        self._data = torch.view_as_real(data)
-        _set_wrapper_metadata(self, data)
+        self._data.resize_(size, memory_format=memory_format)
+        _set_wrapper_metadata(self, self._data)
         return self
 
     # E.g. `from_interleaved` of an empty tensor leaves both components viewing one
@@ -1469,16 +1467,13 @@ def view_dtype_impl(
             raise RuntimeError("Cannot take a real view of conjugated tensor.")
         if isinstance(self, ComplexTensor):
             raise AssertionError("Unreachable due to condition above.")
-        data = self._data.view(dtype).reshape(self.shape[:-1] + (-1,))
+        data = self._data.view(dtype)
         if self.is_neg():
             data = aten._neg_view(data)
         return data
 
-    real_dtype = COMPLEX_TO_REAL[dtype]
     if isinstance(self, InterleavedComplexTensor):
-        out_shape = self._data.shape[:-2] + (-1, 2)
-        out_data = self._data.view(real_dtype).reshape(out_shape)
-        out = InterleavedComplexTensor(torch.view_as_complex(out_data))
+        out = InterleavedComplexTensor(self._data.view(dtype))
         if self.is_neg():
             out = torch._neg_view(out)
 
@@ -1497,8 +1492,7 @@ def view_default_impl(
     shape: tuple[int, ...],
 ) -> torch.Tensor:
     if isinstance(self, InterleavedComplexTensor):
-        out_data = self._data.reshape(shape)
-        out = InterleavedComplexTensor(torch.view_as_complex(out_data))
+        out = InterleavedComplexTensor(self._data.view(shape))
         if self.is_neg():
             out = torch._neg_view(out)
 

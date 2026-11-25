@@ -12,6 +12,7 @@ are wrapped in InterleavedComplexTensor instead, which views the input's storage
 
 from __future__ import annotations
 
+import operator
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -67,8 +68,10 @@ def _unwrap_output(value: Any, meta: Any) -> Any:
     if meta.is_conj():
         im = -im
     real = torch.stack([re, im], dim=-1)
-    real_strides = [2 * s for s in meta.stride()] + [1]
-    out = torch.view_as_complex(torch.ops.prims.copy_strided(real, real_strides))
+    if not meta.is_contiguous():
+        real_strides = [2 * s for s in meta.stride()] + [1]
+        real = torch.ops.prims.copy_strided(real, real_strides)
+    out = torch.view_as_complex(real)
     if meta.is_neg():
         out = torch.ops.aten._neg_view(out)
     if meta.is_conj():
@@ -76,13 +79,24 @@ def _unwrap_output(value: Any, meta: Any) -> Any:
     return out
 
 
-def _view_base(node: Any) -> Any:
-    while (
+def _is_view(node: Any) -> bool:
+    return (
         isinstance(node, fx.Node)
         and isinstance(node.target, torch._ops.OpOverload)
         and node.target.is_view
-    ):
+    )
+
+
+def _viewed_node(node: Any) -> Any:
+    """The node that `node` is a view of, or `None`. Sees through `getitem` of e.g. `split`."""
+    if isinstance(node, fx.Node) and node.target is operator.getitem:
         node = node.args[0]
+    return node.args[0] if _is_view(node) else None
+
+
+def _view_base(node: Any) -> Any:
+    while (viewed := _viewed_node(node)) is not None:
+        node = viewed
     return node
 
 
@@ -127,12 +141,8 @@ def _output_view_bases(out_nodes: list[Any], out_metas: list[Any]) -> dict[int, 
             continue
         base = None
         node = n
-        while (
-            isinstance(node, fx.Node)
-            and isinstance(node.target, torch._ops.OpOverload)
-            and node.target.is_view
-        ):
-            node = node.args[0]
+        while (viewed := _viewed_node(node)) is not None:
+            node = viewed
             base = out_index.get(node, base)
         meta, base_meta = out_metas[i], out_metas[base] if base is not None else None
         if (
@@ -193,6 +203,10 @@ class _ComplexInterpreter(fx.Interpreter):
             raw = self.raw_inputs[id(args[0])]
             raw.copy_(_maybe_unwrap(args[1]), *args[2:], **kwargs)
             return args[0]
+        if target is torch.ops.aten.view.dtype and isinstance(args[0], ComplexTensor):
+            # `ComplexTensor` can't be viewed as another dtype, but the graph is functional,
+            # so viewing an interleaved copy is equivalent.
+            args = (InterleavedComplexTensor(args[0].as_interleaved()), *args[1:])
         if isinstance(target, torch._ops.HigherOrderOperator):
             # HOP subgraphs are not decomposed; run them on plain complex tensors.
             args, kwargs = pytree.tree_map(_maybe_unwrap, (args, kwargs))

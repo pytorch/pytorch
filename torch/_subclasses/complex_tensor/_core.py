@@ -195,6 +195,7 @@ class InterleavedComplexTensor(Tensor):
     Ops are computed via `ComplexTensor`; mutations are written back into the original storage.
     """
 
+    # The interleaved tensor, without the conj/neg bits, which are on the wrapper instead.
     _data: Tensor
 
     def __new__(cls, t: Tensor, /) -> Self:
@@ -228,7 +229,7 @@ class InterleavedComplexTensor(Tensor):
             layout=t.layout,
             requires_grad=False,
         )
-        res._data = torch.view_as_real(t.detach())
+        res._data = t.detach()
         torch._C._set_neg(res, neg)
         torch._C._set_conj(res, conj)
         return res
@@ -239,16 +240,16 @@ class InterleavedComplexTensor(Tensor):
     @property
     def re(self) -> Tensor:
         if self.is_neg():
-            return torch._neg_view(self._data[..., 0])
+            return torch._neg_view(torch.real(self._data))
 
-        return self._data[..., 0]
+        return torch.real(self._data)
 
     @property
     def im(self) -> Tensor:
         if self.is_neg() != self.is_conj():
-            return torch._neg_view(self._data[..., 1])
+            return torch._neg_view(torch.imag(self._data))
 
-        return self._data[..., 1]
+        return torch.imag(self._data)
 
     @property
     def real(self) -> Tensor:  # type: ignore[bad-override]
@@ -267,7 +268,7 @@ class InterleavedComplexTensor(Tensor):
         self.im[...] = value
 
     def as_interleaved(self) -> Tensor:
-        out = torch.view_as_complex(self._data)
+        out = self._data
         if self.is_neg():
             out = torch.ops.aten._neg_view(out)
         if self.is_conj():
@@ -318,7 +319,7 @@ class InterleavedComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> InterleavedComplexTensor:
-        out = InterleavedComplexTensor(torch.view_as_complex(inner_tensors["_data"]))
+        out = InterleavedComplexTensor(inner_tensors["_data"])
         torch._C._set_conj(out, meta["conj"])
         torch._C._set_neg(out, meta["neg"])
         return out
