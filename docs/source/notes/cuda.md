@@ -791,16 +791,28 @@ b = torch.zeros(10, device='cuda')
 ```
 
 
-The allocator can also be changed after memory has been allocated (and changed back, to the
-allocator {func}`torch.cuda.memory._get_current_allocator` returned). Memory stays with the
-allocator that made it: the caching allocator's memory is freed by the caching allocator
-whichever allocator is current, but a pluggable allocator's memory is freed through the current
-pluggable allocator, so it must not outlive a change away from it. Storages keep a pointer to
-the allocator that made them, so an allocator that has been current must stay alive. While it
-is current, the new allocator receives every allocator call in the program, so an allocator
-made current after memory has been allocated should hand the calls it does not handle to the
-one it replaces. Only the calls the program actually makes need handling; the others can stay
-unsupported.
+```python
+import torch
+
+# Do an initial memory allocation
+b = torch.zeros(10, device='cuda')
+# Load the allocator
+new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
+    'alloc.so', 'my_malloc', 'my_free')
+# Swap the current allocator after memory has been allocated
+torch.cuda.memory.change_current_allocator(new_alloc)
+```
+
+```{note}
+When swapping the allocator after memory has been allocated, memory from a
+pluggable allocator is freed through whichever pluggable allocator is current. So:
+
+- A pluggable allocator may receive frees of memory allocated before it became current.
+- Memory it allocates may be freed after it is swapped away. To work around this,
+  return a deleter that frees to itself instead of the current allocator.
+- An allocator should not be deleted while storages it made are alive; they keep
+  a pointer to it.
+```
 
 <!-- cublas-workspaces -->
 
