@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_CUDA,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_XPU,
     TestCase,
@@ -165,6 +166,23 @@ class TestShardGradScaler(TestCase):
         scaler.scale(loss)
         ret_val = scaler.step(opt)
         self.assertTrue(ret_val is None)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_unscale_cpu_grads_while_device_busy(self):
+        pg = DummyProcessGroup(0, 1)
+        scaler = ShardedGradScaler(device="cuda", init_scale=2.0, process_group=pg)
+        inv_scale = torch.full((1,), 0.5, device="cuda")
+        found_inf = torch.zeros(1, device="cuda")
+        param = torch.zeros(4)
+        param.grad = torch.tensor([2.0, 4.0, 8.0, float("inf")])
+        opt = torch.optim.SGD([param], lr=1.0)
+        # Keep the stream busy so that a non-blocking copy of inv_scale and
+        # found_inf to the CPU would land after the CPU unscale kernel.
+        torch.cuda._sleep(1 << 24)
+        found_inf_per_device = scaler._unscale_grads_(opt, inv_scale, found_inf)
+        torch.cuda.synchronize()
+        self.assertEqual(found_inf_per_device[torch.device("cpu")], 1.0)
+        self.assertEqual(param.grad[:3], torch.tensor([1.0, 2.0, 4.0]))
 
     def test_infer_default_device_fallbacks(self):
         # Test the inference helper directly so the check is deterministic on

@@ -204,8 +204,8 @@ class TestComplexBwdGradients(TestCase):
         self.check_grad(device, dtype, op)
 
 
-instantiate_device_type_tests(TestComplexTensor, globals())
-instantiate_device_type_tests(TestComplexBwdGradients, globals())
+instantiate_device_type_tests(TestComplexTensor, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestComplexBwdGradients, globals(), allow_xpu=True)
 
 
 if dist.is_available():
@@ -219,7 +219,7 @@ if dist.is_available():
         def test_distributed(self, device, dtype, op: OpInfo):
             self.check_consistency(device, dtype, op, Variant.Distributed)
 
-    instantiate_device_type_tests(TestComplexDistributed, globals())
+    instantiate_device_type_tests(TestComplexDistributed, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
