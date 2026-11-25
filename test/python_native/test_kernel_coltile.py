@@ -984,6 +984,7 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNone(got)
         with mock.patch.object(ct, "_INT32_LIMIT", 129):
             got = ct.reduce_ordered_col(trait, key, x, f32, 1, config=_FIXED)
+        self.assertIsNotNone(got)
         (wide,) = [_ordered_fields(k)["wide"] for k in ct._CACHE if k[1] == key]
         self.assertIs(wide, True)
         reference = kg._try_indexed_itree(
@@ -997,7 +998,6 @@ class TestOrderedColDevice(TestCase):
             f32,
             1,
         )
-        self.assertIsNotNone(got)
         self.assertIsNotNone(reference)
         self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
         self.assertEqual(_tags(key), {"ordered_col1"})
