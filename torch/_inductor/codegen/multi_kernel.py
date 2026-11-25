@@ -108,18 +108,23 @@ class MultiKernelState:
         return multi_kernel_name
 
 
-def leaf_kernels(kernel: Any) -> list[Any]:
-    """The compiled kernels behind kernel: itself, or a multi-kernel's sub-kernels."""
-    return kernel.leaf_kernels() if isinstance(kernel, MultiKernelBase) else [kernel]
-
-
 class MultiKernelBase:
     """
-    Compile-time state shared by every kernel that wraps several sub-kernels and
-    launches one of them. Subclasses decide how the launched one is picked:
-    MultiKernel benchmarks them once and keeps the fastest, SizeHintMultiKernel
-    picks the one tuned for the nearest size hint. Both are DispatchedMultiKernels:
-    the pick happens at run time, in MultiKernelCall / SizeHintMultiKernelCall.
+    This class maintains the compile time state for multi kernels.
+
+    Assume we do codegen for a MultiKernel encapsulating kernel1 and kernel2.
+    The generated definition for the multi-kernel will looks like:
+    ```
+    multi_kernel_kernel1 = MultiKernelCall(
+        [kernel1, kernel2], multi_kernel_definition_code
+    )
+    ```
+
+    Here is a concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
+
+    Subclasses decide how the launched sub-kernel is picked: MultiKernel and
+    SizeHintMultiKernel are DispatchedMultiKernels, picked at run time by
+    MultiKernelCall / SizeHintMultiKernelCall.
     """
 
     kernels: list[Any]
@@ -131,10 +136,6 @@ class MultiKernelBase:
     @property
     def kernel_name(self) -> str:
         raise NotImplementedError
-
-    def leaf_kernels(self) -> list[Any]:
-        """The compiled kernels, with nested multi-kernels expanded."""
-        return [leaf for kernel in self.kernels for leaf in leaf_kernels(kernel)]
 
     @staticmethod
     def _merge_workspace_args(left: list[WorkspaceArg], right: list[WorkspaceArg]):
@@ -166,7 +167,7 @@ class MultiKernelBase:
     def codegen_nan_check(self):
         wrapper = V.graph.wrapper_code
         seen: OrderedSet[str] = OrderedSet()
-        for k in self.leaf_kernels():
+        for k in self.kernels:
             _, call_args, precompile_args, _ = k.args.python_argdefs()
             for arg, precompile_arg in zip(call_args, precompile_args):
                 if arg in seen:
@@ -237,13 +238,8 @@ class DispatchedMultiKernel(MultiKernelBase):
 
     def call_kernel(self, kernel_name):
         """
-        Codegen the launch of this multi-kernel into the wrapper:
-        `multi_kernel_0.run(<args>)`, which the dispatcher routes to one sub-kernel at
-        run time. The args are the sub-kernels' shared call args (they must match),
-        plus each sub-kernel's own grid args for templates, sliced apart again by
-        `arg_index`. The merged workspaces are allocated before the launch and freed
-        after it. In the second pass of cpp-wrapper codegen the pick is already
-        made, so the chosen sub-kernel is launched directly.
+        Collect the union of arguments from all subkernels as the arguments
+        for the multi-kernel.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
@@ -317,17 +313,7 @@ class DispatchedMultiKernel(MultiKernelBase):
 
 
 class MultiKernel(DispatchedMultiKernel):
-    """
-    Launches the fastest of several interchangeable sub-kernels, e.g. persistent
-    and looped variants of one reduction (see add_multi_kernel_choices); each is
-    correct for every input. The wrapper defines
-
-        multi_kernel_0 = async_compile.multi_kernel("multi_kernel_0", [k0, k1], ...)
-
-    and at run time MultiKernelCall benchmarks the sub-kernels on the first call
-    and keeps the fastest (cached on disk); with the cpp wrapper the pick is made
-    at compile time.
-    """
+    """Benchmarks the sub-kernels on the first call and keeps the fastest."""
 
     def __init__(self, kernels):
         if len(kernels) < 2:
@@ -596,9 +582,7 @@ class MultiKernelCall:
 
 class SizeHintMultiKernel(DispatchedMultiKernel):
     """
-    Launches the sub-kernel tuned for the size hint nearest to the input shapes:
-    one template kernel is tuned per hint, and at run time SizeHintMultiKernelCall
-    picks by distance to the actual shapes, cached per shape.
+    Version of multi-kernel that generates kernels based on specified size hints.
     Currently only performs 1-d search over hints; doesn't perform combinatorial n-d search
     if n > 1 dynamic dimensions are specified.
 
