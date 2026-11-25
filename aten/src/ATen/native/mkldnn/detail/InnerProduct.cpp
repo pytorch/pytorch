@@ -564,7 +564,8 @@ MkldnnMemory::desc inner_product_forward_expected_weights_desc(
     const dnnl::memory::dims& src_dims,
     dnnl::memory::data_type dtype,
     dnnl::memory::data_type x_dtype,
-    dnnl::prop_kind prop_kind) {
+    dnnl::prop_kind prop_kind,
+    const Attr& attr) {
   const auto& engine = Engine::cpu_engine();
   auto x_dims = weights_dims;
   // 128 is default batch size for inner product
@@ -585,7 +586,7 @@ MkldnnMemory::desc inner_product_forward_expected_weights_desc(
   MkldnnMemory::desc weights_desc(
       weights_dims, dtype, dnnl::memory::format_tag::any);
   auto pd = dnnl::inner_product_forward::primitive_desc(
-      engine, prop_kind, src_desc, weights_desc, dst_desc);
+      engine, prop_kind, src_desc, weights_desc, dst_desc, attr);
   return pd.weights_desc();
 }
 
