@@ -7169,8 +7169,11 @@ def meta__flash_attention_forward_quantized(
     window_size_right: int | None = None,
     seqused_k: Tensor | None = None,
     alibi_slopes: Tensor | None = None,
+    block_table: Tensor | None = None,
+    num_splits: int | None = None,
 ):
-    if query.dtype == torch.float8_e4m3fn:
+    # fp8 flash attention writes a bf16 output.
+    if query.dtype in (torch.float8_e4m3fn, torch.float8_e5m2):
         query = query.to(torch.bfloat16)
 
     return meta__flash_attention_forward(
@@ -7189,6 +7192,54 @@ def meta__flash_attention_forward_quantized(
         window_size_right,
         seqused_k,
         alibi_slopes,
+        block_table,
+        num_splits,
+    )
+
+
+@register_meta([aten._flash_attention_forward_no_dropout_inplace.quantized])
+def meta__flash_attention_forward_no_dropout_inplace_quantized(
+    out: Tensor,
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    cum_seq_q: Tensor | None,
+    cum_seq_k: Tensor | None,
+    max_q: int,
+    max_k: int,
+    dropout_p: float,
+    is_causal: bool,
+    return_debug_mask: bool,
+    q_descale: Tensor | None,
+    k_descale: Tensor | None,
+    v_descale: Tensor | None,
+    scale: float | None = None,
+    window_size_left: int | None = None,
+    window_size_right: int | None = None,
+    seqused_k: Tensor | None = None,
+    alibi_slopes: Tensor | None = None,
+    block_table: Tensor | None = None,
+    num_splits: int | None = None,
+):
+    return meta__flash_attention_forward_no_dropout_inplace(
+        out,
+        query,
+        key,
+        value,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        dropout_p,
+        is_causal,
+        return_debug_mask,
+        scale,
+        window_size_left,
+        window_size_right,
+        seqused_k,
+        alibi_slopes,
+        block_table,
+        num_splits,
     )
 
 

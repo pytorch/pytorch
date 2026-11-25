@@ -133,6 +133,7 @@ aten::_flash_attention_backward
 aten::_flash_attention_forward
 aten::_flash_attention_forward.quantized
 aten::_flash_attention_forward_no_dropout_inplace
+aten::_flash_attention_forward_no_dropout_inplace.quantized
 aten::_foobar
 aten::_foobar.out
 aten::_foreach_abs

@@ -1555,11 +1555,42 @@ _flash_attention_forward_quantized(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
-    const std::optional<Tensor>& _alibi_slopes
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _block_table,
+    std::optional<int64_t> num_splits
   ) {
-    TORCH_CHECK(false, "Low-precision flash attention SDPA requires FA3. "
-    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
+    TORCH_CHECK(false, "Low-precision flash attention requires FA3 (SM90) or FA4 (SM100). "
+    "Call torch.nn.attention.activate_flash_attention_impl('FA3') or ('FA4') first.");
     return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
+  }
+
+Tensor
+_flash_attention_forward_no_dropout_inplace_quantized(
+    Tensor& out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& _block_table,
+    std::optional<int64_t> num_splits
+  ) {
+    TORCH_CHECK(false, "Low-precision flash attention requires FA3 (SM90) or FA4 (SM100). "
+    "Call torch.nn.attention.activate_flash_attention_impl('FA3') or ('FA4') first.");
+    return Tensor();
   }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_attention_forward(
