@@ -19,8 +19,16 @@ from torch import Tensor
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._guards import StorageOverlap
+from torch._prims_common import compute_required_storage_length
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._subclasses.functional_tensor import FunctionalTensor
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch.fx.experimental.symbolic_shapes import (
+    guarding_hint_or_throw,
+    has_free_unbacked_symbols,
+    is_concrete_int,
+    is_nested_int,
+)
+from torch.multiprocessing.reductions import StorageWeakRef
 
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .descriptors import AOTInput, InputMutationAOTOutput, TangentAOTInput
@@ -44,6 +52,38 @@ zip = strict_zip
 # alias_of_intermediate* types index into graph intermediates or user outputs
 # instead, so input renumbering must skip them. See OutputAliasInfo.base_idx.
 INPUT_ALIAS_TYPES = (OutputType.alias_of_input, OutputType.is_input)
+
+
+def _is_symbolic(tensors: list[Tensor]) -> bool:
+    return any(
+        isinstance(x, torch.SymInt)
+        for t in tensors
+        for x in (*t.shape, *t.stride(), t.storage_offset())
+    )
+
+
+def _prepare_overlap_analysis(
+    aot_config: AOTConfig, tensors: list[Tensor], symbolic: bool
+) -> tuple[list[Tensor], bool, contextlib.AbstractContextManager[None]]:
+    """
+    The tensors and symbolic flag to run the overlap analysis with, and the
+    context to run it in. Shape guards are suppressed only when Dynamo sources
+    are available, and then if any tensor is symbolic, the tensors are
+    replaced by their hinted layouts where possible (see _hinted_views).
+    """
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is None or not aot_config.aot_autograd_arg_pos_to_source:
+        return tensors, symbolic, contextlib.nullcontext()
+    if tracing_context.fake_mode is None:
+        raise AssertionError("tracing_context.fake_mode must not be None")
+    shape_env = tracing_context.fake_mode.shape_env
+    if shape_env is None:
+        return tensors, symbolic, contextlib.nullcontext()
+    if symbolic:
+        hinted = _hinted_views(tensors)
+        if hinted is not None:
+            tensors, symbolic = hinted, False
+    return tensors, symbolic, shape_env.suppress_guards()
 
 
 def remove_dupe_metadata(
@@ -333,38 +373,64 @@ def create_synthetic_base_metadata(
     )
 
 
+def _hinted_views(tensors: list[Tensor]) -> list[Tensor] | None:
+    """
+    Meta tensors with the hinted layout of each tensor, sharing a
+    storage exactly when the originals do, or None if a size, stride or offset
+    is unbacked or a nested int.
+
+    With shape guards suppressed, every symbolic comparison in the overlap
+    analysis that ShapeEnv can't decide statically evaluates to its value at
+    the hints, and the ones it can decide hold at the hints too. So for backed
+    symbols, running the static analysis on these gives the same answer
+    without a ShapeEnv round trip per pair of tensors.
+    """
+    layouts = []
+    extents: dict[StorageWeakRef, int] = {}
+    for t in tensors:
+        sizes, strides, offset = t.shape, t.stride(), t.storage_offset()
+        symbols = (*sizes, *strides, offset)
+        if has_free_unbacked_symbols(symbols) or any(map(is_nested_int, symbols)):
+            return None
+        sizes = [guarding_hint_or_throw(x) for x in sizes]
+        strides = [guarding_hint_or_throw(x) for x in strides]
+        offset = guarding_hint_or_throw(offset)
+        storage = StorageWeakRef(t.untyped_storage())
+        # Zero for an empty view, however large its other dims.
+        length = compute_required_storage_length(sizes, strides, offset)
+        extents[storage] = max(extents.get(storage, 0), length * t.element_size())
+        layouts.append((storage, sizes, strides, offset))
+
+    # Plain meta tensors: the analysis only reads metadata, and this runs under
+    # the compile's fake mode, which may disallow meta FakeTensors.
+    with unset_fake_temporarily():
+        bases = {
+            # Rounded up so that view(dtype) works for every dtype.
+            storage: torch.empty(-(-n // 16) * 16, dtype=torch.uint8, device="meta")
+            for storage, n in extents.items()
+        }
+        # The same tensor passed twice must stay one tensor: the analysis treats
+        # repeated empty tensors as overlapping by identity.
+        views: dict[int, Tensor] = {}
+        for t, (storage, sizes, strides, offset) in zip(tensors, layouts):
+            if id(t) not in views:
+                base = bases[storage].view(t.dtype)
+                views[id(t)] = base.as_strided(sizes, strides, offset)
+    return [views[id(t)] for t in tensors]
+
+
 def compute_overlapping_inputs(
     aot_config: AOTConfig, fwd_inputs: list[Any], aliased_input_indices: list[int]
 ) -> set[int]:
     num_aliases = len(aliased_input_indices)
+    aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
+    symbolic = _is_symbolic(aliased_fwd_inputs)
 
-    shape_env = None
-    maybe_suppress_guards = contextlib.nullcontext
-    tracing_context = torch._guards.TracingContext.try_get()
-
-    if tracing_context is not None:
-        if tracing_context.fake_mode is None:
-            raise AssertionError("tracing_context.fake_mode must not be None")
-        shape_env = tracing_context.fake_mode.shape_env
-
-        # Check whether we can actually get the dynamo sources from within AOTAutograd.
-        if aot_config.aot_autograd_arg_pos_to_source and shape_env is not None:
-            maybe_suppress_guards = shape_env.suppress_guards  # type: ignore[assignment]
-
-    # Check whether there are any symbolic values being used.
-    # We do this for 2 reasons:
-    #   1. StorageOverlap guard is only issued whenever dynamic shapes is turned on
-    #   2. Triggers the fast-path for computing storage overlapping
-    symbolic = any(
-        isinstance(x, torch.SymInt)
-        for i in aliased_input_indices
-        for x in [
-            *fwd_inputs[i].shape,
-            *fwd_inputs[i].stride(),
-            fwd_inputs[i].storage_offset(),
-        ]
-    )
-
+    # This killswitch guards against the cost of symbolic pair checks, which
+    # the hint path below removes for backed symbols with Dynamo sources. It
+    # still keys on the original inputs, so those compiles keep falling back as
+    # before: this is deliberate, to keep behavior unchanged. Consider firing it
+    # only when the hint path isn't taken.
     if torch._inductor.config.is_fbcode():
         if symbolic and num_aliases > 400:
             from torch._subclasses.fake_tensor import (
@@ -380,18 +446,22 @@ def compute_overlapping_inputs(
             ):
                 raise UnsupportedMutationAliasingException(msg)
 
-    with maybe_suppress_guards():
-        aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
+    tensors, analysis_symbolic, suppress_guards = _prepare_overlap_analysis(
+        aot_config, aliased_fwd_inputs, symbolic
+    )
+    with suppress_guards:
         actual_aliased_indices = {
             aliased_input_indices[i]
-            for i in compute_overlapping_tensors(aliased_fwd_inputs, symbolic=symbolic)
+            for i in compute_overlapping_tensors(tensors, symbolic=analysis_symbolic)
         }
 
+    tracing_context = torch._guards.TracingContext.try_get()
     # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
     # dynamo sources inside AOTAutograd.
     if (
         tracing_context is not None
-        # Make sure dynamic shapes is currently being used.
+        # Make sure dynamic shapes is currently being used. This is whether the
+        # original inputs are symbolic, not analysis_symbolic.
         and symbolic
         # We check that we have more than 1 aliased tensor, which should be true at
         # this point, anyway.

@@ -476,7 +476,7 @@ class DuplicateInputs(GuardEnvExpr):
 A class representing storage overlap relations among inputs that aliases the same storage.
 
 Given that a set of tensors alias the same storage, this guard checks whether they actually
-have overlapping storages.
+have overlapping storages, and that they all still share one storage.
 
 While non_overlapping_sources represent input tensors that definitely don't have any storage
 overlapping with any other input, overlapping_sources represent tensors that either:
