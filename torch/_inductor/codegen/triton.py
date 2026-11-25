@@ -9102,7 +9102,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 f"{self.iteration_ranges_ranges_code(entry)}"
             )
             code.writeline(
-                f"{entry.mask_name()} = {entry.name} < {self.index_to_str(entry.numel)}"
+                f"{entry.mask_name()} = {entry.name} < "
+                f"{self.index_to_str(entry.mask_bound())}"
             )
             return
 
@@ -9303,7 +9304,7 @@ def template_reduction_epilogue_supported(
     if not (
         config.triton.template_reduction_epilogue
         and isinstance(template, ir.TritonTemplateBuffer)
-        and len(template.get_size()) == 2
+        and len(template.get_size()) in (2, 3)
         # Only bf16 and fp16 outputs are tested.
         and template.get_dtype() in (torch.bfloat16, torch.float16)
         # The JIT cpp wrapper can't import the Blackwell template's source
@@ -9311,16 +9312,21 @@ def template_reduction_epilogue_supported(
         and not V.graph.cpp_wrapper
     ):
         return False
-    m, n = template.get_size()
+    size = template.get_size()
     # N sets whether a tile spans the rows, so it must be static. A dynamic M
     # must be backed, so autotuning and the fusion benchmark have a hint.
     # SizeHintMultiKernel's per-hint kernels are untested with these epilogues.
-    if not isinstance(n, sympy.Integer) or (
-        not isinstance(m, sympy.Integer)
-        and (free_unbacked_symbols(m) or config.multi_kernel_hints)
+    # The batched (bmm) template specializes dynamic sizes.
+    if not all(isinstance(s, sympy.Integer) for s in size[1:]) or (
+        not isinstance(size[0], sympy.Integer)
+        and (
+            len(size) == 3
+            or free_unbacked_symbols(size[0])
+            or config.multi_kernel_hints
+        )
     ):
         return False
-    if template.get_stride() != [n, 1]:
+    if template.get_stride() != ir.FlexibleLayout.contiguous_strides(size):
         return False
     # Arg reductions can lower to a multi-result tl.reduce, which
     # automatic warp specialization rejects.
