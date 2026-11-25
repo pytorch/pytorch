@@ -13,7 +13,8 @@ def export_args(
     prefix: str,
     read_only: Collection[str] = (),
 ) -> dict[str, Any]:
-    r"""Derive fake scalar arguments and AOT metadata from the callable signature."""
+    r"""Derive AOT arguments from a signature ordered as tensors, annotated scalars,
+    then stream."""
     parameters = list(inspect.signature(fn, eval_str=True).parameters.values())
     args = [*tensors]
     for param in parameters[len(tensors) : -1]:

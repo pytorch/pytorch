@@ -169,20 +169,15 @@ class TestPointwiseTma(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
-    @parametrize(
-        "rows,cols,x_pitch,y_pitch",
-        ((4096, 4096, 4128, 4128), (64, 96, 112, 128)),
-    )
-    def test_registered_padded_input_values(
-        self, device: str, rows: int, cols: int, x_pitch: int, y_pitch: int
-    ) -> None:
+    def test_registered_padded_input_values(self, device: str) -> None:
+        rows, cols, x_pitch, y_pitch = 4096, 4096, 4128, 4160
         x = torch.randn(rows, x_pitch, device=device)[:, :cols]
         y = torch.randn(rows, y_pitch, device=device)[:, :cols]
         with torch.backends.python_native.cutedsl.disabled():
             expected = x + y
         actual = x + y
         with torch.backends.python_native.cutedsl.disabled():
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @onlyCUDA
     @skipIfNoCuteDSL

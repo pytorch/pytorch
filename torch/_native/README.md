@@ -218,24 +218,17 @@ as eager, register overrides for the **functional** variant too.
 
 ### Scalar arguments and type promotion
 
-Callable annotations select operand and result precision; TensorIterator supplies
-promotion. JIT and AOT share the resolved signature.
+Functor annotations select operand and result precision; TensorIterator supplies
+promotion. JIT and AOT use the same functor contract.
 
-`_scalar_arg_coercer` wraps boxed numbers as CPU tensors for `_WEAK_SCALAR_OPS`,
-preserving weak result and computation types.
+`_scalar_arg_coercer` wraps boxed numbers for `_WEAK_SCALAR_OPS` as CPU tensors.
+Unknown policies, promotion-changing division, and calls whose positional tensors
+are all 0D fall back before predicates. Native fallback keeps the original arguments;
+`call_boxed` restores wrapped-number tensors.
 
-Unknown policies or division wraps that change promotion fall back before predicates.
-
-Native fallback keeps the original arguments; `call_boxed` rebuilds wrapped-number
-tensors. Calls with boxed numbers fall back when every positional tensor is 0D.
-
-Functional overrides restore the weak dtype within the same numeric kind; mutable
-overrides return the original outputs without casting.
-
-Device wrapped numbers stay tensors to avoid host reads of device data.
-
-Native `square` retains its `pow` decomposition. `selu` and `relu6` retain their
-autograd decompositions through the overridden `elu` and `hardtanh` leaves.
+Functional overrides restore the weak dtype within the same numeric kind. Mutable
+overrides preserve output aliases. Device wrapped numbers remain tensors to avoid
+host reads.
 
 ## Registering a New Operator
 

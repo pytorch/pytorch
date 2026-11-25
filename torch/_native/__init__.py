@@ -6,6 +6,10 @@ from typing import cast
 
 import torch
 
+
+# CUDA can already be initialized while this module is still importing.
+_registration_complete: bool = False
+
 # This handles collecting registration of all native ops
 # Also need to import DSL utils to make sure DSL registration is ok
 from . import (
@@ -138,3 +142,7 @@ def _unconditional_masked():
         yield
     finally:
         _set_mask_unconditional(previous)
+
+
+_registration_complete = True
+cutedsl_utils._flush_cuda_registrations()

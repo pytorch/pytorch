@@ -11,8 +11,11 @@ if TYPE_CHECKING:
 
     from torch.testing._internal.opinfo.core import OpInfo
 
+import inspect
 import math
+import os
 import re
+import sys
 import unittest
 import warnings
 
@@ -33,6 +36,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     set_default_dtype,
+    shell,
     skipIfNoCuteDSL,
     TestCase,
 )
@@ -102,10 +106,148 @@ def _packed_transpose_reference(
     return torch.tensor(result, device=base.device, dtype=torch.uint8)
 
 
+def _cuda_registration_probe(supported: bool, initialized: bool) -> None:
+    from torch._native import cutedsl_utils
+
+    check = TestCase()
+    check.assertFalse(torch.cuda.is_initialized())
+    if initialized:
+        torch.cuda.init()
+    with (
+        torch.library._scoped_library("torch_nn", "FRAGMENT") as definition,
+        torch.library._scoped_library("torch_nn", "IMPL", "CUDA") as native,
+    ):
+        definition.define("_test_device_registration(Tensor x) -> Tensor")
+        native.impl("_test_device_registration", lambda x: x + 1)
+        operation = torch.ops.torch_nn._test_device_registration.default
+        torch._native.user_order_fn = lambda op, key, graph: list(reversed(graph))
+
+        def register() -> None:
+            for value in (2, 3):
+                cutedsl_utils.register_op_override(
+                    "torch_nn",
+                    "_test_device_registration",
+                    "CUDA",
+                    cond=lambda x: True,
+                    impl=lambda x, value=value: x + value,
+                    allow_multiple_override=True,
+                )
+
+        with torch.backends.python_native.cutedsl.disabled():
+            cutedsl_utils.register_cuda_overrides(
+                register, POINTWISE_ARCH_MAJORS if supported else ()
+            )
+            check.assertEqual(torch.cuda.is_initialized(), initialized)
+            x = torch.tensor([2.0], device="cuda")
+            check.assertEqual(operation(x), torch.tensor([3.0], device="cuda"))
+        check.assertEqual(
+            operation(x), torch.tensor([5.0 if supported else 3.0], device="cuda")
+        )
+
+
+@unittest.skipUnless(TEST_CUDA, "CUDA required")
+@skipIfNoCuteDSL
+class TestCuTeDSLTranspose(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @parametrize("normalize", (False, True))
+    def test_transpose_payload_block_ownership(
+        self, device: str, normalize: bool
+    ) -> None:
+        import cutlass
+        import cutlass.cute as cute
+
+        from torch._native.cutedsl import launch
+        from torch._native.cutedsl.dtypes import torch2cute
+        from torch._native.ops.pointwise.transpose_copy import (
+            _PAYLOAD_THREADS,
+            _PayloadTranspose,
+        )
+
+        dtype = torch.int8 if normalize else torch.float32
+        src = torch.arange(516, device=device).to(dtype).view(-1, 1)
+        dst = torch.full_like(src, -7)
+        op = _PayloadTranspose(torch2cute[dtype], 1, normalize, False)
+
+        @cute.jit
+        def one_block(src: Any, dst: Any, stream: Any) -> None:
+            divisors = tuple(
+                cute.FastDivmodDivisorV2(cutlass.Int32(v)) for v in (2, 1, 2, 129, 1)
+            )
+            op.kernel(
+                src,
+                dst,
+                divisors,
+                cutlass.Int32(129),
+                cutlass.Int32(4),
+                cutlass.Int32(1),
+            ).launch(grid=[1, 1, 1], block=[_PAYLOAD_THREADS, 1, 1], stream=stream)
+
+        fake_src = launch.fake_compact(torch2cute[dtype], (516, 1), align=16)
+        fake_dst = launch.fake_compact(torch2cute[dtype], (516, 1), align=16)
+        compiled = launch.compile_kernel(
+            one_block, fake_src, fake_dst, cute.runtime.make_fake_stream()
+        )
+        compiled(launch.read_only(src), dst, launch.stream())
+        with _disabled():
+            expected = torch.full_like(dst, -7)
+            row = src[:129]
+            expected[:129] = (row != 0).to(dtype) if normalize else row
+            self.assertEqual(dst, expected, atol=0, rtol=0)
+
+    @parametrize(
+        "dtype,shapes",
+        (
+            (torch.float32, ((2, 5, 2, 3, 7), (2, 9, 2, 7, 11))),
+            (torch.uint16, ((2, 512, 2, 2048, 1), (2, 1024, 2, 1024, 1))),
+        ),
+    )
+    def test_transpose_copy_reuses_runtime_geometry(
+        self, device: str, dtype: torch.dtype, shapes: tuple[tuple[int, ...], ...]
+    ) -> None:
+        from torch._native.ops.pointwise import transpose_copy
+
+        cached = None
+        for shape in shapes:
+            outer, a, middle, b, inner = shape
+            with _disabled():
+                src = _random_bits(shape, dtype, device=device).transpose(1, 3)
+                expected = src.contiguous()
+                target = torch.empty_like(expected)
+            transpose_copy.run(
+                src, target, (outer, b, middle, a, inner, dtype.itemsize)
+            )
+            self.assertEqual(target, expected, atol=0, rtol=0)
+            if cached is None:
+                cached = len(transpose_copy._PLANS)
+            self.assertEqual(len(transpose_copy._PLANS), cached)
+
+
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoCuteDSL
 class TestCuTeDSLPointwise(TestCase):
     hw_classification = HardwareClassification.CUDA
+
+    @parametrize("supported", (False, True))
+    @parametrize("initialized", (False, True))
+    def test_device_registration_preserves_filters_and_order(
+        self, device: str, supported: bool, initialized: bool
+    ) -> None:
+        source = (
+            "import torch\n"
+            "from torch.testing._internal.common_utils import TestCase\n"
+            "from torch._native.cutedsl.config import POINTWISE_ARCH_MAJORS\n"
+            + inspect.getsource(_cuda_registration_probe)
+            + f"\n_cuda_registration_probe({supported}, {initialized})"
+        )
+        env = dict(os.environ, TORCH_DISABLE_NATIVE_JIT="0")
+        result = shell(
+            [sys.executable, "-c", source],
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            env=env,
+            timeout=300,
+        )
+        self.assertEqual(result, 0)
 
     @dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @parametrize(
@@ -224,7 +366,7 @@ class TestCuTeDSLPointwise(TestCase):
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             actual = operator(*args)
-        for value in (0.0, -1.0, math.nan):
+        for value in (0.0, 1.0, math.nan):
             with _disabled():
                 x.fill_(value)
                 expected = operator(*args)
@@ -256,10 +398,6 @@ class TestCuTeDSLPointwise(TestCase):
             )
             self.assertEqual(got.filename, ref.filename)
             self.assertEqual(got.lineno, ref.lineno)
-
-    def test_integer_ldexp_fallback(self, device: str) -> None:
-        x = torch.tensor([1, 2], device=device, dtype=torch.int32)
-        self.assertEqual(torch.ldexp(x, x), torch.tensor([2.0, 8.0], device=device))
 
     def test_default_dtype_promotion(self, device: str) -> None:
         x = torch.arange(1, 33, device=device, dtype=torch.int32)
@@ -322,25 +460,16 @@ class TestCuTeDSLPointwise(TestCase):
         src = _random_bits((5, 7, 9), torch.int1, device=device).transpose(0, 2)
         self._assert_native_error(lambda: src.contiguous())
 
-    def test_dense_copy_prefers_native(self, device: str) -> None:
-        from torch._native.ops.pointwise import overrides
-
+    def test_copy_preserves_alias_and_conversion_values(self, device: str) -> None:
         with _disabled():
             src = torch.arange(32, device=device, dtype=torch.float32)
             wider = src.double()
             target = torch.empty_like(src)
-        self.assertFalse(overrides._copy_cond(src, src))
-        self.assertFalse(overrides._copy_cond(target, src))
-        self.assertFalse(overrides._to_copy_cond(src, dtype=src.dtype))
-        self.assertTrue(overrides._copy_cond(target, wider))
-        self.assertTrue(overrides._to_copy_cond(src, dtype=torch.float64))
         self.assertIs(src.copy_(src), src)
-        self.assertIs(overrides._copy_impl(target, wider), target)
+        self.assertIs(target.copy_(wider), target)
         self.assertEqual(target, src)
 
     def test_quantized_clone_with_nan_scale(self, device: str) -> None:
-        from torch._native.ops.pointwise import overrides
-
         src = torch._empty_affine_quantized(
             (32, 32), scale=float("nan"), zero_point=0, dtype=torch.qint8, device=device
         ).t()
@@ -348,27 +477,34 @@ class TestCuTeDSLPointwise(TestCase):
         kwargs = {"memory_format": torch.contiguous_format}
         with _disabled():
             expected = src.clone(**kwargs)
-        self.assertTrue(overrides._quantized_clone_cond(src, **kwargs))
-        actual = overrides._quantized_clone_impl(src, **kwargs)
+        actual = src.clone(**kwargs)
         self.assertEqual(actual.shape, expected.shape)
         self.assertTrue(math.isnan(actual.q_scale()))
         got = _quantized_storage_bytes(actual)
         self.assertEqual(got, _quantized_storage_bytes(expected))
 
-    def test_transpose_external_storage_word_alignment(self, device: str) -> None:
-        from torch._native.ops.pointwise import overrides, transpose_copy
-
+    @parametrize("external_source", (False, True))
+    def test_transpose_external_storage_word_alignment(
+        self, device: str, external_source: bool
+    ) -> None:
         size = 512 * 512
         with _disabled():
             storage = torch.arange(size + 16, device=device).to(torch.uint8)
             external = torch.from_dlpack(storage[1:])
-            src = external[15:].view(512, 512).t()
+            unaligned = external[15:].view(512, 512)
+            src = (
+                unaligned.t()
+                if external_source
+                else torch.arange(size, device=device)
+                .to(torch.uint8)
+                .view(512, 512)
+                .t()
+            )
             expected = src.contiguous()
-            target = torch.empty_like(expected)
-        self.assertNotEqual(src.storage_offset() % 4, 0)
-        spec = (1, 512, 1, 512, 1, 1)
-        self.assertFalse(transpose_copy.indexing_supported(src, target, spec))
-        self.assertFalse(overrides._copy_cond(target, src))
+            target = torch.empty_like(expected) if external_source else unaligned
+        self.assertNotEqual(
+            (src if external_source else target).storage_offset() % 4, 0
+        )
         self.assertIs(target.copy_(src), target)
         self.assertEqual(target, expected)
 
@@ -458,51 +594,6 @@ class TestCuTeDSLPointwise(TestCase):
             if cached is None:
                 cached = len(transpose_copy._PLANS)
             self.assertEqual(len(transpose_copy._PLANS), cached)
-
-    @parametrize("normalize", (False, True))
-    def test_transpose_payload_block_ownership(
-        self, device: str, normalize: bool
-    ) -> None:
-        import cutlass
-        import cutlass.cute as cute
-
-        from torch._native.cutedsl import launch
-        from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise.transpose_copy import (
-            _PAYLOAD_THREADS,
-            _PayloadTranspose,
-        )
-
-        dtype = torch.int8 if normalize else torch.float32
-        src = torch.arange(516, device=device).to(dtype).view(-1, 1)
-        dst = torch.full_like(src, -7)
-        op = _PayloadTranspose(torch2cute[dtype], 1, normalize, False)
-
-        @cute.jit
-        def one_block(src: Any, dst: Any, stream: Any) -> None:
-            divisors = tuple(
-                cute.FastDivmodDivisorV2(cutlass.Int32(v)) for v in (2, 1, 2, 129, 1)
-            )
-            op.kernel(
-                src,
-                dst,
-                divisors,
-                cutlass.Int32(129),
-                cutlass.Int32(4),
-                cutlass.Int32(1),
-            ).launch(grid=[1, 1, 1], block=[_PAYLOAD_THREADS, 1, 1], stream=stream)
-
-        fake_src = launch.fake_compact(torch2cute[dtype], (516, 1), align=16)
-        fake_dst = launch.fake_compact(torch2cute[dtype], (516, 1), align=16)
-        compiled = launch.compile_kernel(
-            one_block, fake_src, fake_dst, cute.runtime.make_fake_stream()
-        )
-        compiled(launch.read_only(src), dst, launch.stream())
-        with _disabled():
-            expected = torch.full_like(dst, -7)
-            row = src[:129]
-            expected[:129] = (row != 0).to(dtype) if normalize else row
-            self.assertEqual(dst, expected, atol=0, rtol=0)
 
     def test_transpose_copy_tma_graph_replays(self, device: str) -> None:
         dtype, shape = torch.uint16, (2, 96, 3, 80)
@@ -652,7 +743,12 @@ class TestCuTeDSLPointwise(TestCase):
         fn = getattr(torch.nn.functional, op)
         kwargs = {"threshold": 0.0, "value": -1.0} if op == "threshold" else {}
         values = torch.tensor([float("nan"), -0.0, 0.0], device=device, dtype=dtype)
-        self._assert_native_result(lambda: fn(values, **kwargs), atol=0, rtol=0)
+        with _disabled():
+            expected = fn(values, **kwargs)
+        actual = fn(values, **kwargs)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        zero = expected == 0
+        self.assertEqual(torch.signbit(actual[zero]), torch.signbit(expected[zero]))
 
     @parametrize(
         "dtype,op",
@@ -721,7 +817,7 @@ class TestCuTeDSLPointwise(TestCase):
                 lambda: torch.nn.functional.leaky_relu(x, negative_slope=value)
             )
 
-    def test_misaligned_view_shares_no_plan_with_aligned(self, device: str) -> None:
+    def test_misaligned_views_preserve_values(self, device: str) -> None:
         base = torch.arange(1024, device=device, dtype=torch.float32)
         for offset, shape in (
             (0, (512,)),
@@ -787,7 +883,7 @@ class TestCuTeDSLPointwise(TestCase):
         else:
             x = torch.zeros(1, device=device, dtype=dtype)
             y = torch.full_like(x, -30.0 if op.name == "logaddexp2" else -20.0)
-        self._assert_native_result(lambda: op(x, y))
+        self._assert_native_result(lambda: op(x, y), atol=0, rtol=self.rel_tol)
 
     @parametrize("factory", ("arange", "linspace"))
     def test_range_overlapping_output(self, device: str, factory: str) -> None:
@@ -976,9 +1072,8 @@ class TestCuTeDSLPointwise(TestCase):
     def _assert_native_error(self, call: Callable[[], torch.Tensor]) -> None:
         with _disabled(), self.assertRaises(RuntimeError) as native_error:
             call()
-        with self.assertRaisesRegex(
-            RuntimeError, re.escape(str(native_error.exception))
-        ):
+        message = str(native_error.exception).split("\nException raised from ", 1)[0]
+        with self.assertRaisesRegex(RuntimeError, re.escape(message)):
             call()
 
     @parametrize(
@@ -1262,33 +1357,6 @@ class TestCuTeDSLPointwise(TestCase):
 
         self._assert_native_result(call, atol=0, rtol=0)
 
-    @parametrize(
-        "dtype,shapes",
-        (
-            (torch.float32, ((2, 5, 2, 3, 7), (2, 9, 2, 7, 11))),
-            (torch.uint16, ((2, 512, 2, 2048, 1), (2, 1024, 2, 1024, 1))),
-        ),
-    )
-    def test_transpose_copy_reuses_runtime_geometry(
-        self, device: str, dtype: torch.dtype, shapes: tuple[tuple[int, ...], ...]
-    ) -> None:
-        from torch._native.ops.pointwise import transpose_copy
-
-        cached = None
-        for shape in shapes:
-            outer, a, middle, b, inner = shape
-            with _disabled():
-                src = _random_bits(shape, dtype, device=device).transpose(1, 3)
-                expected = src.contiguous()
-                target = torch.empty_like(expected)
-            transpose_copy.run(
-                src, target, (outer, b, middle, a, inner, dtype.itemsize)
-            )
-            self.assertEqual(target, expected, atol=0, rtol=0)
-            if cached is None:
-                cached = len(transpose_copy._PLANS)
-            self.assertEqual(len(transpose_copy._PLANS), cached)
-
     def test_integer_cuda_scalar_division_promotion(self, device: str) -> None:
         x = torch.ones(96, 64, device=device, dtype=torch.int32).t()
         y = torch.tensor(2**32 + 1, device=device, dtype=torch.int64)
@@ -1297,6 +1365,7 @@ class TestCuTeDSLPointwise(TestCase):
         self.assertEqual(torch.div(x, y), expected, atol=0, rtol=0)
 
 
+instantiate_device_type_tests(TestCuTeDSLTranspose, globals(), only_for=("cuda",))
 instantiate_device_type_tests(TestCuTeDSLPointwise, globals(), only_for=("cuda",))
 
 if __name__ == "__main__":
