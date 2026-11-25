@@ -3436,27 +3436,67 @@ def _use_cutlass_for_op(op_name: str) -> bool:
 _IntLike: TypeAlias = int | sympy.Expr
 
 
-@functools.cache
+# Not cached: for a dynamic K this installs a guard on the current graph.
 def use_decompose_k_choice(
     m: _IntLike, n: _IntLike, k: _IntLike, threshold_multiple: int = 1
 ) -> bool:
     from torch._inductor.virtualized import V
 
     decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
-
-    return (
-        V.graph.sizevars.statically_known_true(
-            sympy.And(
-                sympy.Ge(k, decompose_k_threshold * m),
-                sympy.Ge(k, decompose_k_threshold * n),
-            )
-        )
-        and not V.graph.aot_mode  # TODO: Support AOTI for decomposeK
-        and not V.graph.cpp_wrapper
-        and config.triton.num_decompose_k_splits > 0
-        # Callers rely on False to retain the regular MM fallback.
-        and bool(get_k_splits(m, n, k))
+    large_k = sympy.And(
+        sympy.Ge(k, decompose_k_threshold * m),
+        sympy.Ge(k, decompose_k_threshold * n),
     )
+    sizevars = V.graph.sizevars
+    if (
+        V.graph.aot_mode  # TODO: Support AOTI for decomposeK
+        or V.graph.cpp_wrapper
+        or config.triton.num_decompose_k_splits <= 0
+        # Callers rely on False to retain the regular MM fallback.
+        or not get_k_splits(m, n, k)
+    ):
+        return False
+    if sizevars.statically_known_true(large_k):
+        return True
+    # A backed dynamic K (opt-in) uses splits that divide every K and is guarded
+    # on the threshold either way, so a K on the other side recompiles instead
+    # of reusing this graph. The threshold_multiple > 1 check only drops Triton
+    # mm; keep it for a dynamic K rather than add a second guard.
+    if (
+        not config.triton.decompose_k_dynamic_k
+        or threshold_multiple != 1
+        or not isinstance(k, sympy.Expr)
+        or k.is_number
+        or free_unbacked_symbols(large_k)
+        or _has_user_bounded_symbol(k)
+    ):
+        return False
+    divisible = any(
+        sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0))
+        for s in get_k_splits(m, n, k)
+    )
+    if not divisible:
+        return False
+    return sizevars.guard_or_false(large_k)
+
+
+def _has_user_bounded_symbol(expr: sympy.Expr) -> bool:
+    """Whether a symbol of ``expr`` carries a user-declared range
+    (StrictMinMaxConstraint, e.g. mark_dynamic(min=, max=)). A guard on it
+    could violate that range. Ranges narrowed only by guards do not count."""
+    from torch._inductor.virtualized import V
+
+    shape_env = V.graph.sizevars.shape_env
+    constrained = shape_env.strict_min_max_constrained_symbols
+    if not constrained:
+        return False
+    # A constrained symbol may have been replaced by an equal one, so compare
+    # against the symbols each constrained symbol now resolves to.
+    resolved = OrderedSet[sympy.Symbol]()
+    for sym in constrained:
+        resolved.update(shape_env.replace(sym).free_symbols)
+        resolved.add(sym)
+    return any(sym in resolved for sym in expr.free_symbols)
 
 
 @functools.cache
