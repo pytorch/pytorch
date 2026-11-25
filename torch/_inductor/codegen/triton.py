@@ -8404,7 +8404,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if prefix_is_reduction(prefix) and not self.inside_reduction:
                 continue
 
-            numel_hint = V.graph.sizevars.optimization_hint(numel)
+            if self.hint_override is None:
+                numel_hint = V.graph.sizevars.optimization_hint(numel)
+            else:
+                numel_hint = V.graph.sizevars.optimization_hint_at(
+                    numel, self.hint_override
+                )
             size_hint = next_power_of_2(int(numel_hint))
             size_hints[prefix] = size_hint
 
@@ -9297,6 +9302,7 @@ class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
     supports_sub_parent_epilogue = True
+    supports_multi_kernel_hints = True
     kernel_type: type[Any] = TritonKernel
     backend_features = OrderedSet(
         [

@@ -726,7 +726,9 @@ cudagraph_unsafe_unbacked_ops: list[str] = []
 # whether template autotuning should allow flexible layouts if possible (e.g. only extern choices)
 max_autotune_allow_flexible_layouts: bool = False
 
-# Size hints for multi-kernel dispatch.
+# Size hints for multi-kernel dispatch, used by Triton templates and by Triton
+# pointwise/reduction kernels with one dynamic symbol (not under cpp_wrapper,
+# fx_wrapper, or triton.autotune_at_compile_time).
 # A reasonable default value of this config would be [64, 256, 4096]
 # TODO: @bobrenjc93 to roll this out to a few internal models to ensure this works
 # as expected before turning it on for everyone.

@@ -23,7 +23,7 @@ import torch._logging
 import torch.utils._pytree as pytree
 from torch._inductor import metrics
 from torch._inductor.ir import MultiTemplateBuffer
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_symbols, free_unbacked_symbols
 from torch.fx.immutable_collections import immutable_dict
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, Identity, ModularIndexing
@@ -79,7 +79,13 @@ from ..utils import (
 )
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
-from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
+from .common import (
+    CSEVariable,
+    index_prevent_reordering,
+    Kernel,
+    PythonPrinter,
+    TensorArg,
+)
 from .multi_kernel import MultiKernel, SizeHintMultiKernel
 from .simd_kernel_features import (
     DisableReduction,
@@ -2987,6 +2993,7 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
     supports_sub_parent_epilogue = False
+    supports_multi_kernel_hints = False
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -4773,13 +4780,72 @@ class SIMDScheduling(BaseScheduling):
             kernel_features.reduction_numel,
             kernel_features.coalesce_analysis,
         )
-        kernels = self.create_kernel_choices(
-            kernel_features,
-            [tiling],
-            {"features": kernel_features, "tiling_scores": tiling_score},
-        )
+        kernel_kwargs: dict[str, Any] = {
+            "features": kernel_features,
+            "tiling_scores": tiling_score,
+        }
+        kernels = self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs)
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        kernels_by_shape: dict[tuple[tuple[int, ...], ...], SIMDKernel] = {}
+        if (
+            self.supports_multi_kernel_hints
+            and config.multi_kernel_hints
+            and not V.graph.cpp_wrapper
+            and not V.graph.fx_wrapper
+            # The compile-time autotune block launches a multi-kernel once, so only the
+            # sub-kernel its example inputs dispatch to would be tuned (precompile sets it).
+            and not config.triton.autotune_at_compile_time
+            and len(kernels) == 1
+        ):
+            # Tensor arguments exist only after codegen, so the first kernel supplies
+            # the shapes the keys are built from.
+            _, _, signature, _ = kernels[0].args.python_argdefs()
+            shapes = [
+                V.graph.get_buffer(arg.buffer).get_size()
+                for arg in signature
+                if isinstance(arg, TensorArg)
+            ]
+            numels = (kernel_features.numel, kernel_features.reduction_numel)
+            # With one dynamic symbol every hint gets its own key, and no numel
+            # like s0 - s1 collapses when its symbols are set to the hint.
+            symbols = free_symbols(numels)
+            hints: list[int] = []
+            if len(symbols) == 1 and free_symbols(shapes) == symbols:
+                # Skip a hint that empties a numel like s0 - 1024, or that grows one like
+                # s0**4 (duck sizing) past both int32 and the size this graph was traced at.
+                limits = [
+                    max(2**31 - 1, V.graph.sizevars.optimization_hint(n))
+                    for n in numels
+                ]
+                hints = [
+                    hint
+                    for hint in config.multi_kernel_hints
+                    if all(
+                        0 < V.graph.sizevars.optimization_hint_at(n, hint) <= limit
+                        for n, limit in zip(numels, limits)
+                    )
+                ]
+                # A lone hint would only trade the kernel tuned at the traced size for one
+                # tuned at that hint, behind a dispatch with nothing to choose.
+                if len(hints) == 1:
+                    hints = []
+            for hint in hints:
+                # hint_override only changes size_hints, so this is one kernel.
+                (kernel,) = self.create_kernel_choices(
+                    kernel_features, [tiling], {**kernel_kwargs, "hint_override": hint}
+                )
+                self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+                key = tuple(
+                    tuple(V.graph.sizevars.optimization_hint_at(s, hint) for s in shape)
+                    for shape in shapes
+                )
+                kernels_by_shape[key] = kernel
+            if kernels_by_shape:
+                kernels = list(kernels_by_shape.values())
+                # The first kernel is replaced by the hinted ones and never emitted.
+                # pyrefly: ignore [bad-assignment]
+                metrics.generated_kernel_count -= 1
         MultiKernel.merge_workspaces_inplace(kernels)
 
         # Collect config_patches from operations (e.g., decomposition ops with
@@ -4796,7 +4862,9 @@ class SIMDScheduling(BaseScheduling):
         del kernel
 
         final_kernel: SIMDKernel | MultiKernel
-        if len(kernels) > 1:
+        if kernels_by_shape:
+            final_kernel = SizeHintMultiKernel(kernels_by_shape)
+        elif len(kernels) > 1:
             final_kernel = MultiKernel(kernels)
         else:
             (final_kernel,) = kernels

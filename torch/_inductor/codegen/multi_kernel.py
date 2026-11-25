@@ -66,13 +66,18 @@ class MultiKernelState:
         from ..select_algorithm import TritonTemplateKernel
 
         kernel_names = tuple(k.kernel_name for k in kernels)
-        if kernel_names in self.subkernel_to_kernel_name:
-            return self.subkernel_to_kernel_name[kernel_names]
+        # The same sub-kernels can serve call sites with different shape keys.
+        dedup_key = (
+            kernel_names,
+            None if kernel_shape_keys is None else tuple(kernel_shape_keys),
+        )
+        if dedup_key in self.subkernel_to_kernel_name:
+            return self.subkernel_to_kernel_name[dedup_key]
 
         # name the multi kernel based on the first kernel
         multi_kernel_name = f"multi_kernel_{self._root._num_names}"
         self._root._num_names += 1
-        self.subkernel_to_kernel_name[kernel_names] = multi_kernel_name
+        self.subkernel_to_kernel_name[dedup_key] = multi_kernel_name
 
         if V.graph.cpp_wrapper and not config.triton.autotune_at_compile_time:
             # we should not generate any python code for multi-kernel during
@@ -118,8 +123,6 @@ class MultiKernelState:
                     buf.writeline(f"{name},")
             buf.writeline("], arg_index=arg_index)")
         else:  # call with dict[size hint key, kernel]
-            if not isinstance(kernels[0], TritonTemplateKernel):
-                raise AssertionError("expected kernels[0] to be a TritonTemplateKernel")
             if not isinstance(kernel_shape_keys, list):
                 raise AssertionError("expected kernel_shape_keys to be a list")
             if len(kernels) != len(kernel_shape_keys):
@@ -579,6 +582,9 @@ class SizeHintMultiKernel(MultiKernel):
 
     e.g. matmul([s0, s1], [s1, s2]) with size-hints [64, 256] only generates 2 kernels,
     based on tuning shapes ([64, 64], [64, 64]) and ([256, 256], [256, 256])
+
+    Triton pointwise and reduction kernels with one dynamic symbol use it too, keyed by
+    their tensor argument shapes with that symbol set to each hint.
     """
 
     def __init__(self, kernels):
@@ -612,6 +618,11 @@ class SizeHintMultiKernelCall(MultiKernelCall):
 
         # Caches results for unique shapes.
         self._shape_cache = {}
+
+    def load_cache(self):
+        # The pick is made per shape in run(). Hashing the sub-kernels here also fails
+        # for kernels loaded from the FX graph cache, whose JITFunction has no hash lock.
+        pass
 
     def _get_shape_cache_key(self, *args, **kwargs):
         """
