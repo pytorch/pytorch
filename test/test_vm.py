@@ -356,6 +356,37 @@ def floats_values_as_a_list(x, t):
     return y + 1, y.tolist(), y.numpy()[0].item()
 
 
+class FloatsScaled(float):
+    """A float whose product is its class's own."""
+
+    def __mul__(self, other):
+        return float(self) * other * 10.0
+
+
+def floats_of_a_subclass(x, t):
+    return floats_work(x, t * 0.25)
+
+
+def floats_beside_a_subclass(x, t, u):
+    return floats_work(x, t * 0.25) * u
+
+
+def floats_of_numpy(x, t):
+    return floats_work(x, float(t) * 2.0), type(t * 2.0).__name__
+
+
+def floats_sign(x, t):
+    return floats_work(x, 2.0) * float(t), str(t)
+
+
+def floats_sign_in_a_tuple(x, pair):
+    return floats_work(x, 2.0) * pair[0] * pair[1], str(pair[0])
+
+
+def floats_sign_of_a_key(x, table):
+    return floats_work(x, 2.0) * next(iter(table)), str(next(iter(table)))
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmFloatArguments(TestCase):
     """A float argument is an input of a region's graph while the function
@@ -506,6 +537,117 @@ class TestVmFloatArguments(TestCase):
     def test_values_of_a_tensor_as_a_list_and_as_an_array(self, device):
         # Each call hands back that call's values.
         self.assertEqual(self.rows(floats_values_as_a_list, device), [])
+
+    def subclass_calls(self, fn, device, make, extra=()):
+        # Twelve calls with three values in turn, each compared with eager's.
+        g = vm_early(fn)
+        x = torch.ones(3, device=device)
+        for call in range(12):
+            t = make(call, (0.5, 0.75, 1.0)[call % 3])
+            more = tuple(e + call for e in extra)
+            self.assertEqual(
+                g(x, t, *more),
+                fn(x, t, *more),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}, {t!r}",
+            )
+        return [
+            r
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["state"] == "region"
+        ]
+
+    @isolated
+    def test_float_of_a_subclass_is_found_by_the_object(self, device):
+        # Its arithmetic is its class's: no input of the graph, and a region
+        # per object.
+        kept = {v: FloatsScaled(v) for v in (0.5, 0.75, 1.0)}
+        (row,) = self.subclass_calls(
+            floats_of_a_subclass, device, lambda call, v: kept[v]
+        )
+        self.assertEqual(
+            (row["variants"], row["values"], row["runs"]), (3, [], 6), msg=str(row)
+        )
+
+    @isolated
+    def test_float_of_a_subclass_made_anew_on_every_call(self, device):
+        self.subclass_calls(
+            floats_of_a_subclass, device, lambda call, v: FloatsScaled(v)
+        )
+
+    @isolated
+    def test_float_beside_one_of_a_subclass(self, device):
+        # The plain float is the graph's input, with its own number.
+        kept = {v: FloatsScaled(v) for v in (0.5, 0.75, 1.0)}
+        (row,) = self.subclass_calls(
+            floats_beside_a_subclass, device, lambda call, v: kept[v], extra=(3.0,)
+        )
+        self.assertEqual(
+            (row["variants"], row["values"], row["runs"]), (3, [], 6), msg=str(row)
+        )
+
+    @isolated
+    def test_float_of_a_subclass_where_the_trace_had_a_float(self, device):
+        # And the other way round: neither is taken for the other.
+        for first in (float, FloatsScaled):
+            other = FloatsScaled if first is float else float
+            kept = {v: FloatsScaled(v) for v in (0.5, 0.75, 1.0)}
+            make = lambda call, v, first=first, other=other: (  # noqa: E731
+                kept[v] if (first if call < 6 else other) is FloatsScaled else v
+            )
+            self.subclass_calls(floats_of_a_subclass, device, make)
+
+    @isolated
+    def test_float_of_numpy(self, device):
+        try:
+            import numpy
+        except ImportError:
+            self.skipTest("needs numpy")
+        self.subclass_calls(floats_of_numpy, device, lambda call, v: numpy.float64(v))
+        self.subclass_calls(floats_of_numpy, device, lambda call, v: numpy.sqrt(v))
+
+    def zero_calls(self, fn, device, make):
+        # Six calls with 0.0, then six with -0.0: equal numbers whose
+        # products and texts differ.
+        g = vm_early(fn)
+        x = torch.ones(3, device=device)
+        for call in range(12):
+            arg = make(0.0 if call < 6 else -0.0)
+            (got, got_text), (want, want_text) = g(x, arg), fn(x, arg)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            self.assertEqual(
+                torch.signbit(got), torch.signbit(want), msg=f"call {call}"
+            )
+            self.assertEqual(got_text, want_text, msg=f"call {call}")
+        return [
+            r
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["state"] == "region"
+        ]
+
+    @isolated
+    def test_zero_and_negative_zero(self, device):
+        # A region per number, though the two are equal.
+        (row,) = self.zero_calls(floats_sign, device, lambda t: t)
+        values = ["arg 1 (float) == -0.0", "arg 1 (float) == 0.0"]
+        self.assertEqual(
+            (row["variants"], sorted(row["values"])), (2, values), msg=str(row)
+        )
+
+    @isolated
+    def test_zero_and_negative_zero_in_a_tuple_checked_by_value(self, device):
+        # Beside a float of a subclass the tuple's float is checked by value.
+        one = FloatsScaled(0.1)
+        (row,) = self.zero_calls(floats_sign_in_a_tuple, device, lambda t: (t, one))
+        self.assertEqual(row["variants"], 2, msg=str(row))
+
+    @isolated
+    def test_zero_and_negative_zero_as_the_key_of_a_dict(self, device):
+        # No region is checked on a key that equals another number's.
+        self.assertEqual(
+            self.zero_calls(floats_sign_of_a_key, device, lambda t: {t: 1}), []
+        )
 
 
 instantiate_device_type_tests(TestVmFloatArguments, globals())

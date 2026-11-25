@@ -142,6 +142,28 @@ def _plain(x):
     return float.__float__(x) if type(x) is _Scalar else x
 
 
+def _is_float(x) -> bool:
+    """Whether x can be a float input of a region: a float and nothing more
+    (or the stand-in an earlier trace left in a frame, which is one). A float
+    of a subclass (a ``numpy.float64``) is an object of its class: its
+    arithmetic is its class's, a stand-in would not be one of it, and the
+    region is found by which object it is, as for any other object."""
+    t = type(x)
+    return t is float or t is _Scalar
+
+
+def _same_value(x, kind: type, want) -> bool:
+    """Whether x is the value ``want`` of exactly the type ``kind``, as a
+    region's check asks: equal, and for a float the same number (0.0 and
+    -0.0 are equal and are two numbers: a product, a text and a division by
+    either differ)."""
+    return (
+        type(x) is kind
+        and x == want
+        and (kind is not float or x != 0.0 or math.copysign(1.0, x) == math.copysign(1.0, want))
+    )
+
+
 def _tracer() -> PythonKeyTracer:
     """The tracer of the make_fx trace running (the region's)."""
     mode = get_proxy_mode()
@@ -1018,6 +1040,18 @@ def _meta(t: torch.Tensor):
     return (type(t), t.dtype, t.device, t.shape, t.stride(), t.requires_grad)
 
 
+def _zero_key(shape) -> bool:
+    """Whether a dict of a container arg (or a pytree node's keys) has the
+    key 0.0 or -0.0: the two are equal as keys and are two numbers, so the
+    structure a region checks would take one for the other."""
+    return any(
+        type(k) is float and k == 0.0
+        for s in shape
+        if type(s) is tuple and len(s) == 2 and type(s[1]) in (tuple, list)
+        for k in s[1]
+    )
+
+
 # How func reads a leaf of a container arg: as a graph input (a tensor,
 # checked by metadata, or a float, checked by value once the trace
 # specialized on it), or checked by value or identity.
@@ -1025,7 +1059,7 @@ _TENSOR, _VALUE, _IS, _FLOAT = 0, 1, 2, 3
 
 
 def _leaf_check(leaf, where, scalars=False):
-    if scalars and isinstance(leaf, float):
+    if scalars and _is_float(leaf):
         return (_FLOAT, None)
     if isinstance(leaf, torch.Tensor):
         if type(leaf) not in _PLAIN:
@@ -1060,7 +1094,7 @@ def _plan(args, unused, span=False, scalars=False):
             checks.append(("tensor", i, a))
             checks.append(("requires_grad", i, a.requires_grad))
             plan.append(("tensor",))
-        elif scalars and isinstance(a, float):
+        elif scalars and _is_float(a):
             plan.append(("float", None))
         elif type(a) in _SCALARS:
             checks.append(("value", i, a))
@@ -1075,6 +1109,8 @@ def _plan(args, unused, span=False, scalars=False):
         elif _is_tree(a) or _made_of(a) is not None:
             leaves, shape = [], []
             _walk(a, leaves, shape)
+            if _zero_key(shape):
+                raise _Refused(f"arg {i} holds a dict with the key 0.0 or -0.0")
             plain = scalars and _plain_tree(a)
             leaf_checks = [_leaf_check(x, f"arg {i}", plain) for x in leaves]
             fast = None
@@ -1111,8 +1147,8 @@ def _inputs(args, plan, why=None):
             inputs.append(a)
             continue
         if p[0] == "float":
-            if not isinstance(a, float) or (
-                p[1] is not None and float.__float__(a) != p[1]
+            if not _is_float(a) or (
+                p[1] is not None and not _same_value(float.__float__(a), float, p[1])
             ):
                 if why is not None:
                     why.append(f"arg {i} (float)")
@@ -1142,10 +1178,10 @@ def _inputs(args, plan, why=None):
                 if ok:
                     inputs.append(leaf)
             elif kind == _VALUE:
-                ok = type(leaf) is want[0] and leaf == want[1]
+                ok = _same_value(leaf, *want)
             elif kind == _FLOAT:
-                ok = isinstance(leaf, float) and (
-                    want is None or float.__float__(leaf) == want
+                ok = _is_float(leaf) and (
+                    want is None or _same_value(float.__float__(leaf), float, want)
                 )
                 if ok:
                     floats.append(float.__float__(leaf))
@@ -2079,7 +2115,7 @@ def _span_holds(checks, args) -> bool:
         elif kind == "tensors":
             ok = want.leaves(tuple(args[j] for j in i)) is not None
         elif kind == "value":
-            ok = type(args[i]) is want[0] and args[i] == want[1]
+            ok = _same_value(args[i], *want)
         elif kind == "ints":
             ok = type(args[i]) is tuple and args[i] == want
         elif kind == "set":
