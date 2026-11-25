@@ -136,7 +136,6 @@ test_failures = {
     "test_index_propagation_abs_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_floordiv_dynamic_shapes": TestFailure(("mps",)),
     "test_index_propagation_remainder_dynamic_shapes": TestFailure(("mps",)),
-    "test_roll_dynamic_shapes": TestFailure(("mps",)),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(
         ("mps",), is_skip=True
     ),
@@ -450,6 +449,28 @@ def _record_launches():
 
     with unittest.mock.patch.object(CachingAutotuner, "run", recording_run):
         yield launched
+
+
+_INT32_TEST_LIMIT = 64 * 1024
+
+
+@contextlib.contextmanager
+def _lowered_int32_limit():
+    """Make dual_index_dtype_kernels dispatch on `size <= 64K` instead of
+    `size <= 2**31 - 1`, so that small test inputs reach both the int32 and the int64
+    kernel."""
+    from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+
+    int32_index_conditions = SIMDKernelFeatures.int32_index_conditions
+
+    def lowered(self):
+        conds = int32_index_conditions(self)
+        return conds and [sympy.Le(cond.lhs, _INT32_TEST_LIMIT) for cond in conds]
+
+    with unittest.mock.patch.object(
+        SIMDKernelFeatures, "int32_index_conditions", lowered
+    ):
+        yield
 
 
 class TestInductorDynamic(DynamicShapesTestCase):
@@ -1040,6 +1061,16 @@ class TestInductorDynamic(DynamicShapesTestCase):
         self.assertEqual("<= 2147483647" in guards, not avoid_guards)
         self.assertEqual("'xnumel': 'i64'" in code, avoid_guards)
 
+    def _assert_dual_launch(self, compiled, fn, args, max_numel):
+        """Run compiled(*args), check it matches fn(*args), and check that only the
+        expected kernels ran: the int32 ones if max_numel (the largest buffer size, in
+        elements) is at most _INT32_TEST_LIMIT, else the int64 ones."""
+        expected = fn(*args)
+        with _record_launches() as launched:
+            self.assertEqual(compiled(*args), expected)
+        side = "i32" if max_numel <= _INT32_TEST_LIMIT else "i64"
+        self.assertEqual({dtype for dtype, _ in launched}, {side})
+
     @onlyAccelerator
     @parametrize("cooperative", [False, True])
     def test_dual_index_dtype_reductions(self, device, cooperative):
@@ -1049,17 +1080,9 @@ class TestInductorDynamic(DynamicShapesTestCase):
         inputs, the int32 limit is lowered from 2**31 to 64K elements (the generated
         check becomes `size <= 65536`). cooperative=True repeats this with cooperative
         reductions, whose two kernels share one scratch workspace."""
-        from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 
         def fn(x):
             return x.sum(-1), x.argmax(-1), torch.softmax(x, -1)
-
-        # Lower the int32 bound so that inputs above 64K elements run the int64 kernel.
-        int32_index_conditions = SIMDKernelFeatures.int32_index_conditions
-
-        def lowered_bound(self):
-            conds = int32_index_conditions(self)
-            return conds and [sympy.Le(cond.lhs, 64 * 1024) for cond in conds]
 
         counter = CompileCounterWithBackend("inductor")
         compiled = torch.compile(fn, backend=counter, dynamic=True)
@@ -1070,22 +1093,15 @@ class TestInductorDynamic(DynamicShapesTestCase):
                     "triton.force_cooperative_reductions": cooperative,
                 }
             ),
-            unittest.mock.patch.object(
-                SIMDKernelFeatures, "int32_index_conditions", lowered_bound
-            ),
+            _lowered_int32_limit(),
         ):
             x = torch.randn(64, 512, device=device)
             actual, (code, *_) = run_and_get_code(compiled, x)
             self.assertEqual(actual, fn(x))
-            # Both sides of the bound, in either order, without recompiling; each
-            # input launches only the kernel of its side.
+            # Both sides of the limit, in either order, without recompiling.
             for shape in [(512, 512), (3, 7), (300, 1000), (64, 512)]:
                 y = torch.randn(shape, device=device)
-                expected = fn(y)
-                with _record_launches() as launched:
-                    self.assertEqual(compiled(y), expected)
-                side = "i32" if y.numel() <= 64 * 1024 else "i64"
-                self.assertEqual({dtype for dtype, _ in launched}, {side})
+                self._assert_dual_launch(compiled, fn, (y,), y.numel())
         self.assertEqual(counter.frame_count, 1)
 
         if cooperative:
@@ -1120,9 +1136,13 @@ class TestInductorDynamic(DynamicShapesTestCase):
             with _record_launches() as launched:
                 actual = compiled(big)
             if dual:
+                # Kernels past int32 launch their int64 variant, tuned for those
+                # sizes. Smaller kernels, like the second stage of a split reduction
+                # (which this sum is on GPUs below sm100), launch int32.
+                self.assertIn("i64", {dtype for dtype, _ in launched})
                 for dtype, size_hints in launched:
-                    self.assertEqual(dtype, "i64")
-                    self.assertGreaterEqual(math.prod(size_hints.values()), 2**31)
+                    big = math.prod(size_hints.values()) >= 2**31
+                    self.assertEqual(dtype, "i64" if big else "i32")
             self.assertEqual(actual, expected)
         # Without dual kernels, the int32 kernel's size guard fails and recompiles.
         self.assertEqual(counter.frame_count, 1 if dual else 2)
@@ -1131,26 +1151,14 @@ class TestInductorDynamic(DynamicShapesTestCase):
     def test_dual_index_dtype_int64_hints(self, device):
         """The int64 kernel is tuned for the sizes at which it runs: its size_hints come
         from the example's sizes scaled by the smallest power of two that exceeds the
-        int32 limit (lowered to 64K here), so 64x512 becomes 128x1024. The int32 kernel
-        keeps the example's hints."""
-        from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+        int32 limit (64K here, see _lowered_int32_limit), so 64x512 becomes 128x1024.
+        The int32 kernel keeps the example's hints."""
 
         def fn(x):
             return x.sum(-1)
 
-        int32_index_conditions = SIMDKernelFeatures.int32_index_conditions
-
-        def lowered_bound(self):
-            conds = int32_index_conditions(self)
-            return conds and [sympy.Le(cond.lhs, 64 * 1024) for cond in conds]
-
         compiled = torch.compile(fn, dynamic=True)
-        with (
-            config.patch(dual_index_dtype_kernels=True),
-            unittest.mock.patch.object(
-                SIMDKernelFeatures, "int32_index_conditions", lowered_bound
-            ),
-        ):
+        with config.patch(dual_index_dtype_kernels=True), _lowered_int32_limit():
             compiled(torch.randn(64, 512, device=device))
             with _record_launches() as launched:
                 compiled(torch.randn(32, 512, device=device))
@@ -1165,25 +1173,16 @@ class TestInductorDynamic(DynamicShapesTestCase):
         int32/int64 dispatch is itself a multi-kernel (persistent and looped variants),
         and each input launches only kernels of its side. Same lowered bound as
         test_dual_index_dtype_reductions."""
-        from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 
         def fn(x):
             return x.sum(-1), x.argmax(-1)
-
-        int32_index_conditions = SIMDKernelFeatures.int32_index_conditions
-
-        def lowered_bound(self):
-            conds = int32_index_conditions(self)
-            return conds and [sympy.Le(cond.lhs, 64 * 1024) for cond in conds]
 
         # A static reduction size keeps the reduction persistent, so multi_kernel
         # adds a looped variant on each side of the int32/int64 dispatch.
         compiled = torch.compile(fn)
         with (
             config.patch({"dual_index_dtype_kernels": True, "triton.multi_kernel": 1}),
-            unittest.mock.patch.object(
-                SIMDKernelFeatures, "int32_index_conditions", lowered_bound
-            ),
+            _lowered_int32_limit(),
         ):
             x = torch.randn(64, 512, device=device)
             torch._dynamo.mark_dynamic(x, 0)
@@ -1191,11 +1190,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
             self.assertEqual(actual, fn(x))
             for rows in [256, 3]:
                 y = torch.randn(rows, 512, device=device)
-                expected = fn(y)
-                with _record_launches() as launched:
-                    self.assertEqual(compiled(y), expected)
-                side = "i32" if y.numel() <= 64 * 1024 else "i64"
-                self.assertEqual({dtype for dtype, _ in launched}, {side})
+                self._assert_dual_launch(compiled, fn, (y,), y.numel())
 
         # Each side of the dispatch is a multi-kernel.
         self.assertIn("multi_kernel_0.run(", code)
@@ -1738,6 +1733,19 @@ class TestInductorDynamic(DynamicShapesTestCase):
         x = torch.empty_strided((1, 4), (5, 1), device=device)
         torch._dynamo.decorators.mark_unbacked(x, 0)
         f(x)
+
+    def test_adaptive_avg_pool2d_backward_dynamic_shapes(self, device):
+        def fn(grad_output, x):
+            return torch.ops.aten._adaptive_avg_pool2d_backward(grad_output, x)
+
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, fullgraph=True, dynamic=True)
+        grad_output = torch.randn(2, 3, 5, 4, device=device)
+        # Heights 7 and 8 share the overlap bound; height 3 needs another tap.
+        for height, expected_frames in ((7, 1), (8, 1), (3, 2)):
+            x = torch.randn(2, 3, height, 9, device=device)
+            self.assertEqual(compiled(grad_output, x), fn(grad_output, x))
+            self.assertEqual(counter.frame_count, expected_frames)
 
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
     def test_unspecialized_float_operations(self, device):
