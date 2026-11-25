@@ -2,6 +2,7 @@
 
 #include <ATen/BlasBackend.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/cuda/CublasGroupedScaleUtils.h>
 #include <optional>
 
 #if !defined(USE_ROCM)
@@ -11,6 +12,8 @@
 namespace at::native {
 
 #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
+constexpr int kMaxCublasGroupedBatchCount = 1024;
+
 struct cublasGroupedArgs {
   cublasGroupedArgs(
       const Tensor& mat1,
@@ -18,7 +21,11 @@ struct cublasGroupedArgs {
       const std::optional<Tensor>& offs,
       Tensor& c,
       int batchCount,
-      bool needs_int64);
+      bool needs_int64,
+      const std::optional<Tensor>& scale_a = std::nullopt,
+      const std::optional<Tensor>& scale_b = std::nullopt,
+      const std::optional<CublasGroupedScaleLayout>& scale_layout_a = std::nullopt,
+      const std::optional<CublasGroupedScaleLayout>& scale_layout_b = std::nullopt);
 
   // In grouped GEMM, m/n/k are the cuBLASLt heuristic averages. The actual
   // per-group dimensions live in mArray, nArray, and kArray.
@@ -47,6 +54,9 @@ struct cublasGroupedArgs {
   int64_t* betaPtrArray;
   float* alphaScalar;
   float* betaScalar;
+
+  void* scale_mata_ptr = nullptr;
+  void* scale_matb_ptr = nullptr;
 };
 #endif // !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 13030
 

@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: cpu inductor"]
+import re
 import sys
 import unittest
 from typing import NamedTuple
@@ -6,10 +7,13 @@ from typing import NamedTuple
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_cpp_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_MACOS,
     IS_WINDOWS,
     slowTest,
@@ -41,6 +45,8 @@ except unittest.SkipTest:
 
 
 _desired_test_bases = get_desired_device_type_test_bases()
+# Unlike inductor_utils.RUN_CPU, this ignores PYTORCH_TEST_INDUCTOR_RUN_CPU to
+# keep this suite's cost out of the nogpu_NO_AVX2 CI job.
 RUN_CPU = (
     HAS_CPU
     and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
@@ -54,10 +60,103 @@ class CppWrapperTemplate:
 
 
 class TestCppWrapper(InductorTestCase):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
+
+    def _check_freed_before_next_call(self, code, calls):
+        # calls: (a line of each call that names its unused outputs, those
+        # names), in code order. Each unused output must be reset before the
+        # next call, not at the end of the wrapper.
+        self.assertTrue(calls)
+        for i, (line, names) in enumerate(calls):
+            check = FileCheck().check(line)
+            for name in names:
+                check = check.check(f"{name}.reset();")
+            if i + 1 < len(calls):
+                check = check.check(calls[i + 1][0])
+            check.run(code)
+
+    @unittest.skipIf(not RUN_CPU, "requires the CPU cpp_wrapper backend")
+    @config.patch(cpp_wrapper=True)
+    def test_unused_fallback_outputs_freed(self):
+        # Each layer uses only the first output of two multi-output fallbacks:
+        # SDPA through the C shim and a custom op through the dispatcher.
+        n_layers = 3
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                for _ in range(n_layers):
+                    sdpa = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu
+                    x = x + sdpa(x, x, x)[0]
+                    x = torch.ops.cpp_wrapper_unused_outputs.two(x)[0]
+                return x
+
+        with torch.library._scoped_library(
+            "cpp_wrapper_unused_outputs", "FRAGMENT"
+        ) as lib:
+            lib.define("two(Tensor x) -> (Tensor, Tensor)")
+            lib.impl("two", lambda x: (x.sin(), x.cos()), "CompositeExplicitAutograd")
+            torch.library.register_fake(
+                "cpp_wrapper_unused_outputs::two",
+                lambda x: (torch.empty_like(x), torch.empty_like(x)),
+                lib=lib,
+            )
+
+            x = torch.randn(2, 4, 64, 16)
+            with torch.no_grad():
+                actual, code = run_and_get_cpp_code(torch.compile(Model()), x)
+                self.assertEqual(actual, Model()(x))
+
+        second_output = r"(\w+) = torch::stable::detail::to<AtenTensorHandle>\(dispatch_vars\[1\]\);"
+        calls = []
+        in_custom_op = False
+        for line in code.splitlines():
+            if "_scaled_dot_product_flash_attention_for_cpu(" in line:
+                # The unused logsumexp is the last output.
+                calls.append((line, re.findall(r"&(\w+)_handle", line)[-1:]))
+            elif 'aoti_torch_call_dispatcher("cpp_wrapper_unused_outputs::two"' in line:
+                in_custom_op = True
+            elif in_custom_op and (m := re.search(second_output, line)):
+                calls.append((line, [m.group(1)]))
+                in_custom_op = False
+        self.assertEqual(len(calls), 2 * n_layers)
+        self._check_freed_before_next_call(code, calls)
+
+    @unittest.skipIf(not RUN_CPU, "requires the CPU cpp_wrapper backend")
+    @unittest.skipIf(
+        not torch.backends.mkldnn.is_available() or IS_WINDOWS,
+        "requires mkldnn, not on Windows",
+    )
+    @torch._dynamo.config.patch(allow_rnn=True)
+    @config.patch(cpp_wrapper=True, freezing=True)
+    def test_unused_mkldnn_rnn_outputs_freed(self):
+        # Each mkldnn_rnn_layer call also returns hy, cy and a dummy workspace,
+        # which are unused when only the LSTM output is returned.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(16, 32, num_layers=2)
+
+            def forward(self, x):
+                return self.lstm(x)[0]
+
+        model = Model().eval()
+        x = torch.randn(5, 3, 16)
+        with torch.no_grad():
+            actual, code = run_and_get_cpp_code(torch.compile(model), x)
+            self.assertEqual(actual, model(x))
+
+        calls = [
+            (line, re.findall(r"&(\w+)_handle", line)[1:])
+            for line in code.splitlines()
+            if "mkldnn_rnn_layer(" in line
+        ]
+        self.assertEqual([len(names) for _, names in calls], [3, 3])
+        self._check_freed_before_next_call(code, calls)
 
 
 class DynamicShapesCppWrapperCpuTests(InductorTestCase):
+    hw_classification = HardwareClassification.CPU
     device = "cpu"
 
 

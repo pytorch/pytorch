@@ -78,7 +78,11 @@ from .sets import DictKeySetVariable, FrozensetVariable, OrderedSetVariable, Set
 if TYPE_CHECKING:
     from torch._dynamo.output_graph import SubgraphTracer
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+    from torch._subclasses.fake_tensor import (
+        CppFakeTensorMode,
+        FakeTensor,
+        FakeTensorMode,
+    )
     from . import AutogradFunctionContextVariable
 
 from collections.abc import Generator, Iterable
@@ -1030,7 +1034,10 @@ def _call_while_loop(
 
 
 def are_same_graph_modules(
-    fn_name: str, a_mod: GraphModule, b_mod: GraphModule, fake_mode: "FakeTensorMode"
+    fn_name: str,
+    a_mod: GraphModule,
+    b_mod: GraphModule,
+    fake_mode: "FakeTensorMode | CppFakeTensorMode",
 ) -> bool:
     from torch._subclasses._fake_tensor_utils import _CacheKeyState
     from torch._subclasses.fake_tensor import extract_tensor_metadata
@@ -2355,7 +2362,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         from torch._higher_order_ops import BaseHOP
 
         if isinstance(value, BaseHOP):
-            return BaseHOPVariable(value, source, **kwargs)
+            from .builder import VariableBuilder
+
+            return VariableBuilder.create_internal_base_hop(value, source, **kwargs)
         unimplemented(
             gb_type="unsupported HigherOrderOperator",
             context=str(value),
@@ -2427,15 +2436,17 @@ class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .builder import VariableBuilder
+
         if self.source is None:
             raise AssertionError("source must not be None")
         call_source = AttrSource(self.source, "__call__")
         return torch._dynamo.variables.UserMethodVariable(
-            torch._dynamo.variables.UserFunctionVariable(
+            VariableBuilder.create_internal_user_function(
                 self.value.__call__.__func__,
                 source=AttrSource(call_source, "__func__"),
             ),
-            torch._dynamo.variables.UserDefinedObjectVariable(
+            VariableBuilder.create_internal_user_defined_object(
                 self.value, source=self.source
             ),
             source=call_source,
@@ -2485,7 +2496,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Specialize into one of the branches since pred is constant
         pred, true_fn, false_fn, operands = args
-        if type(args[0]) is ConstantVariable:
+        if ConstantVariable.is_constant_vt(args[0]):
             warnings.warn(
                 "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
                 " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
@@ -2497,8 +2508,8 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return false_fn.call_function(tx, unpack_iterable(tx, operands), {})
 
         # predicate
-        if type(pred.realize()) not in (
-            ConstantVariable,
+        pred = pred.realize()
+        if not ConstantVariable.is_constant_vt(pred) and type(pred) not in (
             TensorVariable,
             SymNodeVariable,
         ):
@@ -2710,7 +2721,7 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         index, branches, operands = args
-        if type(index) is ConstantVariable:
+        if ConstantVariable.is_constant_vt(index):
             # Specialize into one of the branches since index is constant.
             warnings.warn(
                 "Index is a Python constant. When used with torch.switch, it specializes on one of the branches."
@@ -2724,8 +2735,8 @@ class SwitchHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # index
-        if type(index.realize()) not in (
-            ConstantVariable,
+        index = index.realize()
+        if not ConstantVariable.is_constant_vt(index) and type(index) not in (
             TensorVariable,
             SymNodeVariable,
         ):
@@ -3725,6 +3736,47 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
     _HOP_NAME = "torch.ops.higher_order.print"
 
+    @staticmethod
+    def _lazy_str_proxy(
+        tx: "InstructionTranslatorBase", vt: VariableTracker
+    ) -> torch.fx.Proxy | None:
+        """
+        Strings that print only passes through don't need to be specialized on.
+        If vt is an unrealized lazy str constant (or a str computed from them),
+        return an OpaqueStr graph input built from it before the graph runs,
+        guarded only on the type of the underlying strings.
+        """
+        from torch._library.opaque_object import OpaqueStr
+
+        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+        # Subgraph HOPs (cond, invoke_subgraph, ...) specialize on the strings
+        # they capture, and Inductor can't lower opaque print args inside them.
+        if tx.output.export or tx.output.current_tracer.parent is not None:
+            return None
+        if (
+            not isinstance(vt, (LazyConstantVariable, ComputedLazyConstantVariable))
+            or vt.is_realized()
+            or type(vt.peek_value()) is not str
+        ):
+            return None
+        value = vt.peek_value()
+        is_lazy = isinstance(vt, LazyConstantVariable)
+        if is_lazy:
+            ctor_info = (OpaqueStr, (value,), (vt.source,))
+            for proxy in tx.output.root_tracer.input_name_to_proxy.values():
+                grapharg = proxy.node.meta.get("grapharg")
+                if grapharg is not None and (
+                    tx.output.synthetic_source_ctor_info.get(grapharg.source)
+                    == ctor_info
+                ):
+                    return proxy
+        # Ensure type guards are installed
+        vt.python_type()
+        return tx.output.synthetic_graph_input(
+            OpaqueStr, (value,), ctor_arg_sources=(vt.source if is_lazy else vt,)
+        ).as_proxy()
+
     def _call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -3733,10 +3785,12 @@ class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        def as_proxy(vt: VariableTracker) -> Any:
+            proxy = self._lazy_str_proxy(tx, vt)
+            return vt.realize().as_proxy() if proxy is None else proxy
 
-        args_proxy = [arg.as_proxy() for arg in args]
-        kwargs_proxy = {k: v.as_proxy() for k, v in kwargs.items()}
+        args_proxy = [as_proxy(arg) for arg in args]
+        kwargs_proxy = {k: as_proxy(v) for k, v in kwargs.items()}
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
@@ -3854,6 +3908,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         ctx_manager_vt = super().call_function(tx, args, kwargs)
+        # noqa: RVT001
         return RepararametrizeModuleContextVariable(ctx_manager_vt, args[0])  # type: ignore[arg-type]
 
 
@@ -5262,13 +5317,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
-    def tp_richcompare_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
-    ) -> VariableTracker:
-        from .object_protocol import object_richcompare
-
-        return object_richcompare(self, tx, other, op)
-
     def python_type(self) -> type:
         return types.BuiltinMethodType
 
@@ -5742,10 +5790,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         tx, autograd_function_backward_rewritten(self.bwd_fn)
                     )
                 elif isinstance(self.bwd_fn, types.MethodType):
+                    rewritten = autograd_function_backward_rewritten(
+                        self.bwd_fn.__func__
+                    )
+                    fn_vt = SourcelessBuilder.create_internal_user_function(rewritten)
                     bwd_fn = UserMethodVariable(
-                        torch._dynamo.variables.UserFunctionVariable(
-                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                        ),
+                        fn_vt,
                         VariableTracker.build(tx, self.bwd_fn.__class__),
                     )
                 else:
@@ -6161,6 +6211,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         args: list[VariableTracker],
     ) -> tuple[VariableTracker, list[VariableTracker]]:
         from . import UserMethodVariable
+        from .builder import VariableBuilder
 
         source = None
         if self.parent_source:
@@ -6178,7 +6229,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         elif isinstance(fn, types.MethodType):
             cls_vt = VariableTracker.build(tx, fn.__class__)
             fn_vt = UserMethodVariable(
-                torch._dynamo.variables.UserFunctionVariable(
+                VariableBuilder.create_internal_user_function(
                     fn.__func__,
                     source=source and AttrSource(source, "__func__"),
                 ),
