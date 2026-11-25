@@ -3328,7 +3328,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     gemm_size = V.graph.sizevars.optimization_hint(m * n * k, fallback=-1)
     if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
         return False
-    from .codegen.cutlass.utils import try_import_cutlass
+    from .codegen.cutlass.utils import is_cutlass_arch_supported, try_import_cutlass
 
     # Do not use cutlass template on ROCm
     if torch.version.hip:
@@ -3342,6 +3342,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     res = (
         (config.max_autotune or config.max_autotune_gemm)
         and _use_autotune_backend("CUTLASS")
+        and is_cutlass_arch_supported(layout.device.type)
         and _use_template_for_gpu(layout, layout_dtypes)
     )
 
@@ -4665,6 +4666,22 @@ def get_cloned_parameter_buffer_name(name: str) -> str:
 
 def is_gpu(device: str | None) -> bool:
     return device in GPU_TYPES
+
+
+def triton_fp_fusion_enabled() -> bool:
+    """Whether Triton may contract multiply-adds in Inductor's kernels into FMAs.
+
+    Which multiply-adds Triton contracts can depend on the block size and
+    num_warps, so deterministic mode turns it off: otherwise the result depends
+    on the config autotuning picks.
+    """
+    from torch._inductor import config
+
+    return (
+        config.triton.enable_fp_fusion
+        and not config.emulate_precision_casts
+        and not (config.deterministic or config.batch_invariant)
+    )
 
 
 def is_rocm() -> bool:
