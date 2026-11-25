@@ -1039,9 +1039,46 @@ def _put_back(backups: dict[int, tuple[Any, torch.Tensor]]) -> None:
                 x.copy_(saved)
 
 
+# Operators whose result's size depends on the data and whose schema does
+# not say so (no ``dynamic_output_shape`` tag), by name.
+_DATA_SIZED = frozenset({"torchvision::nms"})
+
+
+def _data_sized(func, args, kwargs) -> str | None:
+    """Why the size of what ``func`` makes of these arguments is not a
+    function of the sizes it is given, or None. A region checks the sizes of its inputs
+    and takes every size inside for what its trace saw: right for an
+    operator whose result's size follows from its arguments' sizes, and for
+    no other. Those are the operators tagged ``dynamic_output_shape``
+    (``nonzero``, ``masked_select``, the ``unique`` family, ``bincount``,
+    ``repeat_interleave`` with a tensor of repeats, ``one_hot``, and
+    ``index`` where an index is a mask: with integer indices its result has
+    the indices' size), those of ``_DATA_SIZED``, and every operator on a
+    tensor that is not strided (a sparse tensor stores as many elements as
+    its data has nonzeros)."""
+    tensors = [
+        x
+        for a in (*args, *kwargs.values())
+        for x in (a if isinstance(a, (list, tuple)) else (a,))
+        if isinstance(x, torch.Tensor)
+    ]
+    if any(t.layout is not torch.strided for t in tensors):
+        return "takes a tensor that is not strided"
+    if func._schema.name in _DATA_SIZED:
+        return "makes a tensor whose size depends on the data"
+    if torch.Tag.dynamic_output_shape not in func.tags:
+        return None
+    masks = (torch.bool, torch.uint8)
+    if func is torch.ops.aten.index.Tensor and all(t.dtype not in masks for t in tensors[1:]):
+        return None
+    return "makes a tensor whose size depends on the data"
+
+
 class _RefuseImpure(TorchDispatchMode):
-    """Raises before an op a region can't hold runs: a collective, or one
-    reading a tensor's value. The executor then runs the block as usual,
+    """Raises before an op a region can't hold runs: a collective, one
+    reading a tensor's value, or one whose result's size depends on the data
+    (see _data_sized; and after one that made a tensor that is not strided).
+    The executor then runs the block as usual,
     which is only sound if nothing it did under tracing had an effect: so
     each tensor an op writes in place is copied into `backups` first, and
     the state of each generator a random op may draw from, for the caller to
@@ -1056,10 +1093,13 @@ class _RefuseImpure(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if self.refuse and (
-            func.namespace in ("c10d", "_c10d_functional") or func in _SKIP_OPS
+            func.namespace in ("c10d", "_c10d_functional")
+            or torch.Tag.data_dependent_output in func.tags
         ):
             raise _refuse(f"it runs {func}")
         kwargs = kwargs or {}
+        if self.refuse and (why := _data_sized(func, args, kwargs)) is not None:
+            raise _refuse(f"it runs {func}, which {why}")
         if torch.Tag.nondeterministic_seeded in func.tags:
             for g in _generators(kwargs.get("generator")):
                 if id(g) not in self.backups:
@@ -1073,7 +1113,10 @@ class _RefuseImpure(TorchDispatchMode):
                     if isinstance(t, torch.Tensor) and id(t) not in self.backups:
                         with torch.utils._python_dispatch._disable_current_modes():
                             self.backups[id(t)] = (t, t.detach().clone())
-        return func(*args, **kwargs)
+        out = func(*args, **kwargs)
+        if self.refuse and isinstance(out, torch.Tensor) and out.layout is not torch.strided:
+            raise _refuse(f"it runs {func}, which makes a tensor that is not strided")
+        return out
 
 
 def _meta(t: torch.Tensor):

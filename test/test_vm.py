@@ -774,6 +774,189 @@ class TestVmGivenUpTraces(TestCase):
 instantiate_device_type_tests(TestVmGivenUpTraces, globals())
 
 
+def sized_tail(y, n):
+    return (y * 2 + 1).cos().tanh().exp().sum() * n
+
+
+def sized_mask(x):
+    y = x.sin() * 2
+    z = y[y > 0]
+    return (z * 2 + 1).cos().tanh().exp().sum(), z.shape[0], z.shape
+
+
+def sized_nonzero(x):
+    y = x.sin() * 2
+    return sized_tail(y, len(torch.nonzero(y > 0)))
+
+
+def sized_where(x):
+    y = x.sin() * 2
+    (index,) = torch.where(y.flatten() > 0)
+    return sized_tail(y, index.shape[0])
+
+
+def sized_masked_select(x):
+    y = x.sin() * 2
+    return sized_tail(y, torch.masked_select(y, y > 0).numel())
+
+
+def sized_unique(x):
+    y = x.sin() * 2
+    return sized_tail(y, torch.unique((y * 4).round()).shape[0])
+
+
+def sized_bincount(x):
+    y = x.sin() * 2
+    return sized_tail(y, torch.bincount((y.flatten().abs() * 20).long()).shape[0])
+
+
+def sized_repeat_interleave(x):
+    y = x.sin() * 2
+    row = y.flatten()[:4]
+    return sized_tail(y, torch.repeat_interleave(row, (row.abs() * 2).long()).shape[0])
+
+
+def sized_one_hot(x):
+    y = x.sin() * 2
+    hot = torch.nn.functional.one_hot((y.flatten().abs() * 20).long())
+    return sized_tail(y, hot.shape[1])
+
+
+def sized_expand(x):
+    y = x.sin() * 2
+    z = y[y > 0]
+    return ((z * 2 + 1).cos().tanh().exp() + torch.zeros_like(z[:1]).expand_as(z)).sum()
+
+
+def sized_sparse(x):
+    y = x.sin() * 2
+    return sized_tail(y, y.relu().to_sparse()._nnz())
+
+
+def sized_nms(x):
+    import torchvision
+
+    y = x.sin() * 2
+    corner = y[:, :2].abs()
+    boxes = torch.cat([corner, corner + y[:, 2:4].abs() + 0.1], 1)
+    return sized_tail(y, torchvision.ops.nms(boxes, y[:, 4], 0.1).shape[0])
+
+
+def sized_integer_index(x):
+    y = x.sin() * 2
+    z = y[torch.tensor([0, 2, 3], device=x.device)]
+    return (z * 2 + 1).cos().tanh().exp().sum(), z.shape[0]
+
+
+def sized_mask_fill(x):
+    y = x.sin() * 2
+    z = y.masked_fill(y > 0, 0.5)
+    return (z * 2 + 1).cos().tanh().exp().sum(), z.shape[0]
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmDataSizes(TestCase):
+    """A region takes every size inside it for what its trace saw, which is
+    right while each follows from the sizes of its inputs. Behind an
+    operator whose result's size depends on the data it is not: such a block
+    is no region, and every call computes with its own sizes."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def rows(self, fn, device):
+        g = vm_early(fn)
+        for call in range(10):
+            x = torch.randn(8, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        return [
+            r
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["kind"] == "block"
+        ]
+
+    def no_region(
+        self, fn, device, why="which makes a tensor whose size depends on the data"
+    ):
+        rows = self.rows(fn, device)
+        self.assertEqual([r["state"] for r in rows[:1]], ["refused"], msg=str(rows))
+        self.assertIn(why, rows[0]["why"])
+
+    @isolated
+    def test_index_with_a_mask(self, device):
+        self.no_region(sized_mask, device)
+
+    @isolated
+    def test_nonzero(self, device):
+        self.no_region(sized_nonzero, device)
+
+    @isolated
+    def test_where_of_a_condition_alone(self, device):
+        self.no_region(sized_where, device)
+
+    @isolated
+    def test_masked_select(self, device):
+        self.no_region(sized_masked_select, device)
+
+    @isolated
+    def test_unique(self, device):
+        self.no_region(sized_unique, device)
+
+    @isolated
+    def test_bincount(self, device):
+        self.no_region(sized_bincount, device)
+
+    @isolated
+    def test_repeat_interleave_with_a_tensor_of_repeats(self, device):
+        self.no_region(sized_repeat_interleave, device)
+
+    @isolated
+    def test_one_hot(self, device):
+        # It reads the largest class from the tensor before anything else.
+        self.no_region(
+            sized_one_hot, device, why="it runs aten._local_scalar_dense.default"
+        )
+
+    @isolated
+    def test_size_computed_by_an_operator_behind_a_mask(self, device):
+        # expand_as takes the size of the masked tensor without Python
+        # seeing it.
+        self.no_region(sized_expand, device)
+
+    @isolated
+    def test_sparse_tensor(self, device):
+        self.no_region(sized_sparse, device, why="a tensor that is not strided")
+
+    @isolated
+    def test_nms_of_torchvision(self, device):
+        try:
+            import torchvision
+        except ImportError:
+            self.skipTest("needs torchvision")
+        # The first call of the operator in a process registers it, which
+        # a region does not hold either: a program has made it by now.
+        torchvision.ops.nms(
+            torch.ones(1, 4, device=device), torch.ones(1, device=device), 0.5
+        )
+        self.no_region(sized_nms, device)
+
+    @isolated
+    def test_index_with_integers_is_a_region(self, device):
+        # The result has the size of the index.
+        (row,) = self.rows(sized_integer_index, device)
+        self.assertEqual((row["state"], row["runs"]), ("region", 6), msg=str(row))
+
+    @isolated
+    def test_fill_through_a_mask_is_a_region(self, device):
+        # The result has the size of the tensor that is filled.
+        (row,) = self.rows(sized_mask_fill, device)
+        self.assertEqual((row["state"], row["runs"]), ("region", 6), msg=str(row))
+
+
+instantiate_device_type_tests(TestVmDataSizes, globals())
+
+
 class WritesBox:
     pass
 
