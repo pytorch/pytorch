@@ -1460,6 +1460,11 @@ class TestBlackwellTMALoadFusion(TestCase):
         "var_mean": lambda a, b: torch.var_mean((a @ b).float(), -1),
         "sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(-1)),
         "extra_input": lambda a, b: ((a @ b).float() * b[0].float()).sum(-1),
+        # A row-only output that may be ordered before the reduction.
+        "row_output_first": lambda a, b: (
+            (v := a[:, 0].float()) * 2 + 1,
+            ((a @ b).float() * v[:, None]).sum(-1),
+        ),
     }
 
     @unittest.skipIf(
@@ -1475,7 +1480,7 @@ class TestBlackwellTMALoadFusion(TestCase):
     ):
         if variant == "ws_flatten" and meta_ws_enabled():
             self.skipTest("meta WS doesn't support FLATTEN")
-        if op == "var_mean" and epilogue_subtile > 1:
+        if op in ("var_mean", "row_output_first") and epilogue_subtile > 1:
             self.skipTest(
                 "covered by test_blackwell_mm_row_reduction_epilogue_not_fused"
             )
@@ -1595,6 +1600,7 @@ class TestBlackwellTMALoadFusion(TestCase):
             "argmax",
             "center_subtiled",
             "var_mean_subtiled",
+            "row_output_first_subtiled",
             "data_partition",
             "two_ctas",
             "dynamic",
@@ -1606,10 +1612,11 @@ class TestBlackwellTMALoadFusion(TestCase):
     def test_blackwell_mm_row_reduction_epilogue_not_fused(self, case: str):
         """The reduction stays unfused when the flag is off, when the fused
         kernel benchmarks slower or isn't benchmarked, for arg reductions,
-        subtiled outputs that read their reduction back or need a multi-output
-        reduction, configs that can't host it (data partitioning, 2CTA),
-        dynamic shapes, cpp_wrapper, fp32 outputs, and welford reductions of
-        tiles narrower than N, which can't finish from partials."""
+        subtiled outputs that read their reduction back, need a multi-output
+        reduction or have a row-only node before it, configs that can't host
+        it (data partitioning, 2CTA), dynamic shapes, cpp_wrapper, fp32
+        outputs, and welford reductions of tiles narrower than N, which can't
+        finish from partials."""
         fn = {
             "max_values": lambda a, b: (a @ b).float().max(-1).values,
             "argmax": lambda a, b: (a @ b).argmax(-1),
@@ -1617,6 +1624,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                 (c := (a @ b).float()) - c.mean(-1, keepdim=True)
             ),
             "var_mean_subtiled": self.ROW_OPS["var_mean"],
+            "row_output_first_subtiled": self.ROW_OPS["row_output_first"],
             "var_mean_wide": lambda a, b: torch.var_mean((a @ b).float(), -1),
         }.get(case, self.ROW_OPS["sum"])
         M, K, N = 1024, 512, {"var_mean_wide": 256}.get(case, 128)
