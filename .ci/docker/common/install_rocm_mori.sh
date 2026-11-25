@@ -26,7 +26,7 @@ as_jenkins git submodule update --init --recursive 3rdparty/spdlog 3rdparty/msgp
 # Build requirements missing from requirements-ci.txt, pinned so they keep the
 # image's packaging pin. Without Cython the build only warns and drops
 # mori.cco.cco, which carries the flydsl EP backend.
-pip_install "Cython==3.1.6" "setuptools-scm==8.3.1" "pybind11==2.13.6" "wheel==0.45.1"
+pip_install "Cython==3.1.6" "setuptools-scm==8.3.1" "pybind11==3.0.1" "wheel==0.48.0"
 # Kernels are JIT-compiled on first use, so the build needs no GPU or arch list.
 MORI_SKIP_PRECOMPILE=1 BUILD_TORCH_SYMM=OFF pip_install --no-build-isolation .
 popd
