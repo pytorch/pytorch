@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
     from torch._inductor.codegen.wrapper import EnterCudaStreamContextLine
 
-    from .codegen.multi_kernel import MultiKernel
+    from .codegen.multi_kernel import MultiKernelBase
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
     from .memory import FreeableInputBuffer
@@ -2807,7 +2807,8 @@ class SchedulerBuffer:
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
-        # hacky check for if V.kernel is a real kernel or NullHandler
+        # hacky check for if V.kernel is a real kernel or NullHandler (multi-kernels
+        # set a placeholder args for this, see MultiKernelBase.args)
         if (
             hasattr(V.kernel, "args")
             and self.get_name() in V.kernel.inplace_update_buffers
@@ -3235,7 +3236,8 @@ class BaseSchedulerNode:
                 not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
             )
-            # hacky check for if V.kernel is a real kernel or NullHandler
+            # hacky check for if V.kernel is a real kernel or NullHandler (multi-kernels
+            # set a placeholder args for this, see MultiKernelBase.args)
             and hasattr(V.kernel, "args")
         ):
             return
@@ -13369,16 +13371,21 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                from .codegen.multi_kernel import MultiKernel
+                from .codegen.multi_kernel import leaf_kernels
                 from .codegen.triton import TritonKernel
 
+                # Track, per stream, the nodes launched since the last PDL wait, so
+                # the next kernel knows whose writes it may have to wait for. A
+                # kernel with workspaces doesn't use PDL, so the chain restarts
+                # after it; any leaf of a multi-kernel can be the one launched.
                 waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
                 if self.previous_nodes is None or waited:
                     previous_nodes_by_stream[stream_key] = []
                 previous_nodes_by_stream[stream_key].append(node)
-                if isinstance(kernel, MultiKernel):
-                    kernel = kernel.kernels[0]
-                if isinstance(kernel, TritonKernel) and kernel.args.workspace_args:
+                if any(
+                    isinstance(k, TritonKernel) and k.args.workspace_args
+                    for k in leaf_kernels(kernel)
+                ):
                     previous_nodes_by_stream.pop(stream_key, None)
             else:
                 previous_nodes_by_stream.pop(stream_key, None)
@@ -13739,7 +13746,7 @@ class BaseScheduling:  # noqa: docstring_linter
 
     def codegen_node(
         self, node: FusedSchedulerNode | SchedulerNode
-    ) -> Kernel[Any] | MultiKernel | None:
+    ) -> Kernel[Any] | MultiKernelBase | None:
         """
         Generate a kernel given a list of pre-fused nodes.
         """
