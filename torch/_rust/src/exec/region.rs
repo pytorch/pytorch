@@ -202,8 +202,10 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     if r.is_none() {
         return Ok(None);
     }
-    let (func, outputs, objects, checks, reads): (Bound<'_, PyAny>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyTuple>>, Option<Py<super::reads::Reads>>) =
+    #[allow(clippy::type_complexity)]
+    let (func, outputs, objects, checks, reads, quick): (Bound<'_, PyAny>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyAny>>, Vec<Bound<'_, PyTuple>>, Option<Py<super::reads::Reads>>, Vec<Bound<'_, PyTuple>>) =
         r.extract()?;
+    let quick = quick.iter().map(parse_quick).collect::<PyResult<Vec<_>>>()?;
     let outputs = outputs.iter().map(parse_out).collect::<PyResult<Vec<_>>>()?;
     Ok(Some(Traced {
         spec: RegionSpec {
@@ -212,9 +214,74 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
             objects: objects.into_iter().map(Bound::unbind).collect(),
             name: name.to_string(),
             reads,
+            quick,
         },
         checks: checks.into_iter().map(Bound::unbind).collect(),
     }))
+}
+
+// A check of a region's args that its func makes too, asked first (see
+// torch._rust_inductor._quick).
+pub enum Quick {
+    // Arg i is (or equals, with the same exact type) this.
+    Arg(u32, bool, Py<PyAny>),
+    // Arg i is an exact tuple or list whose item j is (or equals) this.
+    Item(u32, u32, bool, Py<PyAny>),
+    // These args, as a tuple, pass the TreeChecks.
+    Tensors(Vec<u32>, Py<super::TreeChecks>),
+}
+
+fn parse_quick(q: &Bound<'_, PyTuple>) -> PyResult<Quick> {
+    let kind: String = q.get_item(0)?.extract()?;
+    Ok(match kind.as_str() {
+        "arg" => Quick::Arg(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, q.get_item(3)?.unbind()),
+        "item" => Quick::Item(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?, q.get_item(3)?.extract()?, q.get_item(4)?.unbind()),
+        "tensors" => Quick::Tensors(q.get_item(1)?.extract()?, q.get_item(2)?.extract()?),
+        _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("bad quick check {q}"))),
+    })
+}
+
+impl Quick {
+    // No Python code runs: the values compared by == are exact ints, bools,
+    // strs or None.
+    unsafe fn holds(&self, py: Python<'_>, args: &[*mut PyObject]) -> bool {
+        let is = |x: *mut PyObject, same: bool, want: &Py<PyAny>| {
+            if same || x.is_null() {
+                return x == want.as_ptr();
+            }
+            let eq = ffi::Py_TYPE(x) == ffi::Py_TYPE(want.as_ptr()) && ffi::PyObject_RichCompareBool(x, want.as_ptr(), ffi::Py_EQ) == 1;
+            if !ffi::PyErr_Occurred().is_null() {
+                ffi::PyErr_Clear();
+            }
+            eq
+        };
+        let arg = |i: u32| args.get(i as usize).copied().unwrap_or(std::ptr::null_mut());
+        match self {
+            Quick::Arg(i, same, want) => is(arg(*i), *same, want),
+            Quick::Item(i, j, same, want) => {
+                let (a, j) = (arg(*i), *j as ffi::Py_ssize_t);
+                if a.is_null() {
+                    false
+                } else if ffi::PyTuple_CheckExact(a) != 0 && j < ffi::PyTuple_GET_SIZE(a) {
+                    is(ffi::PyTuple_GET_ITEM(a, j), *same, want)
+                } else if ffi::PyList_CheckExact(a) != 0 && j < ffi::PyList_GET_SIZE(a) {
+                    is(ffi::PyList_GET_ITEM(a, j), *same, want)
+                } else {
+                    false
+                }
+            }
+            Quick::Tensors(idx, checks) => {
+                if idx.iter().any(|i| arg(*i).is_null()) {
+                    return false;
+                }
+                let Ok(t) = PyTuple::new(py, idx.iter().map(|i| Bound::from_borrowed_ptr(py, arg(*i)))) else {
+                    ffi::PyErr_Clear();
+                    return false;
+                };
+                checks.get().passes(t.as_any())
+            }
+        }
+    }
 }
 
 fn parse_out(o: &Bound<'_, PyAny>) -> PyResult<RegionOut> {
@@ -249,6 +316,11 @@ fn parse_out(o: &Bound<'_, PyAny>) -> PyResult<RegionOut> {
 // exception set.
 pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
     let py = Python::assume_attached();
+    // The region of another state of its place (another layer of a loop,
+    // another input size) is passed over here, for next to nothing.
+    if !spec.quick.iter().all(|q| q.holds(py, args)) {
+        return Ok(None);
+    }
     // Before anything of the region runs.
     if let Some(reads) = &spec.reads
         && CHECK_READS.load(Ordering::Relaxed)

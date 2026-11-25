@@ -1965,7 +1965,9 @@ int tr_generic(_PyInterpreterFrame* f, int opcode, int oparg, PyObject* const* i
 // runs Python code.
 
 // How a load of `name` from obj is guarded:
-//   -1 it can't be: obj's class resolves attributes its own way
+//   -1 it can't be: obj's class resolves attributes its own way (unless
+//      `direct`: the load is object.__getattribute__'s own, whatever the
+//      class does with other loads)
 //    0 nothing to guard: obj's type can't change and obj has no __dict__
 //    1 by obj's class alone (a method, a class attribute, the __getattr__ it
 //      falls back to), and by `name` not being in *dict (if obj has one)
@@ -1974,7 +1976,7 @@ int tr_generic(_PyInterpreterFrame* f, int opcode, int oparg, PyObject* const* i
 //    4 by *dict, the module obj's namespace
 //    5 obj is a class: by that class
 // *dict is a new reference.
-int tr_attr_home(PyObject* obj, PyObject* name, PyObject** dict) {
+int tr_attr_home(PyObject* obj, PyObject* name, PyObject** dict, int direct) {
   static PyObject *getattribute_name, *generic;
   *dict = NULL;
   if (generic == NULL) {
@@ -1998,7 +2000,7 @@ int tr_attr_home(PyObject* obj, PyObject* name, PyObject** dict) {
     return 4;
   }
   PyTypeObject* tp = Py_TYPE(obj);
-  if (tp->tp_getattro != PyObject_GenericGetAttr) {
+  if (!direct && tp->tp_getattro != PyObject_GenericGetAttr) {
     // A class with a __getattr__ has a slot of its own that still starts
     // with the generic lookup unless __getattribute__ is overridden too.
     PyObject* g = _PyType_Lookup(tp, getattribute_name);

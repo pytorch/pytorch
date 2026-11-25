@@ -407,7 +407,9 @@ impl Read {
         match &self.name {
             None => same(PyCell_Get_borrowed(self.obj.as_ptr()), self.want, self.value.as_ref()),
             Some(name) => {
-                let now = ffi::PyObject_GetAttr(self.obj.as_ptr(), name.as_ptr());
+                // The data descriptor's own answer: no __getattribute__ of
+                // the class runs.
+                let now = ffi::PyObject_GenericGetAttr(self.obj.as_ptr(), name.as_ptr());
                 if now.is_null() {
                     ffi::PyErr_Clear();
                 }
@@ -569,7 +571,25 @@ impl Trace {
         self.special(obj, c"__getattr__");
     }
 
-    unsafe fn attr(&mut self, obj: *mut PyObject, name: *mut PyObject, value: *mut PyObject, ran: bool) {
+    // `generic`: the load was object.__getattribute__'s own (called on obj
+    // directly), so it is resolved as that does, whatever obj's class does
+    // with a load of its own.
+    unsafe fn attr(&mut self, obj: *mut PyObject, name: *mut PyObject, value: *mut PyObject, ran: bool, generic: bool) {
+        // A bound method is bound to the same function and object for as long
+        // as it lives; its other attributes are its function's.
+        if ffi::Py_TYPE(obj) == &raw mut super::ffi::PyMethod_Type {
+            let n = text(name);
+            if n != "__func__" && n != "__self__" {
+                let func = ffi::PyObject_GetAttrString(obj, c"__func__".as_ptr());
+                if func.is_null() {
+                    ffi::PyErr_Clear();
+                } else {
+                    self.attr(func, name, value, ran, false);
+                    ffi::Py_DECREF(func);
+                }
+            }
+            return;
+        }
         if tensor(obj) {
             // A tensor's dtype, device, sizes and requires_grad are the
             // guard's or the graph's. What autograd keeps on it is not.
@@ -580,7 +600,7 @@ impl Trace {
             return;
         }
         let mut dict = std::ptr::null_mut();
-        let home = tr_attr_home(obj, name, &mut dict);
+        let home = tr_attr_home(obj, name, &mut dict, generic as std::ffi::c_int);
         match home {
             0 => {}
             // A method, a class attribute, the class's __getattr__: the class,
@@ -601,7 +621,9 @@ impl Trace {
                 self.typed(obj, name);
                 self.resolves(obj);
                 let n = text(name);
-                if !ran && !value.is_null() && n != "__dict__" && n != "__class__" && self.seen.insert((obj as usize, name as usize)) {
+                // `__dict__` too: the items read from the dict it gave are
+                // obj's for as long as obj has that dict.
+                if !ran && !value.is_null() && n != "__class__" && self.seen.insert((obj as usize, name as usize)) {
                     self.count += 1;
                     self.entries.reads.push(Read { obj: own(obj), name: Some(own(name)), want: want_of(value), value: Some(own(value)), at: place() });
                 }
@@ -618,6 +640,9 @@ impl Trace {
                     self.typed(obj, name);
                     self.resolves(obj);
                 } else {
+                    // Whatever becomes of obj: a class that resolves loads
+                    // its own way in C may hand on what another object holds
+                    // (a weak proxy does), which no entry would cover.
                     self.refused = Some(format!("it reads .{} of a {}, which it cannot check", text(name), type_name(obj)));
                 }
             }
@@ -675,7 +700,7 @@ pub unsafe fn global(globals: *mut PyObject, builtins: *mut PyObject, name: *mut
 // The exception set, if any, is kept.
 pub unsafe fn attr(obj: *mut PyObject, name: *mut PyObject, value: *mut PyObject, ran: bool) {
     let raised = if value.is_null() { ffi::PyErr_GetRaisedException() } else { std::ptr::null_mut() };
-    with(|t| t.attr(obj, name, value, ran));
+    with(|t| t.attr(obj, name, value, ran, false));
     if !raised.is_null() {
         ffi::PyErr_SetRaisedException(raised);
     }
@@ -779,8 +804,16 @@ pub unsafe fn truth(obj: *mut PyObject) {
 
 // `callee` (a builtin: a C function, a method of a builtin type, a builtin
 // type) was called with these positional arguments (then keyword values)
-// and returned `result`.
+// and returned `result` (null: it raised; the exception set is kept).
 pub unsafe fn call(callee: *mut PyObject, args: &[*mut PyObject], result: *mut PyObject, ran: bool) {
+    let raised = if result.is_null() { ffi::PyErr_GetRaisedException() } else { std::ptr::null_mut() };
+    call_read(callee, args, result, ran);
+    if !raised.is_null() {
+        ffi::PyErr_SetRaisedException(raised);
+    }
+}
+
+unsafe fn call_read(callee: *mut PyObject, args: &[*mut PyObject], result: *mut PyObject, ran: bool) {
     let b = builtins();
     let f = tr_bound_function(callee) as usize;
     let me = tr_builtin_self(callee);
@@ -792,7 +825,7 @@ pub unsafe fn call(callee: *mut PyObject, args: &[*mut PyObject], result: *mut P
     let str_at = |k: usize| all.len() > k && ffi::Py_TYPE(all[k]) == &raw mut ffi::PyUnicode_Type;
     if (f == b.getattr || f == b.getattribute || f == b.hasattr) && str_at(1) {
         let value = if f == b.hasattr { std::ptr::null_mut() } else { result };
-        with(|t| t.attr(all[0], all[1], value, ran));
+        with(|t| t.attr(all[0], all[1], value, ran, f == b.getattribute));
     } else if (f == b.dict_get || f == b.dict_getitem || f == b.dict_contains) && all.len() >= 2 && ffi::PyDict_Check(all[0]) != 0 && key_ok(all[1]) {
         with(|t| t.dict_item(all[0], all[1], f == b.dict_contains));
     } else if f == b.len && all.len() == 1 {
@@ -819,12 +852,52 @@ pub struct Reads {
 
 unsafe impl Sync for Reads {}
 
+// Drops what was read from an object that nothing but these entries refers
+// to any more: an object the traced run made (or let go of), which no later
+// call can reach, so there is nothing to check. What was read from it was
+// its own (its __dict__, its slots: the entries here are of loads resolved
+// from the object itself or from its class, and the class's stay). An object
+// is such when every reference to it is one of the entries' own (as what was
+// read from, or as a value read). Repeated: an object dropped may have been
+// all that held another (an instance and its __dict__, a temporary and what
+// it was made of).
 unsafe fn sweep(e: &mut Entries) {
-    let alone = |o: &Py<PyAny>| ffi::Py_REFCNT(o.as_ptr()) == 1;
-    // An object first: its __dict__ is only its own once it is gone.
-    e.typed.retain(|t| !alone(&t.obj));
-    e.reads.retain(|r| !alone(&r.obj));
-    e.groups.retain(|g| !alone(&g.holder) && !g.empty());
+    for _ in 0..8 {
+        let mut mine: HashMap<usize, isize> = HashMap::new();
+        let mut hold = |o: &Py<PyAny>| *mine.entry(o.as_ptr() as usize).or_insert(0) += 1;
+        for t in &e.typed {
+            hold(&t.obj);
+            hold(&t.class);
+        }
+        for c in &e.classes {
+            hold(&c.class);
+            c.names.iter().for_each(|(n, had)| {
+                hold(n);
+                had.iter().for_each(&mut hold);
+            });
+        }
+        for r in &e.reads {
+            hold(&r.obj);
+            r.name.iter().for_each(&mut hold);
+            r.value.iter().for_each(&mut hold);
+        }
+        for g in &e.groups {
+            hold(&g.holder);
+            for i in &g.items {
+                hold(&i.key);
+                i.value.iter().for_each(&mut hold);
+            }
+            g.whole.iter().flat_map(|w| &w.items).for_each(&mut hold);
+        }
+        let gone = |o: &Py<PyAny>| ffi::Py_REFCNT(o.as_ptr()) == mine[&(o.as_ptr() as usize)];
+        let before = (e.typed.len(), e.reads.len(), e.groups.len());
+        e.typed.retain(|t| !gone(&t.obj));
+        e.reads.retain(|r| !gone(&r.obj));
+        e.groups.retain(|g| !gone(&g.holder) && !g.empty());
+        if before == (e.typed.len(), e.reads.len(), e.groups.len()) {
+            break;
+        }
+    }
 }
 
 impl Reads {
@@ -999,6 +1072,10 @@ pub fn _region_reads(py: Python<'_>) -> PyResult<(Option<Py<Reads>>, Option<Stri
                 *had = (!found.is_null()).then(|| own(found));
             }
         }
+        // The traced run's own temporaries first: what was read from them
+        // is no entry (so a getset that gives another object on every read
+        // of one of them is nothing to refuse).
+        sweep(&mut e);
         if let Some(r) = e.reads.iter().find(|r| r.name.is_some() && !r.holds()) {
             let name = r.name.as_ref().map_or("?".into(), |n| text(n.as_ptr()));
             return Ok((None, Some(format!("it reads .{name} of a {}, which is another object on every read{}", type_name(r.obj.as_ptr()), r.at))));
@@ -1015,7 +1092,6 @@ pub fn _region_reads(py: Python<'_>) -> PyResult<(Option<Py<Reads>>, Option<Stri
                 g.len = None;
             }
         }
-        sweep(&mut e);
         sweep(&mut e);
     }
     let reads = Reads { thread: t.thread, entries: GilCell::new(e), sweeps: Cell::new(2), misses: Cell::new(0), last: Cell::new(""), hot: Cell::new(0) };

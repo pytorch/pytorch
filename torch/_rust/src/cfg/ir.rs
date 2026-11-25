@@ -719,6 +719,10 @@ pub struct RegionSpec {
     // What the trace read from outside its args (see exec/reads.rs): checked
     // before `func` is called.
     pub reads: Option<pyo3::Py<crate::exec::reads::Reads>>,
+    // Checks of the args that `func` makes too, asked before the reads and
+    // before `func`: the regions of a place's other states are passed over
+    // by them (see exec/region.rs).
+    pub quick: Vec<crate::exec::region::Quick>,
 }
 
 impl std::fmt::Debug for RegionSpec {

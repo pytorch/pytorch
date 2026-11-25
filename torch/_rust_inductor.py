@@ -1715,6 +1715,41 @@ def _span_checks(checks):
     return out
 
 
+def _quick(args, plan, own_checks):
+    """What the checks of a region's args imply that the executor can ask
+    before anything else of the region runs (region::call), so that a place
+    with many regions (one per layer of a loop, one per input size) passes
+    over the others for nanoseconds each: ("arg", i, by identity, what) and
+    ("tensors", args, TreeChecks) from a span's own checks, and ("item", i,
+    j, by identity, what) for the items of an exact tuple or list arg that
+    are leaves checked by value or by identity. Each is one of the checks
+    func makes anyway, so a region passed over here is one func would turn
+    down."""
+    simple = (int, bool, str, type(None))
+    out: list[tuple[Any, ...]] = []
+    for kind, i, want in own_checks:
+        if kind == "is":
+            out.append(("arg", i, True, want))
+        elif kind == "value" and want[0] in simple:
+            out.append(("arg", i, False, want[1]))
+        elif kind == "tensors":
+            out.append(("tensors", list(i), want))
+    for i, (a, p) in enumerate(zip(args, plan)):
+        if p is None or p[0] != "tree" or type(a) not in (tuple, list):
+            continue
+        for j, x in enumerate(a):
+            if type(x) in simple:
+                out.append(("item", i, j, False, x))
+            elif (
+                type(x) not in (list, tuple, dict)
+                and _made_of(x) is None
+                and not _is_tree(x)
+                and _leaf_check(x, "")[0] is _IS
+            ):
+                out.append(("item", i, j, True, x))
+    return out
+
+
 def _span_holds(checks, args) -> bool:
     for kind, i, want in checks:
         if kind == "grad_enabled":
@@ -2017,4 +2052,5 @@ def trace_region(
         record.runs += 1
         return compiled(*inputs, *consts)
 
-    return func, result["outputs"], result["objects"], checks, reads
+    quick = _quick(args, plan, own_checks)
+    return func, result["outputs"], result["objects"], checks, reads, quick

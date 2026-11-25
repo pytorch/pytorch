@@ -1963,10 +1963,12 @@ impl Act<'_> {
                     check(super::outside_executor(|| self.opaque_call(args, *argc as c_int, kw)))?
                 } else if self.reading && reads::reads_args(callee) {
                     let before = reads::frames();
-                    let r = check(tr_call(args, *argc as c_int, kw))?;
+                    let r = tr_call(args, *argc as c_int, kw);
                     let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                    // A call that raised read what it was handed too (a
+                    // lookup that found nothing).
                     reads::call(callee, &all[if all[0].is_null() { 2 } else { 1 }..], r, reads::frames() != before);
-                    r
+                    check(r)?
                 } else {
                     if self.reading {
                         reads::called(callee);
@@ -2117,10 +2119,17 @@ impl Act<'_> {
                 };
                 let args = self.args(ins);
                 let before = if self.reading { reads::frames() } else { 0 };
-                status(tr_generic(self.f, *opcode as c_int, *arg as c_int, args, out.as_mut_ptr()))?;
+                let rc = tr_generic(self.f, *opcode as c_int, *arg as c_int, args, out.as_mut_ptr());
                 if self.reading {
+                    // An instruction that raised read its operands too (a
+                    // key that isn't there): the exception is kept.
+                    let raised = if rc != 0 { pyo3::ffi::PyErr_GetRaisedException() } else { std::ptr::null_mut() };
                     self.note_read(*opcode, *arg, ins, reads::frames() != before);
+                    if !raised.is_null() {
+                        pyo3::ffi::PyErr_SetRaisedException(raised);
+                    }
                 }
+                status(rc)?;
                 match n {
                     0 => return Ok(()),
                     1 => out[0],

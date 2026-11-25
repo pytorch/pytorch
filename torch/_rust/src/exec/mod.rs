@@ -2382,6 +2382,13 @@ impl TreeChecks {
     }
 }
 
+impl TreeChecks {
+    // Whether `x` matches (see leaves).
+    pub(crate) fn passes(&self, x: &Bound<'_, PyAny>) -> bool {
+        self.walk(&self.root, x, &mut Vec::with_capacity(self.specs.len()))
+    }
+}
+
 // Torch ops a pure callee mustn't run: they read a tensor's value into
 // Python (so the path taken may depend on it; with SCALAR_READS, only a
 // GPU tensor's, which also syncs), or are collectives. `args` as recorded:
