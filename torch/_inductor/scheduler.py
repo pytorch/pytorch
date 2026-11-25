@@ -13372,10 +13372,6 @@ class Scheduler:
                 from .codegen.multi_kernel import leaf_kernels
                 from .codegen.triton import TritonKernel
 
-                # Track, per stream, the nodes launched since the last PDL wait, so
-                # the next kernel knows whose writes it may have to wait for. A
-                # kernel with workspaces doesn't use PDL, so the chain restarts
-                # after it; any leaf of a multi-kernel can be the one launched.
                 waited = isinstance(kernel, TritonKernel) and kernel._pdl_has_wait
                 if self.previous_nodes is None or waited:
                     previous_nodes_by_stream[stream_key] = []
