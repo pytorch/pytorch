@@ -16485,8 +16485,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 )
                 return clone
 
-        # DeterministicGuard locks MIOpen's solver choice on gfx950. atol/rtol
-        # cover the fp16 hgemm noise floor on gfx90a. Derivation:
+        # The conv is an aten call on both sides. On ROCm, MIOpen times its
+        # solvers even in deterministic mode and may pick an fp16 Winograd
+        # solver whose error against an fp32 reference exceeds atol, so compare
+        # with an fp16 eager reference that runs the same MIOpen conv.
+        # DeterministicGuard keeps both runs off nondeterministic solvers.
+        # atol/rtol cover the fp16 hgemm noise floor against an fp32 reference:
         # https://github.com/pytorch/pytorch/issues/183581
         with DeterministicGuard(True, warn_only=True):
             self.common(
@@ -16495,6 +16499,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 check_lowp=not is_halide_backend(self.device),
                 atol=2e-3,
                 rtol=2e-3,
+                reference_in_float=not torch.version.hip,
             )
 
     def test_inplace_where_pointwise(self):

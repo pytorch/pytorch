@@ -73,7 +73,6 @@ from torch._C._dynamo.guards import (
     install_no_tensor_aliasing_guard,
     install_object_alias_pattern_guard,
     install_object_aliasing_guard,
-    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -125,7 +124,6 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
-    StorageOverlapPartition,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -1688,7 +1686,7 @@ class GuardBuilder(GuardBuilderBase):
         # Save the guard managers to avoid repeatedly traversing sources.
         self._cached_guard_managers: dict[str, GuardManager] = {}
         self._cached_duplicate_input_guards: set[tuple[str, str]] = set()
-        self._builtin_object_sources: set[Source] = set()
+        self._pinned_immutable_types: dict[Source, type] = {}
         self.object_aliasing_guard_codes: list[tuple[str, str]] = []
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
@@ -2815,13 +2813,11 @@ class GuardBuilder(GuardBuilderBase):
             return
         self._set_guard_export_info(guard, [code])
         source = guard.originating_source
-        if (
-            isinstance(source, TypeDictSource)
-            and source.base in self._builtin_object_sources
-            and key not in object.__dict__
-        ):
-            # A retained class guard already pins the immutable object dictionary.
-            return
+        if isinstance(source, TypeDictSource):
+            owner = self._pinned_immutable_types.get(source.base)
+            if owner is not None and key not in get_type_dict_no_user_code(owner):
+                # The retained class guard pins this immutable namespace after filtering.
+                return
         reason = (
             f"Dictionary {dict_ref} must not contain key {key!r}; Dynamo specialized "
             "the compiled code on this key being absent."
@@ -3530,8 +3526,10 @@ class GuardBuilder(GuardBuilderBase):
                 f"{guard.name} is not a class, but CLASS_MATCH is used"
             )
         self.id_match_unchecked(guard)
-        if val is object:
-            self._builtin_object_sources.add(guard.originating_source)
+        from .variables.object_protocol import type_is_immutable
+
+        if type_is_immutable(val):
+            self._pinned_immutable_types[guard.originating_source] = val
 
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
@@ -6827,23 +6825,6 @@ class CheckFunctionManager:
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
-                    [code_part],
-                    None,
-                )
-                add_code_part(code_part, None, True)
-            elif isinstance(guard, StorageOverlapPartition):
-                partition_guard_managers = [
-                    builder.get_guard_manager_from_source(s)
-                    for s in guard.input_sources
-                ]
-                code_part = (
-                    "___check_storage_overlap_partition("
-                    f"[{', '.join(source.name for source in guard.input_sources)}], "
-                    f"{guard.overlapping_indices})"
-                )
-                install_storage_overlap_partition_guard(
-                    partition_guard_managers,
-                    guard.overlapping_indices,
                     [code_part],
                     None,
                 )

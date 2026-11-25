@@ -3292,7 +3292,8 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"x": x, "left": [], "right": []}, True)
 
     @parametrize("keep_class", [False, True])
-    def test_pinned_object_skips_redundant_dict_lookup(self, keep_class):
+    @parametrize("base", [object, tuple])
+    def test_pinned_class_skips_redundant_dict_lookup(self, keep_class, base):
         def install(ctx):
             from torch._dynamo.guards import GuardBuilder, install_guard
             from torch._dynamo.source import TypeDictSource
@@ -3313,10 +3314,10 @@ class TestGuardSerialization(TestGuardSerializationBase):
         kinds = ["DICT_NOT_CONTAINS"]
         if keep_class:
             kinds.append("CLASS_MATCH")
-        managers = self._test_serialization(kinds, fn, x, object)
+        managers = self._test_serialization(kinds, fn, x, base)
         for manager in managers:
             self.assertEqual("DICT_CONTAINS:" in str(manager), not keep_class)
-        for cls, expected in ((object, True), (dict, not keep_class), (type, False)):
+        for cls, expected in ((base, True), (dict, not keep_class), (type, False)):
             self._test_check_fn(*managers, {"x": x, "cls": cls}, expected)
 
     @parametrize("reordered", [False, True])
