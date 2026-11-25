@@ -34,7 +34,6 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
-      check_experiments: amd-dpx
 
   build:
     name: torchtitan-x-pytorch-rocm-build
@@ -51,7 +50,7 @@ jobs:
       build-additional-packages: "torchao"
       test-matrix: |
         { include: [
-          { config: "torchtitan_features_integration", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.8" }
+          { config: "torchtitan_features_integration", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi350.8" }
         ]}
     secrets: inherit
 
