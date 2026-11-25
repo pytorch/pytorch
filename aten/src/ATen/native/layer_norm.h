@@ -150,4 +150,27 @@ using backward_fn = void (*)(
 DECLARE_DISPATCH(forward_fn, LayerNormKernel)
 DECLARE_DISPATCH(backward_fn, LayerNormBackwardKernel)
 
+// rstd holds one opmath_t value per row of X. gamma may be undefined.
+using rms_norm_fn = void (*)(
+    const Tensor& /* X */,
+    const Tensor& /* gamma */,
+    int64_t /* M */,
+    int64_t /* N */,
+    double /* eps */,
+    Tensor* /* Y */,
+    Tensor* /* rstd */);
+
+using rms_norm_backward_fn = void (*)(
+    const Tensor& /* dY */,
+    const Tensor& /* X */,
+    const Tensor& /* rstd */,
+    const Tensor& /* gamma */,
+    int64_t /* M */,
+    int64_t /* N */,
+    Tensor* /* dX */,
+    Tensor* /* dgamma */);
+
+DECLARE_DISPATCH(rms_norm_fn, RMSNormKernel)
+DECLARE_DISPATCH(rms_norm_backward_fn, RMSNormBackwardKernel)
+
 } // namespace at::native
