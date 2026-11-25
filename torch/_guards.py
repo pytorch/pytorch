@@ -15,7 +15,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, overload, Self, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -244,10 +244,20 @@ class SLoc:
             return f"({floc})"
 
 
-class ShapeGuard(NamedTuple):
+class _ShapeGuardFields(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
-    size_oblivious: bool
+
+
+class ShapeGuard(_ShapeGuardFields):
+    __slots__ = ()
+
+    # Pickles from older versions carry extra trailing fields (e.g. the removed
+    # size_oblivious); accept and drop them so saved ShapeEnvs still load.
+    def __new__(
+        cls, expr: sympy.logic.boolalg.Boolean, sloc: SLoc, *_legacy: object
+    ) -> Self:
+        return super().__new__(cls, expr, sloc)
 
 
 @dataclasses.dataclass(slots=True)
@@ -490,18 +500,6 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 class StorageOverlap(GuardEnvExpr):
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
-
-
-@dataclasses.dataclass(frozen=True)
-class StorageOverlapPartition(GuardEnvExpr):
-    input_sources: list[Source]
-    overlapping_indices: tuple[tuple[int, ...], ...]
-
-    def __post_init__(self) -> None:
-        if len(set(self.input_sources)) != len(self.input_sources):
-            raise AssertionError(
-                f"input_sources must be unique, got {self.input_sources}"
-            )
 
 
 """

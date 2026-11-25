@@ -4088,6 +4088,7 @@ if torch.mtia._is_compiled():
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
+make_fallback(aten._upsample_inter_area2d.default)  # CPU only
 
 
 # 3) Difficult
