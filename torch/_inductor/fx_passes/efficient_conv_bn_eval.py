@@ -291,8 +291,11 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
     supported_convs = [
         torch.ops.aten.linear.default,
         torch.ops.aten.conv1d.default,
+        torch.ops.aten.conv1d.padding,
         torch.ops.aten.conv2d.default,
+        torch.ops.aten.conv2d.padding,
         torch.ops.aten.conv3d.default,
+        torch.ops.aten.conv3d.padding,
         torch.ops.aten.conv_transpose1d.default,
         torch.ops.aten.conv_transpose2d.input,
         torch.ops.aten.conv_transpose3d.input,
