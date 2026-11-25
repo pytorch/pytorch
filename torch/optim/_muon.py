@@ -30,6 +30,22 @@ DEFAULT_C = 2.0315
 DEFAULT_NS_STEPS = 5
 
 
+def _newtonschulz_iterations(
+    ortho_update: Tensor, ns_coefficients: tuple[float, float, float], ns_steps: int
+) -> Tensor:
+    a, b, c = ns_coefficients
+    tall = ortho_update.size(0) > ortho_update.size(1)
+    if tall:
+        ortho_update = ortho_update.T
+    for _ in range(ns_steps):
+        gram_matrix = ortho_update @ ortho_update.T
+        gram_update = torch.addmm(
+            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
+        )
+        ortho_update = torch.addmm(ortho_update, gram_update, ortho_update, beta=a)
+    return ortho_update.T if tall else ortho_update
+
+
 def _zeropower_via_newtonschulz(
     update: Tensor,
     ns_coefficients: tuple[float, float, float],
@@ -48,23 +64,10 @@ def _zeropower_via_newtonschulz(
     Implementation reference: https://github.com/KellerJordan/Muon/blob/master/muon.py
     with suggestions by @jxbz, @leloykun, and @YouJiacheng.
     """
-    a, b, c = ns_coefficients
     ortho_update = update.to(dtype=torch.bfloat16, copy=True)
-    if update.size(0) > update.size(1):
-        ortho_update = ortho_update.T
     # Ensure spectral norm is at most 1
     ortho_update.div_(ortho_update.norm().clamp(min=eps))
-    # Perform the NS iterations
-    for _ in range(ns_steps):
-        gram_matrix = ortho_update @ ortho_update.T
-        gram_update = torch.addmm(
-            gram_matrix, gram_matrix, gram_matrix, beta=b, alpha=c
-        )
-        ortho_update = torch.addmm(ortho_update, gram_update, ortho_update, beta=a)
-
-    if update.size(0) > update.size(1):
-        ortho_update = ortho_update.T
-    return ortho_update
+    return _newtonschulz_iterations(ortho_update, ns_coefficients, ns_steps)
 
 
 def _adjust_lr(lr: float, adjust_lr_fn: str | None, param_shape: torch.Size) -> float:
