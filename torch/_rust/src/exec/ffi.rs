@@ -64,7 +64,7 @@ unsafe extern "C" {
         out: *mut *mut PyObject,
     ) -> c_int;
 
-    pub fn tr_attr_home(obj: *mut PyObject, name: *mut PyObject, dict: *mut *mut PyObject) -> c_int;
+    pub fn tr_attr_home(obj: *mut PyObject, name: *mut PyObject, dict: *mut *mut PyObject, generic: c_int) -> c_int;
     pub fn tr_type_version(tp: *mut pyo3::ffi::PyTypeObject) -> u32;
     pub fn tr_type_version_is(tp: *mut pyo3::ffi::PyTypeObject, tag: u32) -> c_int;
     pub fn tr_type_immutable(tp: *mut pyo3::ffi::PyTypeObject) -> c_int;

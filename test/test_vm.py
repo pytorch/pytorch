@@ -1692,6 +1692,242 @@ class TestVmFunctionArguments(TestCase):
 instantiate_device_type_tests(TestVmFunctionArguments, globals())
 
 
+def many_loop(scales, x):
+    for i, scale in enumerate(scales):
+        x = (x * scale + i).tanh().cos().sin()
+    return x
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmManyRegions(TestCase):
+    """A place with one region per state finds the one for a call without
+    running anything of the others."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_loop_whose_body_has_a_region_for_each_iteration(self, device):
+        scales = [1.5, 0.5, 2.0, 0.25]
+        g = vm_early(many_loop)
+        for call in range(9):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(scales, x), many_loop(scales, x), atol=0, rtol=0, msg=f"call {call}"
+            )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_loop" and r["state"] == "region"
+        )
+        # One region per value of `i` (it is added in), all of the same
+        # block: each iteration runs its own, and the others are passed
+        # over without counting as a region that was entered and turned
+        # the call down.
+        self.assertEqual(row["variants"], 4)
+        self.assertEqual(row["runs"], 4 * 5)
+        self.assertEqual(row["misses"], {})
+
+
+instantiate_device_type_tests(TestVmManyRegions, globals())
+
+
+class OwnConfig:
+    """Resolves its attributes in Python and reads its own ``__dict__`` to do
+    it, as a configuration class with per-layer values does."""
+
+    def __init__(self, scale):
+        self.scale = scale
+        self.overrides = None
+
+    def __getattribute__(self, key):
+        overrides = super().__getattribute__("__dict__").get("overrides")
+        if overrides is not None and key in overrides:
+            return overrides[key]
+        return super().__getattribute__(key)
+
+
+def own_scaled(config, x):
+    return (x.sin() * config.scale).tanh().cos().exp()
+
+
+class OwnLayer:
+    def __init__(self, factor):
+        self.factor = factor
+
+    def chunk(self, y):
+        return y * self.factor
+
+
+def own_chunk_wider(self, y, shift=1):
+    return y * self.factor + shift
+
+
+def own_parameters(fn):
+    """What a library asks of a callback handed to it as a bound method."""
+    return fn.__func__.__code__.co_argcount - 1
+
+
+def own_applied(layer, x):
+    y = x.sin() + 1
+    n = own_parameters(layer.chunk)
+    return layer.chunk(y).tanh().cos().exp() * n
+
+
+def own_kept(layer, x):
+    # The method object is one the layer holds, not one this call makes.
+    n = own_parameters(layer.kept)
+    return (x.sin() + 1).tanh().cos().exp() * n
+
+
+def own_chunked(fn, y):
+    return fn(y) * len(inspect.signature(fn).parameters)
+
+
+def own_forward(layer, x):
+    return own_chunked(layer.chunk, x.sin() + 1).tanh().cos().exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmReadsOfItsOwn(TestCase):
+    """Reads that need no refusal: a load that ``object.__getattribute__``
+    itself makes for a class with a ``__getattribute__`` in Python (the
+    object's ``__dict__`` among them), what a bound method is bound to, and
+    what a traced run reads from objects it made itself. Every call gives
+    what eager gives, a region exists and runs, and what is changed between
+    calls is followed."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def follows(self, g, fn, device, steps):
+        """Calls ``g`` and ``fn`` on the same input after each of ``steps``
+        (a function changing the state, or None for a call as the one
+        before): how many regions ran in each call."""
+        import torch._rust_inductor as ri
+
+        ri.COUNT = True
+        runs = []
+        for call, step in enumerate(steps):
+            if step is not None:
+                step()
+            x = torch.randn(4, 8, device=device)
+            before = region_runs()
+            got = g(x)
+            self.assertEqual(got, fn(x), atol=0, rtol=0, msg=f"call {call}")
+            runs.append(region_runs() - before)
+        return runs
+
+    def region_of(self, g, function):
+        rows = [r for r in vm.regions(g) if r["function"] == function]
+        self.assertEqual([r["why"] for r in rows if r["state"] == "refused"], [])
+        (row,) = (r for r in rows if r["state"] == "region")
+        return row
+
+    @isolated
+    def test_class_that_reads_its_own_dict_to_resolve_a_load(self, device):
+        config = OwnConfig(2.0)
+        g = vm_early(lambda x: own_scaled(config, x))
+
+        def scale(value):
+            return lambda: setattr(config, "scale", value)
+
+        def override(value):
+            return lambda: setattr(config, "overrides", value)
+
+        def other_dict():
+            config.__dict__ = {"scale": 7.0, "overrides": None}
+
+        steps = [None] * 5 + [scale(3.0), None, None] + [scale(2.0), None, None]
+        # What the __getattribute__ reads from the dict it asked for, then
+        # the dict itself.
+        steps += (
+            [override({"scale": 5.0}), None, None]
+            + [override(None), None]
+            + [other_dict, None, None]
+        )
+        runs = self.follows(g, lambda x: own_scaled(config, x), device, steps)
+        self.assertGreater(runs[4], 0)
+        # Each state that comes back finds its region.
+        self.assertEqual(
+            (runs[7], runs[10], runs[13], runs[15], runs[18]), (runs[4],) * 5
+        )
+        row = self.region_of(g, "own_scaled")
+        self.assertEqual(row["ops"], 5)
+        self.assertGreater(row["reads"], 0)
+
+    @isolated
+    def test_bound_method_made_in_the_call_asked_for_its_function(self, device):
+        layer = OwnLayer(2.0)
+        g = vm(
+            lambda x: own_applied(layer, x), passes=vm.configure(EARLY, pure_calls=2)
+        )
+        chunk = OwnLayer.chunk
+
+        def factor(value):
+            return lambda: setattr(layer, "factor", value)
+
+        def method(f):
+            return lambda: setattr(OwnLayer, "chunk", f)
+
+        steps = [None] * 5 + [factor(3.0), None, None] + [factor(2.0), None]
+        # Another function under the same name: another count of parameters.
+        steps += [method(own_chunk_wider), None, None] + [method(chunk), None]
+        try:
+            runs = self.follows(g, lambda x: own_applied(layer, x), device, steps)
+        finally:
+            OwnLayer.chunk = chunk
+        self.assertGreater(runs[4], 0)
+        self.assertEqual((runs[7], runs[9], runs[12], runs[14]), (runs[4],) * 4)
+        # Seven operations with the first method, one more with the other.
+        self.assertIn(self.region_of(g, "own_applied")["ops"], (7, 8))
+
+    @isolated
+    def test_bound_method_the_object_holds_asked_for_its_function(self, device):
+        layer, other = OwnLayer(2.0), OwnLayer(3.0)
+        layer.kept = layer.chunk
+        wider = types_module.MethodType(own_chunk_wider, other)
+        g = vm_early(lambda x: own_kept(layer, x))
+
+        def keep(m):
+            return lambda: setattr(layer, "kept", m)
+
+        steps = [None] * 5 + [keep(wider), None, None] + [keep(layer.chunk), None, None]
+        runs = self.follows(g, lambda x: own_kept(layer, x), device, steps)
+        self.assertGreater(runs[4], 0)
+        self.assertGreater(runs[7], 0)
+        self.assertEqual(self.region_of(g, "own_kept")["ops"], 6)
+
+    @isolated
+    def test_signature_asked_of_a_bound_method_in_a_callee(self, device):
+        layer = OwnLayer(2.0)
+        passes = vm.configure(
+            EARLY, pure_calls={"rounds": 2, "pure": (inspect.signature,)}
+        )
+        g = vm(lambda x: own_forward(layer, x), passes=passes)
+        chunk = OwnLayer.chunk
+
+        def method(f):
+            return lambda: setattr(OwnLayer, "chunk", f)
+
+        steps = (
+            [None] * 6
+            + [method(own_chunk_wider), None, None]
+            + [method(chunk), None, None]
+        )
+        try:
+            runs = self.follows(g, lambda x: own_forward(layer, x), device, steps)
+        finally:
+            OwnLayer.chunk = chunk
+        self.assertGreater(runs[4], 0)
+        self.assertEqual((runs[5], runs[8], runs[11]), (runs[4],) * 3)
+        # The region is the caller's and holds the callee's work: what the
+        # signature was read from (the method, the Signature made of it) is
+        # no reason to refuse it.
+        self.assertIn(self.region_of(g, "own_forward")["ops"], (7, 8))
+
+
+instantiate_device_type_tests(TestVmReadsOfItsOwn, globals())
+
+
 def purity_double(y):
     return y * 2
 
