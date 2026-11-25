@@ -25,6 +25,7 @@ from torch._inductor.fx_passes.bucketing import (
 )
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
 from torch._inductor.fx_passes.utils import BitsetAncestors
+from torch._inductor.pattern_matcher import stable_topological_sort
 from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
@@ -33,8 +34,6 @@ from torch.utils._python_dispatch import _disable_current_modes
 
 
 log = logging.getLogger(__name__)
-
-from torch._inductor.pattern_matcher import stable_topological_sort
 
 
 def make_all_device_put_sync(gm: torch.fx.GraphModule) -> int:
@@ -426,9 +425,14 @@ class OverlapScheduler:
         max_off_bucket_gb: float | None = 0.5,
         prioritize_bucketing_during_scheduling: bool = True,
         pge_profile_path: str | None = None,
+        prioritize_fusion_regions: bool = False,
     ):
+        from torch._inductor.fx_passes.fusion_regions import contiguous_fusion_regions
+
         self.gm = gm
         self.graph = gm.graph
+        self.prioritize_fusion_regions = prioritize_fusion_regions
+        self.last_scheduled_node: fx.Node | None = None
         self.compute_overlap_multipler = compute_overlap_multipler
         self.max_node_distance = max_coll_distance
         self.max_in_flight_bytes: int = gb_to_bytes(max_in_flight_gb)
@@ -480,11 +484,21 @@ class OverlapScheduler:
         # Compute initial node runtime estimates. Compute nodes use roofline model
         # here; the alignment step in run() replaces them with benchmarked +
         # cross-rank-aligned values.
+        self.fusion_region_of = (
+            {
+                node: region
+                for region in contiguous_fusion_regions(gm)
+                for node in region
+            }
+            if prioritize_fusion_regions
+            else {}
+        )
         self.node_estimations = gather_node_runtime_estimations(
             gm,
             custom_runtime_estimation,
             enable_fusion_regions=enable_fusion_regions,
             log_estimations=True,
+            prioritize_fusion_regions=prioritize_fusion_regions,
         )
         # Build structures
         stable_topological_sort(self.graph)
@@ -922,6 +936,56 @@ class OverlapScheduler:
 
         log.info("Overlap scheduling: Runtime estimations aligned")
 
+    def _can_schedule_fusion_continuation(self, node: fx.Node) -> bool:
+        r"""Check that a ready fusion node preserves compute order and memory limits.
+
+        Example::
+            INPUT:
+                x = placeholder()
+                w = placeholder()
+                first = aten.mm(x, w)
+                second = aten.mm(x, w)
+                result = output((first, second))
+
+                Both nodes are ready and fit the memory limit.
+                first is the next compute node in the original order.
+
+            OUTPUT:
+                node = first  -> True
+                node = second -> False
+        """
+        if node in self.scheduled or self.in_degree[node] != 0:
+            return False
+        if (
+            is_compute_node(node)
+            and self.compute_index_domination[node] != self.current_compute_index
+        ):
+            return False
+        tracker = self.memory_tracker
+        if tracker is None:
+            return True
+        peak_memory = tracker.current_memory_bytes
+        if node.op not in ("placeholder", "get_attr", "output"):
+            peak_memory += sum(
+                optimization_hint(storage.storage.nbytes())
+                for storage in tracker.alias_tracker.get_fresh_allocations(node)
+                if tracker.device_filter(storage.device)
+                and storage not in tracker.current_live_storages
+            )
+        limit = max(self.allowed_peak_memory_bytes, tracker.current_memory_bytes)
+        return peak_memory <= limit
+
+    def _get_fusion_continuation(self) -> fx.Node | None:
+        if not self.prioritize_fusion_regions or self.last_scheduled_node is None:
+            return None
+        region = self.fusion_region_of.get(self.last_scheduled_node)
+        if region is None:
+            return None
+        for node in sorted(region, key=self.node_idx.__getitem__):
+            if self._can_schedule_fusion_continuation(node):
+                return node
+        return None
+
     def _get_next_nodes(self) -> list[fx.Node]:
         """
         Get next node(s) to schedule.
@@ -930,6 +994,15 @@ class OverlapScheduler:
         (same bucket_key) are batched together to enable bucketing them in
         overlap_preserving_bucketer. Bucket size is limited by max_off_bucket_bytes.
         """
+        if self.prioritize_fusion_regions:
+            for queue in (self.on_path_ready, self.off_path_ready):
+                while queue and queue[0][1] in self.scheduled:
+                    heapq.heappop(queue)
+            if not self.on_path_ready and not self.off_path_ready:
+                return []
+            continuation = self._get_fusion_continuation()
+            if continuation is not None:
+                return [continuation]
         if self.off_path_ready:
             _, node = self.off_path_ready[0]
 
@@ -1147,6 +1220,7 @@ class OverlapScheduler:
         if not all(n in self.scheduled for n in node.all_input_nodes):
             raise AssertionError(f"node {node} has unscheduled input nodes")
         self.scheduled.add(node)
+        self.last_scheduled_node = node
         self._scheduled_bits |= self.node_ancestors.node_bit(node)
         if self.memory_tracker is not None:
             self.memory_tracker.schedule_node(node)
@@ -1754,6 +1828,7 @@ def gather_node_runtime_estimations(
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     enable_fusion_regions: bool = False,
     log_estimations: bool = False,
+    prioritize_fusion_regions: bool = False,
 ) -> dict[fx.Node, float]:
     """Gather initial runtime estimations for all nodes without scheduling.
 
@@ -1780,9 +1855,11 @@ def gather_node_runtime_estimations(
             estimate_fused_node_costs,
         )
 
-        raw_regions = build_fusion_regions(gm)
+        raw_regions = build_fusion_regions(gm, prioritize=prioritize_fusion_regions)
         if raw_regions:
-            fused_costs = estimate_fused_node_costs(raw_regions)
+            fused_costs = estimate_fused_node_costs(
+                raw_regions, prioritize=prioritize_fusion_regions
+            )
 
     estimations: dict[fx.Node, float] = {}
     nodes = list(gm.graph.nodes)
@@ -1810,11 +1887,17 @@ def gather_node_runtime_estimations(
 
     for node in nodes:
         if is_compute_node(node):
-            est = estimate_roofline_runtime_ms(node)
+            est = (
+                fused_costs[node]
+                if node in fused_costs
+                else estimate_roofline_runtime_ms(node)
+            )
             if custom_runtime_estimation is not None:
                 custom_est = custom_runtime_estimation(node, None)
                 if custom_est is not None:
                     est = custom_est
+                    if prioritize_fusion_regions:
+                        fused_costs.pop(node, None)
             estimations[node] = est
             compute_nodes.append(node)
             compute_analytical.append(est)
@@ -1823,6 +1906,8 @@ def gather_node_runtime_estimations(
                 est = custom_runtime_estimation(node, None)
                 if est is not None:
                     estimations[node] = est
+                    if prioritize_fusion_regions:
+                        fused_costs.pop(node, None)
             else:
                 est = estimate_roofline_runtime_ms(node)
                 if est > 0:
@@ -1915,6 +2000,7 @@ def schedule_overlap_bucketing(
     pge_profile_path: str | None = None,
     pre_bucketing_fsdp_collectives: bool = True,
     pre_bucketing_fsdp_collectives_bucket_cap_mb: float | None = None,
+    prioritize_fusion_regions: bool = False,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1991,6 +2077,7 @@ def schedule_overlap_bucketing(
         max_off_bucket_gb=max_off_bucket_gb,
         bucket_mode=bucket_mode,
         pge_profile_path=pge_profile_path,
+        prioritize_fusion_regions=prioritize_fusion_regions,
     ).run()
     trace_structured(
         "artifact",
@@ -2040,6 +2127,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "bucket_exposed_first",
         "bucket_only_internode_comms",
         "enable_fusion_regions",
+        "prioritize_fusion_regions",
         "prioritize_bucketing_during_scheduling",
         "bucket_mode",
         "pre_bucketing_fsdp_collectives",
