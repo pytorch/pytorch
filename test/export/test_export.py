@@ -15779,6 +15779,100 @@ def forward(self, x, b_t, y):
         self.assertEqual(lowered.module()(x, y).dtype, torch.bfloat16)
         self.assertIn("torch.ops.aten._to_copy.default", lowered.graph_module.code)
 
+    def _check_autocast_casts_inputs(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, q, k, v):
+                with torch.autocast(device, dtype=torch.bfloat16):
+                    return F.scaled_dot_product_attention(q, k, v)
+
+        # Only autocast makes the dtypes of q, k and v match.
+        q = torch.randn(1, 4, 8, 16, device=device)
+        k = torch.randn(1, 4, 8, 16, device=device)
+        v = torch.randn(1, 4, 8, 16, dtype=torch.bfloat16, device=device)
+        self._test_export_same_as_eager(Model(), (q, k, v))
+
+    def test_export_autocast_casts_inputs(self):
+        self._check_autocast_casts_inputs("cpu")
+
+    @requires_gpu
+    def test_export_autocast_casts_inputs_gpu(self):
+        self._check_autocast_casts_inputs(GPU_TYPE)
+
+    def test_export_nested_autocast_dtypes(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                with torch.autocast("cpu", dtype=torch.bfloat16):
+                    a = self.linear(x)
+                    with torch.autocast("cpu", enabled=False):
+                        b = self.linear(x)
+                    c = self.linear(x)
+                d = self.linear(x)
+                return a, b, c, d
+
+        model, x = Model(), torch.randn(2, 4)
+        ep = export(model, (x,))
+        self.assertEqual(
+            [out.meta["val"].dtype for out in ep.graph.output_node().args[0]],
+            [torch.bfloat16, torch.float32, torch.bfloat16, torch.float32],
+        )
+        self.assertEqual(ep.module()(x), model(x))
+
+    def test_export_autocast_inside_cond_branch(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, w):
+                def true_fn(x, w):
+                    with torch.autocast("cpu", dtype=torch.bfloat16):
+                        return x.mm(w).float()
+
+                return torch.cond(x.sum() > 0, true_fn, torch.mm, (x, w))
+
+        args = (torch.ones(2, 4), torch.randn(4, 4))
+        ep = export(Model(), args)
+        (cond,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.cond
+        )
+        # Export can move the autocast block into a submodule of the branch.
+        true_branch = getattr(ep.graph_module, cond.args[1].target)
+        (mm,) = (
+            node
+            for gm in true_branch.modules()
+            for node in gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mm.default
+            )
+        )
+        self.assertEqual(mm.meta["val"].dtype, torch.bfloat16)
+        self.assertEqual(ep.module()(*args), Model()(*args))
+
+    def test_export_autocast_inside_while_loop_body(self):
+        class Model(torch.nn.Module):
+            def forward(self, i, x, w):
+                def body_fn(i, x):
+                    with torch.autocast("cpu", dtype=torch.bfloat16):
+                        return i + 1, x.mm(w).float()
+
+                return while_loop(lambda i, x: i < 2, body_fn, (i, x))
+
+        args = (torch.tensor(0), torch.randn(4, 4), torch.randn(4, 4))
+        ep = export(Model(), args)
+        (loop,) = ep.graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.while_loop
+        )
+        # Export can move the autocast block into a submodule of the body.
+        body = getattr(ep.graph_module, loop.args[1].target)
+        (mm,) = (
+            node
+            for gm in body.modules()
+            for node in gm.graph.find_nodes(
+                op="call_function", target=torch.ops.aten.mm.default
+            )
+        )
+        self.assertEqual(mm.meta["val"].dtype, torch.bfloat16)
+        self.assertEqual(ep.module()(*args), Model()(*args))
+
     def test_export_as_backend(self):
         def f(x, y):
             return x + y

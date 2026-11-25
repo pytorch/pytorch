@@ -5990,6 +5990,37 @@ def forward(self, arg0_1):
     @unittest.skipIf(
         not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported"
     )
+    def test_aot_export_predispatch_autocast_in_cond_torch_fn(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    y = x.sin()
+                    with torch.autocast("cpu", dtype=torch.bfloat16):
+                        z = x.mm(y)
+                    return z.float()
+
+                return (torch.cond(x.sum() > 0, true_fn, torch.cos, (x,)),)
+
+        gm, _ = aot_export_module(
+            M(), [torch.randn(2, 2)], trace_joint=False, pre_dispatch=True
+        )
+        autocast_fns = (torch.amp._enter_autocast, torch.amp._exit_autocast)
+        self.assertEqual(
+            [
+                node.meta["torch_fn"]
+                for node in gm.true_graph_0.graph.nodes
+                if node.target in autocast_fns
+            ],
+            [
+                ("_enter_autocast_1", "function._enter_autocast"),
+                ("_exit_autocast_1", "function._exit_autocast"),
+            ],
+        )
+
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @unittest.skipIf(
+        not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported"
+    )
     def test_aot_export_predispatch_map_1(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
