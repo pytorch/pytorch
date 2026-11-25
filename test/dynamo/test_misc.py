@@ -6800,6 +6800,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertTrue(same(expected, actual))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_captured_arg_closure_after_graph_break(self):
+        # x is an argument and a cell; in the resume function it is a freevar.
+        def fn(x, pe):
+            y = x + 1
+            torch._dynamo.graph_break()
+            pe = (p[:, -x.shape[1] :] * y.sum() for p in pe)
+            return [p + 1 for p in pe]
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.randn(2, 3)
+        pe = (torch.randn(2, 5), torch.randn(2, 5))
+        self.assertEqual(opt_fn(x, pe), fn(x, pe))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_closure_out_of_scope_cell_with_cond(self):
         # Test closure with out-of-scope cell variable, used in a cond
         # where the two branches read different closure variables

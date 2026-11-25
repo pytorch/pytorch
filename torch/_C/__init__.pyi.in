@@ -2468,6 +2468,9 @@ class _CudaDeviceProperties:
     gcnArchName: str
     warp_size: _int
     uuid: str
+    pci_bus_id: _int
+    pci_device_id: _int
+    pci_domain_id: _int
     L2_cache_size: _int
     clock_rate: _int
     memory_clock_rate: _int

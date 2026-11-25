@@ -1087,7 +1087,7 @@ _RENDER_STAGES = (
     # CUDA-graph event-record / host-callback nodes on their stream lane. Rendered as render
     # stages (not kernels: no launch) so they carry graph id/node/annotation and become
     # dependency-arrow endpoints, matching the JSON export. Point-ish spans from their device
-    # timestamps. Both are empty unless the CUDA_EVENT bridge / host-node collection is enabled.
+    # timestamps. Both are empty unless event-node spans / host-node collection is enabled.
     ("graph_event_node", 5, "EventRecord", 0),
     ("graph_host_node", 6, "HostNode", 0),
 )
