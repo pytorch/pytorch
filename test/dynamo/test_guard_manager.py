@@ -360,6 +360,8 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
         invalid = {**values, "y": torch.empty(2)}
         if kind == "no_alias":
             invalid["y"] = values["x"]
+        elif kind == "overlap":
+            invalid["y"] = storage[2:]
         elif kind == "symbolic":
             invalid["y"] = (1, 4)
         root = RootGuardManager()
