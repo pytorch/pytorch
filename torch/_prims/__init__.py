@@ -734,6 +734,25 @@ clone = _make_prim(
     register_conj_neg_fallthrough=True,
 )
 
+
+def _assert_nonnegative_impl(input: Tensor, message: str) -> None:
+    if torch.any(input < 0):
+        raise ValueError(message)
+
+
+_assert_nonnegative = _make_prim(
+    schema="_assert_nonnegative(Tensor input, str message) -> ()",
+    meta=lambda input, message: None,
+    impl_aten=_assert_nonnegative_impl,
+    doc="Check for negative entries, preserving ValueError validation.",
+    return_type=RETURN_TYPE.NONE,
+    tags=(torch.Tag.cudagraph_unsafe,),
+)
+torch.library._register_effectful_op(
+    _assert_nonnegative, torch.library.EffectType.ORDERED, lib=prim
+)
+
+
 digamma = _make_elementwise_unary_prim(
     "digamma",
     impl_aten=torch.digamma,
@@ -1356,7 +1375,6 @@ def _broadcast_in_dim_meta(
             original_idx = original_idx + 1
         else:
             if guard_or_true(shape[idx] != 1):
-                # consistent with previous use of guard_size_oblivious
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)

@@ -87,7 +87,7 @@ def _permute_all_to_all_single_col_scatter(
 @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "CUDA not available")
 class AllToAllNdBenchmark(MultiProcContinuousTest):
     @classmethod
-    def backend_str(cls) -> str | None:
+    def backend_str(cls, device) -> str | None:
         return "nccl"
 
     @property
