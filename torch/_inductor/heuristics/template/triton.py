@@ -3532,6 +3532,7 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError("Blackwell GEMM requires MMKernelInputs")
         _, mat2 = kernel_inputs.mat1mat2()
+        _, n, _ = kernel_inputs.mnk_symbolic()
         element_size = mat2.get_dtype().itemsize
         allow_tf32 = self._allow_tf32(kernel_inputs)
 
@@ -3580,6 +3581,15 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
             }
             if two_ctas:
                 out["ctas_per_cga"] = (2, 1, 1)
+                # Measured faster on B200 for 128x256 tiles once there are at least
+                # 16 tile columns; other tiles and 1-CTA configs keep 8.
+                if (
+                    op_name in ("mm", "addmm")
+                    and out.get("GROUP_M") == 8
+                    and (out["BLOCK_M"], out["BLOCK_N"]) == (128, 256)
+                    and V.graph.sizevars.statically_known_gt(n, 15 * out["BLOCK_N"])
+                ):
+                    out["GROUP_M"] = 16
             yield out
 
     @staticmethod
