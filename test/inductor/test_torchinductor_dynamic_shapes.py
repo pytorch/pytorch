@@ -6,6 +6,7 @@ import inspect
 import math
 import operator
 import os
+import re
 import sys
 import unittest
 
@@ -1141,8 +1142,8 @@ class TestInductorDynamic(DynamicShapesTestCase):
                 # (which this sum is on GPUs below sm100), launch int32.
                 self.assertIn("i64", {dtype for dtype, _ in launched})
                 for dtype, size_hints in launched:
-                    big = math.prod(size_hints.values()) >= 2**31
-                    self.assertEqual(dtype, "i64" if big else "i32")
+                    past_int32 = math.prod(size_hints.values()) >= 2**31
+                    self.assertEqual(dtype, "i64" if past_int32 else "i32")
             self.assertEqual(actual, expected)
         # Without dual kernels, the int32 kernel's size guard fails and recompiles.
         self.assertEqual(counter.frame_count, 1 if dual else 2)
@@ -1166,6 +1167,26 @@ class TestInductorDynamic(DynamicShapesTestCase):
             with _record_launches() as launched:
                 compiled(torch.randn(256, 512, device=device))
             self.assertEqual(launched, [("i64", {"x": 128, "r0_": 1024})])
+
+    @onlyAccelerator
+    @config.patch({"trace.provenance_tracking_level": 1, "force_disable_caches": True})
+    def test_dual_index_dtype_provenance(self, device):
+        """Provenance tracking records both the int32 and the int64 kernel of a dual
+        pair, each with its own debug handle."""
+        from torch._inductor import debug
+
+        def fn(x):
+            return x.sum(-1)
+
+        with (
+            debug.reset_provenance_globals(),
+            config.patch(dual_index_dtype_kernels=True),
+        ):
+            _, (code, *_) = run_and_get_code(
+                torch.compile(fn, dynamic=True), torch.randn(64, 512, device=device)
+            )
+        handles = re.findall(r"\[Provenance debug handles\] (\w+):\d+", code)
+        self.assertEqual(len(set(handles)), 2)
 
     @onlyAccelerator
     def test_dual_index_dtype_multi_kernel(self, device):
