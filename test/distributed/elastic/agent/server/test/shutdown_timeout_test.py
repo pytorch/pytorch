@@ -26,6 +26,34 @@ def _sleep_long(duration: int):
     return int(os.environ["RANK"])
 
 
+def _mock_worker_spec(local_world_size: int = 2) -> Mock:
+    # WorkerSpec is a dataclass, so its fields without defaults (role,
+    # local_world_size, rdzv_handler) are not class attributes and a
+    # Mock(spec=WorkerSpec) does not expose them until they are set here.
+    spec = Mock(spec=WorkerSpec)
+    spec.role = "trainer"
+    spec.local_world_size = local_world_size
+    spec.max_restarts = 3
+    spec.rdzv_handler = Mock()
+    return spec
+
+
+class _StubElasticAgent(SimpleElasticAgent):
+    """SimpleElasticAgent is abstract; these tests only read back the timeout."""
+
+    def _start_workers(self, worker_group):
+        raise NotImplementedError
+
+    def _stop_workers(self, worker_group):
+        raise NotImplementedError
+
+    def _monitor_workers(self, worker_group):
+        raise NotImplementedError
+
+    def _shutdown(self, death_sig=signal.SIGTERM, timeout=30):
+        raise NotImplementedError
+
+
 class ShutdownTimeoutTest(TestCase):
     """Tests for the configurable shutdown_timeout feature."""
 
@@ -66,11 +94,8 @@ class ShutdownTimeoutTest(TestCase):
             self.assertEqual(config.shutdown_timeout, 120)
 
     def test_simple_elastic_agent_receives_shutdown_timeout(self):
-        mock_spec = Mock(spec=WorkerSpec)
-        mock_spec.max_restarts = 3
-
-        agent = SimpleElasticAgent(
-            spec=mock_spec,
+        agent = _StubElasticAgent(
+            spec=_mock_worker_spec(),
             exit_barrier_timeout=300,
             shutdown_timeout=180,
         )
@@ -78,20 +103,15 @@ class ShutdownTimeoutTest(TestCase):
         self.assertEqual(agent._shutdown_timeout, 180)
 
     def test_simple_elastic_agent_default_shutdown_timeout(self):
-        mock_spec = Mock(spec=WorkerSpec)
-        mock_spec.max_restarts = 3
-
-        agent = SimpleElasticAgent(
-            spec=mock_spec,
+        agent = _StubElasticAgent(
+            spec=_mock_worker_spec(),
             exit_barrier_timeout=300,
         )
 
         self.assertEqual(agent._shutdown_timeout, 30)
 
     def test_local_elastic_agent_receives_shutdown_timeout(self):
-        mock_spec = Mock(spec=WorkerSpec)
-        mock_spec.max_restarts = 3
-        mock_spec.rdzv_handler = Mock()
+        mock_spec = _mock_worker_spec()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logs_specs = DefaultLogsSpecs(log_dir=tmpdir)
@@ -107,9 +127,7 @@ class ShutdownTimeoutTest(TestCase):
             self.assertEqual(agent._shutdown_timeout, 240)
 
     def test_shutdown_method_receives_correct_timeout(self):
-        mock_spec = Mock(spec=WorkerSpec)
-        mock_spec.max_restarts = 3
-        mock_spec.rdzv_handler = Mock()
+        mock_spec = _mock_worker_spec()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logs_specs = DefaultLogsSpecs(log_dir=tmpdir)
@@ -133,9 +151,7 @@ class ShutdownTimeoutTest(TestCase):
             mock_pcontext.close.assert_called_once_with(signal.SIGTERM, 150)
 
     def test_stop_workers_uses_configured_shutdown_timeout(self):
-        mock_spec = Mock(spec=WorkerSpec)
-        mock_spec.max_restarts = 3
-        mock_spec.rdzv_handler = Mock()
+        mock_spec = _mock_worker_spec()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             logs_specs = DefaultLogsSpecs(log_dir=tmpdir)
