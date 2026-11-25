@@ -214,6 +214,11 @@ ncclResult_t NCCLException::getResult() const noexcept {
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
+  try {
+    closeCoalescing();
+  } catch (const std::exception& e) {
+    TC_LOG(ERROR, this) << e.what();
+  }
   if (init_state_ == InitializationState::INITIALIZED) {
     TC_LOG(WARNING, this)
         << "ProcessGroupNCCL " << name_
@@ -545,6 +550,9 @@ void ProcessGroupNCCL::abort() {
     comm_state_ = CommState::ERROR;
     abortNcclComm();
   }
+  if (isCoalescingThread()) {
+    closeCoalescing();
+  }
 }
 
 void ProcessGroupNCCL::suspend() {
@@ -611,6 +619,7 @@ void ProcessGroupNCCL::finalize() {
   // timeout, which is a teardown result to report to the caller, not a reason
   // to terminate the process.
   stopWatchdog();
+  closeCoalescing();
   drainRetiredGraphWork();
 
   // Wait for all pending work objects to complete and get final status
@@ -833,8 +842,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
-  auto work = async_op ? createWork(stream, timeout, tensor)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, tensor)
+                            : createWork(stream, timeout);
 
   // Record start event before NCCL operation
   work->recordStart("send", tensor);
@@ -869,10 +879,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
   waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operation
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -923,10 +930,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
   waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operation
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1017,10 +1021,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
   waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operations
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1043,8 +1044,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
 
-  auto work = async_op ? createWork(stream, timeout, tensor)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, tensor)
+                            : createWork(stream, timeout);
 
   // Record start event before NCCL operation
   work->recordStart("broadcast", tensor);
@@ -1062,10 +1064,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
       "NCCL Broadcast failed");
 
   // Record end event after NCCL operation
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1086,8 +1085,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
-  auto work = async_op ? createWork(stream, timeout, tensor)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, tensor)
+                            : createWork(stream, timeout);
 
   // Record start event before NCCL operation
   work->recordStart("all_reduce", tensor);
@@ -1107,10 +1107,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
       "NCCL AllReduce failed");
 
   // Record end event after NCCL operation
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1132,8 +1129,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
-  auto work = async_op ? createWork(stream, timeout, tensor)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, tensor)
+                            : createWork(stream, timeout);
 
   // Record start event before NCCL operation
   work->recordStart("reduce", tensor);
@@ -1154,10 +1152,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
       "NCCL Reduce failed");
 
   // Record end event after NCCL operation
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1224,8 +1219,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
           local_outputs[i].storage().data_ptr(), operation_stream);
     }
   }
-  auto work = async_op ? createWork(stream, timeout, tensor)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, tensor)
+                            : createWork(stream, timeout);
 
   work->recordStart("all_gather", tensor);
 
@@ -1257,6 +1253,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
 
   waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
+  flushCoalescedGroup();
   if (needs_staging) {
     at::cuda::CUDAStreamGuard stream_guard(operation_stream);
     for (size_t i = 0; i < tensor_list.size(); ++i) {
@@ -1266,10 +1263,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
     }
   }
 
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1303,8 +1297,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
-  auto work = async_op ? createWork(stream, timeout, input)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, input)
+                            : createWork(stream, timeout);
 
   work->recordStart("_all_gather_base", input);
 
@@ -1320,10 +1315,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
       timeout,
       "NCCL AllGather failed");
 
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1366,8 +1358,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
-  auto work = async_op ? createWork(stream, timeout, input_list)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, input_list)
+                            : createWork(stream, timeout);
 
   work->recordStart("reduce_scatter", input_list);
 
@@ -1419,10 +1412,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
 
   waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1457,8 +1447,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
-  auto work = async_op ? createWork(stream, timeout, input)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, input)
+                            : createWork(stream, timeout);
 
   // Record start event before NCCL operation
   work->recordStart("_reduce_scatter_base", input);
@@ -1478,10 +1469,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
       "NCCL ReduceScatter failed");
 
   // Record end event after NCCL operation
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1519,8 +1507,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
-  auto work = async_op ? createWork(stream, timeout, input)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, input)
+                            : createWork(stream, timeout);
 
   // Record start event before NCCL operation
   work->recordStart("all_to_all", input);
@@ -1574,10 +1563,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
 #endif
 
   // Record end event after NCCL operation
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1633,8 +1619,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
-  auto work = async_op ? createWork(stream, timeout, input)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, input)
+                            : createWork(stream, timeout);
 
   // Record start event before NCCL operation
   work->recordStart("all_to_all", input);
@@ -1706,10 +1693,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
   waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operation
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1747,8 +1731,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
 
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
-  auto work = async_op ? createWork(stream, timeout, input_tensor_list)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, input_tensor_list)
+                            : createWork(stream, timeout);
 
   // Record start event before NCCL operations
   work->recordStart("all_to_all", input_tensor_list);
@@ -1792,10 +1777,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
   waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   // Record end event after NCCL operations
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1847,10 +1829,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
       "NCCL Barrier failed");
 
   // Record end event after NCCL operation
-  work->recordEnd();
-
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  finishWork(work, stream);
 
   return work;
 }
@@ -1894,7 +1873,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
   c10::cuda::CUDAGuard device_guard(device_);
   cudaStream_t stream = getOperationStream(async_op);
   std::vector<at::Tensor> input_tensors;
-  if (async_op && rank_ == root) {
+  if ((async_op || isCoalescingThread()) && rank_ == root) {
     input_tensors = input_tensor_list;
   }
   auto work = createWork(stream, timeout, input_tensors);
@@ -1935,6 +1914,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
     waitForNcclOperation(
         nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
+    flushCoalescedGroup();
     at::cuda::CUDAStreamGuard stream_guard(
         at::cuda::getStreamFromExternal(stream, device_.index()));
     output_tensor.copy_(input_tensor_list[root], true);
@@ -1966,11 +1946,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
         nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   }
 
-  // Record end event after NCCL operations
-  work->recordEnd();
+  flushCoalescedGroup();
 
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  // Record end event after NCCL operations
+  finishWork(work, stream);
 
   return work;
 }
@@ -2019,8 +1998,9 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
   if (rank_ == root) {
     output_tensors = output_tensor_list;
   }
-  auto work = async_op ? createWork(stream, timeout, input_tensor)
-                       : createWork(stream, timeout);
+  const bool retain_inputs = async_op || isCoalescingThread();
+  auto work = retain_inputs ? createWork(stream, timeout, input_tensor)
+                            : createWork(stream, timeout);
 
   // Record start event before NCCL operations
   work->recordStart("gather", input_tensor);
@@ -2041,8 +2021,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
             native_config),
         timeout,
         "NCCL Gather failed");
-    work->recordEnd();
-    enqueueWork(work, stream);
+    finishWork(work, stream);
     return work;
   }
 #else
@@ -2080,6 +2059,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     waitForNcclOperation(
         nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
+    flushCoalescedGroup();
     at::cuda::CUDAStreamGuard stream_guard(
         at::cuda::getStreamFromExternal(stream, device_.index()));
     output_tensor_list[root].copy_(input_tensor, true);
@@ -2111,11 +2091,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
         nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
   }
 
-  // Record end event after NCCL operations
-  work->recordEnd();
+  flushCoalescedGroup();
 
-  // Enqueue the work after events have been recorded
-  enqueueWork(work, stream);
+  // Record end event after NCCL operations
+  finishWork(work, stream);
 
   return work;
 }

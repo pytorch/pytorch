@@ -770,6 +770,232 @@ class ProcessGroupNCCL2Test(MultiProcContinuousTest):
             self.assertTrue(work.is_completed())
 
 
+class ProcessGroupNCCL2CoalescingTest(MultiProcContinuousTest):
+    @classmethod
+    def backend_str(cls, device) -> str:
+        return "nccl2"
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.cuda.set_device(self.rank)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "collective", ["all_reduce", "all_gather", "reduce_scatter", "all_to_all"]
+    )
+    @parametrize("device_window", [False, True])
+    @parametrize("async_ops", [False, True])
+    @parametrize("capture", [False, True])
+    def test_coalesced_collectives(
+        self, device, collective, device_window, async_ops, capture
+    ) -> None:
+        device = torch.device(torch.device(device).type, self.rank)
+        if collective == "all_to_all" and not device_window:
+            self.skipTest("all_to_all uses device-based coalescing")
+        inputs = []
+        outputs = []
+        expected = []
+        for i in range(8):
+            count = 32 * self.world_size if collective == "reduce_scatter" else 32
+            if collective == "all_to_all":
+                count *= self.world_size
+            tensor = torch.full((count,), self.rank + i + 1.0, device=device)
+            inputs.append(tensor)
+            if collective == "all_reduce":
+                output = tensor
+            elif collective == "all_gather":
+                output = torch.empty(count * self.world_size, device=device)
+            else:
+                output_count = 32 if collective == "reduce_scatter" else count
+                output = torch.empty(output_count, device=device)
+            outputs.append(output)
+            if collective in ("all_reduce", "reduce_scatter"):
+                value = (
+                    self.world_size * (self.world_size + 1) / 2 + self.world_size * i
+                )
+                expected.append(torch.full_like(output, value))
+            else:
+                expected.append(
+                    torch.cat(
+                        [
+                            torch.full((32,), rank + i + 1.0, device=device)
+                            for rank in range(self.world_size)
+                        ]
+                    )
+                )
+
+        def issue():
+            with dist._coalescing_manager(
+                device=torch.device(device) if device_window else None,
+                async_ops=async_ops,
+            ) as cm:
+                for source, output in zip(inputs, outputs):
+                    if collective == "all_reduce":
+                        dist.all_reduce(source)
+                    elif collective == "all_gather":
+                        dist.all_gather_into_tensor(output, source)
+                    elif collective == "reduce_scatter":
+                        dist.reduce_scatter_tensor(output, source)
+                    else:
+                        dist.all_to_all_single(output, source)
+            if async_ops:
+                cm.wait()
+
+        # Allocate and initialize outside the window; exercise waits on another stream.
+        stream = torch.cuda.Stream(device=device)
+        stream.wait_stream(torch.cuda.current_stream(device))
+        with torch.cuda.stream(stream):
+            issue()
+        torch.cuda.current_stream(device).wait_stream(stream)
+        self.assertEqual(outputs, expected)
+        if capture:
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, stream=stream):
+                issue()
+            for _ in range(2):
+                for i, tensor in enumerate(inputs):
+                    tensor.fill_(self.rank + i + 1.0)
+                graph.replay()
+                self.assertEqual(outputs, expected)
+            graph.reset()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_work_pending_until_group_end(self, device) -> None:
+        device = torch.device(torch.device(device).type, self.rank)
+        pg = dist.distributed_c10d._get_default_group()
+        tensors = [torch.full((32,), self.rank + 1.0, device=device) for _ in range(2)]
+        refs = [weakref.ref(tensor) for tensor in tensors]
+        pg._start_coalescing(torch.device(device))
+        try:
+            first = dist.all_reduce(tensors[0], async_op=True)
+            second = dist.all_reduce(tensors[1], async_op=True)
+            self.assertFalse(first.is_completed())
+            self.assertFalse(second.get_future_result().done())
+            self.assertTrue(first.wait())
+            self.assertFalse(first.is_completed())
+            future = first.get_future()
+            self.assertFalse(future.done())
+            del tensors
+            self.assertTrue(all(ref() is not None for ref in refs))
+        finally:
+            window = pg._end_coalescing(torch.device(device))
+        window.wait()
+        first.wait()
+        second.wait()
+        value = self.world_size * (self.world_size + 1) / 2
+        expected = torch.full((32,), value, device=device)
+        self.assertEqual(first.result()[0], expected)
+        self.assertEqual(future.wait(), [expected])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_sync_window_retains_input(self, device) -> None:
+        device = torch.device(torch.device(device).type, self.rank)
+        pg = dist.distributed_c10d._get_default_group()
+        source = torch.full((32,), self.rank + 1.0, device=device)
+        source_ref = weakref.ref(source)
+        output = torch.empty(32 * self.world_size, device=device)
+        pg._start_coalescing(device)
+        try:
+            dist.all_gather_into_tensor(output, source)
+            del source
+            self.assertIsNotNone(source_ref())
+        finally:
+            work = pg._end_coalescing(device)
+        work.wait()
+        expected = torch.cat(
+            [
+                torch.full((32,), rank + 1.0, device=device)
+                for rank in range(self.world_size)
+            ]
+        )
+        self.assertEqual(output, expected)
+        self.assertIsNone(source_ref())
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_coalesced_validation_error_closes_group(self, device) -> None:
+        device = torch.device(torch.device(device).type, self.rank)
+        pg = dist.distributed_c10d._get_default_group()
+        tensor = torch.ones(32, device=device)
+        invalid = torch.ones(4, 2, device=device).t()
+        opts = AllreduceCoalescedOptions()
+        with self.assertRaisesRegex(ValueError, "Tensors must be contiguous"):
+            pg.allreduce_coalesced([tensor, invalid], opts)
+        torch.cuda.synchronize(device)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+        tensor.fill_(1)
+        dist.all_reduce(tensor)
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_WITH_ROCM, "Checks NCCL CUDA kernel aggregation")
+    @parametrize(
+        "collective", ["all_reduce", "all_gather", "reduce_scatter", "all_to_all"]
+    )
+    def test_coalescing_reduces_launches(self, device, collective) -> None:
+        device = torch.device(torch.device(device).type, self.rank)
+        if (
+            torch.profiler.ProfilerActivity.CUDA
+            not in torch.profiler.supported_activities()
+        ):
+            self.skipTest("CUDA profiling is unavailable")
+        count = 32 * self.world_size
+        inputs = [torch.ones(count, device=device) for _ in range(8)]
+        output_count = count
+        if collective == "all_gather":
+            output_count *= self.world_size
+        elif collective == "reduce_scatter":
+            output_count //= self.world_size
+        outputs = [torch.empty(output_count, device=device) for _ in inputs]
+
+        def issue():
+            for source, output in zip(inputs, outputs):
+                if collective == "all_reduce":
+                    dist.all_reduce(source)
+                elif collective == "all_gather":
+                    dist.all_gather_into_tensor(output, source)
+                elif collective == "reduce_scatter":
+                    dist.reduce_scatter_tensor(output, source)
+                else:
+                    dist.all_to_all_single(output, source)
+
+        issue()
+        torch.cuda.synchronize(device)
+        launches = []
+        for grouped in (False, True):
+            with torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ]
+            ) as prof:
+                if grouped:
+                    with dist._coalescing_manager(device=torch.device(device)):
+                        issue()
+                else:
+                    issue()
+                torch.cuda.synchronize(device)
+            launches.append(
+                sum(
+                    event.device_type == torch.autograd.DeviceType.CUDA
+                    and "nccl" in event.name.lower()
+                    for event in prof.events()
+                )
+            )
+        self.assertGreater(launches[0], 0)
+        self.assertGreater(launches[1], 0)
+        self.assertLess(launches[1], launches[0])
+
+
+instantiate_device_type_tests(
+    ProcessGroupNCCL2CoalescingTest, globals(), only_for="cuda"
+)
+
+
 @instantiate_parametrized_tests
 class ProcessGroupNCCL2WorkLifetimeTest(MultiProcessTestCase):
     @property
