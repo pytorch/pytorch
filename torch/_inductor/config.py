@@ -626,6 +626,9 @@ max_autotune_gemm_min_sms: int | None = (
 incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
+# Extend the default kernel allowlist when incremental autotuning is enabled.
+# An explicit TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_INCLUDE still takes precedence.
+incremental_autotune_reduction = False
 # Per-state dispatch budget for incremental autotuning; 0 disables the cap.
 # A torch.compile option overrides this default for every generated kernel.
 incremental_autotune_max_dispatches = int(
@@ -1258,7 +1261,8 @@ conv_1x1_as_mm = False
 split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 
 # A deterministic mode that skips any on device benchmarking in Inductor
-# if we know they affect numerics.  WARNING: Expect perf hit in this mode.
+# if we know they affect numerics, and turns off Triton's FMA contraction
+# (see triton.enable_fp_fusion).  WARNING: Expect perf hit in this mode.
 deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
@@ -2484,7 +2488,8 @@ class triton:
     # Let Triton contract multiply-adds in Inductor's generated kernels into FMAs.
     # Which multiply-adds become FMAs can depend on the block size, so disable this
     # for results that do not depend on the configs autotuning picks.
-    # emulate_precision_casts also disables it.
+    # Deterministic mode and emulate_precision_casts also disable it. Explicit FMAs
+    # (tl.fma, e.g. in triton_helpers) are kept either way.
     enable_fp_fusion = os.environ.get("TORCHINDUCTOR_ENABLE_FP_FUSION", "1") == "1"
 
     # max autotune gemm with cublasLt
@@ -2571,6 +2576,15 @@ class triton:
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
     force_cooperative_reductions = False
+
+    # Lower a split reduction as an extra grid dim rather than reshaping the
+    # reduction axis, so stage-1 loads stay block_ptr-eligible. Requires
+    # split_reductions. Applies only to reductions with a single non-unit reduction
+    # dim that are not strict; Welford, online softmax and other multi-output
+    # reductions, and reductions taking the aligned split, keep the classic lowering.
+    split_reductions_as_grid = (
+        os.environ.get("TORCHINDUCTOR_SPLIT_REDUCTIONS_AS_GRID", "0") == "1"
+    )
 
     # Lower/upper bounds between two-step variance and Welford variance for
     # non-split CUDA Triton half/bfloat16 reductions. Mid-sized reductions use
@@ -2720,6 +2734,13 @@ class triton:
     # it as an autotuning choice for all matmuls
     decompose_k_threshold = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+    )
+
+    # Skip decompose_k splits whose chunk (K // split) exceeds this: fp32 accumulation
+    # error in each partial grows with the chunk length. 0 disables. Not applied when
+    # K is symbolic.
+    decompose_k_max_k_per_split = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_MAX_K_PER_SPLIT", "16384")
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
