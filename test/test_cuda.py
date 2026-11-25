@@ -16988,6 +16988,226 @@ class TestMemoryPlanningUtils(TestCase):
         self.assertEqual(edges, [(frontier[0], mul)])
 
 
+@unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(TEST_WITH_ROCM, "memory planned graphs are not supported on ROCm")
+class TestMemoryPlanner(TestCase):
+    # The C++ memory planner (torch/csrc/cuda/MemoryPlanner.cpp) on synthetic
+    # problems; nothing is captured.
+
+    @staticmethod
+    def _problem(allocs, num_nodes=0, edges=()):
+        # allocs: (size, alloc_time, free_time or None, alloc_nodes, free_nodes)
+        alloc_ptr, alloc_nodes, free_ptr, free_nodes = [0], [], [0], []
+        for a in allocs:
+            alloc_nodes.extend(a[3])
+            alloc_ptr.append(len(alloc_nodes))
+            free_nodes.extend(a[4])
+            free_ptr.append(len(free_nodes))
+        return torch._C._cuda_PlanningProblem(
+            [a[0] for a in allocs],
+            [a[1] for a in allocs],
+            [-1 if a[2] is None else a[2] for a in allocs],
+            alloc_ptr,
+            alloc_nodes,
+            free_ptr,
+            free_nodes,
+            num_nodes,
+            [v for e in edges for v in e],
+        )
+
+    @staticmethod
+    def _peak_live(allocs):
+        # a lower bound on any plan: the most bytes live at once in host order
+        # (allocations live at the same host time pairwise conflict)
+        events = sorted(
+            [(a[1], a[0]) for a in allocs]
+            + [(a[2], -a[0]) for a in allocs if a[2] is not None]
+        )
+        live = peak = 0
+        for _, delta in events:
+            live += delta
+            peak = max(peak, live)
+        return peak
+
+    def test_conflict_rule(self):
+        # Allocation 1 may reuse the memory of allocation 0 only if 0 was freed
+        # before 1 was allocated (host order) and every node of 0's free
+        # frontier is an ancestor of, or equal to, a node of 1's allocation
+        # frontier. Graph: 0 -> 1 -> 2 on one stream; 3 on a side stream that
+        # is not joined back.
+        cases = [
+            # (free_time of 0, free frontier of 0, allocation frontier of 1, conflict)
+            (1, [1], [2], False),  # ancestor
+            (1, [1], [1], False),  # equal
+            (1, [2], [1], True),  # work that uses 0 may still be running
+            (1, [3], [2], True),  # used on a side stream that is not joined
+            (1, [1, 3], [2], True),  # every node of the free frontier counts
+            (1, [1, 3], [2, 3], False),
+            (1, [], [2], False),  # freed with no nodes (stream not captured)
+            (3, [1], [2], True),  # freed after 1 was allocated
+            (None, [], [2], True),  # live at the end
+        ]
+        for free_time, free_nodes, alloc_nodes, conflict in cases:
+            msg = (free_time, free_nodes, alloc_nodes)
+            p = self._problem(
+                [
+                    (1024, 0, free_time, [0], free_nodes),
+                    (1024, 2, None, alloc_nodes, []),
+                ],
+                num_nodes=4,
+                edges=[(0, 1), (1, 2)],
+            )
+            self.assertEqual(p.conflict(0, 1), conflict, msg)
+            self.assertEqual(p.conflict(1, 0), conflict, msg)
+            self.assertFalse(p.conflict(0, 0))
+            _, arena, offsets = p.plan()
+            self.assertEqual(arena, 2048 if conflict else 1024, msg)
+            self.assertEqual(p.validate(offsets), arena)
+            if conflict:
+                with self.assertRaisesRegex(RuntimeError, "may be in use at the same"):
+                    p.validate([0, 0])
+            else:
+                self.assertEqual(p.validate([0, 0]), 1024)
+
+    def test_plan(self):
+        # three allocations live together: the plan aligns each offset to 256
+        # bytes
+        allocs = [
+            (256, 0, None, [], []),
+            (512, 1, None, [], []),
+            (1000, 2, None, [], []),
+        ]
+        p = self._problem(allocs)
+        self.assertEqual(self._peak_live(allocs), 1768)
+        _, arena, offsets = p.plan()
+        self.assertEqual(arena, 1792)
+        self.assertEqual(p.validate(offsets), arena)
+        # neither strategy is best on every problem: here (host order only)
+        # placing the largest allocation first ("size") fragments the arena
+        # (2304 bytes), while placing by breadth reaches the lower bound
+        allocs = [
+            (768, 0, 6, [], []),
+            (1024, 1, 2, [], []),
+            (768, 3, 5, [], []),
+            (512, 4, 7, [], []),
+        ]
+        p = self._problem(allocs)
+        strategy, arena, offsets = p.plan()
+        self.assertEqual((strategy, arena), ("breadth/best", 2048))
+        self.assertEqual(self._peak_live(allocs), 2048)
+        self.assertEqual(p.validate(offsets), arena)
+        # no allocations
+        p = self._problem([])
+        self.assertEqual(p.plan(), ("size", 0, []))
+
+    def test_invalid_problems(self):
+        def check(msg, allocs, num_nodes=0, edges=()):
+            with self.assertRaisesRegex(RuntimeError, msg):
+                self._problem(allocs, num_nodes, edges)
+
+        check("sizes must be positive", [(0, 0, None, [], [])])
+        check("allocation order", [(256, 1, None, [], []), (256, 1, None, [], [])])
+        check("freed after it is allocated", [(256, 1, 1, [], [])])
+        check("frontier node out of range", [(256, 0, None, [2], [])], num_nodes=2)
+        check("edge out of range", [], num_nodes=2, edges=[(0, 2)])
+        check("cycle", [(256, 0, 1, [], [0])], num_nodes=2, edges=[(0, 1), (1, 0)])
+
+    def test_planner_on_random_problems(self):
+        # the C++ planner on synthetic problems: the conflict rule against a
+        # direct implementation, the plan valid and no smaller than the peak
+        # live bytes, and invalid plans rejected
+
+        def problem(seed, steps=80, nodes=40):
+            rng = random.Random(seed)
+            edges = [
+                (a, b)
+                for b in range(nodes)
+                for a in rng.sample(range(b), min(b, 2))
+                if rng.random() < 0.7
+            ]
+            # [size, alloc_time, free_time, alloc_nodes, free_nodes]
+            allocs, live = [], []
+            for t in range(steps):
+                if live and rng.random() < 0.45:
+                    a = live.pop(rng.randrange(len(live)))
+                    a[2] = t
+                    a[4] = rng.sample(range(nodes), rng.randint(0, 2))
+                else:
+                    a = [
+                        rng.choice([256, 1000, 4096, 1 << 16, 3 << 18]),
+                        t,
+                        None,
+                        rng.sample(range(nodes), rng.randint(0, 2)),
+                        [],
+                    ]
+                    allocs.append(a)
+                    live.append(a)
+            return allocs, nodes, edges
+
+        def reference_conflict(allocs, ancestors, i, j):
+            if i > j:
+                i, j = j, i
+            a, b = allocs[i], allocs[j]
+            if a[2] is None or a[2] > b[1]:
+                return True
+            closure = set().union(*(ancestors[v] for v in b[3]))
+            return any(v not in closure for v in a[4])
+
+        for seed in range(4):
+            allocs, nodes, edges = problem(seed)
+            parents = [[] for _ in range(nodes)]
+            for a, b in edges:
+                parents[b].append(a)
+            ancestors = []
+            for v in range(nodes):  # edges go from lower to higher indices
+                ancestors.append({v}.union(*(ancestors[p] for p in parents[v])))
+            alloc_ptr, alloc_nodes, free_ptr, free_nodes = [0], [], [0], []
+            for a in allocs:
+                alloc_nodes.extend(a[3])
+                alloc_ptr.append(len(alloc_nodes))
+                free_nodes.extend(a[4])
+                free_ptr.append(len(free_nodes))
+            args = (
+                [a[0] for a in allocs],
+                [a[1] for a in allocs],
+                [-1 if a[2] is None else a[2] for a in allocs],
+                alloc_ptr,
+                alloc_nodes,
+                free_ptr,
+                free_nodes,
+                nodes,
+                [v for e in edges for v in e],
+            )
+            p = torch._C._cuda_PlanningProblem(*args)
+            n = p.num_allocations
+            self.assertEqual(n, len(allocs))
+            for i in range(n):
+                for j in range(n):
+                    self.assertEqual(
+                        p.conflict(i, j),
+                        i != j and reference_conflict(allocs, ancestors, i, j),
+                        (seed, i, j),
+                    )
+            _, arena, offsets = p.plan()
+            self.assertEqual(p.validate(offsets), arena)
+            self.assertGreaterEqual(arena, self._peak_live(allocs))
+            # an overlapping conflicting pair, a misaligned offset and a plan
+            # of the wrong length are rejected
+            i, j = next(
+                (i, j) for i in range(n) for j in range(i + 1, n) if p.conflict(i, j)
+            )
+            bad = list(offsets)
+            bad[j] = bad[i]
+            with self.assertRaisesRegex(
+                RuntimeError, "invalid memory plan: allocations"
+            ):
+                p.validate(bad)
+            with self.assertRaisesRegex(RuntimeError, "not a multiple of 256"):
+                p.validate([o + 1 for o in offsets])
+            with self.assertRaisesRegex(RuntimeError, "offsets for"):
+                p.validate(offsets[1:])
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available")
 @unittest.skipIf(TEST_WITH_ROCM, "graph allocators are not tested on ROCm")
 @unittest.skipIf(_GRAPH_ALLOCATORS_TEST, "already in a subprocess")
