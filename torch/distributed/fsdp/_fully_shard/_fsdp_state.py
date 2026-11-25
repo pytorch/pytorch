@@ -187,7 +187,9 @@ class FSDPState(_State):
             return  # no-op: already initialized
         if len(self._modules) > 1:
             raise RuntimeError(
-                f"{self._state_name} requires a single root module but got {self._modules}"
+                f"{self._state_name} requires a single root module but got "
+                f"{self._modules}. If running a grouped submodule before the "
+                "root module, call lazy_init() on the root module first."
             )
         root_module = self._modules[0]
         for module in root_module.modules():
@@ -211,7 +213,8 @@ class FSDPState(_State):
                     raise RuntimeError(
                         f"{self._state_name} state has already been lazily initialized for "
                         f"{module_name}\n{self._state_name} requires running forward through "
-                        "the root module first"
+                        "the root module first, or calling lazy_init() on the root module "
+                        "before running submodules"
                     )
                 state._is_root = False
             # A single state can map to multiple modules (e.g.
