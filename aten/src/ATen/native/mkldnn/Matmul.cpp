@@ -124,18 +124,18 @@ static bool use_mkldnn_tf32_matmul() {
 #endif
 }
 
-// returns an ITensor
+// returns an MkldnnMemory
 // - dims: shape e.g: {M,N}
 // - idtype: oneDNN data type e.g: (f32, bf16, f16)
 // - strides: Memory layout
 // - data: data pointer
 template <typename scalar_t>
-inline mkldnn::ITensor make_ideep_tensor(
+inline mkldnn::MkldnnMemory make_ideep_tensor(
     std::vector<int64_t> dims,
     dnnl::memory::data_type idtype,
     dnnl::memory::dims& strides,
     scalar_t *data){
-    mkldnn::ITensor res({
+    mkldnn::MkldnnMemory res({
       dims,
       idtype,
       strides
@@ -193,10 +193,10 @@ mkldnn_gemm(
     idtype = dnnl::memory::data_type::f32;
   }
 
-  mkldnn::ITensor a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
-  mkldnn::ITensor b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
-  mkldnn::ITensor c = make_ideep_tensor<scalar_t>({n, m}, idtype, c_strides, c_data);
-  mkldnn::ITensor src = b;
+  mkldnn::MkldnnMemory a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
+  mkldnn::MkldnnMemory b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
+  mkldnn::MkldnnMemory c = make_ideep_tensor<scalar_t>({n, m}, idtype, c_strides, c_data);
+  mkldnn::MkldnnMemory src = b;
 
 #if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
   if constexpr (std::is_same_v<scalar_t, c10::Half>) {
@@ -218,7 +218,7 @@ mkldnn_gemm(
     // matmul_forward will query oneDNN expect format of output
     // if given output format is not expected, matmul_forward will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
-    mkldnn::ITensor real_output = make_ideep_tensor<scalar_t>({n,m}, idtype, c_strides, c_data);
+    mkldnn::MkldnnMemory real_output = make_ideep_tensor<scalar_t>({n,m}, idtype, c_strides, c_data);
     c.reorder_to(real_output);
   }
   return true;
@@ -261,9 +261,9 @@ mkldnn_gemm(
 
   auto idtype = dnnl::memory::data_type::bf16;
 
-  mkldnn::ITensor a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
-  mkldnn::ITensor b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
-  mkldnn::ITensor c = make_ideep_tensor<float>({n, m}, dnnl::memory::data_type::f32, c_strides, c_data);
+  mkldnn::MkldnnMemory a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
+  mkldnn::MkldnnMemory b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
+  mkldnn::MkldnnMemory c = make_ideep_tensor<float>({n, m}, dnnl::memory::data_type::f32, c_strides, c_data);
 
   mkldnn::matmul_forward(b, a, c, alpha, beta, op_attr);
 
@@ -271,7 +271,7 @@ mkldnn_gemm(
     // matmul_forward will query onednn expect format of output
     // if given output format is not expected, matmul_forward will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
-    mkldnn::ITensor real_output = make_ideep_tensor<float>({n,m}, idtype, c_strides, c_data);
+    mkldnn::MkldnnMemory real_output = make_ideep_tensor<float>({n,m}, idtype, c_strides, c_data);
     c.reorder_to(real_output);
   }
 
@@ -420,15 +420,15 @@ void mkldnn_matmul(
   mat2_ = may_convert_to_default_contiguous_strides(mat2_);
 
   // mkldnn_matmul only proceed CPU tensor
-  const mkldnn::ITensor x = itensor_view_from_const_dense(mat1_);
-  const mkldnn::ITensor w = itensor_view_from_const_dense(mat2_);
-  mkldnn::ITensor y = itensor_view_from_dense(result_unsqueezed);
+  const mkldnn::MkldnnMemory x = itensor_view_from_const_dense(mat1_);
+  const mkldnn::MkldnnMemory w = itensor_view_from_const_dense(mat2_);
+  mkldnn::MkldnnMemory y = itensor_view_from_dense(result_unsqueezed);
   mkldnn::matmul_forward(x, w, y, alpha, beta, op_attr);
   if (y.get_data_handle() != result.const_data_ptr()){
     // matmul_forward will query onednn expect format of output
     // if given output format is not expected, matmul_forward will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
-    mkldnn::ITensor public_y = itensor_view_from_dense(result);
+    mkldnn::MkldnnMemory public_y = itensor_view_from_dense(result);
     y.reorder_to(public_y);
   }
 
@@ -541,17 +541,17 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   } else {
     src_dtype = dnnl::memory::data_type::s8;
   }
-  auto src = mkldnn::ITensor(
+  auto src = mkldnn::MkldnnMemory(
       {mat1.sizes().vec(),
        src_dtype,
        mat1.strides().vec()},
       const_cast<void*>(mat1.const_data_ptr()));
-  auto wei = mkldnn::ITensor(
+  auto wei = mkldnn::MkldnnMemory(
       {mat2.sizes().vec(),
        dnnl::memory::data_type::s8,
        mat2.strides().vec()},
       const_cast<void*>(mat2.const_data_ptr()));
-  auto dst = mkldnn::ITensor(
+  auto dst = mkldnn::MkldnnMemory(
       {result.sizes().vec(),
        dnnl::memory::data_type::s32,
        result.strides().vec()},
@@ -573,7 +573,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   // Reorder mat2 if needed
   auto expected_weight = wei.reorder_if_differ_in(prim_desc.weights_desc());
   // Prepare args for primitive
-  mkldnn::ITensor scratchpad(prim_desc.scratchpad_desc());
+  mkldnn::MkldnnMemory scratchpad(prim_desc.scratchpad_desc());
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src});
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});

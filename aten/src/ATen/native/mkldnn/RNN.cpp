@@ -131,7 +131,7 @@ struct RNNParams {
 
   // mkldnn memory descriptors
   using format = dnnl::memory::format_tag;
-  using desc = mkldnn::ITensor::desc;
+  using desc = mkldnn::MkldnnMemory::desc;
   using dtype = dnnl::memory::data_type;
   desc src_layer_desc(int64_t _input_size, dtype dtype) const {
     return {{seq_length, mini_batch, _input_size}, dtype, format::tnc};
@@ -253,7 +253,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
 
   // per layer input size
   int64_t input_size = input.size(2);
-  mkldnn::ITensor w1_, w2_;
+  mkldnn::MkldnnMemory w1_, w2_;
   auto x = itensor_view_from_const_dense(
       input,
       rnn.src_layer_desc(input_size, get_mkldnn_dtype(input)));
@@ -276,7 +276,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
     auto pd = mkldnn::lstm_forward_training_prepare(
         x, hx, cx, w1_, w2_, b, y, hy, cy, reverse);
     workspace = at::empty(pd.workspace_desc().get_size() / sizeof(uint8_t), input.options().dtype(at::kByte));
-    mkldnn::ITensor mkldnn_workspace;
+    mkldnn::MkldnnMemory mkldnn_workspace;
     mkldnn_workspace.init(
       pd.workspace_desc(), workspace.template mutable_data_ptr<uint8_t>());
     mkldnn::lstm_forward_training(
@@ -366,7 +366,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     auto cy = itensor_view_from_const_dense(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_.scalar_type())));
 
-  // Create diff_* ATen tensor and corresponding ITensor as fp32
+  // Create diff_* ATen tensor and corresponding MkldnnMemory as fp32
   auto diff_x_ =
       at::empty(input.sizes(), input.options().dtype(at::ScalarType::Float));
   auto diff_hx_ =
@@ -395,7 +395,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
       diff_b_, rnn.bias_desc(dnnl::memory::data_type::f32));
 
   // Convert grad_y, grad_hy, grad_cy to fp32 in non-fp32 backward
-  mkldnn::ITensor diff_y, diff_hy, diff_cy;
+  mkldnn::MkldnnMemory diff_y, diff_hy, diff_cy;
   at::Tensor grad_y_, grad_hy_, grad_cy_;
   if (input.scalar_type() != at::ScalarType::Float) {
     grad_y_ = at::empty(
@@ -425,7 +425,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   }
 
   auto forward_hint = mkldnn::lstm_forward_training_prepare(x, hx, cx, w1, w2, b, y, hy, cy, reverse);
-  mkldnn::ITensor mkldnn_workspace;
+  mkldnn::MkldnnMemory mkldnn_workspace;
   mkldnn_workspace.init(
       forward_hint.workspace_desc(),
       const_cast<uint8_t*>(workspace.const_data_ptr<uint8_t>()));
