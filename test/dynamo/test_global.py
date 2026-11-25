@@ -482,22 +482,34 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                     self.assertEqual(opt_fn(x), x + 1)
                     self.assertEqual(cnt.frame_count, 1)
 
-    # policy=error flags the zero-net store+delete as an unreplayed side
-    # effect; the shape itself matches eager without the policy.
+    @torch._dynamo.config.patch(side_effect_replay_policy="error")
     def test_delete_global_created_then_deleted(self):
         with mock.patch.dict(globals()):
-            with torch._dynamo.config.patch(side_effect_replay_policy="error"):
 
-                def fn(x):
-                    global _dg_a
-                    _dg_a = 1
-                    del _dg_a
-                    return x + 1
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                global _dg_a
+                _dg_a = 1
+                del _dg_a
+                return x + 1
 
-                x = torch.ones(2, 2)
-                with self.assertRaisesRegex(RuntimeError, "found certain side effects"):
-                    torch.compile(fn, backend="eager", fullgraph=True)(x)
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x + 1)
             self.assertNotIn("_dg_a", globals())
+
+    @torch._dynamo.config.patch(side_effect_replay_policy="error")
+    def test_delete_global_preexisting_is_reported(self):
+        with mock.patch.dict(globals(), {"_dg_a": 1}):
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                global _dg_a
+                del _dg_a
+                return x + 1
+
+            with self.assertRaisesRegex(RuntimeError, "found certain side effects"):
+                fn(torch.ones(2, 2))
+            self.assertEqual(globals()["_dg_a"], 1)
 
     @parametrize("preexisting", (True, False))
     def test_delete_global_twice(self, preexisting):
@@ -735,21 +747,32 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), x + 42)
             self.assertNotIn("delete_value", mod.__dict__)
 
-    # policy=error flags the zero-net store+delete as an unreplayed side
-    # effect; the shape itself matches eager without the policy.
+    @torch._dynamo.config.patch(side_effect_replay_policy="error")
     def test_delete_global_crossfile_created_then_deleted(self):
         with crossfile_globals() as mod:
-            with torch._dynamo.config.patch(side_effect_replay_policy="error"):
 
-                @torch.compile(backend="eager", fullgraph=True)
-                def fn(x):
-                    mod.store_then_delete_missing_fn()
-                    return x + 1
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                mod.store_then_delete_missing_fn()
+                return x + 1
 
-                x = torch.ones(2, 2)
-                with self.assertRaisesRegex(RuntimeError, "found certain side effects"):
-                    fn(x)
+            x = torch.ones(2, 2)
+            self.assertEqual(fn(x), x + 1)
             self.assertNotIn("store_then_delete_missing_value", mod.__dict__)
+
+    @torch._dynamo.config.patch(side_effect_replay_policy="error")
+    def test_delete_global_crossfile_with_other_mutation_is_reported(self):
+        with crossfile_globals(global_flag=False) as mod:
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn(x):
+                mod.store_then_delete_missing_fn()
+                mod.set_flag_true()
+                return x + 1
+
+            with self.assertRaisesRegex(RuntimeError, "found certain side effects"):
+                fn(torch.ones(2, 2))
+            self.assertFalse(mod.global_flag)
 
     def test_delete_global_crossfile_created_then_deleted_replays_delete(self):
         with crossfile_globals() as mod:

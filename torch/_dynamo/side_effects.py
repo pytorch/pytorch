@@ -738,6 +738,23 @@ class SideEffects:
             self.store_attr_mutations.get(item)
         )
 
+    def is_noop_global_delete(
+        self, item: VariableTracker, name: str, value: VariableTracker
+    ) -> bool:
+        """Whether a pending delete leaves the original global namespace unchanged."""
+        if not isinstance(value, variables.DeletedVariable):
+            return False
+        output_graph = self.output_graph_weakref()
+        if output_graph is None:
+            return False
+        if isinstance(item, variables.NewGlobalVariable):
+            return name not in output_graph.global_scope
+        if isinstance(item, variables.PythonModuleVariable):
+            namespace = item.value.__dict__
+            deleted = output_graph.deleted_globals_by_dict.get(id(namespace))
+            return deleted is not None and name in deleted[1] and name not in namespace
+        return False
+
     def has_pending_mutation_of_attr(
         self,
         item: VariableTracker,
@@ -2037,6 +2054,8 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
     # reverse order.
     side_effect_occurred = False
     for name, value in reversed(side_effects.store_attr_mutations.get(var, {}).items()):
+        if side_effects.is_noop_global_delete(var, name, value):
+            continue
         mutation_kind = side_effects.get_attr_mutation_kind(var, name)
         if isinstance(var, variables.NewGlobalVariable):
             if not isinstance(var.source, GlobalSource):  # type: ignore[attr-defined]
@@ -2050,12 +2069,9 @@ def _codegen_attribute_mutation(ctx: SideEffectReplayContext) -> None:
                 # Through 3.15, STORE_GLOBAL would write the null as an
                 # ordinary value into the dict, so DELETE_GLOBAL must be
                 # emitted.
-                if name in cg.tx.output.global_scope:
-                    cg.tx.output.update_co_names(name)
-                    ctx.suffixes.append(
-                        [create_instruction("DELETE_GLOBAL", argval=name)]
-                    )
-                    side_effect_occurred = True
+                cg.tx.output.update_co_names(name)
+                ctx.suffixes.append([create_instruction("DELETE_GLOBAL", argval=name)])
+                side_effect_occurred = True
             else:
                 cg.tx.output.update_co_names(name)
                 cg(value)
