@@ -287,9 +287,17 @@ jobs:
           echo "image_available=true" >> "${GITHUB_OUTPUT}"
           # ROCm test runners cannot log in to ECR before pulling the job
           # container, so preview tests need the GHCR mirror pushed right after.
-          for attempt in 1 2 3 4 5 6; do
-            status="token request failed"
-            if token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -er .token)"; then
+          # Wait up to 60 min for it, as the stable lanes do; skip at once if private.
+          token_file="$(mktemp)"
+          deadline=$(( SECONDS + 60 * 60 ))
+          while true; do
+            token_status="$(curl -sS -o "${token_file}" -w '%{http_code}' \
+              "https://ghcr.io/token?scope=repository:${repo}:pull" || true)"
+            if [[ "${token_status}" == "401" || "${token_status}" == "403" ]]; then
+              break
+            fi
+            status="token HTTP ${token_status}"
+            if [[ "${token_status}" == "200" ]] && token="$(jq -er .token "${token_file}")"; then
               status="$(curl -sS -o /dev/null -w 'HTTP %{http_code}' \
                 -H "Authorization: Bearer ${token}" \
                 -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json' \
@@ -302,9 +310,10 @@ jobs:
               exit 0
             fi
             echo "  ghcr.io/${repo}:${tag} not pullable yet (${status})"
-            if (( attempt < 6 )); then
-              sleep 60
+            if (( SECONDS > deadline )); then
+              break
             fi
+            sleep 60
           done
           echo "::warning::ghcr.io/${repo}:${tag} is not publicly pullable; skipping preview tests."
           echo "test_available=false" >> "${GITHUB_OUTPUT}"

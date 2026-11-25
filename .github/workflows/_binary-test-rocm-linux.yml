@@ -56,7 +56,6 @@ on:
         default: 240
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -77,6 +76,11 @@ jobs:
           TAG: ${{ inputs.DOCKER_IMAGE_TAG_PREFIX }}
         run: |
           set -euo pipefail
+          # The image becomes a GPU job container, so only accept builder names.
+          if [[ ! "${REPOSITORY}" =~ ^pytorch/manylinux[A-Za-z0-9_.-]*builder$ || ! "${TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::Refusing unexpected builder image '${REPOSITORY}:${TAG}'."
+            exit 1
+          fi
           image="${REGISTRY_HOST}${REPOSITORY}:${TAG}"
           case "${REGISTRY_HOST}" in
             "")
@@ -125,7 +129,9 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     container:
       image: ${{ needs.resolve-image.outputs.docker-image }}
-      options: --device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon
+      # `bin` is gid 1 on AlmaLinux (`daemon` on Ubuntu); the host `video` gid maps
+      # there. Tests skip the GPU smoke for ROCm, so no render gid or isolation.
+      options: --device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon --group-add bin
     env:
       PYTORCH_ROOT: ${{ github.workspace }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
@@ -143,7 +149,6 @@ jobs:
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
     permissions:
-      id-token: write
       contents: read
     steps:
       - name: Configure git safe directory
