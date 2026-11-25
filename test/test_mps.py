@@ -9364,6 +9364,21 @@ class TestMPS(TestCaseMPS):
         self.assertFalse(torch.mps.current_stream().query())
         event.signal(1)
 
+    def test_mps_event_host_signal_orders_host_writes(self):
+        steps = 8
+        x = torch.zeros(steps, device="mps")
+        torch.mps.synchronize()
+        host_x = torch.empty(0).set_(torch.mps._host_alias_storage(x.untyped_storage()))
+        event = torch.mps.Event()
+        out = []
+        for n in range(1, steps + 1):
+            event.wait(value=n)
+            out.append(x[n - 1] * 1)
+        for n in range(1, steps + 1):
+            host_x[n - 1] = n
+            event.signal(n)
+        self.assertEqual(torch.stack(out).cpu(), torch.arange(1.0, steps + 1))
+
     def test_generic_event(self):
         startEvent = torch.Event('mps', enable_timing=True)
         startEvent.record()
