@@ -1973,6 +1973,32 @@ for warning in w:
         expected = torch.cuda.current_blas_handle()
         self.assertEqual(res, expected)
 
+    @skipIfTorchVersionLessThan(2, 16)
+    @onlyCUDA
+    def test_my_get_curr_cuda_blas_handle_v2(self, device):
+        import libtorch_agn_2_16 as libtorch_agnostic
+
+        get_handle_stream = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle_stream
+        original_stream = torch.cuda.current_stream(device)
+        other_stream = torch.cuda.Stream(device=device)
+        with torch.cuda.device(device):
+            try:
+                _, handle_stream = get_handle_stream(True)
+                self.assertEqual(handle_stream, original_stream.cuda_stream)
+                with torch.cuda.stream(other_stream):
+                    handle_without_setup, handle_stream = get_handle_stream(False)
+                    # ROCm can select a separate BLAS handle for each stream.
+                    if torch.version.hip is None:
+                        self.assertEqual(handle_stream, original_stream.cuda_stream)
+                    handle_with_setup, handle_stream = get_handle_stream(True)
+                    self.assertEqual(handle_stream, other_stream.cuda_stream)
+
+                    expected_handle = torch.cuda.current_blas_handle()
+                    self.assertEqual(handle_without_setup, expected_handle)
+                    self.assertEqual(handle_with_setup, expected_handle)
+            finally:
+                get_handle_stream(True)
+
     @skipIfWindows(msg="ValueError: vector too long")
     @skipIfTorchVersionLessThan(2, 10)
     def test_my_string_op(self, device):
