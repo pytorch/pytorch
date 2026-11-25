@@ -437,6 +437,39 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
     compile_fn = staticmethod(functools.partial(torch.compile, dynamic=True))
 
+    def test_sym_expr_hash_contract(self):
+        # __hash__ keys on the proxy type, so __eq__ must as well: equal
+        # objects are required to have equal hashes, and SymInt/SymFloat
+        # proxies over the same sympy expression are not interchangeable.
+        from torch._inductor.fx_passes.dedupe_symint_uses import _SymExprHash
+
+        class FakeNode:
+            def __init__(self, expr):
+                self.expr = expr
+
+        class FakeSym:
+            def __init__(self, expr):
+                self.node = FakeNode(expr)
+
+        class FakeSymInt(FakeSym):
+            pass
+
+        class FakeSymFloat(FakeSym):
+            pass
+
+        int_a = _SymExprHash(FakeSymInt("s0"))
+        int_b = _SymExprHash(FakeSymInt("s0"))
+        float_a = _SymExprHash(FakeSymFloat("s0"))
+
+        self.assertEqual(int_a, int_b)
+        self.assertEqual(hash(int_a), hash(int_b))
+        self.assertEqual(len({int_a: 1, int_b: 2}), 1)
+        self.assertNotEqual(int_a, float_a)
+        d = {int_a: 1, float_a: 2}
+        self.assertEqual(len(d), 2)
+        self.assertEqual(d[int_a], 1)
+        self.assertEqual(d[float_a], 2)
+
     @preserves_device_selection
     def setUp(self):
         # Pre-PR boundary: the CPU variant only ran on machines with a
