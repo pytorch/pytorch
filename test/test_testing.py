@@ -4316,6 +4316,7 @@ class TestImports(TestCase):
                            "torch._native.cutedsl",  # depends on cutlass
                            'torch._native.ops.pointwise.kernel',
                            'torch._native.ops.pointwise.ops',
+                           'torch._native.ops.pointwise.aot_kernels',
                            'torch._native.ops.pointwise.tma',
                            'torch._native.ops.pointwise.transpose_copy',
                            'torch._native.ops.pointwise.transpose_tma',

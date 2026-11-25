@@ -190,6 +190,9 @@ def get_coverage(op_symbol: str, dispatch_key: str) -> _Coverage | None:
     c = table.get((op_symbol, dispatch_key))
     if c is not None:
         return c
+    # Quantized copy_ uses the same Composite backend CUDA AOT consultation.
+    if (op_symbol, dispatch_key) == ("copy_", "QuantizedCUDA"):
+        return table.get(("copy_", "CUDA"))
     base = _base_name(op_symbol)
     candidate = table.get((base, dispatch_key))
     if candidate is not None and candidate.structured and not candidate.exact:

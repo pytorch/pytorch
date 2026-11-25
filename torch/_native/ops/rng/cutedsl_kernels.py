@@ -1,6 +1,6 @@
 r"""Philox distributions with ATen counter order and generator advancement."""
 
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import cuda.bindings.driver as cuda
 
@@ -12,6 +12,7 @@ import torch
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from ...cutedsl import hw_caps as _hw, launch as _L
+from ...cutedsl.aot import export_args
 from ...cutedsl.dtypes import torch2cute
 from ...cutedsl.types import Index, NumericType
 from ...utils.device import check_current
@@ -253,3 +254,11 @@ def fill_random(
         seed_val, off_val = seed_t.item(), offset_t.item()
     compiled(target, st, st2, seed_val, off_val, intra, a, b, c, num_iters, grid)
     return out
+
+
+def build(spec: dict[str, Any]) -> dict[str, Any]:
+    output = _L.fake_compact(Float32, (_L.sym(),), align=4)
+    states = [_L.fake_compact(Int64, (1,), align=8) for _ in range(2)]
+    fn = _Distribution(spec["kind"], spec["capture"])
+    prefix = f"rng_{spec['kind']}_{'capture' if spec['capture'] else 'eager'}"
+    return export_args(fn, output, *states, prefix=prefix, read_only=("mSeed", "mOff"))
