@@ -10,35 +10,35 @@ namespace at::native::mkldnn {
 // Ported from ideep::batch_normalization_forward_inference::compute (the
 // overload taking mean/variance).
 void batch_normalization_forward_inference(
-    const ITensor& src,
-    const ITensor& mean,
-    const ITensor& variance,
-    const ITensor& scale,
-    const ITensor& shift,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& mean,
+    const MkldnnMemory& variance,
+    const MkldnnMemory& scale,
+    const MkldnnMemory& shift,
+    MkldnnMemory& dst,
     float epsilon);
 
 // Ported from ideep::batch_normalization_forward_training::compute (the
 // overload without running stats).
 void batch_normalization_forward_training(
-    const ITensor& src,
-    const ITensor& scale,
-    const ITensor& shift,
-    ITensor& dst,
-    ITensor& mean,
-    ITensor& variance,
+    const MkldnnMemory& src,
+    const MkldnnMemory& scale,
+    const MkldnnMemory& shift,
+    MkldnnMemory& dst,
+    MkldnnMemory& mean,
+    MkldnnMemory& variance,
     float epsilon);
 
 // Ported from ideep::batch_normalization_backward::compute.
 void batch_normalization_backward(
-    const ITensor& src,
-    const ITensor& mean,
-    const ITensor& variance,
-    const ITensor& diff_dst,
-    const ITensor& scale,
-    ITensor& diff_src,
-    ITensor& diff_scale,
-    ITensor& diff_shift,
+    const MkldnnMemory& src,
+    const MkldnnMemory& mean,
+    const MkldnnMemory& variance,
+    const MkldnnMemory& diff_dst,
+    const MkldnnMemory& scale,
+    MkldnnMemory& diff_src,
+    MkldnnMemory& diff_scale,
+    MkldnnMemory& diff_shift,
     float epsilon);
 
 } // namespace at::native::mkldnn
