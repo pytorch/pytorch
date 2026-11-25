@@ -1,0 +1,6 @@
+{{def_kernel("X")}}
+    channel = tl.program_id(0)
+    mean, variance = triton_helpers.cuda_bn_statistics(X, channel, N, C, S, BW, BH)
+    row = tl.arange(0, 2)
+    value = tl.where(row == 0, mean, variance)
+    {{store_output(("row", "channel"), "value", "True", val_shape=("2",))}}

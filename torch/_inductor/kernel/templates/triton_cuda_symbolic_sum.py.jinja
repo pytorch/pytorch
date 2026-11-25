@@ -1,0 +1,140 @@
+{% if SINGLE_CTA and not FINAL %}
+{{def_kernel("X")}}
+    value = tl.full((1,), 0, ACC_TYPE)
+    index = tl.full((1,), 0, tl.int64)
+    {{store_output(("index", "index", "index"), "value", "index < 0", val_shape=("1",))}}
+{% else %}
+{% if FINAL %}
+{{def_kernel("X", "PARTIAL")}}
+    leaf_bound = {{size("PARTIAL", 0, precomputed=True)}}
+    capacity = {{size("PARTIAL", 1, precomputed=True)}}
+    partial_stride = {{size("PARTIAL", 2, precomputed=True)}}
+    local_output = tl.full((), 0, tl.int64)
+    cta = 0
+    leaf_index = 0
+{% else %}
+{{def_kernel("X")}}
+    PARTIAL = X
+    leaf_bound = {{size(None, 0, precomputed=True)}}
+    capacity = {{size(None, 1, precomputed=True)}}
+    partial_stride = {{size(None, 2, precomputed=True)}}
+{% endif %}
+    programs = {% if FINAL %}{{size(None, 0, precomputed=True)}}{% else %}tl.full((), leaf_bound, tl.int64) * capacity * partial_stride{% endif %}
+    for program in range(tl.program_id(0).to(tl.int64), programs, tl.num_programs(0)):
+        {% if FINAL %}
+        output = program
+        {% else %}
+        leaf_index = program // (capacity * partial_stride)
+        local_output = (program // partial_stride) % capacity
+        cta = program % partial_stride
+        {% endif %}
+        source_shape = ({% for d in range(RANK) %}{{size("X", d)}}, {% endfor %})
+        source_strides = ({% for d in range(RANK) %}{{stride("X", d)}}, {% endfor %})
+        full_shape, istrides, ostrides, ndim, reduced = triton_helpers.cuda_native_sum_coalesced_metadata(source_shape, source_strides, ORDER, RDIMS)
+        slots = tl.arange(0, {{WIDTH}})
+        value = tl.full((), 0, ACC_TYPE)
+        incoming = tl.full((), 0, ACC_TYPE)
+        active = False
+        iteration = tl.full((), 0, tl.int64)
+        available = True
+        while available and iteration < {% if FINAL %}leaf_bound{% else %}1 and partial_stride > 1{% endif %}:
+            leaf = {% if FINAL %}iteration{% else %}leaf_index{% endif %}
+            {% if SINGLE_LEAF %}
+            shape = full_shape
+            starts = tl.full(({{WIDTH}},), 0, tl.int64)
+            accumulate = False
+            found = leaf == 0
+            {% else %}
+            shape, starts, accumulate, found = triton_helpers.cuda_native_sum_split_leaf(full_shape, istrides, ostrides, ndim, ITEMSIZE, OUTPUT_ITEMSIZE, leaf)
+            {% endif %}
+            count = triton_helpers.prod(tl.where(slots < reduced, shape, 1), 0)
+            m = triton_helpers.prod(tl.where((slots >= reduced) & (slots < ndim), shape, 1), 0)
+            {% if FINAL %}
+            coordinates = (output // tl.maximum(ostrides, 1)) % tl.maximum(full_shape, 1)
+            inside = found and tl.min(tl.where((slots >= reduced) & (slots < ndim), (coordinates >= starts) & (coordinates < starts + shape), True).to(tl.int32), 0) != 0
+            local_output = tl.full((), 0, tl.int64)
+            multiplier = tl.full((), 1, tl.int64)
+            for d in tl.static_range({{WIDTH}}):
+                if d >= reduced and d < ndim:
+                    coordinate = triton_helpers.cuda_native_sum_vector_get(coordinates, d)
+                    start = triton_helpers.cuda_native_sum_vector_get(starts, d)
+                    local_output += (coordinate - start) * multiplier
+                    multiplier *= triton_helpers.cuda_native_sum_vector_get(shape, d)
+            {% else %}
+            inside = found and local_output < m
+            {% endif %}
+            active = inside and cta == 0
+            incoming = tl.full((), 0, ACC_TYPE)
+            if inside and count > 0:
+                pointer = X + tl.sum(starts * istrides, 0)
+                first_input = triton_helpers.cuda_native_sum_vector_get(istrides, 0)
+                first_output = triton_helpers.cuda_native_sum_vector_get(istrides, reduced)
+                fast = reduced == ndim or first_input < first_output
+                vi = fast and first_input == 1 and reduced == 1 and count >= 128
+                ov = 1
+                if not fast and first_output == 1:
+                    for vector in tl.static_range(2, 5, 2):
+                        aligned = triton_helpers.cuda_native_sum_vector_get(shape, reduced) % vector == 0
+                        aligned = aligned and tl.min(tl.where((slots != reduced) & (slots < ndim), istrides % vector == 0, True).to(tl.int32), 0) != 0
+                        if aligned and pointer.to(tl.uint64) % (vector * ITEMSIZE) == 0:
+                            ov = vector
+                d0 = tl.where(fast, count, m) // tl.where(vi, IV, ov)
+                d1 = tl.where(fast, m, count)
+                maximum = 512 // ov
+                d0p = tl.full((), 1, tl.int64)
+                d1p = tl.full((), 1, tl.int64)
+                for power in tl.static_range(1, 10):
+                    power_value = 1 << power
+                    d0p = tl.where(d0 >= power_value, power_value, d0p)
+                    d1p = tl.where(d1 >= power_value, power_value, d1p)
+                d0p, d1p = tl.minimum(d0p, maximum), tl.minimum(d1p, maximum)
+                bw = tl.minimum(d0p, 32)
+                bh = tl.minimum(d1p, maximum // bw)
+                bw = tl.minimum(d0p, maximum // bh)
+                {% for case in CASES %}
+    {% macro reduce_leaf(finalize) -%}
+if sy:
+    incoming = triton_helpers.cuda_native_sum(pointer, partial, local_output, cta, shape, istrides, (0,), reduced, count, 1, {{case[0]}}, {{case[1]}}, {{case[2]}}, IV, {{case[3]}}, True, ctas, partial_stride, {{finalize}}, True, {% if case[3] %}{{case[0] * case[1]}}{% else %}{{case[1]}}{% endif %}, -1, None, True)
+else:
+    incoming = triton_helpers.cuda_native_sum(pointer, partial, local_output, cta, shape, istrides, (0,), reduced, count, 1, {{case[0]}}, {{case[1]}}, {{case[2]}}, IV, {{case[3]}}, False, ctas, partial_stride, {{finalize}}, True, {% if case[3] %}{{case[0]}}{% else %}1{% endif %}, -1, None, True)
+    {%- endmacro %}
+                {% if loop.first %}if{% else %}elif{% endif %} bw == {{case[0]}} and bh == {{case[1]}} and vi == {{case[2]}} and fast == {{case[3]}}:
+                    sy = tl.cdiv(count, {% if case[3] %}{{case[0]}}{% else %}1{% endif %}) >= {{[case[1] * 16, 256]|min}}
+                    if sy:
+                        step = {% if case[3] %}{{case[0] * case[1]}}{% else %}{{case[1]}}{% endif %}
+                        output_step = {% if case[3] %}1{% else %}{{case[0]}}{% endif %}
+                    else:
+                        step = {% if case[3] %}{{case[0]}}{% else %}1{% endif %}
+                        output_step = {% if case[3] %}{{case[1]}}{% else %}{{case[0] * case[1]}}{% endif %}
+                    target = {{SMS}} * ({{THREADS_PER_SM}} // {{case[0] * case[1]}})
+                    grid = tl.cdiv(m // ov, output_step)
+                    vpt = tl.cdiv(count, step)
+                    ctas = tl.where(sy and vpt >= 256 and grid <= target, tl.minimum(tl.maximum(tl.cdiv(target, tl.maximum(grid, 1)), tl.cdiv(vpt, 256)), tl.cdiv(vpt, 16)), 1)
+                    active = cta < ctas{% if not FINAL %} and ctas > 1{% endif %}
+                    if active:
+                        partial = PARTIAL + leaf * capacity * partial_stride
+                        {% if FINAL and not SINGLE_CTA %}
+                        if ctas == 1:
+{{reduce_leaf(False)|indent(28, true)}}
+                        else:
+{{reduce_leaf(True)|indent(28, true)}}
+                        {% else %}
+{{reduce_leaf(False)|indent(24, true)}}
+                        {% endif %}
+                {% endfor %}
+            if inside:
+                {% if FINAL %}
+                value = value + incoming if accumulate else incoming
+                {% else %}
+                value = incoming
+                {% endif %}
+            available = found
+            iteration += 1
+        value = value[None]
+        {% if FINAL %}
+        {{store_output(("output",), "value", "True", indent_width=8, val_shape=("1",))}}
+        {% else %}
+        {{store_output(("leaf_index", "local_output", "cta"), "value", "active", indent_width=8, val_shape=("1",))}}
+        {% endif %}
+
+{% endif %}
