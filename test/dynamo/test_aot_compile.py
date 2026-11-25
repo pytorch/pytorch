@@ -6929,6 +6929,7 @@ from user code:
         model._aot_compile([ModelInput(args=(x,), kwargs={}, contexts=[])])
         artifacts = model.forward.compiled_results[0]._artifacts
         state = load_guards_state(artifacts.guards_state)
+        # Only the generated builtin name and replayable import aliases are expected.
         recorded = set(state.output_graph.global_scope)
         recorded.discard(state.output_graph.name_of_builtins_dict_key_in_fglobals)
         self.assertTrue(

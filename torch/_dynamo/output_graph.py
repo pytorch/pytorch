@@ -1852,8 +1852,7 @@ class OutputGraph(OutputGraphCommon):
         """
         Resolve the runtime value a Source points to using root_tx's frame.
 
-        Useful to inspect the python object associated with the source during
-        debugging. Will also be used by invoke subgraph caching later on.
+        Pass a shared cache to reuse intermediate values across nested region guard checks.
         """
         return source.get_value(
             {"G": self.root_tx.f_globals, "L": self.root_tx.f_locals},
