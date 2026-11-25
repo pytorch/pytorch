@@ -220,14 +220,6 @@ static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
       Py_TYPE(_other) == THPEventClass,
       "expected other to be a torch.Event object");
   auto other = reinterpret_cast<THPEvent*>(_other);
-  if (self->event.device_type() == c10::DeviceType::MPS) {
-    double elapsed = 0.0;
-    {
-      pybind11::gil_scoped_release no_gil;
-      elapsed = self->event.elapsedTime(other->event);
-    }
-    return PyFloat_FromDouble(elapsed);
-  }
   return PyFloat_FromDouble(self->event.elapsedTime(other->event));
   END_HANDLE_TH_ERRORS
 }
