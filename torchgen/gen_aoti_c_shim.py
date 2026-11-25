@@ -81,12 +81,6 @@ base_type_to_callsite_expr = {
 
 
 # convert args to C types, names in declarations, and expressions in function bodies
-#
-# resolve_dispatch_flags: whether to manually materialize conj/neg input tensors
-# before the call. Device-specific shims call kernels directly and need this.
-# Device-generic (aten) shims go through the dispatcher, which already handles these
-# flags, so one must pass tensors through as-is so that view ops called on complex
-# Tensors keep aliasing their inputs instead of operating on a temporary copy.
 def convert_arg_type_and_name(
     typ: Type,
     name: str,
@@ -495,6 +489,11 @@ def gen_static_dispatch_backend_call(
                 base_name = base_name.removesuffix("_symint")  # Remove "_symint" suffix
                 return f"at::symint::{base_name}<c10::SymInt>"
 
+        # For ops not having a function variant, such as Tensor.index_fill_
+        if Variant.function not in f.variants:
+            # Dispatcher order is safe here because NativeFunction requires out variants to be function-only.
+            return f"at::_ops::{f.func.name.unambiguous_name()}::call"
+
         return f"at::{cpp_sig.name()}"
     else:
         return f"at::{backend_index.dispatch_key.lower()}::{cpp_sig.name()}"
@@ -589,7 +588,14 @@ def gen_c_shim(
         func,
         backend_index,
     )
-    resolve_dispatch_flags = backend_index is not None
+    # ATen shims and CompositeImplicitAutograd kernels already handle conj/neg.
+    # Views need the original tensors to preserve aliasing and checks on math bits.
+    # Other direct kernel calls need materialized inputs.
+    resolve_dispatch_flags = (
+        backend_index is not None
+        and backend_index.dispatch_key != DispatchKey.CompositeImplicitAutograd
+        and not func.is_view_op
+    )
 
     try:
         if header:
