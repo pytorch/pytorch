@@ -102,8 +102,7 @@ using c10::less_than_lowest;
 using c10::signs_differ;
 using c10::signum;
 
-/// Returns true if the sign bit of x is set (true for -0.0 and -NaN
-/// Non-builtin types are evaluated on their value converted to float
+/// Returns true if the sign bit of x is set (true for -0.0 and -NaN)
 template <typename T>
 C10_HOST_DEVICE inline bool _signbit(T x) {
   if constexpr (std::is_integral_v<T>) {
@@ -119,7 +118,7 @@ C10_HOST_DEVICE inline bool _signbit(T x) {
     // Read the bit directly: device Half->float conversion canonicalizes NaN
     return (x.x & 0x8000) != 0;
   } else {
-    return _signbit(static_cast<float>(x));
+    static_assert(!std::is_same_v<T, T>, "_signbit: unsupported type");
   }
 }
 HIDDEN_NAMESPACE_END(torch, headeronly)
