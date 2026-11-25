@@ -931,12 +931,13 @@ class TestOpSchemaMetaProperties(TestCase):
             torch.ops.aten._foreach_max.default, (input_meta,), {}
         )
 
-        self.assertEqual(len(strategies), 3)
+        # No P(max) -> P(max) pass-through: NCCL's all_reduce MAX ignores NaN,
+        # so a NaN in one rank's local values would hide its other values.
+        self.assertEqual(len(strategies), 2)
         self.assertEqual(strategies[0][0], Partial("max"))
         self.assertEqual(strategies[0][1].dim, 0)
         self.assertEqual(strategies[1][0], Partial("max"))
         self.assertEqual(strategies[1][1].dim, 1)
-        self.assertEqual(strategies[2], [Partial("max"), Partial("max")])
 
     def test_var_mean_single_dim_strategy(self):
         from torch.distributed.tensor._ops._math_ops import std_var_single_dim_strategy
