@@ -43,6 +43,7 @@ from torch._inductor.autotune_process import (
     TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
+    TuningThreadPool,
     use_pipelined_autotuning,
 )
 from torch._inductor.codegen.common import WorkspaceArg
@@ -5327,6 +5328,64 @@ class TestTuningProcess(TestCase):
             self.check_healthy(p, device=device)
             p.shutdown()
 
+    def test_rocm_subprocess_sees_its_device_through_hip_visible_devices(self):
+        # HIP reads CUDA_VISIBLE_DEVICES only when HIP_VISIBLE_DEVICES is unset.
+        parent_env = {"HIP_VISIBLE_DEVICES": "4,5,6,7", "CUDA_VISIBLE_DEVICES": "4,5,6,7"}
+        with (
+            mock.patch.object(torch.version, "hip", "7.0"),
+            mock.patch(
+                "torch._inductor.autotune_process.get_gpu_type", return_value="cuda"
+            ),
+            mock.patch.dict(os.environ, parent_env),
+        ):
+            p = TuningProcess(5)
+        try:
+            for env_var in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+                p.put(_TestEnvBenchmarkRequest(env_var).benchmark)
+                self.assertEqual(p.get(), "5")
+        finally:
+            p.shutdown()
+
+    def test_cuda_subprocess_leaves_hip_visible_devices_alone(self):
+        with (
+            mock.patch.object(torch.version, "hip", None),
+            mock.patch(
+                "torch._inductor.autotune_process.get_gpu_type", return_value="cuda"
+            ),
+            mock.patch.dict(os.environ, {"HIP_VISIBLE_DEVICES": "4,5"}),
+        ):
+            p = TuningProcess(1)
+        try:
+            p.put(_TestEnvBenchmarkRequest("HIP_VISIBLE_DEVICES").benchmark)
+            self.assertEqual(p.get(), "4,5")
+            p.put(_TestEnvBenchmarkRequest("CUDA_VISIBLE_DEVICES").benchmark)
+            self.assertEqual(p.get(), "1")
+        finally:
+            p.shutdown()
+
+    def test_rocm_subprocess_inherits_rocr_visible_devices(self):
+        # HIP_VISIBLE_DEVICES and CUDA_VISIBLE_DEVICES index the devices it leaves.
+        with (
+            mock.patch.object(torch.version, "hip", "7.0"),
+            mock.patch(
+                "torch._inductor.autotune_process.get_gpu_type", return_value="cuda"
+            ),
+            mock.patch.dict(os.environ, {"ROCR_VISIBLE_DEVICES": "2,3"}),
+        ):
+            os.environ.pop("HIP_VISIBLE_DEVICES", None)
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            p = TuningProcess(1)
+        try:
+            for env_var, expected in (
+                ("ROCR_VISIBLE_DEVICES", "2,3"),
+                ("HIP_VISIBLE_DEVICES", "1"),
+                ("CUDA_VISIBLE_DEVICES", "1"),
+            ):
+                p.put(_TestEnvBenchmarkRequest(env_var).benchmark)
+                self.assertEqual(p.get(), expected)
+        finally:
+            p.shutdown()
+
 
 class TestTuningProcessPool(TestCase):
     # Use only one device/subprocess so we test the process restarts
@@ -5532,8 +5591,80 @@ class TestTuningProcessPool(TestCase):
             ) as get_interface_mock,
             unittest.mock.patch.dict(os.environ, {env_var: env_value}, clear=False),
         ):
+            os.environ.pop("HIP_VISIBLE_DEVICES", None)
             get_interface_mock.return_value.device_count.return_value = 4
             self.assertEqual(TuningProcessPool.get_device_list(), [1, 3])
+
+    @config.patch({"autotune_multi_device": True})
+    def test_get_device_list_prefers_hip_visible_devices_on_rocm(self):
+        env = {"HIP_VISIBLE_DEVICES": "2,3", "CUDA_VISIBLE_DEVICES": "0,1,2,3"}
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.get_interface_for_device"
+            ) as get_interface_mock,
+            mock.patch(
+                "torch._inductor.autotune_process.get_gpu_type", return_value="cuda"
+            ),
+            mock.patch.object(torch.version, "hip", "7.0"),
+            unittest.mock.patch.dict(os.environ, env, clear=False),
+        ):
+            get_interface_mock.return_value.device_count.return_value = 2
+            self.assertEqual(TuningProcessPool.get_device_list(), [2, 3])
+
+    @config.patch({"autotune_multi_device": True})
+    def test_get_device_list_with_only_rocr_visible_devices(self):
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.get_interface_for_device"
+            ) as get_interface_mock,
+            mock.patch(
+                "torch._inductor.autotune_process.get_gpu_type", return_value="cuda"
+            ),
+            mock.patch.object(torch.version, "hip", "7.0"),
+            unittest.mock.patch.dict(os.environ, {"ROCR_VISIBLE_DEVICES": "2,3"}),
+        ):
+            os.environ.pop("HIP_VISIBLE_DEVICES", None)
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+            get_interface_mock.return_value.device_count.return_value = 2
+            self.assertEqual(TuningProcessPool.get_device_list(), [0, 1])
+
+    @config.patch({"autotune_multi_device": True})
+    def test_get_device_list_with_device_uuids_uses_one_device(self):
+        env = {"HIP_VISIBLE_DEVICES": "GPU-1a2b,GPU-3c4d"}
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.get_interface_for_device"
+            ) as get_interface_mock,
+            mock.patch(
+                "torch._inductor.autotune_process.get_gpu_type", return_value="cuda"
+            ),
+            mock.patch.object(torch.version, "hip", "7.0"),
+            unittest.mock.patch.dict(os.environ, env, clear=False),
+        ):
+            get_interface_mock.return_value.device_count.return_value = 2
+            with self.assertWarnsRegex(UserWarning, "does not list device indices"):
+                self.assertEqual(TuningProcessPool.get_device_list(), [None])
+
+    @config.patch({"autotune_multi_device": True})
+    def test_thread_pool_devices_are_ordinals_in_this_process(self):
+        env = {"HIP_VISIBLE_DEVICES": "4,5"}
+        with (
+            mock.patch(
+                "torch._inductor.autotune_process.get_interface_for_device"
+            ) as get_interface_mock,
+            mock.patch(
+                "torch._inductor.autotune_process.get_gpu_type", return_value="cuda"
+            ),
+            mock.patch.object(torch.version, "hip", "7.0"),
+            unittest.mock.patch.dict(os.environ, env, clear=False),
+        ):
+            get_interface_mock.return_value.device_count.return_value = 2
+            self.assertEqual(TuningProcessPool.get_device_list(), [4, 5])
+            pool = TuningThreadPool()
+            try:
+                self.assertEqual(pool.devices, [0, 1])
+            finally:
+                pool.shutdown()
 
     def test_add_feedback_saver(self):
         """Test that add_feedback_saver correctly adds feedback functions."""
