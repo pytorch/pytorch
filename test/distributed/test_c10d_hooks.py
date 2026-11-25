@@ -10,10 +10,7 @@ from torch.distributed._hooks.collective_annotations import (
     unregister_collective_annotation_hooks,
 )
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_device_type import (
-    expectedFailureXPU,
-    instantiate_device_type_tests,
-)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
@@ -325,9 +322,6 @@ class TestProcessGroupHooksAccelerator(
 
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    # The pinned torch-xpu-ops registers its own XPU c10d kernels without hooks;
-    # remove once the pin includes intel/torch-xpu-ops#6129.
-    @expectedFailureXPU
     def test_hooks_fire_for_all_collectives(self, device):
         torch.accelerator.set_device_index(self.rank)
         self._check_hooks_fire_for_all_collectives(
