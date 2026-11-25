@@ -44,9 +44,7 @@ enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
 enum class WaitResponseType : uint8_t { STOP_WAITING, WAIT_CANCELED };
 
-// Abstract base class to handle thread state for TCPStoreMasterDaemon.
-// Contains the windows/unix implementations to signal a
-// shutdown sequence for the thread
+// Abstract base class to handle thread state for the TCPStore server daemon.
 class BackgroundThread {
  public:
   explicit BackgroundThread();
@@ -70,8 +68,6 @@ class BackgroundThread {
   std::thread daemonThread_;
 };
 
-std::unique_ptr<BackgroundThread> create_tcpstore_backend(
-    const TCPStoreOptions& opts);
 std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
     const TCPStoreOptions& opts);
 bool is_libuv_tcpstore_backend_available();
