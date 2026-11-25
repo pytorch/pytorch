@@ -400,9 +400,12 @@ void validate_mxfp6_scaled_mm_inputs(
        {std::tuple{scale_a[0], mat_a.sym_size(0), "scale_a"},
         std::tuple{scale_b[0], mat_b.sym_size(1), "scale_b"}}) {
     TORCH_CHECK_VALUE(
-        scale.scalar_type() == ScalarType::Float8_e8m0fnu && scale.is_contiguous(),
-        "MXFP6 scaled_mm requires contiguous Float8_e8m0fnu scales, got ", name,
+        scale.scalar_type() == ScalarType::Float8_e8m0fnu,
+        "MXFP6 scaled_mm requires Float8_e8m0fnu scales, got ", name,
         " with dtype ", scale.scalar_type());
+    TORCH_CHECK_VALUE(
+        scale.is_contiguous(), "MXFP6 scaled_mm requires contiguous scales, got ",
+        name, " with strides ", scale.sym_strides());
     const auto expected = (rows + 127) / 128 * 128 * scale_k;
     TORCH_CHECK_VALUE(
         scale.sym_numel() == expected, "MXFP6 scaled_mm expected ", name, " to have ",

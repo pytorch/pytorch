@@ -7747,10 +7747,20 @@ def meta_scaled_mm_v2(
     return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
 
 
-@register_meta([aten._scaled_mm_mxfp6.default, aten._scaled_mm_mxfp6.out])
-@out_wrapper(exact_dtype=True)
+@register_meta([aten._scaled_mm_mxfp6.default])
 def meta_scaled_mm_mxfp6(self, mat2, scale_a, scale_b, out_dtype):
+    from torch._native.ops.scaled_mm.validation import validate_mxfp6_scaled_mm
+
+    validate_mxfp6_scaled_mm(self, mat2, scale_a, scale_b, out_dtype)
     return torch.empty(self.size(0), mat2.size(1), dtype=out_dtype, device=self.device)
+
+
+@register_meta([aten._scaled_mm_mxfp6.out])
+def meta_scaled_mm_mxfp6_out(self, mat2, scale_a, scale_b, out_dtype, *, out):
+    from torch._native.ops.scaled_mm.validation import validate_mxfp6_scaled_mm
+
+    validate_mxfp6_scaled_mm(self, mat2, scale_a, scale_b, out_dtype, out)
+    return _maybe_resize_out(out, (self.size(0), mat2.size(1)))
 
 
 @register_meta([aten._scaled_addmm.default])

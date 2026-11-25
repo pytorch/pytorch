@@ -1721,14 +1721,14 @@ void scaled_mm_cuda_v2_impl(
   const char* op_name = accumulator ? "torch._scaled_addmm" : "torch._scaled_mm";
   if (mat_a.scalar_type() == kFloat6_e2m3fn_x4) {
     // validate_scaled_mm_v2_inputs checked the operands and scales.
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !accumulator && !bias, op_name, " does not support bias or an accumulator for MXFP6");
 #ifdef USE_ROCM
     TORCH_CHECK_NOT_IMPLEMENTED(false, op_name, " does not support MXFP6 on ROCm");
 #endif
     TORCH_CHECK_NOT_IMPLEMENTED(
         at::cuda::getDeviceProperties(mat_a.get_device())->major == 10,
         op_name, " supports MXFP6 only on SM100-family GPUs");
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        !accumulator && !bias, op_name, " does not support bias or an accumulator for MXFP6");
     if (out.numel() == 0) {
       return;
     }
@@ -2042,10 +2042,12 @@ Tensor& _scaled_mm_mxfp6_out_cuda(
     Tensor& out) {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
-      "MXFP6 scaled_mm runs through the CuTeDSL override in torch._native, which "
-      "is not registered. It needs the nvidia-cutlass-dsl and apache-tvm-ffi "
-      "packages at a supported version; TORCH_LOGS=+native_dsl shows why it was "
-      "skipped.");
+      "MXFP6 scaled_mm needs an SM100-family NVIDIA GPU and runs through the "
+      "CuTeDSL override in torch._native, which is not active: it needs the "
+      "nvidia-cutlass-dsl and apache-tvm-ffi packages at a supported version "
+      "(TORCH_LOGS=+native_dsl shows why registration was skipped), and "
+      "TORCH_DISABLE_NATIVE_JIT=1 or a disabled torch.backends.python_native "
+      "context turns it off.");
   return out;
 }
 
