@@ -136,7 +136,7 @@ from .constant import (
     IntConstantVariable,
     StrConstantVariable,
 )
-from .dicts import ConstDictVariable, OrderedDictVariable, pydict_check
+from .dicts import ConstDictVariable, OrderedDictVariable
 from .exception import ExceptionVariable
 from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
@@ -148,6 +148,7 @@ from .object_protocol import (
     mappingproxy_check_mapping,
     mro_attr_source,
     mro_lookup,
+    pydict_check,
     pynumber_as_ssize_t,
     pynumber_index,
     repr_guard,

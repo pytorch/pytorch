@@ -47,7 +47,6 @@ import unittest
 import weakref
 from collections import defaultdict, deque
 from typing import Any, cast, NoReturn, TYPE_CHECKING, TypeAlias, TypeVar
-from typing_extensions import TypeIs
 
 import torch
 import torch._logging
@@ -223,6 +222,8 @@ from .variables.object_protocol import (
     mro_lookup,
     Py_TPFLAGS_MAPPING,
     Py_TPFLAGS_SEQUENCE,
+    pyexception_class_check,
+    pyexception_instance_check,
     pyiter_send,
     pysequence_contains,
     type_is_immutable,
@@ -1350,28 +1351,12 @@ class BytecodeDispatchTableMeta(type):
         cls.dispatch_table = [dispatch_table.get(i) for i in range(2**8)]
 
 
-def pyexception_class_check(val: VariableTracker) -> TypeIs[ExceptionTypes]:
-    # Mirror's CPython PyExceptionClass_Check
-    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L60-L62
-    if isinstance(val, variables.BuiltinVariable):
-        return issubclass(val.fn, BaseException)
-    return isinstance(val, UserDefinedExceptionClassVariable)
-
-
-def pyexception_instance_check(val: VariableTracker) -> TypeIs[ExceptionVals]:
-    # Mirror's CPython PyExceptionInstance_Check
-    # https://github.com/python/cpython/blob/60403a5409ff2c3f3b07dd2ca91a7a3e096839c7/Include/pyerrors.h#L64-L65
-    return isinstance(
-        val, (variables.ExceptionVariable, UserDefinedExceptionObjectVariable)
-    )
-
-
 def pyerr_given_exception_match(err: VariableTracker, exc: type[BaseException]) -> bool:
     # Mirror's PyErr_GivenExceptionMatch
     if pyexception_class_check(err):
-        return issubclass(err.fn, exc)
+        return issubclass(err.as_python_constant(), exc)
     if pyexception_instance_check(err):
-        return issubclass(err.exc_type, exc)
+        return issubclass(err.python_type(), exc)
     return False
 
 
@@ -2976,7 +2961,7 @@ class InstructionTranslatorBase(
         if (
             value
             and pyexception_instance_check(value)
-            and issubclass(value.exc_type, exception.fn)
+            and issubclass(value.python_type(), exception.as_python_constant())
         ):
             instance = value
         else:
@@ -3148,9 +3133,7 @@ class InstructionTranslatorBase(
         val = self.stack[-1]
         if not pyexception_instance_check(val):
             raise AssertionError("expected _exception_instance_check(val) to be true")
-        typ = SourcelessBuilder.create_internal_builtin(
-            val.exc_type  # type: ignore[attr-defined, union-attr]
-        )
+        typ = SourcelessBuilder.create_internal_builtin(val.python_type())
         tb = val.tp_getattro_impl(
             # pyrefly: ignore[bad-argument-type]
             self,
@@ -3357,7 +3340,7 @@ class InstructionTranslatorBase(
                     "catching classes that do not inherit from BaseException is not allowed",
                 )
             if pyexception_instance_check(exc_instance) and issubclass(
-                exc_instance.exc_type,  # type: ignore[union-attr]
+                exc_instance.python_type(),
                 expected_type.fn,  # type: ignore[attr-defined]
             ):
                 return True
@@ -4616,7 +4599,7 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 f"expected _exception_instance_check(val) to be true, got {val}"
             )
-        if val.exc_type is StopIteration:  # type: ignore[union-attr]
+        if val.python_type() is StopIteration:
             new_val = VariableTracker.build(self, RuntimeError).call_function(
                 self,  # type: ignore[arg-type]
                 [VariableTracker.build(self, "generator raised StopIteration")],
