@@ -12,6 +12,7 @@ from torch._inductor.ir import Buffer, ExternKernel, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.decompose_k import (
     BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS,
     DecomposeKSubgraphTemplate,
+    get_blackwell_decompose_k_splits,
     lower_blackwell_decompose_k_partial,
 )
 from torch._inductor.kernel.mm_common import mm_args
@@ -263,11 +264,12 @@ class TestSubgraphChoice(TestCase):
         # tcgen05.mma cannot read a transposed FP32 A operand from shared
         # memory, so with TF32 on the Triton partial BMM must be skipped for a
         # column-major A rather than failing to compile.
+        # K is deep enough for the one-wave Triton split to keep 8 K blocks.
         if a_row_major:
-            a = _exact_inputs(128, 16384, dtype=torch.float32)
+            a = _exact_inputs(128, 65536, dtype=torch.float32)
         else:
-            a = _exact_inputs(16384, 128, dtype=torch.float32).T
-        b = _exact_inputs(16384, 512, dtype=torch.float32)
+            a = _exact_inputs(65536, 128, dtype=torch.float32).T
+        b = _exact_inputs(65536, 512, dtype=torch.float32)
         old_precision = torch.backends.cuda.matmul.fp32_precision
         torch.backends.cuda.matmul.fp32_precision = "tf32"
         try:
@@ -291,6 +293,63 @@ class TestSubgraphChoice(TestCase):
         # Small integers are exact in both TF32 and IEEE fp32.
         self.assertEqual(actual, a @ b, atol=0, rtol=0)
         self.assertEqual("_split_triton_" in "\n".join(codes), a_row_major)
+
+    def test_backend_specific_split_candidates(self):
+        one_cta = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
+        two_cta_wide = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[2]
+
+        # Geometry only: the per-split K bound is covered separately below.
+        def splits(m, n, k, partial_config):
+            return get_blackwell_decompose_k_splits(
+                m, n, k, 148, partial_config, max_k_per_split=0
+            )
+
+        production_ks = (
+            10_879_109,
+            10_954_007,
+            11_091_857,
+            11_047_127,
+            11_029_264,
+        )
+        for k in production_ks:
+            self.assertEqual(splits(256, 128, k, one_cta), [74, 148])
+
+        self.assertEqual(splits(128, 128, 11_047_127, one_cta), [148, 296])
+        self.assertEqual(splits(128, 256, 969_147, one_cta), [74, 149])
+        self.assertEqual(splits(256, 424, 973_138, two_cta_wide), [37, 74])
+        self.assertEqual(splits(512, 424, 11_047_127, two_cta_wide), [19, 37])
+
+        # Exact and uneven K use the same bounded geometry-based candidates,
+        # while shallow K and a lone M tile reject the 2CTA schedule.
+        self.assertEqual(splits(256, 424, 973_248, two_cta_wide), [37, 74])
+        self.assertEqual(splits(256, 128, 8_193, one_cta), [])
+        self.assertEqual(splits(128, 424, 11_047_127, two_cta_wide), [])
+
+    def test_blackwell_split_candidates_bound_k_per_split(self):
+        # The tile-wave generator never calls get_k_splits, so it applies
+        # decompose_k_max_k_per_split itself. g027-like shape: unbounded, split
+        # 10 gives 27456-long fp32 partial accumulations.
+        one_cta = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[0]
+        two_cta_wide = BLACKWELL_DECOMPOSE_K_PARTIAL_CONFIGS[2]
+
+        def k_parts(k, ks, partial_config):
+            block_k = partial_config.block_k
+            return [math.ceil(math.ceil(k / s) / block_k) * block_k for s in ks]
+
+        with config.patch({"triton.decompose_k_max_k_per_split": 16384}):
+            ks = get_blackwell_decompose_k_splits(512, 896, 274_456, 148, two_cta_wide)
+            self.assertEqual(ks, [17, 19])
+            self.assertTrue(all(p <= 16384 for p in k_parts(274_456, ks, two_cta_wide)))
+            # A K so long that every wave-sized split exceeds the bound starts
+            # the search at the smallest split that fits it.
+            ks = get_blackwell_decompose_k_splits(256, 128, 11_047_127, 148, one_cta)
+            self.assertEqual(ks, [675])
+            self.assertEqual(k_parts(11_047_127, ks, one_cta), [16384])
+        with config.patch({"triton.decompose_k_max_k_per_split": 0}):
+            self.assertEqual(
+                get_blackwell_decompose_k_splits(512, 896, 274_456, 148, two_cta_wide),
+                [10, 19],
+            )
 
     def test_subgraph_freeze_layout(self):
         from torch._inductor.kernel.decompose_k import DecomposeKSubgraphTemplate
