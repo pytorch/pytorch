@@ -59,7 +59,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocm,
     TEST_WITH_ROCM,
-    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -72,12 +71,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
-
-# XPU does not support the mem-efficient attention kernel.
 backends = []
 if PLATFORM_SUPPORTS_FLASH_ATTENTION:
     backends.append(SDPBackend.FLASH_ATTENTION)
-if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION and not TEST_XPU:
+if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
     backends.append(SDPBackend.EFFICIENT_ATTENTION)
 if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
     backends.append(SDPBackend.CUDNN_ATTENTION)
