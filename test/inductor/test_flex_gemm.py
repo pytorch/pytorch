@@ -38,6 +38,7 @@ from torch._subclasses.fake_tensor import is_fake, maybe_get_fake_mode
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     BF16X9_SUPPORTED,
+    IS_SM10X,
     SM100OrLater,
     SM120OrLater,
     TEST_CUDA,
@@ -52,6 +53,7 @@ from torch.testing._internal.common_quantized import (
     to_blocked as to_blocked_reference,
     to_mxfp,
 )
+from torch._native.registry import get_dsl_operations
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -1612,7 +1614,7 @@ class FlexGemmTestCase(TestCase):
             "output_dtype": torch.bfloat16,
         }
         if format_name == "mxfp6_e2m3_packed":
-            # No eager MXFP6 kernel exists, so the reference multiplies dequantized values.
+            # Multiply dequantized values so the reference does not run an MXFP6 kernel.
             reference = (dequantized[0] @ dequantized[1].t()).bfloat16()
         else:
             reference = F.scaled_mm(a, b, scale_a, scale_b=scale_b, **gemm_kwargs)
@@ -3003,7 +3005,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             ("fp6_mixed_data", NotImplementedError),
             ("fp6_scale_dtype", NotImplementedError),
             ("fp6_n_major", NotImplementedError),
-            ("fp6_eager", NotImplementedError),
         ),
         name_fn=lambda case: case[0],
     )
@@ -3123,21 +3124,21 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
             )
         self.assertIs(type(raised.exception), error)
 
-    @parametrize("backend", ("eager", "aot_eager"))
-    def test_scaled_mm_mxfp6_non_inductor_backend_raises(self, backend):
-        # These backends run the HOP's dense implementation, which has no MXFP6 kernel.
-        a = torch.zeros(256, 64, dtype=torch.float6_e2m3fn_x4)
-        b = torch.zeros_like(a).t()
-        scale_a = [torch.zeros(2048, dtype=torch.float8_e8m0fnu)]
-        scale_b = [torch.zeros_like(scale_a[0])]
-        gemm_kwargs = {
-            "scale_recipe_a": [F.ScalingType.BlockWise1x32],
-            "scale_recipe_b": [F.ScalingType.BlockWise1x32],
-            "swizzle_a": [F.SwizzleType.SWIZZLE_32_4_4],
-            "swizzle_b": [F.SwizzleType.SWIZZLE_32_4_4],
-        }
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(
+        not IS_SM10X, "the MXFP6 eager kernel requires an SM100-family GPU"
+    )
+    @unittest.skipIf(
+        not TEST_CUDA or "_scaled_mm_mxfp6.out" not in get_dsl_operations("cutedsl"),
+        "the MXFP6 CuTeDSL override is not registered",
+    )
+    @parametrize("backend", (None, "eager", "aot_eager"))
+    def test_scaled_mm_mxfp6_non_inductor_backend(self, backend):
+        # These run the HOP's dense implementation, which calls F.scaled_mm.
+        a, b, scale_a, scale_b, gemm_kwargs, reference = self.makeBlockScaledMm(
+            "mxfp6_e2m3_packed", 256, 512, 1024
+        )
 
-        @torch.compile(backend=backend, fullgraph=True)
         def fn(a, b, scale_a, scale_b):
             return flex_gemm(
                 F.scaled_mm,
@@ -3147,8 +3148,11 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
                 kernel_options={"backend": "QUACK"},
             )
 
-        with self.assertRaisesRegex(NotImplementedError, "no eager kernel"):
-            fn(a, b, scale_a, scale_b)
+        if backend is not None:
+            fn = torch.compile(fn, backend=backend, fullgraph=True)
+        self.assertEqual(
+            fn(a, b, scale_a, scale_b), reference.relu(), atol=2e-2, rtol=2e-2
+        )
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
