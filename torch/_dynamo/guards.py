@@ -72,7 +72,6 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
-    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -124,7 +123,6 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
-    StorageOverlapPartition,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -140,10 +138,13 @@ from torch._subclasses.fake_tensor import (
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
+from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
+    _get_placeholder_expr,
     _ShapeGuardsHelper,
     EqualityConstraint,
+    has_free_unbacked_symbols,
     is_symbolic,
     SYMPY_INTERP,
 )
@@ -1172,7 +1173,15 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
     else:
         if not isinstance(dim, torch.SymInt):
             raise AssertionError(f"Expected torch.SymInt, got {type(dim)}")
-        return dim.node.maybe_as_int()
+        node = dim.node
+        if isinstance(node, SymNode) and node.shape_env is not None:
+            expr = _get_placeholder_expr(node)
+            # An unbacked input dim refined to a constant (e.g. by
+            # torch._check(x.shape[0] == 1)) stays None, so TENSOR_MATCH does not
+            # check it and the runtime assert enforces the value instead.
+            if expr.is_Symbol and has_free_unbacked_symbols(expr):
+                return None
+        return node.maybe_as_int()
 
 
 def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
@@ -6712,23 +6721,6 @@ class CheckFunctionManager:
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
-                    [code_part],
-                    None,
-                )
-                add_code_part(code_part, None, True)
-            elif isinstance(guard, StorageOverlapPartition):
-                partition_guard_managers = [
-                    builder.get_guard_manager_from_source(s)
-                    for s in guard.input_sources
-                ]
-                code_part = (
-                    "___check_storage_overlap_partition("
-                    f"[{', '.join(source.name for source in guard.input_sources)}], "
-                    f"{guard.overlapping_indices})"
-                )
-                install_storage_overlap_partition_guard(
-                    partition_guard_managers,
-                    guard.overlapping_indices,
                     [code_part],
                     None,
                 )
