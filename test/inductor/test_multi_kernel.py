@@ -260,6 +260,7 @@ class MultiKernelTest(TestCase):
 
     @requires_triton()
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6391")
     def test_triton_gemm(self):
         def fn(x, y):
             return x @ y
@@ -287,6 +288,7 @@ class MultiKernelTest(TestCase):
         self.assertEqual(ref, act, **rocm_tol)
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/6392")
     @requires_triton()
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
