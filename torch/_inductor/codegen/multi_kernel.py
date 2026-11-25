@@ -37,34 +37,22 @@ class MultiKernelState:
         self._root: MultiKernelState = self if parent is None else parent._root
         self._num_names = 0
 
-    def define_kernel(
-        self,
-        kernels: list[Any],
-        kernel_shape_keys: list[None | tuple[tuple[int, ...], ...]] | None = None,
-    ) -> str:
-        """
-        Previously we name the multi kernel as "multi_kernel_{kernel_names[0]}".
-        This has some minor issue.
+    def define_dispatcher(self, multi_kernel: "DispatchedMultiKernel") -> str:
+        """Register a multi-kernel whose sub-kernel is picked at run time by a
+        dispatcher object in the generated module (MultiKernel, SizeHintMultiKernel;
+        see DispatchedMultiKernel), and return its name.
 
-        E.g. for persistent reduction https://gist.github.com/shunting314/39e7c00ff8bb2055942ed5a3255d61ca ,
-        there are 2 flavors of non-persistent reduction:
-          https://gist.github.com/shunting314/056d43d35907e87efb883970b35c17d4
-        and
-          https://gist.github.com/shunting314/02ee753b65c513c54e695626afe682bd
-
-        The only different is cache eviction policy.
-
-        We should name the multi-kernel differently in these 2 cases.
-
-        kernels:
-            A list of kernels
-        kernel_shape_keys:
-            Specified for size-hint multi-kernels.
-            Each list element is a shape key, corresponding to the concrete input & output size hints each kernel was tuned for.
+        Multi-kernels with the same sub-kernels share one name; otherwise a new
+        `multi_kernel_N` is assigned (numbered from the root state, since subgraph
+        definitions land in the parent module) and kernel_defs gets the shared
+        `arg_index` table (which call args each sub-kernel takes), then the line
+        that creates the dispatcher, from multi_kernel.write_dispatcher. Nothing is
+        written in the second pass of cpp-wrapper codegen.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
 
+        kernels = multi_kernel.kernels
         kernel_names = tuple(k.kernel_name for k in kernels)
         if kernel_names in self.subkernel_to_kernel_name:
             return self.subkernel_to_kernel_name[kernel_names]
@@ -100,7 +88,6 @@ class MultiKernelState:
             for i in range(len(kernels)):
                 arg_index[i] = [slice(0, len(call_args))]
 
-        keyed_by_sizes = kernel_shape_keys is not None
         buf = self.kernel_defs
         buf.writeline("")
         buf.writeline("arg_index = {")
@@ -108,32 +95,7 @@ class MultiKernelState:
             slice_reprs = ", ".join(repr(s) for s in slice_list)
             buf.writeline(f"    {key}: [{slice_reprs}],")
         buf.writeline("}")
-
-        if not keyed_by_sizes:  # no size hint keys, just call with list of kernels
-            buf.writeline(
-                f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
-            )
-            with buf.indent():
-                for name in kernel_names:
-                    buf.writeline(f"{name},")
-            buf.writeline("], arg_index=arg_index)")
-        else:  # call with dict[size hint key, kernel]
-            if not isinstance(kernels[0], TritonTemplateKernel):
-                raise AssertionError("expected kernels[0] to be a TritonTemplateKernel")
-            if not isinstance(kernel_shape_keys, list):
-                raise AssertionError("expected kernel_shape_keys to be a list")
-            if len(kernels) != len(kernel_shape_keys):
-                raise AssertionError(
-                    f"expected len(kernels) == len(kernel_shape_keys), "
-                    f"got {len(kernels)} != {len(kernel_shape_keys)}"
-                )
-            buf.writeline(
-                f"{multi_kernel_name} = async_compile.size_hint_multi_kernel({multi_kernel_name!r}, {{"
-            )
-            with buf.indent():
-                for shape_key, name in zip(kernel_shape_keys, kernel_names):
-                    buf.writeline(f"{shape_key}: {name},")
-            buf.writeline("}, arg_index=arg_index)")
+        multi_kernel.write_dispatcher(buf, multi_kernel_name, kernel_names)
 
         if config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.src_to_kernel["\n".join(kernel_names)] = (
@@ -143,33 +105,33 @@ class MultiKernelState:
         return multi_kernel_name
 
 
-class MultiKernel:
+def leaf_kernels(kernel: Any) -> list[Any]:
+    """The compiled kernels behind kernel: itself, or a multi-kernel's sub-kernels."""
+    return kernel.leaf_kernels() if isinstance(kernel, MultiKernelBase) else [kernel]
+
+
+class MultiKernelBase:
     """
-    This class maintains the compile time state for multi kernels.
-
-    Assume we do codegen for a MultiKernel encapsulating kernel1 and kernel2.
-    The generated definition for the multi-kernel will looks like:
-    ```
-    multi_kernel_kernel1 = MultiKernelCall(
-        [kernel1, kernel2], multi_kernel_definition_code
-    )
-    ```
-
-    Here is a concrete example: https://gist.github.com/shunting314/d9f3fb6bc6cee3dbae005825ca196d39
+    Compile-time state shared by every kernel that wraps several sub-kernels and
+    launches one of them. Subclasses decide how the launched one is picked:
+    MultiKernel benchmarks them once and keeps the fastest, SizeHintMultiKernel
+    picks the one tuned for the nearest size hint. Both are DispatchedMultiKernels:
+    the pick happens at run time, in MultiKernelCall / SizeHintMultiKernelCall.
     """
 
-    def __init__(self, kernels):
-        if len(kernels) < 2:
-            raise AssertionError(f"expected at least 2 kernels, got {len(kernels)}")
+    kernels: list[Any]
 
-        self.kernels = kernels
-        self.kernel_name = V.graph.wrapper_code.multi_kernel_state.define_kernel(
-            kernels
-        )
+    # need this since some code in inductor check if the kernel object has an args
+    # attribute to decide if it's a non-null kernel.
+    args: object = object()
 
-        # need this since some code in inductor check if the kernel object has an args
-        # attribute to decide if it's a non-null kernel.
-        self.args = object()
+    @property
+    def kernel_name(self) -> str:
+        raise NotImplementedError
+
+    def leaf_kernels(self) -> list[Any]:
+        """The compiled kernels, with nested multi-kernels expanded."""
+        return [leaf for kernel in self.kernels for leaf in leaf_kernels(kernel)]
 
     @staticmethod
     def _merge_workspace_args(left: list[WorkspaceArg], right: list[WorkspaceArg]):
@@ -191,12 +153,72 @@ class MultiKernel:
             return
         # All kernels must share the same workspace
         workspace_args = functools.reduce(
-            MultiKernel._merge_workspace_args,
+            MultiKernelBase._merge_workspace_args,
             [kernel.args.workspace_args for kernel in kernels],
         )
         for kernel in kernels:
             kernel.args.workspace_args = workspace_args
         return workspace_args
+
+    def codegen_nan_check(self):
+        wrapper = V.graph.wrapper_code
+        seen: OrderedSet[str] = OrderedSet()
+        for k in self.leaf_kernels():
+            _, call_args, precompile_args, _ = k.args.python_argdefs()
+            for arg, precompile_arg in zip(call_args, precompile_args):
+                if arg in seen:
+                    continue
+                seen.add(arg)
+                if isinstance(precompile_arg, TensorArg):
+                    wrapper.codegen_nan_assert(arg)
+
+    @property
+    def removed_buffers(self):
+        return OrderedSet.intersection(*[k.removed_buffers for k in self.kernels])
+
+    @property
+    def inplaced_to_remove(self):
+        return OrderedSet.intersection(*[k.inplaced_to_remove for k in self.kernels])
+
+    @property
+    @cache_on_self
+    def inplace_update_buffers(self):
+        """
+        Make sure all kernels have the same inplace update mappings.
+        """
+        for k in self.kernels[1:]:
+            if k.inplace_update_buffers != self.kernels[0].inplace_update_buffers:
+                raise AssertionError(
+                    "expected all kernels to share the same inplace_update_buffers"
+                )
+        return self.kernels[0].inplace_update_buffers
+
+    def warn_mix_layout(self, kernel_name: str):
+        pass
+
+
+class DispatchedMultiKernel(MultiKernelBase):
+    """
+    A multi-kernel launched through a run-time dispatcher: the wrapper defines
+    `multi_kernel_0 = async_compile.<kind>("multi_kernel_0", ...)` (written when
+    kernel_name is first read) and launches `multi_kernel_0.run(...)`, and the
+    dispatcher picks the sub-kernel. Subclasses choose the dispatcher by overriding
+    write_dispatcher.
+    """
+
+    @functools.cached_property
+    def kernel_name(self) -> str:  # type: ignore[override]
+        # Registered on first use: the sub-kernels only have names once defined.
+        return V.graph.wrapper_code.multi_kernel_state.define_dispatcher(self)
+
+    def write_dispatcher(
+        self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
+    ) -> None:
+        """Write the module-level line that creates the dispatcher, e.g.
+        `multi_kernel_0 = async_compile.multi_kernel(...)`: the run-time object that
+        picks the sub-kernel on each `.run()`. `arg_index` is already defined above
+        it."""
+        raise NotImplementedError
 
     def launched_kernel_name(self) -> str:
         """The kernel the generated code actually launches.
@@ -212,8 +234,13 @@ class MultiKernel:
 
     def call_kernel(self, kernel_name):
         """
-        Collect the union of arguments from all subkernels as the arguments
-        for the multi-kernel.
+        Codegen the launch of this multi-kernel into the wrapper:
+        `multi_kernel_0.run(<args>)`, which the dispatcher routes to one sub-kernel at
+        run time. The args are the sub-kernels' shared call args (they must match),
+        plus each sub-kernel's own grid args for templates, sliced apart again by
+        `arg_index`. The merged workspaces are allocated before the launch and freed
+        after it. In the second pass of cpp-wrapper codegen the pick is already
+        made, so the chosen sub-kernel is launched directly.
         """
         # Prevent circular import
         from ..select_algorithm import TritonTemplateKernel
@@ -285,41 +312,34 @@ class MultiKernel:
         for ws in reversed(self.kernels[0].args.workspace_args):
             V.graph.wrapper_code.generate_workspace_deallocation(ws)
 
-    def codegen_nan_check(self):
-        wrapper = V.graph.wrapper_code
-        seen: OrderedSet[str] = OrderedSet()
-        for k in self.kernels:
-            _, call_args, precompile_args, _ = k.args.python_argdefs()
-            for arg, precompile_arg in zip(call_args, precompile_args):
-                if arg in seen:
-                    continue
-                seen.add(arg)
-                if isinstance(precompile_arg, TensorArg):
-                    wrapper.codegen_nan_assert(arg)
 
-    @property
-    def removed_buffers(self):
-        return OrderedSet.intersection(*[k.removed_buffers for k in self.kernels])
+class MultiKernel(DispatchedMultiKernel):
+    """
+    Launches the fastest of several interchangeable sub-kernels, e.g. persistent
+    and looped variants of one reduction (see add_multi_kernel_choices); each is
+    correct for every input. The wrapper defines
 
-    @property
-    def inplaced_to_remove(self):
-        return OrderedSet.intersection(*[k.inplaced_to_remove for k in self.kernels])
+        multi_kernel_0 = async_compile.multi_kernel("multi_kernel_0", [k0, k1], ...)
 
-    @property
-    @cache_on_self
-    def inplace_update_buffers(self):
-        """
-        Make sure all kernels have the same inplace update mappings.
-        """
-        for k in self.kernels[1:]:
-            if k.inplace_update_buffers != self.kernels[0].inplace_update_buffers:
-                raise AssertionError(
-                    "expected all kernels to share the same inplace_update_buffers"
-                )
-        return self.kernels[0].inplace_update_buffers
+    and at run time MultiKernelCall benchmarks the sub-kernels on the first call
+    and keeps the fastest (cached on disk); with the cpp wrapper the pick is made
+    at compile time.
+    """
 
-    def warn_mix_layout(self, kernel_name: str):
-        pass
+    def __init__(self, kernels):
+        if len(kernels) < 2:
+            raise AssertionError(f"expected at least 2 kernels, got {len(kernels)}")
+
+        self.kernels = kernels
+
+    def write_dispatcher(
+        self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
+    ) -> None:
+        buf.writeline(f"{name} = async_compile.multi_kernel({name!r}, [")
+        with buf.indent():
+            for kernel_name in kernel_names:
+                buf.writeline(f"{kernel_name},")
+        buf.writeline("], arg_index=arg_index)")
 
 
 class MultiKernelCall:
@@ -571,9 +591,11 @@ class MultiKernelCall:
         return row
 
 
-class SizeHintMultiKernel(MultiKernel):
+class SizeHintMultiKernel(DispatchedMultiKernel):
     """
-    Version of multi-kernel that generates kernels based on specified size hints.
+    Launches the sub-kernel tuned for the size hint nearest to the input shapes:
+    one template kernel is tuned per hint, and at run time SizeHintMultiKernelCall
+    picks by distance to the actual shapes, cached per shape.
     Currently only performs 1-d search over hints; doesn't perform combinatorial n-d search
     if n > 1 dynamic dimensions are specified.
 
@@ -589,13 +611,20 @@ class SizeHintMultiKernel(MultiKernel):
         for shape_key, kernel in kernels.items():
             self.kernels.append(kernel)
             self.kernel_shape_keys.append(shape_key)
-        self.kernel_name = V.graph.wrapper_code.multi_kernel_state.define_kernel(
-            self.kernels, self.kernel_shape_keys
-        )
 
-        # need this since some code in inductor check if the kernel object has an args
-        # attribute to decide if it's a non-null kernel.
-        self.args = object()
+    def write_dispatcher(
+        self, buf: IndentedBuffer, name: str, kernel_names: tuple[str, ...]
+    ) -> None:
+        # Prevent circular import
+        from ..select_algorithm import TritonTemplateKernel
+
+        if not isinstance(self.kernels[0], TritonTemplateKernel):
+            raise AssertionError("expected kernels[0] to be a TritonTemplateKernel")
+        buf.writeline(f"{name} = async_compile.size_hint_multi_kernel({name!r}, {{")
+        with buf.indent():
+            for shape_key, kernel_name in zip(self.kernel_shape_keys, kernel_names):
+                buf.writeline(f"{shape_key}: {kernel_name},")
+        buf.writeline("}, arg_index=arg_index)")
 
 
 class SizeHintMultiKernelCall(MultiKernelCall):

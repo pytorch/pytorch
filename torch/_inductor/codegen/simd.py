@@ -80,7 +80,7 @@ from ..utils import (
 from ..virtualized import ops, OpsWrapper, V
 from .block_analysis import BlockPatternMatcher
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
-from .multi_kernel import MultiKernel, SizeHintMultiKernel
+from .multi_kernel import leaf_kernels, MultiKernelBase, SizeHintMultiKernel
 from .simd_kernel_features import (
     DisableReduction,
     EnableReduction,
@@ -3582,19 +3582,18 @@ class SIMDScheduling(BaseScheduling):
         self, kernel_features, split_size
     ) -> TritonKernel:
         numel, rnumel = kernel_features.numel, kernel_features.reduction_numel
-        kernel = cast(
-            "TritonKernel",
-            self.create_kernel_choices(
-                kernel_features,
-                [{"x": numel, "r0_": rnumel}],
-                {
-                    "features": kernel_features,
-                    "tiling_scores": None,
-                    "mix_order_reduction": True,
-                    "override_persistent_reduction": True,
-                },
-            )[0],
+        kernel_choice = self.create_kernel_choices(
+            kernel_features,
+            [{"x": numel, "r0_": rnumel}],
+            {
+                "features": kernel_features,
+                "tiling_scores": None,
+                "mix_order_reduction": True,
+                "override_persistent_reduction": True,
+            },
         )
+        # This path launches one kernel itself, so it keeps only the first choice.
+        kernel = cast("TritonKernel", leaf_kernels(kernel_choice)[0])
         kernel.rsplit_size = split_size
         if not kernel.persistent_reduction:
             raise AssertionError("expected kernel.persistent_reduction")
@@ -3980,14 +3979,10 @@ class SIMDScheduling(BaseScheduling):
             "override_cooperative_reduction": False,
             "tiling_scores": tiling_score,
         }
-        kernels = cast(
-            "list[TritonKernel]",
-            self.create_kernel_choices(
-                kernel_features,
-                [tiling],
-                kernel_kwargs,
-            ),
+        kernel_choice = self.create_kernel_choices(
+            kernel_features, [tiling], kernel_kwargs
         )
+        kernels = cast("list[TritonKernel]", leaf_kernels(kernel_choice))
 
         for kernel in kernels:
             if local_reduction_in_r:
@@ -4084,7 +4079,7 @@ class SIMDScheduling(BaseScheduling):
                 kernel.codegen_body()
 
         self._finalize_nested_reduction_kernels(
-            kernels,
+            kernel_choice,
             combined_schedule,
             node.get_nodes(),
             indexing_schedule,
@@ -4092,12 +4087,13 @@ class SIMDScheduling(BaseScheduling):
 
     def _finalize_nested_reduction_kernels(
         self,
-        kernels,
+        final_kernel,
         combined_schedule,
         nodes_to_mark,
         config_patch_schedule=None,
     ) -> None:
-        MultiKernel.merge_workspaces_inplace(kernels)
+        kernels = leaf_kernels(final_kernel)
+        MultiKernelBase.merge_workspaces_inplace(kernels)
         config_patches = self._collect_config_patches(
             config_patch_schedule or combined_schedule
         )
@@ -4111,9 +4107,6 @@ class SIMDScheduling(BaseScheduling):
             )
             kernel.code_hash = code_hash(src_code)
 
-        final_kernel: SIMDKernel | MultiKernel = (
-            MultiKernel(kernels) if len(kernels) > 1 else kernels[0]
-        )
         with V.set_kernel_handler(final_kernel):
             for sn in nodes_to_mark:
                 sn.mark_run()
@@ -4448,10 +4441,10 @@ class SIMDScheduling(BaseScheduling):
         }
         if plan.requires_persistent:
             kernel_kwargs["override_persistent_reduction"] = True
-        kernels = cast(
-            "list[TritonKernel]",
-            self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs),
+        kernel_choice = self.create_kernel_choices(
+            kernel_features, [tiling], kernel_kwargs
         )
+        kernels = cast("list[TritonKernel]", leaf_kernels(kernel_choice))
         metrics.codegen_nested_reduction += 1
         sub_parent_factor = stage.factor
         parent_rnumel = plan.parent_rnumel
@@ -4489,7 +4482,7 @@ class SIMDScheduling(BaseScheduling):
                 )
                 kernel.codegen_body()
 
-        self._finalize_nested_reduction_kernels(kernels, combined_schedule, nodes)
+        self._finalize_nested_reduction_kernels(kernel_choice, combined_schedule, nodes)
 
     def codegen_node(
         self, node: scheduler.FusedSchedulerNode | scheduler.SchedulerNode
@@ -4571,13 +4564,10 @@ class SIMDScheduling(BaseScheduling):
             "override_cooperative_reduction": False,
             "tiling_scores": tiling_score,
         }
-        kernels = cast(
-            "list[TritonKernel]",
-            self.create_kernel_choices(features, [tiling], kernel_kwargs),
-        )
-        for kernel in kernels:
+        kernel_choice = self.create_kernel_choices(features, [tiling], kernel_kwargs)
+        for kernel in leaf_kernels(kernel_choice):
             self.codegen_node_schedule_with_kernel(combined_schedule, kernel)
-        self._finalize_nested_reduction_kernels(kernels, combined_schedule, nodes)
+        self._finalize_nested_reduction_kernels(kernel_choice, combined_schedule, nodes)
 
     def _codegen_native_matmul_row_epilogue_with_kernel(
         self, nodes, kernel, m, n, first_row_node
@@ -4711,14 +4701,15 @@ class SIMDScheduling(BaseScheduling):
             kernel_features.reduction_numel,
             kernel_features.coalesce_analysis,
         )
-        kernels = self.create_kernel_choices(
+        final_kernel = self.create_kernel_choices(
             kernel_features,
             [tiling],
             {"features": kernel_features, "tiling_scores": tiling_score},
         )
+        kernels = leaf_kernels(final_kernel)
         for kernel in kernels:
             self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-        MultiKernel.merge_workspaces_inplace(kernels)
+        MultiKernelBase.merge_workspaces_inplace(kernels)
 
         # Collect config_patches from operations (e.g., decomposition ops with
         # coordinate_descent_tuning) and apply during kernel codegen
@@ -4732,12 +4723,6 @@ class SIMDScheduling(BaseScheduling):
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
         del kernel
-
-        final_kernel: SIMDKernel | MultiKernel
-        if len(kernels) > 1:
-            final_kernel = MultiKernel(kernels)
-        else:
-            (final_kernel,) = kernels
 
         with V.set_kernel_handler(final_kernel):
             for node in kernel_features.scheduler_nodes():
@@ -4802,13 +4787,10 @@ class SIMDScheduling(BaseScheduling):
 
     def create_kernel_choices(
         self, kernel_features: SIMDKernelFeatures, kernel_args, kernel_kwargs
-    ) -> list[SIMDKernel]:
-        return [
-            self.kernel_type(
-                *kernel_args,
-                **kernel_kwargs,
-            )
-        ]
+    ) -> SIMDKernel | MultiKernelBase:
+        """The kernel to launch: one kernel, or a multi-kernel that picks among
+        several. Its leaf_kernels() still need codegen and define_kernel."""
+        return self.kernel_type(*kernel_args, **kernel_kwargs)
 
     def codegen_node_schedule_with_kernel(
         self,
@@ -5092,7 +5074,7 @@ class SIMDScheduling(BaseScheduling):
             if only_gen_src_code:
                 return "\n\n".join(src_codes)
 
-            MultiKernel.merge_workspaces_inplace(list(kernels.values()))
+            MultiKernelBase.merge_workspaces_inplace(list(kernels.values()))
             multi_kernel = SizeHintMultiKernel(kernels)
             node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
             self.codegen_comment(node_schedule, multi_kernel.kernel_name)
