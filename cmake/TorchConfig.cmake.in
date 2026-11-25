@@ -78,10 +78,6 @@ else()
   # TODO: this list might be incomplete.
   append_torchlib_if_found(c10)
 
-  if(@USE_NNPACK@)
-    append_torchlib_if_found(nnpack)
-  endif()
-
   if(@USE_PYTORCH_QNNPACK@)
     append_torchlib_if_found(pytorch_qnnpack)
   endif()
@@ -101,7 +97,6 @@ else()
   append_torchlib_if_found(fmt)
   append_torchlib_if_found(cpuinfo clog)
 
-  append_torchlib_if_found(eigen_blas)
   append_torchlib_if_found(pthreadpool)
 
   if(@USE_FBGEMM@)

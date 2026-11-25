@@ -1,3 +1,7 @@
+// Round float to bf16 to nearest even, like hipBLASLt. CK-tile defaults to truncation where it has no native conversion
+// (gfx942); must precede every ck_tile include.
+#define CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT CK_TILE_FLOAT_TO_BFLOAT16_STANDARD
+
 #include <ATen/native/hip/ck_tile_group_gemm.h>
 #include <ATen/native/hip/ck_tile_group_gemm/four_wave_tail_comp_v3.h>
 #include <ATen/native/hip/ck_tile_group_gemm/no_split_k_epilogue.h>
@@ -119,7 +123,20 @@ namespace at::hip::detail {
             using GemmEpilogue = std::conditional_t<EightWaves, DirectEpilogue,
                 std::conditional_t<Config::UseNoSplitKEpilogue, NoSplitKEpilogue<CShuffleEpilogue>, CShuffleEpilogue>>;
 
+#if !defined(__HIP_DEVICE_COMPILE__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__)
             using Kernel = ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+#else
+            // Standalone rather than derived from GroupedGemmKernel, so device passes for other targets never instantiate
+            // GemmPipeline: newer CK static_asserts against eight-wave CompV3 on gfx11/gfx12 (including gfx1250).
+            struct Kernel {
+                static constexpr index_t kBlockSize = Config::M_Warp * Config::N_Warp * Config::K_Warp * 64;
+                CK_TILE_HOST static dim3 BlockSize() { return dim3(kBlockSize); }
+                template <typename GroupArgs>
+                CK_TILE_DEVICE void operator()(GroupArgs* group_args, index_t group_count) const {
+                    __builtin_trap();
+                }
+            };
+#endif
         };
 
         // helper function to get the number of elements in one 16 byte load vector op
@@ -733,7 +750,8 @@ namespace at::hip::detail {
             with_ck_type(mat_a.scalar_type(), [&](auto data_tag) {
                 constexpr amdgcn_target_id Arch = decltype(arch_tag)::value;
                 using DataType = decltype(data_tag);
-                if constexpr (GroupGemmConfigs<CkTileGroupGemmConfigs<Arch, DataType>>) {
+                if constexpr (ck_tile::get_warp_size() == 64 &&
+                              GroupGemmConfigs<CkTileGroupGemmConfigs<Arch, DataType>>) {
                     launch_ck_tile_group_gemm<Arch, DataType>(
                             mat_a, mat_b, offs, out, group_args, a_row_major, b_row_major,
                             static_cast<int32_t>(M), static_cast<int32_t>(N), static_cast<int32_t>(K), static_cast<int32_t>(group_count),

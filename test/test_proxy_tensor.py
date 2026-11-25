@@ -40,28 +40,6 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-# Under CPP_FAKETENSOR=1 this whole suite exercises the C++ FakeTensor mode:
-# make_fx builds a CppFakeTensorMode for tracing_mode="fake"/"symbolic" natively.
-
-# Mirror test_fake_tensor.py: under the C++ fake path, make bare FakeTensorMode()
-# construction build a CppFakeTensorMode so the suite exercises it end to end.
-if torch._dynamo.config.use_cpp_fake_tensor:
-    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorConverter
-
-    def FakeTensorMode(
-        *,
-        shape_env=None,
-        allow_fallback_kernels=True,
-        allow_non_fake_inputs=False,
-        **kwargs,
-    ):
-        mode = CppFakeTensorMode.create_cpp_fake_tensor_mode(
-            FakeTensorConverter(), shape_env
-        )
-        mode.set_allow_fallback_kernels(allow_fallback_kernels)
-        mode.allow_non_fake_inputs = allow_non_fake_inputs
-        return mode
-
 from torch.utils._pytree import tree_map
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
@@ -239,6 +217,30 @@ def forward(self, a_1):
         out1.sum().backward()
         out2.sum().backward()
         self.assertEqual(a1.grad, a2.grad)
+
+    def test_pre_dispatch_autocast_in_nested_make_fx(self):
+        def g(x):
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                return x.mm(x)
+
+        inner = []
+
+        def f(x):
+            inner.append(make_fx(g, pre_dispatch=True)(x))
+            return x + 1
+
+        outer = make_fx(f, pre_dispatch=True, tracing_mode=self.tracing_mode)(
+            torch.randn(2, 2)
+        )
+        self.assertExpectedInline(inner[0].code.strip(), """\
+def forward(self, x_1):
+    _enter_autocast = torch.amp.autocast_mode._enter_autocast('cpu', torch.bfloat16, True, False)
+    mm = torch.ops.aten.mm.default(x_1, x_1);  x_1 = None
+    _exit_autocast = torch.amp.autocast_mode._exit_autocast(_enter_autocast);  _enter_autocast = _exit_autocast = None
+    return mm""")
+        self.assertEqual(inner[0](torch.randn(2, 2)).dtype, torch.bfloat16)
+        autocast_fns = (torch.amp._enter_autocast, torch.amp._exit_autocast)
+        self.assertFalse(any(n.target in autocast_fns for n in outer.graph.nodes))
 
     def test_make_fx_simple(self):
         def f(x):
@@ -916,6 +918,7 @@ class TestFakeProxyTensor(TestCase):
         # no real tensor. A value whose real tensor is kept keeps its wrapper,
         # which carries it.
         from torch._functorch.vmap import vmap_increment_nesting
+        from torch._subclasses.fake_tensor import maybe_get_real_tensor
 
         functorch = torch._C._functorch
         real = torch.randn(4, 3, 5)[1:]
@@ -931,7 +934,7 @@ class TestFakeProxyTensor(TestCase):
                     val = snapshot_fake(batched)
                     kept = snapshot_fake(batched, include_real=True)
                 self.assertTrue(is_fake_tensor(val))
-                self.assertIsNone(val.real_tensor)
+                self.assertIsNone(maybe_get_real_tensor(val))
                 self.assertEqual(
                     StorageWeakRef(val.untyped_storage()),
                     StorageWeakRef(fake.untyped_storage()),
@@ -943,7 +946,26 @@ class TestFakeProxyTensor(TestCase):
                 # With no real tensor to keep, include_real records the view too.
                 self.assertEqual(is_fake_tensor(kept), not propagate)
                 if propagate:
-                    self.assertIsNotNone(functorch.get_unwrapped(kept).real_tensor)
+                    self.assertIsNotNone(maybe_get_real_tensor(functorch.get_unwrapped(kept)))
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN not available")
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=False)
+    def test_snapshot_fake_of_mkldnn_batched_tensor(self):
+        real = torch.randn(2, 3).to_mkldnn()
+        gm = make_fx(
+            torch.vmap(lambda x: x.detach()), tracing_mode="fake", pre_dispatch=True
+        )(real)
+        detach = next(n for n in gm.graph.nodes if n.target == aten.detach.default)
+        val = detach.meta["val"]
+        input_val = next(n for n in gm.graph.nodes if n.op == "placeholder").meta["val"]
+        self.assertFalse(torch._C._functorch.is_batchedtensor(val))
+        self.assertTrue(is_fake_tensor(val))
+        self.assertEqual(val.layout, torch._mkldnn)
+        self.assertEqual(val.shape, (3,))
+        self.assertEqual(
+            StorageWeakRef(val.untyped_storage()),
+            StorageWeakRef(input_val.untyped_storage()),
+        )
 
     def test_snapshot_fake_of_grad_tracking_tensor(self):
         # A grad tracking wrapper, as inside jvp, is recorded as a view of the
@@ -966,6 +988,22 @@ class TestFakeProxyTensor(TestCase):
             (val.shape, val.stride(), val.storage_offset()),
             (fake.shape, fake.stride(), fake.storage_offset()),
         )
+
+    def test_snapshot_fake_of_sparse_batched_tensor(self):
+        from torch._functorch.vmap import vmap_increment_nesting
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        functorch = torch._C._functorch
+        mode = FakeTensorMode()
+        fake = mode.from_tensor(torch.eye(3).to_sparse())
+        with vmap_increment_nesting(3, "error") as level:
+            with mode:
+                batched = functorch._add_batch_dim(fake, 0, level)
+                val = snapshot_fake(batched)
+            self.assertTrue(functorch.is_batchedtensor(val))
+            self.assertTrue(is_fake_tensor(functorch.get_unwrapped(val)))
+            self.assertEqual(val.layout, torch.sparse_coo)
+            self.assertEqual(val.shape, (3,))
 
     def test_use_fake_and_tensor(self):
         def f(x, y):
@@ -2306,14 +2344,14 @@ class TestProxyTensorOpInfo(TestCase):
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
-    @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @ops([op for op in op_db + custom_op_db if op.get_inplace()], allowed_dtypes=(torch.float,))
     @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | inplace_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive_inplace(self, device, dtype, op):
         if not op.get_inplace():
             self.skipTest("No inplace variable for this op")
         _test_make_fx_helper(self, device, dtype, op, "symbolic", inplace=True)
 
-    @ops(op_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @ops([op for op in op_db + custom_op_db if op.supports_out], allowed_dtypes=(torch.float,))
     @skipOps(make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | out_symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive_out(self, device, dtype, op):
         if not op.supports_out:
@@ -2466,6 +2504,7 @@ class TestUnbackedSymbolicTracingDevice(TestCase):
             )
 
 instantiate_device_type_tests(TestUnbackedSymbolicTracingDevice, globals(), except_for="cpu")
+
 
 if __name__ == '__main__':
     run_tests()
