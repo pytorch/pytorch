@@ -768,6 +768,7 @@ class TestOrderedColDevice(TestCase):
         self.assertIsNone(got)
         with mock.patch.object(ct, "_INT32_LIMIT", 129):
             got = ct.reduce_ordered_col(trait, key, x, f32, 1, allow_split=True)
+        self.assertIsNotNone(got)
         # Key slot 6 is _OrderedColReduce.cache_sig's wide flag.
         (wide,) = [k[6] for k in ct._CACHE if k[1] == key]
         self.assertIs(wide, True)
@@ -782,7 +783,6 @@ class TestOrderedColDevice(TestCase):
             f32,
             1,
         )
-        self.assertIsNotNone(got)
         self.assertIsNotNone(reference)
         self.assertEqual(got[0].view(torch.uint8), reference[0].view(torch.uint8))
         self.assertEqual(_tags(key), {"ordered_col1"})
