@@ -2674,6 +2674,11 @@ class triton:
     template_reduction_epilogue = (
         os.environ.get("TORCHINDUCTOR_TEMPLATE_REDUCTION_EPILOGUE", "1") == "1"
     )
+    # Raises max_template_fusion_benchmarked_choices for Triton template
+    # reduction epilogues: the choice that hosts a reduction best is often not
+    # the fastest template alone, e.g. one without epilogue subtiles. Each
+    # choice costs a fused compile and benchmark (more if it spills).
+    max_template_reduction_epilogue_benchmarked_choices = 4
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
