@@ -46,6 +46,7 @@ from torch._inductor.autotune_process import (
     use_pipelined_autotuning,
 )
 from torch._inductor.codegen.common import WorkspaceArg
+from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import (
     get_registered_heuristic_class,
@@ -3240,6 +3241,54 @@ class TestMaxAutotune(TestCase):
                 else:
                     self.assertTrue(decompose_count > 0)
                     self.assertTrue(decompose_count <= num_decompose_k_splits)
+
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "ignore decompose_k when native matmul codegen",
+    )
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    @unittest.skipIf(
+        not HAS_GPU
+        or GPU_TYPE != "cuda"
+        or torch.version.hip
+        or get_cuda_arch() != "100",
+        "TF32 decompose_k threshold applies to B200 (SM 10.0) only",
+    )
+    @unittest.skipIf(
+        config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
+    )
+    @parametrize("allow_tf32", (False, True))
+    @parametrize("M,N,K,few_tiles", ((512, 512, 4096, True), (2048, 2048, 8192, False)))
+    def test_max_autotune_decompose_k_tf32_threshold(
+        self, allow_tf32, M, N, K, few_tiles
+    ):
+        # K/M and K/N are below decompose_k_threshold but not below
+        # decompose_k_threshold_tf32, which only applies when the 128x128
+        # output tiles fill less than one wave.
+        get_k_splits.cache_clear()
+        use_decompose_k_choice.cache_clear()
+        a = torch.randn(M, K, dtype=torch.float32, device=GPU_TYPE)
+        b = torch.randn(K, N, dtype=torch.float32, device=GPU_TYPE)
+        with config.patch(
+            {
+                "triton.num_decompose_k_splits": 10,
+                "triton.decompose_k_threshold": 32,
+                "triton.decompose_k_threshold_tf32": 4,
+            }
+        ):
+            old_tf32 = torch.backends.cuda.matmul.allow_tf32
+            torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+            try:
+                compiled_func = torch.compile(lambda a, b: a @ b)
+                _, code = run_and_get_code(compiled_func, a, b)
+            finally:
+                torch.backends.cuda.matmul.allow_tf32 = old_tf32
+        has_decompose_k = any("benchmark_decompose_k_mm" in c for c in code)
+        self.assertEqual(has_decompose_k, allow_tf32 and few_tiles)
 
     @unittest.skipIf(
         config.triton.native_matmul,
