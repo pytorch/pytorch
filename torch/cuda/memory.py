@@ -8,6 +8,7 @@ import json
 import logging
 import pickle
 import sys
+import threading
 import warnings
 from collections.abc import Callable
 from inspect import signature
@@ -68,6 +69,7 @@ __all__ = [
     "MemPool",
     "LocalizedAllocator",
     "use_mem_pool",
+    "HostMemPool",
 ]
 
 
@@ -90,12 +92,25 @@ if not hasattr(torch._C, "_MemPool"):
     )
     torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
 
+if not hasattr(torch._C, "_HostMemPool"):
+    # Define dummy base classes
+    torch._C.__dict__["_HostMemPool"] = _dummy_type("_HostMemPool")
+    torch._C.__dict__["_host_beginAllocateCurrentThreadToPool"] = _dummy_type(
+        "_host_beginAllocateCurrentThreadToPool"
+    )
+    torch._C.__dict__["_host_endAllocateCurrentThreadToPool"] = _dummy_type(
+        "_host_endAllocateCurrentThreadToPool"
+    )
+
 from torch._C import (  # noqa: F401
     _cuda_beginAllocateCurrentThreadToPool,
     _cuda_beginAllocateToPool,
     _cuda_CUDAAllocator,
     _cuda_endAllocateToPool,
     _cuda_releasePool,
+    _host_beginAllocateCurrentThreadToPool,
+    _host_endAllocateCurrentThreadToPool,
+    _HostMemPool,
     _MemPool,
 )
 
@@ -1814,16 +1829,57 @@ class LocalizedAllocator(_CUDAAllocator):
         return self._localized_allocator.device_id
 
 
-@contextlib.contextmanager
-def use_mem_pool(pool: MemPool, device: "Device" = None):
+class HostMemPool(_HostMemPool):
+    r"""HostMemPool represents a pool of pinned (page-locked) host memory in the
+    CUDA host caching allocator, with no device memory.
+
+    Pinned allocations of a thread inside ``use_mem_pool(host_pool)`` come from
+    this pool, and blocks freed by any thread return to it. The pool keeps its
+    cached blocks apart from other pools; it does not choose where memory is
+    placed. A typical use is one pool per NUMA node, entered by the loader
+    threads bound to that node; see :ref:`cuda-pinned-host-memory-pools`.
+
+    Creating a pool allocates no memory. A HostMemPool cannot be a CUDA graph's
+    ``pool``, but a graph keeps the pool until it is reset if the pool's
+    context is entered while the current stream is capturing into the graph.
+    Deleting the pool frees its cached blocks, or, if a graph keeps the pool,
+    the reset of the last such graph does; what remains is freed by a later
+    :func:`torch.accelerator.empty_host_cache`.
+    """
+
+    @property
+    def id(self) -> tuple[int, int]:
+        r"""Returns the ID of this pool as a tuple of two ints."""
+        return super().id
+
+    def use_count(self) -> int:  # pylint: disable=useless-parent-delegation
+        r"""Returns the reference count of this pool: 1 for the pool object, plus
+        one for each open ``use_mem_pool`` context and each graph that keeps it."""
+        return super().use_count()
+
+
+class _PinnedRoutes(threading.local):
+    def __init__(self) -> None:
+        # The open use_mem_pool contexts that route pinned memory on this
+        # thread, innermost last.
+        self.stack: list[use_mem_pool] = []
+
+
+_pinned_routes = _PinnedRoutes()
+
+
+class use_mem_pool(contextlib.ContextDecorator):
     r"""A context manager that routes allocations to a given pool.
 
     Args:
-        pool(torch.cuda.MemPool): a MemPool object to be made active so that
-            allocations route to this pool.
+        pool (torch.cuda.MemPool or torch.cuda.HostMemPool): the pool that the
+            current thread's allocations route to. A :class:`MemPool` takes
+            device allocations; a :class:`HostMemPool` takes pinned host
+            allocations, such as ``torch.empty(n, pin_memory=True)``.
         device (torch.device or int, optional): selected device. Uses MemPool on
             the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
+            if :attr:`device` is ``None`` (default). Must be ``None`` for a
+            HostMemPool.
 
     .. note::
         This context manager makes only current thread's allocations route to
@@ -1833,20 +1889,66 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
 
     .. note::
         When used during :class:`~torch.cuda.CUDAGraph` capture, the graph
-        retains the pool until the graph is reset or destroyed.
+        retains the pool until the graph is reset or destroyed. The newest of
+        the capture and the context wins: allocations on the capturing stream
+        go to the pool when the context is entered inside the capture, and to
+        the graph's pool when the capture is begun inside the context.
+
+    .. note::
+        Contexts that route pinned memory must be exited in reverse order, on
+        the thread that entered them; otherwise exiting raises an error and
+        changes nothing.
     """
-    device_index = (
-        torch.cuda.current_device() if device is None else _get_device_index(device)
-    )
-    _cuda_beginAllocateCurrentThreadToPool(device_index, pool.id)
-    try:
+
+    def __init__(self, pool: "MemPool | HostMemPool", device: "Device" = None) -> None:
+        if isinstance(pool, HostMemPool) and device is not None:
+            raise ValueError("device does not apply to a HostMemPool")
+        self._args = (pool, device)
+        self._pool = pool
+        # The device of each open entry, for a MemPool: the same context can be
+        # re-entered on another device.
+        self._device_indices: list[int] = []
+
+    def _recreate_cm(self) -> "use_mem_pool":
+        return type(self)(*self._args)
+
+    def __enter__(self) -> None:
+        if isinstance(self._pool, HostMemPool):
+            _host_beginAllocateCurrentThreadToPool(self._pool.id)
+            _pinned_routes.stack.append(self)
+        else:
+            # The current device on entry, not at construction, as it was when
+            # use_mem_pool was a generator.
+            device = self._args[1]
+            if device is None:
+                device = torch.cuda.current_device()
+            device_index = _get_device_index(device)
+            _cuda_beginAllocateCurrentThreadToPool(device_index, self._pool.id)
+            self._device_indices.append(device_index)
         if torch.cuda.is_current_stream_capturing():
-            graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
-            graph._retain_pool(pool)
-        yield
-    finally:
-        _cuda_endAllocateToPool(device_index, pool.id)
-        _cuda_releasePool(device_index, pool.id)
+            try:
+                graph = torch.cuda.CUDAGraph.get_currently_capturing_graph()
+                graph._retain_pool(self._pool)
+            except BaseException:
+                self.__exit__()
+                raise
+
+    def __exit__(self, *args: object) -> None:
+        if isinstance(self._pool, HostMemPool):
+            # The native end checks the pool id only, so it cannot tell this
+            # context from another one of the same pool on this thread.
+            stack = _pinned_routes.stack
+            if not stack or stack[-1] is not self:
+                raise RuntimeError(
+                    "use_mem_pool contexts that route pinned memory must be exited "
+                    "in reverse order of entry, on the thread that entered them"
+                )
+            _host_endAllocateCurrentThreadToPool(self._pool.id)
+            stack.pop()
+        else:
+            device_index = self._device_indices.pop()
+            _cuda_endAllocateToPool(device_index, self._pool.id)
+            _cuda_releasePool(device_index, self._pool.id)
 
 
 def _make_uvm_pool():

@@ -102,17 +102,27 @@ def native_matmul_persistent_rblock(r0_block: int) -> int:
 
 
 class ReductionHint(Enum):
+    """How a reduction's loads are laid out relative to its reduction dims.
+
+    INNER: the reduction dims are contiguous in memory (e.g. a row sum).
+    OUTER: the reduction dims are outer-strided (e.g. a column sum); such
+        reductions may be split into a partial and a final reduction.
+    OUTER_TINY: an OUTER reduction with very few elements per output.
+    DEFAULT: no layout preference was detected.
+    OUTER_NO_SPLIT: an OUTER reduction that the IR deliberately kept as one
+        pass; it is scheduled like DEFAULT (see is_default_reduction_scheduling).
+    """
+
     INNER = 0
     OUTER = 1
     OUTER_TINY = 2
     DEFAULT = 3
-    # The reduction dimension is outer-strided, but the IR deliberately kept
-    # the reduction as a single-stage plan. Scheduling otherwise treats this
-    # like DEFAULT.
     OUTER_NO_SPLIT = 4
 
-    def is_default_scheduling(self) -> bool:
-        return self in (ReductionHint.DEFAULT, ReductionHint.OUTER_NO_SPLIT)
+
+def is_default_reduction_scheduling(hint: ReductionHint) -> bool:
+    """Whether a reduction with ``hint`` gets the DEFAULT schedule."""
+    return hint in (ReductionHint.DEFAULT, ReductionHint.OUTER_NO_SPLIT)
 
 
 class TileHint(Enum):
@@ -348,6 +358,7 @@ class InductorMeta(typing.TypedDict, total=False):
     force_disable_caches: bool
     dynamic_scale_rblock: bool
     incremental_autotune: bool
+    incremental_autotune_reduction: bool
     incremental_autotune_max_dispatches: int
     max_autotune: bool
     max_autotune_pointwise: bool
