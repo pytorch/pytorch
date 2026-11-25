@@ -3059,30 +3059,6 @@ raise RuntimeError("device assert did not fire")
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**30], expected)
 
-    def test_mixed_dtype_binary_low_precision_out(self):
-        # The float input must not be rounded to the output dtype before the op.
-        for dtype in (torch.bfloat16, torch.half):
-            for n in (1, 16383, 16384, 65537):
-                a = torch.randn(n, device="cuda").to(dtype)
-                b = torch.randn(n, device="cuda")
-                out = torch.empty(n, device="cuda", dtype=dtype)
-                torch.add(a, b, out=out)
-                out, a, b = out.cpu(), a.cpu(), b.cpu()
-                expected = (a.float() + b).to(dtype)
-                if TEST_WITH_ROCM:
-                    # RDNA fuses the add and the conversion (v_fma_mix*), rounding the
-                    # exact sum once instead of through float. Accept that more accurate
-                    # result too. Rounding the double sum to float with round-to-odd
-                    # makes the final .to(dtype) a correct single rounding; a plain
-                    # double .to(dtype) would round through float again.
-                    s = a.double() + b.double()
-                    f = s.float()
-                    trunc = f.view(torch.int32) - (f.double().abs() > s.abs()).int()
-                    odd = torch.where(f.double() == s, f.view(torch.int32), trunc | 1)
-                    once = odd.view(torch.float32).to(dtype)
-                    expected = torch.where(out == once, once, expected)
-                self.assertEqual(out, expected, atol=0, rtol=0)
-
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     @gcIfJetson
     @serialTest()
@@ -3102,33 +3078,6 @@ raise RuntimeError("device assert did not fire")
         y = torch.nn.functional.avg_pool2d(x, kernel_size=1)
         torch.cuda.synchronize()
         self.assertEqual(y[0, 0, 0, 2**31 - 2], expected)
-
-    def test_vectorized_elementwise_remainder_sizes(self):
-        # Sizes around the 256 / 1024 / 4096 boundaries of the vectorized kernel's
-        # remainder block, alone and after full blocks.
-        sizes = [1, 255, 256, 257, 1023, 1024, 1025, 2047, 4095, 4096, 4097]
-        sizes += [4096 + 256, 4096 + 1024, 3 * 4096 + 17, 65537]
-        for dtype in (torch.float32, torch.bfloat16, torch.float16, torch.uint8):
-            for n in sizes:
-                a, b, c = (
-                    torch.randint(0, 100, (n,), device="cuda").to(dtype)
-                    for _ in range(3)
-                )
-                a_cpu, b_cpu, c_cpu = a.cpu(), b.cpu(), c.cpu()
-                out = torch.full((n + 64,), 7, device="cuda", dtype=dtype)
-                torch.add(a, b, out=out[:n])
-                self.assertEqual(out[:n], a_cpu + b_cpu)
-                self.assertEqual(out[n:], torch.full((64,), 7, dtype=dtype))
-                self.assertEqual(
-                    torch.addcmul(a, b, c), torch.addcmul(a_cpu, b_cpu, c_cpu)
-                )
-                self.assertEqual(torch.square(a), torch.square(a_cpu))
-                self.assertEqual(a.float(), a_cpu.float())
-        for n in sizes:
-            # Same values through the strided kernel must give identical results.
-            x, y = torch.randn(2, n, device="cuda")
-            x_nc = torch.empty(2 * n, device="cuda")[::2].copy_(x)
-            self.assertEqual(torch.atan2(x, y), torch.atan2(x_nc, y), atol=0, rtol=0)
 
     # this might create a reference cycle on self...
     def _make_multiply_in_stream(self):
@@ -3511,60 +3460,6 @@ torch.cuda.synchronize()
                         results[t].sum().item(),
                         (2048 - test_iters) * (2048 - test_iters),
                     )
-
-    def test_cusparse_multiple_threads_same_device(self):
-        size = 1024
-        num_threads = 2
-        trials = 3
-        test_iters = 500
-
-        def ones_sparse(size):
-            a = torch.arange(size, device="cuda")
-            indices = torch.cartesian_prod(a, a).t()
-            values = torch.ones(size * size, device="cuda")
-            return torch.sparse_coo_tensor(indices, values)
-
-        weight = ones_sparse(size)
-        results = {}
-        barrier = threading.Barrier(num_threads)
-
-        def _worker(t):
-            my_stream = torch.cuda.Stream()
-            # Hard sync so we don't need to worry about creating and using tensors
-            # across streams or the fact that default streams are thread-local.
-            # Those issues are not the target of this test.
-            torch.cuda.synchronize()
-            # Line up threads to increase likelihood of race conditions.
-            barrier.wait()
-            with torch.cuda.stream(my_stream):
-                for _ in range(test_iters):
-                    # If all threads are sharing the same cublas handle,
-                    # the following sequence may occur:
-                    # thread 0 calls cublasSetStream()
-                    # thread 1 calls cublasSetStream()
-                    # thread 0 launches its raw gemm, which it thinks is in
-                    #          its own stream, but is actually in thread 1's stream.
-                    # thread 0 enqueues its div_, which IS in its own stream,
-                    #          but actually now races with its gemm.
-                    results[t] = weight.mm(results[t])
-                    results[t].div_(float(size))
-            torch.cuda.synchronize()
-
-        for _ in range(trials):
-            for t in range(num_threads):
-                results[t] = torch.ones((size, size), device="cuda")
-
-            threads = [
-                threading.Thread(target=_worker, args=(t,)) for t in range(num_threads)
-            ]
-
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join()
-
-            for t in range(num_threads):
-                self.assertEqual(results[t].sum().item(), size * size)
 
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
@@ -14544,19 +14439,6 @@ class TestCudaAutocast(TestAutocast):
             loss = output.sum()
         loss.backward()
 
-    def test_autocast_boxed_cpu_cat_stack(self):
-        unit = torch.jit.CompilationUnit(
-            "def boxed_cat_stack(a: Tensor, b: Tensor) -> Tensor:\n"
-            "    c = torch.cat([a, b], 0)\n"
-            "    return torch.stack([c, c], 0)\n"
-        )
-        a = torch.randn(1, device="cpu")
-        b = torch.randn(1, device="cpu")
-        with torch.autocast("cuda", enabled=True):
-            result = unit.boxed_cat_stack(a, b)
-        c = torch.cat([a, b], 0)
-        self.assertEqual(result, torch.stack([c, c], 0))
-
     # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
     # so they get a dedicated test.
     # Despite the large number of RNN cases it tries, the test takes < 15 seconds on a Titan V (similar to V100).
@@ -16973,6 +16855,129 @@ class TestCudaArchList(TestCase):
             self.assertEqual(torch.cuda.get_arch_list(), expected)
 
 
+# Device-generic tests that also run on XPU. Only CUDA and XPU are
+# instantiated; on ROCm these run as the CUDA variant.
+class TestCudaDeviceGeneric(TestCase):
+    def test_mixed_dtype_binary_low_precision_out(self, device):
+        # The float input must not be rounded to the output dtype before the op.
+        for dtype in (torch.bfloat16, torch.half):
+            for n in (1, 16383, 16384, 65537):
+                a = torch.randn(n, device=device).to(dtype)
+                b = torch.randn(n, device=device)
+                out = torch.empty(n, device=device, dtype=dtype)
+                torch.add(a, b, out=out)
+                out, a, b = out.cpu(), a.cpu(), b.cpu()
+                expected = (a.float() + b).to(dtype)
+                if TEST_WITH_ROCM:
+                    # RDNA fuses the add and the conversion (v_fma_mix*), rounding the
+                    # exact sum once instead of through float. Accept that more accurate
+                    # result too. Rounding the double sum to float with round-to-odd
+                    # makes the final .to(dtype) a correct single rounding; a plain
+                    # double .to(dtype) would round through float again.
+                    s = a.double() + b.double()
+                    f = s.float()
+                    trunc = f.view(torch.int32) - (f.double().abs() > s.abs()).int()
+                    odd = torch.where(f.double() == s, f.view(torch.int32), trunc | 1)
+                    once = odd.view(torch.float32).to(dtype)
+                    expected = torch.where(out == once, once, expected)
+                self.assertEqual(out, expected, atol=0, rtol=0)
+
+    def test_vectorized_elementwise_remainder_sizes(self, device):
+        # Sizes around the 256 / 1024 / 4096 boundaries of the vectorized kernel's
+        # remainder block, alone and after full blocks.
+        sizes = [1, 255, 256, 257, 1023, 1024, 1025, 2047, 4095, 4096, 4097]
+        sizes += [4096 + 256, 4096 + 1024, 3 * 4096 + 17, 65537]
+        for dtype in (torch.float32, torch.bfloat16, torch.float16, torch.uint8):
+            for n in sizes:
+                a, b, c = (
+                    torch.randint(0, 100, (n,), device=device).to(dtype)
+                    for _ in range(3)
+                )
+                a_cpu, b_cpu, c_cpu = a.cpu(), b.cpu(), c.cpu()
+                out = torch.full((n + 64,), 7, device=device, dtype=dtype)
+                torch.add(a, b, out=out[:n])
+                self.assertEqual(out[:n], a_cpu + b_cpu)
+                self.assertEqual(out[n:], torch.full((64,), 7, dtype=dtype))
+                self.assertEqual(
+                    torch.addcmul(a, b, c), torch.addcmul(a_cpu, b_cpu, c_cpu)
+                )
+                self.assertEqual(torch.square(a), torch.square(a_cpu))
+                self.assertEqual(a.float(), a_cpu.float())
+        for n in sizes:
+            # Same values through the strided kernel must give identical results.
+            x, y = torch.randn(2, n, device=device)
+            x_nc = torch.empty(2 * n, device=device)[::2].copy_(x)
+            self.assertEqual(torch.atan2(x, y), torch.atan2(x_nc, y), atol=0, rtol=0)
+
+    def test_cusparse_multiple_threads_same_device(self, device):
+        device_module = torch.get_device_module(device)
+        size = 1024
+        num_threads = 2
+        trials = 3
+        test_iters = 500
+
+        def ones_sparse(size):
+            a = torch.arange(size, device=device)
+            indices = torch.cartesian_prod(a, a).t()
+            values = torch.ones(size * size, device=device)
+            return torch.sparse_coo_tensor(indices, values)
+
+        weight = ones_sparse(size)
+        results = {}
+        barrier = threading.Barrier(num_threads)
+
+        def _worker(t):
+            my_stream = device_module.Stream()
+            # Hard sync so we don't need to worry about creating and using tensors
+            # across streams or the fact that default streams are thread-local.
+            # Those issues are not the target of this test.
+            device_module.synchronize()
+            # Line up threads to increase likelihood of race conditions.
+            barrier.wait()
+            with device_module.stream(my_stream):
+                for _ in range(test_iters):
+                    # If all threads are sharing the same cublas handle,
+                    # the following sequence may occur:
+                    # thread 0 calls cublasSetStream()
+                    # thread 1 calls cublasSetStream()
+                    # thread 0 launches its raw gemm, which it thinks is in
+                    #          its own stream, but is actually in thread 1's stream.
+                    # thread 0 enqueues its div_, which IS in its own stream,
+                    #          but actually now races with its gemm.
+                    results[t] = weight.mm(results[t])
+                    results[t].div_(float(size))
+            device_module.synchronize()
+
+        for _ in range(trials):
+            for t in range(num_threads):
+                results[t] = torch.ones((size, size), device=device)
+
+            threads = [
+                threading.Thread(target=_worker, args=(t,)) for t in range(num_threads)
+            ]
+
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+            for t in range(num_threads):
+                self.assertEqual(results[t].sum().item(), size * size)
+
+    def test_autocast_boxed_cpu_cat_stack(self, device):
+        unit = torch.jit.CompilationUnit(
+            "def boxed_cat_stack(a: Tensor, b: Tensor) -> Tensor:\n"
+            "    c = torch.cat([a, b], 0)\n"
+            "    return torch.stack([c, c], 0)\n"
+        )
+        a = torch.randn(1, device="cpu")
+        b = torch.randn(1, device="cpu")
+        with torch.autocast(torch.device(device).type, enabled=True):
+            result = unit.boxed_cat_stack(a, b)
+        c = torch.cat([a, b], 0)
+        self.assertEqual(result, torch.stack([c, c], 0))
+
+
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaAllocator)
 instantiate_parametrized_tests(TestMemPool)
@@ -16982,6 +16987,9 @@ instantiate_parametrized_tests(TestCachingHostAllocatorConfig)
 instantiate_parametrized_tests(TestGDS)
 instantiate_device_type_tests(TestCudaOptims, globals())
 instantiate_device_type_tests(TestCudaDeviceParametrized, globals())
+instantiate_device_type_tests(
+    TestCudaDeviceGeneric, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 instantiate_device_type_tests(TestCudaGreenContexts, globals(), except_for="cpu")
 
 
