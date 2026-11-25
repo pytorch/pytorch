@@ -9,12 +9,12 @@ namespace at::native::mkldnn {
 
 // Ported from ideep::layer_normalization_forward::compute.
 void layer_normalization_forward(
-    const ITensor& src,
-    const ITensor& scale,
-    const ITensor& shift,
-    ITensor& dst,
-    ITensor& mean,
-    ITensor& variance,
+    const MkldnnMemory& src,
+    const MkldnnMemory& scale,
+    const MkldnnMemory& shift,
+    MkldnnMemory& dst,
+    MkldnnMemory& mean,
+    MkldnnMemory& variance,
     float epsilon);
 
 } // namespace at::native::mkldnn

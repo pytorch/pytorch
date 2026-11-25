@@ -1129,6 +1129,8 @@ def get_verbose_code_parts(
     # add a hint explaining which closure variable is being checked.
     # This helps users understand which closure variable caused the guard failure.
     if guard is not None:
+        if guard.recompile_hint is not None:
+            recompile_hint = guard.recompile_hint
         closure_hint = _get_closure_var_hint(guard.originating_source)
         if closure_hint:
             recompile_hint = (
@@ -7439,13 +7441,16 @@ def install_not_in_instance_dict_guard(source: Source, name: str) -> None:
     )
 
 
-def install_guard(*guards: Guard, skip: int = 0) -> None:
+def install_guard(
+    *guards: Guard, skip: int = 0, recompile_hint: str | None = None
+) -> None:
     """
     Add dynamo guards to the current tracing context.
 
     Args:
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
+        recompile_hint: explanation to display when this guard fails
     """
     from torch._guards import TracingContext
 
@@ -7462,6 +7467,8 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
             raise AssertionError(f"Expected Guard, got {type(guard)}")
         if is_from_skip_guard_source(guard.originating_source):
             continue
+        if recompile_hint is not None:
+            guard.recompile_hint = recompile_hint
         add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
 
 

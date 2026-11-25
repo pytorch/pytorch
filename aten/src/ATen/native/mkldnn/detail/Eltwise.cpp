@@ -6,8 +6,8 @@
 namespace at::native::mkldnn {
 
 void eltwise_forward(
-    const ITensor& src,
-    ITensor& dst,
+    const MkldnnMemory& src,
+    MkldnnMemory& dst,
     dnnl::algorithm algorithm,
     dnnl::prop_kind prop_kind,
     float alpha,
@@ -35,7 +35,7 @@ void eltwise_forward(
   if (src_in.has_scale()) {
     dst.set_scale(src_in.get_scale());
   }
-  ITensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   dnnl::eltwise_forward(pd).execute(
       IStream::default_stream(),
@@ -50,9 +50,9 @@ void eltwise_forward(
 }
 
 void eltwise_backward(
-    const ITensor& src,
-    const ITensor& diff_dst,
-    ITensor& diff_src,
+    const MkldnnMemory& src,
+    const MkldnnMemory& diff_dst,
+    MkldnnMemory& diff_src,
     dnnl::algorithm algorithm,
     float alpha,
     float beta) {
@@ -92,7 +92,7 @@ void eltwise_backward(
       op_attr);
 
   auto expected_diff_dst = diff_dst.reorder_if_differ_in(pd.diff_dst_desc());
-  ITensor expected_diff_src;
+  MkldnnMemory expected_diff_src;
   if (diff_src.is_empty() || diff_src.get_desc() != pd.diff_src_desc()) {
     expected_diff_src.init(pd.diff_src_desc());
   } else {
@@ -110,7 +110,7 @@ void eltwise_backward(
   auto src_dst_arg = use_dst ? DNNL_ARG_DST : DNNL_ARG_SRC;
   auto expected_src_dst_desc = use_dst ? pd.dst_desc() : pd.src_desc();
   auto expected_src_dst = src.reorder_if_differ_in(expected_src_dst_desc);
-  ITensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
   dnnl::eltwise_backward(pd).execute(
       IStream::default_stream(),
       {{DNNL_ARG_DIFF_DST, expected_diff_dst},
