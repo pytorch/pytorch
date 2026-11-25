@@ -201,7 +201,7 @@ class TestInnerTreeCombineUnroll(TestCase):
         "updates,msg",
         [
             ({"uniform_combine": "weight"}, r"must be one of \('off', 'counts'"),
-            ({"shape": "split"}, "staged combine plan"),
+            ({"shape": "looped"}, "staged combine plan"),
             ({"combine_tile": 0}, "staged combine plan"),
             ({"trait": "sum"}, "combine_uniform, got SumOps"),
             ({"trait": "fp64"}, "an FP32 accumulator"),
@@ -393,6 +393,11 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
         general = {k[-2] for k in kg._COMPILE_CACHE if k[1:3] == ("genitree2", key)}
         self.assertEqual(row_sigs, {combine.sig})
         self.assertEqual(general, {combine.sig})
+        # Uniform combines derive counts, so stage one writes no count partial.
+        nparts = trait.nfields - (uniform != "off")
+        row_parts = {k[3] for k in rt._CACHE if k[:2] == ("rowitree1", key)}
+        gen = {k[4] for k in kg._COMPILE_CACHE if k[1:3] == ("genitree1", key)}
+        self.assertEqual({len(p) for p in row_parts | gen}, {nparts})
         if col_combine is not None:
             # Split columns fold their partials through the general genitree2 combine.
             self.assertEqual(col_combine.combine_tile, 128)
@@ -402,6 +407,9 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             col_key = ("genitree2", f"{key}_col")
             col_sigs = {k[-2] for k in kg._COMPILE_CACHE if k[1:3] == col_key}
             self.assertEqual(col_sigs, {col_combine.sig})
+            col_one = ("ordered_col1", f"{key}_col")
+            col_parts = {len(k[3]) for k in ct._CACHE if k[:2] == col_one}
+            self.assertEqual(col_parts, {nparts})
         for g, w in zip(got, want):
             self.assertEqual(g.view(torch.int32), w.view(torch.int32))
 
