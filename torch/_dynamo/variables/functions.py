@@ -2271,6 +2271,11 @@ def invoke_and_store_as_constant(
         source_name = tx.output.install_global_by_id(name, res)
         tx.output.update_co_names(source_name)
         source = ConstantSource(source_name)
+        # Process-local id-based globals and lifted constant tensors cannot be
+        # restored across precompile cache loads.
+        tx.output.bypass_package(
+            f"Frame uses assume_constant_result tensor {source_name} bound to a process-local global."
+        )
     else:
         source = ConstantSource(name)
     return tx.output.register_attr_or_module(
