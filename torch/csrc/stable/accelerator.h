@@ -146,13 +146,15 @@ inline void* getStreamFromPool<torch::headeronly::DeviceType::XPU>(
 #endif
 
 #ifdef USE_MPS
+template <torch::headeronly::DeviceType device_type>
+void* getStreamFromPool(DeviceIndex device_index) = delete;
+
 template <>
 inline void* getStreamFromPool<torch::headeronly::DeviceType::MPS>(
-    bool is_high_priority,
     DeviceIndex device_index) {
   void* stream = nullptr;
   STABLE_TORCH_ERROR_CODE_CHECK(
-      torch_get_mps_stream_from_pool(is_high_priority, device_index, &stream));
+      torch_get_mps_stream_from_pool(device_index, &stream));
   return stream;
 }
 #endif // USE_MPS

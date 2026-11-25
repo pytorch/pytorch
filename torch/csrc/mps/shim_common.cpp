@@ -22,7 +22,6 @@ AOTITorchError torch_mps_set_arg_bytes(
 }
 
 AOTITorchError torch_get_mps_stream_from_pool(
-    bool is_high_priority,
     int32_t device_index,
     void** ret_stream) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({

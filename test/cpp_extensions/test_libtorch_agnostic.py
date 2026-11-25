@@ -3063,16 +3063,14 @@ class TestLibtorchAgnosticMetal(TestCase):
 
         get_stream = torch.ops.libtorch_agn_2_16.get_mps_stream_from_pool
         previous = torch.mps.current_stream()
-        explicit = get_stream(False, 0)
-        current = get_stream(False, -1)
+        explicit = get_stream(0)
+        current = get_stream(-1)
         self.assertNotEqual(explicit, 0)
         self.assertNotEqual(current, 0)
         self.assertNotEqual(explicit, current)
         self.assertEqual(torch.mps.current_stream(), previous)
-        with self.assertRaisesRegex(RuntimeError, "does not support high priority"):
-            get_stream(True, 0)
         with self.assertRaisesRegex(RuntimeError, "requires device index -1 or 0"):
-            get_stream(False, 1)
+            get_stream(1)
 
     @parametrize("scale,negate", [(0.5, False), (2.0, True)])
     def test_mps_set_arg_bytes(self, device, scale, negate):

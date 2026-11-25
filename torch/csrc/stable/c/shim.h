@@ -387,10 +387,8 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
 #ifdef USE_MPS
 // Returns a borrowed Metal command queue. Acquiring it does not commit pending
 // PyTorch work. Callers must establish dependencies for separate submissions.
-AOTI_TORCH_EXPORT AOTITorchError torch_get_mps_stream_from_pool(
-    bool is_high_priority,
-    int32_t device_index,
-    void** ret_stream);
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_mps_stream_from_pool(int32_t device_index, void** ret_stream);
 #endif // USE_MPS
 
 #ifdef USE_XPU
