@@ -4863,7 +4863,7 @@ class SIMDScheduling(BaseScheduling):
            each leaf's body: the Triton lines for the nodes' loads, compute and stores.
            A leaf has no signature, decorator or name yet, and nothing is written to
            the wrapper, so this can run more than once; the dual index dtype path
-           builds an int32 and an int64 kernel, each with its own hints and tiling,
+           builds an int32 and an int64 kernel, the int64 one with hints past int32,
            and wraps them in a ConditionalMultiKernel.
         2. Define (_define_node_schedule_kernels), on the leaf kernels from step 1:
            merge their workspaces, then turn each leaf into its complete Triton source
@@ -4954,8 +4954,9 @@ class SIMDScheduling(BaseScheduling):
 
         index_dtype forces the index dtype instead of deriving it (and its guard)
         from the sizes. optimization_hint_overrides replaces the hints that the
-        heuristics read (tiling included), here and when _define_node_schedule_kernels
-        renders the kernels.
+        heuristics read, here and when _define_node_schedule_kernels renders the
+        kernels: tiling scores included, but not the memory-coalescing analysis, which
+        is computed before codegen.
         """
         with V.graph.sizevars.optimization_hint_overrides(optimization_hint_overrides):
             tiling, tiling_score = self.get_tiling_and_scores(
@@ -6024,7 +6025,6 @@ class SIMDScheduling(BaseScheduling):
         for src_code, kernel, _ in kernel_code_list:
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             self.codegen_comment(combo_kernel_node.snodes, kernel_name)
-            self._record_other_choices_provenance(kernel, combo_kernel_node.snodes)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
             with V.graph.wrapper_code.kernel_profile_scope(
                 kernel_name, combo_kernel_node.snodes
