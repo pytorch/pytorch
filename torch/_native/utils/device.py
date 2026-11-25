@@ -1,5 +1,3 @@
-# Validate the current device before launching a cached kernel.
-
 import torch
 
 

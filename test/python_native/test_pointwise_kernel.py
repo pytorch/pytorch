@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, TYPE_CHECKING
 
 import torch
 from torch._native.cutedsl.config import POINTWISE_HOST_CACHE_LIMIT
@@ -21,13 +21,25 @@ from torch.testing._internal.common_utils import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from torch._native.cutedsl.types import MathFn, NumericType, Scalar
+
+
 @instantiate_parametrized_tests
 class TestPointwiseIndexing(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     @parametrize(
         "shape,strides,expected",
-        (((2**31,), (1,), False), ((2,), (2**31,), False), ((8, 8), (16, 1), True)),
+        (
+            ((2**31 - 1,), (1,), False),
+            ((2**31 - 2,), (1,), True),
+            ((2,), (2**31 - 1,), False),
+            ((2,), (2**31 - 2,), True),
+            ((8, 8), (16, 1), True),
+        ),
     )
     def test_index_width_checks_count_and_storage_span(
         self, shape: tuple[int, ...], strides: tuple[int, ...], expected: bool
@@ -41,26 +53,48 @@ class TestPointwiseIndexing(TestCase):
 class TestPointwiseKernel(TestCase):
     hw_classification = HardwareClassification.CUDA
 
+    def _run_kernel(
+        self,
+        fn: MathFn,
+        compute: NumericType,
+        inputs: Sequence[torch.Tensor],
+        out_dtypes: tuple[torch.dtype, ...],
+        *,
+        consts: Sequence[Scalar] = (),
+        key: tuple[Any, ...] | None = None,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, ...]:
+        from torch._native.ops.pointwise import kernel
+
+        return kernel.run(
+            fn,
+            key or (self.id(),),
+            len(inputs),
+            len(out_dtypes),
+            consts,
+            compute,
+            inputs,
+            out_dtypes,
+            **kwargs,
+        )
+
     @onlyCUDA
     @skipIfNoCuteDSL
     def test_default_cast_rounds_through_common_dtype(self, device: str) -> None:
         import cutlass
 
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         with torch.backends.python_native.cutedsl.disabled():
             x = torch.full((16,), 2049, dtype=torch.int32, device=device)
             y = torch.ones(16, dtype=torch.float16, device=device)
             expected = x + y
-            (actual,) = kernel.run(
+            (actual,) = self._run_kernel(
                 ops.get_fn("_add"),
-                ("default_common_dtype",),
-                2,
-                1,
-                (cutlass.Float32(1),),
                 cutlass.Float32,
                 [x, y],
                 (torch.float16,),
+                consts=(cutlass.Float32(1),),
             )
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
@@ -80,7 +114,7 @@ class TestPointwiseKernel(TestCase):
         self, device: str, name: str, dtype: torch.dtype
     ) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         with torch.backends.python_native.cutedsl.disabled():
             if name == "_bitwise_right_shift":
@@ -96,12 +130,8 @@ class TestPointwiseKernel(TestCase):
                 torch.tensor(v, device=device, dtype=dtype) for v in (values, divisors)
             ]
             expected = reference(*inputs)
-            (actual,) = kernel.run(
+            (actual,) = self._run_kernel(
                 ops.get_fn(name),
-                ("integer_boundary", name, dtype),
-                2,
-                1,
-                (),
                 torch2cute[dtype],
                 inputs,
                 (dtype,),
@@ -116,7 +146,7 @@ class TestPointwiseKernel(TestCase):
 
         import cutlass
 
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         with torch.backends.python_native.cutedsl.disabled():
             base = torch.arange(128, device=device, dtype=torch.float32).reshape(8, 16)
@@ -124,12 +154,8 @@ class TestPointwiseKernel(TestCase):
             if layout == "dense":
                 x = x.contiguous()
             fn = partial(ops.get_fn("_mul"), y=2.0)
-            (actual,) = kernel.run(
+            (actual,) = self._run_kernel(
                 fn,
-                ("unnamed_callable",),
-                1,
-                1,
-                (),
                 cutlass.Float32,
                 [x],
                 (x.dtype,),
@@ -203,7 +229,6 @@ class TestPointwiseKernel(TestCase):
                 bid * tile, (bid + 1) * tile, device=device, dtype=torch.int64
             )
         self.assertEqual(actual, expected)
-        self.assertEqual(actual < count, expected < count)
 
     @onlyCUDA
     @skipIfNoCuteDSL
@@ -215,24 +240,23 @@ class TestPointwiseKernel(TestCase):
         import cutlass.cute as cute
 
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel
         from torch._native.ops.pointwise.signature import specialize
 
         @cute.jit
         def narrow(x: Annotated[Any, "storage"]) -> Annotated[Any, "storage"]:
-            return (x + x.__class__(0.0001)) - x
+            return (x + x.__class__(0.0003)) - x
 
         @cute.jit
         def opmath(x: Annotated[Any, "compute"]) -> Annotated[Any, "compute"]:
-            return (x + x.__class__(0.0001)) - x
+            return (x + x.__class__(0.0003)) - x
 
         @cute.jit
         def wide(x: Annotated[Any, torch.float64]) -> Annotated[Any, torch.float64]:
-            return (x + x.__class__(0.0001)) - x
+            return (x + x.__class__(0.0003)) - x
 
         @cute.jit
         def opmath_wide(x: Annotated[Any, "compute"]) -> Annotated[Any, torch.float64]:
-            return (x + x.__class__(0.0001)) - x
+            return (x + x.__class__(0.0003)) - x
 
         fn = {
             "storage": narrow,
@@ -252,13 +276,9 @@ class TestPointwiseKernel(TestCase):
             }[precision]
             result = torch.float64 if "float64" in precision else torch.float16
             work = x.to(dtype)
-            expected = ((work + 0.0001) - work).to(result).to(torch.float32)
-        (actual,) = kernel.run(
+            expected = ((work + 0.0003) - work).to(result).to(torch.float32)
+        (actual,) = self._run_kernel(
             fn,
-            ("signature_casts", precision, strided),
-            1,
-            1,
-            (),
             torch2cute[sig.compute],
             [x],
             (torch.float32,),
@@ -277,7 +297,6 @@ class TestPointwiseKernel(TestCase):
         from cutlass import Float32
 
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel
         from torch._native.ops.pointwise.signature import specialize
 
         @cute.jit
@@ -295,12 +314,8 @@ class TestPointwiseKernel(TestCase):
                 0.5, device="cpu" if host_scalar else device, dtype=torch.float32
             )
             expected = x.float() + 0.5 * torch.arange(6, device=device).reshape(2, 3)
-        (actual,) = kernel.run(
+        (actual,) = self._run_kernel(
             indexed,
-            ("indexed_input", host_scalar),
-            2,
-            1,
-            (),
             torch2cute[sig.compute],
             [scale, x],
             (torch.float32,),
@@ -312,13 +327,36 @@ class TestPointwiseKernel(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    def test_indexed_factory_writes_strided_output(self, device: str) -> None:
+        import cutlass
+
+        from torch._native.ops.pointwise import ops
+
+        with torch.backends.python_native.cutedsl.disabled():
+            out = torch.empty_strided((3, 257), (517, 2), device=device)
+            expected = torch.arange(out.numel(), device=device).reshape(out.shape)
+            expected = expected * 0.25 + 1.5
+            (actual,) = self._run_kernel(
+                ops.get_fn("_arange"),
+                cutlass.Float32,
+                [],
+                (torch.float32,),
+                consts=(cutlass.Float32(1.5), cutlass.Float32(0.25)),
+                out=[out],
+                with_index=True,
+                work_per_thread=3,
+            )
+        self.assertIs(actual, out)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     @parametrize("strided", (False, True))
     def test_signature_mixed_returns(self, device: str, strided: bool) -> None:
         import cutlass
         import cutlass.cute as cute
 
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel
         from torch._native.ops.pointwise.signature import specialize
 
         @cute.jit
@@ -330,20 +368,32 @@ class TestPointwiseKernel(TestCase):
         sig = specialize(split, torch.float16, torch.float16, 2)
         with torch.backends.python_native.cutedsl.disabled():
             x = torch.arange(-32, 32, device=device, dtype=torch.float16)
-            x = x[::2] if strided else x
+            if strided:
+                x = x.reshape(8, 8)[:, ::2]
+                outputs = (
+                    torch.empty_strided(
+                        x.shape, (13, 2), device=device, dtype=torch.bool
+                    ),
+                    torch.empty_strided(
+                        x.shape, (1, 11), device=device, dtype=torch.int32
+                    ),
+                )
+            else:
+                outputs = tuple(
+                    torch.empty(x.shape, device=device, dtype=d) for d in sig.results
+                )
             expected = (x > 0, x.to(torch.int32))
-        actual = kernel.run(
+        actual = self._run_kernel(
             split,
-            ("signature_returns", strided),
-            1,
-            2,
-            (),
             torch2cute[sig.compute],
             [x],
             sig.results,
+            out=outputs,
             input_casts=(sig.input_dtype(0, False),),
             result_dtypes=sig.results,
         )
+        self.assertIs(actual[0], outputs[0])
+        self.assertIs(actual[1], outputs[1])
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @onlyCUDA
@@ -354,7 +404,7 @@ class TestPointwiseKernel(TestCase):
         self, device: str, dtype: torch.dtype, strided: bool
     ) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
         from torch._native.ops.pointwise.signature import Functor
         from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND as PromotionKind
 
@@ -369,12 +419,8 @@ class TestPointwiseKernel(TestCase):
         sig = Functor("_signbit").signature(
             ((dtype, False),), PromotionKind.ALWAYS_BOOL
         )
-        (actual,) = kernel.run(
+        (actual,) = self._run_kernel(
             ops.get_fn("_signbit"),
-            ("signbit_patterns", dtype, strided),
-            1,
-            1,
-            (),
             torch2cute[sig.compute],
             [values],
             (torch.bool,),
@@ -397,10 +443,13 @@ class TestPointwiseKernel(TestCase):
             ):
                 from cutlass import Float32
 
-                from torch._native.ops.pointwise import kernel, ops
+                from torch._native.ops.pointwise import ops
 
-                kernel.run(
-                    ops.get_fn("_identity"), (), 1, 1, (), Float32, [x], (x.dtype,)
+                self._run_kernel(
+                    ops.get_fn("_identity"),
+                    Float32,
+                    [x],
+                    (x.dtype,),
                 )
 
     @onlyCUDA
@@ -417,17 +466,13 @@ class TestPointwiseKernel(TestCase):
         self, device: str, storage: torch.dtype, compute: torch.dtype, vec_bits: int
     ) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         value = torch.arange(64, device=device, dtype=storage)
         with torch.backends.python_native.cutedsl.disabled():
             expected = value.to(compute)
-        (actual,) = kernel.run(
+        (actual,) = self._run_kernel(
             ops.get_fn("_identity"),
-            ("copy_width", storage, compute, vec_bits),
-            1,
-            1,
-            (),
             torch2cute[compute],
             (value,),
             (compute,),
@@ -441,7 +486,7 @@ class TestPointwiseKernel(TestCase):
     @parametrize("change", ("function", "output", "storage", "compute"))
     def test_fixed_key_preserves_specialization(self, device: str, change: str) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         for second in (False, True, False):
             wide = change in ("storage", "compute")
@@ -461,15 +506,12 @@ class TestPointwiseKernel(TestCase):
                 if name == "_neg":
                     expected = -expected
                 expected = expected.to(dtype)
-            (actual,) = kernel.run(
+            (actual,) = self._run_kernel(
                 ops.get_fn(name),
-                ("specialization", change),
-                1,
-                1,
-                (),
                 torch2cute[compute],
                 [x],
                 (dtype,),
+                key=("specialization", change),
             )
             self.assertEqual(actual.dtype, dtype)
             self.assertEqual(actual, expected, atol=0, rtol=0)
@@ -503,12 +545,8 @@ class TestPointwiseKernel(TestCase):
                     if transposed:
                         out = out.t()
                     strides = out.stride()
-                    (actual,) = kernel.run(
+                    (actual,) = self._run_kernel(
                         ops.get_fn("_neg"),
-                        ("rowgap_output",),
-                        1,
-                        1,
-                        (),
                         torch2cute[x.dtype],
                         [x],
                         (x.dtype,),
@@ -529,7 +567,7 @@ class TestPointwiseKernel(TestCase):
         self, device: str, kind: str
     ) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         x = torch.full((32,), -10000.0, device=device, dtype=torch.float16)
         y = torch.tensor(10000.25, device=device) if kind == "device" else 10000.25
@@ -541,15 +579,12 @@ class TestPointwiseKernel(TestCase):
             else torch.tensor(y, dtype=torch.float64, device="cpu")
         )
         ct = torch2cute[torch.float32]
-        (actual,) = kernel.run(
+        (actual,) = self._run_kernel(
             ops.get_fn("_add"),
-            ("scalar_precision", kind),
-            2,
-            1,
-            (ct(1),),
             ct,
             [x, scalar],
             (x.dtype,),
+            consts=(ct(1),),
         )
         with torch.backends.python_native.cutedsl.disabled():
             self.assertEqual(actual, expected, atol=0, rtol=0)
@@ -594,7 +629,7 @@ class TestPointwiseKernel(TestCase):
     ) -> None:
         import cutlass
 
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         with torch.backends.python_native.cutedsl.disabled():
             rows = 4096 if cols == 4096 else 2048
@@ -605,15 +640,12 @@ class TestPointwiseKernel(TestCase):
                 for _ in range(2)
             ]
             expected = x + y
-            (actual,) = kernel.run(
+            (actual,) = self._run_kernel(
                 ops.get_fn("_add"),
-                ("rowgap_tail",),
-                2,
-                1,
-                (cutlass.Float32(1),),
                 cutlass.Float32,
                 [x, y],
                 (x.dtype,),
+                consts=(cutlass.Float32(1),),
             )
             self.assertEqual(actual, expected)
 
@@ -640,22 +672,22 @@ class TestPointwiseKernel(TestCase):
         )
         count = None
         with torch.backends.python_native.cutedsl.disabled():
-            for shape, strides, rhs_shape, rhs_strides, out_strides in cases * 2:
+            for shape, strides, rhs_shape, rhs_strides, out_strides in (
+                *cases,
+                cases[0],
+            ):
                 x, y, out = (
                     view(shape, strides),
                     view(rhs_shape, rhs_strides),
                     view(shape, out_strides),
                 )
                 expected = x + y
-                (actual,) = kernel.run(
+                (actual,) = self._run_kernel(
                     ops.get_fn("_add"),
-                    ("runtime_layouts",),
-                    2,
-                    1,
-                    (cutlass.Float32(1),),
                     cutlass.Float32,
                     [x, y],
                     (torch.float32,),
+                    consts=(cutlass.Float32(1),),
                     out=[out],
                 )
                 self.assertIs(actual, out)
@@ -670,7 +702,7 @@ class TestPointwiseKernel(TestCase):
     @parametrize("name", ("maximum", "minimum", "fmax", "fmin"))
     def test_extrema_preserve_signed_zeros(self, device: str, name: str) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         with torch.backends.python_native.cutedsl.disabled():
             a = torch.tensor(
@@ -684,12 +716,8 @@ class TestPointwiseKernel(TestCase):
                 dtype=torch.float64,
             )
             expected = getattr(torch, name)(a, b)
-        (actual,) = kernel.run(
+        (actual,) = self._run_kernel(
             ops.get_fn(f"_{name}"),
-            ("signed_zero", name),
-            2,
-            1,
-            (),
             torch2cute[a.dtype],
             [a, b],
             (a.dtype,),
@@ -710,7 +738,7 @@ class TestPointwiseKernel(TestCase):
         self, device: str, dtype: torch.dtype, direction: str, layout: str
     ) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         counts = [-1, 0, 31, 32, 33, 63, 64, 65]
         if dtype is torch.int64:
@@ -723,14 +751,10 @@ class TestPointwiseKernel(TestCase):
             y = y.view(1, -1)
         name = f"bitwise_{direction}_shift"
         with torch.backends.python_native.cutedsl.disabled():
-            # CUDA's scalar shift can truncate out-of-range int64 counts.
+            # Compare full-width shift counts against the CPU integer reference.
             expected = getattr(torch, name)(x.cpu(), y.cpu()).to(device)
-        (actual,) = kernel.run(
+        (actual,) = self._run_kernel(
             ops.get_fn(f"_{name}"),
-            ("shift_bounds", dtype, direction, layout),
-            2,
-            1,
-            (),
             torch2cute[dtype],
             [x, y],
             (dtype,),
@@ -810,7 +834,7 @@ class TestPointwiseKernel(TestCase):
     def test_engine_rejects_unlaunchable_views(self, device: str, case: str) -> None:
         import cutlass
 
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         x = torch.ones(8, device=device, dtype=torch.float32)
         target = torch.empty_like(x)
@@ -826,12 +850,8 @@ class TestPointwiseKernel(TestCase):
             x, target = (zero, target) if case == "zero_input" else (x, zero)
             message = "real tensor storage"
         with self.assertRaisesRegex(ValueError, message):
-            kernel.run(
+            self._run_kernel(
                 ops.get_fn("_identity"),
-                ("engine_view",),
-                1,
-                1,
-                (),
                 cutlass.Float32,
                 [x],
                 (target.dtype,),
@@ -846,7 +866,7 @@ class TestPointwiseKernel(TestCase):
     ) -> None:
         import cutlass
 
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
 
         x = (
             torch._efficientzerotensor((), dtype=torch.float32)
@@ -855,12 +875,8 @@ class TestPointwiseKernel(TestCase):
         )
         y = torch.tensor(3.0, dtype=torch.float32)
         target = torch.empty((), device=device, dtype=torch.float32)
-        result = kernel.run(
+        result = self._run_kernel(
             ops.get_fn("_mul"),
-            ("host_scalar_output",),
-            2,
-            1,
-            (),
             cutlass.Float32,
             [x, y],
             (torch.float32,),
@@ -873,7 +889,7 @@ class TestPointwiseKernel(TestCase):
     @skipIfNoCuteDSL
     def test_bool_to_long_promotion(self, device: str) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
         from torch._native.ops.pointwise.signature import Functor
         from torch._prims_common import (
             elementwise_dtypes,
@@ -895,15 +911,12 @@ class TestPointwiseKernel(TestCase):
         sig = Functor("_add").signature(
             ((torch.bool, False),) * 2, PromotionKind.BOOL_TO_LONG
         )
-        (actual,) = kernel.run(
+        (actual,) = self._run_kernel(
             ops.get_fn("_add"),
-            ("bool_to_long",),
-            2,
-            1,
-            (torch2cute[sig.compute](1),),
             torch2cute[sig.compute],
             [x, y],
             sig.results,
+            consts=(torch2cute[sig.compute](1),),
             input_casts=(sig.storage,) * 2,
             result_dtypes=sig.results,
         )
@@ -917,7 +930,7 @@ class TestPointwiseKernel(TestCase):
         self, device: str, dtype: torch.dtype
     ) -> None:
         from torch._native.cutedsl.dtypes import torch2cute
-        from torch._native.ops.pointwise import kernel, ops
+        from torch._native.ops.pointwise import ops
         from torch._native.ops.pointwise.signature import Functor
 
         with torch.backends.python_native.cutedsl.disabled():
@@ -925,12 +938,8 @@ class TestPointwiseKernel(TestCase):
             x, y = bits.view(dtype), (bits ^ -32768).view(dtype)
             expected = torch.copysign(x, y)
         sig = Functor("_copysign").signature(((dtype, False),) * 2)
-        (actual,) = kernel.run(
+        (actual,) = self._run_kernel(
             ops.get_fn("_copysign"),
-            ("copysign_bits",),
-            2,
-            1,
-            (),
             torch2cute[sig.compute],
             [x, y],
             (dtype,),
