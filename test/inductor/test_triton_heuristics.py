@@ -126,6 +126,32 @@ def get_autotuned_amd_sqr_kernel():
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
 
+    def test_skip_for_spills(self):
+        """A precompiled kernel is skipped without a launch only when every
+        config spills and run() would not tune further."""
+
+        def autotuner(n_spills, heuristic_type, **meta):
+            kernel = CachingAutotuner.__new__(CachingAutotuner)
+            kernel.launchers = [types.SimpleNamespace(n_spills=n) for n in n_spills]
+            kernel.inductor_meta = meta
+            kernel.heuristic_type = heuristic_type
+            kernel.deterministic_mode = False
+            return kernel
+
+        pw, tmpl = HeuristicType.POINTWISE, HeuristicType.TEMPLATE
+        self.assertTrue(autotuner([9, 12], pw).skip_for_spills(8))
+        self.assertFalse(autotuner([9, 3], pw).skip_for_spills(8))
+        self.assertFalse(autotuner([9, None], pw).skip_for_spills(8))
+        self.assertFalse(autotuner([], pw).skip_for_spills(8))
+        # Coordinate descent may still find a config that does not spill, but it
+        # never tunes templates.
+        coordesc = {"coordinate_descent_tuning": True}
+        self.assertFalse(autotuner([9], pw, **coordesc).skip_for_spills(8))
+        self.assertTrue(autotuner([9], tmpl, **coordesc).skip_for_spills(8))
+        # Combo per-subkernel tuning also tunes past the precompiled configs.
+        combo = {"combo_tuning_groups": [{"member_indices": [0]}]}
+        self.assertFalse(autotuner([9], pw, **combo).skip_for_spills(8))
+
     @staticmethod
     def _config_with_extra_options(extra_options):
         from torch._inductor.runtime.triton_compat import Config
