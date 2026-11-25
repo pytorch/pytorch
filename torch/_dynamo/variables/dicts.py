@@ -601,7 +601,16 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             if key_present:
                 self.realize_key_vt(key)
             else:
-                self.install_dict_keys_match_guard(recompile_hint=recompile_hint)
+                prefix = f"{recompile_hint} " if recompile_hint else ""
+                self.install_dict_keys_match_guard(
+                    recompile_hint=(
+                        f"{prefix}Dynamo checks the complete key set when "
+                        "the key is not present and its runtime source's value may "
+                        "differ from the current trace time value; "
+                        "therefore unrelated key changes can also trigger recompilation. "
+                        "This overguarding may be addressable in dynamo."
+                    )
+                )
 
     def _lookup_key(
         self,
@@ -726,7 +735,13 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
+        self.install_dict_keys_match_guard(
+            recompile_hint=(
+                f"`{self.source.name if self.source else 'dict'}.copy()` requires "
+                "the key-set check to exactly match as the dict is captured at "
+                "trace time."
+            )
+        )
         return self._new_dict(self.items.copy())
 
     def dict_get(
@@ -775,7 +790,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             return None
         check_positional(tx, "pop", len(args), 1, 2)
         if not self.items and not isinstance(self, OrderedDictVariable):
-            self.install_dict_keys_match_guard()
+            self.install_dict_keys_match_guard(
+                recompile_hint=(
+                    f"`{self.source.name if self.source else 'dict'}.pop("
+                    f"key{', default' if len(args) == 2 else ''})` traced "
+                    f"{'the default' if len(args) == 2 else 'KeyError'} for an "
+                    "empty plain dictionary without hashing the key. This "
+                    "overguarding may be addressable in Dynamo."
+                )
+            )
             if len(args) == 1:
                 raise_observed_exception(KeyError, tx, args=[args[0]])
             return args[1]
