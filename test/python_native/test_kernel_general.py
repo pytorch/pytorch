@@ -1072,6 +1072,10 @@ class TestKernelGeneral(TestCase):
         # Index reduce-all copies a strided input with a torch op, which a replay cannot redo.
         x = torch.randn(1 << 16, device="cuda")[::2]
         trait = lambda: T.ArgMaxOps(acc=cutlass.Float32)  # noqa: E731
+        # Drop entries left by an earlier run in this process so these calls record.
+        names = ("replay_copy", "replay_flat", "replay_seeded")
+        for k in [k for k in kg._REPLAYS if k[0] in names]:
+            kg._REPLAYS.pop(k)
         kg.replay_reduce(trait, "replay_copy", x, None, torch.int32)
         (replay,) = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_copy"]
         self.assertIsNone(replay)
@@ -1088,9 +1092,6 @@ class TestKernelGeneral(TestCase):
         # for an input that records stays a decline.
         y = torch.randn(64, 256, device="cuda")
         sums = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
-        # Drop a decline left by an earlier run in this process so this call records.
-        for k in [k for k in kg._REPLAYS if k[0] == "replay_seeded"]:
-            kg._REPLAYS.pop(k)
         kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
         (seeded,) = [k for k in kg._REPLAYS if k[0] == "replay_seeded"]
         try:
