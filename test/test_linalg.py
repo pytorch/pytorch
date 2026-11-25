@@ -3031,12 +3031,14 @@ class TestLinalgDevice(_TestLinalgMixin, TestCase):
     @dtypes(*floating_and_complex_types())
     def test_eig_does_not_modify_input(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/202629
-        column_major = make_tensor((2, 5, 5), device=device, dtype=dtype).mT
-        noncontiguous = make_tensor((2, 5, 5), device=device, dtype=dtype, noncontiguous=True)
-        for a, fn in itertools.product((column_major, noncontiguous), (torch.linalg.eig, torch.linalg.eigvals)):
-            a_orig = a.clone()
-            fn(a)
-            self.assertEqual(a, a_orig)
+        shapes = ((0, 0), (5, 5), (0, 5, 5), (2, 0, 0), (2, 5, 5))
+        for shape, fn in itertools.product(shapes, (torch.linalg.eig, torch.linalg.eigvals)):
+            column_major = make_tensor(shape, device=device, dtype=dtype).mT
+            noncontiguous = make_tensor(shape, device=device, dtype=dtype, noncontiguous=True)
+            for a in (column_major, noncontiguous):
+                a_orig = a.clone()
+                fn(a)
+                self.assertEqual(a, a_orig)
 
     @skipCPUIfNoLapack
     @skipCUDAIf(
