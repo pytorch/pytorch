@@ -76,7 +76,6 @@ from ..utils import (
     check_unspec_python_args,
     dict_methods,
     extract_fake_example_value,
-    get_type_mro_no_user_code,
     has_torch_function,
     is_safe_constant,
     is_torch_class,
@@ -1842,12 +1841,10 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "vars() takes no keyword arguments")
+        no_keywords(tx, "vars", kwargs)
+        check_positional(tx, "vars", len(args), 0, 1)
         if len(args) == 0:
             return self._call_frame_locals_snapshot(tx)
-        if len(args) != 1:
-            raise_type_error(tx, f"vars expected at most 1 argument, got {len(args)}")
         # vars(obj) is obj.__dict__ if __dict__ is present else TypeError
         try:
             return args[0].tp_getattro_impl(tx, "__dict__")
@@ -1994,14 +1991,8 @@ class BuiltinVariable(TypeVariable):
                 args = [args[0], args[1]]  # type: ignore[assignment]
 
             if fn is operator.getitem:
-                if kwargs:
-                    raise_type_error(
-                        tx, "_operator.getitem() takes no keyword arguments"
-                    )
-                if len(args) != 2:
-                    raise_type_error(
-                        tx, f"getitem expected 2 arguments, got {len(args)}"
-                    )
+                no_keywords(tx, "_operator.getitem", kwargs)
+                check_positional(tx, "getitem", len(args), 2, 2)
                 if isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
                     # __index__.  Rewrite as a regular torch op which will
@@ -2690,12 +2681,8 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "range() takes no keyword arguments")
-        if len(args) == 0:
-            raise_type_error(tx, "range expected at least 1 argument, got 0")
-        if len(args) > 3:
-            raise_type_error(tx, f"range expected at most 3 arguments, got {len(args)}")
+        no_keywords(tx, "range", kwargs)
+        check_positional(tx, "range", len(args), 1, 3)
         args = tuple(pynumber_index(tx, arg) for arg in args)
         if (
             len(args) == 3
@@ -2715,8 +2702,7 @@ class BuiltinVariable(TypeVariable):
     def call_slice(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
-        if not 1 <= len(args) < 4:
-            raise_type_error(tx, f"slice expected at least 1 argument, got {len(args)}")
+        check_positional(tx, "slice", len(args), 1, 3)
         return variables.SliceVariable(list(args), tx)
 
     def _dyn_proxy(
@@ -2738,18 +2724,10 @@ class BuiltinVariable(TypeVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
         # ref: https://github.com/python/cpython/blob/main/Objects/abstract.c#L2004-L2078
-        if kwargs:
-            raise_type_error(
-                tx,
-                f"{self.fn.__name__}() takes no keyword arguments",
-            )
+        no_keywords(tx, self.fn.__name__, kwargs)
+        check_positional(tx, self.fn.__name__, len(args), 0, 1)
         if len(args) == 0:
             return TupleVariable([], mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"{self.fn.__name__} expected at most 1 argument, got {len(args)}",
-            )
 
         obj = args[0]
         if isinstance(obj, TupleVariable) and obj.python_type() is tuple:
@@ -2806,18 +2784,10 @@ class BuiltinVariable(TypeVariable):
         # ref: https://github.com/python/cpython/blob/main/Objects/setobject.c#L2708-L2735
         # CPython set_init rejects keywords before unpacking positional args, so
         # set(a=1) and set().__init__(a=1) both raise regardless of arg count.
-        if kwargs:
-            raise_type_error(
-                tx,
-                "set() takes no keyword arguments",
-            )
+        no_keywords(tx, "set", kwargs)
+        check_positional(tx, "set", len(args), 0, 1)
         if len(args) == 0:
             return variables.SetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"set expected at most 1 argument, got {len(args)}",
-            )
 
         s = SetVariable([], mutation_type=ValueMutationNew())
         s.call_method(tx, "update", [args[0]], kwargs)
@@ -2829,18 +2799,10 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(
-                tx,
-                "frozenset() takes no keyword arguments",
-            )
+        no_keywords(tx, "frozenset", kwargs)
+        check_positional(tx, "frozenset", len(args), 0, 1)
         if len(args) == 0:
             return variables.FrozensetVariable(set(), mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"frozenset expected at most 1 argument, got {len(args)}",
-            )
 
         if istype(args[0], variables.FrozensetVariable):
             # CPython: frozenset(existing_frozenset) returns the same object.
@@ -2908,10 +2870,9 @@ class BuiltinVariable(TypeVariable):
         # ref: PyObject_LengthHint (Objects/abstract.c): try __len__, then
         # __length_hint__, falling back to the supplied default for a missing
         # slot, a TypeError raised by the slot, or a NotImplemented result.
-        if kwargs:
-            # `default` is positional-only, so a keyword call is rejected before
-            # any argument count is looked at.  The name matches CPython's.
-            raise_type_error(tx, "_operator.length_hint() takes no keyword arguments")
+        # `default` is positional-only, so a keyword call is rejected before
+        # any argument count is looked at.
+        no_keywords(tx, "_operator.length_hint", kwargs)
         check_positional(tx, "length_hint", len(args), 1, 2)
         obj = args[0]
         if len(args) == 2:
@@ -2999,10 +2960,8 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "_operator.getitem() takes no keyword arguments")
-        if len(args) != 2:
-            raise_type_error(tx, f"getitem expected 2 arguments, got {len(args)}")
+        no_keywords(tx, "_operator.getitem", kwargs)
+        check_positional(tx, "getitem", len(args), 2, 2)
         return generic_getitem(tx, args[0], args[1])
 
     def call_setitem(
@@ -3011,10 +2970,8 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "_operator.setitem() takes no keyword arguments")
-        if len(args) != 3:
-            raise_type_error(tx, f"setitem expected 3 arguments, got {len(args)}")
+        no_keywords(tx, "_operator.setitem", kwargs)
+        check_positional(tx, "setitem", len(args), 3, 3)
         return generic_setitem(tx, args[0], args[1], args[2])
 
     def call_delitem(
@@ -3023,10 +2980,8 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "_operator.delitem() takes no keyword arguments")
-        if len(args) != 2:
-            raise_type_error(tx, f"delitem expected 2 arguments, got {len(args)}")
+        no_keywords(tx, "_operator.delitem", kwargs)
+        check_positional(tx, "delitem", len(args), 2, 2)
         return generic_delitem(tx, args[0], args[1])
 
     def call_isinstance(
@@ -3250,12 +3205,8 @@ class BuiltinVariable(TypeVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if kwargs:
-            raise_type_error(tx, "next() takes no keyword arguments")
-        if len(args) == 0:
-            raise_type_error(tx, "next expected at least 1 argument, got 0")
-        if len(args) > 2:
-            raise_type_error(tx, f"next expected at most 2 arguments, got {len(args)}")
+        no_keywords(tx, "next", kwargs)
+        check_positional(tx, "next", len(args), 1, 2)
         arg = args[0]
         if not pyiter_check(maybe_get_python_type(arg)):
             raise_type_error(
@@ -3405,6 +3356,15 @@ class BuiltinVariable(TypeVariable):
     ) -> VariableTracker:
         return pynumber_invert(tx, a)
 
+    @staticmethod
+    def has_pending_format_mutation(tx, cls=None):
+        return any(
+            isinstance(owner, variables.UserDefinedClassVariable)
+            and not {"__format__", "__str__", "__float__"}.isdisjoint(attrs)
+            and (cls is None or type.__subclasscheck__(owner.value, cls))
+            for owner, attrs in tx.output.side_effects.store_attr_mutations.items()
+        )
+
     def _format_user_defined(
         self,
         tx: "InstructionTranslatorBase",
@@ -3412,20 +3372,14 @@ class BuiltinVariable(TypeVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
         value = args[0] if args else None
-        effects = tx.output.side_effects
-        writes = effects.store_attr_mutations
         expanding = tx.f_code is polyfills.builtins._expand_format.__code__
-        slots = {"__format__", "__str__", "__float__"}
 
         def defer(field):
             field = field.realize()
             if isinstance(field, UserDefinedObjectVariable):
-                if writes and any(
-                    cls in effects and slots.intersection(writes.get(effects[cls], ()))
-                    for cls in get_type_mro_no_user_code(field.python_type())
-                ):
+                if self.has_pending_format_mutation(tx, field.python_type()):
                     unsupported(field, True)
-                return ConstantVariable.create(False)
+                return ConstantVariable.create(not field.is_python_constant())
             if isinstance(field, FakeIdVariable):
                 field.guard_as_python_constant()
             return ConstantVariable.create(True)
@@ -3441,34 +3395,28 @@ class BuiltinVariable(TypeVariable):
         if self.fn is str.format:
             if expanding or value is None or value.python_type() is not str:
                 return None
-            if any(
+            has_constant = any(
                 isinstance(v, UserDefinedObjectVariable) and v.is_python_constant()
                 for v in itertools.chain(args[1:], kwargs.values())
-            ) or any(
-                isinstance(cls, variables.UserDefinedClassVariable)
-                and slots.intersection(attrs)
-                for cls, attrs in writes.items()
-            ):
+            )
+            if has_constant or self.has_pending_format_mutation(tx):
                 from .builder import SourcelessBuilder
 
-                build = SourcelessBuilder.create_internal_user_function
-                fn = build(polyfills.builtins.str_format)
-                fields = [variables.LambdaVariable(defer), *args]
-                return fn.call_function(tx, fields, kwargs)
+                return SourcelessBuilder.create_internal_user_function(
+                    polyfills.builtins.str_format
+                ).call_function(tx, [variables.LambdaVariable(defer), *args], kwargs)
             return None
         if value is None or kwargs or len(args) not in (1, 2):
             return None
         spec = args[1] if len(args) == 2 else ConstantVariable.create("")
         defer(value)  # validate mutations and identity-dependent hashes before folding
-        if isinstance(value, UserDefinedObjectVariable):
-            if spec.python_type() is not str:
-                return None
+        if isinstance(value, UserDefinedObjectVariable) and spec.python_type() is str:
             cls_type = value.python_type()
             lookup = value.lookup_class_mro_attr
             formatter = lookup("__format__")
             if isinstance(formatter, types.FunctionType):
                 return value.SLOT1(tx, "__format__", spec)
-            if value.is_python_constant():
+            if value.is_python_constant() and spec.is_python_constant():
                 for base in (int, float, str, object):
                     if formatter is not base.__format__ or value.cls_source is None:
                         continue
@@ -4278,18 +4226,10 @@ class ListBuiltinVariable(TypeVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/3.13/Objects/listobject.c#L1265-L1287
-        if kwargs:
-            raise_type_error(
-                tx,
-                "list() takes no keyword arguments",
-            )
+        no_keywords(tx, "list", kwargs)
+        check_positional(tx, "list", len(args), 0, 1)
         if len(args) == 0:
             return ListVariable([], mutation_type=ValueMutationNew())
-        elif len(args) > 1:
-            raise_type_error(
-                tx,
-                f"list expected at most 1 argument, got {len(args)}",
-            )
 
         obj = args[0]
         if obj.source and not is_constant_source(obj.source):

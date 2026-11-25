@@ -109,10 +109,9 @@ def _nested_region_identity(
     tracer.has_container_identity |= container
     if a is None or b is None or a == b or any(map(is_constant_source, (a, b))):
         return None
-    if container:
-        # Reconstructed containers do not preserve identity.
-        resolve = tx.output.resolve_source_value
-        same = resolve(a) is resolve(b)
+    if container or kind is variables.UserFunctionVariable:
+        # Containers can be reconstructed and function VTs can unwrap decorators.
+        same = tx.output.resolve_source_value(a) is tx.output.resolve_source_value(b)
     elif kind is VariableTracker or isinstance(left, variables.UserDefinedVariable):
         same = left.value is right.value
     else:
@@ -3188,14 +3187,13 @@ def object_generic_setattr_str(
                         "reload it from.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
-            if (
-                (
-                    type(obj) is variables.OrderedDictVariable
-                    and not isinstance(obj.mutation_type, ValueMutationNew)
-                )
-                or obj.is_tensor()
-                or isinstance(obj, variables.PythonModuleVariable)
+            if type(obj) is variables.OrderedDictVariable and not isinstance(
+                obj.mutation_type, ValueMutationNew
             ):
+                obj.unsupported_instance_state(
+                    "attribute mutation on an input OrderedDict"
+                )
+            if obj.is_tensor() or isinstance(obj, variables.PythonModuleVariable):
                 # handle_traced_output leaves aliased Tensor outputs untracked
                 # (repeated objects, returned inputs): replaying onto them as
                 # new objects would be wrong.
