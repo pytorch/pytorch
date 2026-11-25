@@ -4885,6 +4885,137 @@ class DictTests(torch._dynamo.test_case.TestCase):
             x = torch.randn(size)
             self.assertEqual(compiled(x), fn(x))
 
+    @parametrize(
+        "view",
+        ["mapping", "tuple_key", "keys", "values", "items", "reversed", "dict.keys"],
+    )
+    def test_ordered_iterator_key_callbacks(self, view):
+        class Key:
+            calls = 0
+
+            def __hash__(self):
+                self.calls += 1
+                if self.calls == 3 and view != "tuple_key":
+                    raise ValueError("third hash")
+                return 0
+
+        def fn(x):
+            key = Key()
+            mapping = OrderedDict.fromkeys([(key,) if view == "tuple_key" else key], x)
+            key.calls = 0
+            if view in ("mapping", "tuple_key"):
+                source = mapping
+            elif view == "dict.keys":
+                source = dict.keys(mapping)
+            elif view == "reversed":
+                source = mapping.values()
+            else:
+                source = getattr(mapping, view)()
+            it = reversed(source) if view == "reversed" else iter(source)
+            before = key.calls
+            next(it)
+            first = key.calls
+            try:
+                list(source)
+            except ValueError:
+                return x + 1, before, first, key.calls
+            return x, before, first, key.calls
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_ordered_iterator_colliding_key_callbacks(self):
+        events = []
+
+        class Key:
+            def __init__(self, name):
+                self.name = name
+
+            def __hash__(self):
+                events.append(self.name)
+                return 1
+
+            def __eq__(self, other):
+                events.append((self.name, other.name))
+                return self is other
+
+        def fn(x):
+            mapping = OrderedDict([(Key("a"), x), (Key("b"), x + 1)])
+            events.clear()
+            key, value = next(reversed(mapping.items()))
+            return value, key.name, tuple(events)
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_ordered_input_snapshot_preserves_equality_callbacks(self):
+        events = []
+
+        class Key:
+            def __hash__(self):
+                return 1
+
+            def __eq__(self, other):
+                events.append(1)
+                return self is other
+
+        def fn(x, mapping):
+            events.clear()
+            size = len(mapping)
+            before = len(events)
+            values = list(mapping.values())
+            return x + size, before, len(events), values
+
+        mapping = OrderedDict(zip((Key(), Key()), (1, 2)))
+        x = torch.ones(1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x, mapping),
+            fn(x, mapping),
+        )
+
+    @parametrize(
+        "args, kwargs", [((1, 2), {}), ((1,), {"last": True}), ((), {"bad": 0})]
+    )
+    def test_ordered_dict_popitem_invalid_args(self, args, kwargs):
+        def fn(x, mapping):
+            try:
+                mapping.popitem(*args, **kwargs)
+            except TypeError as exc:
+                return x + 1, exc.args
+            return x, ()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for mapping in (OrderedDict(a=1, b=2), OrderedDict()):
+            actual = mapping.copy()
+            self.assertEqual(compiled(x, actual), fn(x, mapping))
+            self.assertEqual(actual, mapping)
+
+    def test_ordered_dict_popitem_last_conversion(self):
+        calls = []
+
+        class First:
+            def __bool__(self):
+                calls.append(1)
+                return False
+
+        def fn(x, mapping):
+            try:
+                item = mapping.popitem(last=First())
+            except KeyError as exc:
+                item = exc.args
+            return x + len(calls), item
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(1)
+        for mapping in (OrderedDict(a=1, b=2), OrderedDict()):
+            actual = mapping.copy()
+            calls.clear()
+            result = compiled(x, actual)
+            calls.clear()
+            self.assertEqual(result, fn(x, mapping))
+            self.assertEqual(actual, mapping)
+
     @parametrize("mapping_type", [OrderedDict, SimpleOrderedDict])
     @parametrize("keys", [("a", "b", "c"), ("layer.0.weight", "layer.1.weight")])
     def test_ordered_dict_value_update_preserves_iterator(self, mapping_type, keys):
