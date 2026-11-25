@@ -576,7 +576,9 @@ class TypeVariable(VariableTracker):
 
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "TypeVariable":
-        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        # A constant source cannot be guarded, and the value cannot change.
+        if not is_constant_source(source):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         return cls(source=source)
 
     def as_python_constant(self) -> Any:
@@ -850,7 +852,9 @@ class BuiltinVariable(TypeVariable):
 
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "BuiltinVariable":
-        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        # A constant source cannot be guarded, and the value cannot change.
+        if not is_constant_source(source):
+            install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
         return cls(value, source=source)
 
     @staticmethod
