@@ -147,13 +147,13 @@ class DSLController:
 
     @property
     def enabled(self) -> bool:
-        """Check if DSL is currently enabled."""
+        """Whether this DSL's conditional operations are enabled."""
         filter_state = _get_filter_state()
         return self._dsl_name not in filter_state._dsl_names
 
     @enabled.setter
     def enabled(self, value: bool):
-        """Enable or disable the DSL."""
+        """Enable or disable this DSL's conditional operations."""
         if flags_frozen():
             raise RuntimeError(
                 f"not allowed to set {self._dsl_name} DSL flags "
@@ -165,18 +165,18 @@ class DSLController:
             self.disable()
 
     def disable(self):
-        """Disable the conditional operations from this DSL."""
+        """Disable this DSL's conditional operations."""
         dsl_module = _get_dsl_module(self._dsl_name)
         dsl_module.deregister_op_overrides()
 
     def enable(self):
-        """Re-enable the conditional operations from this DSL."""
+        """Re-enable this DSL's conditional operations."""
         reenable_op_overrides = _get_registry_functions()[1]
         reenable_op_overrides(enable_dsl_names=self._dsl_name)
 
     @contextmanager
     def disabled(self):
-        """Context manager to temporarily disable DSL.
+        """Context manager to temporarily disable this DSL's conditional operations.
 
         Also masks the native-AOT kernel stubs of every DSL (AOT-compiled kernels
         embedded in the aten kernels themselves), process-wide, so code inside the
