@@ -97,6 +97,12 @@ class MetalExprPrinter(ExprPrinter_):
             return f"c10::metal::floor_divide({x}, {div})"
         return f"metal::floor({x}) / ({div})"
 
+    def _print_PythonMod(self, expr: sympy.Expr) -> str:
+        x, div = expr.args
+        if x.is_nonnegative and div.is_nonnegative:
+            return f"({self.doprint(x)}) % ({self.doprint(div)})"
+        return f"c10::metal::remainder({self.doprint(x)}, {self.doprint(div)})"
+
     def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
         x, div, mod = expr.args
         # Workaround for Metal compiler bug with fused (x / A) % B, see PR 175481
