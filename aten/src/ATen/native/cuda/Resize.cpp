@@ -15,14 +15,15 @@
 namespace at::native {
 
 namespace {
-// A storage whose CUDA allocator is no longer the current one (the current
-// allocator was changed after it was made, change_current_allocator)
-// re-allocates from the current one. E.g. FSDP2's unsharded parameters, made
-// once and resized every step, follow the current allocator.
+// An empty storage whose CUDA allocator is no longer the current one (the
+// current allocator was changed after it was made, change_current_allocator)
+// allocates from the current one. E.g. FSDP2's unsharded parameters, made once
+// and resized from 0 every step, follow the current allocator. A storage that
+// holds memory keeps its allocator.
 c10::Allocator* current_cuda_allocator_for(StorageImpl* storage) {
   auto* allocator = storage->allocator();
   auto* current = c10::cuda::CUDACachingAllocator::get();
-  if (C10_UNLIKELY(allocator != current) &&
+  if (C10_UNLIKELY(allocator != current) && !storage->data_ptr() &&
       dynamic_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
           allocator)) {
     storage->set_allocator(current);
