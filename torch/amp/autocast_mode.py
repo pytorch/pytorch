@@ -1,7 +1,9 @@
 # mypy: allow-untyped-defs
 import collections
+import contextlib
 import functools
 import warnings
+from collections.abc import Iterator
 from typing import Any
 
 import torch
@@ -219,6 +221,8 @@ class autocast:
             Default: ``True``
     """
 
+    _warn_when_disabled = True
+
     def __init__(
         self,
         device_type: str,
@@ -282,10 +286,11 @@ class autocast:
             # Special case for CUDA AMP and bfloat16 support
             if self.device == "cuda":
                 if torch.cuda.amp.common.amp_definitely_not_available():
-                    warnings.warn(
-                        "CUDA is not available or torch_xla is imported. Disabling autocast.",
-                        stacklevel=2,
-                    )
+                    if self._warn_when_disabled:
+                        warnings.warn(
+                            "CUDA is not available or torch_xla is imported. Disabling autocast.",
+                            stacklevel=2,
+                        )
                     enabled = False
                 elif (
                     self.fast_dtype == torch.bfloat16
@@ -301,7 +306,8 @@ class autocast:
                     + ", ".join(map(str, device_supported_dtypes))
                     + " currently."
                 )
-                warnings.warn(error_message, stacklevel=2)
+                if self._warn_when_disabled:
+                    warnings.warn(error_message, stacklevel=2)
                 enabled = False
         self._enabled = enabled
 
@@ -388,6 +394,13 @@ class _UnmanagedAutocast(autocast):
     pass
 
 
+class _ReplayedAutocast(_UnmanagedAutocast):
+    # Dynamo already showed the "Disabling autocast" warnings when it traced the
+    # block. This also hides them when a later pre-dispatch trace replays the
+    # graph again.
+    _warn_when_disabled = False
+
+
 def _top_pre_dispatch_mode():
     # Act only when the pre-dispatch mode is on top. Modes pushed after it, such
     # as the one that records torch_fn metadata, see the call first and call it
@@ -406,20 +419,22 @@ def _top_pre_dispatch_mode():
 # They are what we trace into a graph during pre_dispatch tracing
 # when we encounter an autocast context manager.
 def _enter_autocast(*vals):
-    # A Dynamo graph traced in pre-dispatch mode (strict export or a control
-    # flow branch) replays these calls. Enter the autocast as well, like
-    # autocast.__enter__ does, so that the traced ops see it. If tracing fails
-    # before the matching _exit_autocast, the tracer restores the autocast
-    # state from the start of tracing.
+    # A graph traced in pre-dispatch mode, such as a Dynamo graph in strict
+    # export or in a control flow branch, replays these calls. Enter the
+    # autocast as well, like autocast.__enter__ does, so that the traced ops
+    # see it.
     pre_dispatch_mode = _top_pre_dispatch_mode()
     if pre_dispatch_mode is not None:
-        mode = _UnmanagedAutocast(*vals)
+        # Always trace with the cast cache off: a cast cached while tracing
+        # would be reused as a constant by a later trace.
+        mode = _ReplayedAutocast(*vals[:3], cache_enabled=False)
+        # Enter without recording: __enter__ would record a second node with the
+        # resolved arguments. The node is recorded below with the original ones.
         with torch._C.DisableTorchFunction():
             mode.__enter__()
         pre_dispatch_mode.entered_autocasts.append(mode)
         pre_dispatch_mode.__torch_function__(torch.amp._enter_autocast, (), vals)
         return mode
-    # Other TorchFunction modes may want to trace this call into their graph.
     if torch._C._is_torch_function_mode_enabled():
         return torch.overrides.handle_torch_function(
             torch.amp._enter_autocast, [], *vals
@@ -441,6 +456,44 @@ def _exit_autocast(mode):
     if torch._C._is_torch_function_mode_enabled():
         return torch.overrides.handle_torch_function(torch.amp._exit_autocast, [], mode)
     mode.__exit__(None, None, None)
+
+
+def _autocast_state() -> tuple[tuple[bool, _dtype], ...]:
+    return tuple(
+        (torch.is_autocast_enabled(device), torch.get_autocast_dtype(device))
+        for device in torch._C._autocast_supported_devices()
+    )
+
+
+def _autocast_nesting() -> int:
+    # The nesting depth has no getter, so step it up and back down to read it.
+    depth = torch.autocast_increment_nesting() - 1
+    torch.autocast_decrement_nesting()
+    return depth
+
+
+@contextlib.contextmanager
+def _preserve_autocast_state() -> Iterator[None]:
+    state = _autocast_state()
+    cache_enabled = torch.is_autocast_cache_enabled()
+    depth = _autocast_nesting()
+    try:
+        yield
+    finally:
+        for device, (enabled, dtype) in zip(
+            torch._C._autocast_supported_devices(), state
+        ):
+            torch.set_autocast_enabled(device, enabled)
+            torch.set_autocast_dtype(device, dtype)
+        torch.set_autocast_cache_enabled(cache_enabled)
+        current = _autocast_nesting()
+        for _ in range(current - depth):
+            # Like autocast.__exit__, drop the cached casts when the last
+            # autocast is left.
+            if torch.autocast_decrement_nesting() == 0:
+                torch.clear_autocast_cache()
+        for _ in range(depth - current):
+            torch.autocast_increment_nesting()
 
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
