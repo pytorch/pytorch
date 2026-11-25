@@ -4004,9 +4004,9 @@ class SIMDScheduling(BaseScheduling):
         )
         return self.benchmark_codegened_module(PyCodeCache.load(src_code))
 
-    def _tuned_mix_order_split_size(self, kernel_features, initial_split_size, rename):
-        """The split size codegen_mix_order_reduction uses: initial_split_size,
-        autotuned when enabled."""
+    def _tuned_mix_order_kernel(self, kernel_features, initial_split_size, rename):
+        """The kernel codegen_mix_order_reduction emits, at initial_split_size
+        or its autotuned replacement."""
         kernel = self._create_kernel_for_mix_order_reduction(
             kernel_features, initial_split_size
         )
@@ -4034,7 +4034,7 @@ class SIMDScheduling(BaseScheduling):
                 kernel.rsplit_size,
                 8,
             )
-        return kernel.rsplit_size
+        return kernel
 
     def benchmark_mix_order_reduction(self, node) -> tuple[float, str] | None:
         """Time the kernel codegen_mix_order_reduction would emit for node, at
@@ -4048,16 +4048,19 @@ class SIMDScheduling(BaseScheduling):
         if node2_epilogue:
             return None
         snapshot = scheduler._LoopStateSnapshot.create(tuple(node2_reductions))
+        # These kernels are only timed, never emitted.
+        old_kernel_count = metrics.generated_kernel_count
         try:
             _, kernel_features = self._mix_order_kernel_features(
                 node1, node2_reductions, numel, rnumel
             )
             rename = self._mix_order_rename(node2_reductions)
-            split_size = self._tuned_mix_order_split_size(
+            split_size = self._tuned_mix_order_kernel(
                 kernel_features, self._mix_order_split_size(node1, numel), rename
-            )
+            ).rsplit_size
             return self._benchmark_mix_order_kernel(kernel_features, split_size, rename)
         finally:
+            metrics.generated_kernel_count = old_kernel_count
             snapshot.restore()
             for subnode in node2_reductions:
                 # cancel_reduction_split caches the unsplit body.
@@ -4080,11 +4083,8 @@ class SIMDScheduling(BaseScheduling):
         )
         node_schedule = kernel_features.node_schedule
         rename = self._mix_order_rename(node2_reductions)
-        kernel = self._create_kernel_for_mix_order_reduction(
-            kernel_features,
-            self._tuned_mix_order_split_size(
-                kernel_features, initial_split_size, rename
-            ),
+        kernel = self._tuned_mix_order_kernel(
+            kernel_features, initial_split_size, rename
         )
 
         ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
