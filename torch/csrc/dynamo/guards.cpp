@@ -3521,6 +3521,7 @@ bool is_recording_dict_pointers(RootGuardManager* root);
 void record_dict_pointer(RootGuardManager* root, PyObject* dict_pointer);
 void record_tensor_pointer(RootGuardManager* root, PyObject* tensor_pointer);
 void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer);
+void record_list_snapshot(RootGuardManager* root, PyObject* list_pointer);
 using RecordedDictTagGuard = std::pair<std::shared_ptr<LeafGuard>, PyObject*>;
 void record_dict_tag_guard(
     RootGuardManager* root,
@@ -3599,6 +3600,16 @@ inline bool coor_device_index_is_current(
 struct RecordedTensorMetadata {
   py::weakref tensor_weakref;
   TensorCheck check;
+};
+
+// A list has no version tag, so an in-place mutation (lst[0] = x, append, ...)
+// does not change the tag of the dict that holds it. Snapshot the list's
+// length and element identities when recording, and compare them on tag hits.
+// Strong references keep the elements alive, so a freed element's address
+// can't be reused by a new object and alias the recorded pointer.
+struct RecordedListSnapshot {
+  py::object list;
+  std::vector<py::object> items;
 };
 
 /**
@@ -3762,6 +3773,8 @@ class GuardManager {
     _max_saved_pointers_for_recursive_dict_tags_check =
         config_module.attr("max_saved_pointers_for_recursive_dict_tags_check")
             .cast<uint64_t>();
+    _max_recursive_dict_tag_rerecords =
+        config_module.attr("max_recursive_dict_tag_rerecords").cast<uint64_t>();
   }
 
   GuardManager(const GuardManager& m) = delete;
@@ -3879,6 +3892,12 @@ class GuardManager {
     _dict_tag_guards[value] = std::move(guards);
   }
 
+  void stash_list_snapshots(
+      PyObject* value,
+      std::vector<RecordedListSnapshot>&& snapshots) {
+    _list_snapshots[value] = std::move(snapshots);
+  }
+
   void disable_recursive_dict_tag_optimization() {
     dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
       disable_recursive_dict_tag_optimization(map);
@@ -3889,6 +3908,40 @@ class GuardManager {
   void disable_recursive_dict_tag_optimization(DictToGuardManagersMap& map) {
     unwatch_all_saved_dict_pointers(map);
     _disable_dict_tag_matching = true;
+  }
+
+  // A recorded subtree changed (a dict tag moved, a watched dict was mutated
+  // or a list snapshot differs), but the guard itself may still pass. Drop
+  // everything recorded for this root so the next check records afresh, up
+  // to max_recursive_dict_tag_rerecords times; after that, disable. One-off
+  // mutations (lazy init, a setting flipped once) then don't cost the fast
+  // path for the rest of the run, while an attribute that changes every call
+  // still ends up disabled.
+  void rerecord_or_disable_recursive_dict_tag_optimization() {
+    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+      rerecord_or_disable_recursive_dict_tag_optimization(map);
+    });
+  }
+
+  // Caller must hold dict_to_guard_managers lock.
+  void rerecord_or_disable_recursive_dict_tag_optimization(
+      DictToGuardManagersMap& map) {
+    if (_disable_dict_tag_matching) {
+      return;
+    }
+    if (_num_recursive_dict_tag_rerecords >=
+        _max_recursive_dict_tag_rerecords) {
+      disable_recursive_dict_tag_optimization(map);
+      return;
+    }
+    _num_recursive_dict_tag_rerecords++;
+    unwatch_all_saved_dict_pointers(map);
+    _dict_pointers.clear();
+    _tensor_pointers.clear();
+    _tensor_metadata_pointers.clear();
+    _dict_tag_guards.clear();
+    _list_snapshots.clear();
+    _dict_callback_installed = false;
   }
 
  public:
@@ -4072,6 +4125,26 @@ class GuardManager {
     return true;
   }
 
+  bool check_list_snapshots_fast(PyObject* value) {
+    auto it = _list_snapshots.find(value);
+    if (it == _list_snapshots.end()) {
+      return true;
+    }
+    for (const auto& snapshot : it->second) {
+      PyObject* list = snapshot.list.ptr();
+      Py_ssize_t size = PyList_GET_SIZE(list);
+      if (size != static_cast<Py_ssize_t>(snapshot.items.size())) {
+        return false;
+      }
+      for (Py_ssize_t i = 0; i < size; i++) {
+        if (PyList_GET_ITEM(list, i) != snapshot.items[i].ptr()) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   bool check_dict_tag_guards_fast(PyObject* value) {
     auto it = _dict_tag_guards.find(value);
     if (it != _dict_tag_guards.end()) {
@@ -4157,16 +4230,17 @@ class GuardManager {
                 check_no_tensor_aliasing_guards_fast(value);
             if (no_tensor_aliasing_result.has_value()) {
               if (*no_tensor_aliasing_result &&
-                  check_dict_tag_guards_fast(value)) {
+                  check_dict_tag_guards_fast(value) &&
+                  check_list_snapshots_fast(value)) {
                 return true;
               }
               _disable_dict_tag_matching = true;
               return false;
             }
           }
-          // Something changed, very likely the dict tag checking will fail in
-          // future. So disable the recursive tag matching.
-          _disable_dict_tag_matching = true;
+          // Something changed. Re-record on a later call, or disable the
+          // recursive tag matching if this root keeps changing.
+          rerecord_or_disable_recursive_dict_tag_optimization();
         } else if (
             _dict_pointers.size() ==
             _max_saved_pointers_for_recursive_dict_tags_check) {
@@ -4185,6 +4259,8 @@ class GuardManager {
           record_dict_pointer(_root, value);
         } else if (_has_no_tensor_aliasing_guard) {
           record_tensor_pointer(_root, value);
+        } else if (PyList_CheckExact(value)) {
+          record_list_snapshot(_root, value);
         }
         // Dict tags do not capture linked order. Replay these leaves on tag
         // hits.
@@ -4634,6 +4710,8 @@ class GuardManager {
   bool _is_immutable = false;
   uint64_t _dict_tag{0};
   uint64_t _max_saved_pointers_for_recursive_dict_tags_check = 0;
+  uint64_t _max_recursive_dict_tag_rerecords = 0;
+  uint64_t _num_recursive_dict_tag_rerecords = 0;
 
   // tag safe markers
   bool _is_tag_safe = false;
@@ -4650,6 +4728,8 @@ class GuardManager {
   // pointers.
   std::unordered_map<PyObject*, std::vector<RecordedDictTagGuard>>
       _dict_tag_guards;
+  std::unordered_map<PyObject*, std::vector<RecordedListSnapshot>>
+      _list_snapshots;
 
   // 3.12+ related helper
   bool _dict_callback_installed = false;
@@ -4943,6 +5023,7 @@ class RootGuardManager : public GuardManager {
     _recorded_tensor_pointers.clear();
     _recorded_tensor_metadata.clear();
     _recorded_dict_tag_guards.clear();
+    _recorded_list_snapshots.clear();
   }
 
   void stop_recording_dict_pointers(PyObject* value, bool result) {
@@ -4956,6 +5037,8 @@ class RootGuardManager : public GuardManager {
           value, std::move(_recorded_tensor_metadata));
       _current_tag_safe_root->stash_dict_tag_guards(
           value, std::move(_recorded_dict_tag_guards));
+      _current_tag_safe_root->stash_list_snapshots(
+          value, std::move(_recorded_list_snapshots));
     }
     reset_dict_tag_recording_variables();
   }
@@ -4989,6 +5072,18 @@ class RootGuardManager : public GuardManager {
       const std::shared_ptr<LeafGuard>& guard,
       PyObject* dictionary) {
     _recorded_dict_tag_guards.emplace_back(guard, dictionary);
+  }
+
+  void record_list_snapshot(PyObject* list_pointer) {
+    RecordedListSnapshot snapshot{
+        py::reinterpret_borrow<py::object>(list_pointer), {}};
+    Py_ssize_t size = PyList_GET_SIZE(list_pointer);
+    snapshot.items.reserve(size);
+    for (Py_ssize_t i = 0; i < size; i++) {
+      snapshot.items.emplace_back(
+          py::reinterpret_borrow<py::object>(PyList_GET_ITEM(list_pointer, i)));
+    }
+    _recorded_list_snapshots.push_back(std::move(snapshot));
   }
 
   // Whether this graph was traced with compile_on_one_rank. Set from Python
@@ -5058,6 +5153,7 @@ class RootGuardManager : public GuardManager {
   std::vector<py::weakref> _recorded_tensor_pointers;
   std::vector<RecordedDictTagGuard> _recorded_dict_tag_guards;
   std::vector<RecordedTensorMetadata> _recorded_tensor_metadata;
+  std::vector<RecordedListSnapshot> _recorded_list_snapshots;
 };
 
 /*
@@ -5420,7 +5516,8 @@ static int dict_recursive_tag_watch_callback(
         auto guard_managers = it->second;
         for (auto& guard_manager : guard_managers) {
           if (guard_manager) {
-            guard_manager->disable_recursive_dict_tag_optimization(map);
+            guard_manager->rerecord_or_disable_recursive_dict_tag_optimization(
+                map);
           }
         }
       }
@@ -5510,6 +5607,10 @@ void record_dict_tag_guard(
 
 void record_tensor_metadata(RootGuardManager* root, PyObject* tensor_pointer) {
   root->record_tensor_metadata(tensor_pointer);
+}
+
+void record_list_snapshot(RootGuardManager* root, PyObject* list_pointer) {
+  root->record_list_snapshot(list_pointer);
 }
 
 std::shared_ptr<RelationalGuard> get_no_tensor_aliasing_guard(
