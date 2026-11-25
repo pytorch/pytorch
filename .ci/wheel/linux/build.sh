@@ -49,6 +49,8 @@ case "${GPU_ARCH_TYPE:-BLANK}" in
         # CUDA arch types only: this arm also serves cpu/xpu/rocm, where stage 2 can
         # only skip.
         if [[ "${GPU_ARCH_TYPE}" == cuda* ]]; then
+            # cuda.pathfinder needs the toolkit root in the final manywheel image.
+            export CUDA_PATH="${CUDA_PATH:-${CUDA_HOME:-/usr/local/cuda}}"
             # nullglob so an empty directory counts as zero, not the pattern.
             naot_wheels=()
             shopt -s nullglob
