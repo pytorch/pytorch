@@ -1010,6 +1010,80 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
 
+class TestBenchmarkChoiceFailures(TestCase):
+    def _benchmark_with_pool_failure(self, exc):
+        good, bad = unittest.mock.Mock(), unittest.mock.Mock()
+
+        def benchmark_choice(choice, autotune_args):
+            if choice is bad:
+                raise exc
+            return 1.0
+
+        with patch.object(
+            select_algorithm.AlgorithmSelectorCache,
+            "benchmark_choice",
+            side_effect=benchmark_choice,
+        ):
+            timings = select_algorithm.AlgorithmSelectorCache.benchmark_choices(
+                [bad, good], None
+            )
+        return timings, bad, good
+
+    def _job_failure(self, exc):
+        from torch._inductor.compile_worker.subproc_pool import (
+            SubprocException,
+            SubprocMain,
+            SubprocPickler,
+        )
+
+        # Run the worker-side job wrapper in process; skip pickling so the job
+        # can be a closure.
+        class NoPickle(SubprocPickler):
+            def dumps(self, obj):
+                return obj
+
+            def loads(self, data):
+                return data
+
+        def job():
+            raise exc
+
+        info = SubprocMain.do_job(NoPickle(), 0, job)
+        return SubprocException(info.details, "k", info.exc_types)
+
+    @requires_triton()
+    def test_pool_compile_failure_drops_choice(self):
+        from triton.runtime.errors import OutOfResources
+
+        for exc in (RuntimeError("PassManager::run failed"), OutOfResources(1, 0, "x")):
+            with self.subTest(type(exc).__name__):
+                timings, bad, good = self._benchmark_with_pool_failure(
+                    self._job_failure(exc)
+                )
+                self.assertEqual(timings, {bad: float("inf"), good: 1.0})
+
+    def test_pool_failure_that_is_fatal_in_process_is_reraised(self):
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        infra = SubprocException("SubprocPool failed to deliver a result for job 0")
+        for exc in (self._job_failure(ValueError("bad config")), infra):
+            with self.subTest(exc.exc_types[:1]):
+                with self.assertRaises(SubprocException):
+                    self._benchmark_with_pool_failure(exc)
+
+        with self.assertRaisesRegex(AssertionError, "Incorrect result from choice"):
+            self._benchmark_with_pool_failure(self._job_failure(AssertionError()))
+
+    @config.patch({"triton.disallow_failing_autotune_kernels_TESTING_ONLY": True})
+    def test_pool_compile_failure_reraised_when_disallowed(self):
+        from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+        with self.assertRaises(SubprocException):
+            self._benchmark_with_pool_failure(
+                self._job_failure(RuntimeError("PassManager::run failed"))
+            )
+
+
 class TestSelectAlgorithmCleanup(TestCase):
     def test_benchmark_only_clears_matching_precompile_cache_entry(self):
         """
