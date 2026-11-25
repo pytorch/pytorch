@@ -911,6 +911,13 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
 }
 
+meta_dispatch_device_expected_failures['xpu'] = {
+    # Same as cuda: the XPU kernel returns an empty buffer, while the meta decomp
+    # follows the CPU branch (see Note [log_sigmoid_forward buffer contract]).
+    aten.log_sigmoid_forward.default: {bf16, f16, f32, f64},
+    aten.log_sigmoid_forward.output: {bf16, f16, f32, f64},  # aten::log_sigmoid_forward.output
+}
+
 meta_dispatch_device_skips['cpu'] = {
     aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
 

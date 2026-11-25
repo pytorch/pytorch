@@ -16977,14 +16977,6 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
-            # torch-xpu-ops/issues/5020
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', "test_dispatch_symbolic_meta_outplace",
-                         device_type='xpu'),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', "test_dispatch_meta_outplace",
-                         device_type='xpu'),
-            DecorateInfo(unittest.expectedFailure, 'TestMetaCudaRef', "test_dispatch_symbolic_meta_outplace_all_strides",
-                         device_type='xpu'),
-
         ),
     ),
     OpInfo('nn.functional.avg_pool2d',
@@ -17811,13 +17803,6 @@ op_db: list[OpInfo] = [
             # UserWarning not triggered : Resized a non-empty tensor but did not
             # warn about it
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-            # torch-xpu-ops/issues/5020
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
-                         device_type=('xpu',)),
-            DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace',
-                         device_type=('xpu',)),
-            DecorateInfo(unittest.expectedFailure, 'TestMetaCudaRef', 'test_dispatch_symbolic_meta_outplace_all_strides',
-                         device_type=('xpu',)),
         ),
     ),
     UnaryUfuncInfo(
