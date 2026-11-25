@@ -257,11 +257,40 @@ class _ElementwiseStrided(_PointwiseOp):
     ) -> None:
         n = cute.size(mOuts[0])
         tile = const_expr(self.block * self.elements_per_thread)
-        self.kernel(mIns, mOuts, consts, n, rank).launch(
+        divisors = [
+            cute.fast_divmod_create_divisor_v2(mOuts[0].shape[d])
+            for d in range(_ITERATION_DIMS - 1)
+        ]
+        self.kernel(mIns, mOuts, consts, n, rank, divisors).launch(
             grid=[cute.ceil_div(n, tile), 1, 1],
             block=[self.block, 1, 1],
             stream=stream,
         )
+
+    @cute.jit
+    def _offsets(
+        self,
+        operands: Any,
+        divisors: Any,
+        rank: cutlass.Int32,
+        rest: cutlass.Int32,
+        offsets: list[cutlass.Int32],
+        axis: cutlass.Constexpr = 0,
+    ) -> list[cutlass.Int32]:
+        # The planner bounds element offsets to 32 bits; nesting exits at runtime rank.
+        if axis < rank:
+            coord = rest
+            if const_expr(axis + 1 < _ITERATION_DIMS):
+                if axis + 1 < rank:
+                    rest, coord = divmod(rest, divisors[axis])
+            for k in cutlass.range_constexpr(self.nin + self.nout):
+                if const_expr(k >= self.nin or not self.host_scalars[k]):
+                    offsets[k] += coord * cutlass.Int32(operands[k].stride[axis])
+            if const_expr(axis + 1 < _ITERATION_DIMS):
+                offsets = self._offsets(
+                    operands, divisors, rank, rest, offsets, axis + 1
+                )
+        return offsets
 
     @cute.kernel
     def kernel(
@@ -271,29 +300,23 @@ class _ElementwiseStrided(_PointwiseOp):
         consts: Any,
         n: cutlass.Int32,
         rank: cutlass.Int32,
+        divisors: Any,
     ) -> None:
         tidx, _, _ = cute.arch.thread_idx()
         bidx, _, _ = cute.arch.block_idx()
         block = const_expr(self.block)
         base = _block_base(bidx, tidx, const_expr(block * self.elements_per_thread))
+        operands = [mIns[k] for k in range(self.nin)] + mOuts
         for p in cutlass.range_constexpr(self.elements_per_thread):
             i = base + p * block
             if i < n:
-                rest = i
-                offsets = [cutlass.Int64(0) for _ in range(self.nin + self.nout)]
-                for d in cutlass.range_constexpr(_ITERATION_DIMS):
-                    if d < rank:
-                        coord = rest
-                        if d + 1 < rank:
-                            coord = rest % mOuts[0].shape[d]
-                            rest = rest // mOuts[0].shape[d]
-                        for k in cutlass.range_constexpr(self.nin):
-                            if const_expr(not self.host_scalars[k]):
-                                offsets[k] += cutlass.Int64(coord) * mIns[k].stride[d]
-                        for k in cutlass.range_constexpr(self.nout):
-                            offsets[self.nin + k] += (
-                                cutlass.Int64(coord) * mOuts[k].stride[d]
-                            )
+                offsets = self._offsets(
+                    operands,
+                    divisors,
+                    rank,
+                    cutlass.Int32(i),
+                    [cutlass.Int32(0) for _ in range(self.nin + self.nout)],
+                )
                 values = []
                 for k in cutlass.range_constexpr(self.nin):
                     value = mIns[k]
@@ -530,7 +553,7 @@ def _build_plan(
         nin, nout, inputs, out_dtypes, out_refs, input_casts, result_dtypes
     )
     if math.prod(shape) >= 2**31 - 1 or any(
-        not can_use_32bit_indexing(t) for t in (*inputs, ref, *(out_refs or ()))
+        not can_use_32bit_indexing(t) for t in (*inputs, *(out_refs or ()))
     ):
         raise ValueError("pointwise plan requires 32-bit counts and element offsets")
     # Device-scaled measured defaults apply unless the caller supplies tuning values.
@@ -717,6 +740,7 @@ def _build_plan(
         path = "strided"
         kkey = generic_key + ("strided", block, work_per_thread)
     if input_casts is None:
+        # Direct callers can request compute precision above native opmath.
         annotations, _ = inspect_functor(fn)
         start = int(with_index)
         op.argument_types = tuple(
