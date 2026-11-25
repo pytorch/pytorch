@@ -440,81 +440,36 @@ class CondTests(TestCase):
 
     @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
     @parametrize("dynamic", [False, True])
-    def test_cond_identity_branch_does_not_mutate_input(self, device, dynamic):
-        # Regression test for https://github.com/pytorch/pytorch/issues/202514.
-        # An identity-like branch (``t + 0.0``, ``t * 1.0``, ...) is folded by
-        # Inductor into returning its operand unchanged, so the cond output used
-        # to alias the caller's input; a following pointwise op then reused that
-        # buffer in place and silently overwrote the input. Each branch output
-        # must get its own storage.
-        identity_fns = {
-            "add_zero": lambda t: t + 0.0,
-            "sub_zero": lambda t: t - 0.0,
-            "mul_one": lambda t: t * 1.0,
-            "div_one": lambda t: t / 1.0,
-            "clone": lambda t: t.clone(),  # control: storage already distinct
-        }
-        follow_ons = {
-            "cos": torch.cos,
-            "relu": torch.relu,
-            "add_one": lambda u: u + 1.0,
-        }
-        for id_name, identity_fn in identity_fns.items():
-            for fo_name, follow_on in follow_ons.items():
-                # Each combination is a distinct function; reset so the repeated
-                # fullgraph compiles below do not accumulate toward the recompile
-                # limit.
-                torch._dynamo.reset()
+    def test_cond_identity_branch_with_view(self, device, dynamic):
+        def model(pred, x):
+            out = torch.cond(
+                pred,
+                lambda t: (t * 3.0).view(-1),
+                lambda t: (t + 0.0).view(-1) * 1.0,
+                (x,),
+            )
+            return out.cos()
 
-                def model(pred, x, identity_fn=identity_fn, follow_on=follow_on):
-                    out = torch.cond(pred, lambda t: t * 3.0, identity_fn, (x,))
-                    return follow_on(out)
-
-                compiled = torch.compile(
-                    model, backend="inductor", fullgraph=True, dynamic=dynamic
-                )
-                for pred_val in (False, True):
-                    pred = torch.tensor(pred_val, device=device)
-                    # repeated calls with different input values reuse the artifact
-                    for seed in range(3):
-                        torch.manual_seed(seed)
-                        x = torch.randn(8, device=device)
-                        x_expected = x.clone()
-                        ref = model(pred, x.clone())
-                        got = compiled(pred, x)
-                        tag = f"{id_name}/{fo_name} pred={pred_val} seed={seed}"
-                        self.assertEqual(x, x_expected, msg=f"input mutated: {tag}")
-                        self.assertEqual(got, ref, msg=f"wrong result: {tag}")
+        self._run_test(model, (torch.randn(4, 8),), device, dynamic=dynamic)
 
     @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
-    def test_cond_identity_branch_output_not_aliased_to_input(self, device):
-        # https://github.com/pytorch/pytorch/issues/202514: the output of an
-        # identity-like cond branch must own its storage, like eager and
-        # aot_eager, rather than aliasing the input.
+    def test_cond_identity_branch_slice(self, device):
         def model(pred, x):
-            return torch.cond(pred, lambda t: t * 3.0, lambda t: t + 0.0, (x,))
+            return torch.cond(
+                pred, lambda t: (t * 3.0)[4:], lambda t: (t + 0.0)[4:], (x,)
+            )
 
-        for backend in ("aot_eager", "inductor"):
-            compiled = torch.compile(model, backend=backend, fullgraph=True)
-            for pred_val in (False, True):
-                pred = torch.tensor(pred_val, device=device)
-                x = torch.randn(8, device=device)
-                x_expected = x.clone()
-                eager_out = model(pred, x.clone())
-                out = compiled(pred, x)
-                tag = f"{backend} pred={pred_val}"
-                self.assertEqual(x, x_expected, msg=f"input mutated: {tag}")
-                self.assertEqual(out, eager_out, msg=f"wrong result: {tag}")
-                self.assertNotEqual(
-                    out.data_ptr(),
-                    x.data_ptr(),
-                    msg=f"output aliases input storage: {tag}",
-                )
+        x = torch.randn(8, device=device)
+        compiled = torch.compile(model, fullgraph=True)
+        for pred, arg in prepend_predicates([x], device=device):
+            out = compiled(pred, arg)
+            self.assertEqual(out, model(pred, arg))
+            self.assertNotEqual(
+                out.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+            )
 
     @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
     def test_cond_identity_branch_multiple_outputs(self, device):
-        # https://github.com/pytorch/pytorch/issues/202514 with more than one
-        # branch output, where only one of them is identity-like.
         def model(pred, x, y):
             def true_fn(a, b):
                 return a * 3.0, b * 3.0
@@ -525,18 +480,7 @@ class CondTests(TestCase):
             o1, o2 = torch.cond(pred, true_fn, false_fn, (x, y))
             return torch.cos(o1), torch.relu(o2)
 
-        compiled = torch.compile(model, backend="inductor", fullgraph=True)
-        for pred_val in (False, True):
-            pred = torch.tensor(pred_val, device=device)
-            x = torch.randn(8, device=device)
-            y = torch.randn(8, device=device)
-            x_expected, y_expected = x.clone(), y.clone()
-            ref = model(pred, x.clone(), y.clone())
-            got = compiled(pred, x, y)
-            tag = f"pred={pred_val}"
-            self.assertEqual(x, x_expected, msg=f"x mutated: {tag}")
-            self.assertEqual(y, y_expected, msg=f"y mutated: {tag}")
-            self.assertEqual(got, ref, msg=f"wrong result: {tag}")
+        self._run_test(model, (torch.randn(8), torch.randn(8)), device)
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])

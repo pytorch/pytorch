@@ -9458,6 +9458,25 @@ for dtype in (torch.int32, torch.int64):
                 out, matmul_with_op(inps[0], inps[1], fn), atol=atol, rtol=rtol
             )
 
+    def test_remove_no_ops_preserves_output_storage(self):
+        x = torch.randn(4, 8, device=self.device)
+        for fn in (lambda x: x + 0.0, lambda x: (x + 0.0).view(-1) * 1.0):
+            out = torch.compile(fn, fullgraph=True)(x)
+            self.assertEqual(out, fn(x))
+            self.assertNotEqual(
+                out.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+            )
+
+        def two_outputs(x):
+            y = x.sin()
+            return y, y * 1.0
+
+        first, second = torch.compile(two_outputs, fullgraph=True)(x)
+        self.assertEqual((first, second), two_outputs(x))
+        self.assertNotEqual(
+            first.untyped_storage().data_ptr(), second.untyped_storage().data_ptr()
+        )
+
     def test_remove_noop_copy(self):
         def fn(x, y):
             x = x.cos()

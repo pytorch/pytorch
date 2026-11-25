@@ -108,6 +108,26 @@ def remove_no_ops(
     with torch.utils._python_dispatch._disable_current_modes():
         graph = gm.graph
 
+        # Folds overwrite replacement metadata. Keep the original storage of each
+        # operand and track where it moves, including views of earlier folds.
+        original_storage = functools.cache(get_node_storage)
+        storage_parent: dict[int, int] = {}
+        boundary_storages = OrderedSet(
+            storage
+            for n in itertools.chain(
+                graph.find_nodes(op="placeholder"), graph.output_node().all_input_nodes
+            )
+            if (storage := original_storage(n)) is not None
+        )
+
+        def current_storage(node: torch.fx.Node) -> int | None:
+            storage = original_storage(node)
+            while storage is not None and storage in storage_parent:
+                parent = storage_parent[storage]
+                storage_parent[storage] = storage_parent.get(parent, parent)
+                storage = parent
+            return storage
+
         def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):
             if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
                 return False
@@ -157,21 +177,38 @@ def remove_no_ops(
             if is_mutated(replacement):
                 return
 
-            if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
-                if fake_tensors_eq(
-                    node.meta["val"],
-                    replacement.meta["val"],
-                    ("shape", "device"),
-                ):
-                    with graph.inserting_after(node):
-                        replacement = graph.call_function(
-                            torch.ops.prims.convert_element_type.default,
-                            args=(replacement, node.meta["val"].dtype),
-                        )
-                else:
+            storage_merge = None
+            if fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
+                operand_storage = current_storage(replacement)
+                result_storage = current_storage(node)
+                if operand_storage is None or result_storage is None:
                     return
+                if operand_storage != result_storage:
+                    # Preserve storage identities visible at the graph boundary.
+                    if (
+                        operand_storage in boundary_storages
+                        and result_storage in boundary_storages
+                    ):
+                        return
+                    storage_merge = (result_storage, operand_storage)
+            elif fake_tensors_eq(
+                node.meta["val"], replacement.meta["val"], ("shape", "device")
+            ):
+                with graph.inserting_after(node):
+                    replacement = graph.call_function(
+                        torch.ops.prims.convert_element_type.default,
+                        args=(replacement, node.meta["val"].dtype),
+                    )
+            else:
+                return
 
             node.replace_all_uses_with(replacement)
+            if storage_merge is not None:
+                old, new = storage_merge
+                storage_parent[old] = new
+                if old in boundary_storages:
+                    boundary_storages.remove(old)
+                    boundary_storages.add(new)
             replacement.meta.update(node.meta)
             graph.erase_node(node)
 
