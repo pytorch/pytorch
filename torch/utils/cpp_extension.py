@@ -443,7 +443,10 @@ COMMON_HIP_FLAGS = [
     '-DHIPBLAS_V2',
 ]
 
-if not IS_WINDOWS:
+if IS_WINDOWS:
+    # Prevent Windows headers used by ROCm projects from defining min/max macros.
+    COMMON_HIP_FLAGS.append('-DNOMINMAX')
+else:
     COMMON_HIP_FLAGS.append('-fPIC')
 
 COMMON_HIPCC_FLAGS = [
