@@ -629,7 +629,6 @@
   "test/test_nn.py",
   "test/test_numa_binding.py",
   "test/test_numba_integration.py",
-  "test/test_numpy_interop.py",
   "test/test_openmp.py",
   "test/test_ops.py",
   "test/test_ops_fwd_gradients.py",
