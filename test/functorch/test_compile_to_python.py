@@ -597,44 +597,6 @@ class TestAOTCompileToPython(TestCase):
         self.assertEqual(out.a, eager.a)
         self.assertEqual(out.b, eager.b)
 
-    @unittest.skipIf(
-        not torch.cuda.is_available(),
-        "functionalize_rng_ops threads CUDA RNG state via CUDARngStateHelper, which "
-        "requires a CUDA device (the graph itself lowers through the CPU backend).",
-    )
-    def test_functionalized_rng_runs_like_eager(self):
-        # functionalize_rng_ops rewrites the RNG op into a functional form during the inner
-        # AOTAutograd lowering, producing a FunctionalizedRngRuntimeWrapper that threads RNG
-        # state via CUDARngStateHelper. ``CUDARngStateHelper`` in the source is the RNG-specific
-        # signal (it appears only under functionalize_rng_ops and exercises the helper-table
-        # rows); the wrapper's ``_compiled_fn_`` inner-name is real but not asserted here, as
-        # that token is the orchestration's first parameter and appears in every composed
-        # module. Seeded so dropout's mask is deterministic for the eager comparison.
-        class _Dropout(torch.nn.Module):
-            def forward(self, x):
-                return torch.nn.functional.dropout(x, p=0.5, training=True)
-
-        m = _Dropout()
-        x = torch.randn(8, 4)
-
-        def flat_fn(flat):
-            return pytree.tree_flatten(m(flat[-1]))[0]
-
-        with functorch_config.patch(functionalize_rng_ops=True):
-            with torch.enable_grad():
-                gm = make_fx(flat_fn, tracing_mode="real")([x])
-            src, _cache = compile_to_python(gm, [x])
-        _assert_composed(self, src)
-        self.assertIn("CUDARngStateHelper", src)
-        fn = load_from_python(src)
-        torch.manual_seed(123)
-        with torch.no_grad():
-            out = fn([x])[0]
-        torch.manual_seed(123)
-        with torch.no_grad():
-            eager = m(x)
-        self.assertEqual(out, eager)
-
     def test_helpers_imported_from_standalone_runtime_surface(self):
         # End-to-end lock for the stability contract: a graph closing over a runtime helper
         # (here gen_alias_from_base, via output-alias regen) must import it from the
@@ -774,6 +736,48 @@ class TestAOTCompileToPython(TestCase):
             t.join()
         self.assertEqual(sinks["a"], ["a_fn"])
         self.assertEqual(sinks["b"], ["b_fn"])
+
+
+class TestAOTCompileToPythonCUDA(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    @unittest.skipIf(
+        not torch.cuda.is_available(),
+        "functionalize_rng_ops threads CUDA RNG state via CUDARngStateHelper, which "
+        "requires a CUDA device (the graph itself lowers through the CPU backend).",
+    )
+    def test_functionalized_rng_runs_like_eager(self):
+        # functionalize_rng_ops rewrites the RNG op into a functional form during the inner
+        # AOTAutograd lowering, producing a FunctionalizedRngRuntimeWrapper that threads RNG
+        # state via CUDARngStateHelper. ``CUDARngStateHelper`` in the source is the RNG-specific
+        # signal (it appears only under functionalize_rng_ops and exercises the helper-table
+        # rows); the wrapper's ``_compiled_fn_`` inner-name is real but not asserted here, as
+        # that token is the orchestration's first parameter and appears in every composed
+        # module. Seeded so dropout's mask is deterministic for the eager comparison.
+        class _Dropout(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.dropout(x, p=0.5, training=True)
+
+        m = _Dropout()
+        x = torch.randn(8, 4)
+
+        def flat_fn(flat):
+            return pytree.tree_flatten(m(flat[-1]))[0]
+
+        with functorch_config.patch(functionalize_rng_ops=True):
+            with torch.enable_grad():
+                gm = make_fx(flat_fn, tracing_mode="real")([x])
+            src, _cache = compile_to_python(gm, [x])
+        _assert_composed(self, src)
+        self.assertIn("CUDARngStateHelper", src)
+        fn = load_from_python(src)
+        torch.manual_seed(123)
+        with torch.no_grad():
+            out = fn([x])[0]
+        torch.manual_seed(123)
+        with torch.no_grad():
+            eager = m(x)
+        self.assertEqual(out, eager)
 
 
 @instantiate_parametrized_tests
