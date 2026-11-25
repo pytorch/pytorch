@@ -2,16 +2,19 @@
 
 """Tests of torch.vm under the thread state that sits above the level a region
 is traced at: a region's graph is what ran below autocast, and it is run, and
-lowered, without autocast treating its operators a second time.
+lowered, without autocast treating its operators a second time. And of what a
+region keeps of the call it was traced on: none of that call's tensors.
 """
 
 import contextlib
 import functools
+import gc
 import os
 import subprocess
 import sys
 import traceback
 import unittest
+import weakref
 
 import torch
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -360,6 +363,98 @@ class TestVmAutocast(TestCase):
 
 
 instantiate_device_type_tests(TestVmAutocast, globals())
+
+
+def modes_weighted(x, w):
+    return ((x * w).tanh().cos().sin() + x).sum()
+
+
+def lowered(gm, input_types):
+    # A lowering that keeps the graph it was given: what it returns calls it.
+    return vm.lower_to(gm, gm.forward)
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmTracedTensors(TestCase):
+    """The tensors of the call a region was traced on are the caller's to
+    free, as in eager: the passes see them, the region does not keep them."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @parametrize("passes", ("default", "kept", "lowered", "autograd", "inductor"))
+    @isolated
+    def test_input_of_the_traced_call_is_freed(self, device, passes):
+        behind = {
+            "default": (),
+            "kept": (keep,),
+            "lowered": (lowered,),
+            "autograd": (vm.passes.Autograd(), vm.passes.Partition()),
+            "inductor": (vm.passes.Inductor(),),
+        }[passes]
+        exact = passes not in ("autograd", "inductor")
+        tolerance = {"atol": 0, "rtol": 0} if exact else {"atol": 1e-05, "rtol": 1e-04}
+        size = 1 << 20
+        w = torch.full((size,), 1.5, device=device)
+        compiled = vm(modes_weighted, passes=(*EARLY, *behind))
+        inputs = []
+        for call in range(12):
+            # 4 MiB that only this call refers to.
+            x = torch.randn(size, device=device)
+            inputs.append(weakref.ref(x))
+            got, want = compiled(x, w), modes_weighted(x, w)
+            self.assertEqual(got, want, msg=f"call {call}", **tolerance)
+            del x, got, want
+        gc.collect()
+        alive = [call for call, ref in enumerate(inputs) if ref() is not None]
+        self.assertEqual(alive, [])
+        # No other tensor of that size is left either (a copy of an input).
+        left = [t for t in gc.get_objects() if type(t) is torch.Tensor and t is not w]
+        self.assertEqual([t.shape for t in left if t.numel() == size], [])
+        # The region runs on, and still says what it was traced for.
+        before = region_runs(compiled)
+        self.assertGreater(before, 0)
+        x = torch.randn(size, device=device)
+        self.assertEqual(compiled(x, w), modes_weighted(x, w), **tolerance)
+        self.assertGreater(region_runs(compiled), before)
+        self.assertIn(f"f32[{size}]", vm.explain(compiled))
+
+    @isolated
+    def test_gradients_of_the_traced_step_are_freed(self, device):
+        # The optimizer's region is handed every gradient. With the gradients
+        # set to None at the start of a step, only the last step's are alive.
+        def make():
+            torch.manual_seed(0)
+            layers = [torch.nn.Linear(64, 64), torch.nn.Tanh(), torch.nn.Linear(64, 8)]
+            net = torch.nn.Sequential(*layers).to(device)
+            optimizer = torch.optim.Adam(net.parameters(), lr=0.001)
+
+            def step(x):
+                optimizer.zero_grad(set_to_none=True)
+                loss = net(x).square().mean()
+                loss.backward()
+                optimizer.step()
+                return loss.detach()
+
+            return net, step
+
+        (net, step), (eager_net, eager_step) = make(), make()
+        compiled = vm(step, passes=EARLY)
+        alive = []
+        for call in range(12):
+            x = torch.randn(8, 64, device=device)
+            got, want = compiled(x), eager_step(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            alive.append([weakref.ref(p.grad) for p in net.parameters()])
+        weights, expected = list(net.parameters()), list(eager_net.parameters())
+        self.assertEqual(weights, expected, atol=0, rtol=0)
+        gc.collect()
+        alive = [any(ref() is not None for ref in refs) for refs in alive]
+        self.assertEqual(alive, [False] * 11 + [True])
+        rows = [r for r in vm.regions(compiled) if r["state"] == "region"]
+        self.assertTrue(any("adam" in r["where"] and r["runs"] for r in rows), msg=rows)
+
+
+instantiate_device_type_tests(TestVmTracedTensors, globals())
 
 
 if __name__ == "__main__":

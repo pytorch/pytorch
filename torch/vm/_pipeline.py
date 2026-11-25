@@ -136,7 +136,9 @@ class Pipeline:
         for t in input_types:
             if isinstance(t, TensorType) and t.is_const:
                 t._on_const = lambda: setattr(report, "const_read", True)
-        gm.meta["vm_example_inputs"] = inputs
+        # The traced run's tensors, for the passes: every graph a pass is
+        # given, and what it makes of it, refers to this one list.
+        examples = gm.meta["vm_example_inputs"] = list(inputs)
         gm.meta["vm_stage"] = "forward"
         gm.meta["vm_const_inputs"] = [
             p.name
@@ -161,6 +163,12 @@ class Pipeline:
             else:
                 versions[-1].gm = new
                 versions[-1].passes.append(_name(p))
+        # The graphs live as long as the function. Kept with them, the tensors
+        # of the one call that was traced would too: the batch, every gradient
+        # an optimizer's region was handed.
+        del examples[:]
+        for v in versions:
+            v.gm.meta.pop("vm_example_inputs", None)
         report.versions = versions
         top = versions[-1]
         if self.autograd is not None:
@@ -241,7 +249,8 @@ class Pipeline:
         """A compiler for AOT Autograd running ``passes`` on one graph."""
 
         def compile(g, ins):
-            g.meta.update(vm_example_inputs=list(ins), vm_stage=stage)
+            examples = list(ins)
+            g.meta.update(vm_example_inputs=examples, vm_stage=stage)
             types = [
                 input_types[i]
                 if stage != "backward" and i < len(input_types)
@@ -253,6 +262,9 @@ class Pipeline:
                 if out is not None:
                     g = out[0]
                     report.notes.append(f"{_name(p)} ran on the {stage} graph")
+            # For the passes only, as the region's own (see __call__).
+            del examples[:]
+            g.meta.pop("vm_example_inputs", None)
             return direct(g) or g
 
         return compile

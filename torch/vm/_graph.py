@@ -575,9 +575,9 @@ def run_until(gm: torch.fx.GraphModule, node: torch.fx.Node) -> Any:
     """``node``'s value in the traced run (the block's graphs are pure, so
     rerunning them changes nothing)."""
     inputs = gm.meta.get("vm_example_inputs")
-    if inputs is None:
+    if not inputs:
         raise ValueError(
-            "run_until needs the graph the VM gave the pass (it carries the traced run's inputs)"
+            "run_until needs the graph the VM gave the pass, while the pass runs (it carries the traced run's inputs until the passes are done)"
         )
     result: dict[str, Any] = {}
 
