@@ -2373,6 +2373,23 @@ class CachingAutotuner(KernelInterface):
             and self._should_coordesc_tune
         )
 
+    def skip_for_spills(self, n_spills_threshold: int) -> bool:
+        """Whether a benchmark can skip this precompiled kernel without launching
+        it: every config spills more than ``n_spills_threshold`` and ``run()``
+        would not tune further (coordinate descent or combo per-subkernel
+        tuning could still find a config that does not spill)."""
+        if not self.launchers:
+            return False
+        if (
+            self.inductor_meta.get("coordinate_descent_tuning")
+            and self._should_coordesc_tune
+        ) or self.inductor_meta.get("combo_tuning_groups"):
+            return False
+        return all(
+            launcher.n_spills is not None and launcher.n_spills > n_spills_threshold
+            for launcher in self.launchers
+        )
+
     def _keep_launcher(self, launcher):
         """Drop every launcher and compile result except `launcher`."""
         self._release_static_launchers_except(launcher)

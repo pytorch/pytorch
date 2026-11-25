@@ -229,6 +229,8 @@ class BenchmarkFusionTestTemplate:
             mod.call = call
             ms, path = orig_benchmark(scheduling, mod, -1, **kwargs)
             self.assertTrue(math.isinf(ms))
+            # Skipped kernels are still pruned to one launcher, as run() would.
+            self.assertEqual(len(mod.triton_.launchers), 1)
             benchmarked.append(path)
             return ms, path
 

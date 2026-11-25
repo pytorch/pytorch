@@ -9504,16 +9504,9 @@ class TritonScheduling(SIMDScheduling):
             call = mod.call
             wrapped_jit_function = mod.triton_
             try:
-                # Compile without launching, so that a kernel we skip for its
-                # spills is never run: nothing waits for that launch, and the
-                # next kernel load blocks until it finishes (a CUDA module load
-                # waits for the context's running kernels).
-                if not wrapped_jit_function.launchers:
-                    wrapped_jit_function.precompile()
-                spills = _all_configs_spill(wrapped_jit_function, n_spills_threshold)
-                if not spills:
-                    # call once to pick a config if there are several
-                    call(wrapped_jit_function.clone_args(*args)[0])
+                spills = _compile_or_skip_for_spills(
+                    wrapped_jit_function, call, args, n_spills_threshold
+                )
             except Exception as e:
                 if config.triton.disallow_failing_autotune_kernels_TESTING_ONLY:
                     raise
@@ -9527,7 +9520,7 @@ class TritonScheduling(SIMDScheduling):
                 return ms, mod.__file__
 
             launchers = wrapped_jit_function.launchers
-            if not spills and len(launchers) != 1:
+            if len(launchers) != 1:
                 raise AssertionError(f"expected 1 launcher, got {len(launchers)}")
             # n_spills does not necessarily mean it's not profitable to fuse,
             # and sometimes it can be inaccurate
@@ -9732,16 +9725,12 @@ class TritonScheduling(SIMDScheduling):
                 call = mod.call
                 wrapped_jit_function = mod.triton_
 
-                # Compile without launching a kernel we skip for its spills (see
-                # benchmark_codegened_module).
-                if not wrapped_jit_function.launchers:
-                    wrapped_jit_function.precompile()
-                spills = _all_configs_spill(wrapped_jit_function, 0)
-                if not spills:
-                    call(wrapped_jit_function.clone_args(*args)[0])
+                spills = _compile_or_skip_for_spills(
+                    wrapped_jit_function, call, args, 0
+                )
 
                 launchers = wrapped_jit_function.launchers
-                if not spills and len(launchers) != 1:
+                if len(launchers) != 1:
                     raise AssertionError(f"expected 1 launcher, got {len(launchers)}")
                 if spills or launchers[0].n_spills > 0:
                     # skip benchmarking the kernel if there are register spills
@@ -9777,18 +9766,24 @@ class TritonScheduling(SIMDScheduling):
         return total_ms, total_clone_ms, file_list
 
 
-def _all_configs_spill(
-    kernel: triton_heuristics.CachingAutotuner, n_spills_threshold: int
+def _compile_or_skip_for_spills(
+    kernel: triton_heuristics.CachingAutotuner,
+    call: Callable[..., Any],
+    args: list[Any],
+    n_spills_threshold: int,
 ) -> bool:
-    """Whether every config of the precompiled kernel spills more than the
-    benchmark allows, so it can be skipped without a launch. Coordinate descent
-    tuning may still find a config that doesn't spill, and times what it runs."""
-    if kernel.inductor_meta.get("coordinate_descent_tuning"):
-        return False
-    return all(
-        launcher.n_spills is not None and launcher.n_spills > n_spills_threshold
-        for launcher in kernel.launchers
-    )
+    """Compile ``kernel`` for a benchmark and return whether to skip it for
+    register spills. A skipped kernel is never launched: nothing waits for that
+    launch, and the next kernel load blocks until it finishes (a CUDA module load
+    waits for the context's running kernels). Otherwise ``call`` runs once, which
+    autotunes down to one launcher. Either way one launcher is left."""
+    if not kernel.launchers:
+        kernel.precompile()
+    if kernel.skip_for_spills(n_spills_threshold):
+        kernel._keep_launcher(kernel.launchers[0])
+        return True
+    call(kernel.clone_args(*args)[0])
+    return False
 
 
 def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
