@@ -15,6 +15,7 @@
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros_like.h>
 #include <fmt/format.h>
+#include <utility>
 
 namespace at::native {
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
@@ -30,6 +31,12 @@ namespace mps {
 // copy_conj_neg functor for complex (the only case where it differs from neg); real types route through copy_neg.
 // Strided iterators get the `_strided_castout_<in>` template; contiguous get `_dense_castout_*`.
 void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
+  // float4_e2m1fn_x2 has no Metal type and copy_ rejects casts to or from it, so move its packed bytes.
+  if (src.scalar_type() == kFloat4_e2m1fn_x2) {
+    auto dst_bytes = dst.view(kByte);
+    copy_cast_kernel_mps(dst_bytes, src.view(kByte));
+    return;
+  }
   const bool needs_conj = src.is_conj() != dst.is_conj();
   const bool needs_neg = src.is_neg() != dst.is_neg();
 
@@ -150,7 +157,7 @@ void inner_contiguous_scatter_mps(const Tensor& input,
   const uint64_t num_slices = (input.nbytes() + slice_bytes - 1) / slice_bytes;
   const uint64_t max_out = off_bytes + (num_slices ? (num_slices - 1) * out_stride_bytes + slice_bytes : 0);
   const uint64_t bound = std::max<uint64_t>(input.nbytes(), max_out);
-  if (bound > std::numeric_limits<uint32_t>::max()) {
+  if (!std::in_range<uint32_t>(bound)) {
     exec_inner_contiguous_scatter<uint64_t>(input, output, slice_bytes, out_stride_bytes, off_bytes);
   } else {
     exec_inner_contiguous_scatter<uint32_t>(input, output, slice_bytes, out_stride_bytes, off_bytes);
