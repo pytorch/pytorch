@@ -378,7 +378,14 @@ std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator() {
-  return current_custom_allocator;
+  auto* current = c10::cuda::CUDACachingAllocator::allocator.load();
+  if (current_custom_allocator && current_custom_allocator.get() == current) {
+    return current_custom_allocator;
+  }
+  // e.g. the native caching allocator, which is never destroyed: a handle
+  // that does not own it, so that it can be made current again
+  return std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>(
+      current, [](c10::cuda::CUDACachingAllocator::CUDAAllocator*) {});
 }
 
 // TODO: add more functions in the argument
@@ -392,12 +399,20 @@ createCustomAllocator(
   return allocator;
 }
 
+// Any time, including after memory has been allocated. A
+// CUDAPluggableAllocator's memory is freed through whichever pluggable
+// allocator is current (custom_raw_deleter). So:
+// - A pluggable allocator may receive frees of memory allocated before it
+//   became current.
+// - Memory it allocates may be freed after it is swapped away. To work around
+//   this, return a deleter that frees to itself instead of the current
+//   allocator.
+// - An allocator should not be deleted while storages it made are alive; they
+//   keep a pointer to it.
 void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator) {
-  TORCH_CHECK(
-      !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
-      "Can't swap an already initialized allocator");
+  TORCH_CHECK(allocator, "change_current_allocator needs an allocator");
   c10::cuda::CUDACachingAllocator::allocator.store(allocator.get());
   current_custom_allocator = allocator;
 }
