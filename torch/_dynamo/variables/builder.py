@@ -369,6 +369,7 @@ from .user_defined import (
     is_reconstructable_decorator_ctx_manager_clone,
     KeyedJaggedTensorVariable,
     MutableMappingVariable,
+    ProtobufDescriptorMapVariable,
     SimpleNamespaceVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
@@ -2029,6 +2030,8 @@ class VariableBuilder:
             result = KeyedJaggedTensorVariable(value, source=self.source)
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif ProtobufDescriptorMapVariable.is_matching_object(value):
+            return ProtobufDescriptorMapVariable(value, source=self.source)
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.ID_MATCH)
             self.source = OptimizerSource(self.source)

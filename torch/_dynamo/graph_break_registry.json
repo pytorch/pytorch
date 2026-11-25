@@ -7209,6 +7209,16 @@
       ]
     }
   ],
+  "GB4683": [
+    {
+      "Gb_type": "Native mapping subscription after slot mutation",
+      "Context": "type={mapping_type.__qualname__}",
+      "Explanation": "The native mapping's __getitem__ changed earlier in the trace.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0368": [
     {
       "Gb_type": "Frozen dataclass with __post_init__",

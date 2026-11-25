@@ -5099,6 +5099,66 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().tp_getattro_impl(tx, name)
 
 
+class ProtobufDescriptorMapVariable(UserDefinedObjectVariable):
+    """Model subscription on UPB's read-only descriptor name maps."""
+
+    @staticmethod
+    def is_matching_object(obj: object) -> bool:
+        upb = sys.modules.get("google._upb._message")
+        return upb is not None and type(obj) is getattr(upb, "_ByNameMap", None)
+
+    def mp_subscript_impl(
+        self, tx: "InstructionTranslatorBase", key: VariableTracker
+    ) -> VariableTracker:
+        mapping_type = type(self.value)
+        slot = self.lookup_class_mro_attr("__getitem__")
+        if (
+            self.source is None
+            or is_constant_source(self.source)
+            or self.source.is_ephemeral()
+            or not isinstance(slot, types.WrapperDescriptorType)
+            or slot.__objclass__ is not mapping_type
+            or slot.__name__ != "__getitem__"
+            or not key.is_python_constant()
+        ):
+            return super().mp_subscript_impl(tx, key)
+
+        name = key.as_python_constant()
+        # The native slot can call Python's hash protocol for other key types.
+        if type(name) not in (str, bytes):
+            return super().mp_subscript_impl(tx, key)
+
+        side_effects = tx.output.side_effects
+        if mapping_type in side_effects and side_effects.has_pending_mutation_of_attr(
+            side_effects[mapping_type], "__getitem__"
+        ):
+            unimplemented(
+                gb_type="Native mapping subscription after slot mutation",
+                context=f"type={mapping_type.__qualname__}",
+                explanation="The native mapping's __getitem__ changed earlier in the trace.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        try:
+            entry = slot(self.value, name)
+        except KeyError as exc:
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(
+                        GuardBuilder.NATIVE_SUBSCRIPT_MATCH, slot=slot, absent_key=name
+                    )
+                )
+            )
+            raise_observed_exception(KeyError, tx, args=exc.args)
+        install_guard(
+            self.source.make_guard(
+                functools.partial(
+                    GuardBuilder.NATIVE_SUBSCRIPT_MATCH, slot=slot, absent_key=None
+                )
+            )
+        )
+        return VariableTracker.build(tx, entry, GetItemSource(self.source, name))
+
+
 _CONSTANT_BASE_TYPES = (int, float, str)
 
 
