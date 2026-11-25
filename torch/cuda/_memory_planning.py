@@ -508,7 +508,7 @@ class MemoryPlannedGraph:
             recorder.alloc, recorder.free, recorder.record_stream
         )
         with torch.cuda.graph(graph, capture_error_mode=self.capture_error_mode):
-            with torch.cuda.memory._graph_allocator(allocator):
+            with torch.cuda.memory._route_capture_allocations(allocator):
                 outputs = self.fn()
         nodes, edges = torch._C._cuda_graphTopology(graph.raw_cuda_graph())
         recorder.end(nodes, edges)
@@ -525,7 +525,7 @@ class MemoryPlannedGraph:
         try:
             graph = torch.cuda.CUDAGraph(keep_graph=True)
             with torch.cuda.graph(graph, capture_error_mode=self.capture_error_mode):
-                with torch.cuda.memory._graph_allocator(allocator):
+                with torch.cuda.memory._route_capture_allocations(allocator):
                     outputs = self.fn()
             del allocator
             # (counts only: fetching the placed graph's nodes and edges took
