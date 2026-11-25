@@ -1564,6 +1564,7 @@ class TestBlackwellAutoWSConstraints(TestCase):
             config.patch(
                 compile_threads=1,
                 **{
+                    "max_autotune": True,
                     "triton.enable_template_autows": True,
                     "triton.enable_template_tma_store": True,
                 },
