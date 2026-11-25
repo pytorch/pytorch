@@ -116,6 +116,34 @@ class TestVmTracedCall(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
     @isolated
+    def test_gradient_stops_where_the_program_detaches(self, device):
+        # A region's graph is differentiated again when it runs: a detach in
+        # it cuts the gradient as it does in the program.
+        import torch._rust_inductor as ri
+
+        torch.manual_seed(0)
+        lin = torch.nn.Linear(8, 8).to(device)
+
+        def f(x):
+            h = torch.tanh(lin(x))
+            target = h.detach().mean(0)
+            return ((h - target) ** 2).sum() + (h * target).sum()
+
+        ri.COUNT = True
+        g = vm_early(f)
+        for call in range(9):
+            x = torch.rand(4, 8, device=device)
+            grads = []
+            for fn in (g, f):
+                lin.zero_grad()
+                fn(x).backward()
+                grads.append(lin.weight.grad.clone())
+            self.assertEqual(
+                grads[0], grads[1], atol=1e-5, rtol=1e-4, msg=f"call {call}"
+            )
+        self.assertGreater(region_runs(), 0)
+
+    @isolated
     def test_loop_with_a_test_on_tensor_data(self, device):
         # The trace of a span cannot hold a branch on tensor data: it gives
         # up, and the call goes on as if nothing had been traced.

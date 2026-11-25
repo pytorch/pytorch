@@ -2061,7 +2061,11 @@ def trace_region(
     Backward.__init__ = _refusing_init
     torch.autograd.Function.apply = classmethod(_tracing_apply)
     try:
-        gm = make_fx(body, tracing_mode="real")(*example)
+        # An explicit (empty) table: without one make_fx turns `detach` into
+        # an alias, and the region's graph, which autograd differentiates
+        # again when it runs, would let gradients through where the program
+        # cut them.
+        gm = make_fx(body, decomposition_table={}, tracing_mode="real")(*example)
     except Exception as e:
         # The executor runs the block again from its start.
         with torch.no_grad():
