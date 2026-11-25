@@ -2,6 +2,7 @@
 
 
 import enum
+import inspect
 import itertools
 import operator
 import sys
@@ -2528,6 +2529,40 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(d.keys(), mp.keys())
 
+    def test_mapping_proxy_existing_unrelated_mutation(self):
+        d = {"a": 2, "b": 3, "c": 5}
+        mp = types.MappingProxyType(d)
+        other = {}
+
+        def fn(x):
+            # Mutating a different pre-existing dict must not affect reads of mp
+            other["d"] = 4
+            return torch.sin(x * mp["c"]) + len(mp)
+
+        x = torch.randn(4)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, torch.sin(x * 5) + 3)
+        self.assertEqual(other, {"d": 4})
+
+    def test_signature_bind_after_unrelated_dict_mutation(self):
+        # Signature.parameters is a pre-existing mappingproxy
+        def inner(x, flag=None):
+            return x + 1
+
+        sig = inspect.signature(inner)
+        registry = {}
+
+        def fn(x):
+            registry["k"] = 1
+            bound = sig.bind(x, flag=None)
+            bound.apply_defaults()
+            return inner(*bound.args, **bound.kwargs)
+
+        x = torch.randn(4)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, x + 1)
+        self.assertEqual(registry, {"k": 1})
+
     @parametrize(
         "mapping_type",
         [dict, OrderedDict, defaultdict],
@@ -4188,6 +4223,74 @@ class DictGuardTests(LoggingTestCase):
             f"(HINT: Dictionary d must {requirement} key 'scale'; "
             f"Dynamo specialized the compiled code on this key being {expectation}.",
             failures[0],
+        )
+
+    @parametrize("operation", ["getitem", "get", "get_default", "pop", "pop_default"])
+    def test_missing_key_recompilation_hint(self, operation):
+        failures = []
+
+        def fn(x, d):
+            try:
+                if operation == "getitem":
+                    value = d["scale"]
+                elif operation == "get":
+                    value = d.get("scale")
+                elif operation == "get_default":
+                    value = d.get("scale", 2)
+                elif operation == "pop":
+                    value = d.pop("scale")
+                else:
+                    value = d.pop("scale", 2)
+            except KeyError:
+                value = 1
+            return x + (value if value is not None else 0)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        for mapping in ({"kept": 1}, {"kept": 1, "scale": 3}):
+            expected_mapping = mapping.copy()
+            expected = fn(x, expected_mapping)
+            self.assertEqual(compiled_fn(x, mapping), expected)
+            self.assertEqual(mapping, expected_mapping)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("not ___dict_contains('scale', d)", failures[0])
+        if operation == "getitem":
+            self.assertIn("[key]` traced KeyError for an absent key", failures[0])
+        elif operation == "get":
+            self.assertIn(".get(key)` traced None for an absent key", failures[0])
+        elif operation == "get_default":
+            self.assertIn(
+                ".get(key, default)` traced the default for an absent key", failures[0]
+            )
+        elif operation == "pop":
+            self.assertIn(
+                ".pop(key)` traced KeyError without removing an entry", failures[0]
+            )
+        else:
+            self.assertIn(
+                ".pop(key, default)` traced the default without removing an entry",
+                failures[0],
+            )
+
+    def test_missing_object_key_recompilation_hint(self):
+        failures = []
+        key = object()
+
+        def fn(x, d):
+            return x + d.get(key, 2)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        self.assertEqual(compiled_fn(x, {"kept": 1}), x + 2)
+        self.assertEqual(compiled_fn(x, {"kept": 1, key: 3}), x + 3)
+        self.assertEqual(len(failures), 1)
+        self.assertIn(
+            ".get(key, default)` traced the default for an absent key", failures[0]
         )
 
     @make_logging_test(recompiles=True)
