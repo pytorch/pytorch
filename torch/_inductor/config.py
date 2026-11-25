@@ -2701,6 +2701,15 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Offer decompose_k for an mm whose K is a backed dynamic dimension. The
+    # choice is made on K's hint and guarded on K >= threshold * max(M, N), so a
+    # K on the other side of the threshold recompiles. K with a user-declared
+    # min/max range (mark_dynamic(min=, max=)) is skipped so the guard cannot
+    # narrow it.
+    decompose_k_dynamic_k = (
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_DYNAMIC_K", "0") == "1"
+    )
+
     # Skip decompose_k splits whose chunk (K // split) exceeds this: fp32 accumulation
     # error in each partial grows with the chunk length. 0 disables. Not applied when
     # K is symbolic.
