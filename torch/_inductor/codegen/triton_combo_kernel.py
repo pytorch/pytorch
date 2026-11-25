@@ -694,6 +694,8 @@ class ComboKernel(Kernel):
         triton_kernel_cls: type[TritonKernel],
         tiling_scores: dict[str, sympy.Expr] | None = None,
         per_subkernel_blocks: bool = False,
+        override_index_dtype: torch.dtype | None = None,
+        optimization_hint_overrides: dict[sympy.Symbol, int] | None = None,
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
@@ -716,7 +718,10 @@ class ComboKernel(Kernel):
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction=False,
             tiling_scores=tiling_scores,
+            optimization_hint_overrides=optimization_hint_overrides,
         )
+        if override_index_dtype is not None:
+            kwargs["override_index_dtype"] = override_index_dtype
         triton_kernel_cls.apply_feature_required_overrides(features, kwargs)
 
         return triton_kernel_cls(tiling, features=features, **kwargs)
