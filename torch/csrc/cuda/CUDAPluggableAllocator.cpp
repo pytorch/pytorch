@@ -378,7 +378,14 @@ std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator() {
-  return current_custom_allocator;
+  auto* current = c10::cuda::CUDACachingAllocator::allocator.load();
+  if (current_custom_allocator && current_custom_allocator.get() == current) {
+    return current_custom_allocator;
+  }
+  // e.g. the native caching allocator, which is never destroyed: a handle
+  // that does not own it, so that it can be made current again
+  return std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>(
+      current, [](c10::cuda::CUDACachingAllocator::CUDAAllocator*) {});
 }
 
 // TODO: add more functions in the argument
@@ -392,12 +399,20 @@ createCustomAllocator(
   return allocator;
 }
 
+// Any time, including after the current allocator has been used. Memory stays
+// with the allocator that made it (the caching allocator's is freed by it
+// whichever allocator is current; a CUDAPluggableAllocator's through the
+// current pluggable allocator, custom_raw_deleter, so it must not outlive a
+// change away from it). Storages keep a pointer to the allocator that made
+// them, so an allocator that has been current must stay alive. While it is
+// current, the new allocator gets every allocator call in the process: after
+// memory has been allocated, it should hand the calls it does not handle to
+// the one it replaces. Only the calls the program actually makes need
+// handling; the others can stay unsupported.
 void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator) {
-  TORCH_CHECK(
-      !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
-      "Can't swap an already initialized allocator");
+  TORCH_CHECK(allocator, "change_current_allocator needs an allocator");
   c10::cuda::CUDACachingAllocator::allocator.store(allocator.get());
   current_custom_allocator = allocator;
 }
