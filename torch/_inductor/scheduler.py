@@ -2807,8 +2807,7 @@ class SchedulerBuffer:
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
-        # hacky check for if V.kernel is a real kernel or NullHandler (multi-kernels
-        # set a placeholder args for this, see MultiKernelBase.args)
+        # hacky check for if V.kernel is a real kernel or NullHandler
         if (
             hasattr(V.kernel, "args")
             and self.get_name() in V.kernel.inplace_update_buffers
@@ -3236,8 +3235,7 @@ class BaseSchedulerNode:
                 not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
             )
-            # hacky check for if V.kernel is a real kernel or NullHandler (multi-kernels
-            # set a placeholder args for this, see MultiKernelBase.args)
+            # hacky check for if V.kernel is a real kernel or NullHandler
             and hasattr(V.kernel, "args")
         ):
             return
