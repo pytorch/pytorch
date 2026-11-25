@@ -259,14 +259,19 @@ device's handle. Deterministic mode and the SM carveout are also in the key as a
 precaution; on ROCm they do not change what the heuristic sees.
 
 Each thread has its own cache, so there is no lock and no shared state between
-threads. A thread's cache holds 1024 entries by default and drops the least
-recently used one past that. The limit can be set with the environment variable
-``TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT``, read once per process, with the same
-meaning as ``TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT``: ``0`` means unlimited and a
-negative value disables the cache. An invalid value prints a warning and uses
-the default. A thread's cache is not freed when the thread exits. An empty or
-failed heuristic query is not stored. If ``hipblasLtMatmul()`` reports a
-failure, the entry is removed and the existing rocBLAS or unfused fallback runs.
+threads. A thread's cache is freed when the thread exits. It holds 1024 entries
+by default and drops the least recently used one past that. The limit is set
+with the environment variable ``TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT``, read
+once per process:
+
+* ``TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT=0`` disables the cache.
+* A positive value is the maximum number of entries per thread. There is no
+  unlimited setting; set a large value instead.
+* A negative or non-integer value prints a warning and uses the default.
+
+An empty or failed heuristic query is not stored. If ``hipblasLtMatmul()``
+reports a failure, the entry is removed and the existing rocBLAS or unfused
+fallback runs.
 
 This only stores the answer ``hipblasLtMatmulAlgoGetHeuristic()`` already
 gave. It does not launch or time candidate kernels, so it is not hipBLASLt

@@ -17,8 +17,8 @@
 #ifdef USE_ROCM
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/env.h>
-#include <ATen/native/utils/ParamsHash.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+#include <cstring>
 #include <list>
 #include <unordered_map>
 // until hipblas has an API to accept flags, we must use rocblas here
@@ -238,12 +238,44 @@ struct HipblasltGemmConfig {
   int32_t device, deterministic, sm_carveout;
 };
 static_assert(std::has_unique_object_representations_v<HipblasltGemmConfig>);
+static_assert(sizeof(HipblasltGemmConfig) % sizeof(uint64_t) == 0);
 
-// Maximum entries per thread, following TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT:
-// 0 means unlimited, a negative value disables the cache. Read once per process.
-long long hipblasltHeuristicCacheLimit() {
-  static const long long limit = [] {
-    constexpr long long kDefault = 1024;
+// The hash is computed once per GEMM and kept with the key, so a miss does not
+// hash again when it inserts and evicts.
+struct HipblasltCacheKey {
+  std::size_t hash;
+  HipblasltGemmConfig config;
+};
+
+struct HipblasltCacheKeyHash {
+  std::size_t operator()(const HipblasltCacheKey& key) const noexcept {
+    return key.hash;
+  }
+};
+
+struct HipblasltCacheKeyEqual {
+  bool operator()(const HipblasltCacheKey& a, const HipblasltCacheKey& b) const noexcept {
+    return a.hash == b.hash &&
+        std::memcmp(&a.config, &b.config, sizeof(HipblasltGemmConfig)) == 0;
+  }
+};
+
+// FNV-1a over 8-byte words. Byte-at-a-time hashing of the 144-byte key is a
+// large part of the per-call cost.
+std::size_t hashGemmConfig(const HipblasltGemmConfig& config) {
+  uint64_t words[sizeof(HipblasltGemmConfig) / sizeof(uint64_t)];
+  std::memcpy(words, &config, sizeof(config));
+  uint64_t h = 0xcbf29ce484222325ULL;
+  for (const uint64_t w : words) {
+    h = (h ^ w) * 0x100000001b3ULL;
+  }
+  return static_cast<std::size_t>(h ^ (h >> 32));
+}
+
+// Maximum entries per thread; 0 disables the cache. Read once per process.
+std::size_t hipblasltHeuristicCacheLimit() {
+  static const std::size_t limit = []() -> std::size_t {
+    constexpr std::size_t kDefault = 1024;
     const auto val = c10::utils::get_env("TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT");
     if (!val) {
       return kDefault;
@@ -252,15 +284,15 @@ long long hipblasltHeuristicCacheLimit() {
     try {
       std::size_t pos = 0;
       const long long parsed = std::stoll(text, &pos);
-      if (pos == text.size()) {
-        return parsed;
+      if (pos == text.size() && parsed >= 0) {
+        return static_cast<std::size_t>(parsed);
       }
     } catch (const std::exception&) {
     }
     TORCH_WARN(
         "invalid TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT=",
         text,
-        ", expected an integer (0 = unlimited, negative = disabled); using the default of ",
+        ", expected a non-negative integer (0 disables the cache); using the default of ",
         kDefault,
         " entries per thread.");
     return kDefault;
@@ -268,17 +300,17 @@ long long hipblasltHeuristicCacheLimit() {
   return limit;
 }
 
-// One cache per thread, so no lock is needed. The cache is leaked like the
-// cuDNN v8 caches (see Conv_v8.cpp) to avoid teardown races at thread exit.
+// One cache per thread, so no lock is needed. It is a plain thread_local, so
+// its entries are freed when the thread exits. The entries are plain data, so
+// the destructor does not call into HIP.
 class HipblasltHeuristicCache {
  public:
   static HipblasltHeuristicCache& get() {
-    static thread_local HipblasltHeuristicCache* cache =
-        new HipblasltHeuristicCache();
-    return *cache;
+    static thread_local HipblasltHeuristicCache cache;
+    return cache;
   }
 
-  bool find(const HipblasltGemmConfig& key, cublasLtMatmulHeuristicResult_t* out) {
+  bool find(const HipblasltCacheKey& key, cublasLtMatmulHeuristicResult_t* out) {
     if (map_.empty()) {
       return false;
     }
@@ -287,30 +319,35 @@ class HipblasltHeuristicCache {
       return false;
     }
     order_.splice(order_.begin(), order_, it->second);
-    *out = it->second->second;
+    *out = it->second->result;
     return true;
   }
 
-  void add(const HipblasltGemmConfig& key, const cublasLtMatmulHeuristicResult_t& result) {
-    const long long limit = hipblasltHeuristicCacheLimit();
-    if (limit < 0) {
+  // Called after find() missed for this key on this thread, so the key is new.
+  // If it is not, the existing entry is kept.
+  void add(const HipblasltCacheKey& key, const cublasLtMatmulHeuristicResult_t& result) {
+    const std::size_t limit = hipblasltHeuristicCacheLimit();
+    if (limit == 0) {
       return;
     }
-    auto it = map_.find(key);
-    if (it != map_.end()) {
-      it->second->second = result;
-      order_.splice(order_.begin(), order_, it->second);
-      return;
-    }
-    if (limit > 0) {
-      while (order_.size() >= static_cast<std::size_t>(limit)) {
-        map_.erase(order_.back().first);
-        order_.pop_back();
+    if (order_.size() >= limit) {
+      // Reuse the least recently used entry's list and map nodes, so a miss on
+      // a full cache does not allocate or free.
+      auto victim = std::prev(order_.end());
+      auto node = map_.extract(victim->key);
+      node.key() = key;
+      *victim = Entry{key, result};
+      order_.splice(order_.begin(), order_, victim);
+      if (!map_.insert(std::move(node)).inserted) {
+        order_.pop_front();
       }
+      return;
     }
-    order_.emplace_front(key, result);
+    order_.push_front(Entry{key, result});
     try {
-      map_.emplace(key, order_.begin());
+      if (!map_.emplace(key, order_.begin()).second) {
+        order_.pop_front();
+      }
     } catch (...) {
       // Keep the list and the map in sync if the map allocation fails.
       order_.pop_front();
@@ -318,7 +355,7 @@ class HipblasltHeuristicCache {
     }
   }
 
-  void drop(const HipblasltGemmConfig& key) {
+  void drop(const HipblasltCacheKey& key) {
     auto it = map_.find(key);
     if (it == map_.end()) {
       return;
@@ -328,17 +365,20 @@ class HipblasltHeuristicCache {
   }
 
  private:
-  using Entry = std::pair<HipblasltGemmConfig, cublasLtMatmulHeuristicResult_t>;
+  struct Entry {
+    HipblasltCacheKey key;
+    cublasLtMatmulHeuristicResult_t result;
+  };
   std::list<Entry> order_;
   std::unordered_map<
-      HipblasltGemmConfig,
+      HipblasltCacheKey,
       std::list<Entry>::iterator,
-      at::native::ParamsHash<HipblasltGemmConfig>,
-      at::native::ParamsEqual<HipblasltGemmConfig>>
+      HipblasltCacheKeyHash,
+      HipblasltCacheKeyEqual>
       map_;
 };
 
-HipblasltGemmConfig hipblasltGemmConfig(
+HipblasltCacheKey hipblasltCacheKey(
     cudaDataType_t abType,
     cudaDataType_t cType,
     cublasComputeType_t computeType,
@@ -377,7 +417,7 @@ HipblasltGemmConfig hipblasltGemmConfig(
   key.device = c10::cuda::current_device();
   key.deterministic = at::globalContext().deterministicAlgorithms() ? 1 : 0;
   key.sm_carveout = at::globalContext()._SMCarveout_EXPERIMENTAL().value_or(-1);
-  return key;
+  return HipblasltCacheKey{hashGemmConfig(key), key};
 }
 #endif
 
@@ -537,7 +577,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
 #ifdef USE_ROCM
-  const auto heuristic_key = hipblasltGemmConfig(
+  const auto heuristic_key = hipblasltCacheKey(
       abType, cType, computeType, scaleType, opa, opb, m, n, k, lda, ldb, ldc,
       ldc, num_batches, stridea, strideb, stridec, CUBLASLT_EPILOGUE_DEFAULT,
       ltworkspace.size);
@@ -1919,7 +1959,7 @@ bool gemm_and_bias(
   int returnedResult = 0;
   cublasLtHandle_t ltHandle = at::cuda::getCurrentCUDABlasLtHandle();
 #ifdef USE_ROCM
-  const auto heuristic_key = hipblasltGemmConfig(
+  const auto heuristic_key = hipblasltCacheKey(
       abType, cType, computeType, scaleType, transa, transb, m, n, k, mat1_ld,
       mat2_ld, c_ptr ? c_ld : result_ld, result_ld, /*num_batches=*/1, 0, 0, 0,
       epilogue, ltworkspace.size);

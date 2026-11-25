@@ -1105,9 +1105,10 @@ class TestMatmulCuda(InductorTestCase):
     def test_hipblaslt_heuristic_cache_limit(self, device):
         # With TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT=2, the cache keeps two
         # entries per thread and evicts the least recently used one. Hits do not
-        # call the heuristic. Sequence A, B, A, C, A, B:
+        # call the heuristic. Sequence A, B, A, C, A, B, B, C, A:
         #   A miss; B miss; A hit (order is now A, B); C miss, evicts B;
-        #   A hit; B miss, evicts C.
+        #   A hit; B miss, evicts C; B hit on the reused entry; C miss, evicts A;
+        #   A miss, evicts B.
         self._skip_unless_hipblaslt()
         script = r"""
 import torch
@@ -1122,7 +1123,8 @@ a, b = r(128, 128), r(128, 128)
 fa = lambda: torch.mm(a, b)
 fb = lambda: torch.mm(a[:64], b)
 fc = lambda: torch.mm(a[:, :64], b[:64])
-seq = [("A", fa), ("B", fb), ("A", fa), ("C", fc), ("A", fa), ("B", fb)]
+seq = [("A", fa), ("B", fb), ("A", fa), ("C", fc), ("A", fa), ("B", fb),
+       ("B", fb), ("C", fc), ("A", fa)]
 for i, (name, fn) in enumerate(seq):
     print(f"STEP {i} {name}", flush=True)
     fn()
@@ -1133,8 +1135,15 @@ print("DONE", flush=True)
             script, device, extra_env={"TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT": "2"})
         self.assertEqual(
             steps,
-            [("0 A", 1), ("1 B", 1), ("2 A", 0), ("3 C", 1), ("4 A", 0), ("5 B", 1)],
+            [("0 A", 1), ("1 B", 1), ("2 A", 0), ("3 C", 1), ("4 A", 0), ("5 B", 1),
+             ("6 B", 0), ("7 C", 1), ("8 A", 1)],
         )
+
+        # TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT=0 disables the cache, so every
+        # call runs the heuristic.
+        steps = self._count_hipblaslt_heuristic_calls(
+            script, device, extra_env={"TORCH_HIPBLASLT_HEURISTIC_CACHE_LIMIT": "0"})
+        self.assertEqual([n for _, n in steps], [1] * 9)
 
     @onlyCUDA
     @skipCUDAIfNotRocm
