@@ -29,10 +29,10 @@ std::pair<
     dnnl::inner_product_forward::primitive_desc,
     dnnl::inner_product_forward>
 get_primitive_desc(
-    const ideep::tensor::desc& src_desc,
-    const ideep::tensor::desc& weights_desc,
-    const ideep::tensor::desc& dst_desc,
-    const ideep::tensor::desc& bias_desc = ideep::tensor::desc(),
+    const MkldnnMemory::desc& src_desc,
+    const MkldnnMemory::desc& weights_desc,
+    const MkldnnMemory::desc& dst_desc,
+    const MkldnnMemory::desc& bias_desc = MkldnnMemory::desc(),
     const bool with_bias = false,
     const Attr& attr = Attr(),
     const dnnl::prop_kind prop_kind = dnnl::prop_kind::forward) {
@@ -49,10 +49,10 @@ get_primitive_desc(
 }
 #else
 dnnl::inner_product_forward::primitive_desc get_primitive_desc(
-    const ideep::tensor::desc& src_desc,
-    const ideep::tensor::desc& weights_desc,
-    const ideep::tensor::desc& dst_desc,
-    const ideep::tensor::desc& bias_desc = ideep::tensor::desc(),
+    const MkldnnMemory::desc& src_desc,
+    const MkldnnMemory::desc& weights_desc,
+    const MkldnnMemory::desc& dst_desc,
+    const MkldnnMemory::desc& bias_desc = MkldnnMemory::desc(),
     const bool with_bias = false,
     const Attr& attr = Attr(),
     const dnnl::prop_kind prop_kind = dnnl::prop_kind::forward) {
@@ -90,13 +90,13 @@ dnnl::inner_product_forward::primitive_desc get_primitive_desc(
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void do_prepare_(
     inner_product_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const Attr& attr,
     const dnnl::prop_kind prop_kind) {
-  ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
+  MkldnnMemory::desc src_desc, weights_desc, bias_desc, dst_desc;
   Attr& op_attr = param.op_attr;
   Attr& src_attr = param.src_attr;
   dnnl::memory::data_type dst_data_type;
@@ -136,11 +136,11 @@ void do_prepare_(
 #endif
   }
   src_desc = reorder_src
-      ? ideep::tensor::desc(
+      ? MkldnnMemory::desc(
             src.get_dims(), dst_data_type, dnnl::memory::format_tag::any)
       : src.get_desc();
   weights_desc = reorder_weight
-      ? ideep::tensor::desc(
+      ? MkldnnMemory::desc(
             weights.get_dims(), dst_data_type, dnnl::memory::format_tag::any)
       : weights.get_desc();
   if (with_bias) {
@@ -169,7 +169,7 @@ void do_prepare_(
 #endif
   }
   dst_desc = reorder_src
-      ? ideep::tensor::desc(
+      ? MkldnnMemory::desc(
             dst_dims, dst_data_type, dnnl::memory::format_tag::any)
       : dst.get_desc();
 
@@ -203,11 +203,11 @@ void do_prepare_(
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void do_compute_binary(
     const inner_product_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& other,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst) {
+    const MkldnnMemory& src,
+    const MkldnnMemory& other,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst) {
   auto& pd = param.pd;
   auto& primitive = param.primitive;
   auto& src_attr = param.src_attr;
@@ -217,13 +217,13 @@ void do_compute_binary(
   auto& expected_src =
       reorder_src ? src.reorder_if_differ_in(pd.src_desc(), src_attr) : src;
   // make sure other has contiguous format.
-  auto other_desc = ideep::tensor::desc(other.get_dims(), other.get_data_type());
+  auto other_desc = MkldnnMemory::desc(other.get_dims(), other.get_data_type());
   auto& expected_other =
       reorder_src ? other.reorder_if_differ_in(other_desc) : other;
   auto& expected_weights = reorder_weight
       ? weights.reorder_if_differ_in(pd.weights_desc(), weights_attr)
       : weights;
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, expected_src});
@@ -238,7 +238,7 @@ void do_compute_binary(
   args.insert(
       {DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, expected_other});
   if (reorder_src) {
-    ideep::tensor expected_dst;
+    MkldnnMemory expected_dst;
     if (dst.is_empty() || dst.get_desc() != pd.dst_desc()) {
       // If dst buffer are not given by user or user given dst buffer are not
       // under expected format We need init a new one. "dst.get_desc() !=
@@ -281,10 +281,10 @@ void do_compute_binary(
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void do_compute_(
     const inner_product_forward_params& param,
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst) {
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst) {
   auto& pd = param.pd;
   auto& primitive = param.primitive;
   auto& op_attr = param.op_attr;
@@ -297,7 +297,7 @@ void do_compute_(
   auto& expected_weights = reorder_weight
       ? weights.reorder_if_differ_in(pd.weights_desc(), weights_attr)
       : weights;
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, expected_src});
@@ -310,7 +310,7 @@ void do_compute_(
   }
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
   if (reorder_src) {
-    ideep::tensor expected_dst;
+    MkldnnMemory expected_dst;
     if (dst.is_empty() || dst.get_desc() != pd.dst_desc()) {
       // If dst buffer are not given by user or user given dst buffer are not
       // under expected format We need init a new one. "dst.get_desc() !=
@@ -356,10 +356,10 @@ void do_compute_(
 // Ported from ideep::inner_product_forward::compute_impl.
 template <bool with_bias, bool reorder_src, bool reorder_weight>
 void compute_impl(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const Attr& attr,
     const dnnl::prop_kind prop_kind) {
   inner_product_forward_params param;
@@ -385,10 +385,10 @@ void compute_impl(
 // Ported from ideep::inner_product_backward_weights::compute_impl.
 template <bool with_diff_bias>
 void backward_weights_compute_impl(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
-    ideep::tensor& diff_weights,
-    ideep::tensor& diff_bias) {
+    const MkldnnMemory& src,
+    const MkldnnMemory& diff_dst,
+    MkldnnMemory& diff_weights,
+    MkldnnMemory& diff_bias) {
   if (is_avx2_vnni_2() &&
       one_of(
           diff_dst.get_data_type(),
@@ -404,10 +404,10 @@ void backward_weights_compute_impl(
   auto diff_weights_dims = src.get_dims();
   diff_weights_dims[0] = diff_dst.get_dim(1);
   dnnl::memory::data_type diff_dst_type = diff_dst.get_data_type();
-  auto diff_weights_desc = ideep::tensor::desc(
+  auto diff_weights_desc = MkldnnMemory::desc(
       diff_weights_dims, diff_dst_type, dnnl::memory::format_tag::any);
 
-  auto diff_bias_desc = ideep::tensor::desc(
+  auto diff_bias_desc = MkldnnMemory::desc(
       {diff_dst.get_dim(1)}, diff_dst_type, dnnl::memory::format_tag::any);
 
   // for forward hint, weights_desc should have same data_type
@@ -462,7 +462,7 @@ void backward_weights_compute_impl(
 
   auto expected_diff_dst = diff_dst.reorder_if_differ_in(pd.diff_dst_desc());
   auto expected_src = src.reorder_if_differ_in(pd.src_desc());
-  ideep::tensor expected_diff_weights;
+  MkldnnMemory expected_diff_weights;
   if (diff_weights.is_empty() ||
       diff_weights.get_desc() != pd.diff_weights_desc()) {
     // If diff_weights buffer are not given by user or user given diff_weights
@@ -473,7 +473,7 @@ void backward_weights_compute_impl(
     expected_diff_weights = diff_weights;
   }
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   std::unordered_map<int, dnnl::memory> args{
       {DNNL_ARG_DIFF_DST, expected_diff_dst},
@@ -505,10 +505,10 @@ void backward_weights_compute_impl(
 
 template <bool reorder_src, bool reorder_weight>
 void inner_product_forward(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const Attr& attr,
     dnnl::prop_kind prop_kind) {
   compute_impl</*with_bias=*/true, reorder_src, reorder_weight>(
@@ -517,23 +517,23 @@ void inner_product_forward(
 
 template <bool reorder_src, bool reorder_weight>
 void inner_product_forward(
-    const ideep::tensor& src,
-    const ideep::tensor& weights,
-    ideep::tensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& weights,
+    MkldnnMemory& dst,
     const Attr& attr,
     dnnl::prop_kind prop_kind) {
-  static ideep::tensor dummy_bias;
+  static MkldnnMemory dummy_bias;
   compute_impl</*with_bias=*/false, reorder_src, reorder_weight>(
       src, weights, dummy_bias, dst, attr, prop_kind);
 }
 
 template <bool reorder_src, bool reorder_weight>
 void inner_product_forward_binary(
-    const ideep::tensor& src,
-    const ideep::tensor& other,
-    const ideep::tensor& weights,
-    const ideep::tensor& bias,
-    ideep::tensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& other,
+    const MkldnnMemory& weights,
+    const MkldnnMemory& bias,
+    MkldnnMemory& dst,
     const Attr& attr,
     dnnl::prop_kind prop_kind) {
   inner_product_forward_params param;
@@ -545,13 +545,13 @@ void inner_product_forward_binary(
 
 template <bool reorder_src, bool reorder_weight>
 void inner_product_forward_binary(
-    const ideep::tensor& src,
-    const ideep::tensor& other,
-    const ideep::tensor& weights,
-    ideep::tensor& dst,
+    const MkldnnMemory& src,
+    const MkldnnMemory& other,
+    const MkldnnMemory& weights,
+    MkldnnMemory& dst,
     const Attr& attr,
     dnnl::prop_kind prop_kind) {
-  static ideep::tensor dummy_bias;
+  static MkldnnMemory dummy_bias;
   inner_product_forward_params param;
   do_prepare_<false, reorder_src, reorder_weight>(
       param, src, weights, dummy_bias, dst, attr, prop_kind);
@@ -559,7 +559,7 @@ void inner_product_forward_binary(
       param, src, other, weights, dummy_bias, dst);
 }
 
-ideep::tensor::desc inner_product_forward_expected_weights_desc(
+MkldnnMemory::desc inner_product_forward_expected_weights_desc(
     const dnnl::memory::dims& weights_dims,
     const dnnl::memory::dims& src_dims,
     dnnl::memory::data_type dtype,
@@ -580,9 +580,9 @@ ideep::tensor::desc inner_product_forward_expected_weights_desc(
                                            : dnnl_invalid_arguments,
       "Invalid dims for data and weights");
 #endif
-  ideep::tensor::desc src_desc(x_dims, x_dtype, dnnl::memory::format_tag::any);
-  ideep::tensor::desc dst_desc(y_dims, y_dtype, dnnl::memory::format_tag::any);
-  ideep::tensor::desc weights_desc(
+  MkldnnMemory::desc src_desc(x_dims, x_dtype, dnnl::memory::format_tag::any);
+  MkldnnMemory::desc dst_desc(y_dims, y_dtype, dnnl::memory::format_tag::any);
+  MkldnnMemory::desc weights_desc(
       weights_dims, dtype, dnnl::memory::format_tag::any);
   auto pd = dnnl::inner_product_forward::primitive_desc(
       engine, prop_kind, src_desc, weights_desc, dst_desc);
@@ -590,10 +590,10 @@ ideep::tensor::desc inner_product_forward_expected_weights_desc(
 }
 
 void inner_product_backward_data(
-    const ideep::tensor& diff_dst,
-    const ideep::tensor& weights,
+    const MkldnnMemory& diff_dst,
+    const MkldnnMemory& weights,
     const dnnl::memory::dims& diff_src_dims,
-    ideep::tensor& diff_src) {
+    MkldnnMemory& diff_src) {
   if (is_avx2_vnni_2() &&
       one_of(
           diff_dst.get_data_type(),
@@ -615,11 +615,11 @@ void inner_product_backward_data(
   }
 
   auto diff_dst_desc = diff_dst.get_desc().to_format_any();
-  auto weights_desc = ideep::tensor::desc(
+  auto weights_desc = MkldnnMemory::desc(
       weights_.get_dims(),
       diff_dst.get_data_type(),
       dnnl::memory::format_tag::any);
-  auto diff_src_desc = ideep::tensor::desc(
+  auto diff_src_desc = MkldnnMemory::desc(
       diff_src_dims, diff_dst.get_data_type(), dnnl::memory::format_tag::any);
 
   Attr op_attr;
@@ -629,7 +629,7 @@ void inner_product_backward_data(
       diff_src_desc,
       weights_desc,
       diff_dst_desc,
-      ideep::tensor::desc(),
+      MkldnnMemory::desc(),
       false,
       op_attr);
 
@@ -653,7 +653,7 @@ void inner_product_backward_data(
 
   auto expected_diff_dst = diff_dst.reorder_if_differ_in(pd.diff_dst_desc());
   auto expected_weights = weights_.reorder_if_differ_in(pd.weights_desc());
-  ideep::tensor expected_diff_src;
+  MkldnnMemory expected_diff_src;
   if (diff_src.is_empty() || diff_src.get_desc() != pd.diff_src_desc()) {
     // If diff_src buffer are not given by user or user given diff_src buffer
     // are not under expected format We need init a new one
@@ -663,7 +663,7 @@ void inner_product_backward_data(
     expected_diff_src = diff_src;
   }
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   dnnl::inner_product_backward_data(pd).execute(
       ideep::stream::default_stream(),
@@ -682,63 +682,63 @@ void inner_product_backward_data(
 }
 
 void inner_product_backward_weights(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
-    ideep::tensor& diff_weights,
-    ideep::tensor& diff_bias) {
+    const MkldnnMemory& src,
+    const MkldnnMemory& diff_dst,
+    MkldnnMemory& diff_weights,
+    MkldnnMemory& diff_bias) {
   backward_weights_compute_impl</*with_diff_bias=*/true>(
       src, diff_dst, diff_weights, diff_bias);
 }
 
 void inner_product_backward_weights(
-    const ideep::tensor& src,
-    const ideep::tensor& diff_dst,
-    ideep::tensor& diff_weights) {
-  static ideep::tensor dummy_diff_bias;
+    const MkldnnMemory& src,
+    const MkldnnMemory& diff_dst,
+    MkldnnMemory& diff_weights) {
+  static MkldnnMemory dummy_diff_bias;
   backward_weights_compute_impl</*with_diff_bias=*/false>(
       src, diff_dst, diff_weights, dummy_diff_bias);
 }
 
 // The template arguments used by ATen callers.
 template void inner_product_forward<true, true>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward<true, true>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward<false, false>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward<false, false>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward_binary<false, false>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward_binary<false, false>(
-    const ideep::tensor&,
-    const ideep::tensor&,
-    const ideep::tensor&,
-    ideep::tensor&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    const MkldnnMemory&,
+    MkldnnMemory&,
     const Attr&,
     dnnl::prop_kind);
 
