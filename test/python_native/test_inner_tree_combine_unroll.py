@@ -6,7 +6,10 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -412,6 +415,75 @@ class TestInnerTreeCombineUnrollDevice(TestCase):
             self.assertEqual(col_parts, {nparts})
         for g, w in zip(got, want):
             self.assertEqual(g.view(torch.int32), w.view(torch.int32))
+
+    @parametrize("name", ["sum", "var1"])
+    @largeTensorTest("2GB", device="cuda")
+    def test_sm107_profile_reaches_every_plan(self, device, name):
+        """Thread SM107's selected profile, moved off every device row, through both
+        row entry points' split and combine builders, bitwise equal to the default
+        profile, and keep those bits when an underaligned row re-plans unstaged."""
+        import cutlass
+
+        from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
+
+        welford = name == "var1"
+        key = f"sm107_profile_{name}"
+        trait = (T.WelfordOps if welford else T.SumOps)(acc=cutlass.Float32)
+        x = torch.randn(1, (256 << 20) // 4, device=device)
+        with mock.patch.object(rt._hw, "caps", return_value=mock.Mock(cc=(10, 7))):
+            profile = rt._full_itree_arch(trait, x, [torch.float32])
+        self.assertIsNotNone(profile)
+        # B200's row can equal the profile (it does for sum), so vary two bit-neutral
+        # knobs away from every row: a dropped arch= then changes a plan's sig.
+        profile = profile._replace(split_stage_rows=2, combine_unroll=32)
+        row = rt._itree_arch(x.device)
+        # The plans both entry points build under the profile.
+        split = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=profile)
+        c = rt.itree_combine_plan(split, 4, nrows=1, trait=trait, arch=profile)
+        row_split = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=row)
+        self.assertNotEqual(row_split.sig, split.sig)
+        row_c = rt.itree_combine_plan(split, 4, nrows=1, trait=trait, arch=row)
+        self.assertNotEqual(row_c.sig, c.sig)
+        # Welford partials come from uniform 8192-element batches, so they are weighted.
+        self.assertEqual(c.uniform_combine, "weights" if welford else "off")
+        ordered = torch.empty(1, device=device)
+        with mock.patch.object(rt, "_full_itree_arch", return_value=profile):
+            (got,) = rt.reduce_row_tile(
+                trait, key, x, [torch.float32], order="inner_tree"
+            )
+            # The ordered entry point compiles its own kernels under a distinct key.
+            self.assertTrue(rt.reduce_row_itree(trait, key + "_ordered", x, ordered))
+        self.assertEqual(ordered.view(torch.int32), got.view(torch.int32))
+        # A pitch past N underaligns the staged plan, so _run_itree re-plans it
+        # unstaged. Unstaged split plans read no profile knob; the bits stay the same.
+        self.assertTrue(split.stage_e or split.stage_rows)
+        n = x.shape[1]
+        pitched = torch.empty(2, n + 1, device=device)[:1, :n]
+        pitched.copy_(x)
+        with mock.patch.object(rt, "_full_itree_arch", return_value=profile):
+            (got_p,) = rt.reduce_row_tile(
+                trait, key + "_pitched", pitched, [torch.float32], order="inner_tree"
+            )
+        self.assertEqual(got_p.view(torch.int32), got.view(torch.int32))
+        # Split stages carry their combine's mode, so Welford's write no count partial.
+        mode = c.uniform_combine
+        unstaged = rt.trait_itree_plan(trait, n, 1, 4, stage=False, arch=profile)
+        sigs = {e[-1] for e in rt._CACHE if e[:2] == ("rowitree1", key + "_pitched")}
+        self.assertEqual(sigs, {unstaged._replace(uniform_combine=mode).sig})
+        # Each stage's cache key ends with its plan's sig.
+        stage_one = split._replace(uniform_combine=mode)
+        for k in (key, key + "_ordered"):
+            for tag, plan in (("rowitree1", stage_one), ("rowitree2", c)):
+                sigs = {e[-1] for e in rt._CACHE if e[:2] == (tag, k)}
+                self.assertEqual(sigs, {plan.sig})
+        # Every _ItreeArch knob is bit-neutral, so the default profile gives the same bits.
+        default = rt._ITREE_ARCH["default"]
+        ref_plan = rt.trait_itree_plan(trait, x.shape[1], 1, 4, arch=default)
+        self.assertNotEqual(ref_plan.sig, split.sig)
+        (want,) = rt._run_itree(
+            trait, key + "_ref", x, [torch.float32], ref_plan, arch=default
+        )
+        self.assertEqual(got.view(torch.int32), want.view(torch.int32))
 
     @parametrize("mode", ["counts", "weights"])
     @parametrize("rpb", [1, 4])

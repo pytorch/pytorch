@@ -35,6 +35,7 @@ from torch._native.ops.reductions import (
 _VIEWS = {
     "default": ({}, "default"),
     "b200": ({"cc": (10, 0), "columns": 4095}, "b200_ragged_c4095"),
+    "sm107": ({"cc": (10, 7)}, "rubin_sum_c4096_tiled"),
 }
 
 
@@ -55,6 +56,8 @@ class TestColumnConfig(TestCase):
             acc_bits=32,
             nouts=1,
             welford_outs=0,
+            alignment=16,
+            out_dtypes=(torch.float32,),
         )
         args.update(kwargs)
         return ct.select_col_config(**args)
@@ -94,6 +97,9 @@ class TestColumnConfig(TestCase):
             ("b200", {"threads_per_block": 128}, (33, 1)),
             ("b200", {"npar": 7}, (7, 1)),
             ("b200", {"vec": 1}, (33, 1)),
+            ("sm107", {"threads_per_block": 128}, (128, 4)),
+            ("sm107", {"npar": 7}, (7, 4)),
+            ("sm107", {"vec": 2}, (64, 2)),
         ],
         name_fn=lambda view, kw, g: view + "".join(f"_{k}_{v}" for k, v in kw.items()),
     )
