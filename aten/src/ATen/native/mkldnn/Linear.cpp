@@ -260,7 +260,7 @@ Tensor mkldnn_linear_pointwise(
   }
   const ideep::tensor w = itensor_from_const_tensor(weight_t);
 
-  ideep::attr_t op_attr = ideep::attr_t();
+  mkldnn::Attr op_attr = mkldnn::Attr();
   if (attr != "none") {
     auto it = fusion_unary_attr_map().find(attr);
     TORCH_CHECK(
@@ -359,7 +359,7 @@ Tensor mkldnn_linear_pointwise_binary(
   const ideep::tensor w = itensor_from_const_tensor(weight_t);
 
   auto other_desc = mkldnn_other.get_desc();
-  auto op_attr = ideep::attr_t::fuse_binary(it_binary->second, other_desc);
+  auto op_attr = mkldnn::Attr::fuse_binary(it_binary->second, other_desc);
   auto aprop_kind = dnnl::prop_kind::forward_inference;
 
   if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
@@ -578,7 +578,7 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
                         get_mkldnn_dtype(bias.value().scalar_type()),
                         dnnl::memory::format_tag::any);
   }
-  auto op_attr = ideep::attr_t();
+  auto op_attr = mkldnn::Attr();
   if (input_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_SRC, 0);
   }
