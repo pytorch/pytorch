@@ -7,7 +7,7 @@
 #include <dnnl.hpp>
 #include <ATen/native/mkldnn/detail/Attr.h>
 #include <ATen/native/mkldnn/detail/IdeepUtils.h>
-#include <ATen/native/mkldnn/detail/Tensor.h>
+#include <ATen/native/mkldnn/detail/Memory.h>
 #include <ATen/native/mkldnn/detail/Version.h>
 
 namespace at::native {
@@ -29,30 +29,30 @@ TORCH_API at::Tensor mkldnn_tensor_from_data_ptr(
     int64_t opaque_metadata_size);
 
 // Construct aten MKL-DNN tensor given an ideep tensor
-TORCH_API Tensor new_with_itensor_mkldnn(mkldnn::ITensor&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
+TORCH_API Tensor new_with_itensor_mkldnn(mkldnn::MkldnnMemory&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
 
 // Retrieve `ideep::tensor` from MKL-DNN tensor
-TORCH_API mkldnn::ITensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
+TORCH_API mkldnn::MkldnnMemory& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 
 TORCH_API int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor);
 
 // Construct an `ideep::tensor` "view" from dense tensor, note the
 // ideep::tensor will share the underlying buffer
-TORCH_API mkldnn::ITensor itensor_view_from_dense(const Tensor& tensor);
-TORCH_API mkldnn::ITensor itensor_view_from_const_dense(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory itensor_view_from_dense(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory itensor_view_from_const_dense(const Tensor& tensor);
 
 // Construct an `ideep::tensor` "view" from dense tensor using given desc, note
 // the ideep::tensor will share the underlying buffer
-TORCH_API mkldnn::ITensor itensor_view_from_dense(
+TORCH_API mkldnn::MkldnnMemory itensor_view_from_dense(
     const at::Tensor& tensor,
-  const mkldnn::ITensor::desc& desc);
-TORCH_API mkldnn::ITensor itensor_view_from_const_dense(
+  const mkldnn::MkldnnMemory::desc& desc);
+TORCH_API mkldnn::MkldnnMemory itensor_view_from_const_dense(
   const at::Tensor& tensor,
-  const mkldnn::ITensor::desc& desc);
+  const mkldnn::MkldnnMemory::desc& desc);
 
 // Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
-TORCH_API mkldnn::ITensor itensor_from_tensor(const Tensor& tensor);
-TORCH_API mkldnn::ITensor itensor_from_const_tensor(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory itensor_from_tensor(const Tensor& tensor);
+TORCH_API mkldnn::MkldnnMemory itensor_from_const_tensor(const Tensor& tensor);
 
 // Set MKLDNN verbose level
 TORCH_API int set_verbose(int level);

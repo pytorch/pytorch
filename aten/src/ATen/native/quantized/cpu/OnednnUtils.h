@@ -123,8 +123,8 @@ enum PostOps {
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   PackedLinearWeightsOnednn(
-      std::unique_ptr<at::native::mkldnn::ITensor> weight,
-      std::optional<at::native::mkldnn::ITensor> bias,
+      std::unique_ptr<at::native::mkldnn::MkldnnMemory> weight,
+      std::optional<at::native::mkldnn::MkldnnMemory> bias,
       at::Tensor orig_weight,
       std::optional<at::Tensor> orig_bias)
       : weight_(std::move(weight)),
@@ -133,8 +133,8 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
         orig_bias_(std::move(orig_bias)) {
     cache_initialized_flag = std::make_unique<c10::once_flag>();
   }
-  std::unique_ptr<at::native::mkldnn::ITensor> weight_;
-  std::optional<at::native::mkldnn::ITensor> bias_;
+  std::unique_ptr<at::native::mkldnn::MkldnnMemory> weight_;
+  std::optional<at::native::mkldnn::MkldnnMemory> bias_;
   at::Tensor orig_weight_;
   std::optional<at::Tensor> orig_bias_;
 
@@ -193,8 +193,8 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
 template <int kSpatialDim = 2>
 struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightsOnednn(
-      std::unique_ptr<at::native::mkldnn::ITensor> weight,
-      std::optional<at::native::mkldnn::ITensor> bias,
+      std::unique_ptr<at::native::mkldnn::MkldnnMemory> weight,
+      std::optional<at::native::mkldnn::MkldnnMemory> bias,
       at::Tensor orig_weight,
       std::optional<at::Tensor> orig_bias,
       torch::List<int64_t> stride,
@@ -216,8 +216,8 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
     cache_initialized_flag = std::make_unique<c10::once_flag>();
   }
 
-  std::unique_ptr<at::native::mkldnn::ITensor> weight_;
-  std::optional<at::native::mkldnn::ITensor> bias_;
+  std::unique_ptr<at::native::mkldnn::MkldnnMemory> weight_;
+  std::optional<at::native::mkldnn::MkldnnMemory> bias_;
   at::Tensor orig_weight_;
   std::optional<at::Tensor> orig_bias_;
   torch::List<int64_t> stride_;
@@ -319,7 +319,7 @@ inline at::native::mkldnn::Attr create_attr_by_post_op(
     double binary_alpha,
     double input1_scale,
     int64_t input1_zero_point,
-    const at::native::mkldnn::ITensor::desc& input1_desc,
+    const at::native::mkldnn::MkldnnMemory::desc& input1_desc,
     const std::string_view& unary_post_op,
     const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
     const std::string_view& unary_post_op_algorithm) {
@@ -498,17 +498,17 @@ struct QlinearForwardParams {
   std::vector<int64_t> output_size;
   dnnl::matmul primitive;
   std::unordered_map<int, dnnl::memory> args;
-  at::native::mkldnn::ITensor src;
-  at::native::mkldnn::ITensor dst;
-  std::optional<at::native::mkldnn::ITensor> src1;
-  at::native::mkldnn::ITensor packed_weight;
-  at::native::mkldnn::ITensor weight_scales;
-  std::optional<at::native::mkldnn::ITensor> src_scale;
-  std::optional<at::native::mkldnn::ITensor> src_zero_point;
-  std::optional<at::native::mkldnn::ITensor> dst_scale;
-  std::optional<at::native::mkldnn::ITensor> dst_zero_point;
-  std::optional<at::native::mkldnn::ITensor> bias;
-  at::native::mkldnn::ITensor scratchpad;
+  at::native::mkldnn::MkldnnMemory src;
+  at::native::mkldnn::MkldnnMemory dst;
+  std::optional<at::native::mkldnn::MkldnnMemory> src1;
+  at::native::mkldnn::MkldnnMemory packed_weight;
+  at::native::mkldnn::MkldnnMemory weight_scales;
+  std::optional<at::native::mkldnn::MkldnnMemory> src_scale;
+  std::optional<at::native::mkldnn::MkldnnMemory> src_zero_point;
+  std::optional<at::native::mkldnn::MkldnnMemory> dst_scale;
+  std::optional<at::native::mkldnn::MkldnnMemory> dst_zero_point;
+  std::optional<at::native::mkldnn::MkldnnMemory> bias;
+  at::native::mkldnn::MkldnnMemory scratchpad;
 
   void init_args() {
     args.insert({DNNL_ARG_SRC, src});
