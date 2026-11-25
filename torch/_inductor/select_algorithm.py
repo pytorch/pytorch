@@ -1211,7 +1211,14 @@ class TritonTemplateKernel(TritonKernel):
 
         return self._register_hook("<DEF_KERNEL>", hook)
 
-    def size(self, name: str | None, index: int, *, precomputed: bool = False):
+    def size(
+        self,
+        name: str | None,
+        index: int,
+        *,
+        precomputed: bool = False,
+        runtime: bool = False,
+    ):
         """
         Hook called from template code to get the size of an arg.
         Will add needed args to pass it in if it is dynamic.
@@ -1229,7 +1236,10 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_size()[index]
         if precomputed:
             val = V.graph.sizevars.lookup_precomputed_size(val)
-        result = texpr(self.rename_indexing(val))
+        if runtime and isinstance(val, (int, sympy.Integer)):
+            result = self.args.seed_offset(f"ks_{name}_{index}", int(val))
+        else:
+            result = texpr(self.rename_indexing(val))
         if self.index_dtype == "tl.int64":
             return f"tl.full([], {result}, dtype=INDEX_DTYPE)"
         return result

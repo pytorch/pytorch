@@ -5249,6 +5249,18 @@ def get_current_backend(device_type: str | None = None) -> str:
         return config.cuda_backend
 
 
+def cudnn_batch_norm_use_single_read(dtype, n, spatial, device, *, backward=False):
+    if dtype == torch.float64:
+        return False
+    vec = 2 if dtype == torch.float16 and spatial % 2 == 0 else 1
+    chunks = (n * spatial + 512 * vec - 1) // (512 * vec)
+    group = 7 if backward else 10
+    cached = min(2 * group, ((chunks - 1) // group) * group) if vec == 2 else 0
+    shared = torch.cuda.get_device_properties(device).shared_memory_per_multiprocessor
+    fixed, per_chunk = (272, 4096) if backward else (144, 2048)
+    return chunks - cached <= (shared // 2 - fixed) // per_chunk
+
+
 def is_strict_cuda_triton(device: torch.device | None = None) -> bool:
     if not (
         config.strict_pointwise

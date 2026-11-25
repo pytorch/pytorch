@@ -1,0 +1,47 @@
+{% if CHANNELS_LAST and not FINAL %}
+{{def_kernel("X", "G", "M")}}
+{% elif CHANNELS_LAST %}
+{{def_kernel("P")}}
+{% else %}
+{{def_kernel("X", "G", "M")}}
+{% endif %}
+    {% if not FINAL or not CHANNELS_LAST %}
+    batch = tl.full((), {{size("X", 0, runtime=True)}}, tl.int32)
+    spatial = tl.full((), 1, tl.int32)
+    {% for dimension in range(2, RANK) %}
+    spatial = spatial * {{size("X", dimension, runtime=True)}}
+    {% endfor %}
+    {% endif %}
+    {% if CHANNELS_LAST %}
+    channel_tile = tl.program_id(0) if FINAL else tl.program_id(1)
+    {% if FINAL %}
+    total, dot = triton_helpers.cuda_cudnn_bn_nhwc_backward_finish(
+        P, channel_tile, C, TILE, VEC, PARTS,
+    )
+    {% else %}
+    total, dot = triton_helpers.cuda_cudnn_bn_nhwc_backward_partial(
+        X, G, M, tl.program_id(0), channel_tile, batch * spatial,
+        C, TILE, VEC, PARTS, GROUPS, EXTRA, STREAMED,
+    )
+    {% endif %}
+    lane = tl.arange(0, 512 * VEC).to(INDEX_DTYPE)
+    channel = channel_tile * TILE + lane % TILE
+    sample_row = lane // TILE
+    row = tl.arange(0, 2).to(INDEX_DTYPE)[:, None]
+    channel_index = channel[None, :]
+    value = tl.where(row == 0, total[None, :], dot[None, :])
+    {% if FINAL %}
+    {{store_output(("row", "channel_index"), "value", "(sample_row[None, :] == 0) & (channel_index < C)", val_shape=("2", "512 * VEC"))}}
+    {% else %}
+    part = tl.program_id(0).to(INDEX_DTYPE)
+    {{store_output(("row", "part", "channel_index"), "value", "(sample_row[None, :] == 0) & (channel_index < C)", val_shape=("2", "512 * VEC"))}}
+    {% endif %}
+    {% else %}
+    channel = tl.program_id(0).to(INDEX_DTYPE)
+    total, dot = triton_helpers.cuda_cudnn_bn_backward_statistics(
+        X, G, M, channel, batch, C, spatial, SINGLE, VEC, BW,
+    )
+    row = tl.arange(0, 2).to(INDEX_DTYPE)
+    value = tl.where(row == 0, total, dot)
+    {{store_output(("row", "channel"), "value", "True", val_shape=("2",))}}
+    {% endif %}
