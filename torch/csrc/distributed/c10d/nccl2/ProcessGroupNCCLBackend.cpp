@@ -287,6 +287,9 @@ c10::intrusive_ptr<::c10d::Backend::Options> ProcessGroupNCCL::
 }
 
 void ProcessGroupNCCL::startTimeEstimate() {
+  TORCH_CHECK(
+      coalescing_thread_.owner == nullptr,
+      "Cannot estimate inside a coalescing group");
 #ifdef NCCL_SIM_INFO_INITIALIZER
   checkInitialized();
   NCCL_CHECK(
@@ -316,6 +319,9 @@ MaterializedCollectiveConfig ProcessGroupNCCL::materializeConfig(
   if (time_estimate_active_ && materialized.owner) {
     // NCCL reads deferred configs when the estimate group ends.
     time_estimate_configs_.push_back(materialized.owner);
+  }
+  if (isCoalescingThread() && materialized.owner) {
+    coalescing_configs_.push_back(materialized.owner);
   }
   return materialized;
 }
@@ -393,6 +399,7 @@ void ProcessGroupNCCL::shutdown() {
   // Called by destroy_process_group(). Drain in-flight work and close the comm
   // gracefully. Idempotent: finalize-on-already-finalized throws, so swallow.
   if (init_state_ != InitializationState::INITIALIZED) {
+    closeCoalescing();
     return;
   }
   try {
@@ -592,7 +599,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::coalesceWorks(
   works.pop_back();
   // The coalesced work stands in for its per-tensor works in the coalescing
   // window, so a window holding one *_coalesced op returns that op's work.
-  if (coalescing_batch_) {
+  if (isCoalescingThread() && coalescing_batch_) {
     std::unordered_set<const WorkNCCL*> folded;
     for (const auto& w : works) {
       folded.insert(w.get());
@@ -611,6 +618,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
     const ::c10d::AllreduceCoalescedOptions& opts) {
   const auto config = materializeConfig(opts.config);
   TORCH_CHECK(!tensors.empty(), "Tensor list must be nonempty");
+  CoalescingGuard group(*this);
   ++sequence_number_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(tensors.size());
@@ -622,6 +630,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
         operationTimeout(opts.timeout),
         config));
   }
+  group.finish();
   return coalesceWorks(std::move(works), tensors);
 }
 
@@ -691,6 +700,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
       allGatherSingleImpl(staging, input, opts.asyncOp, timeout, config);
   work->setOutputs(outputList);
   auto rows = staging.view({getSize(), input.numel()});
+  flushCoalescedGroup();
   work->wait();
   for (int r = 0; r < getSize(); ++r) {
     outputList.at(r).copy_(rows[r].view_as(outputList.at(r)));
@@ -707,6 +717,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
   TORCH_CHECK(
       !inputTensors.empty() && outputTensorLists.size() == inputTensors.size(),
       "Input and output tensor lists must have the same nonzero size");
+  CoalescingGuard group(*this);
   ++sequence_number_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   std::vector<at::Tensor> outputs;
@@ -723,6 +734,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
         outputTensorLists.at(i).begin(),
         outputTensorLists.at(i).end());
   }
+  group.finish();
   return coalesceWorks(std::move(works), std::move(outputs));
 }
 
@@ -735,6 +747,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
   TORCH_CHECK(
       !inputs.empty() && outputs.size() == inputs.size(),
       "Input and output tensor lists must have the same nonzero size");
+  CoalescingGuard group(*this);
   ++sequence_number_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(inputs.size());
@@ -746,6 +759,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         operationTimeout(opts.timeout),
         config));
   }
+  group.finish();
   return coalesceWorks(std::move(works), outputs);
 }
 
@@ -917,6 +931,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
   TORCH_CHECK(
       !outputs.empty() && inputs.size() == outputs.size(),
       "Input and output tensor lists must have the same nonzero size");
+  CoalescingGuard group(*this);
   ++sequence_number_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
   works.reserve(outputs.size());
@@ -929,6 +944,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         operationTimeout(opts.timeout),
         config));
   }
+  group.finish();
   return coalesceWorks(std::move(works), outputs);
 }
 
@@ -1022,7 +1038,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::send(
     int dstRank,
     [[maybe_unused]] int tag) {
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
-  if (coalescing_batch_.has_value()) {
+  if (isCoalescingThread() && coalescing_batch_.has_value()) {
     coalescing_batch_->send(tensors.at(0), dstRank);
     return c10::make_intrusive<CompletedWork>(tensors, coalescing_result_);
   }
@@ -1037,7 +1053,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::recv(
     int srcRank,
     [[maybe_unused]] int tag) {
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
-  if (coalescing_batch_.has_value()) {
+  if (isCoalescingThread() && coalescing_batch_.has_value()) {
     coalescing_batch_->recv(tensors.at(0), srcRank);
     return c10::make_intrusive<CompletedWork>(tensors, coalescing_result_);
   }
@@ -1047,10 +1063,34 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::recv(
   return work;
 }
 
+void ProcessGroupNCCL::closeCoalescing() {
+  if (!isCoalescingThread()) {
+    TORCH_CHECK(
+        !coalescing_claimed_.test(std::memory_order_acquire),
+        "Cannot destroy a process group coalescing on another thread");
+    return;
+  }
+  coalescing_batch_.reset();
+  auto result = std::move(coalescing_result_);
+  auto works = std::move(coalescing_works_);
+  coalescing_works_.clear();
+  coalescing_depth_ = 1;
+  try {
+    endCoalescedGroup();
+  } catch (const std::exception& e) {
+    TC_LOG(ERROR, this) << "Failed to close coalescing during teardown: "
+                        << e.what();
+  }
+  if (result && !result->future->completed()) {
+    result->future->markCompleted(resultValue(::c10d::WorkResult::COMM_ERROR));
+  }
+}
+
 void ProcessGroupNCCL::startCoalescing() {
   TORCH_CHECK(
-      !coalescing_batch_.has_value(),
+      !isCoalescingThread() || !coalescing_batch_.has_value(),
       "startCoalescing called while a batch is already active");
+  beginCoalescedGroup();
   coalescing_works_.clear();
   coalescing_batch_.emplace();
   coalescing_result_ = std::make_shared<CoalescedBatchResult>();
@@ -1058,8 +1098,9 @@ void ProcessGroupNCCL::startCoalescing() {
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
   TORCH_CHECK(
-      coalescing_batch_.has_value(),
+      isCoalescingThread() && coalescing_batch_.has_value(),
       "endCoalescing called without a matching startCoalescing");
+  CoalescingGuard group(*this, /*start=*/false);
   auto batch = std::move(*coalescing_batch_);
   coalescing_batch_.reset();
   auto works = std::move(coalescing_works_);
@@ -1086,6 +1127,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
                            : f.value());
         });
   }
+  group.finish();
   if (works.empty()) {
     return c10::make_intrusive<CompletedWork>();
   }

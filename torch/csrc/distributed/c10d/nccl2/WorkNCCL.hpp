@@ -138,7 +138,8 @@ class WorkNCCL : public c10d::Work {
   void recordStart(
       std::string_view coll_name,
       at::ArrayRef<at::Tensor> inputs = {});
-  void recordEnd();
+  void recordEnd(bool record_event = true);
+  void completeFuture();
 
   friend class ProcessGroupNCCL;
   friend class WorkNCCLQueue;
@@ -184,6 +185,7 @@ class WorkNCCL : public c10d::Work {
     std::chrono::milliseconds timeout;
     std::chrono::milliseconds ownedEphemeralTimeout{0};
     std::atomic<bool> ephemeralTimeoutReleased{false};
+    std::atomic<bool> endEventRecorded{false};
     bool timingEnabled;
     uint64_t seq{0};
     std::shared_ptr<Events> events;

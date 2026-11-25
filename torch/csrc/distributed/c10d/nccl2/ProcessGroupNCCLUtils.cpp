@@ -13,6 +13,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
+#include <exception>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -419,6 +420,9 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
 }
 
 void ProcessGroupNCCL::checkInitialized() {
+  TORCH_CHECK(
+      coalescing_thread_.owner == nullptr || isCoalescingThread(),
+      "Cannot issue operations on another process group inside a coalescing group");
   if (options_c10d_->lazy_init &&
       init_state_ == InitializationState::UNINITIALIZED &&
       getBoundDeviceId().has_value()) {
@@ -531,11 +535,140 @@ void ProcessGroupNCCL::addEphemeralTimeout(
   ephemeral_timeout_active_ += timeout;
 }
 
+thread_local ProcessGroupNCCL::CoalescingThreadState
+    ProcessGroupNCCL::coalescing_thread_;
+
+ProcessGroupNCCL::CoalescingThreadState::~CoalescingThreadState() {
+  if (owner) {
+    owner->closeCoalescing();
+  }
+}
+
+ProcessGroupNCCL::CoalescingGuard::CoalescingGuard(
+    ProcessGroupNCCL& pg,
+    bool start)
+    : pg_(pg) {
+  if (start) {
+    pg_.beginCoalescedGroup();
+  }
+}
+
+ProcessGroupNCCL::CoalescingGuard::~CoalescingGuard() {
+  if (active_) {
+    try {
+      pg_.endCoalescedGroup();
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, &pg_) << "Failed to close coalescing group: " << e.what();
+    }
+  }
+}
+
+void ProcessGroupNCCL::CoalescingGuard::finish() {
+  active_ = false;
+  pg_.endCoalescedGroup();
+}
+
+bool ProcessGroupNCCL::isCoalescingThread() const {
+  return coalescing_thread_.owner.get() == this;
+}
+
+void ProcessGroupNCCL::beginCoalescedGroup() {
+  TORCH_CHECK(
+      !time_estimate_active_, "Cannot coalesce inside a time estimator");
+  TORCH_CHECK(
+      coalescing_thread_.owner == nullptr || isCoalescingThread(),
+      "Cannot nest coalescing groups from different process groups");
+  if (!isCoalescingThread()) {
+    TORCH_CHECK(
+        !coalescing_claimed_.test_and_set(std::memory_order_acquire),
+        "Cannot coalesce the same process group concurrently on multiple threads");
+    coalescing_thread_.owner =
+        c10::intrusive_ptr<ProcessGroupNCCL>::unsafe_reclaim_from_nonowning(
+            this);
+  }
+  ++coalescing_depth_;
+}
+
+void ProcessGroupNCCL::endCoalescedGroup() {
+  TORCH_INTERNAL_ASSERT(isCoalescingThread() && coalescing_depth_ > 0);
+  if (--coalescing_depth_ != 0) {
+    return;
+  }
+  std::exception_ptr error;
+  try {
+    flushCoalescedGroup();
+  } catch (...) {
+    error = std::current_exception();
+  }
+  auto failed = std::move(failed_works_);
+  failed_works_.clear();
+  auto futures = std::move(coalescing_future_works_);
+  coalescing_future_works_.clear();
+  coalescing_configs_.clear();
+  auto owner = std::move(coalescing_thread_.owner);
+  coalescing_claimed_.clear(std::memory_order_release);
+  for (const auto& work : failed) {
+    work->state_->releaseEphemeralTimeout();
+    work->state_->publishResult();
+  }
+  for (const auto& work : futures) {
+    work->completeFuture();
+  }
+  if (error) {
+    std::rethrow_exception(error);
+  }
+}
+
+void ProcessGroupNCCL::flushCoalescedGroup() {
+  if (!isCoalescingThread() || !nccl_group_active_) {
+    return;
+  }
+  nccl_group_active_ = false;
+  auto works = std::move(deferred_works_);
+  deferred_works_.clear();
+  auto configs = std::move(coalescing_configs_);
+  coalescing_configs_.clear();
+  auto timeout = options_c10d_->timeout;
+  for (const auto& work : works) {
+    timeout = std::max(timeout, work->getTimeout());
+    if (work->future_) {
+      coalescing_future_works_.push_back(work);
+    }
+  }
+  c10::cuda::CUDAGuard guard(device_);
+  try {
+    waitForNcclOperation(
+        nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
+  } catch (...) {
+    for (const auto& work : works) {
+      work->state_->setTerminalStatus(WorkNCCL::WorkStatus::ERROR);
+      failed_works_.push_back(work);
+    }
+    throw;
+  }
+  for (const auto& work : works) {
+    work->recordEnd();
+    enqueueWork(work, work->state_->stream);
+  }
+}
+
+void ProcessGroupNCCL::finishWork(
+    const c10::intrusive_ptr<WorkNCCL>& work,
+    cudaStream_t stream) {
+  const bool coalescing = isCoalescingThread();
+  work->recordEnd(!coalescing || !nccl_group_active_);
+  if (coalescing && coalescing_batch_) {
+    coalescing_works_.push_back(work);
+  }
+  enqueueWork(work, stream);
+}
+
 void ProcessGroupNCCL::enqueueWork(
     const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {
-  if (coalescing_batch_) {
-    coalescing_works_.push_back(work);
+  if (isCoalescingThread() && nccl_group_active_) {
+    deferred_works_.push_back(work);
+    return;
   }
 
   // In graph capture mode, keep the completion state and events alive until
@@ -598,7 +731,18 @@ void ProcessGroupNCCL::drainRetiredGraphWork() {
 }
 
 cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
+  TORCH_CHECK(
+      coalescing_thread_.owner == nullptr || isCoalescingThread(),
+      "Cannot issue operations on another process group inside a coalescing group");
   c10::cuda::CUDAGuard gpuGuard(device_);
+  if (isCoalescingThread() && !nccl_group_active_) {
+    NCCL_CHECK(
+        nccl_api_,
+        nccl_comm_,
+        nccl_api_->groupStart(),
+        "NCCL GroupStart failed");
+    nccl_group_active_ = true;
+  }
   auto device = device_.index();
   auto current_stream = at::cuda::getCurrentCUDAStream(device);
   if (!async_op) {

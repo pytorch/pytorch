@@ -182,8 +182,11 @@ void WorkNCCL::recordStart(
   state_->events->start->record(state_->stream);
 }
 
-void WorkNCCL::recordEnd() {
-  state_->events->end->record(state_->stream);
+void WorkNCCL::recordEnd(bool record_event) {
+  if (record_event) {
+    state_->events->end->record(state_->stream);
+    state_->endEventRecorded.store(true, std::memory_order_release);
+  }
 
   if (recordFunction_ && recordFunction_->isActive()) {
     recordFunction_->end();
@@ -330,6 +333,10 @@ WorkNCCL::WorkStatus WorkNCCL::State::checkStatus(
     return current;
   }
 
+  if (!endEventRecorded.load(std::memory_order_acquire)) {
+    return current;
+  }
+
   auto comm_error = comm->getError();
   if (comm_error == ErrorType::TIMEOUT) {
     setTerminalStatus(WorkStatus::TIMEDOUT);
@@ -404,6 +411,13 @@ void WorkNCCL::synchronizeInternal() {
     return;
   }
 
+  if (!state_->endEventRecorded.load(std::memory_order_acquire)) {
+    TORCH_CHECK(
+        state_->comm->isCoalescingThread(),
+        "Cannot wait on coalesced work before the coalescing group ends");
+    return;
+  }
+
   TracingGuard tracingGuard(
       std::string(state_->comm->getCommName()),
       state_->comm->getSize(),
@@ -440,6 +454,12 @@ void WorkNCCL::synchronizeInternal() {
 }
 
 bool WorkNCCL::wait(std::chrono::milliseconds timeout) {
+  // Synchronous Python collectives wait here inside device coalescing windows.
+  // The window's work owns their synchronization after the group is issued.
+  if (!state_->endEventRecorded.load(std::memory_order_acquire) &&
+      state_->comm->isCoalescingThread()) {
+    return true;
+  }
   synchronize();
 
   auto current_stream =
@@ -506,7 +526,8 @@ float WorkNCCL::State::getDuration() {
       "getDuration only works if timing was enabled, see ProcessGroup::_enable_collectives_timing");
   TORCH_CHECK(events->start && events->end, "getDuration requires CUDA events");
   TORCH_CHECK(
-      events->end->isCreated() && events->end->query(),
+      endEventRecorded.load(std::memory_order_acquire) &&
+          events->end->isCreated() && events->end->query(),
       "getDuration only works after the work has completed");
   std::shared_ptr<Events> start_events;
   {
@@ -535,12 +556,27 @@ c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
   future_ = c10::make_intrusive<c10::ivalue::Future>(
       c10::ListType::create(c10::TensorType::get()), devices);
 
+  if (state_->endEventRecorded.load(std::memory_order_acquire) || exception()) {
+    completeFuture();
+  }
+  return future_;
+}
+
+void WorkNCCL::completeFuture() {
+  if (!future_ || future_->completed()) {
+    return;
+  }
+  if (auto error = exception()) {
+    future_->setError(error);
+    return;
+  }
+
   // Without a device the future records no CUDA event, so order the current
   // stream here instead (this includes barriers, which have no outputs).
-  if (devices.empty()) {
+  if (future_->devices().empty()) {
     synchronize();
     future_->markCompleted(c10::IValue(outputs_));
-    return future_;
+    return;
   }
 
   // Complete on the stream that last wrote the outputs (the collective's
@@ -550,7 +586,6 @@ c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFuture() {
   // getFuture() right after launching each bucket's allreduce).
   at::cuda::CUDAStreamGuard guard(outputsStream_.value_or(state_->stream));
   future_->markCompleted(c10::IValue(outputs_));
-  return future_;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> WorkNCCL::getFutureResult() {

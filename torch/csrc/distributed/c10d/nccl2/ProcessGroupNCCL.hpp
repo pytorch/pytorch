@@ -460,6 +460,28 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const at::Tensor& inputTensor);
 
  private:
+  class CoalescingGuard {
+   public:
+    explicit CoalescingGuard(ProcessGroupNCCL& pg, bool start = true);
+    ~CoalescingGuard();
+    CoalescingGuard(const CoalescingGuard&) = delete;
+    CoalescingGuard& operator=(const CoalescingGuard&) = delete;
+    void finish();
+
+   private:
+    ProcessGroupNCCL& pg_;
+    bool active_ = true;
+  };
+
+  bool isCoalescingThread() const;
+  void beginCoalescedGroup();
+  void endCoalescedGroup();
+  void flushCoalescedGroup();
+  void closeCoalescing();
+  void finishWork(
+      const c10::intrusive_ptr<WorkNCCL>& work,
+      cudaStream_t stream);
+
   // RAII helper that cleans up NCCL premul-sum reduction ops. Built from a
   // c10d::ReduceOp (the premul factor is read from its supplement).
   struct RedOpRAII {
@@ -758,6 +780,18 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
+  struct CoalescingThreadState {
+    c10::intrusive_ptr<ProcessGroupNCCL> owner;
+    ~CoalescingThreadState();
+  };
+  static thread_local CoalescingThreadState coalescing_thread_;
+  std::atomic_flag coalescing_claimed_ = ATOMIC_FLAG_INIT;
+  size_t coalescing_depth_ = 0;
+  bool nccl_group_active_ = false;
+  std::vector<c10::intrusive_ptr<WorkNCCL>> deferred_works_;
+  std::vector<c10::intrusive_ptr<WorkNCCL>> failed_works_;
+  std::vector<c10::intrusive_ptr<WorkNCCL>> coalescing_future_works_;
+  std::vector<std::shared_ptr<const void>> coalescing_configs_;
   std::optional<BatchSendRecv> coalescing_batch_;
   // Works enqueued while coalescing_batch_ is engaged; endCoalescing()
   // returns a work covering all of them.
