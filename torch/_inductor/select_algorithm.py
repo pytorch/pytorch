@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import copy
 import dataclasses
 import functools
 import hashlib
@@ -39,6 +40,7 @@ from torch._dynamo.utils import (
 )
 from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
@@ -57,11 +59,19 @@ from .autotune_process import (
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import (
     CSEVariable,
+    DeferredLine,
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
     WorkspaceArg,
     WorkspaceZeroMode,
+)
+from .codegen.simd import (
+    codegen_reduced_buffer,
+    DerivedIterationRangesRoot,
+    finished_after_kernel,
+    PARTIAL_REDUCTION_OPS,
+    template_reduction_axis,
 )
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
@@ -88,6 +98,7 @@ from .runtime.tiling import pointwise_prefixes
 from .runtime.triton_compat import HAS_WARP_SPEC
 from .runtime.triton_heuristics import FixedGrid
 from .utils import (
+    can_use_tma,
     ceildiv,
     do_bench_using_profiling,
     FakeIndentedBuffer,
@@ -574,6 +585,46 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
 RecordedEventsType = list[tuple[str, list[Any], dict[str, Any]]]
 
 
+class _PartialReduction(NamedTuple):
+    """A reduction fused into a template epilogue as per-tile partials. Each
+    tile along the reduced dim stores size fp32 partials to the workspace at
+    byte offset; the wrapper reduces them with the torch op after the kernel
+    and writes buffer."""
+
+    node: Any
+    buffer: str
+    op: str
+    offset: int | sympy.Expr
+    tiles: int | sympy.Expr
+    size: int | sympy.Expr
+
+
+def _partials_finish(
+    ws: str, reduction: _PartialReduction, pexpr: Callable[[sympy.Expr], str]
+) -> str:
+    """The wrapper expression that reduces reduction's partials in workspace
+    tensor ws, printing sizes with pexpr."""
+    offset, tiles, size = reduction.offset, reduction.tiles, reduction.size
+    end = offset + tiles * size * torch.float32.itemsize
+    return (
+        f"{ws}[{pexpr(offset)}:{pexpr(end)}].view(torch.float32)"
+        f".view({pexpr(tiles)}, {pexpr(size)}).{reduction.op}(dim=0)"
+    )
+
+
+def tma_store_outputs_within_budget(
+    outputs: Sequence[tuple[str, int]], budget: int
+) -> OrderedSet[str]:
+    """Names of the outputs, given as (name, staged bytes), to TMA-store:
+    largest first, each while its staging still fits in budget."""
+    kept: OrderedSet[str] = OrderedSet()
+    for name, nbytes in sorted(outputs, key=lambda o: -o[1]):
+        if nbytes <= budget:
+            kept.add(name)
+            budget -= nbytes
+    return kept
+
+
 class TritonTemplateKernel(TritonKernel):
     """
     A specialized kernel class for Triton templates that handles code generation
@@ -667,6 +718,16 @@ class TritonTemplateKernel(TritonKernel):
         self.kernel_name = kernel_name
         self.use_jit = use_jit
         self.tma_store = tma_store
+        # With a reduction epilogue, the epilogue outputs that keep their TMA
+        # store when tma_store is set; the rest use tl.store. See store.
+        self.tma_store_epilogue_outputs: OrderedSet[str] | None = None
+        # With a reduction epilogue and tma_load_for_template_epilogue, the
+        # full-tile epilogue inputs the row pass TMA-loads. See _tile_tma_load.
+        self.tma_load_epilogue_inputs: OrderedSet[str] = OrderedSet()
+        # Which of a reduction epilogue's full-tile extra outputs and inputs use
+        # TMA: "budget" (those that fit in shared memory), "plain" (none) or
+        # "all". See TritonTemplateCaller.with_epilogue_tma_plan.
+        self.epilogue_tma_plan = "budget"
         self.tma_load_for_template_epilogue = tma_load_for_template_epilogue
         self.transpose_discontiguous_tensor_descriptors_override = (
             transpose_discontiguous_tensor_descriptors_override
@@ -738,6 +799,23 @@ class TritonTemplateKernel(TritonKernel):
         self.template_out_shape: str | tuple[str] | None = None
         self.ops_handler: V.WrapperHandler | None = None  # type: ignore[name-defined]
         self.root_var_renames: dict[str, str] = {}
+        # Per store_output subgraph: scalar (row, col) tile origin, (rows, cols,
+        # subtiles) tile shape from block indexing, and the subtile loop index,
+        # used to codegen reduction epilogues over the tile.
+        self.output_tiles: dict[
+            int, tuple[list[sympy.Symbol], tuple[int, int, int], str | None]
+        ] = {}
+        # Reductions fused into the epilogue as per-tile partials, which the
+        # wrapper reduces after the kernel.
+        self.partial_reductions: list[_PartialReduction] = []
+        # In a row reduction pass over a whole tile, with tma_store set: the
+        # tile's index symbols, origin and shape, so full-tile outputs keep
+        # their TMA store. See _tile_tma_store.
+        self._tile_tma_store_ctx: (
+            tuple[list[sympy.Symbol], list[sympy.Expr], tuple[int, int]] | None
+        ) = None
+        # Epilogue nodes codegen'd after the kernel call instead of fused into it.
+        self._unfused_epilogues: list[Any] = []
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
@@ -1807,6 +1885,7 @@ class TritonTemplateKernel(TritonKernel):
         indent_width: int = 4,
         val_shape: tuple[str] | None = None,
         block_indexing: bool = False,
+        subtile_loop: tuple[str, str] | None = None,
     ):
         """Generates store-output input producers fusion, applies output epilogue fusions,
         and stores the final output unless it has been optimized away.
@@ -1821,6 +1900,9 @@ class TritonTemplateKernel(TritonKernel):
                 store_output is indented in the kernel definition.
             block_indexing (bool): Are the input indices presented as offsets for creating the block (e.g.
                 inputs to TMA) or are they tensors that should be passed in directly.
+            subtile_loop (Optional[Tuple[str, str]]): (index, count) of an enclosing unrolled
+                `tl.static_range` loop in which this call stores subtile `index` of `count`
+                subtiles that split the output tile's columns.
         """
         subgraph_idx = next(self.store_output_ctr)
         subgraph_name = self._get_store_output_subgraph_name(subgraph_idx)
@@ -1877,6 +1959,25 @@ class TritonTemplateKernel(TritonKernel):
                     )
                 if mask:
                     raise AssertionError("Mask is not supported with blocking indexing")
+                meta = {
+                    sympy.Symbol(k): v
+                    for k, v in self.meta.items()
+                    if isinstance(v, int)
+                }
+                subtile_index, subtiles = subtile_loop or (None, "1")
+                tile = [sympy.sympify(s).subs(meta) for s in (*val_shape, subtiles)]
+                if (
+                    all(isinstance(t, sympy.Integer) for t in tile)
+                    # Automatic warp specialization's data partitioning and
+                    # 2CTA are untested with reduction epilogues.
+                    and self.meta.get("DATA_PARTITION_FACTOR", 1) == 1
+                    and not self.meta.get("TWO_CTAS", False)
+                ):
+                    self.output_tiles[subgraph_idx] = (
+                        index_symbols,
+                        (int(tile[0]), int(tile[1]), int(tile[2])),
+                        subtile_index,
+                    )
                 intermediate_lines: list[str] = []
                 epilogue_index_symbols: list[sympy.Symbol] = []
                 if self.tma_store or self.tma_load_for_template_epilogue:
@@ -2276,8 +2377,71 @@ class TritonTemplateKernel(TritonKernel):
             wrapper.generate_workspace_deallocation(self.workspace_arg)
 
     def _emit_post_kernel_code(self, wrapper, kernel_name: str) -> None:
-        """Hook for subclasses to emit code after kernel call, before workspace dealloc."""
-        pass  # noqa: PIE790
+        """Finish reduction partials after the kernel call, before workspace
+        dealloc, then generate the epilogue nodes that read them."""
+        from .scheduler import FusedSchedulerNode
+
+        if not self.partial_reductions:
+            return
+        if self.workspace_arg is None:
+            raise AssertionError("reduction partials need a workspace")
+        ws = self.workspace_arg.outer_name
+        pexpr = V.graph.wrapper_code.codegen_python_sizevar
+        for reduction in self.partial_reductions:
+            codegen_reduced_buffer(
+                reduction.buffer, _partials_finish(ws, reduction, pexpr)
+            )
+        scheduler = V.graph.scheduler
+        backend = scheduler.get_backend(self.output_node.get_device())
+        # The buffers the template's fused nodes last read are already queued
+        # for freeing, and each kernel below frees the queue when it finishes,
+        # so hold them until the last one has run.
+        to_free = scheduler.buffer_names_to_free
+        scheduler.buffer_names_to_free = OrderedSet()
+        try:
+            # Consecutive nodes over the same ranges run as one kernel.
+            groups = itertools.groupby(self._unfused_epilogues, lambda n: n.group)
+            for _, group in groups:
+                nodes = list(group)
+                backend.codegen_node(
+                    nodes[0]
+                    if len(nodes) == 1
+                    else FusedSchedulerNode(scheduler, nodes)
+                )
+        finally:
+            scheduler.buffer_names_to_free |= to_free
+
+    def get_unfused_epilogues(self) -> list[Any]:
+        return self._unfused_epilogues
+
+    def codegen_benchmark_post_call(self, result, call_args, signature) -> None:
+        # Epilogue benchmarking should pay for the wrapper's finish of the
+        # reduction partials, not just the kernel.
+        if not self.partial_reductions:
+            return
+        if self.workspace_arg is None:
+            raise AssertionError("reduction partials need a workspace")
+        idx = next(
+            i
+            for i, sig in enumerate(signature)
+            if isinstance(sig, WorkspaceArg)
+            and sig.outer_name == self.workspace_arg.outer_name
+        )
+
+        def hint(expr: sympy.Expr) -> str:
+            # Same hints as get_args, so the slices match the workspace.
+            return str(
+                V.graph.sizevars.optimization_hint_with_override(
+                    expr, hint_override=self.hint_override
+                )
+            )
+
+        for reduction in self.partial_reductions:
+            finish = _partials_finish(f"args[{idx}]", reduction, hint)
+            # Like the wrapper, cast the fp32 partials to the output dtype.
+            if (dtype := V.graph.get_dtype(reduction.buffer)) != torch.float:
+                finish += f".to({dtype})"
+            result.writeline(finish)
 
     def kernel_benchmark_extra_args(self) -> list[str]:
         # Grid args are only used for benchmarking, not correctness
@@ -2332,6 +2496,356 @@ class TritonTemplateKernel(TritonKernel):
                 return list(fixed_layout_copy.stride)
         # Already frozen or not a FlexibleLayout, just return current strides
         return node.get_stride()
+
+    def store(
+        self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
+    ) -> None:
+        if (
+            mode is None
+            and self.tma_store
+            and self.tma_store_epilogue_outputs is not None
+            and name != self.output_node.get_name()
+            and name not in self.tma_store_epilogue_outputs
+        ):
+            with patch.object(self, "tma_store", False):
+                return super().store(name, index, value, mode)
+        if mode is None and self._tile_tma_store(name, index, value):
+            return None
+        return super().store(name, index, value, mode)
+
+    def _tile_tma_store(self, name: str, index: sympy.Expr, value: CSEVariable) -> bool:
+        """TMA-store a full-tile output of a row reduction pass, e.g. a
+        normalized output, whose index is row-major in the tile's symbols. The
+        descriptor uses the tile's origin as offsets, so it needs no standard
+        block symbols. Returns False to fall back to tl.store."""
+        if name not in (self.tma_store_epilogue_outputs or ()):
+            return False
+        access = self._tile_tma_descriptor(name, index, self.args.output(name))
+        if access is None:
+            return False
+        desc, offsets = access
+        rows, cols = self._tile_tma_store_ctx[2]
+        dtype = V.graph.get_buffer(name).get_dtype()
+        self.stores.writeline(
+            DeferredLine(
+                name,
+                f"{desc}.store([{offsets}], "
+                f"tl.broadcast_to({value}, [{rows}, {cols}])"
+                f".to({triton_type(dtype)}))",
+            )
+        )
+        return True
+
+    def _tile_tma_load(self, name: str, index: sympy.Expr) -> CSEVariable | None:
+        """TMA-load a full-tile epilogue input of a row reduction pass, e.g. the
+        incoming gradient of a norm backward, as _tile_tma_store writes
+        full-tile outputs. Returns None to fall back to tl.load."""
+        if name not in self.tma_load_epilogue_inputs:
+            return None
+        access = self._tile_tma_descriptor(name, index, self.args.input(name))
+        if access is None:
+            return None
+        desc, offsets = access
+        line, dtype = f"{desc}.load([{offsets}])", V.graph.get_buffer(name).get_dtype()
+        if (
+            dtype in (torch.float16, torch.bfloat16)
+            and config.triton.codegen_upcast_to_fp32
+        ):
+            line, dtype = f"{line}.to(tl.float32)", torch.float32
+        return self.cse.generate(
+            self.loads, line, dtype=dtype, shape=self._tile_tma_store_ctx[2]
+        )
+
+    def _tile_tma_descriptor(
+        self, name: str, index: sympy.Expr, var: str
+    ) -> tuple[str, str] | None:
+        """The tensor descriptor of buffer name (kernel arg var) over the row
+        pass's tile, and the tile's origin as its offsets, if index is
+        row-major in the tile's symbols; else None."""
+        ctx = self._tile_tma_store_ctx
+        if ctx is None:
+            return None
+        (x, r), origin, (rows, cols) = ctx
+        layout = V.graph.get_buffer(name).get_layout()
+        tile_index = index.xreplace(
+            {s: e.expr for s, e in self.range_tree_nodes.items()}
+        )
+        # The descriptor sees the buffer as [M, N], also when it's a row-major
+        # view such as [B, S, N].
+        shape = [sympy_product(layout.size[:-1]), layout.size[-1]]
+        strides = [layout.stride[-2], layout.stride[-1]]
+        if tile_index != strides[0] * x + r or not all(
+            self._tma_dim_fits_int32(name, size) for size in shape
+        ):
+            return None
+        offsets = ", ".join(
+            texpr(o) if self.index_dtype == "tl.int32" else f"({texpr(o)}).to(tl.int32)"
+            for o in origin
+        )
+        desc = self.prologue_cache.get(var)
+        if desc is None:
+            desc = f"tma_descriptor{next(self.block_ptr_id)}"
+            self.prologue.writeline(
+                DeferredLine(
+                    name,
+                    f"{desc} = tl.make_tensor_descriptor({var}, "
+                    f"shape={self.index_to_str(shape)}, strides={strides}, "
+                    f"block_shape=[{rows}, {cols}])",
+                )
+            )
+            self.prologue_cache[var] = desc
+        self._device_tma_buffers.add(name)
+        return desc, offsets
+
+    @staticmethod
+    def _tma_dim_fits_int32(name: str, size: sympy.Expr) -> bool:
+        """Whether a TMA descriptor dim, and so every coordinate along it,
+        fits in int32. Admitting a TMA template already guards its output size
+        (use_triton_tma_template); this guards a dynamic size below 2**31 if
+        not, so a larger one recompiles. One that can't be guarded falls back
+        to tl.store."""
+        limit = 2**31
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_lt(size, limit):
+            return True
+        if free_unbacked_symbols(size):
+            reason = "is unbacked"
+        elif sizevars.optimization_hint(size) >= limit:
+            reason = "is at least 2**31"
+        elif sizevars.guard_or_false(sympy.Lt(size, limit)):
+            return True
+        else:
+            reason = "can't be guarded below 2**31"
+        log.debug("Storing %s with tl.store: its size %s %s", name, size, reason)
+        return False
+
+    def _staged_tile_elems(self) -> int | None:
+        """Elements in one TMA store's shared-memory staging buffer: an
+        epilogue subtile, BLOCK_M x BLOCK_N / EPILOGUE_SUBTILE, single-buffered."""
+        bm, bn = self.meta.get("BLOCK_M"), self.meta.get("BLOCK_N")
+        if bm is None or bn is None:
+            return None
+        return bm * (bn // self.meta.get("EPILOGUE_SUBTILE", 1))
+
+    def _epilogue_tma_store_budget(self, template_stored: bool) -> int:
+        """Shared memory left for staging the TMA stores of epilogue outputs,
+        after the operand ring and, if it's stored, the template output's own
+        staging."""
+        device = self.output_node.get_device()
+        tile = [self.meta.get(k) for k in ("BLOCK_M", "BLOCK_N", "BLOCK_K")]
+        staged = self._staged_tile_elems()
+        if device is None or device.type != "cuda" or None in tile or staged is None:
+            return 0
+        bm, bn, bk = tile
+        props = torch.cuda.get_device_properties(device)
+        # ROCm reports only shared_memory_per_block. With neither, budget
+        # nothing: all-plain costs ~2%, an overflow costs the fused choice.
+        limit = getattr(
+            props,
+            "shared_memory_per_block_optin",
+            getattr(props, "shared_memory_per_block", 0),
+        )
+        operands = self.input_nodes[
+            self.prefix_args : len(self.input_nodes) - self.suffix_args
+        ]
+        elem = max(node.get_dtype().itemsize for node in operands)
+        ring = self.num_stages * (bm * bk + bk * bn) * elem
+        template_out = staged * self.output_node.get_dtype().itemsize
+        # An overflow drops the fused choice to num_stages=1, or fails it
+        # outright. Besides the ring, the staging buffers and the layout
+        # scratch _tma_epilogue_accesses charges, B200 fused kernels
+        # measured at most 1.6 KB of barriers and reduction scratch.
+        margin = 2 * 1024
+        if not template_stored:
+            template_out = 0
+        return limit - ring - template_out - margin
+
+    def _plain_store_scratch(self, itemsizes: Sequence[int]) -> int:
+        """Shared memory the full-tile tensors an epilogue reads or plain-stores
+        take to convert the subtile's layout, shared by all of them: measured at
+        BLOCK_M x BLOCK_N / EPILOGUE_SUBTILE x itemsize / 4 bytes for the widest
+        dtype, and 8 KB at small subtiles."""
+        if not itemsizes:
+            return 0
+        return max((self._staged_tile_elems() or 0) * max(itemsizes) // 4, 8 * 1024)
+
+    def _full_tile_epilogue_outputs(
+        self, template_node, epilogue_nodes
+    ) -> tuple[list[tuple[str, int]], list[int]]:
+        """The epilogue outputs a TMA store can write whole, with the bytes of
+        their staged (sub)tile: materialized, the template output's shape or
+        a row-major view of it, and 16-byte aligned. Also the itemsizes of the
+        other materialized outputs with the template output's elements, which
+        use tl.store. epilogue_nodes are the ones this kernel computes."""
+        staged = self._staged_tile_elems()
+        scheduler = V.graph.scheduler
+        if staged is None or scheduler is None:
+            return [], []
+        fused = OrderedSet(
+            [template_node.get_name(), *(n.get_name() for n in epilogue_nodes)]
+        )
+        size = self.output_node.get_size()
+        outputs, plain = [], []
+        for node in epilogue_nodes:
+            if node.is_reduction():
+                continue
+            for name in node.get_buffer_names():
+                if scheduler.can_buffer_be_removed_through_fusion(name, fused):
+                    continue
+                layout = V.graph.get_buffer(name).get_layout()
+                if sympy_product(layout.size) != sympy_product(size):  # not full-tile
+                    continue
+                if not self._is_full_tile_tma_layout(name, layout):
+                    plain.append(layout.dtype.itemsize)
+                    continue
+                outputs.append((name, staged * layout.dtype.itemsize))
+        return outputs, plain
+
+    def _tma_epilogue_accesses(
+        self, template_node, epilogue_nodes
+    ) -> tuple[OrderedSet[str], OrderedSet[str]]:
+        """The full-tile epilogue outputs that keep their TMA store, the
+        largest first while their staging fits in shared memory, and under
+        tma_load_for_template_epilogue the full-tile inputs the row pass
+        TMA-loads, if their staging fits too."""
+        from torch._inductor.dependencies import MemoryDep
+
+        bm, bn = self.meta.get("BLOCK_M"), self.meta.get("BLOCK_N")
+        scheduler = V.graph.scheduler
+        if bm is None or bn is None or scheduler is None:
+            return OrderedSet(), OrderedSet()
+        subtiles = self.meta.get("EPILOGUE_SUBTILE", 1)
+        template = template_node.node
+        # Nodes reading reduction results run after the kernel.
+        _, after = finished_after_kernel(
+            (bm, bn // subtiles, subtiles), template, epilogue_nodes
+        )
+        nodes = [n for n in epilogue_nodes if n not in after]
+        produced = OrderedSet([template.get_name()]).union(
+            *(n.get_buffer_names() for n in nodes)
+        )
+        # A removed template output stores nothing, unless a column pass reloads
+        # it after invalidating the CSE cache, which keeps it.
+        columns = any(
+            n.is_reduction() and template_reduction_axis(n, template, produced) == 1
+            for n in nodes
+        )
+        template_stored = columns or not scheduler.can_buffer_be_removed_through_fusion(
+            template.get_name(),
+            OrderedSet([template_node.get_name(), *(n.get_name() for n in nodes)]),
+        )
+        outputs, plain = self._full_tile_epilogue_outputs(template_node, nodes)
+        staged = self._staged_tile_elems() or 1
+        if not self.tma_store:
+            plain += [nbytes // staged for _, nbytes in outputs]
+            outputs = []
+        budget = self._epilogue_tma_store_budget(template_stored)
+        # The column pass needs scratch for the transposed tile, measured at
+        # under BLOCK_M x BLOCK_N / EPILOGUE_SUBTILE bytes.
+        if columns:
+            budget -= self._staged_tile_elems() or 0
+        # Full-tile tensors the epilogue reads, including the template's own
+        # extra inputs such as addmm's bias, and plain-stores share one layout
+        # conversion buffer. Read through TMA, each also has its own staging.
+        numel = sympy_product(template.get_size())
+        # Each buffer stages once, however many epilogue nodes read it.
+        reads = {
+            node.get_name(): node.get_dtype().itemsize
+            for node in (
+                *self.input_nodes[: self.prefix_args],
+                *self.input_nodes[len(self.input_nodes) - self.suffix_args :],
+            )
+            if sympy_product(node.get_size()) == numel
+        }
+        for n in nodes:
+            for dep in n.read_writes.reads:
+                buf = V.graph.try_get_buffer(dep.name)
+                if (
+                    dep.name not in produced
+                    and dep.name not in reads
+                    and isinstance(dep, MemoryDep)
+                    and buf is not None
+                    and dep.get_numel() == numel
+                    and V.graph.sizevars.statically_known_geq(
+                        sympy_product(buf.get_size()), numel
+                    )
+                ):
+                    reads[dep.name] = buf.get_dtype().itemsize
+        if self.tma_load_for_template_epilogue:
+            budget -= (self._staged_tile_elems() or 0) * sum(reads.values())
+        if self.epilogue_tma_plan == "all":
+            return OrderedSet(name for name, _ in outputs), OrderedSet(
+                name
+                for name, _ in self._full_tile_epilogue_inputs(template_node, nodes)
+                if self.tma_load_for_template_epilogue
+            )
+        scratch = self._plain_store_scratch([*plain, *reads.values()])
+        kept = tma_store_outputs_within_budget(outputs, budget - scratch)
+        if len(kept) < len(outputs):
+            # Some outputs fall back to tl.store, so they need the scratch too.
+            scratch = self._plain_store_scratch(
+                [*plain, *reads.values(), *(nbytes // staged for _, nbytes in outputs)]
+            )
+            kept = tma_store_outputs_within_budget(outputs, budget - scratch)
+        inputs: OrderedSet[str] = OrderedSet()
+        # The budget already charges every full-tile read's staging.
+        left = budget - scratch - sum(n for name, n in outputs if name in kept)
+        if self.tma_load_for_template_epilogue and left >= 0:
+            inputs = OrderedSet(
+                name
+                for name, _ in self._full_tile_epilogue_inputs(template_node, nodes)
+            )
+        return kept, inputs
+
+    def _full_tile_epilogue_inputs(
+        self, template_node, epilogue_nodes
+    ) -> list[tuple[str, int]]:
+        """The buffers the epilogue reads, other than the template's and the
+        epilogue's own, that a TMA load can read whole, with the bytes of their
+        staged tile. Smaller inputs, e.g. a norm weight, keep tl.load."""
+        staged = self._staged_tile_elems()
+        if staged is None or self.meta.get("EPILOGUE_SUBTILE", 1) != 1:
+            return []
+        produced = OrderedSet(
+            [self.output_node.get_name(), *template_node.get_buffer_names()]
+        ).union(*(node.get_buffer_names() for node in epilogue_nodes))
+        inputs: dict[str, int] = {}
+        for node in epilogue_nodes:
+            for dep in node.read_writes.reads:
+                if dep.name in produced or dep.name in inputs:
+                    continue
+                buf = V.graph.try_get_buffer(dep.name)
+                if buf is not None and self._is_full_tile_tma_layout(
+                    dep.name, layout := buf.get_layout()
+                ):
+                    inputs[dep.name] = staged * layout.dtype.itemsize
+        return list(inputs.items())
+
+    def _is_full_tile_tma_layout(self, name: str, layout: ir.Layout) -> bool:
+        """Whether a TMA descriptor can cover the buffer with this layout in
+        template output tiles: the template output's shape or a row-major view
+        of it, and 16-byte aligned."""
+        size = self.output_node.get_size()
+        return (
+            all(
+                isinstance(x, (int, sympy.Integer))
+                for x in (layout.size[-1], *layout.stride, layout.offset)
+            )  # static, other than the outer sizes
+            # [M, N] or a row-major view of it, e.g. [B, S, N]
+            and sympy_product(layout.size) == sympy_product(size)
+            and layout.size[-1] == size[-1]
+            and layout.offset == 0
+            and layout.stride[-1] == 1
+            and all(
+                layout.stride[i] == layout.stride[i + 1] * layout.size[i + 1]
+                for i in range(len(layout.size) - 2)
+            )
+            and can_use_tma(output_layout=layout)
+            and all(
+                self._tma_dim_fits_int32(name, dim)
+                for dim in (sympy_product(layout.size[:-1]), layout.size[-1])
+            )
+        )
 
     # DO NOT change the name, parameter count, or parameter order of this method, and
     # keep calling it positionally. TorchTLX (triton 3.8:
@@ -2400,6 +2914,25 @@ class TritonTemplateKernel(TritonKernel):
         self._compute_fusion_metadata(
             scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
         )
+        self.tma_store_epilogue_outputs = None
+        self.tma_load_epilogue_inputs = OrderedSet()
+        if any(node.is_reduction() for node in epilogue_nodes) and (
+            self.tma_store or self.tma_load_for_template_epilogue
+        ):
+            # Each TMA store or load stages its whole tile in its own
+            # shared-memory buffer, so a reduction epilogue's many, often fp32,
+            # outputs and inputs can overflow it. Keep the largest on TMA while
+            # they fit. Epilogue inputs are TMA-loaded only under
+            # tma_load_for_template_epilogue (off by default), which on
+            # fb-triton builds without facebookexperimental/triton#3938-#3940
+            # can give wrong results for single-K-tile templates.
+            outputs, self.tma_load_epilogue_inputs = (
+                (OrderedSet(), OrderedSet())
+                if self.epilogue_tma_plan == "plain"
+                else self._tma_epilogue_accesses(template_node, epilogue_nodes)
+            )
+            if self.tma_store:
+                self.tma_store_epilogue_outputs = outputs
         with self:
             partial_code = render()
 
@@ -2407,8 +2940,50 @@ class TritonTemplateKernel(TritonKernel):
             for i in range(num_store_subgraphs):
                 subgraph_name = self._get_store_output_subgraph_name(i)
                 with self.set_subgraph_body(subgraph_name):
-                    for node in self._epilogue_nodes_by_subgraph[i]:
+                    nodes = self._epilogue_nodes_by_subgraph[i]
+                    if any(node.is_reduction() for node in nodes):
+                        _, after = finished_after_kernel(
+                            self.output_tiles[i][1], template_node.node, nodes
+                        )
+                        # Keep the nodes deferred from earlier subgraphs.
+                        self._unfused_epilogues.extend(after)
+                        nodes = [n for n in nodes if n not in after]
+                    produced = template_node.get_buffer_names().union(
+                        *(node.get_buffer_names() for node in nodes)
+                    )
+                    columns = [
+                        node
+                        for node in nodes
+                        if node.is_reduction()
+                        and template_reduction_axis(node, template_node.node, produced)
+                        == 1
+                    ]
+                    nodes = [n for n in nodes if n not in columns]
+                    first_red = next(
+                        (j for j, n in enumerate(nodes) if n.is_reduction()), len(nodes)
+                    )
+                    if first_red < len(nodes) and self.output_tiles[i][1][2] == 1:
+                        # Nodes over rows only can't be generated in the
+                        # output's (M * N) space, but the tile pass handles them
+                        # when it isn't looped over subtiles.
+                        rows = (self.output_node.get_size()[0], sympy.S.One)
+                        first_red = next(
+                            j
+                            for j, n in enumerate(nodes)
+                            if n.is_reduction() or n.group[1] == rows
+                        )
+                    for node in nodes[:first_red]:
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                    row_loads = {}
+                    if first_red < len(nodes):
+                        row_loads = self.codegen_tile_reduction_epilogue(
+                            nodes[first_red:], i
+                        )
+                    if columns:
+                        # Nothing reads a column result, so they go last, in a
+                        # pass whose range trees reuse the row pass's names.
+                        self.cse.invalidate(OrderedSet(self.cse.store_cache.values()))
+                        self.codegen_tile_reduction_epilogue(columns, i, row_loads)
                     self.cse.invalidate(OrderedSet())
 
             self.codegen_prologues_in_subgraphs(
@@ -2449,6 +3024,257 @@ class TritonTemplateKernel(TritonKernel):
                 src_code = partial_code.finalize_remaining()
 
         return src_code
+
+    def codegen_tile_reduction_epilogue(
+        self,
+        nodes,
+        subgraph_idx: int,
+        row_loads: dict[tuple[str, sympy.Expr], CSEVariable] | None = None,
+    ) -> dict[tuple[str, sympy.Expr], CSEVariable]:
+        """Codegen row reductions of the output, and the nodes after them, as a
+        reduction over the output tile: x spans the tile's rows and r0_ its
+        columns, so loads of the output buffer resolve to the in-register tile.
+        A tile split into subtiles by an unrolled loop is a looped reduction whose
+        loop is the template's: accumulators start at the first subtile and the
+        reduction finishes at the last.
+
+        Column reductions swap the roles (x spans columns, r0_ rows), are
+        persistent over each (sub)tile, and store fp32 partials per row tile to
+        the workspace, which the wrapper reduces after the kernel (see
+        _emit_post_kernel_code). Split column reductions are generated whole.
+        Row reductions do the same, per column (sub)tile, when the tile doesn't
+        span the output's columns.
+
+        A row pass returns its loads keyed by buffer and tile position; the
+        column pass takes them as row_loads and reuses them transposed."""
+        columns = row_loads is not None
+        m, n = self.output_node.get_size()
+        origin, (rows, cols, subtiles), subtile_index = self.output_tiles[subgraph_idx]
+        spans = V.graph.sizevars.statically_known_geq(cols * subtiles, n)
+        partial = columns or not spans
+        numels = {"x": m, "r0_": n}
+        sizes, offsets = (rows, cols), origin
+        persistent = subtiles == 1 or partial
+        if columns:
+            numels = {"x": n, "r0_": m}
+            sizes, offsets = (cols, rows), origin[::-1]
+        with patch.object(self, "persistent_reduction", persistent):
+            roots = self.construct_range_trees(None, True, True, numels, False)
+        range_trees = [
+            DerivedIterationRangesRoot(
+                root,
+                numel=root.numel,
+                block_size=sympy.Integer(size),
+                block_offset=offset,
+                name_suffix="tile",
+            )
+            for root, size, offset in zip(roots, sizes, offsets)
+        ]
+        # Stored tile values carry the template's symbolic shape; restate it as
+        # the concrete tile so they broadcast against loads in the tile space.
+        if columns:
+            # The transposes below read values that the nodes before them may
+            # have left in these buffers, so emit those first.
+            for buf in (self.indexing_code, self.loads, self.compute, self.stores):
+                self.body.splice(buf)
+                buf.clear()
+            read_names = OrderedSet(
+                dep.name for node in nodes for dep in node.read_writes.reads
+            )
+            store_cache = {}
+            for name, v in self.cse.store_cache.items():
+                if name in read_names:
+                    store_cache[name] = self.cse.newvar(
+                        v.bounds, v.dtype, (str(cols), str(rows))
+                    )
+                    self.body.writeline(f"{store_cache[name]} = tl.trans({v})")
+        else:
+            store_cache = {
+                name: self.create_cse_var(
+                    str(v), v.bounds, v.dtype, (str(rows), str(cols))
+                )
+                for name, v in self.cse.store_cache.items()
+            }
+
+        def store_partials(reduction_node, reduction_type, name, index, value):
+            if reduction_node.node._split_size is not None:
+                # The whole reduction replaces the split's second stage.
+                stage2 = reduction_node.get_outputs()[0].users[0].node
+                name = stage2.get_outputs()[0].node.get_name()
+            # One partial per tile along the reduced dim.
+            if columns:
+                tiles, size = ceildiv(m, rows), n
+                tile_idx = f"{origin[0]} // {rows}"
+            else:
+                tiles, size = ceildiv(n, cols), m
+                tile_idx = f"{origin[1]} // {cols}"
+            ws = next(
+                (w for w in self.args.workspace_args if w.inner_name == "ws_ptr"), None
+            )
+            # Partials share ws_ptr with the template's workspace (e.g. TMA
+            # descriptors): align them to 16 bytes, and rebind workspace_arg to
+            # the joined arg so the wrapper allocates both. Regions are padded
+            # to 16 bytes, so only the template's own (static) workspace needs
+            # a leading pad, even when M is dynamic.
+            count = ws.count if ws is not None else sympy.S.Zero
+            if V.graph.sizevars.statically_known_multiple_of(count, 16):
+                pad = 0
+            elif isinstance(count, (int, sympy.Integer)):
+                pad = -int(count) % 16
+            else:
+                raise AssertionError(
+                    f"can't 16-byte align partials after {count} workspace bytes"
+                )
+            nbytes = 16 * ceildiv(tiles * size * torch.float32.itemsize, 16)
+            ws_ptr, ws_name, offset = self.args.workspace(pad + nbytes, False)
+            self.workspace_arg = next(
+                w for w in self.args.workspace_args if w.outer_name == ws_name
+            )
+            offset += pad
+            self.partial_reductions.append(
+                _PartialReduction(
+                    reduction_node,
+                    name,
+                    PARTIAL_REDUCTION_OPS[reduction_type],
+                    offset,
+                    tiles,
+                    size,
+                )
+            )
+            indexing = self.indexing(index, block_ptr=False)
+            mask = indexing.mask_str
+            if not columns and subtiles > 1:
+                # A trailing subtile can start past the last column; its slot
+                # would be past this partial's region in the workspace.
+                in_bounds = f"({origin[1]} < {n})"
+                mask = in_bounds if mask == "None" else f"{mask} & {in_bounds}"
+            self.post_loop_store.writeline(
+                f"tl.store(({ws_ptr} + {self.index_to_str(offset)})"
+                f".to(tl.pointer_type(tl.float32)) + "
+                f"{self.index_to_str(size)} * ({tile_idx}) + {indexing.index_str}, "
+                f"{value}, {mask})"
+            )
+
+        tile_syms = [tree.index_sym() for tree in range_trees]
+        tile_loads: dict[tuple[str, sympy.Expr], CSEVariable] = {}
+        load = self.load
+
+        def tile_load(record, name, index):
+            # A load under a mask (e.g. one branch of a cat) is only valid
+            # where that mask holds, so neither record nor reuse it.
+            if self._load_mask is not None:
+                return load(name, index)
+            key = index.xreplace({s: e.expr for s, e in self.range_tree_nodes.items()})
+            if columns:
+                key = key.xreplace(dict(zip(tile_syms, tile_syms[::-1])))
+                if (v := row_loads.get((name, key))) is not None:
+                    shape = v.shape[::-1] if v.shape is not None else None
+                    return self.cse.generate(
+                        self.loads,
+                        f"tl.trans({v})",
+                        bounds=v.bounds,
+                        dtype=v.dtype,
+                        shape=shape,
+                    )
+            var = (None if columns else self._tile_tma_load(name, index)) or load(
+                name, index
+            )
+            if record:
+                tile_loads[(name, key)] = var
+            return var
+
+        codegen_nodes = [
+            node.unsplit_reduction() if columns else node for node in nodes
+        ]
+        header, init, tail = self.body, IndentedBuffer(), IndentedBuffer()
+        tile_tma_store_ctx = (
+            (tile_syms, origin, (rows, cols))
+            if (self.tma_store or self.tma_load_epilogue_inputs)
+            and not partial
+            and subtiles == 1
+            else None
+        )
+        with (
+            self.use_range_trees(range_trees),
+            patch.object(self.cse, "store_cache", store_cache),
+            patch.multiple(
+                self,
+                numels=numels,
+                range_tree_nodes={},
+                inside_reduction=True,
+                persistent_reduction=persistent,
+                template_mask=None,
+                template_out_shape=None,
+                features=SIMDKernelFeatures(codegen_nodes, numels["x"], numels["r0_"]),
+                # Tensor descriptors expect standard block symbols, not the tile's.
+                tma_store=False,
+                tma_load_for_template_epilogue=False,
+                _tile_tma_store_ctx=tile_tma_store_ctx,
+            ),
+        ):
+            for tree in range_trees:
+                self.iteration_ranges_codegen_header(tree, header)
+            header.writeline(f"rindex = {range_trees[1].name}")
+            if not persistent:
+                # The tile spans all columns, so its column origin is the reduction offset.
+                header.writeline(f"roffset = {origin[1]}")
+            # Looped reductions emit accumulator inits into self.body.
+            with patch.object(self, "body", init):
+                for original, node in zip(nodes, codegen_nodes):
+                    # Nodes over rows only (e.g. mean's division) run after the reduction.
+                    self.inside_reduction = node.group[1] != (numels["x"], sympy.S.One)
+                    after_loop = not (persistent or self.inside_reduction)
+                    with (
+                        (
+                            patch.multiple(
+                                self,
+                                indexing_code=tail,
+                                loads=tail,
+                                compute=tail,
+                                stores=tail,
+                            )
+                            if after_loop
+                            else contextlib.nullcontext()
+                        ),
+                        (
+                            patch.object(
+                                self,
+                                "store_reduction",
+                                functools.partial(
+                                    store_partials,
+                                    original,
+                                    node.node.get_reduction_type(),
+                                ),
+                            )
+                            if partial
+                            else contextlib.nullcontext()
+                        ),
+                        # Tail loads run under the last subtile's branch only.
+                        patch.object(
+                            self,
+                            "load",
+                            functools.partial(tile_load, not (columns or after_loop)),
+                        ),
+                    ):
+                        node.codegen(self.split_and_set_ranges(node.get_ranges()))
+            if persistent:
+                header.splice(init)
+                self.codegen_body()
+                return tile_loads
+            # The subtile loop is an unrolled tl.static_range, so names defined
+            # under the first subtile's branch stay visible in later ones.
+            header.writeline(f"if {subtile_index} == 0:")
+            with header.indent():
+                header.splice(init or "pass")
+            for buf in (self.indexing_code, self.loads, self.compute, self.stores):
+                header.splice(buf)
+                buf.clear()
+            header.writeline(f"if {subtile_index} == {subtiles - 1}:")
+            with header.indent():
+                for buf in (self.post_loop_combine, self.post_loop_store, tail):
+                    header.splice(buf)
+                    buf.clear()
+        return tile_loads
 
     def codegen_prologues_in_subgraphs(
         self, buf_name_to_prologue_group, prologue_preserves_zero_mask_fn
@@ -2563,8 +3389,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # Call emission state, populated by _setup_fusion_hooks / external render
         self._call_preamble: list[str] = []
         self._call_args: list[str] = []
-        # Epilogues that could not be fused into the kernel
-        self._unfused_epilogues: list[Any] = []
         # Reference to the scheduler, set by _compute_fusion_metadata;
         # used in call_kernel() to codegen unfused epilogue nodes
         self._scheduling_ref: Any = None
@@ -2600,9 +3424,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
                 info.indexing_code = IndentedBuffer()
 
         return PartialRender(result.source, self.render_hooks)
-
-    def get_unfused_epilogues(self) -> list[Any]:
-        return self._unfused_epilogues
 
     def _compute_fusion_metadata(
         self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
@@ -2957,12 +3778,14 @@ class GenerateAndLoadResult(NamedTuple):
     store_output_fusion_allowed_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
+    output_tile: tuple[int, int, int] | None
 
 
 class GeneratedCodeCacheEntry(NamedTuple):
     code: str
     extra: str
     events: list[Any]
+    output_tile: tuple[int, int, int] | None
 
 
 def template_subgraph_index_dtype_nodes(
@@ -3126,10 +3949,11 @@ class GeneratedCodeCache:
         code: str,
         extra: str,
         events: list[Any],
+        output_tile: tuple[int, int, int] | None,
     ) -> None:
         if cache_key is None:
             return
-        entry = GeneratedCodeCacheEntry(code, extra, events)
+        entry = GeneratedCodeCacheEntry(code, extra, events, output_tile)
         self._cache.update({cache_key: entry})
 
 
@@ -3402,7 +4226,7 @@ class TritonTemplate(KernelTemplate):
             cache_hit = False
 
             if cache_entry is not None:
-                code, extra, events = cache_entry
+                code, extra, events, output_tile = cache_entry
                 kernel.replay_cached_events(events)
                 cache_hit = True
 
@@ -3411,8 +4235,12 @@ class TritonTemplate(KernelTemplate):
                 if result is None:  # happens at ZeroDivisionError:
                     return None
                 code, extra = result
+                tiles = [tile for _, tile, _ in kernel.output_tiles.values()]
+                # Templates with several store_output calls don't host
+                # reduction epilogues.
+                output_tile = tiles[0] if len(tiles) == 1 else None
                 self._generated_code_cache.put_entry(
-                    cache_key, code, extra, kernel.cached_replay_events
+                    cache_key, code, extra, kernel.cached_replay_events, output_tile
                 )
 
         if not (code is not None and extra is not None):
@@ -3442,6 +4270,7 @@ class TritonTemplate(KernelTemplate):
             store_output_fusion_allowed_inputs,
             kernel_args_sizevars_keys,
             kernel_options,
+            output_tile,
         )
 
     def generate(  # type: ignore[override]
@@ -3708,6 +4537,7 @@ class TritonTemplate(KernelTemplate):
                 result.store_output_fusion_allowed_inputs
             ),
             hint_override=hint_override,
+            output_tile=result.output_tile,
         )
 
 
@@ -3853,6 +4683,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         load_input_fusion_allowed_inputs: OrderedSet[str] | None = None,
         store_output_fusion_allowed_inputs: OrderedSet[str] | None = None,
         hint_override: int | None = None,
+        output_tile: tuple[int, int, int] | None = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -3880,6 +4711,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             else OrderedSet()
         )
         self.hint_override = hint_override
+        self.output_tile = output_tile
 
         self.n_regs = None
 
@@ -3927,6 +4759,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             store_output_fusion_allowed_inputs=(
                 self.store_output_fusion_allowed_inputs
             ),
+            output_tile=self.output_tile,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
@@ -3939,6 +4772,21 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def get_make_kernel_render(self):
         return self.make_kernel_render
+
+    def with_epilogue_tma_plan(self, plan: str) -> "TritonTemplateCaller":
+        """This choice with its reduction epilogue's full-tile extra outputs and
+        inputs all off TMA (plan "plain") or all on it ("all"), for when keeping
+        only those that fit in shared memory spills registers."""
+        make_kernel_render = self.make_kernel_render
+
+        def make_plan_kernel_render(out_node, hint_override: int | None = None):
+            kernel, render = make_kernel_render(out_node, hint_override=hint_override)
+            kernel.epilogue_tma_plan = plan
+            return kernel, render
+
+        variant = copy.copy(self)
+        variant.make_kernel_render = make_plan_kernel_render
+        return variant
 
     def autoheuristic_id(self):
         type_name = "triton"

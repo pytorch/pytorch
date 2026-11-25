@@ -28,6 +28,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype, type_to_dtype
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -9293,6 +9294,44 @@ class FusedUserDefinedTritonKernel(TritonKernel):
         return "\n".join(new_src_lines)
 
 
+def template_reduction_epilogue_supported(
+    template: ir.TemplateBuffer,
+    epilogue_nodes: Sequence[BaseSchedulerNode],
+) -> bool:
+    """Whether a Triton template can host epilogue_nodes, including reductions,
+    given an output tile that fits them (see tile_fits_reduction_epilogue)."""
+    if not (
+        config.triton.template_reduction_epilogue
+        and isinstance(template, ir.TritonTemplateBuffer)
+        and len(template.get_size()) == 2
+        # Only bf16 and fp16 outputs are tested.
+        and template.get_dtype() in (torch.bfloat16, torch.float16)
+        # The JIT cpp wrapper can't import the Blackwell template's source
+        # (its docstring ends the wrapper's string literal).
+        and not V.graph.cpp_wrapper
+    ):
+        return False
+    m, n = template.get_size()
+    # N sets whether a tile spans the rows, so it must be static. A dynamic M
+    # must be backed, so autotuning and the fusion benchmark have a hint.
+    # SizeHintMultiKernel's per-hint kernels are untested with these epilogues.
+    if not isinstance(n, sympy.Integer) or (
+        not isinstance(m, sympy.Integer)
+        and (free_unbacked_symbols(m) or config.multi_kernel_hints)
+    ):
+        return False
+    if template.get_stride() != [n, 1]:
+        return False
+    # Arg reductions can lower to a multi-result tl.reduce, which
+    # automatic warp specialization rejects.
+    return not any(
+        isinstance(node.node, ir.ComputedBuffer)
+        and node.node.get_reduction_type() in ARG_REDUCTION_TYPES
+        for node in epilogue_nodes
+        if node.is_reduction()
+    )
+
+
 class TritonScheduling(SIMDScheduling):
     """Scheduling backend for Triton kernel code generation."""
 
@@ -9330,6 +9369,29 @@ class TritonScheduling(SIMDScheduling):
                 [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
             )
         return cls.backend_features
+
+    def can_fuse_template_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """Row or column reductions over a row-major template output, when some
+        template choice stores output tiles they fit. See
+        TritonTemplateKernel.codegen_tile_reduction_epilogue."""
+        template = node1.get_template_node()
+        if not isinstance(template, ir.TritonTemplateBuffer):
+            return False
+        epilogue = ir.ReductionEpilogue(node1, node2)
+        if (
+            isinstance(template, ir.MultiTemplateBuffer)
+            and template.make_kernel_render is None
+        ):
+            return any(
+                c.supports_reduction_epilogue(epilogue)
+                for c in template.choices
+                if isinstance(c, ir.TritonTemplateCallerBase)
+            )
+        return epilogue.triton_supported and epilogue.triton_tile_fits(
+            template.output_tile
+        )
 
     def codegen_comment(self, node_schedule, kernel_name=None):
         wrapper = V.graph.wrapper_code
