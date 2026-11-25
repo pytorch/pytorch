@@ -7736,7 +7736,18 @@ def meta_scaled_mm_v2(
     )
 
     _out_dtype = out_dtype if out_dtype is not None else self.dtype
+    torch._check_value(
+        self.dtype != torch.float6_e2m3fn_x4
+        or _out_dtype in (torch.bfloat16, torch.float32),
+        lambda: f"MXFP6 scaled_mm requires out_dtype to be BFloat16 or Float, got {_out_dtype}",
+    )
     return torch.empty(self.size(0), mat2.size(1), dtype=_out_dtype, device=self.device)
+
+
+@register_meta([aten._scaled_mm_mxfp6.default, aten._scaled_mm_mxfp6.out])
+@out_wrapper(exact_dtype=True)
+def meta_scaled_mm_mxfp6(self, mat2, scale_a, scale_b, out_dtype):
+    return torch.empty(self.size(0), mat2.size(1), dtype=out_dtype, device=self.device)
 
 
 @register_meta([aten._scaled_addmm.default])

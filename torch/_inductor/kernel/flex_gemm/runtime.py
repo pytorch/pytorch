@@ -20,7 +20,10 @@ from torch._inductor.kernel.flex_gemm.constraints import (
 )
 from torch._inductor.kernel.flex_gemm.output_layout import FlexGemmOutputStorageLayout
 from torch._inductor.runtime.cache_dir_utils import cache_dir
-from torch._inductor.utils import ceildiv
+from torch._native.ops.scaled_mm.quack_operands import (
+    quack_blockscaled_scale_view,
+    quack_packed_operand,
+)
 from torch._prims_common import is_expandable_to
 
 
@@ -107,38 +110,9 @@ def quack_epilogue_arg(arg: torch.Tensor) -> torch.Tensor:
     return arg if physical is arg.dtype else arg.view(physical)
 
 
-def quack_packed_operand(operand: torch.Tensor, k_dim: int) -> torch.Tensor:
-    """View a K-major float6_e2m3fn_x4 GEMM operand as QuACK's packed uint8 bit stream.
-
-    Each 3-byte element becomes 3 bytes along K (A: [M, K/4] with k_dim=-1 ->
-    [M, 3K/4]; B: column-major [K/4, N] with k_dim=-2 -> [3K/4, N]).
-    """
-    if operand.dtype is not torch.float6_e2m3fn_x4:
-        return operand
-    if operand.stride(k_dim) != 1:
-        raise NotImplementedError(
-            "FlexGEMM MXFP6 operands must be contiguous along K, got strides "
-            f"{operand.stride()} for shape {tuple(operand.shape)}"
-        )
-    if k_dim == -1:
-        return operand.view(torch.uint8)
-    return operand.mT.view(torch.uint8).mT
-
-
 def selection_callback(acc, *operands):
     """Stand in for generated callbacks in config-selection EpiMods."""
     raise AssertionError("config-selection EpiMods are never launched")
-
-
-def quack_blockscaled_scale_view(
-    scale: torch.Tensor, mn: int, storage_k: int, format_name: str
-) -> torch.Tensor:
-    """View a public flat SWIZZLE_32_4_4 scale as QuACK's (rm, rk, 32, 4, 4) blocked tensor."""
-    from torch._vendor.quack.blockscaled import operand as blockscaled
-
-    format = blockscaled.BlockScaledFormat.from_name(format_name)
-    sf_k = ceildiv(format.logical_k(storage_k), format.sf_vec_size)
-    return scale.view(ceildiv(mn, 128), ceildiv(sf_k, 4), 32, 4, 4)
 
 
 def normalize_c(

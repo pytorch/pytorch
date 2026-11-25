@@ -338,6 +338,7 @@ XPU_BLOCKLIST = [
     "inductor/test_pallas",
     "nn/attention/test_fa4",
     "python_native/test_quack_vendor",
+    "python_native/test_scaled_mm_mxfp6_cutedsl",
     "python_native/test_topk_cutedsl",
     "quantization/core/test_quantized_tensor",
     "quantization/core/test_workflow_module",
