@@ -3554,6 +3554,18 @@ def check_positional(
         )
 
 
+def check_num_args(
+    tx: InstructionTranslatorBase, args: list[VariableTracker], n: int
+) -> None:
+    # Mirrors CPython check_num_args (Objects/typeobject.c), used by the
+    # slot wrappers (wrap_binaryfunc, wrap_delitem, ...).
+    from torch._dynamo.exc import raise_type_error
+
+    if len(args) != n:
+        s = "" if n == 1 else "s"
+        raise_type_error(tx, f"expected {n} argument{s}, got {len(args)}")
+
+
 def no_positional(
     tx: InstructionTranslatorBase, funcname: str, args: list[VariableTracker]
 ) -> None:
