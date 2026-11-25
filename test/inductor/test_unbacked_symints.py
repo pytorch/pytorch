@@ -28,21 +28,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfXpu,
 )
-from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.testing._internal.inductor_utils import requires_triton
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.printers import PythonPrinter
-
-
-def requires_accelerator_triton(fn):
-    @functools.wraps(fn)
-    def wrapper(self, device, *args, **kwargs):
-        if torch.device(device).type != "cpu":
-            if not HAS_TRITON:
-                raise unittest.SkipTest("requires triton")
-        return fn(self, device, *args, **kwargs)
-
-    return wrapper
 
 
 class TestUnbackedSymints(InductorTestCase):
@@ -53,7 +42,7 @@ class TestUnbackedSymints(InductorTestCase):
         preserves_device_selection(InductorTestCase.setUpClass.__func__)
     )
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):
         def fn(x, y):
@@ -74,7 +63,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
         def fn(x):
@@ -85,7 +74,7 @@ class TestUnbackedSymints(InductorTestCase):
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
         torch.compile(fn, fullgraph=True)(x)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_broadcast_tensors(self, device):
         def fn(x):
@@ -114,7 +103,39 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    def test_remove_no_ops_unbacked_shape_dde(self, device):
+        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
+        # which raises GuardOnDataDependentSymNode when the tuples contain
+        # two different unbacked SymInts (u0 vs u1).
+        from torch._inductor.fx_passes.joint_graph import remove_no_ops
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            u0 = shape_env.create_unbacked_symint()
+            u1 = shape_env.create_unbacked_symint()
+            ones_val = torch.empty((u0, 128), device=device)
+            x_val = torch.empty((u1, 128), device=device)
+
+        graph = torch.fx.Graph()
+        ones_node = graph.placeholder("ones")
+        x_node = graph.placeholder("x")
+        ones_node.meta["val"] = ones_val
+        x_node.meta["val"] = x_val
+        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
+        mul.meta["val"] = ones_val
+        graph.output(mul)
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        # Must not raise. Shapes are not provably equal, so mul must stay.
+        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
+        self.assertEqual(
+            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
+            1,
+        )
+
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_autotuning(self, device):
         def fn(x, y):
@@ -138,7 +159,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_split_with_sizes(self, device):
         def fn(x, y):
@@ -154,7 +175,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_view_of_slice(self, device):
         # Tests View.create(slice, size_with_unbacked_symint)
@@ -176,7 +197,7 @@ class TestUnbackedSymints(InductorTestCase):
         unittest.skip("Triton kernel requires GPU"),
         lambda params: params["device"] == "cpu",
     )
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_kernel_grid(self, device):
         if device == "cpu":
@@ -198,7 +219,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_nonzero_in_inference_mode(self, device):
         def fn(x):
@@ -212,7 +233,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @inductor_config.patch({"max_autotune": True})
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_equivalent_backed_unbacked(self, device):
@@ -246,7 +267,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "precision not good enough on CPU")
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
         # reset in case we run both cpu and cuda tests
@@ -275,7 +296,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize(
         "torch_fn", [torch.mm, torch.bmm, torch.addmm], name_fn=lambda fn: fn.__name__
@@ -313,7 +334,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_range_tree_divisor(self, device):
         def fn(x, num):
@@ -330,7 +351,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_unbacked_masked_scatter(self, device):
         def fn(value, mask):
@@ -346,7 +367,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_unbacked_repeat(self, device):
         def fn(x, a, b):
@@ -364,7 +385,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch(
         {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
     )
@@ -381,7 +402,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize("dynamic", [False, True, None])
     def test_unbacked_slice_on_subclass(self, device, dynamic):
@@ -470,7 +491,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual.t, expected.t)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch(capture_dynamic_output_shape_ops=True)
     def test_issue_143498(self, device):
         class Model(torch.nn.Module):
@@ -526,7 +547,7 @@ class TestUnbackedSymints(InductorTestCase):
         model = Model()
         self.assertEqual(torch.compile(model)(*example_inputs), model(*example_inputs))
 
-    @requires_accelerator_triton
+    @requires_triton()
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_einsum(self, device):
         def fn(q, k, vector, scalar):
@@ -553,7 +574,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_softmax(self, device):
         def fn(x):
@@ -573,7 +594,7 @@ class TestUnbackedSymints(InductorTestCase):
         unittest.skip("scaled_dot_product_flash_attention has no CPU backend"),
         lambda params: params["device"] == "cpu",
     )
-    @requires_accelerator_triton
+    @requires_triton()
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
@@ -603,7 +624,7 @@ class TestUnbackedSymints(InductorTestCase):
         unittest.skip("scaled_dot_product_attention has no CPU backend"),
         lambda params: params["device"] == "cpu",
     )
-    @requires_accelerator_triton
+    @requires_triton()
     @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):
@@ -632,7 +653,7 @@ class TestUnbackedSymints(InductorTestCase):
         y = torch.tensor([1.0, 0.0], device=device)
         torch.compile(fn, fullgraph=True)(x, y)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_unbacked_linear_layer_norm_input(self, device):
         class MyModel(torch.nn.Module):
@@ -663,7 +684,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = model(*inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_to_int_with_unbacked_size(self, device):
         def fn(x):
@@ -684,7 +705,7 @@ class TestUnbackedSymints(InductorTestCase):
         unittest.skip("Combo kernels must be for GPU."),
         lambda params: params["device"] == "cpu",
     )
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @inductor_config.patch({"combo_kernels": True, "benchmark_combo_kernel": True})
     def test_combo_kernel_size_hint_failure(self, device):
@@ -711,7 +732,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     @inductor_config.patch({"benchmark_kernel": True})
     def test_triton_kernel_with_unbacked_symint_fallback(self, device):
@@ -736,7 +757,7 @@ class TestUnbackedSymints(InductorTestCase):
     @skipIfXpu(
         msg="Invalid SPIR-V module,https://github.com/intel/torch-xpu-ops/issues/2329"
     )
-    @requires_accelerator_triton
+    @requires_triton()
     @inductor_config.patch({"max_autotune": True})
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_autotune_with_unbacked_stride(self, device):
@@ -758,7 +779,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_fmod_with_out_arg(self, device):
         def fn(x):
@@ -771,7 +792,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_pow_type_mismatch(self, device):
         """
@@ -801,7 +822,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_trunc_large_float_scalar_tensor(self, device):
         import math
@@ -818,7 +839,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_trunc_float_scalar_tensor_preserves_positive_zero(self, device):
         import math
@@ -836,7 +857,7 @@ class TestUnbackedSymints(InductorTestCase):
         self.assertEqual(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_pow_symbolic_int_exponent(self, device):
         """
@@ -873,7 +894,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipCPUIf(True, "Triton codegen bug only affects GPU")
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_triton_pow_symbolic_negative_int_exponent(self, device):
         def fn(x, exponent_src):
@@ -888,7 +909,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @requires_accelerator_triton
+    @requires_triton()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_slice_unbacked_bindings_with_later_constraint(self, device):
         # Regression test for https://github.com/pytorch/pytorch/issues/166460
@@ -920,7 +941,7 @@ class TestUnbackedSymints(InductorTestCase):
 
     @skipIfXpu(msg="standalone_compile coverage is CUDA-only")
     @skipCPUIf(True, "requires gpu and triton")
-    @requires_accelerator_triton
+    @requires_triton()
     def test_standalone_compile_reuses_fallback_unbacked_binding(self, device):
         from torch._inductor import standalone_compile
         from torch._subclasses.fake_tensor import is_fake_tensor, maybe_get_fake_mode
@@ -1114,126 +1135,6 @@ class TestUnbackedSymints(InductorTestCase):
         compiled_fn = torch.compile(fn, backend=fx_pass_backend, fullgraph=True)
         result = compiled_fn(t)
         self.assertEqual(result, 8)
-
-    @requires_accelerator_triton
-    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
-    @inductor_config.patch(
-        {"max_complex_pointwise_cat_inputs": 1, "max_pointwise_cat_inputs": 1}
-    )
-    def test_cat_sympy_channels_last_contiguous(self, device):
-        """torch.cat with symbolic shapes in shapes / strides should not raise
-        GuardOnDataDependentSymNode when checking channels_last contiguity."""
-
-        def fn(x, y):
-            # nonzero produces an unbacked symint in dim 0
-            nz = torch.nonzero(x)  # (u0, 1)
-            u0 = nz.size(0)
-            # All inputs are unrealized Pointwise (new_zeros), so
-            # any_input_is_storage_and_layout is False, reaching the
-            # meta["val"] channels_last check. Lower both pointwise cat
-            # thresholds to force ConcatKernel path instead of pointwise_cat.
-            inputs = [
-                y.new_zeros(y.size(0), u0, y.size(2), y.size(3)),
-                y.new_zeros(y.size(0), u0 + 1, y.size(2), y.size(3)),
-            ]
-            return torch.cat(inputs, dim=1)
-
-        example_inputs = (
-            torch.tensor([1.0, 0.0, 1.0, 1.0], device=device),
-            torch.randn(2, 3, 4, 10, device=device),
-        )
-        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
-        expected = fn(*example_inputs)
-        torch.testing.assert_close(actual, expected)
-
-    @parametrize("dynamic", ["unbacked", "backed"])
-    def test_reshape_indexer_dynamic_size(self, device, dynamic):
-        # Reshape [u0, 4096] -> [32*u0, 128]
-        def fn(qkv):
-            y = qkv[:, :4096].reshape(-1, 128).sin()
-            return y.reshape(qkv.shape[0], 4096)
-
-        mark = (
-            torch._dynamo.decorators.mark_unbacked
-            if dynamic == "unbacked"
-            else torch._dynamo.mark_dynamic
-        )
-        compiled = torch.compile(fn, fullgraph=True)
-        for n in (16, 3):
-            x = torch.randn(n, 4608, device=device)
-            mark(x, 0)
-            self.assertEqual(compiled(x), fn(x))
-
-    def test_reshape_indexer_unbacked_sizes_match(self, device):
-        # Reshape [u0, 32, 4096] -> [32*u0, 4096]
-        def fn(x):
-            return x[:, :32, :].reshape(x.shape[0] * 32, 4096).sin()
-
-        compiled = torch.compile(fn, fullgraph=True)
-        for n in (4, 7):
-            x = torch.randn(n, 33, 4096, device=device)
-            torch._dynamo.decorators.mark_unbacked(x, 0)
-            self.assertEqual(compiled(x), fn(x))
-
-    def test_reshape_indexer_unbacked_total_size_fixes_value(self, device):
-        # Reshape [4*u0, 32, 4096] -> [128, 4096]
-        def fn(x):
-            q = torch.cat([x, x, x, x], 0)[:, :, :4096]
-            return q.reshape(128, 4096).sin()
-
-        compiled = torch.compile(fn, fullgraph=True)
-        x = torch.randn(1, 32, 4608, device=device)
-        torch._dynamo.decorators.mark_unbacked(x, 0)
-        self.assertEqual(compiled(x), fn(x))
-
-        bad = torch.randn(2, 32, 4608, device=device)
-        torch._dynamo.decorators.mark_unbacked(bad, 0)
-        with self.assertRaisesRegex(RuntimeError, r"Eq\(u0, 1\)"):
-            compiled(bad)
-
-    def test_reshape_indexer_fallback(self, device):
-        # Reshape [6, 4] -> [8, 3]
-        def fn(x):
-            return x[:, :-1].reshape(8, 3).sin()
-
-        x = torch.randn(6, 5, device=device)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
-
-
-class TestUnbackedSymintsCompilerLogic(InductorTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def test_remove_no_ops_unbacked_shape_dde(self, device):
-        # Regression: fake_tensors_eq in remove_no_ops used `shape1 != shape2`,
-        # which raises GuardOnDataDependentSymNode when the tuples contain
-        # two different unbacked SymInts (u0 vs u1).
-        from torch._inductor.fx_passes.joint_graph import remove_no_ops
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
-        shape_env = ShapeEnv()
-        with FakeTensorMode(shape_env=shape_env):
-            u0 = shape_env.create_unbacked_symint()
-            u1 = shape_env.create_unbacked_symint()
-            ones_val = torch.empty((u0, 128), device=device)
-            x_val = torch.empty((u1, 128), device=device)
-
-        graph = torch.fx.Graph()
-        ones_node = graph.placeholder("ones")
-        x_node = graph.placeholder("x")
-        ones_node.meta["val"] = ones_val
-        x_node.meta["val"] = x_val
-        mul = graph.call_function(torch.ops.aten.mul.Tensor, (ones_node, x_node))
-        mul.meta["val"] = ones_val
-        graph.output(mul)
-        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
-
-        # Must not raise. Shapes are not provably equal, so mul must stay.
-        remove_no_ops(gm, OrderedSet(), OrderedSet([ones_node]))
-        self.assertEqual(
-            sum(1 for n in gm.graph.nodes if n.target is torch.ops.aten.mul.Tensor),
-            1,
-        )
 
     def test_stride_ordered_uses_symbolic_divisibility(self, device):
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -1488,8 +1389,93 @@ class TestUnbackedSymintsCompilerLogic(InductorTestCase):
         self.assertEqual(negative_powers, [])
         self.assertIn("%", PythonPrinter().doprint(guard))
 
+    @requires_triton()
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    @inductor_config.patch(
+        {"max_complex_pointwise_cat_inputs": 1, "max_pointwise_cat_inputs": 1}
+    )
+    def test_cat_sympy_channels_last_contiguous(self, device):
+        """torch.cat with symbolic shapes in shapes / strides should not raise
+        GuardOnDataDependentSymNode when checking channels_last contiguity."""
 
-class TestUnbackedSymintsInputValidation(InductorTestCase):
+        def fn(x, y):
+            # nonzero produces an unbacked symint in dim 0
+            nz = torch.nonzero(x)  # (u0, 1)
+            u0 = nz.size(0)
+            # All inputs are unrealized Pointwise (new_zeros), so
+            # any_input_is_storage_and_layout is False, reaching the
+            # meta["val"] channels_last check. Lower both pointwise cat
+            # thresholds to force ConcatKernel path instead of pointwise_cat.
+            inputs = [
+                y.new_zeros(y.size(0), u0, y.size(2), y.size(3)),
+                y.new_zeros(y.size(0), u0 + 1, y.size(2), y.size(3)),
+            ]
+            return torch.cat(inputs, dim=1)
+
+        example_inputs = (
+            torch.tensor([1.0, 0.0, 1.0, 1.0], device=device),
+            torch.randn(2, 3, 4, 10, device=device),
+        )
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @parametrize("dynamic", ["unbacked", "backed"])
+    def test_reshape_indexer_dynamic_size(self, device, dynamic):
+        # Reshape [u0, 4096] -> [32*u0, 128]
+        def fn(qkv):
+            y = qkv[:, :4096].reshape(-1, 128).sin()
+            return y.reshape(qkv.shape[0], 4096)
+
+        mark = (
+            torch._dynamo.decorators.mark_unbacked
+            if dynamic == "unbacked"
+            else torch._dynamo.mark_dynamic
+        )
+        compiled = torch.compile(fn, fullgraph=True)
+        for n in (16, 3):
+            x = torch.randn(n, 4608, device=device)
+            mark(x, 0)
+            self.assertEqual(compiled(x), fn(x))
+
+    def test_reshape_indexer_unbacked_sizes_match(self, device):
+        # Reshape [u0, 32, 4096] -> [32*u0, 4096]
+        def fn(x):
+            return x[:, :32, :].reshape(x.shape[0] * 32, 4096).sin()
+
+        compiled = torch.compile(fn, fullgraph=True)
+        for n in (4, 7):
+            x = torch.randn(n, 33, 4096, device=device)
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            self.assertEqual(compiled(x), fn(x))
+
+    @dynamo_config.patch(error_on_recompile=True)
+    def test_reshape_indexer_unbacked_total_size_fixes_value(self, device):
+        # Reshape [4*u0, 32, 4096] -> [128, 4096]
+        def fn(x):
+            q = torch.cat([x, x, x, x], 0)[:, :, :4096]
+            return q.reshape(128, 4096).sin()
+
+        compiled = torch.compile(fn, fullgraph=True)
+        x = torch.randn(1, 32, 4608, device=device)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(compiled(x), fn(x))
+
+        bad = torch.randn(2, 32, 4608, device=device)
+        torch._dynamo.decorators.mark_unbacked(bad, 0)
+        with self.assertRaisesRegex(RuntimeError, r"u0 <= 1"):
+            compiled(bad)
+
+    def test_reshape_indexer_fallback(self, device):
+        # Reshape [6, 4] -> [8, 3]
+        def fn(x):
+            return x[:, :-1].reshape(8, 3).sin()
+
+        x = torch.randn(6, 5, device=device)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x), fn(x))
+
+
+class TestUnbackedSymintsGeneric(InductorTestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_override_optimization_hint_concrete_int_noop(self):
@@ -1519,10 +1505,6 @@ class TestUnbackedSymintsInputValidation(InductorTestCase):
         v = u + 1  # derived expression: u0 + 1
         with self.assertRaisesRegex(ValueError, "single unbacked symbol"):
             torch._dynamo.override_optimization_hint(v, 42)
-
-
-class TestUnbackedSymintsHintLogic(InductorTestCase):
-    hw_classification = HardwareClassification.GENERIC
 
     def test_stride_order_uses_unbacked_optimization_hint(self):
         from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -1582,9 +1564,6 @@ class TestUnbackedSymintsHintLogic(InductorTestCase):
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
-instantiate_device_type_tests(
-    TestUnbackedSymintsCompilerLogic, globals(), allow_xpu=True
-)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

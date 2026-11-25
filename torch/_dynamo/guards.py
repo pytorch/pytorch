@@ -50,7 +50,11 @@ from weakref import ReferenceType
 import torch
 import torch.overrides
 import torch.utils._device
-from torch._C._dynamo.eval_frame import code_framelocals_names
+from torch._C._dynamo.eval_frame import (
+    _invalidate_cache_entry,
+    _update_diff_guard_root_manager,
+    code_framelocals_names,
+)
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
@@ -68,7 +72,6 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
-    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -120,7 +123,6 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
-    StorageOverlapPartition,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -130,15 +132,19 @@ from torch._subclasses.fake_tensor import (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS,
     FakeTensor,
     is_fake_tensor,
+    maybe_get_fake_constant,
     maybe_get_fake_dispatch_keys,
     maybe_get_fake_pytype,
 )
 from torch._subclasses.meta_utils import safe_grad
 from torch._utils_internal import justknobs_check
+from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import (
     _CppShapeGuardsHelper,
+    _get_placeholder_expr,
     _ShapeGuardsHelper,
     EqualityConstraint,
+    has_free_unbacked_symbols,
     is_symbolic,
     SYMPY_INTERP,
 )
@@ -205,7 +211,6 @@ from .source import (
 from .types import (  # noqa: F401
     CacheEntry,
     DynamoFrameType,
-    ExtraState,
     GuardedCode,
     GuardFail,
     GuardFilterEntry,
@@ -457,8 +462,8 @@ class GuardManagerWrapper:
         self.verbose_code_parts: list[str] | None = None
         self.global_scope: dict[str, Any] | None = None
         self.guard_fail_fn: Callable[[GuardFail], None] | None = None
-        self.cache_entry: CacheEntry | None = None
-        self.extra_state: ExtraState | None = None
+        # Set when the guard manager is cached, to find its cache entry.
+        self.code_ref: ReferenceType[types.CodeType] | None = None
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
         self.no_tensor_aliasing_sources: list[Source] = []
 
@@ -816,15 +821,11 @@ class GuardManagerWrapper:
     def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)
 
-        # Ensure that C++ side points to the updated diff guard manager.
-        # When a new GuardManagerWrapper is created, it does not have a
-        # cache_entry attribute, so it relies on the CacheEntry constructor to
-        # set the diff_guard_root in C++.  But once it is saved in the Dynamo
-        # cache, C++ side adds a cache_entry attribute. On recompiles, this
-        # cache_entry is visible, so we update the C++ side to point to the
-        # update guard manager.
-        if self.cache_entry:
-            self.cache_entry.update_diff_guard_root_manager()
+        # Ensure that C++ side points to the updated diff guard manager.  A new
+        # GuardManagerWrapper is not cached yet, so this does nothing and the
+        # CacheEntry constructor reads diff_guard_root instead.  On recompiles,
+        # the guard managers already in the cache are updated in place.
+        _update_diff_guard_root_manager(self)
 
     def clone_with_chosen_sources(
         self, chosen_sources: OrderedSet[str]
@@ -1128,6 +1129,8 @@ def get_verbose_code_parts(
     # add a hint explaining which closure variable is being checked.
     # This helps users understand which closure variable caused the guard failure.
     if guard is not None:
+        if guard.recompile_hint is not None:
+            recompile_hint = guard.recompile_hint
         closure_hint = _get_closure_var_hint(guard.originating_source)
         if closure_hint:
             recompile_hint = (
@@ -1172,7 +1175,15 @@ def convert_int_to_concrete_values(dim: Any) -> int | None:
     else:
         if not isinstance(dim, torch.SymInt):
             raise AssertionError(f"Expected torch.SymInt, got {type(dim)}")
-        return dim.node.maybe_as_int()
+        node = dim.node
+        if isinstance(node, SymNode) and node.shape_env is not None:
+            expr = _get_placeholder_expr(node)
+            # An unbacked input dim refined to a constant (e.g. by
+            # torch._check(x.shape[0] == 1)) stays None, so TENSOR_MATCH does not
+            # check it and the runtime assert enforces the value instead.
+            if expr.is_Symbol and has_free_unbacked_symbols(expr):
+                return None
+        return node.maybe_as_int()
 
 
 def convert_to_concrete_values(size_or_stride: Sequence[Any]) -> list[int | None]:
@@ -4748,6 +4759,7 @@ _FAKE_TENSOR_OWNED_ATTRIBUTES = (
     _FAKE_TENSOR_CONSTRUCTOR_IGNORED_STATE_ATTRS
     | {
         "_fake_device",
+        "_fake_pytype",
         "fake_mode",
         "constant",
         "pytype",
@@ -4848,8 +4860,6 @@ class GuardsStatePickler(FunctionPicklerBase):
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self.fake_mode = torch._subclasses.FakeTensorMode()
-        self.tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
         self.guard_tree_values = guard_tree_values
         # The plain tuples an EQUALS_MATCH reads whole, by id; see the Note
         # above _keep. Required, because omitting it would carry no plain
@@ -4940,14 +4950,15 @@ class GuardsStatePickler(FunctionPicklerBase):
         grad: torch.Tensor,
     ) -> torch.Tensor:
         fake_mode = torch._subclasses.FakeTensorMode()
-        tensor_converter = torch._subclasses.fake_tensor.FakeTensorConverter()
-        ret = tensor_converter.from_meta_and_device(
+        ret = fake_mode.fake_tensor_converter.from_meta_and_device(
             fake_mode,
             meta_tensor,
             device,
             pytype,
             torch._C.DispatchKeySet.from_raw_repr(dispatch_keys_raw),
         )
+        # Guard replay reads this metadata after dropping the user's attribute.
+        object.__setattr__(ret, "constant", maybe_get_fake_constant(ret))
         # A .grad the guards never read is pruned to the _Missing sentinel on
         # the way in (only a training capture has one to prune at all); it was
         # not guarded on, so the rebuilt tensor does not need it, but assigning
@@ -5450,12 +5461,12 @@ class GuardsStatePickler(FunctionPicklerBase):
             if isinstance(  # noqa: ISINSTANCE_FAKE_TENSOR
                 obj, torch._subclasses.FakeTensor
             ):
-                default = torch.nn.Parameter if is_param else torch.Tensor
-                pytype = obj.pytype or default
+                pytype = torch.nn.Parameter if is_param else torch.Tensor
             elif is_fake and is_param and pytype is torch.Tensor:
                 # A C++ fake's own type is the real type, but a C++ fake
                 # Parameter can be a plain Tensor carrying the marker.
                 pytype = torch.nn.Parameter
+            pytype = maybe_get_fake_pytype(obj) or pytype
             # A fake answers empty_like with another fake (a Python fake through
             # its own __torch_dispatch__, whether or not its FakeTensorMode is
             # active), and that fake would drag the mode and its converters into
@@ -6716,23 +6727,6 @@ class CheckFunctionManager:
                     None,
                 )
                 add_code_part(code_part, None, True)
-            elif isinstance(guard, StorageOverlapPartition):
-                partition_guard_managers = [
-                    builder.get_guard_manager_from_source(s)
-                    for s in guard.input_sources
-                ]
-                code_part = (
-                    "___check_storage_overlap_partition("
-                    f"[{', '.join(source.name for source in guard.input_sources)}], "
-                    f"{guard.overlapping_indices})"
-                )
-                install_storage_overlap_partition_guard(
-                    partition_guard_managers,
-                    guard.overlapping_indices,
-                    [code_part],
-                    None,
-                )
-                add_code_part(code_part, None, True)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
@@ -6783,10 +6777,6 @@ class CheckFunctionManager:
         # Grab only G, but preserve "G" because guards access it as "G"
         self.guard_manager.global_scope = globals_for_guard_fn
         self.guard_manager.guard_fail_fn = guard_fail_fn
-        # will be populated by a non-owning reference to CacheEntry/ExtraState
-        # when the CacheEntry is constructed
-        self.guard_manager.cache_entry = None
-        self.guard_manager.extra_state = None
         self.guard_manager.no_tensor_aliasing_sources = (
             builder.no_tensor_aliasing_sources
         )
@@ -6795,22 +6785,13 @@ class CheckFunctionManager:
         # Some tests reveal that CheckFunctionManager has no attribute
         # guard_manager, but this case should not be of any concern.
         # This case doesn't seem easy to repro.
-        if (
-            hasattr(self, "guard_manager")
-            and not isinstance(self.guard_manager, DeletedGuardManagerWrapper)
-            and (cache_entry := self.guard_manager.cache_entry) is not None
-            and (extra_state := self.guard_manager.extra_state) is not None
+        if hasattr(self, "guard_manager") and not isinstance(
+            self.guard_manager, DeletedGuardManagerWrapper
         ):
-            if not isinstance(cache_entry, CacheEntry):
-                raise AssertionError(f"Expected CacheEntry, got {type(cache_entry)}")
-
-            if not isinstance(extra_state, ExtraState):
-                raise AssertionError(f"Expected ExtraState, got {type(extra_state)}")
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
-
-            extra_state.invalidate(cache_entry, deleted_guard_manager)
-            self.guard_manager = deleted_guard_manager
+            if _invalidate_cache_entry(self.guard_manager, deleted_guard_manager):
+                self.guard_manager = deleted_guard_manager
 
     def id_ref(self, obj: object, obj_str: str) -> int:
         """add a weakref, return the id"""
@@ -7148,6 +7129,7 @@ def get_guard_fail_reason_helper(
     f_locals: dict[str, object],
     compile_id: CompileId | None,
     backend: Callable[..., object] | None,
+    cache_entry_backend: Callable[..., object] | None = None,
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -7162,10 +7144,6 @@ def get_guard_fail_reason_helper(
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
-
-    cache_entry_backend = None
-    if guard_manager.cache_entry:
-        cache_entry_backend = guard_manager.cache_entry.backend
 
     no_tensor_aliasing_check_failed = False
 
@@ -7262,20 +7240,24 @@ def get_guard_fail_reason(
     compile_id: CompileId,
     backend: Callable[..., object],
     skip_logging: bool = False,
+    cache_entry_backend: Callable[..., object] | None = None,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
         return f"{compile_id}: {guard_manager.invalidation_reason}"
     reason_str = get_guard_fail_reason_helper(
-        guard_manager, f_locals, compile_id, backend
+        guard_manager, f_locals, compile_id, backend, cache_entry_backend
     )
-    if skip_logging:
+    # A reset clears orig_code_map, and can run after a compile but before its
+    # entry is cached, leaving the entry with nothing to attribute it to.
+    orig_code = orig_code_map.get(code)
+    if skip_logging or orig_code is None:
         return reason_str
-    guard_failures[orig_code_map[code]].append(reason_str)
+    guard_failures[orig_code].append(reason_str)
 
     try:
         if guard_manager.guard_fail_fn is not None:
             guard_manager.guard_fail_fn(
-                GuardFail(reason_str or "unknown reason", orig_code_map[code])
+                GuardFail(reason_str or "unknown reason", orig_code)
             )
     except Exception:
         log.exception(
@@ -7306,6 +7288,7 @@ def get_and_maybe_log_recompilation_reasons(
             cache_entry.compile_id,
             backend,
             skip_logging,
+            cache_entry.backend,
         )
         if reason:
             reasons.append(reason)
@@ -7458,13 +7441,16 @@ def install_not_in_instance_dict_guard(source: Source, name: str) -> None:
     )
 
 
-def install_guard(*guards: Guard, skip: int = 0) -> None:
+def install_guard(
+    *guards: Guard, skip: int = 0, recompile_hint: str | None = None
+) -> None:
     """
     Add dynamo guards to the current tracing context.
 
     Args:
         guards: guard(s) to add
         skip: number of stack frames to ignore for debug stack trace
+        recompile_hint: explanation to display when this guard fails
     """
     from torch._guards import TracingContext
 
@@ -7481,6 +7467,8 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
             raise AssertionError(f"Expected Guard, got {type(guard)}")
         if is_from_skip_guard_source(guard.originating_source):
             continue
+        if recompile_hint is not None:
+            guard.recompile_hint = recompile_hint
         add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
 
 
