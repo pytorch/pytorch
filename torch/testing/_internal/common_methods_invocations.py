@@ -5175,6 +5175,17 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
                 mode=mode,
                 align_corners=align_corners,
             )
+            if rank in (2, 3):
+                # Channels-last except for the stride of the size-1 batch dim, like img[None] for an image
+                # whose channels are its last dim in memory.
+                x = make_tensor((D,) * rank + (C,), device=device, dtype=dtype)
+                yield SampleInput(
+                    x.permute(rank, *range(rank))[None].requires_grad_(requires_grad),
+                    shape(S, rank, False),
+                    scale_factor=None,
+                    mode=mode,
+                    align_corners=align_corners,
+                )
             if mode in ("nearest", "nearest-exact") and rank == 3:
                 # https://github.com/pytorch/pytorch/issues/183771
                 yield SampleInput(
