@@ -1303,6 +1303,64 @@ def reasons_branches(x):
     return y.tanh().cos().exp()
 
 
+def plans_scale(x, k):
+    return x * k + 1
+
+
+def plans_block(x, k):
+    return plans_scale(x.sin(), k).tanh().cos()
+
+
+def plans_model(x):
+    for k in range(3):
+        x = plans_block(x, k)
+    return x.exp()
+
+
+def plans_descend(x, n):
+    if n == 0:
+        return (x.sin() + 1).tanh().cos().exp()
+    return plans_descend(x, n - 1) * 0.5 + n
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmPlans(TestCase):
+    """What the executor keeps of the code it ran: a function's unoptimized
+    plan (optimizing again starts from it) and the one its frames run now."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    @isolated
+    def test_optimizing_again_does_not_keep_the_plans_before(self):
+        # The default schedule: optimized after the first return, five
+        # rounds of optimizing again before regions, regions from call 24.
+        g = vm(plans_model)
+        for call in range(30):
+            x = torch.randn(4, 8)
+            self.assertEqual(g(x), plans_model(x), atol=0, rtol=0, msg=f"call {call}")
+        stats = dict(torch._rust._cfg_plan_stats())
+        functions = stats["code objects"] + stats["clones"]
+        self.assertGreaterEqual(functions, 3)
+        self.assertLessEqual(stats["plans"], 2 * functions)
+        self.assertTrue(any(r["state"] == "region" for r in vm.regions(g)))
+
+    @isolated
+    def test_frame_goes_on_with_its_plan_while_its_function_is_optimized(self):
+        # The innermost frame returns first and has the function optimized
+        # (and, on later calls, optimized again and given regions) while the
+        # frames above it are still running what they started with.
+        g = vm(plans_descend)
+        for call in range(40):
+            x = torch.randn(4, 8)
+            self.assertEqual(
+                g(x, 6), plans_descend(x, 6), atol=0, rtol=0, msg=f"call {call}"
+            )
+        stats = dict(torch._rust._cfg_plan_stats())
+        self.assertLessEqual(
+            stats["plans"], 2 * (stats["code objects"] + stats["clones"])
+        )
+
+
 def reasons_leaves(x, n, stop):
     for i in range(n):
         x = (x.sin() * 2 + 1).tanh().cos()
