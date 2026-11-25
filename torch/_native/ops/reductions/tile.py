@@ -298,6 +298,29 @@ def _uniform_tree_issue(
     return None
 
 
+def uniform_tree_ok(trait, count, threads_per_block, npairs_red):
+    """Whether TileReduce accepts a general-axis uniform Welford tree of count values per
+    output on a block of threads_per_block threads.
+
+    TileReduce also needs a linear-order fold of inputs (not partials) indexed by r over
+    an unclamped run (no flat tail or ragged chunk), which ReduceBlock's defaults give,
+    and raises itself on a block that is not a power-of-two warp count.
+    """
+    issue = _uniform_tree_issue(
+        trait,
+        count,
+        threads_per_block,
+        npairs_red,
+        axis="general",
+        order="linear",
+        combine=False,
+        gidx_from="r",
+        flat_tail=False,
+        ragged_chunk=False,
+    )
+    return issue is None
+
+
 UniformCombineMode = Literal["off", "counts", "weights"]
 UNIFORM_COMBINE_MODES = get_args(UniformCombineMode)
 

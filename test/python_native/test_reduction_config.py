@@ -28,7 +28,12 @@ if not TEST_CUTEDSL:
         sys.exit(0)
     raise unittest.SkipTest("CuTeDSL not available")
 
-from torch._native.ops.reductions import kernel_general as kg, kernel_rowtile as rt
+from torch._native.ops.reductions import (
+    kernel_coltile as ct,
+    kernel_general as kg,
+    kernel_rowtile as rt,
+    traits as T,
+)
 
 
 def _served(trait_key):
@@ -83,6 +88,32 @@ class TestReductionConfig(TestCase):
             with warnings.catch_warnings():
                 warnings.simplefilter("error")
                 rt.inner_tree_fallback("first")
+
+    def test_b200_ragged_welford_columns_need_combine_equal(self):
+        """Decline the grouped Welford column rule for a trait without combine_equal."""
+
+        class OwnCombine(T.WelfordOps):
+            def combine(self, a, b):
+                return super().combine(a, b)
+
+        kwargs = dict(itemsize=2, acc_bits=32, nouts=1, welford_outs=1)
+        # At 16 MiB, 4095 columns take b200_ragged_c4095_ordered first.
+        for columns, anchor in ((257, 16 << 20), (4095, 64 << 20)):
+            args = ((10, 0), torch.float16, anchor // (columns * 2), columns, 1, 3)
+            for kind, rule in (
+                (T.WelfordOps, f"b200_ragged_welford_c{columns}"),
+                (OwnCombine, "default"),
+            ):
+                cfg = ct.select_col_config(*args, trait_type=kind, **kwargs)
+                self.assertEqual(cfg.rule, rule, msg=f"{kind.__name__} at C={columns}")
+
+    def test_b200_ragged_rows_need_an_aligned_base(self):
+        """Decline ragged rows without a 16-byte aligned base: reduce_row_tile refuses
+        them."""
+        args = ((10, 0), torch.float16, 4095)
+        kw = dict(trait=T.SumOps(), acc_bits=32, pitch=4095)
+        self.assertTrue(kg._ragged_rows_ok(*args, 16, **kw))
+        self.assertFalse(kg._ragged_rows_ok(*args, 8, **kw))
 
 
 @unittest.skipUnless(TEST_CUDA and SM90OrLater, "CuTeDSL requires Hopper or later")
@@ -148,6 +179,106 @@ class TestReductionConfigDevice(TestCase):
         want = "rowitree" if stride == 1 else "genitree"
         self.assertTrue(any(t.startswith(want) for t in _served(key)), _served(key))
         self.assertEqual(got, x.double().sum(1).float(), atol=1e-4, rtol=1e-4)
+
+    @parametrize(
+        "op,dtype,N,pitch",
+        [
+            ("sum", torch.float32, 255, 255),
+            ("var_mean", torch.bfloat16, 1025, 1025),
+            ("var_mean", torch.float16, 16383, 16383),
+            ("sum", torch.float16, 1026, 1026),
+            ("sum", torch.bfloat16, 1024, 1025),
+            ("sum", torch.float32, 4097, 4104),
+        ],
+        name_fn=lambda op, dtype, N, pitch: f"{op}_{str(dtype)[6:]}_{N}_{pitch}",
+    )
+    def test_b200_ragged_rows_route(self, device, op, dtype, N, pitch):
+        """Serve unordered rows whose width or pitch is not whole vectors inside the B200
+        band with the ragged-vector plan."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
+            self.skipTest("the ragged-row route is measured on B200 only")
+        x = torch.randn(64, pitch, device=device, dtype=dtype)[:, :N]
+        key = f"ragged_route_{op}_{str(dtype)[6:]}_{N}_{pitch}"
+        if op == "sum":
+            trait, outs = T.SumOps(acc=cutlass.Float32), [torch.float32]
+            got = (kg.reduce_dim(trait, key, x, [1], outs[0], order="unordered"),)
+        else:
+            trait, outs = T.VarMeanOps(correction=1), [torch.float32] * 2
+            got = kg.reduce_dim2(trait, key, x, [1], outs, order="unordered")
+        routed = {k for k in rt._CACHE if k[:2] == ("rowtile", key)}
+        self.assertEqual(len(routed), 1, routed)
+        # Row keys carry ragged_vector, so an explicit ragged launch reuses the plan.
+        kw = dict(nouts=len(outs), order="linear", ragged_vector=True)
+        rt.reduce_row_tile(trait, key, x, outs, **kw)
+        self.assertEqual({k for k in rt._CACHE if k[:2] == ("rowtile", key)}, routed)
+        with torch.backends.python_native.cutedsl.disabled():
+            xf = x.float()
+            want = (xf.sum(1),) if op == "sum" else torch.var_mean(xf, dim=1)
+        self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
+
+    @parametrize("op", ["argmax", "var"])
+    def test_b200_strided_c256_route(self, device, op):
+        """Serve b200_strided_c256 at 8 outputs, within its 2-output-and-up range, with
+        the indexed tree."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
+            self.skipTest("the strided rules are measured on B200 only")
+        x = torch.randn(8, 512, device=device)[:, ::2]
+        key = f"{op}_strided_c256"
+        if op == "argmax":
+            trait, out = T.ArgMaxOps(acc=cutlass.Float32), torch.int64
+        else:
+            trait, out = T.WelfordOps(correction=1, acc=cutlass.Float32), torch.float32
+        got = kg.reduce_dim(trait, key, x, [1], out, order="unordered")
+        self.assertEqual(_served(key), {"genitree"})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.argmax(1) if op == "argmax" else x.var(1)
+        self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
+
+    def test_b200_strided_index_route(self, device):
+        """Run b200_strided_index's fp32 64-thread blocks at its smallest anchor."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
+            self.skipTest("the strided rules are measured on B200 only")
+        count, num_o = 1024, 2048
+        x = torch.randn(num_o, 2 * count, device=device)[:, ::2]
+        trait, key = T.ArgMaxOps(acc=cutlass.Float32), "argmax_strided_index"
+        got = kg.reduce_dim(trait, key, x, [1], torch.int64, order="unordered")
+        pairs = dict(red_pairs=((count, 2),), kept_pairs=((num_o, 2 * count),))
+        op = kg.ReduceBlock(trait, count=count, num_o=num_o, **pairs, block=64)
+        keys = {k for k in kg._COMPILE_CACHE if k[1:3] == ("reduce", key)}
+        prefix = (x.get_device(), "reduce", key, x.dtype, (torch.int64,))
+        self.assertEqual(keys, {prefix + op.cache_sig})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.argmax(1)
+        self.assertEqual(got, want)
+
+    @parametrize("count", [1024, 4095, 4096])
+    def test_b200_strided_welford_route(self, device, count):
+        """Fold b200_strided_welford's anchors with the uniform Welford tree."""
+        import cutlass
+
+        if torch.cuda.get_device_capability(device) not in kg._B200_CCS:
+            self.skipTest("the strided rules are measured on B200 only")
+        num_o = 2048
+        x = torch.randn(num_o, 2 * count, device=device)[:, ::2]
+        trait = T.WelfordOps(correction=1, acc=cutlass.Float32)
+        key = f"var_strided_tree_{count}"
+        got = kg.reduce_dim(trait, key, x, [1], torch.float32, order="unordered")
+        pairs = dict(red_pairs=((count, 2),), kept_pairs=((num_o, 2 * count),))
+        shape = dict(count=count, num_o=num_o, **pairs, block=64)
+        tree = kg.ReduceBlock(trait, **shape, uniform_tree=True)
+        self.assertNotEqual(tree.cache_sig, kg.ReduceBlock(trait, **shape).cache_sig)
+        keys = {k for k in kg._COMPILE_CACHE if k[1:3] == ("reduce", key)}
+        prefix = (x.get_device(), "reduce", key, x.dtype, (torch.float32,))
+        self.assertEqual(keys, {prefix + tree.cache_sig})
+        with torch.backends.python_native.cutedsl.disabled():
+            want = x.var(1)
+        self.assertEqual(got, want, atol=1e-4, rtol=1e-4)
 
     def test_row_kernel_leaves_the_environment_to_dispatch(self, device):
         """Follow only the order argument in direct row calls, even under strict."""

@@ -778,6 +778,8 @@ class TestKernelRowTile(TestCase):
             (torch.float64, 1),  # vec 2, no full vector group
             (torch.float32, 4098),  # even N: residues 0 and 2 only
             (torch.float16, 4096),  # whole vectors: the rolled path
+            (torch.float16, 255),  # narrowest B200 ragged-row width
+            (torch.bfloat16, 16383),  # widest B200 ragged-row width
         ),
     )
     def test_ragged_vector_edges_and_interior(self, dtype, columns):
@@ -1014,6 +1016,24 @@ class TestKernelRowTile(TestCase):
                 rt.reduce_row_tile(
                     trait, "ragged_misaligned", x, [torch.float32], ragged_vector=True
                 )
+
+    @parametrize("op", ["argmax", "var_mean"])
+    def test_ragged_vector_int64_index_and_var_mean(self, op):
+        """Return int64 argmax indices and both var_mean fields from ragged rows."""
+        # Small integers give argmax ties to break.
+        x = torch.randint(-4, 5, (33, 1025), device="cuda").to(torch.float32)
+        trait, outs = {
+            "argmax": (T.ArgMaxOps(acc=cutlass.Float32), [torch.int64]),
+            "var_mean": (T.VarMeanOps(correction=1), [torch.float32] * 2),
+        }[op]
+        kw = dict(nouts=len(outs), order="linear", ragged_vector=True)
+        got = rt.reduce_row_tile(trait, f"ragged_{op}", x, outs, **kw)
+        with torch.backends.python_native.cutedsl.disabled():
+            expected = {
+                "argmax": lambda: (x.argmax(dim=1),),
+                "var_mean": lambda: torch.var_mean(x, dim=1),
+            }[op]()
+        self.assertEqual(got, expected, atol=1e-4, rtol=1e-4)
 
 
 instantiate_parametrized_tests(TestKernelRowTile)
