@@ -31,6 +31,7 @@ import operator
 import os
 import re
 import types
+import weakref
 from collections.abc import Callable
 from typing import Any
 
@@ -652,6 +653,21 @@ _compiled: dict[Any, Any] = {}
 
 class _Refused(Exception):
     pass
+
+
+class _Bound:
+    """A region's lowering that took the region's constants once (see
+    torch.vm.lower_to's ``bind``): ``call`` takes the other inputs. The
+    executor calls ``rebind`` before an entry at which the memory of a
+    constant is somewhere else (exec/reads.rs)."""
+
+    def __init__(self, bind: Callable, consts: list[torch.Tensor]) -> None:
+        self.bind = bind
+        self.consts = consts
+        self.call = bind(consts)
+
+    def rebind(self) -> None:
+        self.call = self.bind(self.consts)
 
 
 # Makes autograd.Function.apply raise, before the forward runs, while a region
@@ -1565,6 +1581,19 @@ def _tree_holders(args, plan):
     return out
 
 
+# The tensors the traced regions gave the program, by id: (a weak reference,
+# its region's name, which output). An input of a later trace that is one of
+# them says so in its type (TensorType.made_by). The references have no
+# callback: one would run, as Python code, at whichever instruction of the
+# program drops the tensor.
+_made: dict[int, tuple[Any, str, int]] = {}
+
+
+def _made_by(x: torch.Tensor) -> tuple[str, int] | None:
+    entry = _made.get(id(x))
+    return entry[1:] if entry is not None and entry[0]() is x else None
+
+
 def _input_types(args, plan, types, consts):
     """torch.vm Types of the graph's inputs: tensor args' from what the VM
     recorded (``types``, by arg), container leaves', floats' and constants'
@@ -1578,6 +1607,7 @@ def _input_types(args, plan, types, consts):
             continue
         if p[0] == "tensor":
             out.append(_types.from_rust(t, a))
+            out[-1].made_by = _made_by(a)
             continue
         if p[0] == "float":
             floats.append(_types.FloatType(p[1]))
@@ -1586,7 +1616,10 @@ def _input_types(args, plan, types, consts):
             continue
         leaves: list[Any] = []
         _walk(a, leaves, [])
-        out.extend(_types.exact(x) for x in leaves if isinstance(x, torch.Tensor))
+        for x in leaves:
+            if isinstance(x, torch.Tensor):
+                out.append(_types.exact(x))
+                out[-1].made_by = _made_by(x)
         floats.extend(_types.FloatType(c[1]) for c in p[2] if c[0] == _FLOAT)
     return out + floats + [_types.exact(c, const=True) for c in consts]
 
@@ -2018,6 +2051,7 @@ def trace_region(
                 result["refused"] = str(e)
                 return []
             result["objects"] = objects
+            result["tensors"] = tensor_outs
             return tensor_outs
         finally:
             _scalar_state = None
@@ -2103,6 +2137,7 @@ def trace_region(
             print(f"region {name}: refused: {e}")
         return None
     compiled = _compile(name, gm, example, consts, args, plan, types)
+    bound: _Bound | None = None
     if reads is not None:
         # A constant the program binds anew (`m.seen = m.seen + y`) is no
         # longer what the body would read: its home is one of the reads,
@@ -2113,6 +2148,13 @@ def trace_region(
         # structure, on every call.
         reads.forget(_tree_holders(args, plan))
         stats["reads"] += len(reads)
+        # The graph is for the constants' shapes and dtypes as well: checked
+        # with the reads. Where every constant is checked, a lowering that
+        # asked for it is bound to them, and hears when one's memory moved.
+        bind = getattr(compiled, "bind", None)
+        if reads.constants(consts) == len(consts) and bind is not None:
+            bound = _Bound(bind, consts)
+            reads.bound(bound.rebind)
     record = _traced(
         name,
         "region",
@@ -2121,6 +2163,11 @@ def trace_region(
         constants=len(consts),
         reads=reads,
     )
+    for key in [key for key, entry in _made.items() if entry[0]() is None]:
+        del _made[key]
+    for k, t in enumerate(result["tensors"]):
+        if isinstance(t, torch.Tensor):
+            _made[id(t)] = (weakref.ref(t), name, k)
     if DEBUG:
         print(
             f"region {name}: {n_ops} ops, {len(example)} inputs + {len(consts)} constants"
@@ -2156,10 +2203,11 @@ def trace_region(
                 print(f"region {name}: miss on {what}")
             return None
         record.runs += 1
+        call, rest = (compiled, consts) if bound is None else (bound.call, ())
         if not below_autocast:
-            return compiled(*inputs, *consts)
+            return call(*inputs, *rest)
         with torch._C._ExcludeDispatchKeyGuard(autocast):
-            return compiled(*inputs, *consts)
+            return call(*inputs, *rest)
 
     # For _dropped.
     func.record = record  # type: ignore[attr-defined]

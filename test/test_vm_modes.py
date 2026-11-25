@@ -2,8 +2,10 @@
 
 """Tests of torch.vm under the thread state that sits above the level a region
 is traced at: a region's graph is what ran below autocast, and it is run, and
-lowered, without autocast treating its operators a second time. And of what a
-region keeps of the call it was traced on: none of that call's tensors.
+lowered, without autocast treating its operators a second time. Of what a
+region keeps of the call it was traced on: none of that call's tensors. And
+of a region's constants, the weights its graph reads: what the region checks
+of them, and a lowering that is bound to them.
 """
 
 import contextlib
@@ -12,6 +14,7 @@ import gc
 import os
 import subprocess
 import sys
+import time
 import traceback
 import unittest
 import weakref
@@ -455,6 +458,245 @@ class TestVmTracedTensors(TestCase):
 
 
 instantiate_device_type_tests(TestVmTracedTensors, globals())
+
+
+class ModesWeights(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(8, 8))
+        self.b = torch.nn.Parameter(torch.randn(8))
+
+    def forward(self, x):
+        y = torch.mm(x, self.w) + self.b
+        return (y.reshape(y.shape[0] * y.shape[1]).tanh() * 2 + 1).cos()
+
+
+def modes_chained(x, w):
+    y = (x * w).sin().cos().tanh()
+    # No region holds this call: the tensor work is two regions.
+    time.perf_counter()
+    return (y + x).sin().cos().tanh() * 2
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmConstants(TestCase):
+    """A region's constants are the tensors its graph reads that are none of
+    its arguments: a module's weights."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def bound(self, log):
+        """A block pass whose lowering takes the constants once: it notes when
+        it is bound and what it is called with, and does not look at the
+        constants when it is called."""
+
+        def lower(gm, input_types):
+            def bind(consts):
+                where = [torch._C._data_address(c) for c in consts]
+                log.append(("bind", len(consts)))
+
+                def call(*inputs):
+                    log.append(("call", len(inputs)))
+                    # Between two binds the constants are where they were.
+                    now = [torch._C._data_address(c) for c in consts]
+                    if now != where:
+                        raise AssertionError("a constant moved and bind was not called")
+                    return gm.forward(*inputs, *consts)
+
+                return call
+
+            return vm.lower_to(gm, bind=bind)
+
+        return lower
+
+    @isolated
+    def test_weight_given_another_shape_is_traced_again(self, device):
+        # `param.data = ...` leaves the parameter the object it was. The graph
+        # is for its shape: a region is entered while its constants have the
+        # metadata of the trace.
+        net = ModesWeights().to(device)
+        compiled = vm(net.forward, passes=EARLY)
+        for call in range(14):
+            x = torch.randn(4, 8, device=device)
+            if call == 8:
+                net.w.data = torch.randn(8, 8, device=device)
+            if call == 11:
+                net.w.data = torch.randn(8, 16, device=device)
+                net.b.data = torch.randn(16, device=device)
+            with torch.no_grad():
+                want, got = net(x), compiled(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        (row,) = (r for r in vm.regions(compiled) if r["state"] == "region")
+        # The swap to the same shape is no miss; the other shape is one, and
+        # gets a region of its own.
+        self.assertEqual((row["variants"], sum(row["misses"].values())), (2, 1))
+
+    @parametrize("lowering", ("autograd", "inductor"))
+    @isolated
+    def test_weight_that_starts_to_require_grad(self, device, lowering):
+        # What AOT Autograd made of the region while the weight took no
+        # gradient has no backward: the region is traced again when it does.
+        behind = {
+            "autograd": (vm.passes.Autograd(), vm.passes.Partition()),
+            "inductor": (vm.passes.Inductor(),),
+        }[lowering]
+        net = ModesWeights().to(device).requires_grad_(False)
+        compiled = vm(net.forward, passes=(*EARLY, *behind))
+        for call in range(12):
+            x = torch.randn(4, 8, device=device)
+            if call == 8:
+                net.w.requires_grad_(True)
+            grads = []
+            for fn in (net, compiled):
+                out = fn(x).sum()
+                self.assertEqual(out.requires_grad, call >= 8, msg=f"call {call}")
+                net.w.grad = None
+                if call >= 8:
+                    out.backward()
+                grads.append(net.w.grad)
+            msg, close = f"call {call}", {"rtol": 1e-04, "atol": 1e-05}
+            self.assertEqual(grads[1], grads[0], msg=msg, **close)
+        self.assertGreater(region_runs(compiled), 0)
+
+    @isolated
+    def test_lowering_is_bound_to_the_constants(self, device):
+        log = []
+        net = ModesWeights().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, self.bound(log)))
+        seen = []
+        for call in range(16):
+            x = torch.randn(4, 8, device=device)
+            with torch.no_grad():
+                if call == 8:
+                    net.w.add_(1)
+                if call == 10:
+                    net.w.data = torch.randn(8, 8, device=device)
+                if call == 13:
+                    net.b.data = torch.randn(8, device=device)
+                want = net(x)
+                del log[:]
+                got = compiled(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+            seen.append(list(log))
+        # Bound at the trace (the fourth call), and again before the calls at
+        # which a weight's memory was another; a weight written in place
+        # (call 8) is read where it is. Every call hands over the one input
+        # that is no constant.
+        binds = [at for at, entries in enumerate(seen) if ("bind", 2) in entries]
+        self.assertEqual(binds, [3, 10, 13])
+        self.assertEqual(seen[4:10], [[("call", 1)]] * 6)
+        self.assertEqual(seen[10], [("bind", 2), ("call", 1)])
+
+    @isolated
+    def test_bound_lowering_of_each_region_has_its_own_constants(self, device):
+        # Two layers of one class have the same graph, and share what the
+        # passes made of it: each region binds the lowering to its own weights.
+        log = []
+        first, second = ModesWeights().to(device), ModesWeights().to(device)
+
+        def both(x):
+            return first(x), second(x)
+
+        compiled = vm(both, passes=(*EARLY, self.bound(log)))
+        for call in range(8):
+            x = torch.randn(4, 8, device=device)
+            with torch.no_grad():
+                want, got = both(x), compiled(x)
+            self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertEqual(log.count(("bind", 2)), 2)
+        self.assertGreater(region_runs(compiled), 0)
+
+    def test_bound_lowering_called_with_every_input(self, device):
+        # What `verify`, or a pass that wraps the lowering, does: then the
+        # lowering looks at the constants itself.
+        gm = torch.fx.symbolic_trace(lambda x, w: x * w + 1)
+        gm.meta["vm_const_inputs"] = ["w"]
+        binds = []
+
+        def bind(consts):
+            binds.append(list(consts))
+            return lambda x: x * consts[0] + 1
+
+        lowered = vm.lower_to(gm, bind=bind)
+        x, w = torch.randn(4, device=device), torch.randn(4, device=device)
+        other = torch.randn(4, device=device)
+        self.assertEqual(lowered(x, w), x * w + 1)
+        self.assertEqual(lowered(x + 1, w), (x + 1) * w + 1)
+        self.assertEqual(len(binds), 1)
+        self.assertEqual(lowered(x, other), x * other + 1)
+        w.data = torch.randn(4, device=device)
+        self.assertEqual(lowered(x, w), x * w + 1)
+        self.assertEqual([c[0] is w for c in binds], [True, False, True])
+        with self.assertRaisesRegex(TypeError, "bind="):
+            vm.lower_to(gm)
+
+    @isolated
+    def test_input_type_says_which_region_made_the_input(self, device):
+        seen = []
+
+        def look(gm, input_types):
+            seen.append([t.made_by for t in input_types])
+            return gm
+
+        compiled = vm(modes_chained, passes=(*EARLY, look))
+        w = torch.randn(8, device=device)
+        for _ in range(8):
+            x = torch.randn(8, device=device)
+            self.assertEqual(compiled(x, w), modes_chained(x, w), atol=0, rtol=0)
+        rows = [r["where"] for r in vm.regions(compiled) if r["state"] == "region"]
+        # The second region's first input is what the first region gave.
+        self.assertEqual(seen, [[None, None], [(rows[0], 0), None]])
+
+
+instantiate_device_type_tests(TestVmConstants, globals())
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+@unittest.skipUnless(torch.cuda.is_available(), "needs CUDA")
+class TestVmCudaGraphs(TestCase):
+    """Lowerings that replay CUDA graphs of their own."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    @isolated
+    def test_cuda_graph_reads_the_constants_where_they_are(self):
+        # The lowering a CUDA graph wants: the weights' addresses are in the
+        # graph, and nothing compares them on a call.
+        captures = []
+
+        def graphed(gm, input_types):
+            def bind(consts):
+                state = {}
+
+                def call(x):
+                    if not state:
+                        state["x"] = torch.empty_like(x)
+                        state["graph"] = torch.cuda.CUDAGraph()
+                        with torch.cuda.graph(state["graph"]):
+                            state["outs"] = gm.forward(state["x"], *consts)
+                        captures.append(len(consts))
+                    state["x"].copy_(x)
+                    state["graph"].replay()
+                    return [out.clone() for out in state["outs"]]
+
+                return call
+
+            return vm.lower_to(gm, bind=bind)
+
+        device = "cuda"
+        net = ModesWeights().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, graphed))
+        with torch.no_grad():
+            for call in range(14):
+                x = torch.randn(4, 8, device=device)
+                if call == 8:
+                    net.w.add_(1)
+                if call == 11:
+                    net.w.data = torch.randn(8, 8, device=device)
+                want, got = net(x), compiled(x)
+                self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertEqual(captures, [2, 2])
+        self.assertGreater(region_runs(compiled), 0)
 
 
 if __name__ == "__main__":

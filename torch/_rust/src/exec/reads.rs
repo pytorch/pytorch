@@ -54,6 +54,7 @@ use pyo3::prelude::*;
 
 use super::ffi::*;
 use crate::bindings::ffi as tffi;
+use crate::cfg::ir::TensorSpec;
 
 // Entries a region may have, and items a container read whole may have.
 const MAX_ENTRIES: usize = 1 << 15;
@@ -835,12 +836,30 @@ unsafe fn call_read(callee: *mut PyObject, args: &[*mut PyObject], result: *mut 
     }
 }
 
+// A tensor the region's graph reads that is none of its arguments: a weight.
+// The region holds the object (the read of its home says it is still the
+// one) and is entered while it has the metadata of the trace, which the
+// graph is specialized on. Where its data is may change under the same
+// object (`param.data = ...`): the graph reads the tensor wherever it is,
+// and a lowering that was bound to the constants is bound anew first.
+struct Constant {
+    obj: Py<PyAny>,
+    spec: TensorSpec,
+    requires_grad: bool,
+    at: Cell<usize>,
+}
+
 // What a region is checked against when it is entered (see the top of the
 // file). Made by torch._rust._region_reads when the body's trace is over.
 #[pyclass(frozen, module = "torch._rust")]
 pub struct Reads {
     thread: u64,
     entries: GilCell<Entries>,
+    consts: GilCell<Vec<Constant>>,
+    // Called before the region's function when a constant's data moved (set
+    // for a lowering bound to the constants), and whether one did.
+    rebind: GilCell<Option<Py<PyAny>>>,
+    moved: Cell<bool>,
     // Checks left that also drop the entries nothing can change any more.
     sweeps: Cell<u8>,
     misses: Cell<u64>,
@@ -956,6 +975,8 @@ impl Reads {
             "a namespace or a container"
         } else if !e.reads.iter().all(|r| r.holds()) {
             "a cell or a slot"
+        } else if !self.constants_hold() {
+            "the shape, dtype, device or requires_grad of a constant"
         } else {
             return true;
         };
@@ -963,6 +984,38 @@ impl Reads {
         MISSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.last.set(why);
         false
+    }
+
+    // Whether each constant has the metadata of the trace. For a lowering
+    // bound to the constants, also notes whether the data of one is
+    // somewhere else than at the last look.
+    unsafe fn constants_hold(&self) -> bool {
+        let watch = (*self.rebind.get()).is_some();
+        for c in &*self.consts.get() {
+            let Some(t) = tffi::tensor_by_type(c.obj.as_ptr() as usize).as_ref() else { return false };
+            if t.requires_grad() != c.requires_grad || !tffi::tensor_matches(t, c.spec.dtype, c.spec.device_type, c.spec.device_index, &c.spec.sizes, &c.spec.strides) {
+                return false;
+            }
+            if watch {
+                let at = tffi::tensor_data_address(t);
+                if at != c.at.get() {
+                    c.at.set(at);
+                    self.moved.set(true);
+                }
+            }
+        }
+        true
+    }
+
+    // Has the lowering bound anew if a constant's data moved since it was
+    // bound. Runs Python code: after the check, before the region's function.
+    pub fn rebind(&self, py: Python<'_>) -> PyResult<()> {
+        if self.moved.replace(false)
+            && let Some(f) = unsafe { &*self.rebind.get() }
+        {
+            f.bind(py).call0()?;
+        }
+        Ok(())
     }
 }
 
@@ -1003,6 +1056,37 @@ impl Reads {
         true
     }
 
+    /// The tensors the region's graph reads that are none of its arguments
+    /// (weights): the region is entered while each has the dtype, device,
+    /// sizes, strides and requires_grad it has now. Returns how many of them
+    /// are checked: all that are plain strided tensors.
+    fn constants(&self, consts: Vec<Bound<'_, PyAny>>) -> usize {
+        let list = unsafe { &mut *self.consts.get() };
+        for x in consts {
+            let Some(t) = (unsafe { tffi::tensor_by_type(x.as_ptr() as usize).as_ref() }) else { continue };
+            let mut m = tffi::TensorMeta::default();
+            tffi::tensor_meta(t, &mut m);
+            let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: t.sizes().to_vec(), strides: t.strides().to_vec() };
+            if tffi::tensor_matches(t, spec.dtype, spec.device_type, spec.device_index, &spec.sizes, &spec.strides) {
+                list.push(Constant { obj: x.unbind(), spec, requires_grad: t.requires_grad(), at: Cell::new(tffi::tensor_data_address(t)) });
+            }
+        }
+        list.len()
+    }
+
+    /// For a lowering bound to the constants: from now on ``rebind()`` is
+    /// called, before the region's function, on an entry at which the data of
+    /// a constant is not where it was at the entry before (or now).
+    fn bound(&self, rebind: Bound<'_, PyAny>) {
+        for c in unsafe { &*self.consts.get() } {
+            if let Some(t) = unsafe { tffi::tensor_by_type(c.obj.as_ptr() as usize).as_ref() } {
+                c.at.set(tffi::tensor_data_address(t));
+            }
+        }
+        unsafe { *self.rebind.get() = Some(rebind.unbind()) };
+        self.moved.set(false);
+    }
+
     /// Drops what was read from these containers and objects: the region
     /// checks them itself (its arguments, by structure).
     fn forget(&self, holders: Vec<Bound<'_, PyAny>>) {
@@ -1022,6 +1106,7 @@ impl Reads {
             if unsafe { exact_scalar(o.as_ptr()) } || o.is_none() || o.is_instance_of::<pyo3::types::PyBool>() { format!("{}", o.repr().map_or("?".into(), |r| r.to_string())) } else { format!("<{tp} at {:p}>", o.as_ptr()) }
         };
         let mut out = vec![format!("thread state {:#x}", self.thread)];
+        out.extend(unsafe { &*self.consts.get() }.iter().map(|c| format!("{} keeps its shape {:?}, strides, dtype, device and requires_grad", show(&c.obj), c.spec.sizes)));
         out.extend(e.typed.iter().map(|t| format!("type({}) is {}", show(&t.obj), show(&t.class))));
         for c in &e.classes {
             let class = c.class.bind(py).getattr("__qualname__").map_or("?".into(), |n| n.to_string());
@@ -1103,7 +1188,17 @@ pub fn _region_reads(py: Python<'_>) -> PyResult<(Option<Py<Reads>>, Option<Stri
         }
         sweep(&mut e);
     }
-    let reads = Reads { thread: t.thread, entries: GilCell::new(e), sweeps: Cell::new(2), misses: Cell::new(0), last: Cell::new(""), hot: Cell::new(0) };
+    let reads = Reads {
+        thread: t.thread,
+        entries: GilCell::new(e),
+        consts: GilCell::new(vec![]),
+        rebind: GilCell::new(None),
+        moved: Cell::new(false),
+        sweeps: Cell::new(2),
+        misses: Cell::new(0),
+        last: Cell::new(""),
+        hot: Cell::new(0),
+    };
     Ok((Some(Py::new(py, reads)?), None))
 }
 

@@ -151,6 +151,11 @@ class TensorType(Type):
     # The traced run's strides (the region checks them exactly; the lattice
     # doesn't record strides yet).
     strides: tuple[int, ...] | None = None
+    # (a region's name, which of its outputs) when, at the call that was
+    # traced, this input was that very tensor: the fresh output of a region
+    # traced before it. What the traced call saw, not a check: a later call
+    # may hand the region a tensor from somewhere else.
+    made_by: tuple[str, int] | None = None
     _const: torch.Tensor | None = None
     # Told when a pass reads `const` (its output then depends on this tensor).
     _on_const: Any = None

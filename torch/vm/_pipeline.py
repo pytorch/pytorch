@@ -26,7 +26,13 @@ from typing import Any
 import torch
 import torch.fx
 from torch.vm import _guards
-from torch.vm._graph import below_autocast, copy_graph_module, direct, specialize_floats
+from torch.vm._graph import (
+    below_autocast,
+    BoundLowering,
+    copy_graph_module,
+    direct,
+    specialize_floats,
+)
 from torch.vm._types import exact, TensorType, Type
 
 
@@ -351,6 +357,36 @@ def _dispatch(versions: list[Version]) -> Callable:
         base.hits += 1
         return run_base(*inputs)
 
+    def bind(consts):
+        """``run`` for one region: without its constants, which the versions
+        lowered with ``lower_to(bind=)`` take here and the others are handed
+        on every call."""
+
+        def bound(call):
+            if isinstance(call, BoundLowering):
+                return call.bind(consts)
+            return lambda *inputs: call(*inputs, *consts)
+
+        calls = [(v, bound(call)) for v, call in guarded]
+        call_base = bound(run_base)
+
+        def run(*inputs):
+            for v, call in calls:
+                failed = _guards.failing(v.checks, (*inputs, *consts))
+                if failed is None:
+                    v.hits += 1
+                    return call(*inputs)
+                key = repr(failed[1])
+                v.misses[key] = v.misses.get(key, 0) + 1
+            base.hits += 1
+            return call_base(*inputs)
+
+        return run
+
+    # For torch._rust_inductor.trace_region, which binds per region.
+    calls = [run_base, *(call for _, call in guarded)]
+    if any(isinstance(call, BoundLowering) for call in calls):
+        run.bind = bind  # type: ignore[attr-defined]
     return run
 
 

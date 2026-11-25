@@ -354,10 +354,63 @@ def match(
     return out
 
 
-def lower_to(gm: torch.fx.GraphModule, fn: Callable) -> torch.fx.GraphModule:
+class BoundLowering:
+    """The call ``lower_to(gm, bind=...)`` puts in a graph. The VM takes
+    ``bind`` from it and calls what that gives with the inputs that are no
+    constants. Called itself, with every input (by ``verify``, by a pass that
+    wraps it), it looks at the constants on each call, as a lowering had to
+    before: it binds again when they are other tensors, or elsewhere, than
+    at its last call."""
+
+    def __init__(self, make: Callable, constants: list[int], inputs: int) -> None:
+        self.make = make
+        self.constants = constants
+        self.rest = [i for i in range(inputs) if i not in set(constants)]
+        # FX names a call by its target's __name__ and __module__.
+        self.__name__ = getattr(make, "__name__", "bound")
+        self.__module__ = getattr(make, "__module__", None) or __name__
+        self._key: list[tuple[int, int]] | None = None
+        self._call: Callable | None = None
+
+    def bind(self, consts: Sequence[torch.Tensor]) -> Callable:
+        return self.make(list(consts))
+
+    def __call__(self, *inputs):
+        consts = [inputs[i] for i in self.constants]
+        key = [(id(c), torch._C._data_address(c)) for c in consts]
+        if self._call is None or key != self._key:
+            self._call, self._key = self.make(consts), key
+        return self._call(*[inputs[i] for i in self.rest])
+
+
+def lower_to(
+    gm: torch.fx.GraphModule,
+    fn: Callable | None = None,
+    *,
+    bind: Callable | None = None,
+) -> torch.fx.GraphModule:
     """A graph with ``gm``'s inputs whose body is one call, ``fn(*inputs)``,
     returning its outputs: how a pass that compiles the block (to a callable)
-    returns a graph."""
+    returns a graph.
+
+    With ``bind`` in the place of ``fn``, the lowering takes the block's
+    constants (its weights: the inputs whose type ``is_const``, in order)
+    once and is called without them: ``bind(constants)`` returns the callable
+    of the other inputs. The VM calls ``bind`` when a region starts to use
+    the lowering, and again before a call at which a constant's memory is not
+    where it was (``param.data = ...``). Between two binds the constants are
+    the same tensors at the same addresses with the same shapes and dtypes,
+    so the callable may read them where they are (a CUDA graph) without
+    looking; a weight written in place stays where it is, and causes no new
+    bind. A parameter bound to another tensor, or one whose shape or dtype
+    changed, makes the VM trace the block again."""
+    if (fn is None) == (bind is None):
+        raise TypeError("lower_to takes a callable, or bind=")
+    names = [p.name for p in gm.graph.find_nodes(op="placeholder")]
+    if fn is None:
+        consts = set(gm.meta.get("vm_const_inputs", ()))
+        at = [i for i, name in enumerate(names) if name in consts]
+        fn = BoundLowering(bind, at, len(names))
     g = torch.fx.Graph()
     phs = [g.placeholder(p.name) for p in gm.graph.find_nodes(op="placeholder")]
     for new, old in zip(phs, gm.graph.find_nodes(op="placeholder")):

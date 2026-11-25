@@ -32,6 +32,7 @@ pub mod ffi {
         fn region_thread_state() -> u64;
         fn set_grad_mode(on: bool) -> bool;
         fn tensor_version(t: &Tensor) -> i64;
+        fn tensor_data_address(t: &Tensor) -> usize;
         fn forward_ad_active() -> bool;
         fn saved_tensor_hooks_active() -> bool;
         fn tensor_matches(

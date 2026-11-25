@@ -191,6 +191,19 @@ int64_t tensor_version(const Tensor& t) {
   return t._version();
 }
 
+std::uintptr_t tensor_data_address(const Tensor& t) noexcept {
+  const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
+  if (!t.defined() || impl->is_python_dispatch() || !impl->has_storage() ||
+      t.layout() != c10::kStrided) {
+    return 0;
+  }
+  try {
+    return reinterpret_cast<std::uintptr_t>(impl->data());
+  } catch (...) {
+    return 0;
+  }
+}
+
 bool forward_ad_active() {
   return torch::autograd::ForwardADLevel::has_any_level() &&
       c10::AutogradState::get_tls_state().get_fw_grad_mode();

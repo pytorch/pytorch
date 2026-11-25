@@ -705,6 +705,13 @@ pub unsafe fn call(spec: &RegionSpec, args: &[*mut PyObject]) -> Result<Option<V
         }
         return Ok(None);
     }
+    // A lowering bound to the region's constants is bound anew first if the
+    // data of one moved (see reads.rs).
+    if let Some(reads) = &spec.reads
+        && reads.get().rebind(py).is_err()
+    {
+        return Err(());
+    }
     let Ok(null) = null_sentinel(py) else { return Err(()) };
     let list = ffi::PyList_New(args.len() as ffi::Py_ssize_t);
     if list.is_null() {

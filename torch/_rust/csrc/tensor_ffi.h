@@ -43,6 +43,10 @@ std::uint64_t region_thread_state();
 bool set_grad_mode(bool on);
 // The version counter in-place ops bump (Tensor._version).
 int64_t tensor_version(const Tensor& t);
+// Where t's first element is, 0 if t has no memory of its own to point at
+// (undefined, not strided, a Python-dispatch tensor). Read without asking
+// for a mutable pointer, so a copy-on-write storage stays one.
+std::uintptr_t tensor_data_address(const Tensor& t) noexcept;
 // Whether a forward-mode AD level is open (as custom autograd Functions check).
 bool forward_ad_active();
 // Whether saved_tensors_hooks would pack tensors saved for backward.
