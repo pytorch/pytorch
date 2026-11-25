@@ -7163,11 +7163,13 @@
 # these kernels only report that the override is unavailable.
 - func: _scaled_mm_mxfp6(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, ScalarType out_dtype) -> Tensor
   variants: function
+  tags: needs_exact_strides
   dispatch:
     CUDA: _scaled_mm_mxfp6_cuda
 
 - func: _scaled_mm_mxfp6.out(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, ScalarType out_dtype, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
+  tags: needs_exact_strides
   dispatch:
     CUDA: _scaled_mm_mxfp6_out_cuda
 

@@ -10,6 +10,7 @@ import unittest
 import torch
 import torch.nn.functional as F
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_cuda import IS_SM10X, TEST_CUDA
 from torch.testing._internal.common_quantized import (
     _float6_e2m3fn_x4_to_float32,
@@ -164,7 +165,7 @@ class TestScaledMmMXFP6CuTeDSL(TestCase):
         a, b, scale_a, scale_b, _ = _operands(128, 256, 512)
         op = torch.ops.aten._scaled_mm_mxfp6
         cases = {
-            "on": (a, b, scale_a.cpu(), scale_b),
+            "got torch.float8_e8m0fnu on cpu": (a, b, scale_a.cpu(), scale_b),
             "multiple of 128": (a[:, :16], b[:16], scale_a, scale_b),
             "float6_e2m3fn_x4": (a.view(torch.uint8), b, scale_a, scale_b),
             "elements": (a, b, scale_a[:-1], scale_b),
@@ -179,9 +180,9 @@ class TestScaledMmMXFP6CuTeDSL(TestCase):
         strided = strided[::2].copy_(scale_b)
         bad_scales = {
             "elements": (scale_b[:-1], scale_b),
-            "contiguous scale": (strided, None),
-            "on cuda": (scale_b.cpu(), scale_b[:0].cpu()),
-            "float8_e8m0fnu": (scale_b.float(), scale_b[:0].float()),
+            "contiguous scale, got strides": (strided, None),
+            "got torch.float8_e8m0fnu on cpu": (scale_b.cpu(), scale_b[:0].cpu()),
+            "got torch.float32 on cuda": (scale_b.float(), scale_b[:0].float()),
         }
         for message, (bad, bad_for_zero_k) in bad_scales.items():
             with self.subTest(message):
@@ -220,14 +221,6 @@ class TestScaledMmMXFP6CuTeDSL(TestCase):
             self.assertMatches(compiled(a, b, scale_a, scale_b), reference)
         self.assertEqual(counter.frame_count, 1)
 
-    def test_fake_rejects_bias(self):
-        a, b, scale_a, scale_b, _ = _operands(128, 256, 512)
-        bias = torch.zeros(256, device="cuda", dtype=torch.bfloat16)
-        with FakeTensorMode() as mode:
-            args = [mode.from_tensor(t) for t in (a, b, scale_a, scale_b)]
-            with self.assertRaisesRegex(NotImplementedError, "bias"):
-                _scaled_mm(*args, bias=mode.from_tensor(bias))
-
     def test_contraction_dim(self):
         a, b, scale_a, scale_b, reference = _operands(128, 256, 512)
         for contraction_dim in ((1, 0), (-1, -2)):
@@ -247,7 +240,7 @@ class TestScaledMmMXFP6CuTeDSL(TestCase):
 
     def test_fake_out(self):
         a, b, scale_a, scale_b, _ = _operands(128, 256, 512)
-        with FakeTensorMode(allow_non_fake_inputs=True) as mode:
+        with FakeTensorMode() as mode:
             args = _scaled_mm_v2_args(
                 *map(mode.from_tensor, (a, b, scale_a, scale_b)), torch.bfloat16
             )
@@ -255,32 +248,22 @@ class TestScaledMmMXFP6CuTeDSL(TestCase):
             torch.ops.aten._scaled_mm_v2.out(*args, out=out)
             self.assertEqual(out.shape, (128, 256))
 
-    def test_invalid_calls_raise(self):
+    @unittest.skipUnless(torch.cuda.device_count() > 1, "requires two GPUs")
+    def test_direct_op_on_another_device(self):
+        # The override replaces the generated kernel's device guard.
+        a, b, scale_a, scale_b, reference = _operands(128, 256, 512)
+        args = [t.to("cuda:1") for t in (a, b, scale_a, scale_b)]
+        with torch.cuda.device(0):
+            out = torch.ops.aten._scaled_mm_mxfp6(*args, torch.bfloat16)
+            torch.cuda.synchronize(1)
+        self.assertEqual(out.device, torch.device("cuda:1"))
+        self.assertMatches(out.cpu().cuda(), reference)
+
+    def test_bias_raises(self):
         a, b, scale_a, scale_b, _ = _operands(128, 256, 512)
-        fp8 = torch.zeros(128, 256, device="cuda", dtype=torch.float8_e4m3fn)
-        cases = {
-            "contiguous along K": lambda: _scaled_mm(
-                a, b.contiguous(), scale_a, scale_b
-            ),
-            "SWIZZLE_32_4_4": lambda: _scaled_mm(
-                a, b, scale_a, scale_b, swizzle_b=F.SwizzleType.NO_SWIZZLE
-            ),
-            "both operands": lambda: _scaled_mm(a, fp8, scale_a, scale_b),
-            "multiple of 128": lambda: _scaled_mm(a[:, :16], b[:16], scale_a, scale_b),
-            "scale_b to have": lambda: _scaled_mm(a, b, scale_a, scale_b[:-1]),
-            "out_dtype": lambda: _scaled_mm(a, b, scale_a, scale_b, output_dtype=None),
-        }
-        for message, call in cases.items():
-            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
-                call()
+        bias = torch.zeros(256, device="cuda", dtype=torch.bfloat16)
         with self.assertRaisesRegex(NotImplementedError, "bias"):
-            _scaled_mm(
-                a,
-                b,
-                scale_a,
-                scale_b,
-                bias=torch.zeros(256, device="cuda", dtype=torch.bfloat16),
-            )
+            _scaled_mm(a, b, scale_a, scale_b, bias=bias)
 
     def test_disabled_override_reports_it(self):
         a, b, scale_a, scale_b, _ = _operands(128, 256, 512)
@@ -292,16 +275,81 @@ class TestScaledMmMXFP6CuTeDSL(TestCase):
             _scaled_mm(a, b, scale_a, scale_b)
 
 
+def _zero_operands():
+    """CPU [128, K/4] x [K/4, 256] MXFP6 operands and scales with K = 512."""
+    a = torch.zeros(128, 384, dtype=torch.uint8).view(torch.float6_e2m3fn_x4)
+    b = torch.zeros(256, 384, dtype=torch.uint8).view(torch.float6_e2m3fn_x4).t()
+    scale_a = torch.zeros(128 * 16, dtype=torch.float8_e8m0fnu)
+    scale_b = torch.zeros(256 * 16, dtype=torch.float8_e8m0fnu)
+    return a, b, scale_a, scale_b
+
+
 class TestScaledMmMXFP6CPU(TestCase):
     hw_classification = HardwareClassification.CPU
 
     def test_cpu_raises(self):
-        a = torch.zeros(128, 96, dtype=torch.uint8).view(torch.float6_e2m3fn_x4)
-        b = torch.zeros(256, 96, dtype=torch.uint8).view(torch.float6_e2m3fn_x4).t()
-        scale_a = torch.zeros(128 * 4, dtype=torch.float8_e8m0fnu)
-        scale_b = torch.zeros(256 * 4, dtype=torch.float8_e8m0fnu)
         with self.assertRaisesRegex(NotImplementedError, "NVIDIA CUDA device"):
-            _scaled_mm(a, b, scale_a, scale_b, output_dtype=torch.bfloat16)
+            _scaled_mm(*_zero_operands())
+
+    def test_invalid_calls_raise(self):
+        # _scaled_mm_v2's meta rejects these before any kernel runs.
+        a, b, scale_a, scale_b = _zero_operands()
+        fp8 = torch.zeros(256, 128, dtype=torch.float8_e4m3fn).t()
+        cases = {
+            "contiguous along K": (a, b.contiguous(), scale_a, scale_b, {}),
+            "SWIZZLE_32_4_4": (
+                a,
+                b,
+                scale_a,
+                scale_b,
+                {"swizzle_b": F.SwizzleType.NO_SWIZZLE},
+            ),
+            "both operands to be Float6_e2m3fn_x4": (a, fp8, scale_a, scale_b, {}),
+            "multiple of 128": (a[:, :16], b[:16], scale_a, scale_b, {}),
+            "scale_b to have": (a, b, scale_a, scale_b[:-1], {}),
+            "out_dtype": (a, b, scale_a, scale_b, {"output_dtype": None}),
+        }
+        for message, (*args, kwargs) in cases.items():
+            with self.subTest(message), self.assertRaisesRegex(ValueError, message):
+                _scaled_mm(*args, **kwargs)
+
+    def test_meta_validates_mxfp6_op(self):
+        # The new op's meta shares the eager implementation's checks.
+        args = [t.to("meta") for t in _zero_operands()]
+        op = torch.ops.aten._scaled_mm_mxfp6
+        with self.assertRaisesRegex(ValueError, "out_dtype bfloat16 or float32"):
+            op(*args, torch.int32)
+        out = torch.empty(0, dtype=torch.float32, device="meta")
+        with self.assertRaisesRegex(ValueError, "expected out to be torch.bfloat16"):
+            op.out(*args, torch.bfloat16, out=out)
+        self.assertEqual(op(*args, torch.bfloat16).shape, (128, 256))
+
+    def test_fake_mxfp6_op(self):
+        a, b, scale_a, scale_b = _zero_operands()
+        op = torch.ops.aten._scaled_mm_mxfp6
+        with FakeTensorMode(shape_env=ShapeEnv()) as mode:
+            # An unbacked M that fits one 128-row scale block traces.
+            m = mode.shape_env.create_unbacked_symint()
+            torch._check(m <= 128)
+            fake_a = torch.empty(m, 128, dtype=a.dtype)
+            fake = [mode.from_tensor(t) for t in (b, scale_a, scale_b)]
+            self.assertEqual(op(fake_a, *fake, torch.bfloat16).shape[1], 256)
+            # A wrong-device out is rejected before it is resized.
+            args = [mode.from_tensor(t) for t in (a, b, scale_a, scale_b)]
+            out = torch.empty(0, dtype=torch.bfloat16, device="meta")
+            with self.assertRaisesRegex(ValueError, "expected out"):
+                op.out(*args, torch.bfloat16, out=out)
+            self.assertEqual(out.shape, (0,))
+            # So is an N-major mat_b, as in eager.
+            with self.assertRaisesRegex(ValueError, "contiguous along K"):
+                op(args[0], args[1].contiguous(), *args[2:], torch.bfloat16)
+
+    def test_meta_rejects_bias(self):
+        # The Python meta, which tracing uses, rejects bias like the CUDA kernel.
+        args = [t.to("meta") for t in _zero_operands()]
+        bias = torch.zeros(256, dtype=torch.bfloat16, device="meta")
+        with self.assertRaisesRegex(NotImplementedError, "bias"):
+            _scaled_mm(*args, bias=bias)
 
 
 instantiate_parametrized_tests(TestScaledMmMXFP6CuTeDSL)
