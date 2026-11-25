@@ -72,6 +72,7 @@ from torch._C._dynamo.guards import (
     GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_overlap_partition_guard,
     install_storage_overlapping_guard,
     install_symbolic_shape_guard,
     LeafGuard,
@@ -123,6 +124,7 @@ from torch._guards import (
     GuardSource,
     Source,
     StorageOverlap,
+    StorageOverlapPartition,
 )
 from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
@@ -464,7 +466,9 @@ class GuardManagerWrapper:
         self.id_matched_objs: dict[str, ReferenceType[object]] = {}
         self.no_tensor_aliasing_sources: list[Source] = []
 
-        self.printed_relational_guards: set[RelationalGuard] = set()
+        # A relational guard spanning several inputs is attached to each of
+        # them, and the copies share their verbose code parts, so key on those.
+        self.printed_relational_guards: set[tuple[str, ...]] = set()
 
         self.diff_guard_sources: OrderedSet[str] = OrderedSet()
 
@@ -870,8 +874,9 @@ class GuardManagerWrapper:
         with body.indent():
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, RelationalGuard):
-                    if guard not in self.printed_relational_guards:
-                        self.printed_relational_guards.add(guard)
+                    key = tuple(guard.verbose_code_parts())
+                    if key not in self.printed_relational_guards:
+                        self.printed_relational_guards.add(key)
 
                         body.writelines(self.get_guard_lines(guard))
                     else:
@@ -917,7 +922,7 @@ class GuardManagerWrapper:
 
     def populate_code_parts_for_debugging(self) -> None:
         # This should be called when the guard manager is fully populated
-        relational_guards_seen = set()
+        relational_guards_seen: set[tuple[str, ...]] = set()
 
         def get_code_parts(leaf_guard: LeafGuard) -> list[str]:
             code_parts = []
@@ -929,9 +934,10 @@ class GuardManagerWrapper:
         def add_code_parts(guard: LeafGuard) -> None:
             nonlocal relational_guards_seen
             if isinstance(guard, RelationalGuard):
-                if guard not in relational_guards_seen:
+                key = tuple(guard.verbose_code_parts())
+                if key not in relational_guards_seen:
                     self.code_parts.extend(get_code_parts(guard))
-                    relational_guards_seen.add(guard)
+                    relational_guards_seen.add(key)
             else:
                 self.code_parts.extend(get_code_parts(guard))
 
@@ -6710,6 +6716,24 @@ class CheckFunctionManager:
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
                     non_overlapping_guard_managers,
+                    [code_part],
+                    None,
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlapPartition):
+                partition_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.input_sources
+                ]
+                code_part = (
+                    "___check_storage_overlap_partition("
+                    f"[{', '.join(source.name for source in guard.input_sources)}], "
+                    f"{guard.overlapping_indices}, {guard.storage_groups})"
+                )
+                install_storage_overlap_partition_guard(
+                    partition_guard_managers,
+                    guard.overlapping_indices,
+                    guard.storage_groups,
                     [code_part],
                     None,
                 )
