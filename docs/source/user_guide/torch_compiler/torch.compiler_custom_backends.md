@@ -194,8 +194,29 @@ fn(torch.randn(3))
 torch._dynamo.reset()  # calls my_backend.reset()
 ```
 
-A class-based backend can define `reset` as a method instead; see
-`CudagraphsBackend` in `torch/_dynamo/backends/cudagraphs.py`.
+A class-based backend can define `reset` as a method instead:
+
+```python
+class MyBackend:
+    def __init__(self):
+        self.kernel_cache = {}
+
+    def __call__(self, gm, example_inputs):
+        self.kernel_cache[id(gm)] = gm.forward
+        return gm.forward
+
+    def reset(self):
+        self.kernel_cache.clear()
+
+my_backend = MyBackend()
+
+@torch.compile(backend=my_backend)
+def fn(x):
+    return x + 1
+
+fn(torch.randn(3))
+torch._dynamo.reset()  # calls my_backend.reset()
+```
 
 The hook works whether the backend is passed directly or registered by name
 with `register_backend`. When using `aot_autograd(...)`, set `reset` on the
