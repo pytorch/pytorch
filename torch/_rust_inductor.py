@@ -840,13 +840,24 @@ class _Refused(Exception):
     pass
 
 
+def _refuse(why: str) -> _Refused:
+    """The exception to raise into the code a trace is running, to refuse
+    the trace where it is. That code may catch it (an ``except Exception``
+    of the program's around the place) and go on, so the executor is told as
+    well: it gives the trace up when its body ends, whatever path the code
+    took from here, and runs the block as it is."""
+    e = _Refused(why)
+    _rust()._region_refuse(e)
+    return e
+
+
 # Makes autograd.Function.apply raise, before the forward runs, while a region
 # is traced, unless it's _tracing_apply's: the trace would have the forward's
 # ops and lose the backward, and the forward may have effects (torchrec's
 # launch collectives). apply makes the Function's ctx (a BackwardCFunction)
 # first.
 def _refusing_init(ctx, *a, **kw):
-    raise _Refused(f"it calls the autograd.Function {ctx._forward_cls.__name__}")
+    raise _refuse(f"it calls the autograd.Function {ctx._forward_cls.__name__}")
 
 
 def autocast_on():
@@ -911,7 +922,7 @@ def _tracing_apply(cls, *args, **kwargs):
         # trace ran, or one inside the Function's own forward): the real apply.
         return _function_apply.__get__(None, cls)(*args, **kwargs)
     if kwargs:
-        raise _Refused(f"it calls the autograd.Function {cls.__name__} with keywords")
+        raise _refuse(f"it calls the autograd.Function {cls.__name__} with keywords")
     target = _applier(cls, autocast_on())
     Backward = torch.autograd.function.BackwardCFunction
     with disable_proxy_modes_tracing():
@@ -999,20 +1010,45 @@ def _opaque_call(fn, *args, **kwargs):
     return track_tensor_tree(out, proxy, constant=None, tracer=tracer)
 
 
-# The tensors the trace running wrote in place, with their copies (see
-# _RefuseImpure).
-_trace_backups: dict[int, tuple[torch.Tensor, torch.Tensor]] | None = None
+# What the trace running changed that outlives it, by id, with what puts it
+# back: a tensor written in place with its copy, a random generator drawn
+# from with its state (see _RefuseImpure, _put_back).
+_trace_backups: dict[int, tuple[Any, torch.Tensor]] | None = None
+
+
+def _generators(given) -> list[torch.Generator]:
+    """The generators a random operator may draw from: the one it is handed,
+    else the default one of the CPU and of every CUDA device in use."""
+    if given is not None:
+        return [given]
+    if not torch.cuda.is_initialized():
+        return [torch.default_generator]
+    return [torch.default_generator, *torch.cuda.default_generators]
+
+
+def _put_back(backups: dict[int, tuple[Any, torch.Tensor]]) -> None:
+    """Takes back what a trace that is given up did to what outlives it,
+    before the executor runs its block again from the start: a tensor it
+    wrote in place gets its values back, a generator it drew from its state
+    (the block's draws are then the ones eager makes, once)."""
+    with torch.no_grad():
+        for x, saved in backups.values():
+            if isinstance(x, torch.Generator):
+                x.set_state(saved)
+            else:
+                x.copy_(saved)
 
 
 class _RefuseImpure(TorchDispatchMode):
     """Raises before an op a region can't hold runs: a collective, or one
     reading a tensor's value. The executor then runs the block as usual,
     which is only sound if nothing it did under tracing had an effect: so
-    each tensor an op writes in place is copied into `backups` first, for
-    the caller to put back."""
+    each tensor an op writes in place is copied into `backups` first, and
+    the state of each generator a random op may draw from, for the caller to
+    put back."""
 
     def __init__(
-        self, backups: dict[int, tuple[torch.Tensor, torch.Tensor]], refuse: bool = True
+        self, backups: dict[int, tuple[Any, torch.Tensor]], refuse: bool = True
     ) -> None:
         super().__init__()
         self.backups = backups
@@ -1022,8 +1058,12 @@ class _RefuseImpure(TorchDispatchMode):
         if self.refuse and (
             func.namespace in ("c10d", "_c10d_functional") or func in _SKIP_OPS
         ):
-            raise _Refused(f"it runs {func}")
+            raise _refuse(f"it runs {func}")
         kwargs = kwargs or {}
+        if torch.Tag.nondeterministic_seeded in func.tags:
+            for g in _generators(kwargs.get("generator")):
+                if id(g) not in self.backups:
+                    self.backups[id(g)] = (g, g.get_state())
         if func._schema.is_mutable:
             for k, a in enumerate(func._schema.arguments):
                 if a.alias_info is None or not a.alias_info.is_write:
@@ -2256,7 +2296,7 @@ def trace_region(
         if c[0] == _FLOAT
     )
     n_tensors = len(example) - n_floats
-    backups: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
+    backups: dict[int, tuple[Any, torch.Tensor]] = {}
     locs: list[Any] = []
     state = {"specialized": set()}
 
@@ -2344,9 +2384,7 @@ def trace_region(
         gm = make_fx(body, decomposition_table={}, tracing_mode="real")(*example)
     except Exception as e:
         # The executor runs the block again from its start.
-        with torch.no_grad():
-            for t, saved in backups.values():
-                t.copy_(saved)
+        _put_back(backups)
         if isinstance(e, _Refused):
             _traced(name, "refused", str(e))
         else:

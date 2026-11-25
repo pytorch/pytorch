@@ -167,6 +167,34 @@ pub type Body<'a> = dyn FnMut(&[*mut PyObject]) -> Result<Vec<*mut PyObject>, ()
 thread_local! {
     static BODY: Cell<Option<*mut Body<'static>>> = const { Cell::new(None) };
     static TRACING: Cell<bool> = const { Cell::new(false) };
+    // The exception by which the trace running on this thread was refused
+    // while its body ran (see _region_refuse).
+    static REFUSAL: std::cell::RefCell<Option<Py<PyAny>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The trace running on this thread is refused, by `why`, an exception the
+/// caller raises into the traced code right after. That code may catch it
+/// and go on: from here on the body is no run of the program's, so when it
+/// ends without an error the executor raises `why` again, and the block
+/// runs as it is.
+#[pyfunction]
+pub fn _region_refuse(why: Py<PyAny>) {
+    REFUSAL.with_borrow_mut(|r| {
+        r.get_or_insert(why);
+    });
+}
+
+// Whether the trace that runs (or the last that ran) on this thread was
+// refused while its body ran.
+pub fn refused() -> bool {
+    REFUSAL.with_borrow(|r| r.is_some())
+}
+
+// Raises the refusal again, for a body that went on past it.
+pub fn raise_refusal(py: Python<'_>) {
+    if let Some(why) = REFUSAL.with_borrow(|r| r.as_ref().map(|w| w.clone_ref(py))) {
+        PyErr::from_value(why.into_bound(py)).restore(py);
+    }
 }
 
 // Whether a trace is running on this thread. Regions don't run then (the
@@ -590,6 +618,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     let body: *mut Body<'_> = body;
     BODY.set(Some(std::mem::transmute::<*mut Body<'_>, *mut Body<'static>>(body)));
     TRACING.set(true);
+    REFUSAL.set(None);
     super::reads::begin();
     let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types, asked)));
     super::reads::end();

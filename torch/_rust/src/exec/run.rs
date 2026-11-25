@@ -1498,14 +1498,17 @@ impl Act<'_> {
             this.stop = std::ptr::null();
             this.reading = false;
             let mut outs: Vec<*mut PyObject> = sp.live_out.iter().map(|s| xincref(*this.local(*s))).collect();
+            // A run that went on past a refusal (its code caught what the
+            // trace raised) is no run of the program's.
+            let stands = !super::region::refused();
             let done = match &out {
                 Outcome::Stopped(x) => {
                     outs.extend(this.cfg.explicit_params(*x).into_iter().map(|q| xincref(this.val(q))));
-                    Some(*x) == sp.exit && !sp.never.contains(x)
+                    stands && Some(*x) == sp.exit && !sp.never.contains(x)
                 }
                 Outcome::Return(v) => {
                     outs.push(xincref(*v));
-                    sp.exit.is_none()
+                    stands && sp.exit.is_none()
                 }
                 _ => false,
             };
@@ -1514,7 +1517,9 @@ impl Act<'_> {
                 return Ok(outs);
             }
             outs.into_iter().for_each(|o| ffi::Py_XDECREF(o));
-            if pyo3::ffi::PyErr_Occurred().is_null() {
+            if pyo3::ffi::PyErr_Occurred().is_null() && !stands {
+                super::region::raise_refusal(pyo3::Python::assume_attached());
+            } else if pyo3::ffi::PyErr_Occurred().is_null() {
                 ffi::PyErr_SetString(ffi::PyExc_RuntimeError, c"the span left by another way or ran a block never seen run".as_ptr());
             }
             Err(())
@@ -1528,9 +1533,10 @@ impl Act<'_> {
         }
         let debug = std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some();
         sp.state.runs.store(0, std::sync::atomic::Ordering::Relaxed);
+        let stands = !super::region::refused();
         let leave = match ended {
-            Some(Outcome::Stopped(x)) if Some(x) == sp.exit && !sp.never.contains(&x) => Some(Ok(x)),
-            Some(Outcome::Return(v)) if sp.exit.is_none() => Some(Err(Outcome::Return(v))),
+            Some(Outcome::Stopped(x)) if stands && Some(x) == sp.exit && !sp.never.contains(&x) => Some(Ok(x)),
+            Some(Outcome::Return(v)) if stands && sp.exit.is_none() => Some(Err(Outcome::Return(v))),
             Some(Outcome::Stopped(x)) => {
                 for q in &self.cfg[x].params {
                     self.set(*q, std::ptr::null_mut());
@@ -1709,6 +1715,13 @@ impl Act<'_> {
                 this.drop_all(&code.kills[step.kill.0 as usize..step.kill.1 as usize]);
             }
             this.reading = false;
+            if super::region::refused() {
+                // Its code caught what the trace raised to refuse it, and
+                // went on: no run of the program's.
+                failed = true;
+                super::region::raise_refusal(pyo3::Python::assume_attached());
+                return Err(());
+            }
             Ok(ver.outputs.iter().map(|o| xincref(this.val(*o))).collect())
         };
         let c = self.c.expect("checked by the caller");

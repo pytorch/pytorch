@@ -653,6 +653,127 @@ class TestVmFloatArguments(TestCase):
 instantiate_device_type_tests(TestVmFloatArguments, globals())
 
 
+def given_up_count(y):
+    try:
+        return int((y > 0).sum())
+    except Exception:
+        return -1
+
+
+def given_up_handler(x):
+    y = x.sin() * 2
+    n = given_up_count(y)
+    return (y * n + 1).cos().tanh().exp()
+
+
+def given_up_handler_here(x):
+    y = x.sin() * 2
+    try:
+        n = int((y > 0).sum())
+    except BaseException:
+        n = -1
+    return (y * n + 1).cos().tanh().exp()
+
+
+def given_up_draw(x, gen):
+    r = torch.rand(4, 8, device=x.device)
+    y = x.sin() * 2 + r
+    n = int((y > 0).sum())
+    return (y * n + 1).cos().tanh().exp()
+
+
+def given_up_dropout(x, gen):
+    y = torch.nn.functional.dropout(x.sin() * 2, 0.5) + torch.randn_like(x)
+    n = int((y > 0).sum())
+    return (y * n + 1).cos().tanh().exp()
+
+
+def given_up_own_generator(x, gen):
+    r = torch.rand(4, 8, device=x.device, generator=gen)
+    y = x.sin() * 2 + r
+    n = int((y > 0).sum())
+    return (y * n + 1).cos().tanh().exp()
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmGivenUpTraces(TestCase):
+    """A trace that comes to something a region cannot hold is given up and
+    its block runs as it is: what the call returns and what it leaves behind
+    are eager's, whatever the traced code did until then."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, fn, device):
+        g = vm_early(fn)
+        for call in range(10):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            self.assertEqual(g(x), fn(x), atol=0, rtol=0, msg=f"call {call}")
+        return [
+            (r["state"], r["why"])
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["kind"] == "block"
+        ]
+
+    @isolated
+    def test_refusal_caught_by_a_handler_of_a_function_the_block_calls(self, device):
+        # The handler is the program's, for errors of the program's.
+        rows = self.calls(given_up_handler, device)
+        self.assertEqual(
+            rows, [("refused", "it runs aten._local_scalar_dense.default")]
+        )
+
+    @isolated
+    def test_refusal_caught_by_a_handler_in_the_block(self, device):
+        rows = self.calls(given_up_handler_here, device)
+        self.assertNotIn("region", [state for state, _ in rows[:1]], msg=str(rows))
+
+    def draws(self, fn, device):
+        # Each call after the same seed on both sides: the result, and the
+        # next draw from the default generator and from the one handed in.
+        g = vm_early(fn)
+        for call in range(8):
+            x = torch.randn(4, 8, generator=torch.Generator().manual_seed(call)).to(
+                device
+            )
+            sides = []
+            for side in (fn, g):
+                torch.manual_seed(call)
+                gen = torch.Generator(device=device).manual_seed(call)
+                out = side(x, gen)
+                sides.append(
+                    (
+                        out,
+                        torch.rand(2, device=device),
+                        torch.rand(2, device=device, generator=gen),
+                    )
+                )
+            self.assertEqual(sides[1], sides[0], atol=0, rtol=0, msg=f"call {call}")
+        return [
+            r["state"]
+            for r in vm.regions(g)
+            if r["function"] == fn.__name__ and r["kind"] == "block"
+        ]
+
+    @isolated
+    def test_random_draw_in_a_block_whose_trace_is_given_up(self, device):
+        self.assertEqual(self.draws(given_up_draw, device), ["refused"])
+
+    @isolated
+    def test_dropout_in_a_block_whose_trace_is_given_up(self, device):
+        self.assertEqual(self.draws(given_up_dropout, device), ["refused"])
+
+    @isolated
+    def test_draw_from_a_generator_of_the_program_in_a_block_whose_trace_is_given_up(
+        self, device
+    ):
+        self.assertEqual(self.draws(given_up_own_generator, device), ["refused"])
+
+
+instantiate_device_type_tests(TestVmGivenUpTraces, globals())
+
+
 class WritesBox:
     pass
 
