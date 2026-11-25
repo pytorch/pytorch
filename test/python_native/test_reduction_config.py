@@ -96,7 +96,8 @@ class TestReductionConfig(TestCase):
             def combine(self, a, b):
                 return super().combine(a, b)
 
-        kwargs = dict(itemsize=2, acc_bits=32, nouts=1, welford_outs=1)
+        kwargs = dict(itemsize=2, acc_bits=32, nouts=1, welford_outs=1, alignment=16)
+        kwargs |= dict(out_dtypes=(torch.float16,))
         # At 16 MiB, 4095 columns take b200_ragged_c4095_ordered first.
         for columns, anchor in ((257, 16 << 20), (4095, 64 << 20)):
             args = ((10, 0), torch.float16, anchor // (columns * 2), columns, 1, 3)
