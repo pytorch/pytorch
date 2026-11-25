@@ -22,17 +22,21 @@ createCustomAllocator(
 TORCH_CUDA_CPP_API void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator);
-// Graph allocator windows (torch.cuda.memory._graph_allocator): opened inside
-// a CUDA graph capture, on its capturing stream, a window makes a layer over
-// the native caching allocator the current CUDA allocator until it ends. While
-// it is open, the tensor allocations that the caching allocator would place
-// into the capture's pool are made by `allocator`; everything else is
-// forwarded to the caching allocator. One window at a time; no other capture
-// may begin or end during it. End is idempotent and returns whether another
-// capture began or ended during the window.
-TORCH_CUDA_CPP_API void beginGraphAllocatorWindow(
+// Routing a CUDA graph capture's tensor allocations to `allocator`
+// (torch.cuda.memory._route_capture_allocations). Arm, inside the capture on
+// its capturing stream, returns the routing allocator, which
+// change_current_allocator makes current until routing ends. While it is
+// current, the tensor allocations that the caching allocator would place into
+// the capture's pool are made by `allocator`; the other calls that occur are
+// handed to the caching allocator. One capture at a time; no other capture may
+// begin or end meanwhile. Disarm (after making the previous allocator current
+// again) is idempotent and returns whether another capture began or ended
+// while the capture's allocations were routed.
+TORCH_CUDA_CPP_API std::shared_ptr<
+    c10::cuda::CUDACachingAllocator::CUDAAllocator>
+armCaptureRouting(
     std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator);
-TORCH_CUDA_CPP_API bool endGraphAllocatorWindow();
+TORCH_CUDA_CPP_API bool disarmCaptureRouting();
 
 struct _AllocationMetadata {
   _AllocationMetadata();
