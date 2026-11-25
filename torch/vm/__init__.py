@@ -191,6 +191,19 @@ DEFAULT_PASSES: tuple[Any, ...] = (
 FAST: tuple[Any, ...] = (*DEFAULT_PASSES, passes.static_parameters, passes.Inductor({"triton.cudagraphs": True}))
 
 
+def _runtime() -> Any:
+    """``torch._rust``, the executor that runs a function on the VM; a
+    RuntimeError that says why when this build of PyTorch has none."""
+    rust = torch._rust
+    if rust is None:
+        raise RuntimeError(
+            "torch.vm needs the torch._rust extension, which this build of PyTorch does not have: the build makes it "
+            "with cargo for CPython 3.12 on Linux and skips it elsewhere "
+            f"(this is Python {sys.version_info.major}.{sys.version_info.minor} on {sys.platform})"
+        )
+    return rust
+
+
 def kind(p: Any) -> str:
     """``"cfg"`` or ``"block"``: what pass ``p`` is, from its first
     parameter's annotation (``vm.Cfg`` or ``fx.GraphModule``), else from how
@@ -282,9 +295,9 @@ class _Program:
         self.calls = 0
 
     def run(self, *args, **kwargs):
-        import torch._rust as rust
         import torch._rust_inductor as ri
 
+        rust = _runtime()
         builtin = self.cfg.builtin
         regions = self.regions
         # Process-wide settings: set on each call, so each function's passes
@@ -317,8 +330,7 @@ class _Program:
         """Runs the cfg passes on one function's CFG (see torch._rust's
         cfg_view) and returns their edits. A pass that raises is dropped for
         that function, its edits with it."""
-        import torch._rust as rust
-
+        rust = _runtime()
         edits: dict[str, list[Any]] = {"movable": [], "spans": [], "split": [], "opaque": []}
         for p in self.cfg_passes:
             cfg = Cfg(self.fn, view)
@@ -344,8 +356,7 @@ bit for bit; a lowering such as ``vm.passes.Inductor()`` is opt-in. ``verify``
     from, within its replacements' tolerances, and drops it if they differ."""
     if fn is None:
         return functools.partial(vm, passes=passes, verify=verify)
-    import torch._rust as rust
-
+    rust = _runtime()
     program = _Program(fn, DEFAULT_PASSES if passes is None else passes, verify)
     rust._set_cfg_reoptimize_after(2**31)
     for f in program.cfg.skipped:
