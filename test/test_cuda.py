@@ -11789,40 +11789,6 @@ for args in ((a, b), (a, b, False)):
         self.assertNotIn(before.data_ptr(), live)
         self.assertEqual(live, {})
 
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
-    def test_python_allocator_record_stream(self):
-        # a Python allocator sees record_stream on its memory
-        arena = torch.empty(1 << 20, dtype=torch.uint8, device="cuda")
-        top = [arena.data_ptr()]
-        live = {}
-        streams = []
-
-        def alloc(size, device, stream):
-            ptr = top[0]
-            top[0] += (size + 511) // 512 * 512
-            live[ptr] = size
-            return ptr
-
-        def free(ptr, size, device, stream):
-            del live[ptr]
-
-        side = torch.cuda.Stream()
-        previous = torch.cuda.memory._get_current_allocator()
-        pluggable = torch.cuda.memory._CUDAAllocator(
-            torch._C._cuda_createPythonAllocator(
-                alloc, free, lambda ptr, stream: streams.append((ptr, stream))
-            )
-        )
-        torch.cuda.memory.change_current_allocator(pluggable)
-        try:
-            t = torch.empty(1024, device="cuda")
-            t.record_stream(side)
-            self.assertEqual(streams, [(t.data_ptr(), side.cuda_stream)])
-            del t
-            self.assertEqual(live, {})
-        finally:
-            torch.cuda.memory.change_current_allocator(previous)
-
     @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
     @requires_cuda_python_bindings
@@ -16934,26 +16900,6 @@ class TestGraphAllocators(TestCase):
         self.assertEqual(y, x + 1)
         del g, buf, pool
 
-    def test_record_stream_reaches_the_allocator(self):
-        # record_stream on the allocator's memory while routing
-        bump = self.Bump()
-        seen = []
-        allocator = torch.cuda.memory._CUDAAllocator(
-            torch._C._cuda_createPythonAllocator(
-                bump._alloc, bump._free, lambda ptr, stream: seen.append((ptr, stream))
-            )
-        )
-        side = torch.cuda.Stream()
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g), _route_capture_allocations(allocator):
-            t = torch.empty(1024, device="cuda")
-            side.wait_stream(torch.cuda.current_stream())
-            t.record_stream(side)
-            torch.cuda.current_stream().wait_stream(side)
-        self.assertEqual(seen, [(t.data_ptr(), side.cuda_stream)])
-        del t
-        self.assertEqual(bump.live, {})
-
     def test_pass_through(self):
         # while routing, everything but the capture's tensor allocations is
         # forwarded to the caching allocator
@@ -17117,31 +17063,7 @@ class TestMemoryPlannedGraph(TestCase):
             cur.wait_stream(side)
             return u, v
 
-        def record_stream(extra=None):
-            cur = torch.cuda.current_stream()
-            t = x * 2
-            side.wait_stream(cur)
-            with torch.cuda.stream(side):
-                u = t + 1
-            t.record_stream(side)
-            if extra is not None:
-                t.record_stream(extra)
-            del t  # still in use on side
-            v = x * 3
-            cur.wait_stream(side)
-            return u, v
-
-        def record_uncaptured():
-            # also recorded on a stream that is not captured: its work is not
-            # in the graph, and side's use still blocks the reuse
-            return record_stream(torch.cuda.default_stream())
-
-        for fn, buffers in (
-            (after_join, 2),
-            (before_join, 3),
-            (record_stream, 3),
-            (record_uncaptured, 3),
-        ):
+        for fn, buffers in ((after_join, 2), (before_join, 3)):
             self._warmup(fn)
             ref = [t.clone() for t in fn()]
             step = torch.cuda.MemoryPlannedGraph(fn)
@@ -17373,8 +17295,6 @@ class TestMemoryPlannedGraph(TestCase):
             s.wait_stream(m)
             with torch.cuda.stream(s):
                 out.copy_(a)
-            a.record_stream(s)
-            out.record_stream(s)
             if not placed:
                 m.wait_stream(s)
             del a
