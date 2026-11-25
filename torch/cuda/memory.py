@@ -1667,7 +1667,14 @@ class CUDAPluggableAllocator(_CUDAAllocator):
 def change_current_allocator(allocator: _CUDAAllocator) -> None:
     r"""Change the currently used memory allocator to be the one provided.
 
-    If the current allocator has already been used/initialized, this function will error.
+    It can be called at any time, including after memory has been allocated. Memory from a
+    :class:`CUDAPluggableAllocator` is freed through whichever pluggable allocator is current. So:
+
+    - A pluggable allocator may receive frees of memory allocated before it became current.
+    - Memory it allocates may be freed after it is swapped away. To work around this, return a
+      deleter that frees to itself instead of the current allocator.
+    - An allocator should not be deleted while storages it made are alive; they keep a pointer
+      to it.
 
 
     Args:

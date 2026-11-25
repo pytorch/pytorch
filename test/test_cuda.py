@@ -11742,13 +11742,59 @@ for args in ((a, b), (a, b, False)):
                 None,
             )
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    def test_change_current_allocator_after_initialization(self):
+        # the current allocator can be changed after memory has been allocated,
+        # and changed back. An empty storage whose allocator is no longer the
+        # current one allocates from the current one when it is resized.
+        arena = torch.empty(1 << 20, dtype=torch.uint8, device="cuda")
+        top = [arena.data_ptr()]
+        live = {}
+
+        def alloc(size, device, stream):
+            ptr = top[0]
+            top[0] += (size + 511) // 512 * 512
+            live[ptr] = size
+            return ptr
+
+        def free(ptr, size, device, stream):
+            del live[ptr]
+
+        before = torch.empty(0, device="cuda").untyped_storage()
+        holding = torch.empty(16, device="cuda").untyped_storage()
+        previous = torch.cuda.memory._get_current_allocator()
+        pluggable = torch.cuda.memory._CUDAAllocator(
+            torch._C._cuda_createPythonAllocator(alloc, free)
+        )
+        torch.cuda.memory.change_current_allocator(pluggable)
+        try:
+            self.assertEqual(torch.cuda.memory.get_allocator_backend(), "pluggable")
+            t = torch.empty(1024, device="cuda")
+            self.assertIn(t.data_ptr(), live)
+            before.resize_(4096)  # empty, made by the caching allocator
+            self.assertIn(before.data_ptr(), live)
+            holding.resize_(4096)  # holds memory: keeps the caching allocator
+            self.assertNotIn(holding.data_ptr(), live)
+            # (a plain pluggable allocator's memory is freed through the
+            # current pluggable allocator: free it before swapping away)
+            before.resize_(0)
+            del t
+            self.assertEqual(live, {})
+        finally:
+            torch.cuda.memory.change_current_allocator(previous)
+        self.assertEqual(torch.cuda.memory.get_allocator_backend(), "native")
+        u = torch.empty(1024, device="cuda")
+        self.assertNotIn(u.data_ptr(), live)
+        before.resize_(4096)  # its allocator is pluggable, no longer current
+        self.assertNotIn(before.data_ptr(), live)
+        self.assertEqual(live, {})
+
     @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
     @requires_cuda_python_bindings
     @serialTest()
     def test_python_allocator_supports_process_wide_installation(self):
-        # changeCurrentAllocator must run before the caching allocator is
-        # initialized, so exercise this path in a fresh process. Leave one
+        # Install it before anything is allocated, in a fresh process. Leave one
         # tensor alive at process exit to also cover interpreter teardown.
         script = r"""
 import gc

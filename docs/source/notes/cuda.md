@@ -794,13 +794,24 @@ b = torch.zeros(10, device='cuda')
 ```python
 import torch
 
-# Do an initial memory allocator
+# Do an initial memory allocation
 b = torch.zeros(10, device='cuda')
 # Load the allocator
 new_alloc = torch.cuda.memory.CUDAPluggableAllocator(
     'alloc.so', 'my_malloc', 'my_free')
-# This will error since the current allocator was already instantiated
+# Swap the current allocator after memory has been allocated
 torch.cuda.memory.change_current_allocator(new_alloc)
+```
+
+```{note}
+When swapping the allocator after memory has been allocated, memory from a
+pluggable allocator is freed through whichever pluggable allocator is current. So:
+
+- A pluggable allocator may receive frees of memory allocated before it became current.
+- Memory it allocates may be freed after it is swapped away. To work around this,
+  return a deleter that frees to itself instead of the current allocator.
+- An allocator should not be deleted while storages it made are alive; they keep
+  a pointer to it.
 ```
 
 <!-- cublas-workspaces -->
