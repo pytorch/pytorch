@@ -1424,6 +1424,11 @@ class TestBlackwellTMALoadFusion(TestCase):
         "var_mean": lambda a, b: torch.var_mean((a @ b).float(), -1),
         "sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(-1)),
         "extra_input": lambda a, b: ((a @ b).float() * b[0].float()).sum(-1),
+        # A row-only output that may be ordered before the reduction.
+        "row_output_first": lambda a, b: (
+            (v := a[:, 0].float()) * 2 + 1,
+            ((a @ b).float() * v[:, None]).sum(-1),
+        ),
     }
 
     @unittest.skipIf(
