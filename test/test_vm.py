@@ -363,6 +363,59 @@ def writes_then_fails_in_a_kernel(x, rate, box):
     return writes_tail(factor.diagonal(), rate) + box.acc.sum()
 
 
+def writes_list_in_place(x, rate, box):
+    y = writes_work(x, rate)
+    items = box.items
+    items += [y]
+    return writes_tail(y, rate)
+
+
+def writes_dict_in_place(x, rate, box):
+    y = writes_work(x, rate)
+    table = box.table
+    table |= {len(table): y}
+    return writes_tail(y, rate)
+
+
+def writes_set_in_place(x, rate, box):
+    y = writes_work(x, rate)
+    seen = box.seen
+    seen |= {y}
+    return writes_tail(y, rate)
+
+
+def writes_extends(box, y):
+    items = box.items
+    items += [y]
+
+
+def writes_list_in_place_in_a_callee(x, rate, box):
+    y = writes_work(x, rate)
+    writes_extends(box, y)
+    return writes_tail(y, rate)
+
+
+def writes_list_in_place_in_a_loop(x, rate, box):
+    for _ in range(2):
+        x = writes_work(x, rate)
+        items = box.items
+        items += [x]
+    return writes_tail(x, rate)
+
+
+def writes_parts(y):
+    # A list the function makes itself, extended in place twice.
+    parts = []
+    parts += [y.sin()]
+    parts += [y.cos()]
+    return parts[0] * parts[1]
+
+
+def writes_list_of_its_own(x, rate, box):
+    y = writes_work(x, rate)
+    return writes_tail(writes_parts(y), rate)
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmWrites(TestCase):
     """A write to something that outlives the call (an attribute, an item, a
@@ -518,6 +571,56 @@ class TestVmWrites(TestCase):
             theirs,
             lambda box: box.acc,
             before=before,
+        )
+
+    def in_place(self, fn, device, name, read):
+        mine, theirs = WritesBox(), WritesBox()
+        for box in (mine, theirs):
+            box.items, box.table, box.seen = [], {}, set()
+        self.compare(fn, device, mine, theirs, lambda box: read(getattr(box, name)))
+
+    @isolated
+    def test_list_extended_by_an_in_place_operator(self, device):
+        # `items += [y]` changes the list itself, as `items.extend([y])` does.
+        self.in_place(writes_list_in_place, device, "items", list)
+
+    @isolated
+    def test_dict_merged_by_an_in_place_operator(self, device):
+        self.in_place(writes_dict_in_place, device, "table", dict)
+
+    @isolated
+    def test_set_united_by_an_in_place_operator(self, device):
+        # The set holds each call's tensor (by identity): one more per call.
+        self.in_place(writes_set_in_place, device, "seen", len)
+
+    @isolated
+    def test_list_extended_in_place_in_a_function_the_region_calls(self, device):
+        self.in_place(writes_list_in_place_in_a_callee, device, "items", list)
+
+    @isolated
+    def test_list_extended_in_place_inside_a_loop(self, device):
+        # The loop is one span, and the list is read from the object in it.
+        self.in_place(writes_list_in_place_in_a_loop, device, "items", list)
+
+    @isolated
+    def test_list_a_callee_makes_and_extends_in_place_stays_in_the_region(self, device):
+        # The list dies with the callee's frame: extending it is no write,
+        # and the call sits in its caller's region with all it computes.
+        g = vm(writes_list_of_its_own, passes=EARLY)
+        x = torch.randn(4, device=device)
+        for call in range(9):
+            self.assertEqual(
+                g(x, 0.5, None),
+                writes_list_of_its_own(x, 0.5, None),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+        (row,) = (r for r in vm.regions(g) if r["state"] == "region")
+        self.assertEqual(
+            (row["function"], row["ops"], row["runs"]),
+            ("writes_list_of_its_own", 13, 9 - 3 - 1),
+            msg=str(row),
         )
 
 

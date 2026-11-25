@@ -2135,7 +2135,7 @@ fn observed_ops(
                     no_frames() && objects
                 }
                 Op::Binary(_) | Op::Compare(_) | Op::ToBool | Op::GetIter | Op::Bytecode { .. } => {
-                    no_frames() && ins.args.iter().all(|a| plain(a, false))
+                    no_frames() && ins.args.iter().all(|a| plain(a, false)) && !changes_operand(prep, *v)
                 }
                 _ => false,
             };
@@ -2576,6 +2576,31 @@ pub(crate) fn escaping_store(op: &Op) -> bool {
         )
 }
 
+// Whether instr v is an in-place operator (`x += y`, `x |= y`, ...) that may
+// change its left operand itself: a list, a dict or a set is changed (the
+// result is the operand), and so may be an object whose class implements the
+// operator in C. A number, a string and a tuple are not (the result is
+// another object); a tensor is changed by a torch op, which a region runs
+// again; what the operator method of a Python class does is judged from the
+// frame it enters.
+pub(crate) fn changes_operand(prep: &Prepared, v: ValueId) -> bool {
+    use types::{Kind, Ty};
+    let ins = &prep.cfg[v];
+    // BINARY_OP's in-place operators start at NB_INPLACE_ADD.
+    if !matches!(ins.op, Op::Binary(k) if k >= 13) {
+        return false;
+    }
+    let types = unsafe { &*prep.types.get() };
+    let Some(kinds) = ins.args.first().and_then(|a| types.get(a.idx())).and_then(|t| t.ty.as_ref()).and_then(Ty::kinds) else { return true };
+    let effects = unsafe { &*prep.effects.get() };
+    let entered = || effects.get(Site::Instr(v)).iter().any(|(seq, _)| seq.iter().any(|e| matches!(e, effects::Effect::Frame { .. })));
+    kinds.iter().any(|k| match k {
+        Kind::List(_) | Kind::Set(_) | Kind::Dict(_) => true,
+        Kind::Object(_) => !entered(),
+        _ => false,
+    })
+}
+
 fn writes(op: &Op) -> bool {
     match op {
         Op::StoreAttr(_) | Op::StoreDeref { .. } | Op::DeleteDeref { .. } => true,
@@ -2784,6 +2809,8 @@ fn fresh_container(py: Python<'_>, prep: &Prepared, x: ValueId, own: &Own, seen:
             let callees = unsafe { &*prep.callees.get() };
             callees.get(&x).and_then(|c| c.get(py)).is_some_and(|f| makers().contains(&(f.as_ptr() as usize)))
         }
+        // What an in-place operator gives back is its left operand.
+        Op::Binary(k) if k >= 13 => fresh_container(py, prep, cfg[x].args[0], own, seen),
         _ => false,
     }
 }
@@ -2926,6 +2953,11 @@ fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<Valu
         };
     if writes(&ins.op) && !local {
         return Err(format!("{} writes", here()));
+    }
+    // An in-place operator on a container is a change to it, as a method of
+    // it is (see mutators): pure only on one this frame made.
+    if changes_operand(prep, v) && !(depth > 0 && own_container(ins.args[0])) {
+        return Err(format!("{} changes its left operand in place", here()));
     }
     // CALL_INTRINSIC_1's unary + (5) and list-to-tuple (6) only compute.
     if let Op::Bytecode { opcode, arg } = ins.op

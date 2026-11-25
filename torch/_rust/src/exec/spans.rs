@@ -164,6 +164,7 @@ fn changed_container(py: Python<'_>, prep: &Prepared, v: ValueId) -> Option<Valu
                 | opcodes::DICT_MERGE,
             ..
         } => Some(ins.args[0]),
+        Op::Binary(_) if super::changes_operand(prep, v) => Some(ins.args[0]),
         Op::Call { .. } if ins.args.len() > 1 => {
             let callees = unsafe { &*prep.callees.get() };
             let f = callees.get(&v).and_then(|c| c.get(py))?;
@@ -198,6 +199,8 @@ fn made_here(py: Python<'_>, prep: &Prepared, x: ValueId, made: &HashSet<ValueId
             let callees = unsafe { &*prep.callees.get() };
             made.contains(&x) && callees.get(&x).and_then(|c| c.get(py)).is_some_and(|f| makers().contains(&(f.as_ptr() as usize)))
         }
+        // What an in-place operator gives back is its left operand.
+        Op::Binary(k) if k >= 13 => made.contains(&x) && made_here(py, prep, cfg[x].args[0], made, live_in, seen),
         _ => false,
     }
 }
