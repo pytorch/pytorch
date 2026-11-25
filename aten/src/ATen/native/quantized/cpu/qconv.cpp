@@ -1273,12 +1273,12 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   const std::vector<int32_t> src_zero_points = std::vector<int32_t>(1, input_zp);
   const std::vector<int32_t> dst_zero_points = std::vector<int32_t>(1, output_zero_point);
 
-  ideep::attr_t op_attr;
+  at::native::mkldnn::Attr op_attr;
   float sum_scale = has_accum ? accum.value().q_scale() : 1.0;
   int32_t sum_zero_point = has_accum ? accum.value().q_zero_point() : 0;
   if (has_accum) {
     // Just tells we have these post op, the actual value such as scale and zero point will be set later.
-    op_attr = kReluFused ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
+    op_attr = kReluFused ? at::native::mkldnn::Attr::residual_with_sum_zero_point() : at::native::mkldnn::Attr::fuse_sum();
     const std::vector<float> accum_scale = std::vector<float>(1, 1.0/sum_scale);
     const std::vector<int32_t> accum_zero_points = std::vector<int32_t>(1, sum_zero_point);
     // Set the dst scale and zero point with the value of accum.
@@ -1286,7 +1286,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     dst.set_scale(accum_scale);
     dst.set_zero_point(accum_zero_points);
   } else if (kReluFused) {
-    op_attr = ideep::attr_t::fuse_relu();
+    op_attr = at::native::mkldnn::Attr::fuse_relu();
   }
 
   // Bias might be modified outside (e.g. by quantization bias correction).
@@ -1303,24 +1303,24 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
         input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads, sum_scale, sum_zero_point);
     c10::call_once(*cache_initialized_flag, [&](){
         DeconvParams params;
-        ideep::convolution_transpose_forward::prepare(
+        at::native::mkldnn::convolution_transpose_forward_prepare(
             params, src, weights, b, dst_dims, dst,
             strides, padding_l, padding_r, dilates, groups(),
             src_scales, weights_scales, std::vector<float>(1, inv_output_scale),
             src_zero_points, dst_zero_points, op_attr,
             dnnl::algorithm::deconvolution_direct,
             dnnl::prop_kind::forward_inference,
-            ideep::u8s8, ideep::engine::cpu_engine());
+            ideep::u8s8);
         get_deconv_cache() = DeconvPrimitiveCache(cache_key, params);
         auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     if (get_deconv_cache().hit(cache_key)) {
       DeconvParams& params = get_deconv_cache().get_params();
-      ideep::convolution_transpose_forward::compute<false, false>(
+      at::native::mkldnn::convolution_transpose_forward_compute<false, false>(
           params, src, weights, b, dst);
     } else {
-      ideep::convolution_transpose_forward::compute(
+      at::native::mkldnn::convolution_transpose_forward_compute(
           src, weights, b, dst_dims, dst,
           strides, padding_l, padding_r, dilates,
           groups(), src_scales, weights_scales,
@@ -1328,21 +1328,21 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::deconvolution_direct,
           dnnl::prop_kind::forward_inference,
-          ideep::u8s8, ideep::engine::cpu_engine());
+          ideep::u8s8);
     }
   } else {  // not transposed
     PrimitiveCacheKey cache_key = std::make_tuple(
         input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads, sum_scale, sum_zero_point);
     c10::call_once(*cache_initialized_flag, [&](){
         ConvParams params;
-        ideep::convolution_forward::prepare(
+        at::native::mkldnn::convolution_forward_prepare(
             params, src, weights, b, dst_dims, dst,
             strides, dilates, padding_l, padding_r, groups(),
             src_scales, weights_scales, std::vector<float>(1, inv_output_scale),
             src_zero_points, dst_zero_points,
             op_attr, dnnl::algorithm::convolution_direct,
             dnnl::prop_kind::forward_inference,
-            ideep::u8s8, ideep::engine::cpu_engine());
+            ideep::u8s8);
         get_conv_cache() = ConvPrimitiveCache(cache_key, params);
         auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
         weights = weights.reorder_if_differ_in(expected_weight_desc);
@@ -1350,16 +1350,16 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     // If hit, use cached data. If miss, fall back to normal path.
     if (get_conv_cache().hit(cache_key)) {
       auto& params = get_conv_cache().get_params();
-      ideep::convolution_forward::compute<false, false>(params, src, weights, b, dst);
+      at::native::mkldnn::convolution_forward_compute<false, false>(params, src, weights, b, dst);
     } else {
-      ideep::convolution_forward::compute(
+      at::native::mkldnn::convolution_forward_compute(
           src, weights, b, dst_dims, dst,
           strides, dilates, padding_l, padding_r, groups(),
           src_scales, weights_scales, std::vector<float>(1, inv_output_scale),
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::convolution_direct,
           dnnl::prop_kind::forward_inference,
-          ideep::u8s8, ideep::engine::cpu_engine());
+          ideep::u8s8);
     }
   }
   if (has_accum) {
@@ -1760,7 +1760,7 @@ static at::Tensor _quantized_convolution_onednn(
   }
   ideep::tensor dst = at::native::itensor_view_from_dense(output);
   static ideep::tensor::desc dummy_accum_desc;
-  ideep::attr_t op_attr = onednn_utils::create_attr_by_post_op(
+  at::native::mkldnn::Attr op_attr = onednn_utils::create_attr_by_post_op(
     binary_attr.has_value() ? binary_attr.value() : "none",
     binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
     accum_scale,
@@ -1873,19 +1873,19 @@ static at::Tensor _quantized_convolution_onednn(
 
   // Weight Reorder
   ConvParams params;
-  ideep::convolution_forward::prepare(
+  at::native::mkldnn::convolution_forward_prepare(
       params, src, packed_weight, expected_bias, dst_dims, dst,
       stride.vec(), dilation.vec(), padding.vec(), padding.vec(), groups,
       src_scales, weights_scales, std::vector<float>(1, 1.0f / output_scale),
       src_zero_points, dst_zero_points,
       op_attr, dnnl::algorithm::convolution_direct,
       dnnl::prop_kind::forward_inference,
-      ideep::u8s8, ideep::engine::cpu_engine());
+      ideep::u8s8);
   auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups);
   ideep::tensor expected_weight = packed_weight.reorder_if_differ_in(expected_weight_desc);
 
   // Computation
-  ideep::convolution_forward::compute<false, false>(params, src, expected_weight, expected_bias, dst);
+  at::native::mkldnn::convolution_forward_compute<false, false>(params, src, expected_weight, expected_bias, dst);
 #endif
 
   if (is_1d) {
