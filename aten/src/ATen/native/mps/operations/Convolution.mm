@@ -805,7 +805,32 @@ static Tensor mps_convolution_2d_large_kernel(const Tensor& input_t,
       mtl_dispatch1DJob(computeEncoder, PSO, nThreads);
     }
   });
-  return output;
+  return output.contiguous(conv_backward_memory_format(input_t, weight_t));
+}
+
+static bool mpsgraph_depthwise_overflows(const Tensor& input,
+                                         const Tensor& weight,
+                                         IntArrayRef stride,
+                                         IntArrayRef dilation,
+                                         int64_t groups) {
+  const auto kernel_height = weight.size(2);
+  const auto kernel_width = weight.size(3);
+  const bool is_depthwise = weight.size(1) == 1 && (groups > 1 || weight.size(0) == 1);
+  const bool is_dilated = dilation[0] > 1 || dilation[1] > 1;
+  const bool has_large_stride = std::max(stride[0], stride[1]) > kMPSGraphDepthwiseMaxStride;
+  const bool has_many_taps = kernel_height * kernel_width * stride[0] * stride[1] > kMPSGraphDepthwiseMaxTaps;
+  const bool uses_untiled_kernel = is_packed_channels_last_2d(input) && groups >= kMPSGraphDepthwiseUntiledChannels;
+  if (!is_depthwise || is_dilated || has_large_stride || has_many_taps || kernel_height == 1 || uses_untiled_kernel) {
+    return false;
+  }
+  static const bool full_tile_overflows = !is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS);
+  const int64_t tile_element_size = weight.scalar_type() == kHalf ? sizeof(c10::Half) : sizeof(float);
+  return std::ranges::any_of(kMPSGraphDepthwiseTileOutputs, [&](const auto& outputs) {
+    const auto tile_width = outputs[0] * stride[1] + kernel_width - 1;
+    const auto tile_height = outputs[1] * stride[0] + kernel_height - 1;
+    const auto tile_bytes = tile_width * tile_height * outputs[2] * tile_element_size;
+    return full_tile_overflows ? tile_bytes >= kMPSGraphDepthwiseTileBytes : tile_bytes > kMPSGraphDepthwiseTileBytes;
+  });
 }
 
 static Tensor _mps_convolution_impl(const Tensor& input_t,
@@ -818,7 +843,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
                                     std::optional<IntArrayRef> input_shape,
                                     Tensor output_t = {}) {
   // MPSGraph 2D conv miscomputes the output once a filter spatial dim reaches 256; use a Metal kernel instead.
-  if (input_t.dim() == 4 && (weight_t.size(2) >= 256 || weight_t.size(3) >= 256)) {
+  const bool has_large_filter = weight_t.size(2) >= 256 || weight_t.size(3) >= 256;
+  const bool overflows = mpsgraph_depthwise_overflows(input_t, weight_t, stride, dilation, groups);
+  if (input_t.dim() == 4 && (has_large_filter || overflows)) {
     const auto outH = (input_t.size(2) + 2 * padding[0] - dilation[0] * (weight_t.size(2) - 1) - 1) / stride[0] + 1;
     const auto outW = (input_t.size(3) + 2 * padding[1] - dilation[1] * (weight_t.size(3) - 1) - 1) / stride[1] + 1;
     // Degenerate shapes fall through to the normal path's shape check.
