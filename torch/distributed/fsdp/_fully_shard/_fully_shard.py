@@ -449,7 +449,8 @@ class FSDPModule:
         an encoder submodule first, or calling grouped embeddings and decoder
         layers separately from an inference engine), or when accessing
         resources created at lazy initialization (such as
-        :meth:`get_all_gather_copy_in_stream` or :func:`share_comm_ctx`).
+        :meth:`get_all_gather_copy_in_stream`). Call :func:`share_comm_ctx`
+        before this method, not after.
 
         Calling this method repeatedly on an already-initialized root module
         is a no-op.
@@ -1427,6 +1428,11 @@ def share_comm_ctx(modules: list[FSDPModule]) -> None:
     For Pipeline Parallelism (PP), each model chunk is a FSDP root. We want
     to share cuda streams for all-gather, reduce-scatter, and all-reduce.
     This avoids allocating inter-stream memory framgmentation
+
+    Call this before lazy initialization of any of ``modules`` (their first
+    forward or :meth:`FSDPModule.lazy_init`). Lazy initialization propagates
+    each root's communication context to its nested FSDP modules, so sharing
+    afterward updates only the roots.
 
     Args:
         modules (List[FSDPModule]): modules to share cuda streams
