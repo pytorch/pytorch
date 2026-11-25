@@ -6859,7 +6859,7 @@ import os
 import pathlib
 import sys
 
-phase, directory, module = sys.argv[1:4]
+phase, directory, module, device = sys.argv[1:5]
 cache = pathlib.Path(directory, phase)
 bundle = pathlib.Path(directory, "bundle")
 os.environ["TRITON_CACHE_DIR"] = str(cache)
@@ -6888,7 +6888,7 @@ import triton
 
 sys.path.insert(0, directory)
 scale = __import__(module).scale
-x = torch.arange(1000, device="cuda", dtype=torch.float32)
+x = torch.arange(1000, device=device, dtype=torch.float32)
 out = torch.empty_like(x)
 scale[lambda meta: (triton.cdiv(x.numel(), meta["BLOCK"]),)](x, out, x.numel())
 torch.testing.assert_close(out, x * 3)
@@ -7245,76 +7245,6 @@ class TestTritonRuntimeCacheTransport(TestCase):
             ):
                 import_runtime_cache(bundle, context=self.CONTEXT)
 
-    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
-    def test_imported_cache_launches_without_compiling(self):
-        with tempfile.TemporaryDirectory() as directory:
-            module = f"triton_transport_{uuid.uuid4().hex}"
-            pathlib.Path(directory, module + ".py").write_text(_TRITON_TRANSPORT_KERNEL)
-            for phase in ("produce", "consume"):
-                out = subprocess.run(
-                    [
-                        sys.executable,
-                        "-c",
-                        _TRITON_TRANSPORT_DRIVER,
-                        phase,
-                        directory,
-                        module,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=900,
-                )
-                self.assertEqual(out.returncode, 0, out.stderr)
-                self.assertIn(f"transport phase ok: {phase}", out.stdout)
-
-    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
-    def test_export_holds_every_entry_triton_commits(self):
-        import triton
-        import triton.language as tl
-
-        from torch.compiler._triton_runtime_cache import export_runtime_cache
-
-        with (
-            tempfile.TemporaryDirectory() as tmp,
-            _triton_cache_namespace(tmp),
-            triton.knobs.autotuning.scope(),
-        ):
-            # Autotuners read this knob when they are created.
-            triton.knobs.autotuning.cache = True
-
-            @triton.autotune(
-                configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
-                key=["n"],
-            )
-            @triton.jit
-            def add(x, y, out, n, BLOCK: tl.constexpr):
-                offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
-                mask = offsets < n
-                total = tl.load(x + offsets, mask=mask) + tl.load(
-                    y + offsets, mask=mask
-                )
-                tl.store(out + offsets, total, mask=mask)
-
-            x = torch.randn(1000, device="cuda")
-            out = torch.empty_like(x)
-            add[lambda meta: (triton.cdiv(x.numel(), meta["BLOCK"]),)](
-                x, x, out, x.numel()
-            )
-            torch.cuda.synchronize()
-            header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
-            kinds = [record["kind"] for record in header["records"]]
-            self.assertEqual(kinds.count("kernel"), 2)
-            self.assertEqual(kinds.count("autotune"), 1)
-            # Groups are rebuilt on import, so every other committed file ships.
-            self.assertEqual(
-                {(file["key"], file["name"]) for file in header["files"]},
-                {
-                    (path.parent.name, path.name)
-                    for path in pathlib.Path(tmp).glob("*/*")
-                    if not path.name.startswith("__grp__")
-                },
-            )
-
     @parametrize(
         "damage",
         (
@@ -7494,6 +7424,90 @@ class TestTritonRuntimeCacheTransport(TestCase):
             for context in (object(), {"x": float("nan")}):
                 with self.assertRaisesRegex(RuntimeError, "JSON-serializable"):
                     export_runtime_cache(context=context)
+
+
+@skipIfTorchDynamo("exports a Triton cache directory, not a traced program")
+class TestTritonRuntimeCacheTransportDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+    CONTEXT = {"build": "test"}
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @onlyAccelerator
+    def test_imported_cache_launches_without_compiling(self, device):
+        with tempfile.TemporaryDirectory() as directory:
+            module = f"triton_transport_{uuid.uuid4().hex}"
+            pathlib.Path(directory, module + ".py").write_text(_TRITON_TRANSPORT_KERNEL)
+            for phase in ("produce", "consume"):
+                out = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        _TRITON_TRANSPORT_DRIVER,
+                        phase,
+                        directory,
+                        module,
+                        device,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"transport phase ok: {phase}", out.stdout)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @onlyAccelerator
+    def test_export_holds_every_entry_triton_commits(self, device):
+        import triton
+        import triton.language as tl
+
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _triton_cache_namespace(tmp),
+            triton.knobs.autotuning.scope(),
+        ):
+            # Autotuners read this knob when they are created.
+            triton.knobs.autotuning.cache = True
+
+            @triton.autotune(
+                configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+                key=["n"],
+            )
+            @triton.jit
+            def add(x, y, out, n, BLOCK: tl.constexpr):
+                offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+                mask = offsets < n
+                total = tl.load(x + offsets, mask=mask) + tl.load(
+                    y + offsets, mask=mask
+                )
+                tl.store(out + offsets, total, mask=mask)
+
+            x = torch.randn(1000, device=device)
+            out = torch.empty_like(x)
+            add[lambda meta: (triton.cdiv(x.numel(), meta["BLOCK"]),)](
+                x, x, out, x.numel()
+            )
+            torch.accelerator.synchronize()
+            header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
+            kinds = [record["kind"] for record in header["records"]]
+            self.assertEqual(kinds.count("kernel"), 2)
+            self.assertEqual(kinds.count("autotune"), 1)
+            # Groups are rebuilt on import, so every other committed file ships.
+            self.assertEqual(
+                {(file["key"], file["name"]) for file in header["files"]},
+                {
+                    (path.parent.name, path.name)
+                    for path in pathlib.Path(tmp).glob("*/*")
+                    if not path.name.startswith("__grp__")
+                },
+            )
+
+
+instantiate_device_type_tests(
+    TestTritonRuntimeCacheTransportDevice, globals(), allow_xpu=True
+)
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
