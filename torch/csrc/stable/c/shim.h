@@ -384,6 +384,31 @@ AOTI_TORCH_EXPORT AOTITorchError torch_device_to_pyobject(
  */
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
+// Reads an integer from at::cpu::get_cpu_capabilities().
+// Key is borrowed and NUL-terminated. Outputs are caller-owned.
+// A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_int(
+    const char* key,
+    int64_t* ret_value,
+    bool* ret_key_exists);
+
+// Reads a string from at::cpu::get_cpu_capabilities().
+// Borrowed NUL-terminated key and caller-owned outputs.
+// A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
+// libtorch owns the returned string. Do not free it or use it after unload.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_string(
+    const char* key,
+    const char** ret_value,
+    bool* ret_key_exists);
+
+// Reads a boolean from at::cpu::get_cpu_capabilities().
+// Key is borrowed and NUL-terminated. Outputs are caller-owned.
+// A miss sets *ret_key_exists to false and leaves *ret_value unchanged.
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cpu_capability_bool(
+    const char* key,
+    bool* ret_value,
+    bool* ret_key_exists);
+
 // Returns whether torch.set_warn_always(True) is in effect.
 AOTI_TORCH_EXPORT bool torch_is_warn_always_enabled();
 
@@ -452,6 +477,26 @@ AOTI_TORCH_EXPORT AOTITorchError torch_cpublas_gemm_no_downcast_float64(
 // ScalarType is supported and enabled on this CPU; writes the result to ret.
 AOTI_TORCH_EXPORT AOTITorchError
 torch_cpublas_could_pack(int32_t dtype, bool* ret);
+
+struct InferenceModeGuardOpaque;
+using InferenceModeGuardHandle = InferenceModeGuardOpaque*;
+
+// Constructs a c10::InferenceMode guard to set inference mode on the current
+// thread. On success, *ret_guard is an owning handle. Release it exactly once
+// with torch_delete_inference_mode_guard on the creating thread, in reverse
+// creation order.
+AOTI_TORCH_EXPORT AOTITorchError torch_create_inference_mode_guard(
+    bool enabled,
+    InferenceModeGuardHandle* ret_guard);
+
+// Deletes the owned guard, invoking c10::InferenceMode::~InferenceMode() to
+// restore the previous thread-local state. Passing nullptr succeeds without
+// changing the thread-local state.
+AOTI_TORCH_EXPORT AOTITorchError
+torch_delete_inference_mode_guard(InferenceModeGuardHandle guard);
+
+// Calls c10::InferenceMode::is_enabled() to query the current thread's state.
+AOTI_TORCH_EXPORT bool torch_is_inference_mode_enabled();
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
 
