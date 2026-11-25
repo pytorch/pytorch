@@ -70,6 +70,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/ElementBytes.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/TensorAdvancedIndexingUtils.h>
@@ -108,6 +109,7 @@
 #include <ATen/ops/index_put_native.h>
 #include <ATen/ops/index_reduce_meta.h>
 #include <ATen/ops/index_reduce_native.h>
+#include <ATen/ops/index_select.h>
 #include <ATen/ops/index_select_backward_native.h>
 #include <ATen/ops/index_select_native.h>
 #include <ATen/ops/masked_fill_native.h>
@@ -120,6 +122,7 @@
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/put_native.h>
 #include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/scatter.h>
 #include <ATen/ops/scatter_add_meta.h>
 #include <ATen/ops/scatter_add_native.h>
 #include <ATen/ops/scatter_meta.h>
@@ -186,6 +189,12 @@ static void scatter_meta_impl(
     const std::optional<Tensor>& src = std::nullopt,
     const std::optional<std::string_view> reduce = std::nullopt) {
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !isPackedShellFloatType(self.scalar_type()) ||
+          (src.has_value() && !reduce.has_value()),
+      "scatter with a reduction or a Scalar value is not supported for ",
+      self.scalar_type(),
+      ", which has no arithmetic or Scalar conversion");
   at::native::scatter_gather_dtype_check("scatter", self, index, src);
   at::native::scatter_shape_check(self, wrapped_dim, index, src);
   auto output = meta.maybe_get_output(0);
@@ -359,6 +368,13 @@ static void index_func_meta_impl(
     std::string_view func) {
   auto numel = index.numel();
 
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !isPackedShellFloatType(self.scalar_type()),
+      func,
+      " is not supported for ",
+      self.scalar_type(),
+      ", which has no arithmetic");
+
   TORCH_CHECK_INDEX(
       index.dim() <= 1,
       func,
@@ -479,6 +495,8 @@ static void build_index_op(
     const Tensor& result) {
   // 'TensorIterator' needs to own the things coming from 'info', since
   // 'info' will be destroyed after the META function.
+  // TORCH_IMPL_FUNC(index_out) rebuilds this iterator on byte views for packed
+  // float shell dtypes; keep its operand order and config in sync.
   TensorIteratorConfig config;
   // info.src is a restrided view of result
   config.set_check_mem_overlap(false)
@@ -722,6 +740,24 @@ static TensorIterator make_index_put_iterator(
 
 TORCH_IMPL_FUNC(index_out)
 (const Tensor& self, DimVector sizes, DimVector strides, const Tensor& result) {
+  if (isPackedShellFloatType(self.scalar_type())) {
+    // index_stub moves elements by byte offsets (sizes and strides are in
+    // bytes), so run it on as_element_bytes views of the restrided operands.
+    // Mirrors build_index_op: tensor(0) is result, tensor(1) the restrided
+    // src, and tensor(i >= 2) the indices, already reshaped to result's rank.
+    TensorIteratorConfig config;
+    config.set_check_mem_overlap(false)
+        .check_all_same_dtype(false)
+        .resize_outputs(false)
+        .add_owned_output(as_element_bytes(result))
+        .add_owned_const_input(as_element_bytes(tensor(1)));
+    for (const auto i : c10::irange(2, ntensors())) {
+      config.add_owned_const_input(tensor(i).unsqueeze(-1));
+    }
+    auto iter = config.build();
+    index_stub(device_type(), iter, sizes, strides);
+    return;
+  }
   index_stub(device_type(), *this, sizes, strides);
 }
 
@@ -971,6 +1007,52 @@ Tensor& _index_put_impl_(
       " (got ",
       indices.size(),
       ")");
+  if (isPackedShellFloatType(self.scalar_type())) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        !accumulate,
+        "index_put_ with accumulate=True is not supported for ",
+        self.scalar_type(),
+        ", which has no arithmetic");
+    TORCH_CHECK(
+        value.scalar_type() == self.scalar_type(),
+        "Index put requires the source and destination dtypes match, got ",
+        self.scalar_type(),
+        " for the destination and ",
+        value.scalar_type(),
+        " for the source.");
+    // A 0-dim value may live on the CPU; its bytes view is not 0-dim.
+    auto value_bytes =
+        as_element_bytes(value.dim() == 0 ? value.to(self.device()) : value);
+    auto self_bytes = as_element_bytes(self);
+    const auto device = self.device().type();
+    if (hasNonPowerOfTwoElementSize(self.scalar_type()) &&
+        (device == DeviceType::CUDA || device == DeviceType::XPU) &&
+        at::has_internal_overlap(self) != MemOverlap::Yes) {
+      // The unsorted kernel writes every byte independently, so duplicate
+      // indices could leave an element with bytes from different values. The
+      // sorted kernel writes each indexed element whole. The device list
+      // matches the scatter path below. CPU writes stay unordered, so
+      // duplicate indices are undefined there as documented.
+      TORCH_CHECK(
+          value_bytes.device() == self.device(),
+          "expected device ",
+          self.device(),
+          " but got device ",
+          value_bytes.device(),
+          " for value tensor");
+      at::assert_no_overlap(self, value);
+      for (const std::optional<Tensor>& index : indices) {
+        if (index.has_value()) {
+          at::assert_no_overlap(self, *index);
+        }
+      }
+      index_put_with_sort_stub(
+          device, self_bytes, indices, value_bytes, accumulate, unsafe);
+      return self;
+    }
+    at::_index_put_impl_(self_bytes, indices, value_bytes, accumulate, unsafe);
+    return self;
+  }
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
         "Use of index_put_ on expanded tensors is deprecated. "
@@ -1632,6 +1714,9 @@ Tensor& index_select_out_cpu_(
     int64_t dim,
     const Tensor& index,
     Tensor& result) {
+  if (isPackedShellFloatType(self.scalar_type())) {
+    return index_select_out_as_bytes(self, dim, index, result);
+  }
   if (self.is_quantized()) {
     TORCH_CHECK(
         self.qscheme() == kPerTensorAffine,
@@ -1893,6 +1978,37 @@ Tensor& index_select_out_cpu_(
   return result;
 }
 
+Tensor& index_select_out_as_bytes(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    Tensor& result) {
+  TORCH_CHECK(
+      self.scalar_type() == result.scalar_type(),
+      "index_select(): self and result must have the same scalar type");
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (self.dim() == 0) {
+    // Select along a size-1 dim so the trailing byte dim is never indexed.
+    TORCH_CHECK(
+        index.numel() == 1,
+        "index_select(): Index to scalar can have only 1 value, got ",
+        index.numel(),
+        " value(s)");
+    at::native::resize_output(result, {});
+    auto result_1d = result.view({1});
+    index_select_out_as_bytes(self.view({1}), dim, index, result_1d);
+    return result;
+  }
+  TORCH_CHECK_INDEX(
+      index.dim() <= 1, "index_select(): Index is supposed to be a vector");
+  auto result_size = self.sizes().vec();
+  result_size[dim] = index.numel();
+  at::native::resize_output(result, result_size);
+  auto result_bytes = as_element_bytes(result);
+  at::index_select_out(result_bytes, as_element_bytes(self), dim, index);
+  return result;
+}
+
 Tensor index_select_cpu_(const Tensor& self, int64_t dim, const Tensor& index) {
   Tensor result = at::empty({0}, self.options());
   return at::native::index_select_out_cpu_(self, dim, index, result);
@@ -2101,6 +2217,19 @@ static bool can_use_expanded_index_path(
       self.is_contiguous();
 }
 
+// gather and scatter of packed float shell dtypes run on as_element_bytes
+// views. 0-dim tensors become 1-dim first so dim never names the byte dim.
+static Tensor element_bytes_atleast_1d(const Tensor& t) {
+  return as_element_bytes(t.dim() == 0 ? t.view({1}) : t);
+}
+
+static Tensor index_bytes_atleast_1d(
+    const Tensor& index,
+    int64_t element_size) {
+  return expand_index_to_element_bytes(
+      index.dim() == 0 ? index.view({1}) : index, element_size);
+}
+
 // gather_out_cpu_cuda
 TORCH_IMPL_FUNC(gather_out)
 (const Tensor& self,
@@ -2111,6 +2240,16 @@ TORCH_IMPL_FUNC(gather_out)
   if (index.numel() == 0)
     return;
   dim = at::maybe_wrap_dim(dim, self.dim());
+  if (isPackedShellFloatType(self.scalar_type())) {
+    auto result_bytes = element_bytes_atleast_1d(result);
+    at::gather_out(
+        result_bytes,
+        element_bytes_atleast_1d(self),
+        dim,
+        index_bytes_atleast_1d(index, self.element_size()),
+        sparse_grad);
+    return;
+  }
   if (can_use_expanded_index_path(
           result, dim, index, self, /*is_scatter_like=*/false)) {
     gather_expanded_index_stub(result.device().type(), result, self, index);
@@ -2183,15 +2322,16 @@ static void _scatter_via_index_put(
     const Tensor& src,
     const Tensor& mut_out,
     bool accumulate) {
-  // If index is expanded with zero strides across non-scatter dimensions,
-  // advanced indexing with the index tensor alone achieves the desired
-  // semantics and avoids creating large intermediate tensors.
+  // If index is expanded with zero strides across the full extent of every
+  // non-scatter dimension, advanced indexing with the index tensor alone
+  // achieves the desired semantics and avoids creating large intermediate
+  // tensors.
   bool broadcast_index = true;
   for (const auto i : c10::irange(index.dim())) {
     if (i == dim) {
       continue;
     }
-    if (index.stride(i) != 0) {
+    if (index.stride(i) != 0 || index.size(i) != self.size(i)) {
       broadcast_index = false;
       break;
     }
@@ -2301,6 +2441,39 @@ TORCH_IMPL_FUNC(scatter_src_out)
  const Tensor& index,
  const Tensor& src,
  const Tensor& out) {
+  if (isPackedShellFloatType(self.scalar_type())) {
+    const auto device = self.device().type();
+    if (hasNonPowerOfTwoElementSize(self.scalar_type()) &&
+        (device == DeviceType::CUDA || device == DeviceType::XPU)) {
+      // A byte scatter could combine the bytes of different src elements
+      // that collide on one index; index_put_ writes each element whole.
+      auto mut_out = const_cast<Tensor&>(out);
+      if (!self.is_same(out)) {
+        mut_out.copy_(self);
+      }
+      if (index.numel() > 0) {
+        auto atleast_1d = [](const Tensor& t) {
+          return t.dim() == 0 ? t.view({1}) : t;
+        };
+        _scatter_via_index_put(
+            atleast_1d(self),
+            at::maybe_wrap_dim(dim, self.dim()),
+            atleast_1d(index),
+            atleast_1d(src),
+            atleast_1d(mut_out),
+            /*accumulate=*/false);
+      }
+      return;
+    }
+    auto out_bytes = element_bytes_atleast_1d(out);
+    at::scatter_out(
+        out_bytes,
+        self.is_same(out) ? out_bytes : element_bytes_atleast_1d(self),
+        at::maybe_wrap_dim(dim, self.dim()),
+        index_bytes_atleast_1d(index, self.element_size()),
+        element_bytes_atleast_1d(src));
+    return;
+  }
   scatter_impl(self, dim, index, src, out, scatter_reduce_stub, scatter_stub);
 }
 
