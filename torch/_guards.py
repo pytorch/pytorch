@@ -492,6 +492,29 @@ class StorageOverlap(GuardEnvExpr):
     non_overlapping_sources: list[Source]
 
 
+@dataclasses.dataclass(frozen=True)
+class StorageOverlapPartition(GuardEnvExpr):
+    """
+    Guard that the storage overlap partition of the input tensors at
+    input_sources is unchanged. overlapping_indices lists the groups of
+    overlapping inputs in the form the C++ checker produces and compares with
+    ==: indices into input_sources, singleton groups omitted, each group
+    ascending, groups ordered by their smallest index. storage_groups, in the
+    same form, lists the inputs that shared a storage, which must still each
+    share one.
+    """
+
+    input_sources: list[Source]
+    overlapping_indices: tuple[tuple[int, ...], ...]
+    storage_groups: tuple[tuple[int, ...], ...]
+
+    def __post_init__(self) -> None:
+        if len(set(self.input_sources)) != len(self.input_sources):
+            raise AssertionError(
+                f"input_sources must be unique, got {self.input_sources}"
+            )
+
+
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 

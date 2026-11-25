@@ -1237,6 +1237,111 @@ user_stack=None)
         self.assertTrue(root.check(scope))
         self.assertFalse(root.check({**scope, "c": other[4:6]}))
 
+    def _make_disjoint_storage_partition_guard(
+        self, values, partition=(), storage_groups=()
+    ):
+        root = RootGuardManager()
+        manager = root.framelocals_manager(("x", 0), "x", values, default_mgr_enum)
+        children = [
+            manager.tuple_getitem_manager(i, f"x[{i}]", t, default_mgr_enum)
+            for i, t in enumerate(values)
+        ]
+        label = ["disjoint storage partition"]
+        guards.install_storage_overlap_partition_guard(
+            children, partition, storage_groups, label, None
+        )
+        return root
+
+    def test_storage_overlap_partition_guard_storage_groups(self):
+        # AOTAutograd rebuilds every view of a storage from one synthetic base,
+        # so a view moved to another storage must fail the guard even when the
+        # overlap partition is unchanged.
+        storage, other = torch.randn(8), torch.randn(8)
+        values = (storage[:2], storage[1:3], storage[4:6], torch.randn(2))
+        root = self._make_disjoint_storage_partition_guard(
+            values, partition=((0, 1),), storage_groups=((0, 1, 2),)
+        )
+        self.assertTrue(root.check({"x": values}))
+        moved = (values[0], values[1], other[4:6], values[3])
+        self.assertFalse(root.check({"x": moved}))
+        # The singleton input can move anywhere that doesn't overlap.
+        self.assertTrue(root.check({"x": values[:3] + (storage[6:8],)}))
+
+    def test_disjoint_storage_partition_uses_live_metadata(self):
+        backing = torch.empty(36)
+        buffers = backing.split(4)
+        columns = torch.empty(2, 8)
+        strided = (columns[:, :4], columns[:, 4:])
+        empty_base = torch.empty(1)
+        empty = (empty_base[:0], empty_base[:0])
+        values = buffers + strided + empty
+
+        root = self._make_disjoint_storage_partition_guard(values)
+        scope = {"x": values}
+        self.assertTrue(root.check(scope))
+
+        # Rebind an existing view to overlapping bytes in the same storage.
+        view = buffers[-1]
+        view.set_(backing.untyped_storage(), 2, view.shape, view.stride())
+        self.assertFalse(root.check(scope))
+        view.set_(backing.untyped_storage(), 32, view.shape, view.stride())
+        self.assertTrue(root.check(scope))
+
+        overlapping_columns = (strided[0], columns[:, 2:6])
+        self.assertFalse(root.check({"x": buffers + overlapping_columns + empty}))
+        self.assertFalse(root.check({"x": buffers + strided + (empty[0], empty[0])}))
+        self.assertTrue(root.check(scope))
+
+        class_checks = 0
+
+        class NonTensor:
+            @property
+            def __class__(self):
+                nonlocal class_checks
+                class_checks += 1
+                return type(self)
+
+        value = NonTensor()
+        self.assertTrue(root.check({"x": values[:-1] + (value,)}))
+        self.assertEqual(class_checks, 1)
+
+    def test_disjoint_storage_partition_tiled_views(self):
+        backing = torch.empty(16, 16)
+        tiles = tuple(
+            backing[row : row + height, col : col + width]
+            for row in (0, 4, 8, 12)
+            for col, height, width in ((0, 4, 3), (4, 3, 4), (10, 3, 2))
+        )
+        root = self._make_disjoint_storage_partition_guard(tiles)
+        self.assertTrue(root.check({"x": tiles[::-1]}))
+
+        # A staggered tile still falls in disjoint columns. It must pass even
+        # when the row-band check cannot prove the tiles are disjoint.
+        staggered = tiles[:2] + (backing[1:4, 10:12],) + tiles[3:]
+        self.assertTrue(root.check({"x": staggered}))
+
+        overlapping = tiles[:2] + (backing[:3, 1:3],) + tiles[3:]
+        self.assertFalse(root.check({"x": overlapping}))
+
+        # Overlap across different starting rows needs the pairwise check.
+        crossing = tiles[:2] + (backing[2:4, 2:6],) + tiles[3:]
+        self.assertFalse(root.check({"x": crossing}))
+
+        # This view starts in one storage row and overlaps the next.
+        wrapped = backing.as_strided((1, 2), (16, 1), 15)
+        wrapping = (wrapped, backing[1:2, :1], tiles[2][:1]) + tiles[3:]
+        self.assertFalse(root.check({"x": wrapping}))
+
+    def test_storage_overlap_partition_guard_text_appears_once(self):
+        # The partition guard is attached to every input, and its text names
+        # every input, so repeating it per input would be quadratic in size.
+        root = self._make_disjoint_storage_partition_guard(torch.empty(40).split(4))
+        wrapper = torch._dynamo.guards.GuardManagerWrapper(root)
+        wrapper.populate_code_parts_for_debugging()
+        label = "disjoint storage partition"
+        self.assertEqual(str(wrapper).count(label), 1)
+        self.assertEqual(sum(label in p for p in wrapper.code_parts), 1)
+
     def test_compute_overlapping_tensor_groups_buckets_storages(self):
         # Tensors on different storages never overlap, even when their element
         # ranges intersect: first[:6], second[:6] and the last tensor all span
