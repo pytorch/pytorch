@@ -1890,6 +1890,56 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         default_factory=lambda: collections.defaultdict(list)
     )
     other_arg_indices: list[int] = field(default_factory=list)
+    has_concrete_storage_offset_guards: bool = False
+
+    def _install_synthetic_base_storage_offset_guards(
+        self,
+        flat_args: list[FxValue],
+        flat_args_descs: list[AOTInput],
+        aot_config: AOTConfig,
+    ) -> None:
+        # When aliased inputs are merged into a synthetic base, gen_alias_from_base
+        # bakes concrete int storage offsets into as_strided / as_strided_scatter.
+        # Dynamo's TENSOR_MATCH guard does not check storage_offset, so guard it
+        # explicitly to avoid reusing a cached graph across different overlap geometries.
+        sources = aot_config.aot_autograd_arg_pos_to_source
+        has_concrete_offset = False
+        for group in self.base_groups.values():
+            for orig_idx in group:
+                view_tensor = flat_args[orig_idx]
+                if not isinstance(view_tensor.storage_offset(), int):
+                    continue
+                has_concrete_offset = True
+                if TracingContext.try_get() is None or not sources:
+                    continue
+                desc = flat_args_descs[orig_idx]
+                source_idx = (
+                    desc.idx + aot_config.num_params_buffers
+                    if isinstance(desc, PlainAOTInput)
+                    else orig_idx
+                )
+                source = sources[source_idx]
+                if source is None or not source.subguards_allowed():
+                    continue
+                from torch._dynamo.guards import GuardBuilder, install_guard
+                from torch._dynamo.source import (
+                    is_constant_source,
+                    TensorProperty,
+                    TensorPropertySource,
+                )
+
+                if not is_constant_source(source):
+                    install_guard(
+                        TensorPropertySource(
+                            source, TensorProperty.STORAGE_OFFSET
+                        ).make_guard(
+                            GuardBuilder.EQUALS_MATCH,
+                            recompile_hint=(
+                                "storage_offset changed for aliased mutated input"
+                            ),
+                        )
+                    )
+        self.has_concrete_storage_offset_guards = has_concrete_offset
 
     def pre_compile(
         self,
@@ -1976,44 +2026,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         other_arg_entries.sort()
         self.other_arg_indices = [orig_idx for _, orig_idx in other_arg_entries]
 
-        # When aliased inputs are merged into a synthetic base, gen_alias_from_base
-        # bakes concrete int storage offsets into as_strided / as_strided_scatter.
-        # Dynamo's TENSOR_MATCH guard does not check storage_offset, so guard it
-        # explicitly to avoid reusing a cached graph across different overlap geometries.
-        if (
-            TracingContext.try_get() is not None
-            and aot_config.aot_autograd_arg_pos_to_source
-        ):
-            from torch._dynamo.guards import GuardBuilder, install_guard
-            from torch._dynamo.source import (
-                is_constant_source,
-                TensorProperty,
-                TensorPropertySource,
-            )
-
-            sources = aot_config.aot_autograd_arg_pos_to_source
-            for group in self.base_groups.values():
-                for orig_idx in group:
-                    view_tensor = flat_args[orig_idx]
-                    if isinstance(view_tensor, torch.Tensor) and isinstance(
-                        view_tensor.storage_offset(), int
-                    ):
-                        desc = flat_args_descs[orig_idx]
-                        source_idx = (
-                            desc.idx if isinstance(desc, PlainAOTInput) else orig_idx
-                        )
-                        if source_idx < len(sources):
-                            source = sources[source_idx]
-                            if (
-                                source is not None
-                                and source.subguards_allowed()
-                                and not is_constant_source(source)
-                            ):
-                                install_guard(
-                                    TensorPropertySource(
-                                        source, TensorProperty.STORAGE_OFFSET
-                                    ).make_guard(GuardBuilder.EQUALS_MATCH)
-                                )
+        self._install_synthetic_base_storage_offset_guards(
+            flat_args, flat_args_descs, aot_config
+        )
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
