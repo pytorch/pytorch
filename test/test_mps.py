@@ -9346,6 +9346,24 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "must be recorded"):
             start_event.elapsed_time(end_event)
 
+    def test_mps_event_host_signal(self):
+        event = torch.mps.Event()
+        event.wait(value=2)
+        event.signal(1)
+        self.assertFalse(torch.mps.current_stream().query())
+        threading.Timer(0.2, event.signal, args=(2,)).start()
+        torch.mps.empty_cache()
+        self.assertTrue(torch.mps.current_stream().query())
+
+    def test_mps_event_host_signal_after_pool_reuse(self):
+        previous_event = torch.mps.Event()
+        previous_event.signal(1)
+        del previous_event
+        event = torch.mps.Event()
+        event.wait(value=1)
+        self.assertFalse(torch.mps.current_stream().query())
+        event.signal(1)
+
     def test_generic_event(self):
         startEvent = torch.Event('mps', enable_timing=True)
         startEvent.record()
