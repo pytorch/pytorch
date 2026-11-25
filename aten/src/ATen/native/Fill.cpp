@@ -2,6 +2,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/native/Fill.h>
+#include <ATen/native/ElementBytes.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorIterator.h>
@@ -148,6 +149,10 @@ static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
 }
 
 Tensor& zero_(Tensor &self) {
+  if (hasNonPowerOfTwoElementSize(self.scalar_type())) {
+    as_element_bytes(self).zero_();
+    return self;
+  }
   int64_t nelements = c10::multiply_integers(self.sizes());
   if (self.device() == at::kCPU &&
       self.is_non_overlapping_and_dense() &&

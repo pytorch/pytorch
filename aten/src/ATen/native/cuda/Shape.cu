@@ -592,6 +592,11 @@ TORCH_IMPL_FUNC(cat_out_cuda)
 
   auto materialized = tensors.materialize();
 
+  if (hasNonPowerOfTwoElementSize(result.scalar_type())) {
+    cat_as_bytes(materialized, dim, result);
+    return;
+  }
+
   // We parallelize the copy if all 6 conditions pass:
   //
   // 1. There is more than one input tensor

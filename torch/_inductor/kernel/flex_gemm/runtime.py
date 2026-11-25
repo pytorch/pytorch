@@ -107,6 +107,24 @@ def quack_epilogue_arg(arg: torch.Tensor) -> torch.Tensor:
     return arg if physical is arg.dtype else arg.view(physical)
 
 
+def quack_packed_operand(operand: torch.Tensor, k_dim: int) -> torch.Tensor:
+    """View a K-major float6_e2m3fn_x4 GEMM operand as QuACK's packed uint8 bit stream.
+
+    Each 3-byte element becomes 3 bytes along K (A: [M, K/4] with k_dim=-1 ->
+    [M, 3K/4]; B: column-major [K/4, N] with k_dim=-2 -> [3K/4, N]).
+    """
+    if operand.dtype is not torch.float6_e2m3fn_x4:
+        return operand
+    if operand.stride(k_dim) != 1:
+        raise NotImplementedError(
+            "FlexGEMM MXFP6 operands must be contiguous along K, got strides "
+            f"{operand.stride()} for shape {tuple(operand.shape)}"
+        )
+    if k_dim == -1:
+        return operand.view(torch.uint8)
+    return operand.mT.view(torch.uint8).mT
+
+
 def selection_callback(acc, *operands):
     """Stand in for generated callbacks in config-selection EpiMods."""
     raise AssertionError("config-selection EpiMods are never launched")
@@ -434,6 +452,7 @@ def gemm_epilogue(
     if blockscaled_format is not None:
         if SFA is None or SFB is None:
             raise RuntimeError("FlexGEMM block-scaled GEMMs require SFA and SFB")
+        a, b = quack_packed_operand(a, k_dim=-1), quack_packed_operand(b, k_dim=-2)
         SFA = quack_blockscaled_scale_view(
             SFA, a.shape[0], a.shape[1], blockscaled_format
         )

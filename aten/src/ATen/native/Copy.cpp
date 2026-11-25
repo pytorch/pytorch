@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
+#include <ATen/native/ElementBytes.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -164,6 +165,17 @@ void check_shell_dtype_cast(ScalarType src, ScalarType dst) {
         "second); to encode, pack fp4 codes into torch.uint8 and "
         ".view(torch.float4_e2m1fn_x2).");
   }
+  if (dst == ScalarType::Float6_e2m3fn_x4 ||
+      src == ScalarType::Float6_e2m3fn_x4) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Casting from ", src, " to ", dst, " is not supported. "
+        "torch.float6_e2m3fn_x4 packs four fp6 values into three bytes, so "
+        "there is no elementwise conversion. To decode, use .view(torch.uint8) "
+        "and unpack each 3-byte group as a little-endian 24-bit word whose "
+        "bits [6i, 6i + 6) hold value i; to encode, pack fp6 codes the same way "
+        "into torch.uint8 and .view(torch.float6_e2m3fn_x4).");
+  }
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       "Casting from ", src, " to ", dst, " is not supported: ",
@@ -250,6 +262,20 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   if (src.is_meta()) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Cannot copy out of meta tensor; no data!")
+  }
+
+  if (hasNonPowerOfTwoElementSize(self.scalar_type())) {
+    // Check broadcasting here so errors report shapes without the byte dim.
+    auto shape = infer_size_symdimvector(self.sym_sizes(), src.sym_sizes());
+    TORCH_CHECK(
+        self.sym_sizes().equals(shape),
+        "output with shape ",
+        self.sym_sizes(),
+        " doesn't match the broadcast shape ",
+        shape);
+    auto self_bytes = as_element_bytes(self);
+    copy_impl(self_bytes, as_element_bytes(src), non_blocking);
+    return self;
   }
 
   // Re-dispatch copies when either src or self device not implemented here (e.g. XLA).

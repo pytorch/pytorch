@@ -8,6 +8,7 @@
 #include <ATen/cuda/EmptyTensor.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/native/cuda/Resize.h>
+#include <ATen/native/ElementBytes.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
@@ -35,6 +36,10 @@
 namespace at::native {
 
 Tensor& zero_cuda_(Tensor& self) {
+  if (hasNonPowerOfTwoElementSize(self.scalar_type())) {
+    as_element_bytes(self).zero_();
+    return self;
+  }
 #if defined(USE_ROCM) && ROCM_VERSION >= 70000 && ROCM_VERSION < 70100
   // hipMemsetAsync recorded into a HIP graph leaves stale bytes on ROCm
   // [7.0.0, 7.1.0) (runtime bug, fixed in ROCm/clr 3038c4c3). The bug needs
