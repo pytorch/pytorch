@@ -337,6 +337,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   m.impl("upsample_bicubic2d.vec", native::upsample_bicubic2d);
   m.impl("_upsample_bilinear2d_aa.vec", native::_upsample_bilinear2d_aa);
   m.impl("_upsample_bicubic2d_aa.vec", native::_upsample_bicubic2d_aa);
+  m.impl("_upsample_inter_area2d.vec", native::_upsample_inter_area2d);
   m.impl("upsample_linear1d.vec", native::upsample_linear1d);
   m.impl("upsample_nearest1d.vec", native::upsample_nearest1d);
   m.impl("upsample_nearest2d.vec", native::upsample_nearest2d);
