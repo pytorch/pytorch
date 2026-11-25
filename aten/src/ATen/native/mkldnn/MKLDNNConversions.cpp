@@ -4,6 +4,7 @@
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/detail/Conv.h>
+#include <ATen/native/mkldnn/detail/Deconv.h>
 #include <ATen/native/mkldnn/detail/InnerProduct.h>
 #include <ATen/native/mkldnn/detail/Lstm.h>
 #include <ATen/native/utils/ParamUtils.h>
@@ -306,7 +307,7 @@ static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
     dnnl::memory::data_type x_dtype,
     const dnnl::memory::dims& src_dims) {
   if (channels_last) {
-    return ideep::convolution_transpose_forward::expected_weights_desc<true>(
+    return mkldnn::convolution_transpose_forward_expected_weights_desc<true>(
         weights_dims,
         w_dtype,
         strides,
@@ -318,7 +319,7 @@ static ideep::tensor::desc get_conv_transpose_expected_weights_desc(
         dnnl::prop_kind::forward,
         src_dims);
   } else {
-    return ideep::convolution_transpose_forward::expected_weights_desc<false>(
+    return mkldnn::convolution_transpose_forward_expected_weights_desc<false>(
         weights_dims,
         w_dtype,
         strides,
