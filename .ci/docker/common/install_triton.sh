@@ -23,7 +23,7 @@ elif [ -n "${TRITON_CPU}" ]; then
   TRITON_REPO="https://github.com/triton-lang/triton-cpu"
   TRITON_TEXT_FILE="triton-cpu"
 else
-  TRITON_REPO="https://github.com/triton-lang/triton"
+  TRITON_REPO="https://github.com/mlazos/triton"
   TRITON_TEXT_FILE="triton"
 fi
 
@@ -104,6 +104,8 @@ fi
 # IMPORTANT: helion needs to be installed without dependencies.
 # It depends on torch and triton. We don't want to install
 # triton and torch from production on Docker CI images
+# Pinned: helion 1.6.0 fails to import on Python 3.11 (a dataclass field
+# defaults to MappingProxyType({}), which 3.11 rejects as a mutable default).
 if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
-  pip_install helion --no-deps
+  pip_install helion==1.5.2 --no-deps
 fi

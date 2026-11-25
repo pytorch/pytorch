@@ -10,7 +10,11 @@ import unittest
 import warnings
 import weakref
 
-from torch.testing._internal.common_utils import HardwareClassification, TestCase
+from torch.testing._internal.common_utils import (
+    add_skip_condition,
+    HardwareClassification,
+    TestCase,
+)
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -1351,6 +1355,12 @@ class TestSubsets(TestCase):
                 method = getattr(y, TestSubsets.case2method[rcase])
                 result = method(x)
                 self.assertEqual(result, expected)
+
+    add_skip_condition(
+        test_issubset,
+        lambda cls: cls is TestSubsets,
+        "Only meant to be run as subclass",
+    )
 
 
 # ------------------------------------------------------------------------------
