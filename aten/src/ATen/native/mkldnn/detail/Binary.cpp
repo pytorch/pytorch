@@ -5,9 +5,9 @@
 namespace at::native::mkldnn {
 
 void binary(
-    const ideep::tensor& src0,
-    const ideep::tensor& src1,
-    ideep::tensor& dst,
+    const MkldnnMemory& src0,
+    const MkldnnMemory& src1,
+    MkldnnMemory& dst,
     dnnl::algorithm algorithm) {
   const auto& engine = ideep::engine::cpu_engine();
   auto src0_desc = src0.get_desc();
@@ -20,7 +20,7 @@ void binary(
   auto pd = dnnl::binary::primitive_desc(
       engine, algorithm, src0_desc, src1_desc, dst_desc, op_attr);
 
-  ideep::tensor scratchpad(pd.scratchpad_desc());
+  MkldnnMemory scratchpad(pd.scratchpad_desc());
 
   auto expected_src0 = src0.reorder_if_differ_in(pd.src0_desc());
   auto expected_src1 = src1.reorder_if_differ_in(pd.src1_desc());
