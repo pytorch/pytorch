@@ -481,7 +481,7 @@ def online_softmax_combine(
     # Should be
     #   out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
     # but since rhs_sum is all 1, we can simplify it.
-    out_sum = lhs_sum * lhs_scale + rhs_scale
+    out_sum = tl.fma(lhs_sum, lhs_scale, rhs_scale)
     out_sum = tl.where(out_max == float("inf"), float("nan"), out_sum)
     return out_max, out_sum
 
@@ -501,9 +501,14 @@ def online_softmax_reduce_scalar_combine(
     state, so only one max/sum per output row stays live across the loop.
     """
     rhs = tl.where(rhs_mask, rhs, float("-inf")).to(lhs_max.dtype)
-    rhs_max, rhs_sum = online_softmax_reduce(
-        rhs, tl.where(rhs_mask, 1.0, 0.0), dim, use_fast_math, strict_signed_zero
-    )
+    if strict_signed_zero:
+        rhs_max = max2_strict(rhs, dim)
+    else:
+        rhs_max = max2(rhs, dim)
+    rhs_max_keepdim = tl.expand_dims(rhs_max, dim)
+    delta = tl.where(rhs_max_keepdim == float("-inf"), 0, rhs - rhs_max_keepdim)
+    # Same sum as weighting each exp by a 0/1 mask, without the multiply.
+    rhs_sum = tl.sum(tl.where(rhs_mask, exp(delta, use_fast_math), 0.0), dim)
     return online_softmax_combine_with_sum(
         lhs_max, lhs_sum, rhs_max, rhs_sum, use_fast_math, strict_signed_zero
     )
@@ -527,7 +532,7 @@ def online_softmax_combine_with_sum(
     lhs_scale = tl.where(lhs_max == out_max, 1.0, scale)
     rhs_scale = tl.where(rhs_max == out_max, 1.0, scale)
 
-    out_sum = lhs_sum * lhs_scale + rhs_sum * rhs_scale
+    out_sum = tl.fma(lhs_sum, lhs_scale, rhs_sum * rhs_scale)
     out_sum = tl.where(out_max == float("inf"), float("nan"), out_sum)
     return out_max, out_sum
 
@@ -542,7 +547,7 @@ def welford_reduce(value, mean, m2, weight, first_iteration):
         delta = value - mean
         new_weight = weight + 1
         new_mean = mean + delta / new_weight
-        new_m2 = m2 + delta * (value - new_mean)
+        new_m2 = tl.fma(delta, value - new_mean, m2)
     return new_mean, new_m2, new_weight
 
 
@@ -554,8 +559,8 @@ def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
     new_weight = weight_1 + weight_2
     w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
     return (
-        mean_1 + delta * w2_over_w,
-        m2_1 + m2_2 + delta * delta * weight_1 * w2_over_w,
+        tl.fma(delta, w2_over_w, mean_1),
+        tl.fma(delta * delta * weight_1, w2_over_w, m2_1 + m2_2),
         new_weight,
     )
 
@@ -596,7 +601,7 @@ def rand_eager_kernel(seed, offset_blocks, tid: tl.tensor, VEC: tl.constexpr):
     v23 = tl.where(lane == 2, u2, u3)
     rand_int = tl.where((lane == 0) | (lane == 1), v01, v23)
 
-    return 1.0 - (rand_int.to(tl.float32) * inv + half)
+    return 1.0 - tl.fma(rand_int.to(tl.float32), inv, half)
 
 
 @triton.jit
