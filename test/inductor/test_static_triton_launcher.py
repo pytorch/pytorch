@@ -770,10 +770,12 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         super().setUp()
 
     def test_basic(self, device):
-        """Verify _FastCudaLauncher correctly launches a kernel with tensor + scalar args.
+        """Verify the device-generic static launcher handles tensor + scalar args.
 
-        Compiles a simple kernel, wraps it in _FastCudaLauncher, then invokes
-        via vectorcall and checks the output tensor has the expected value.
+        Compiles a simple kernel, wraps it in the device's static launcher via
+        _make_launcher, then invokes it through that launcher's C entry point
+        (_StaticCudaLauncher/_StaticXpuLauncher) and checks the output tensor
+        has the expected value.
         """
 
         @triton.jit
