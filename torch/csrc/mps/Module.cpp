@@ -15,6 +15,7 @@
 
 #ifdef USE_MPS
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSEvent.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSSleep.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
@@ -87,8 +88,12 @@ static PyObject* MPSModule_deviceSynchronize(
 static PyObject* MPSModule_emptyCache(
     PyObject* /*_unused*/,
     PyObject* /*noargs*/) {
-  HANDLE_TH_ERRORS
-  at::detail::getMPSHooks().emptyCache();
+  HANDLE_TH_ERRORS {
+    // Release GIL as this can block until another Python thread calls
+    // torch.mps.Event.signal.
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().emptyCache();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -192,7 +197,11 @@ static PyObject* MPSModule_recordEvent(PyObject* /*_unused*/, PyObject* args) {
   }
   const uint32_t event_id = THPUtils_unpackUInt32(event_id_o);
   const int64_t stream_id = THPUtils_unpackLong(stream_id_o);
-  at::detail::getMPSHooks().recordEvent(event_id, stream_id);
+  {
+    // See MPSModule_emptyCache.
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().recordEvent(event_id, stream_id);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -206,7 +215,11 @@ static PyObject* MPSModule_waitForEvent(PyObject* /*_unused*/, PyObject* args) {
   }
   const uint32_t event_id = THPUtils_unpackUInt32(event_id_o);
   const int64_t stream_id = THPUtils_unpackLong(stream_id_o);
-  at::detail::getMPSHooks().waitForEvent(event_id, stream_id);
+  {
+    // See MPSModule_emptyCache.
+    pybind11::gil_scoped_release no_gil;
+    at::detail::getMPSHooks().waitForEvent(event_id, stream_id);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -248,8 +261,14 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   }
   const uint32_t start_event_id = THPUtils_unpackUInt32(start_event_o);
   const uint32_t end_event_id = THPUtils_unpackUInt32(end_event_o);
-  return PyFloat_FromDouble(at::detail::getMPSHooks().elapsedTimeOfEvents(
-      start_event_id, end_event_id));
+  double elapsed = 0.0;
+  {
+    // See MPSModule_emptyCache.
+    pybind11::gil_scoped_release no_gil;
+    elapsed = at::detail::getMPSHooks().elapsedTimeOfEvents(
+        start_event_id, end_event_id);
+  }
+  return PyFloat_FromDouble(elapsed);
   END_HANDLE_TH_ERRORS
 }
 
@@ -621,6 +640,17 @@ void initModule(PyObject* module) {
   m.def("_mps_sleep", [](int64_t cycles) {
     pybind11::gil_scoped_release no_gil;
     at::mps::sleep(cycles);
+  });
+  m.def(
+      "_mps_waitForHostSignal",
+      [](uint32_t event_id, int64_t stream_id, uint64_t value) {
+        pybind11::gil_scoped_release no_gil;
+        at::mps::getMPSEventPool()->waitForHostSignal(
+            event_id, at::mps::getStreamByID(stream_id), value);
+      });
+  m.def("_mps_signalEvent", [](uint32_t event_id, uint64_t value) {
+    pybind11::gil_scoped_release no_gil;
+    at::mps::getMPSEventPool()->signalEvent(event_id, value);
   });
   m.def("_mps_host_alias_storage", [](py::object py_storage) -> py::object {
     PyObject* obj = py_storage.ptr();

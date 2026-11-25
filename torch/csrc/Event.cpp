@@ -109,16 +109,19 @@ static PyObject* THPEvent_record(
     TORCH_WARN("Parsing THPEvent_record arg fails");
     return nullptr;
   }
-  if (!Py_IsNone(_stream)) {
-    auto stream = reinterpret_cast<THPStream*>(_stream);
-    self->event.record(c10::Stream::unpack3(
-        stream->stream_id,
-        static_cast<c10::DeviceIndex>(stream->device_index),
-        static_cast<c10::DeviceType>(stream->device_type)));
-  } else {
-    c10::impl::VirtualGuardImpl impl{
-        static_cast<c10::DeviceType>(self->event.device_type())};
-    self->event.record(impl.getStream(impl.getDevice()));
+  {
+    pybind11::gil_scoped_release no_gil;
+    if (!Py_IsNone(_stream)) {
+      auto stream = reinterpret_cast<THPStream*>(_stream);
+      self->event.record(c10::Stream::unpack3(
+          stream->stream_id,
+          static_cast<c10::DeviceIndex>(stream->device_index),
+          static_cast<c10::DeviceType>(stream->device_type)));
+    } else {
+      c10::impl::VirtualGuardImpl impl{
+          static_cast<c10::DeviceType>(self->event.device_type())};
+      self->event.record(impl.getStream(impl.getDevice()));
+    }
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -189,6 +192,7 @@ static PyObject* THPEvent_wait(
       TORCH_WARN("Parsing THPEvent_wait arg fails");
       return nullptr;
     }
+    pybind11::gil_scoped_release no_gil;
     if (!Py_IsNone(_stream)) {
       auto stream = reinterpret_cast<THPStream*>(_stream);
       self->event.block(c10::Stream::unpack3(
@@ -220,7 +224,12 @@ static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
       Py_TYPE(_other) == THPEventClass,
       "expected other to be a torch.Event object");
   auto other = reinterpret_cast<THPEvent*>(_other);
-  return PyFloat_FromDouble(self->event.elapsedTime(other->event));
+  double elapsed = 0.0;
+  {
+    pybind11::gil_scoped_release no_gil;
+    elapsed = self->event.elapsedTime(other->event);
+  }
+  return PyFloat_FromDouble(elapsed);
   END_HANDLE_TH_ERRORS
 }
 

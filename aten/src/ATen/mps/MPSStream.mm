@@ -110,21 +110,20 @@ void MPSStream::commitIfNeeded() {
   // stall the caller, so skip the commit while kMaxCommandBuffersInFlight of the stream's own commits are in
   // flight (MPSGraph's are not counted).
   constexpr uint32_t kKernelsPerCommit = 16; // See https://github.com/pytorch/pytorch/pull/200181 for the sweep
-  constexpr uint32_t kMaxCommandBuffersInFlight = 32;
   if (_enableCommitAndContinue && _kernelsSinceCommit >= kKernelsPerCommit &&
       _commandBuffersInFlight < kMaxCommandBuffersInFlight) {
     synchronize(SyncType::COMMIT);
   }
 }
 
-void MPSStream::synchronize(SyncType syncType) {
+void MPSStream::synchronize(SyncType syncType, bool deferrable) {
   endKernelCoalescing();
   switch (syncType) {
     case SyncType::NONE:
       // typically in GPU to GPU copies we won't commit explicitly
       break;
     case SyncType::COMMIT:
-      commit();
+      commit(deferrable);
       break;
     case SyncType::COMMIT_ADAPTIVE:
       // the adaptive commit only commits if we hit the low watermark memory threshold
@@ -143,8 +142,23 @@ void MPSStream::synchronize(SyncType syncType) {
   }
 }
 
-void MPSStream::commit() {
+void MPSStream::commit(bool deferrable) {
   _kernelsSinceCommit = 0;
+  // A command buffer committed behind a host signal wait cannot complete before the host signals, and the
+  // calling thread may be the one that has to signal (torch.mps.Event.signal). Those commits must not add up
+  // to the 64 uncompleted command buffers at which Metal blocks the caller (see commitIfNeeded), so past
+  // kMaxCommandBuffersInFlight keep encoding into the current command buffer. A completion handler retries.
+  const auto mustDefer = [this] {
+    return _hostWaitsInFlight > 0 && _commandBuffersInFlight >= kMaxCommandBuffersInFlight;
+  };
+  if (deferrable && mustDefer()) {
+    _commitDeferred = true;
+    // A handler that ran before the flag was set does not retry, so check again
+    if (mustDefer()) {
+      return;
+    }
+  }
+  _commitDeferred = false;
   if (_enableCommitAndContinue) {
     [commandBuffer() commitAndContinue];
   } else {
@@ -180,6 +194,8 @@ void MPSStream::commitAndWait() {
     checkLastError();
   }
   _hasWorkSinceQuerySignal = false;
+  _hasHostWait = false;
+  _commitDeferred = false;
 }
 
 void MPSStream::commitAndContinue() {
@@ -218,8 +234,24 @@ void MPSStream::addErrorHandler() {
   // so that checkLastError() raises it at the next synchronization point, rather than
   // silently returning garbage, similar to how CUDA reports asynchronous errors.
   ++_commandBuffersInFlight;
+  const bool hasHostWait = std::exchange(_hasHostWait, false);
+  if (hasHostWait) {
+    ++_hostWaitsInFlight;
+  }
   [commandBuffer() addCompletedHandler:^(id<MTLCommandBuffer> cb) {
     --_commandBuffersInFlight;
+    if (hasHostWait) {
+      --_hostWaitsInFlight;
+    }
+    if (_commitDeferred) {
+      dispatch_async(_serialQueue, ^() {
+        @autoreleasepool {
+          if (_commitDeferred) {
+            synchronize(SyncType::COMMIT);
+          }
+        }
+      });
+    }
     CommandBufferError error;
     if (commandBufferFailed(cb, error.is_oom, error.code, error.message)) {
       recordCommandBufferError(std::move(error));

@@ -287,7 +287,9 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
                                 static_cast<uint32_t>(src.numel()),
                                 /*ilp_threshold=*/0u);
       if (!non_blocking) {
-        stream->synchronize(SyncType::COMMIT_AND_WAIT);
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          stream->synchronize(SyncType::COMMIT_AND_WAIT);
+        });
       }
     } else if (destOffset % 4 != 0 || storage_byte_offset % 4 != 0) {
       // Blits need 4-byte aligned offsets on macOS, which sub-4-byte dtypes at odd offsets violate (#119367)
@@ -295,7 +297,9 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
       copy_bytes_kernel(
           destBuffer, destOffset, sourceBuffer, storage_byte_offset, src.nbytes(), dst, src, non_blocking);
       if (!non_blocking) {
-        stream->synchronize(SyncType::COMMIT_AND_WAIT);
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          stream->synchronize(SyncType::COMMIT_AND_WAIT);
+        });
       }
     }
 

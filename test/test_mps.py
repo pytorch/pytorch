@@ -9389,6 +9389,123 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "must be recorded"):
             start_event.elapsed_time(end_event)
 
+    def test_mps_event_host_signal(self):
+        event = torch.mps.Event()
+        event.wait(value=2)
+        event.signal(1)
+        signalled = threading.Event()
+        threading.Timer(0.2, lambda: (signalled.set(), event.signal(2))).start()
+        # Drains the stream, so the timer thread can only signal if empty_cache releases the GIL
+        torch.mps.empty_cache()
+        self.assertTrue(signalled.is_set())
+        self.assertTrue(torch.mps.current_stream().query())
+
+    @parametrize("call", ["mps_record", "mps_wait", "record", "wait", "elapsed_time", "record_event", "wait_event", "wait_stream", "empty_cache"])
+    def test_mps_event_host_signal_with_blocked_thread(self, call):
+        torch.empty(1, device="mps")  # torch.accelerator.empty_cache is a no-op until the allocator is initialized
+        stream = torch.mps.current_stream()
+        recorded = torch.Event("mps", enable_timing=True)
+        recorded.record()
+        calls = {
+            "mps_record": torch.mps.Event().record,
+            "mps_wait": torch.mps.Event().wait,
+            "record": torch.Event("mps").record,
+            "wait": recorded.wait,
+            "elapsed_time": lambda: recorded.elapsed_time(recorded),
+            "record_event": stream.record_event,
+            "wait_event": lambda: stream.wait_event(recorded),
+            "wait_stream": lambda: stream.wait_stream(torch.mps.Stream()),
+            "empty_cache": torch.accelerator.empty_cache,
+        }
+        errors = []
+
+        def blocked():
+            try:
+                calls[call]()
+            except Exception as e:
+                errors.append(e)
+
+        event = torch.mps.Event()
+        event.wait(value=1)
+        thread = threading.Timer(0.1, blocked)
+        thread.start()
+        threading.Timer(0.2, event.signal, args=(1,)).start()
+        torch.mps.synchronize()
+        thread.join()
+        self.assertEqual(errors, [])
+
+    def test_mps_event_host_signal_invalid_value(self):
+        event = torch.mps.Event()
+        with self.assertRaisesRegex(ValueError, "unsigned 64-bit"):
+            event.signal(-1)
+        with self.assertRaisesRegex(ValueError, "unsigned 64-bit"):
+            event.wait(value=2**64)
+        with self.assertRaisesRegex(TypeError, "cannot be interpreted as an integer"):
+            event.signal(1.5)
+
+    def test_mps_event_host_signal_after_pool_reuse(self):
+        previous_event = torch.mps.Event()
+        previous_id = previous_event._Event__eventId
+        previous_event.signal(1)
+        del previous_event
+        event = torch.mps.Event()
+        self.assertEqual(event._Event__eventId, previous_id)
+        torch.mps.synchronize()
+        event.wait(value=1)
+        self.assertFalse(torch.mps.current_stream().query())
+        event.signal(1)
+        torch.mps.synchronize()
+
+    @parametrize("commit", ["wait", "record", "generic_record", "query", "copy"])
+    def test_mps_event_host_signal_pending_commits(self, commit):
+        x = torch.ones(8, device="mps")
+        commits = {
+            "wait": lambda n: event.wait(value=n),
+            "record": lambda n: torch.mps.Event().record(),
+            "generic_record": lambda n: torch.Event("mps").record(),
+            "query": lambda n: torch.mps.current_stream().query(),
+            "copy": lambda n: x.to("cpu", non_blocking=True),
+        }
+        steps = 100  # more than the 64 uncompleted command buffers that Metal allows on a queue
+        event = torch.mps.Event()
+        self.addCleanup(event.signal, steps)
+        event.wait(value=1)
+        for n in range(1, steps + 1):
+            x = x + 1
+            commits[commit](n)
+        event.signal(steps)
+        self.assertEqual(x.cpu(), torch.full((8,), steps + 1.0))
+
+    def test_mps_event_host_signal_elapsed_time(self):
+        x = torch.ones(1024, 1024, device="mps")
+        event, pending = torch.mps.Event(), torch.mps.Event()
+        start, end = torch.mps.Event(enable_timing=True), torch.mps.Event(enable_timing=True)
+        self.addCleanup(event.signal, 1)
+        event.wait(value=1)
+        for _ in range(40):
+            pending.record()
+        start.record()
+        x = x @ x
+        end.record()
+        event.signal(1)
+        self.assertGreater(start.elapsed_time(end), 0)
+
+    def test_mps_event_host_signal_orders_host_writes(self):
+        steps = 8
+        x = torch.zeros(steps, device="mps")
+        torch.mps.synchronize()
+        host_x = torch.empty(0).set_(torch.mps._host_alias_storage(x.untyped_storage()))
+        event = torch.mps.Event()
+        self.addCleanup(event.signal, steps)
+        out = []
+        for n in range(1, steps + 1):
+            event.wait(value=n)
+            out.append(x[n - 1] * 1)
+        for n in range(1, steps + 1):
+            host_x[n - 1] = n
+            event.signal(n)
+        self.assertEqual(torch.stack(out).cpu(), torch.arange(1.0, steps + 1))
+
     def test_generic_event(self):
         startEvent = torch.Event('mps', enable_timing=True)
         startEvent.record()

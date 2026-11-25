@@ -191,6 +191,7 @@ static PyObject* THPStream_wait_event(PyObject* _self, PyObject* _event) {
   HANDLE_TH_ERRORS {
     auto self = reinterpret_cast<THPStream*>(_self);
     auto event = reinterpret_cast<THPEvent*>(_event);
+    pybind11::gil_scoped_release no_gil;
     c10::Stream::unpack3(
         self->stream_id,
         static_cast<c10::DeviceIndex>(self->device_index),
@@ -205,6 +206,7 @@ static PyObject* THPStream_wait_stream(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS {
     auto self = reinterpret_cast<THPStream*>(_self);
     auto other_stream = reinterpret_cast<THPStream*>(_other);
+    pybind11::gil_scoped_release no_gil;
     c10::Event new_event(
         static_cast<c10::DeviceType>(other_stream->device_type),
         c10::EventFlag::PYTORCH_DEFAULT);
@@ -257,10 +259,13 @@ static PyObject* THPStream_record_event(
   }
   auto new_event = reinterpret_cast<THPEvent*>(_new_event);
   TORCH_CHECK(new_event, "event must not be null");
-  new_event->event.record(c10::Stream::unpack3(
-      self->stream_id,
-      static_cast<c10::DeviceIndex>(self->device_index),
-      static_cast<c10::DeviceType>(self->device_type)));
+  {
+    pybind11::gil_scoped_release no_gil;
+    new_event->event.record(c10::Stream::unpack3(
+        self->stream_id,
+        static_cast<c10::DeviceIndex>(self->device_index),
+        static_cast<c10::DeviceType>(self->device_type)));
+  }
   return reinterpret_cast<PyObject*>(new_event);
   END_HANDLE_TH_ERRORS
 }
