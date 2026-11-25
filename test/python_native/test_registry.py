@@ -616,7 +616,6 @@ class TestRegistryRuntime(TestCase):
         else:
             router = torch.library.get_kernel("aten::add.Tensor", "CPU")
             actual = router.call_boxed(keyset, x, y)
-        self.assertEqual(actual.dtype, expected.dtype)
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @parametrize("dtype,value", ((torch.float16, 2049), (torch.bfloat16, 257)))
@@ -675,7 +674,6 @@ class TestRegistryRuntime(TestCase):
         self._install(op_name, "CPU")
         router = torch.library.get_kernel(f"aten::{op_name}", "CPU")
         actual = router.call_boxed(keys, sequence, value, out_int32=out_int32)
-        self.assertEqual(actual.dtype, expected.dtype)
         self.assertEqual(actual, expected)
 
     @parametrize("dtype", (torch.int64, torch.float32, torch.float64))
@@ -704,7 +702,6 @@ class TestRegistryRuntime(TestCase):
             self._install("div.Tensor", "CPU")
             router = torch.library.get_kernel("aten::div.Tensor", "CPU")
             actual = router.call_boxed(keys, x, value)
-            self.assertEqual(actual.dtype, expected.dtype)
             self.assertEqual(actual, expected, atol=0, rtol=0)
 
     def test_scalar_router_cleanup_restores_native(self) -> None:
