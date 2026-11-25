@@ -817,7 +817,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   auto K = input.size(dim - 1), M = input.numel() / K, N = w.get_dim(1);
   auto input_dims = {M, K};
   auto input_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
-  auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
+  auto input_desc = at::native::mkldnn::MkldnnMemory::desc(input_dims, input_data_type);
   at::native::mkldnn::Attr op_attr = at::native::mkldnn::Attr();
   if (post_op == Relu) {
     op_attr = at::native::mkldnn::Attr::fuse_relu();
@@ -826,7 +826,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   } else if (post_op == Tanh) {
     op_attr = at::native::mkldnn::Attr::fuse_tanh();
   }
-  ideep::tensor x(input_desc, input_contig->data_ptr());
+  at::native::mkldnn::MkldnnMemory x(input_desc, input_contig->data_ptr());
   auto dst_dims = {M, N};
   double input_scale = input.q_scale();
   int64_t input_zero_point = input.q_zero_point();
@@ -836,7 +836,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
   const std::vector<float>& dst_scales = std::vector<float>(1, 1.0/output_scale);
   const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(1, input_zero_point);
   const std::vector<int32_t>& dst_zero_point = std::vector<int32_t>(1, output_zero_point);
-  // Compute: Use ideep::matmul_forward to support asymmetric quantization
+  // Compute: Use mkldnn::matmul_forward to support asymmetric quantization
   // Allocate output Tensor
   at::Tensor output = at::_empty_affine_quantized(
       dst_dims,
@@ -847,8 +847,8 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
     return output;
   }
   auto output_ideep_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
-  auto ideep_lowp_kind = is_input_qint8 ? ideep::s8s8 : ideep::u8s8;
-  ideep::tensor y({dst_dims, output_ideep_data_type,
+  auto ideep_lowp_kind = is_input_qint8 ? at::native::mkldnn::s8s8 : at::native::mkldnn::u8s8;
+  at::native::mkldnn::MkldnnMemory y({dst_dims, output_ideep_data_type,
                    {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
   bool with_bias = bias_.has_value();
@@ -859,14 +859,14 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
       bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
     }
   }
-  const auto& b = with_bias ? bias_.value() : ideep::tensor();
+  const auto& b = with_bias ? bias_.value() : at::native::mkldnn::MkldnnMemory();
   // Primitive cache is initialized when called for the first time
   // and won't be updated afterwards.
   int num_threads = at::get_num_threads();
   PrimitiveCacheKey cache_key = std::make_tuple(
       input_scale, input_zero_point, input_dims, output_scale, output_zero_point, num_threads, /*accum scale*/1.0, /*accum zero point*/0);
   c10::call_once(*cache_initialized_flag, [&](){
-#if IDEEP_PREREQ(3, 13, 0, 4)
+#if DNNL_PREREQ(3, 13, 0)
       // Prepacking does not know the output dtype. Select the layout for this
       // invocation before preparing the cached primitive.
       auto expected_w = w.reorder_if_differ_in(
@@ -1084,7 +1084,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     const std::string_view& unary_post_op, // e.g. "none", "relu"
     torch::List<std::optional<at::Scalar>>& unary_post_op_args,
     std::string_view& unary_post_op_algorithm) {
-  using ideep::tensor;
+  using tensor = at::native::mkldnn::MkldnnMemory;
   const int64_t dim = input.dim();
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte || input.scalar_type() == c10::ScalarType::Char || input.scalar_type() == c10::ScalarType::Float8_e4m3fn,
       "qlinear with mkldnn tensor: data type of input should be uint8, int8 or float8_e4m3fn.");
@@ -1165,7 +1165,7 @@ static at::Tensor linear_int8_with_onednn_weight(
           auto other_2d = other_ref.reshape({-1, other_ref.size(dim - 1)});
           params.src1->set_data_handle(other_2d.data_ptr());
         }
-        params.primitive.execute(ideep::stream::default_stream(), params.args);
+        params.primitive.execute(at::native::mkldnn::IStream::default_stream(), params.args);
         return dim == 2 ? output : output.resize_(params.output_size);
       }
     }
@@ -1307,7 +1307,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   if (input_zero_point != 0) {
     op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
   }
-  op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, ideep::utils::op_scale_mask(weight_scales.numel()));
+  op_attr.set_scales_mask(DNNL_ARG_WEIGHTS, at::native::mkldnn::utils::op_scale_mask(weight_scales.numel()));
   if (output_scale != 1.0f) {
     op_attr.set_scales_mask(DNNL_ARG_DST, 0);
   }
@@ -1315,7 +1315,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     op_attr.set_zero_points_mask(DNNL_ARG_DST, 0);
   }
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  auto engine = ideep::engine::cpu_engine();
+  auto engine = at::native::mkldnn::Engine::cpu_engine();
   auto primitive_desc = with_bias ?
       dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, bias_desc, dst_desc, op_attr) :
       dnnl::matmul::primitive_desc(engine, src_desc, weights_desc, dst_desc, op_attr);
@@ -1355,7 +1355,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   if (binary_post_op == "add") {
     args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1});
   }
-  primitive.execute(ideep::stream::default_stream(), args);
+  primitive.execute(at::native::mkldnn::IStream::default_stream(), args);
   // Update cache if needed
   if (allow_cache) {
     QlinearForwardParams params;
