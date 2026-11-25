@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     gradcheck,
     parametrize,
+    skipIfXpu,
 )
 
 
@@ -569,6 +570,7 @@ class TestSegmentReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(nd_data, 'sum', lengths=nd_lengths, axis=1, unsafe=False)
 
+    @skipIfXpu(msg="See https://github.com/intel/torch-xpu-ops/issues/6182")
     @dtypes(torch.half, torch.bfloat16)
     def test_reduced_precision_accumulation(self, device, dtype):
         # See https://github.com/pytorch/pytorch/issues/204045
@@ -583,7 +585,7 @@ class TestSegmentReductions(TestCase):
 
 
 
-instantiate_device_type_tests(TestSegmentReductions, globals())
+instantiate_device_type_tests(TestSegmentReductions, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
