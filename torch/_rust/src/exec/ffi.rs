@@ -12,7 +12,7 @@ pub struct Frame {
 
 pub type EvalFrameFn = unsafe extern "C" fn(*mut PyThreadState, *mut Frame, c_int) -> *mut PyObject;
 
-extern "C" {
+unsafe extern "C" {
     // frame_shim.c
     pub fn tr_frame_code(f: *mut Frame) -> *mut PyObject;
     pub fn tr_frame_qualname(f: *mut Frame) -> *mut PyObject;
@@ -30,6 +30,8 @@ extern "C" {
     pub fn tr_current_frame(t: *mut PyThreadState) -> *mut Frame;
     pub fn tr_tracing_active(t: *mut PyThreadState) -> c_int;
     pub fn tr_frame_push(f: *mut Frame, obj: *mut PyObject);
+    pub fn tr_frame_globals(f: *mut Frame) -> *mut PyObject;
+    pub fn tr_frame_builtins(f: *mut Frame) -> *mut PyObject;
     pub fn tr_frame_pop(f: *mut Frame) -> *mut PyObject;
     pub fn tr_frame_stack_depth(f: *mut Frame) -> c_int;
     pub fn tr_gen_suspend(t: *mut PyThreadState, f: *mut Frame, unit: c_int);
@@ -43,6 +45,8 @@ extern "C" {
     pub fn tr_load_global(f: *mut Frame, namei: c_int, cache: *mut GlobalCache) -> *mut PyObject;
     pub fn tr_load_method(name: *mut PyObject, owner: *mut PyObject, out: *mut *mut PyObject) -> c_int;
     pub fn tr_bound_function(callable: *mut PyObject) -> *mut PyObject;
+    pub fn tr_bound_self(callable: *mut PyObject) -> *mut PyObject;
+    pub fn tr_partial_func(callable: *mut PyObject) -> *mut PyObject;
     pub fn tr_type_function(obj: *mut PyObject, getattr: c_int) -> *mut PyObject;
     pub static mut PyMethod_Type: pyo3::ffi::PyTypeObject;
     pub fn tr_type_attr_is(obj: *mut PyObject, name: *mut PyObject, f: *mut PyObject) -> c_int;
@@ -61,7 +65,21 @@ extern "C" {
         out: *mut *mut PyObject,
     ) -> c_int;
 
+    pub fn tr_attr_home(obj: *mut PyObject, name: *mut PyObject, dict: *mut *mut PyObject, generic: c_int) -> c_int;
+    pub fn tr_type_version(tp: *mut pyo3::ffi::PyTypeObject) -> u32;
+    pub fn tr_type_version_is(tp: *mut pyo3::ffi::PyTypeObject, tag: u32) -> c_int;
+    pub fn tr_type_immutable(tp: *mut pyo3::ffi::PyTypeObject) -> c_int;
+    pub fn tr_type_lookup(tp: *mut pyo3::ffi::PyTypeObject, name: *mut PyObject) -> *mut PyObject;
+    pub fn tr_type_heap(tp: *mut pyo3::ffi::PyTypeObject) -> c_int;
+    pub fn tr_super_next(cls: *mut PyObject, obj: *mut PyObject) -> *mut PyObject;
+    pub fn tr_dict_version(d: *mut PyObject) -> u64;
+    pub fn tr_view_dict(o: *mut PyObject) -> *mut PyObject;
+    pub fn tr_proxy_dict(o: *mut PyObject) -> *mut PyObject;
+    pub fn tr_builtin_self(callable: *mut PyObject) -> *mut PyObject;
+    pub fn tr_calls_builtin(callable: *mut PyObject) -> c_int;
+
     // CPython
+    pub fn _PySet_NextEntry(set: *mut PyObject, pos: *mut pyo3::ffi::Py_ssize_t, key: *mut *mut PyObject, hash: *mut pyo3::ffi::Py_hash_t) -> c_int;
     pub fn _PyInterpreterState_GetEvalFrameFunc(interp: *mut pyo3::ffi::PyInterpreterState) -> EvalFrameFn;
     pub fn _PyInterpreterState_SetEvalFrameFunc(interp: *mut pyo3::ffi::PyInterpreterState, f: EvalFrameFn);
     pub fn PyUnstable_Eval_RequestCodeExtraIndex(free: unsafe extern "C" fn(*mut c_void)) -> isize;

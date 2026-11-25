@@ -10,8 +10,18 @@ use crate::bindings::ffi as tffi;
 use crate::cfg::ir::*;
 
 use super::effects::{self, Recorder};
+use super::reads;
 use super::ffi::*;
 use super::{Compiled, Prepared};
+
+// torch._rust_inductor._opaque_call (see Act::opaque_call), once looked up.
+fn opaque_helper(py: pyo3::Python<'_>) -> pyo3::PyResult<pyo3::Bound<'_, pyo3::PyAny>> {
+    use pyo3::types::PyAnyMethods;
+    static HELPER: pyo3::sync::PyOnceLock<pyo3::Py<pyo3::PyAny>> = pyo3::sync::PyOnceLock::new();
+    HELPER
+        .get_or_try_init(py, || Ok::<_, pyo3::PyErr>(py.import("torch._rust_inductor")?.getattr("_opaque_call")?.unbind()))
+        .map(|h| h.bind(py).clone())
+}
 
 // How an exception was raised: Error adds a traceback entry for this frame
 // (the default loop's `error:`); Reraise doesn't (`exception_unwind:`).
@@ -35,6 +45,9 @@ pub enum Outcome {
     // exception is set).
     Leave(Vec<*mut PyObject>),
     Outer(usize, Vec<*mut PyObject>),
+    // Only while tracing a span (see span_trace): about to run this block,
+    // its params set, which is the span's exit or outside it.
+    Stopped(BlockId),
 }
 
 // Where an exception goes from a raise point.
@@ -103,6 +116,11 @@ struct Act<'a> {
     args: Vec<*mut PyObject>,
     outs: Vec<*mut PyObject>,
     edge: Vec<*mut PyObject>,
+    // The span being traced (see span_trace), or null.
+    stop: *const Span,
+    // Whether this activation runs a traced region's body (or a frame under
+    // it): what its instrs read is recorded (see reads.rs).
+    reading: bool,
 }
 
 // An activation's buffers, pooled per thread so a call allocates nothing.
@@ -261,7 +279,7 @@ pub const FLAG_YIELD: u8 = 16;
 // Runs `f` with a recorder for p's table at `site`, or with none on this
 // thread if p doesn't record or recording is off.
 fn recording<R>(p: &Prepared, site: Site, f: impl FnOnce(*mut Recorder) -> R) -> R {
-    if p.record && super::RECORD.load(std::sync::atomic::Ordering::Relaxed) {
+    if p.record && super::RECORD.load(std::sync::atomic::Ordering::Relaxed) && !super::region::tracing() {
         effects::scope(&p.effects, site, f)
     } else {
         effects::unrecorded(|| f(std::ptr::null_mut()))
@@ -294,7 +312,14 @@ pub unsafe fn run(c: &Compiled, prep: &Prepared, f: *mut Frame, start: Start) ->
             args,
             outs,
             edge,
+            stop: std::ptr::null(),
+            reading: reads::entered_by_body(),
         };
+        // Between this frame's instrs no instr is running (the caller puts
+        // back what was, once the frame is gone).
+        if act.reading {
+            reads::set_in_instr(false);
+        }
         let result = match start {
             Start::Entry => act.run_blocks(ENTRY, None),
             Start::Resume { b, ver, i, throw } => match act.resume(b, ver, i, throw) {
@@ -331,6 +356,8 @@ pub unsafe fn run_graph(prep: &Prepared, inputs: &[*mut PyObject]) -> Result<Vec
         args,
         outs,
         edge,
+        stop: std::ptr::null(),
+        reading: false,
     };
     for (obj, p) in inputs.iter().zip(&prep.cfg[ENTRY].params) {
         act.set(*p, xincref(*obj));
@@ -514,6 +541,26 @@ impl Act<'_> {
 
     // The version of `b` to run: the first whose guard holds, with its
     // inputs read. None: run its origin.
+    // The first version from `start` on whose guard holds, after a region
+    // version before it declined to run: the last version's guard, which
+    // the region's implied, holds if no other's does.
+    unsafe fn select_from(&mut self, b: BlockId, start: usize) -> usize {
+        let blk = &self.cfg[b];
+        let last = blk.versions.len() - 1;
+        self.drop_reads(b, blk.reads.len(), None);
+        let mut done = 0;
+        let chosen = (start..last).find(|vi| self.guard_holds(b, *vi, &mut done) == Some(true)).unwrap_or(last);
+        let k = blk.versions[chosen].inputs.iter().map(|x| self.p.read_pos[x.idx()]).max();
+        if let Some(k) = k
+            && !self.read_upto(b, &mut done, k as usize)
+        {
+            unreachable!("the reads ran before");
+        }
+        self.drop_reads(b, done, Some(chosen));
+        self.drop_all(&self.p.live.versions[b.idx()][chosen].entry_kill);
+        chosen
+    }
+
     unsafe fn select(&mut self, b: BlockId) -> Option<usize> {
         let blk = &self.cfg[b];
         let vers = &blk.versions;
@@ -638,8 +685,18 @@ impl Act<'_> {
                         ffi::Py_TYPE(x) == &raw mut ffi::PyLong_Type && ffi::PyLong_AsLongLongAndOverflow(x, &mut overflow) == *n && overflow == 0
                     })
             }
-            Check::TypeAttr { name, pin } => tr_type_attr_is(o, self.name(*name), self.p.pins[*pin as usize].as_ptr()) != 0,
-            Check::Getattr { name, pin } => tr_getattr_falls_back(o, self.name(*name), self.p.pins[*pin as usize].as_ptr()) != 0,
+            Check::TypeAttr { name, pin } => {
+                if self.reading {
+                    reads::class_of(o, self.name(*name));
+                }
+                tr_type_attr_is(o, self.name(*name), self.p.pins[*pin as usize].as_ptr()) != 0
+            }
+            Check::Getattr { name, pin } => {
+                if self.reading {
+                    reads::attr(o, self.name(*name), std::ptr::null_mut(), true);
+                }
+                tr_getattr_falls_back(o, self.name(*name), self.p.pins[*pin as usize].as_ptr()) != 0
+            }
         }
     }
 
@@ -658,6 +715,7 @@ impl Act<'_> {
             return self.bootstrap_inputs(b);
         }
         let params = self.take_params(b);
+        self.p.kept.store(true, std::sync::atomic::Ordering::Relaxed);
         let at = super::autograd::Where { compiled: super::shared(self.c.expect("a frame's Act")), prep: self.p as *const Prepared as usize, block: b };
         // Params passed through as they are: those the guard pins down (a
         // NULL, a pinned callee) and those no op reads (only carried along).
@@ -768,6 +826,7 @@ impl Act<'_> {
                 .iter()
                 .map(|x| pins_down(&ver.guard, *x) || !compute_reads(*x) || matches!(cfg[*x].op, Op::Pinned(_) | Op::Const(_) | Op::Lit(_)))
                 .collect();
+            self.p.kept.store(true, std::sync::atomic::Ordering::Relaxed);
             let at = super::autograd::Where { compiled: super::shared(self.c.expect("a frame's Act")), prep: self.p as *const Prepared as usize, block: b };
             match super::outside_executor(|| super::autograd::Bootstrap::start(&args, &pinned, at)) {
                 Ok((boot, call)) => {
@@ -860,6 +919,8 @@ impl Act<'_> {
                 prev_instr: self.prev_instr,
                 code_units: self.code_units,
                 breaker_flag: self.breaker_flag,
+                stop: std::ptr::null(),
+                reading: self.reading,
             };
             for (obj, q) in params.into_iter().zip(&origin.cfg[ENTRY].params) {
                 sub.set(*q, obj);
@@ -889,6 +950,7 @@ impl Act<'_> {
             Outcome::Return(_) | Outcome::Yield { .. } => {
                 unreachable!("verified: an outlined Cfg leaves rather than returns, and has no resume points")
             }
+            Outcome::Stopped(_) => unreachable!("an origin's run has no span to stop"),
         }
     }
 
@@ -1035,6 +1097,24 @@ impl Act<'_> {
     unsafe fn run_blocks(&mut self, mut b: BlockId, mut resume: Option<(usize, usize)>) -> Outcome {
         let cfg = self.cfg;
         'blocks: loop {
+            if !self.stop.is_null() {
+                let sp = &*self.stop;
+                if Some(b) == sp.exit || sp.blocks.binary_search(&b).is_err() || sp.never.contains(&b) {
+                    return Outcome::Stopped(b);
+                }
+            } else if !cfg.spans.is_empty()
+                && resume.is_none()
+                && let Some(si) = cfg.spans.iter().position(|sp| sp.entry == b)
+            {
+                match self.span(si) {
+                    Some(Ok(next)) => {
+                        b = next;
+                        continue 'blocks;
+                    }
+                    Some(Err(outcome)) => return outcome,
+                    None => {}
+                }
+            }
             let blk = &cfg[b];
             // An optimized block (one with an origin) doesn't record.
             let rec = if self.p.origins[b.idx()].is_some() { std::ptr::null_mut() } else { self.scope_rec };
@@ -1048,7 +1128,7 @@ impl Act<'_> {
             if let Some(rec) = self.rec.as_mut() {
                 rec.at(Site::Block(b));
             }
-            let (vi, first) = match resume.take() {
+            let (mut vi, first) = match resume.take() {
                 Some(r) => r,
                 None if self.p.autograd[b.idx()].load(std::sync::atomic::Ordering::Relaxed) && self.wants_autograd(b) => match self.bootstrap(b) {
                     Ok(next) => {
@@ -1068,10 +1148,62 @@ impl Act<'_> {
                     },
                 },
             };
+            let mut i = first;
+            // The region version runs the variant of its place that is for
+            // this call. With none (or in a trace, which wouldn't see a
+            // region's ops) the next version whose guard holds runs: the
+            // version the variants were traced from, whose guard is the
+            // region version's, if it comes next.
+            while first == 0 && let Some(&head) = blk.versions[vi].body.first() && let Op::Region(r) = self.cfg[head].op {
+                let args: Vec<*mut PyObject> = self.cfg[head].args.iter().map(|a| self.val(*a)).collect();
+                let called = if super::region::tracing() { Ok(None) } else { self.place_call(&self.cfg.regions[r as usize].variants, &args) };
+                match called {
+                    Ok(Some(outs)) => {
+                        if std::env::var_os("TORCH_RUST_REGION_CHECK").is_some() {
+                            self.check_region(b, r, &outs);
+                        }
+                        self.distribute(head, &outs);
+                        let code = &self.p.code[b.idx()][vi];
+                        let step = &code.steps[0];
+                        self.drop_all(&code.kills[step.kill.0 as usize..step.kill.1 as usize]);
+                        i = 1;
+                        break;
+                    }
+                    Ok(None) if super::region::tracing() || vi + 2 == blk.versions.len() => {
+                        vi = blk.versions.len() - 1;
+                        self.drop_all(&self.p.live.versions[b.idx()][vi].entry_kill);
+                        break;
+                    }
+                    Ok(None) => {
+                        vi = self.select_from(b, vi + 1);
+                    }
+                    Err(()) => match self.unwind(b, vi, 0, Exc::Error) {
+                        Unwound::Block(h) => {
+                            b = h;
+                            continue 'blocks;
+                        }
+                        Unwound::Outer(k, args) => return Outcome::Outer(k, args),
+                        Unwound::Propagate => return Outcome::Error,
+                    },
+                }
+            }
             let ver = &blk.versions[vi];
             let code = &self.p.code[b.idx()][vi];
             let fast = self.rec.is_null();
-            let mut i = first;
+            if first == 0 && vi + 1 == blk.versions.len() && blk.origin.is_some() && self.c.is_some() && !super::region::tracing() {
+                if super::region::observing() {
+                    self.region_observe(b, vi);
+                }
+                if super::region::enabled()
+                    && !self.p.region_off[b.idx()].load(std::sync::atomic::Ordering::Relaxed)
+                    && self.region_room(b, vi)
+                    && super::region::due(&self.p.region_runs[b.idx()], &self.p.region_off[b.idx()])
+                    && self.region_worthy(b, vi)
+                    && self.region_trace(b, vi)
+                {
+                    i = code.steps.len();
+                }
+            }
             while i < code.steps.len() {
                 // Steps' kill ranges are within `kills`, and instrs index
                 // values within `vals`.
@@ -1138,6 +1270,502 @@ impl Act<'_> {
         }
     }
 
+    // Runs the variant of a place that is for a call with these args (the
+    // place's args, borrowed): the first of those to ask (see
+    // region::Variants) whose own checks hold and whose region takes the
+    // call. As region::call: None if there is none.
+    unsafe fn place_call(&self, variants: &super::region::Variants, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
+        let mut key = None;
+        let mut i = 0;
+        while let Some(v) = variants.candidate(args, &mut key, i) {
+            i += 1;
+            let own = v.facts_hold(args)
+                && v.checks.iter().all(|c| match c {
+                    super::region::Own::Is(k, o) => args[*k as usize] == o.as_ptr(),
+                    super::region::Own::Check(k, c) => self.check(c, k.map_or(std::ptr::null_mut(), |k| args[k as usize])),
+                });
+            if !own {
+                super::region::passed_over();
+                continue;
+            }
+            match super::region::call(&v.spec, args) {
+                Ok(None) => {}
+                r => {
+                    if matches!(r, Ok(Some(_))) {
+                        variants.ran(&v);
+                    }
+                    return r;
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    // Whether block b, about to run its last version vi, may be traced into
+    // another region: its place (as it is now: this frame's Cfg may be from
+    // before the place had regions) has room for this run's key.
+    unsafe fn region_room(&self, b: BlockId, vi: usize) -> bool {
+        let Some(c) = self.c else { return false };
+        let cfg = super::region_cfg(c, self.p as *const Prepared as usize).unwrap_or(self.cfg);
+        let Some(place) = super::place_of(cfg, b) else { return true };
+        let blk = &self.cfg[b];
+        let args: Vec<*mut PyObject> = blk.params.iter().chain(&blk.versions[vi].inputs).map(|x| self.val(*x)).collect();
+        place.variants.room(&args)
+    }
+
+    // Debugging (TORCH_RUST_REGION_CHECK): runs the version region r was
+    // traced from (the last) on the inputs it just ran on, and has
+    // torch._rust_inductor compare their outputs.
+    unsafe fn check_region(&mut self, b: BlockId, r: u32, outs: &[*mut PyObject]) {
+        let cfg = self.cfg;
+        let src = &cfg[b].versions[cfg[b].versions.len() - 1];
+        let code = &self.p.code[b.idx()][cfg[b].versions.len() - 1];
+        let ok = code.steps.iter().all(|step| {
+            self.set_instr(cfg[step.v].origin as c_int);
+            self.exec(step.v, &cfg[step.v]).is_ok()
+        });
+        let py = pyo3::Python::assume_attached();
+        if ok {
+            let item = |p: *mut PyObject| pyo3::Bound::from_borrowed_ptr_or_opt(py, p).map_or_else(|| py.None(), |b| b.unbind());
+            let mine: Vec<_> = outs.iter().map(|p| item(*p)).collect();
+            let theirs: Vec<_> = src.outputs.iter().map(|o| item(self.val(*o))).collect();
+            let name = &self.cfg.regions[r as usize].name;
+            let check = || -> pyo3::PyResult<()> {
+                use pyo3::types::PyAnyMethods;
+                py.import("torch._rust_inductor")?.as_any().call_method1("check", (name, mine, theirs))?;
+                Ok(())
+            };
+            if let Err(e) = check() {
+                e.print(py);
+            }
+        } else {
+            pyo3::PyErr::fetch(py);
+        }
+        for v in &src.body {
+            self.set(*v, std::ptr::null_mut());
+        }
+    }
+
+    // Whether version vi of block b does enough to be worth tracing: at least
+    // two of its instrs ran torch ops (or entered frames, which pure calls
+    // do). Remembered when it doesn't.
+    unsafe fn region_worthy(&self, b: BlockId, vi: usize) -> bool {
+        let effects = &*self.p.effects.get();
+        let work = self.cfg[b].versions[vi]
+            .body
+            .iter()
+            .filter(|v| {
+                matches!(self.cfg[**v].op, Op::Aten { .. })
+                    || effects.get(crate::cfg::ir::Site::Instr(**v)).iter().any(|(seq, _)| !seq.is_empty())
+            })
+            .count();
+        // A write to something that outlives the block isn't replayed by a
+        // region: the version keeps running as it is, so the write is made
+        // on every call, with that call's value.
+        let body = &self.cfg[b].versions[vi].body;
+        let escapes = body.iter().any(|v| super::escaping_write(self.cfg, body, *v));
+        if work < 2 || escapes {
+            self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        work >= 2 && !escapes
+    }
+
+    // At span si's entry: runs a region of it whose checks hold, or traces
+    // the span into one. Some(where the frame goes on) if either ran it;
+    // None: run its blocks as usual.
+    unsafe fn span(&mut self, si: usize) -> Option<Result<BlockId, Outcome>> {
+        let cfg = self.cfg;
+        let sp = &cfg.spans[si];
+        if super::region::tracing() || self.c.is_none() {
+            return None;
+        }
+        if !super::region::enabled() {
+            if super::region::observing() && !sp.state.off.load(std::sync::atomic::Ordering::Relaxed) {
+                let args = self.span_args(sp)?;
+                super::region::observe(&mut sp.state.types.lock().unwrap(), &args);
+                args.into_iter().for_each(|a| ffi::Py_XDECREF(a));
+            }
+            return None;
+        }
+        let args = self.span_args(sp)?;
+        let called = match self.place_call(&sp.state.regions, &args) {
+            Ok(None) => None,
+            r => Some(r),
+        };
+        let traced = match called {
+            None if !sp.state.off.load(std::sync::atomic::Ordering::Relaxed) && sp.state.regions.room(&args) => {
+                if super::region::observing() {
+                    super::region::observe(&mut sp.state.types.lock().unwrap(), &args);
+                }
+                if super::region::due(&sp.state.runs, &sp.state.off) {
+                    self.span_trace(sp, &args)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        args.into_iter().for_each(|a| ffi::Py_XDECREF(a));
+        match called {
+            Some(Ok(Some(outs))) => Some(self.span_leave(sp, outs)),
+            Some(_) => Some(match self.unwind(sp.entry, 0, 0, Exc::Error) {
+                Unwound::Block(h) => Ok(h),
+                Unwound::Outer(k, args) => Err(Outcome::Outer(k, args)),
+                Unwound::Propagate => Err(Outcome::Error),
+            }),
+            None => traced,
+        }
+    }
+
+    // Span sp's args (owned), or None (no exception set) if an attribute
+    // isn't there to read.
+    unsafe fn span_args(&self, sp: &Span) -> Option<Vec<*mut PyObject>> {
+        let mut args = Vec::with_capacity(sp.inputs.len());
+        for (slot, attr) in &sp.inputs {
+            let x = *self.local(*slot);
+            let a = match attr {
+                None => xincref(x),
+                Some(CELL) if !x.is_null() => PyCell_Get(x),
+                Some(n) if !x.is_null() && (*n as usize) < self.p.names.0.len() => ffi::PyObject_GetAttr(x, self.name(*n)),
+                Some(_) => std::ptr::null_mut(),
+            };
+            if a.is_null() && attr.is_some() {
+                ffi::PyErr_Clear();
+                args.into_iter().for_each(|a| ffi::Py_XDECREF(a));
+                return None;
+            }
+            args.push(a);
+        }
+        args.extend(self.cfg.explicit_params(sp.entry).into_iter().map(|p| xincref(self.val(p))));
+        Some(args)
+    }
+
+    // Leaves span sp with a region's outputs (owned): the locals it leaves,
+    // then the exit's explicit params, or what it returns if it does.
+    unsafe fn span_leave(&mut self, sp: &Span, outs: Vec<*mut PyObject>) -> Result<BlockId, Outcome> {
+        for (s, o) in sp.live_out.iter().zip(&outs) {
+            let old = std::mem::replace(&mut *self.local(*s), *o);
+            ffi::Py_XDECREF(old);
+        }
+        match sp.exit {
+            Some(x) => {
+                for (q, o) in self.cfg.explicit_params(x).into_iter().zip(&outs[sp.live_out.len()..]) {
+                    self.set(q, *o);
+                }
+                Ok(x)
+            }
+            None => Err(Outcome::Return(outs[sp.live_out.len()])),
+        }
+    }
+
+    // Runs span sp's blocks under a trace (see region.rs), stopping at its
+    // exit, and adds the region traced. Some(where the frame goes on) if it
+    // ran them to the exit; None if it didn't run them (or gave up partway,
+    // having put back the locals it read: they only compute, so running them
+    // again from the start is the same).
+    unsafe fn span_trace(&mut self, sp: &Span, args: &[*mut PyObject]) -> Option<Result<BlockId, Outcome>> {
+        let held: Vec<*mut PyObject> = sp.live_in.iter().map(|s| xincref(*self.local(*s))).collect();
+        // The cells it reads hold what the trace passes while it runs.
+        let cells: Vec<(*mut PyObject, *mut PyObject)> = sp.inputs.iter().filter(|(_, a)| *a == Some(CELL)).map(|(s, _)| (*self.local(*s), PyCell_Get(*self.local(*s)))).collect();
+        let mut ran = false;
+        let mut ended: Option<Outcome> = None;
+        let this = self as *mut Self;
+        let mut body = |objs: &[*mut PyObject]| -> Result<Vec<*mut PyObject>, ()> {
+            let this = &mut *this;
+            ran = true;
+            this.reading = reads::on();
+            for ((s, attr), o) in sp.inputs.iter().zip(objs) {
+                if attr.is_none() {
+                    let old = std::mem::replace(&mut *this.local(*s), xincref(*o));
+                    ffi::Py_XDECREF(old);
+                } else if *attr == Some(CELL) && PyCell_Set(*this.local(*s), *o) < 0 {
+                    return Err(());
+                }
+            }
+            for (p, o) in this.cfg.explicit_params(sp.entry).into_iter().zip(&objs[sp.inputs.len()..]) {
+                this.set(p, xincref(*o));
+            }
+            this.stop = sp;
+            let out = this.run_blocks(sp.entry, None);
+            this.stop = std::ptr::null();
+            this.reading = false;
+            let mut outs: Vec<*mut PyObject> = sp.live_out.iter().map(|s| xincref(*this.local(*s))).collect();
+            let done = match &out {
+                Outcome::Stopped(x) => {
+                    outs.extend(this.cfg.explicit_params(*x).into_iter().map(|q| xincref(this.val(q))));
+                    Some(*x) == sp.exit && !sp.never.contains(x)
+                }
+                Outcome::Return(v) => {
+                    outs.push(xincref(*v));
+                    sp.exit.is_none()
+                }
+                _ => false,
+            };
+            ended = Some(out);
+            if done {
+                return Ok(outs);
+            }
+            outs.into_iter().for_each(|o| ffi::Py_XDECREF(o));
+            if pyo3::ffi::PyErr_Occurred().is_null() {
+                ffi::PyErr_SetString(ffi::PyExc_RuntimeError, c"the span left by another way or ran a block never seen run".as_ptr());
+            }
+            Err(())
+        };
+        let types = sp.state.types.lock().unwrap().clone();
+        let passed: Vec<u32> = sp.passed.iter().map(|k| sp.inputs.len() as u32 + k).collect();
+        let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, &mut body));
+        for (cell, old) in cells {
+            PyCell_Set(cell, old);
+            ffi::Py_XDECREF(old);
+        }
+        let debug = std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some();
+        sp.state.runs.store(0, std::sync::atomic::Ordering::Relaxed);
+        let leave = match ended {
+            Some(Outcome::Stopped(x)) if Some(x) == sp.exit && !sp.never.contains(&x) => Some(Ok(x)),
+            Some(Outcome::Return(v)) if sp.exit.is_none() => Some(Err(Outcome::Return(v))),
+            Some(Outcome::Stopped(x)) => {
+                for q in &self.cfg[x].params {
+                    self.set(*q, std::ptr::null_mut());
+                }
+                None
+            }
+            Some(Outcome::Return(v)) => {
+                ffi::Py_XDECREF(v);
+                None
+            }
+            _ => None,
+        };
+        let Some(leave) = leave else {
+            if debug {
+                let at = match &ended {
+                    Some(Outcome::Stopped(x)) => format!("stopped at bb{}", x.0),
+                    Some(Outcome::Error) => "raised".into(),
+                    None => "didn't run".into(),
+                    _ => "left otherwise".into(),
+                };
+                eprintln!("region {}: gave up, {at}: {}", sp.name, traced.as_ref().err().map_or("?".into(), |e| e.to_string()));
+            }
+            sp.state.off.store(true, std::sync::atomic::Ordering::Relaxed);
+            for (s, o) in sp.live_in.iter().zip(held) {
+                let old = std::mem::replace(&mut *self.local(*s), o);
+                ffi::Py_XDECREF(old);
+            }
+            // The entry's stack values too: the run that gave up dropped each
+            // at its last use, and the blocks are about to run from them.
+            for (p, o) in self.cfg.explicit_params(sp.entry).into_iter().zip(&args[sp.inputs.len()..]) {
+                self.set(p, xincref(*o));
+            }
+            pyo3::ffi::PyErr_Clear();
+            return None;
+        };
+        held.into_iter().for_each(|o| ffi::Py_XDECREF(o));
+        // What the traced run leaves to the program holds floats, not the
+        // float subclass the trace computes with (see region::plain).
+        for s in &sp.live_out {
+            let slot = self.local(*s);
+            let new = super::outside_executor(|| super::region::plain(*slot));
+            let old = std::mem::replace(&mut *slot, new);
+            ffi::Py_XDECREF(old);
+        }
+        let leave = match leave {
+            Ok(x) => {
+                for q in self.cfg.explicit_params(x) {
+                    let new = super::outside_executor(|| super::region::plain(self.val(q)));
+                    self.set(q, new);
+                }
+                Ok(x)
+            }
+            Err(Outcome::Return(v)) => {
+                let new = super::outside_executor(|| super::region::plain(v));
+                ffi::Py_XDECREF(v);
+                Err(Outcome::Return(new))
+            }
+            other => other,
+        };
+        match traced {
+            Ok(Some(t)) => sp.state.regions.push(t.variant),
+            Ok(None) => sp.state.off.store(true, std::sync::atomic::Ordering::Relaxed),
+            Err(e) => {
+                if debug {
+                    eprintln!("region {}: trace failed: {e}", sp.name);
+                }
+                sp.state.off.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        Some(leave)
+    }
+
+    // A call of a callable merge_across made opaque, while a region is
+    // traced: torch._rust_inductor._opaque_call(callee, *args) records it as
+    // one graph node.
+    unsafe fn opaque_call(&self, args: *const *mut PyObject, argc: c_int, kw: *mut PyObject) -> *mut PyObject {
+        let py = pyo3::Python::assume_attached();
+        let helper = match opaque_helper(py) {
+            Ok(h) => h,
+            Err(e) => {
+                e.restore(py);
+                return std::ptr::null_mut();
+            }
+        };
+        let (callee, rest, total) = if (*args).is_null() { (*args.add(1), args.add(2), argc) } else { (*args, args.add(1), argc + 1) };
+        let mut all: Vec<*mut PyObject> = vec![callee];
+        all.extend((0..total as usize).map(|i| *rest.add(i)));
+        let nkw = if kw.is_null() { 0 } else { ffi::PyTuple_GET_SIZE(kw) as usize };
+        ffi::PyObject_Vectorcall(helper.as_ptr(), all.as_ptr(), all.len() - nkw, kw)
+    }
+
+    // Whether the call at code unit `origin` of this frame's code was made
+    // opaque (see _cfg_opaque_site).
+    fn opaque_site(&self, origin: u32) -> bool {
+        self.c.is_some_and(|c| super::opaque_site(c.code, origin))
+    }
+
+    // opaque_call for CALL_FUNCTION_EX: `callee(*args, **kwargs)`.
+    unsafe fn opaque_call_ex(&self, callee: *mut PyObject, args: *mut PyObject, kwargs: *mut PyObject) -> *mut PyObject {
+        let py = pyo3::Python::assume_attached();
+        let helper = match opaque_helper(py) {
+            Ok(h) => h,
+            Err(e) => {
+                e.restore(py);
+                return std::ptr::null_mut();
+            }
+        };
+        let items = ffi::PySequence_Tuple(args);
+        if items.is_null() {
+            return std::ptr::null_mut();
+        }
+        let n = ffi::PyTuple_GET_SIZE(items);
+        let all = ffi::PyTuple_New(n + 1);
+        ffi::Py_INCREF(callee);
+        ffi::PyTuple_SET_ITEM(all, 0, callee);
+        for i in 0..n {
+            let x = ffi::PyTuple_GET_ITEM(items, i);
+            ffi::Py_INCREF(x);
+            ffi::PyTuple_SET_ITEM(all, i + 1, x);
+        }
+        ffi::Py_DECREF(items);
+        let out = ffi::PyObject_Call(helper.as_ptr(), all, kwargs);
+        ffi::Py_DECREF(all);
+        out
+    }
+
+    // Joins this run's params and inputs of block b's version vi (the last)
+    // into the types its trace gets.
+    unsafe fn region_observe(&mut self, b: BlockId, vi: usize) {
+        if !self.p.region_off[b.idx()].load(std::sync::atomic::Ordering::Relaxed) {
+            let blk = &self.cfg[b];
+            let args: Vec<*mut PyObject> = blk.params.iter().chain(&blk.versions[vi].inputs).map(|x| self.val(*x)).collect();
+            super::region::observe(&mut *self.p.region_types[b.idx()].get(), &args);
+        }
+    }
+
+    // Traces this run of version vi of block b into a region (see
+    // region.rs), its inputs already read. True: the body ran, its values set
+    // as run_blocks' steps would leave them; false: run it as usual.
+    unsafe fn region_trace(&mut self, b: BlockId, vi: usize) -> bool {
+        let cfg = self.cfg;
+        let blk = &cfg[b];
+        let ver = &blk.versions[vi];
+        let code = &self.p.code[b.idx()][vi];
+        let ids: Vec<ValueId> = blk.params.iter().chain(&ver.inputs).copied().collect();
+        let args: Vec<*mut PyObject> = ids.iter().map(|x| self.val(*x)).collect();
+        // Params the version doesn't use, already dropped by select().
+        let entry_kill = &self.p.live.versions[b.idx()][vi].entry_kill;
+        let unused: Vec<u32> = ids.iter().enumerate().filter(|(_, x)| entry_kill.contains(x)).map(|(i, _)| i as u32).collect();
+        // Kept to run the body again when the trace fails (it's pure).
+        let held: Vec<*mut PyObject> = args.iter().map(|a| xincref(*a)).collect();
+        let mut failed = false;
+        let mut ran = false;
+        let this = self as *mut Self;
+        let mut body = |objs: &[*mut PyObject]| -> Result<Vec<*mut PyObject>, ()> {
+            let this = &mut *this;
+            ran = true;
+            for (i, (x, o)) in ids.iter().zip(objs).enumerate() {
+                if !unused.contains(&(i as u32)) {
+                    this.set(*x, xincref(*o));
+                }
+            }
+            this.reading = reads::on();
+            for step in &code.steps {
+                let v = step.v;
+                this.set_instr(cfg[v].origin as c_int);
+                if this.exec(v, &cfg[v]).is_err() {
+                    failed = true;
+                    this.reading = false;
+                    return Err(());
+                }
+                this.drop_all(&code.kills[step.kill.0 as usize..step.kill.1 as usize]);
+            }
+            this.reading = false;
+            Ok(ver.outputs.iter().map(|o| xincref(this.val(*o))).collect())
+        };
+        let c = self.c.expect("checked by the caller");
+        let lines: Vec<i32> = ver.body.iter().map(|v| c.line(cfg[*v].origin)).filter(|l| *l > 0).collect();
+        let name = format!("{}:bb{} lines {}-{}", c.qualname, b.0, lines.iter().min().unwrap_or(&0), lines.iter().max().unwrap_or(&0));
+        // What the region needn't check: what the version doesn't read, or only
+        // passes on.
+        let read: std::collections::HashSet<ValueId> = ver.body.iter().flat_map(|v| cfg[*v].args.iter().copied()).collect();
+        let unread: Vec<u32> = (0..ids.len() as u32).filter(|i| unused.contains(i) || !read.contains(&ids[*i as usize])).collect();
+        let types = (*self.p.region_types[b.idx()].get()).clone();
+        let traced = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, &mut body));
+        let debug = std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some();
+        if failed {
+            // The body raised under tracing (which also raises on what only
+            // tracing can't do, like reading a tensor's value): run it again
+            // as usual, from its inputs.
+            if debug && let Err(e) = &traced {
+                eprintln!("region {name}: the body raised under tracing: {e}");
+            }
+            self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+            for v in &ver.body {
+                self.set(*v, std::ptr::null_mut());
+            }
+            for (i, (x, o)) in ids.iter().zip(held).enumerate() {
+                if unused.contains(&(i as u32)) {
+                    ffi::Py_XDECREF(o);
+                } else {
+                    self.set(*x, o);
+                }
+            }
+            return false;
+        }
+        held.into_iter().for_each(|o| ffi::Py_XDECREF(o));
+        if ran {
+            // The program gets floats, not the float subclass the trace
+            // computes with (see region::plain).
+            for o in &ver.outputs {
+                let new = super::outside_executor(|| super::region::plain(self.val(*o)));
+                self.set(*o, new);
+            }
+        }
+        match traced {
+            Ok(Some(t)) if ran => match super::add_region(c, self.p as *const Prepared as usize, b, t) {
+                Ok(true) => {}
+                Ok(false) => {
+                    if debug {
+                        eprintln!("region {name}: the CFG changed since the block ran");
+                    }
+                }
+                Err(e) => {
+                    if debug {
+                        eprintln!("region {name}: not added: {e}");
+                    }
+                    self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            },
+            Ok(_) => self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed),
+            Err(e) => {
+                if debug {
+                    eprintln!("region {name}: trace failed: {e}");
+                    e.display(pyo3::Python::assume_attached());
+                }
+                self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        self.p.region_runs[b.idx()].store(0, std::sync::atomic::Ordering::Relaxed);
+        ran
+    }
+
     // Runs body[i] of version `vi` of block b (step) and drops `kills`.
     #[inline(always)]
     unsafe fn slow_step(&mut self, b: BlockId, vi: usize, i: usize, step: &Step, kills: &[ValueId]) -> Next {
@@ -1171,8 +1799,15 @@ impl Act<'_> {
             // the callable's, or the one its (or the receiver's) class runs.
             let direct = match (callee, &ins.op) {
                 (Some(c), _) if !c.is_null() => {
-                    let via_type = tr_type_function(c, 0);
-                    Some(if via_type.is_null() { (c, effects::Via::Callable) } else { (via_type, effects::Via::Call) })
+                    let func = tr_partial_func(c);
+                    let via_type = if func.is_null() { tr_type_function(c, 0) } else { std::ptr::null_mut() };
+                    Some(if !func.is_null() {
+                        (func, effects::Via::Partial)
+                    } else if via_type.is_null() {
+                        (c, effects::Via::Callable)
+                    } else {
+                        (via_type, effects::Via::Call)
+                    })
                 }
                 (None, Op::LoadAttr(_) | Op::LoadMethod(_)) => {
                     let f = tr_type_function(self.val(ins.args[0]), 1);
@@ -1184,7 +1819,9 @@ impl Act<'_> {
                 effects::record_callee(&self.p.callees, *v, f, via);
             }
             (*rec).at(Site::Instr(*v));
-            (*rec).set_callee(direct.map_or(std::ptr::null_mut(), |(f, _)| f));
+            // A partial's function is entered by the partial, not by the
+            // instr: its frames stay indirect ones.
+            (*rec).set_callee(direct.map_or(std::ptr::null_mut(), |(f, via)| if via == effects::Via::Partial { callee.unwrap_or(f) } else { f }));
         }
         let clone = if self.p.clones.is_empty() { None } else { self.p.clones.get(v) };
         if let Some(cl) = clone {
@@ -1212,7 +1849,57 @@ impl Act<'_> {
         Next::Step
     }
 
+    // Whether LoadAttr/LoadMethod `ins` of name `n` reads what the span being
+    // traced takes as an input (an attribute of a local it only reads
+    // attributes of): the span's region is handed that, on every call.
+    unsafe fn span_input(&self, ins: &Instr, n: u32) -> bool {
+        match (self.stop.as_ref(), &self.cfg[ins.args[0]].op) {
+            (Some(sp), Op::LoadLocal { slot } | Op::LoadLocalChecked { slot }) => sp.inputs.contains(&(*slot, Some(n))),
+            _ => false,
+        }
+    }
+
+    // Reports what the generic instruction `ins` (just run; `ran`: it entered
+    // a Python frame) read to the trace's reads (see reads.rs).
+    unsafe fn note_read(&self, opcode: u8, oparg: u32, ins: &Instr, ran: bool) {
+        use crate::cfg::opcodes::*;
+        let a = |k: usize| self.val(ins.args[k]);
+        match opcode {
+            BINARY_SUBSCR => reads::subscript(a(0), a(1), ran),
+            CONTAINS_OP => reads::contains(a(1), a(0), ran),
+            LOAD_SUPER_ATTR => reads::super_attr(a(1), a(2), self.name(oparg >> 2)),
+            // They build or change a container: no read of it.
+            BUILD_LIST | BUILD_MAP | BUILD_SET | BUILD_STRING | BUILD_SLICE | BUILD_CONST_KEY_MAP | LIST_APPEND | SET_ADD | MAP_ADD
+            | STORE_SUBSCR | DELETE_SUBSCR | STORE_SLICE | STORE_GLOBAL | DELETE_GLOBAL | DELETE_ATTR => {}
+            // They read their last operand into the container before it.
+            LIST_EXTEND | SET_UPDATE | DICT_UPDATE | DICT_MERGE => reads::used(&[a(ins.args.len() - 1)]),
+            CALL_FUNCTION_EX => {
+                if reads::reads_args(a(0)) {
+                    let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                    reads::used(&all);
+                } else {
+                    reads::called(a(0));
+                }
+            }
+            _ => {
+                let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                reads::used(&all);
+            }
+        }
+    }
+
+    #[inline]
     unsafe fn exec(&mut self, v: ValueId, ins: &Instr) -> R {
+        if !self.reading {
+            return self.exec_instr(v, ins);
+        }
+        let outer = reads::set_in_instr(true);
+        let r = self.exec_instr(v, ins);
+        reads::set_in_instr(outer);
+        r
+    }
+
+    unsafe fn exec_instr(&mut self, v: ValueId, ins: &Instr) -> R {
         let a = |k: usize| self.val(ins.args[k]);
         let obj = match &ins.op {
             Op::Const(i) => xincref(self.konst(*i)),
@@ -1222,6 +1909,9 @@ impl Act<'_> {
                 let r = ffi::PyObject_IsTrue(a(0));
                 if r < 0 {
                     return Err(Exc::Error);
+                }
+                if self.reading {
+                    reads::truth(a(0));
                 }
                 new_bool(r != 0)
             }
@@ -1253,7 +1943,11 @@ impl Act<'_> {
             }
             Op::LoadGlobal(n) => {
                 let cache = self.p.globals[self.p.global_slot[v.idx()] as usize].get();
-                check(tr_load_global(self.f, *n as c_int, cache))?
+                let x = check(tr_load_global(self.f, *n as c_int, cache))?;
+                if self.reading {
+                    reads::global(tr_frame_globals(self.f), tr_frame_builtins(self.f), self.name(*n), x);
+                }
+                x
             }
             Op::LoadGlobalIn { name, globals, builtins } => {
                 let name = self.name(*name);
@@ -1267,12 +1961,28 @@ impl Act<'_> {
                     }
                     return Err(Exc::Error);
                 }
+                if self.reading {
+                    reads::global(self.p.pins[*globals as usize].as_ptr(), self.p.pins[*builtins as usize].as_ptr(), name, x);
+                }
                 xincref(x)
             }
-            Op::LoadAttr(n) => check(ffi::PyObject_GetAttr(a(0), self.name(*n)))?,
+            Op::LoadAttr(n) => {
+                let before = if self.reading { reads::frames() } else { 0 };
+                let x = ffi::PyObject_GetAttr(a(0), self.name(*n));
+                if self.reading && !self.span_input(ins, *n) {
+                    reads::attr(a(0), self.name(*n), x, reads::frames() != before);
+                }
+                check(x)?
+            }
             Op::LoadMethod(n) => {
                 let mut out = [std::ptr::null_mut(); 2];
-                status(tr_load_method(self.name(*n), a(0), out.as_mut_ptr()))?;
+                let before = if self.reading { reads::frames() } else { 0 };
+                let rc = tr_load_method(self.name(*n), a(0), out.as_mut_ptr());
+                if self.reading && !self.span_input(ins, *n) {
+                    let x = if out[0].is_null() { out[1] } else { out[0] };
+                    reads::attr(a(0), self.name(*n), if rc < 0 { std::ptr::null_mut() } else { x }, reads::frames() != before);
+                }
+                status(rc)?;
                 self.distribute(v, &out);
                 return Ok(());
             }
@@ -1284,9 +1994,35 @@ impl Act<'_> {
             }
             Op::Call { argc, kw_names } => {
                 let kw = kw_names.map_or(std::ptr::null_mut(), |k| self.konst(k));
-                check(tr_call(self.args(ins), *argc as c_int, kw))?
+                let args = self.args(ins);
+                let callee = if (*args).is_null() { *args.add(1) } else { *args };
+                if super::region::tracing() && (super::opaque(callee) || self.opaque_site(ins.origin)) {
+                    // Run as it is on every call: what it reads isn't the
+                    // region's to check.
+                    let _paused = reads::Recording::pause();
+                    check(super::outside_executor(|| self.opaque_call(args, *argc as c_int, kw)))?
+                } else if self.reading && reads::reads_args(callee) {
+                    let before = reads::frames();
+                    let r = tr_call(args, *argc as c_int, kw);
+                    let all: Vec<*mut PyObject> = ins.args.iter().map(|x| self.val(*x)).collect();
+                    // A call that raised read what it was handed too (a
+                    // lookup that found nothing).
+                    reads::call(callee, &all[if all[0].is_null() { 2 } else { 1 }..], r, reads::frames() != before);
+                    check(r)?
+                } else {
+                    if self.reading {
+                        reads::called(callee);
+                    }
+                    check(tr_call(args, *argc as c_int, kw))?
+                }
             }
-            Op::Binary(k) => check(tr_binary_op(*k as c_int, a(0), a(1)))?,
+            Op::Binary(k) => {
+                let r = check(tr_binary_op(*k as c_int, a(0), a(1)))?;
+                if self.reading {
+                    reads::used(&[a(0), a(1)]);
+                }
+                r
+            }
             Op::Aten { .. } => {
                 let (f, kw) = &self.p.aten[&v];
                 let (kw, nkw) = kw.as_ref().map_or((std::ptr::null_mut(), 0), |k| (k.as_ptr(), ffi::PyTuple_GET_SIZE(k.as_ptr()) as usize));
@@ -1328,7 +2064,14 @@ impl Act<'_> {
                     }
                 }
             }
-            Op::Compare(k) => check(ffi::PyObject_RichCompare(a(0), a(1), *k as c_int))?,
+            Op::Region(_) => unreachable!("run_blocks runs a region version's head"),
+            Op::Compare(k) => {
+                let r = check(ffi::PyObject_RichCompare(a(0), a(1), *k as c_int))?;
+                if self.reading {
+                    reads::used(&[a(0), a(1)]);
+                }
+                r
+            }
             Op::BuildTuple(n) => {
                 let t = check(ffi::PyTuple_New(*n as ffi::Py_ssize_t))?;
                 for (i, x) in ins.args.iter().enumerate() {
@@ -1336,7 +2079,13 @@ impl Act<'_> {
                 }
                 t
             }
-            Op::GetIter => check(ffi::PyObject_GetIter(a(0)))?,
+            Op::GetIter => {
+                let r = check(ffi::PyObject_GetIter(a(0)))?;
+                if self.reading {
+                    reads::iterated(a(0));
+                }
+                r
+            }
             Op::MakeFunction(flags) => check(tr_make_function(self.f, *flags as c_int, self.args(ins)))?,
             Op::MakeCell { slot } => {
                 let p = self.local(*slot);
@@ -1359,6 +2108,10 @@ impl Act<'_> {
                 if x.is_null() {
                     tr_unbound_deref(self.f, *slot as c_int);
                     return Err(Exc::Error);
+                }
+                // A span's region is handed what its own frame's cells hold.
+                if self.reading && self.stop.is_null() {
+                    reads::cell(*self.local(*slot), x);
                 }
                 x
             }
@@ -1384,6 +2137,12 @@ impl Act<'_> {
             Op::LoadFromDictOrDeref { slot } => {
                 check(tr_load_from_dict_or_deref(self.f, a(0), *slot as c_int))?
             }
+            Op::Bytecode { opcode: crate::cfg::opcodes::CALL_FUNCTION_EX, .. }
+                if super::region::tracing() && (super::opaque(a(0)) || self.opaque_site(ins.origin)) =>
+            {
+                let _paused = reads::Recording::pause();
+                check(super::outside_executor(|| self.opaque_call_ex(a(0), a(1), if ins.args.len() > 2 { a(2) } else { std::ptr::null_mut() })))?
+            }
             Op::Bytecode { opcode, arg } if super::trampoline::needed(*opcode, *arg) => {
                 let args = self.args(ins);
                 check(super::trampoline::call(*opcode, *arg, std::slice::from_raw_parts(args, ins.args.len())))?
@@ -1399,7 +2158,18 @@ impl Act<'_> {
                     &mut big
                 };
                 let args = self.args(ins);
-                status(tr_generic(self.f, *opcode as c_int, *arg as c_int, args, out.as_mut_ptr()))?;
+                let before = if self.reading { reads::frames() } else { 0 };
+                let rc = tr_generic(self.f, *opcode as c_int, *arg as c_int, args, out.as_mut_ptr());
+                if self.reading {
+                    // An instruction that raised read its operands too (a
+                    // key that isn't there): the exception is kept.
+                    let raised = if rc != 0 { pyo3::ffi::PyErr_GetRaisedException() } else { std::ptr::null_mut() };
+                    self.note_read(*opcode, *arg, ins, reads::frames() != before);
+                    if !raised.is_null() {
+                        pyo3::ffi::PyErr_SetRaisedException(raised);
+                    }
+                }
+                status(rc)?;
                 match n {
                     0 => return Ok(()),
                     1 => out[0],

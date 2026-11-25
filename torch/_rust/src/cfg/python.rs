@@ -14,7 +14,7 @@ fn strings(code: &Bound<'_, PyAny>, attr: &str) -> PyResult<Vec<String>> {
 }
 
 fn bytes(code: &Bound<'_, PyAny>, attr: &str) -> PyResult<Vec<u8>> {
-    Ok(code.getattr(attr)?.downcast::<PyBytes>()?.as_bytes().to_vec())
+    Ok(code.getattr(attr)?.cast::<PyBytes>()?.as_bytes().to_vec())
 }
 
 pub fn code_info(code: &Bound<'_, PyAny>) -> PyResult<CodeInfo> {

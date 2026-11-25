@@ -29,27 +29,27 @@ fn collect_into<'py>(
     obj: &Bound<'py, PyAny>,
     out: &mut Vec<Bound<'py, Tensor>>,
 ) -> PyResult<()> {
-    if let Ok(t) = obj.downcast::<Tensor>() {
+    if let Ok(t) = obj.cast::<Tensor>() {
         out.push(t.clone());
         return Ok(());
     }
-    if let Ok(d) = obj.downcast::<PyDict>() {
+    if let Ok(d) = obj.cast::<PyDict>() {
         for (_, v) in d.iter() {
             collect_into(&v, out)?;
         }
-    } else if let Ok(seq) = obj.downcast::<PyList>() {
+    } else if let Ok(seq) = obj.cast::<PyList>() {
         for item in seq.iter() {
             collect_into(&item, out)?;
         }
-    } else if let Ok(seq) = obj.downcast::<PyTuple>() {
+    } else if let Ok(seq) = obj.cast::<PyTuple>() {
         for item in seq.iter() {
             collect_into(&item, out)?;
         }
-    } else if let Ok(s) = obj.downcast::<PySet>() {
+    } else if let Ok(s) = obj.cast::<PySet>() {
         for item in s.iter() {
             collect_into(&item, out)?;
         }
-    } else if let Ok(s) = obj.downcast::<PyFrozenSet>() {
+    } else if let Ok(s) = obj.cast::<PyFrozenSet>() {
         for item in s.iter() {
             collect_into(&item, out)?;
         }
@@ -80,6 +80,29 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(exec::_set_cfg_elide, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_add_block_checks, m)?)?;
     m.add_function(wrap_pyfunction!(exec::_cfg_misses, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_region_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_set_cfg_regions, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_cfg_region_passed_over, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_plan_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_set_cfg_region_observe, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::region::_set_cfg_region_reads, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_spans, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_pure_calls, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_pure_callables, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_reoptimize_after, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_reoptimize_all, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_bypass_cold, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_skip, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_impure, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_pass_hook, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_opaque, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_cfg_opaque_site, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::_set_cfg_scalar_reads, m)?)?;
+    m.add_class::<exec::TreeChecks>()?;
+    m.add_function(wrap_pyfunction!(exec::region::_region_body, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_reads, m)?)?;
+    m.add_function(wrap_pyfunction!(exec::reads::_region_read_misses, m)?)?;
+    m.add_class::<exec::reads::Reads>()?;
     m.add_function(wrap_pyfunction!(exec::graph::_run_aten_graph, m)?)?;
     m.add_class::<exec::graph::Ref>()?;
     m.add_function(wrap_pyfunction!(exec::joint::_trace_joint, m)?)?;

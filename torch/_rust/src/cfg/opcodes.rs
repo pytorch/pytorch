@@ -2,6 +2,9 @@
 // transcribed from 3.12's Python/bytecodes.c. test/test_rust.py checks this
 // against `dis`.
 
+// IMPORT_NAME under Meta's lazy-imports CPython 3.12; see bytecode::decode.
+pub const META_LAZY_IMPORT_NAME: u8 = 183;
+
 macro_rules! opcodes {
     ($($name:ident = $num:expr, $caches:expr;)*) => {
         $(pub const $name: u8 = $num;)*

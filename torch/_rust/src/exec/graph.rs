@@ -120,7 +120,7 @@ impl Builder {
     }
 
     pub fn arg(&mut self, a: &Bound<'_, PyAny>) -> PyResult<ValueId> {
-        if let Ok(r) = a.downcast::<Ref>() {
+        if let Ok(r) = a.cast::<Ref>() {
             return self.get(r.get());
         }
         if is_tensor(a) {

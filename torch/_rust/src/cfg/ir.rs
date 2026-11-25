@@ -151,6 +151,10 @@ pub enum Op {
     // block output to its Project: the forward of a pure block, with its own
     // autograd node (see exec/autograd.rs).
     Autograd(u32),
+    // Calls Cfg::regions[i]'s compiled graph on the tensors among its args
+    // (the block's params, then its version's inputs), handing each block
+    // output to its Project (see exec/region.rs).
+    Region(u32),
     Removed,
 }
 
@@ -199,7 +203,8 @@ impl Op {
             | Op::LoadFromDictOrDeref { .. }
             | Op::Aten { .. }
             | Op::Expect(_)
-            | Op::Autograd(_) => true,
+            | Op::Autograd(_)
+            | Op::Region(_) => true,
             Op::Bytecode { opcode, .. } => opcodes::generic_can_raise(*opcode),
         }
     }
@@ -645,6 +650,118 @@ pub struct Cfg {
     pub const_pins: Vec<u32>,
     // What Op::Autograd instrs run.
     pub trainings: Vec<Arc<Training>>,
+    // What Op::Region instrs run: the regions of their blocks.
+    pub regions: Vec<Arc<Place>>,
+    // Stretches of blocks traced into one region together (see Span).
+    pub spans: Vec<Span>,
+}
+
+// Span::inputs' name index for a cell's contents.
+pub const CELL: u32 = u32::MAX;
+
+// Single-entry blocks, from `entry` to `exit` (or returning), that only
+// compute, write the frame's locals and change containers they make: run as
+// a compiled region of everything they do (see exec/run.rs's span_trace).
+#[derive(Clone, Debug)]
+pub struct Span {
+    pub entry: BlockId,
+    // None: it leaves by returning.
+    pub exit: Option<BlockId>,
+    // Its blocks (entry included), sorted.
+    pub blocks: Vec<BlockId>,
+    // Those never seen run: a trace that runs one gives up.
+    pub never: Vec<BlockId>,
+    // The locals it may read before writing them, and those it writes that
+    // may be read after it.
+    pub live_in: Vec<u32>,
+    pub live_out: Vec<u32>,
+    // The region's args: live_in's locals, or for one the span only reads
+    // attributes of, those attributes (read on entry: nothing it runs can
+    // change them), as (slot, Some(name index)); then the contents of the
+    // cells it reads (it writes none), as (slot, Some(CELL)).
+    pub inputs: Vec<(u32, Option<u32>)>,
+    // The entry's explicit params (by position) it only passes on to its
+    // exit. The region's args are the inputs, then the entry's explicit
+    // params; its outputs the live_out locals, then the exit's explicit
+    // params (or what it returns).
+    pub passed: Vec<u32>,
+    pub name: String,
+    pub state: Arc<SpanState>,
+}
+
+// A span's regions, and when to trace another. Shared by every Cfg made from
+// the one the span was found in.
+#[derive(Default)]
+pub struct SpanState {
+    pub regions: crate::exec::region::Variants,
+    pub runs: std::sync::atomic::AtomicU32,
+    pub off: std::sync::atomic::AtomicBool,
+    // The types of its args over its runs while observing.
+    pub types: std::sync::Mutex<Vec<crate::exec::types::Slot>>,
+}
+
+impl std::fmt::Debug for SpanState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SpanState({} regions)", self.regions.len())
+    }
+}
+
+// The regions of a block (see exec/region.rs): what its Op::Region runs is
+// the variant whose checks hold of the instr's args. Each gives the block's
+// `outputs` outputs.
+pub struct Place {
+    pub name: String,
+    pub outputs: usize,
+    pub variants: crate::exec::region::Variants,
+}
+
+impl std::fmt::Debug for Place {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Place({}, {:?}, {} outputs)", self.name, self.variants, self.outputs)
+    }
+}
+
+// A pure block's version (or a span) traced into an aten graph and compiled
+// (see exec/region.rs). `func` takes a list of the place's args and returns
+// the graph's outputs (None: its checks failed); each output of the place is
+// built as `outputs` says.
+pub struct RegionSpec {
+    pub func: pyo3::Py<pyo3::PyAny>,
+    pub outputs: Vec<RegionOut>,
+    // What RegionOut::Obj indexes.
+    pub objects: Vec<pyo3::Py<pyo3::PyAny>>,
+    pub name: String,
+    // What the trace read from outside its args (see exec/reads.rs): checked
+    // before `func` is called.
+    pub reads: Option<pyo3::Py<crate::exec::reads::Reads>>,
+    // Checks of the args that `func` makes too, asked before the reads and
+    // before `func`: the regions of a place's other states under the same
+    // key are passed over by them (see exec/region.rs).
+    pub quick: Vec<crate::exec::region::Quick>,
+}
+
+impl std::fmt::Debug for RegionSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RegionSpec({}, {} outputs)", self.name, self.outputs.len())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum RegionOut {
+    // The Op::Region's arg at this position.
+    Arg(u32),
+    // The graph's output at this position.
+    Out(u32),
+    Obj(u32),
+    Tuple(Vec<RegionOut>),
+    List(Vec<RegionOut>),
+    // Keys (RegionSpec::objects indices) and values.
+    Dict(Vec<u32>, Vec<RegionOut>),
+    // An iterator over what's left of the one the trace made (a list).
+    Iter(Box<RegionOut>),
+    // RegionSpec::objects[i] called on a list of these (rebuilding a pytree).
+    Call(u32, Vec<RegionOut>),
+    Null,
 }
 
 // A pure block's forward and backward, split from its joint graph (see
@@ -730,6 +847,8 @@ impl Cfg {
             pins: vec![],
             const_pins: vec![],
             trainings: vec![],
+            regions: vec![],
+            spans: vec![],
         }
     }
 
@@ -905,6 +1024,22 @@ impl Cfg {
             }
             self.blocks.push(blk);
         }
+        self.spans.retain_mut(|sp| {
+            let Some(entry) = map[sp.entry.idx()] else { return false };
+            let exit = match sp.exit {
+                Some(x) => match map[x.idx()] {
+                    Some(x) => Some(x),
+                    None => return false,
+                },
+                None => None,
+            };
+            sp.entry = entry;
+            sp.exit = exit;
+            sp.blocks = sp.blocks.iter().filter_map(|b| map[b.idx()]).collect();
+            sp.blocks.sort();
+            sp.never = sp.never.iter().filter_map(|b| map[b.idx()]).collect();
+            true
+        });
         map
     }
 
@@ -920,6 +1055,13 @@ impl Cfg {
 }
 
 // Iterative DFS postorder, reversed. `succs(n)` lists successors in rule order.
+impl Cfg {
+    // How the printer shows an instr's op (names and constants resolved).
+    pub fn op_text(&self, v: ValueId) -> String {
+        Printer::new(self, true, false, &()).op(&self[v].op)
+    }
+}
+
 pub fn rpo_by(n: usize, start: usize, succs: impl Fn(usize) -> Vec<usize>) -> Vec<usize> {
     let mut visited = vec![false; n];
     let mut post = Vec::with_capacity(n);
@@ -1116,6 +1258,7 @@ impl<'a> Printer<'a> {
             Op::Pinned(i) => format!("Pinned {}", self.pin(*i)),
             Op::Expect(c) => format!("Expect {}", self.check("_", c)),
             Op::Autograd(i) => format!("Autograd t{i}"),
+            Op::Region(i) => format!("Region r{i} {:?}", self.cfg.regions.get(*i as usize)),
             Op::Removed => "Removed".into(),
         }
     }

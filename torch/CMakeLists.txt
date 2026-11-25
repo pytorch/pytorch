@@ -547,6 +547,21 @@ if(BUILD_PYTHON AND NOT BUILD_LIBTORCH_WHL)
     message(STATUS "torch._rust: Windows is not supported yet, skipping")
     set(_build_torch_rust OFF)
   endif()
+  # The crate's C shims (csrc/frame_shim.c, csrc/exec_ops.c) are written
+  # against CPython 3.12's frame and interpreter internals and refuse to
+  # compile for any other version, and frame_shim.c asks the C library for
+  # the thread's stack bounds with pthread_getattr_np. Where the crate cannot
+  # be built it is skipped like on Windows, so the build of PyTorch never
+  # fails because of it (Python_VERSION* come from the find_package(Python)
+  # that gives Python_EXECUTABLE).
+  if(_build_torch_rust AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(STATUS "torch._rust: only Linux is supported yet (this is ${CMAKE_SYSTEM_NAME}), skipping")
+    set(_build_torch_rust OFF)
+  endif()
+  if(_build_torch_rust AND NOT "${Python_VERSION_MAJOR}.${Python_VERSION_MINOR}" STREQUAL "3.12")
+    message(STATUS "torch._rust: only CPython 3.12 is supported yet (building for Python ${Python_VERSION}), skipping")
+    set(_build_torch_rust OFF)
+  endif()
   if(_build_torch_rust)
     if(DEFINED ENV{CARGO})
       set(CARGO_EXECUTABLE "$ENV{CARGO}")

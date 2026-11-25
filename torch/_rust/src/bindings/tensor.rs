@@ -50,8 +50,10 @@ impl Tensor {
     }
 }
 
-impl<'py> FromPyObject<'py> for &'py Tensor {
-    fn extract_bound(ob: &Bound<'py, PyAny>) -> PyResult<Self> {
+impl<'a, 'py> FromPyObject<'a, 'py> for &'a Tensor {
+    type Error = PyErr;
+
+    fn extract(ob: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         let ptr = unsafe { ffi::tensor_from_pyobject(ob.as_ptr() as usize) };
         if ptr.is_null() {
             return Err(pyo3::exceptions::PyTypeError::new_err(
@@ -66,11 +68,19 @@ impl<'py> FromPyObject<'py> for &'py Tensor {
     }
 }
 
-impl pyo3::PyTypeCheck for Tensor {
+// SAFETY: type_check accepts exactly the objects THPVariable_Check accepts,
+// i.e. instances of torch.Tensor and its subclasses.
+unsafe impl pyo3::PyTypeCheck for Tensor {
     const NAME: &'static str = "torch.Tensor";
 
     fn type_check(object: &Bound<'_, PyAny>) -> bool {
         let ptr = unsafe { ffi::tensor_from_pyobject(object.as_ptr() as usize) };
         !ptr.is_null()
+    }
+
+    fn classinfo_object(py: Python<'_>) -> Bound<'_, PyAny> {
+        py.import("torch")
+            .and_then(|m| m.getattr("Tensor"))
+            .expect("torch.Tensor")
     }
 }

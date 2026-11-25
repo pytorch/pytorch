@@ -3090,12 +3090,13 @@ _InputT = _ParamSpec("_InputT")
 _RetT = _TypeVar("_RetT")
 
 
-def compile3(fn: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
+def _compile3(fn: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
     """Experimental: when ``fn`` is called, print the bytecode of ``fn`` and of
     every Python function it calls (each once per call). Requires Python 3.12+.
+    A debugging aid of the torch._rust executor, not public API.
     """
     if _rust is None:
-        raise RuntimeError("torch.compile3 requires the torch._rust extension")
+        raise RuntimeError("torch._compile3 requires the torch._rust extension")
 
     @functools.wraps(fn)
     def wrapper(*args: _InputT.args, **kwargs: _InputT.kwargs) -> _RetT:
@@ -3478,6 +3479,7 @@ else:
         "_dynamo",
         "_inductor",
         "_export",
+        "vm",
         # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
         "onnx",
     }

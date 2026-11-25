@@ -16,7 +16,7 @@ use pyo3::prelude::*;
 
 use crate::cfg::ir::{BlockId, Site, ValueId};
 
-use super::ffi::{tr_bound_function, tr_frame_func, tr_frame_qualname, Frame, GilCell};
+use super::ffi::{tr_bound_function, tr_frame_code, tr_frame_func, tr_frame_qualname, Frame, GilCell};
 
 // Hashes ids (ValueId, Site) by multiplying, as FxHash does: they're small
 // integers, which SipHash protects against nothing worth its cost here.
@@ -105,6 +105,10 @@ impl Table {
         self.0.values().map(|v| (v.seqs.as_slice(), v.varies))
     }
 
+    pub fn by_site(&self) -> impl Iterator<Item = (Site, &[(Vec<Effect>, u64)])> {
+        self.0.iter().map(|(s, v)| (*s, v.seqs.as_slice()))
+    }
+
     pub fn varies(&self, s: Site) -> bool {
         self.0.get(&s).is_some_and(|v| v.varies)
     }
@@ -149,6 +153,9 @@ pub enum Via {
     Call,
     // type(receiver).__getattr__.
     Getattr,
+    // The function a functools.partial calls (its `func`): the callable of
+    // the call is the partial, which may be made anew for every call.
+    Partial,
 }
 
 pub type Callees = IdMap<ValueId, Callee>;
@@ -195,13 +202,30 @@ impl Callee {
 
 // `callable`: what the instr called, or (via Call or Getattr) the function
 // its type runs for it.
+// Whether `owner` (a builtin's self) is a pybind11 function record, which
+// pybind11 binds its functions to.
+unsafe fn pybind11_record(owner: *mut PyObject) -> bool {
+    let name = std::ffi::CStr::from_ptr((*ffi::Py_TYPE(owner)).tp_name);
+    name.to_bytes().windows(31).any(|w| w == b"pybind11_detail_function_record")
+}
+
+pub unsafe fn lru_cache_wrapper(f: *mut PyObject) -> bool {
+    std::ffi::CStr::from_ptr((*ffi::Py_TYPE(f)).tp_name).to_bytes() == b"functools._lru_cache_wrapper"
+}
+
 pub unsafe fn record_callee(table: &GilCell<Callees>, v: ValueId, callable: *mut PyObject, via: Via) {
     let f = tr_bound_function(callable);
-    let weak = if ffi::PyFunction_Check(f) != 0 || ffi::PyType_Check(f) != 0 {
+    let weak = if ffi::PyFunction_Check(f) != 0 || ffi::PyType_Check(f) != 0 || lru_cache_wrapper(f) {
         true
     } else if ffi::PyCFunction_Check(f) != 0 {
         let owner = ffi::PyCFunction_GET_SELF(f);
-        if !(owner.is_null() || ffi::PyModule_Check(owner) != 0 || ffi::PyType_Check(owner) != 0) {
+        // A capsule: a pybind11 function's record.
+        if !(owner.is_null() || ffi::PyModule_Check(owner) != 0 || ffi::PyType_Check(owner) != 0 || ffi::PyCapsule_CheckExact(owner) != 0 || pybind11_record(owner)) {
+            if std::env::var_os("TORCH_RUST_CALLEE_DEBUG").is_some() {
+                let py = Python::assume_attached();
+                let o = Bound::from_borrowed_ptr(py, owner);
+                eprintln!("callee: builtin bound to a {}", o.get_type().name().map_or("?".into(), |n| n.to_string()));
+            }
             return;
         }
         true
@@ -210,13 +234,18 @@ pub unsafe fn record_callee(table: &GilCell<Callees>, v: ValueId, callable: *mut
         let descr = tp == &raw mut ffi::PyMethodDescr_Type
             || tp == &raw mut ffi::PyClassMethodDescr_Type
             || tp == &raw mut ffi::PyWrapperDescr_Type;
-        // PyDescrObject's d_type.
-        if !descr || ffi::PyType_HasFeature((*(f as *mut ffi::PyDescrObject)).d_type, ffi::Py_TPFLAGS_HEAPTYPE) != 0 {
+        // PyDescrObject's d_type: a static type's, or an immutable one's (a
+        // C module's heap type, like itertools.chain).
+        let owner = (*(f as *mut ffi::PyDescrObject)).d_type;
+        if !descr || (ffi::PyType_HasFeature(owner, ffi::Py_TPFLAGS_HEAPTYPE) != 0 && ffi::PyType_HasFeature(owner, ffi::Py_TPFLAGS_IMMUTABLETYPE) == 0) {
             return;
         }
         false
     };
     let py = Python::assume_attached();
+    if std::env::var_os("TORCH_RUST_CALLEE_DEBUG").is_some() {
+        eprintln!("callee: %{} {}", v.0, Bound::from_borrowed_ptr(py, f).repr().map_or("?".into(), |r| r.to_string()));
+    }
     let table = &mut *table.get();
     match table.get(&v) {
         Some(Callee::Many) => {}
@@ -362,7 +391,36 @@ pub unsafe fn frame_entered(frame: *mut Frame, resumed: bool) {
         How::Indirect
     };
     let func = func_name(func, tr_frame_qualname(frame));
+    note_code(&func, tr_frame_code(frame));
     (*rec).pending.push(Effect::Frame { func, how });
+}
+
+// The code of each function a frame was entered for, by name (0 for a name
+// several codes had), for judging whether a call is pure when its callee
+// isn't known (entered indirectly, resumed, or a closure that's gone). The
+// codes are kept alive.
+static CODES: std::sync::Mutex<Option<HashMap<Arc<str>, usize>>> = std::sync::Mutex::new(None);
+
+unsafe fn note_code(func: &Arc<str>, code: *mut PyObject) {
+    let mut guard = CODES.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    match map.get(func) {
+        Some(&c) if c == code as usize || c == 0 => {}
+        Some(_) => {
+            map.insert(func.clone(), 0);
+        }
+        None => {
+            ffi::Py_INCREF(code);
+            map.insert(func.clone(), code as usize);
+        }
+    }
+}
+
+// The code of frames entered as `func`, if only one was.
+pub fn code_named<'py>(py: Python<'py>, func: &str) -> Option<Bound<'py, PyAny>> {
+    let guard = CODES.lock().unwrap();
+    let &c = guard.as_ref()?.get(func)?;
+    (c != 0).then(|| unsafe { Bound::from_borrowed_ptr(py, c as *mut PyObject) })
 }
 
 // "module.qualname", read from the function and code objects (a frame's
