@@ -42,7 +42,7 @@ from .kernel_general import (
     _sm107_outputs,
     ReduceBlock,
 )
-from .kernel_rowtile import trait_itree_plan
+from .kernel_rowtile import split_partials, trait_itree_plan
 from .traits import (
     AMaxOps,
     AMinOps,
@@ -732,7 +732,7 @@ class _OrderedColReduce:
         self.exact = plan.shape == "looped" and plan.tms[0].exact
         # Split warps tile each plan.split[1]-row partition exactly, unless the last one
         # is ragged; then the whole launch keeps its clamps. On B200, launching that
-        # partition separately (two compiles per R, three launches) ran 0.56-0.91x of one
+        # partition separately (a second kernel, three launches) ran 0.56-0.91x of one
         # clamped launch at R 24577-1000003, C 128-1024 (fp32/bf16 sums), while full
         # tiles won 1.01-1.27x on exact splits (R 32768-1048576).
         self.ragged = plan.shape == "split" and plan.split[1] != plan.split[2]
@@ -886,7 +886,7 @@ class _OrderedColReduce:
         bx, by, _ = cute.arch.block_idx()
         trait, plan = self.trait, self.plan
         op, ident = trait.combine, trait.init()
-        # Looped plans bake in R; split plans of any length share a kernel.
+        # Looped plans bake in R; split plans of any R share a kernel per stride width.
         R = rows if const_expr(plan.shape == "split") else Int32(self.R)
         geom = (partitions, tail, tail_chunk)
         split_base = Int32(0)
@@ -981,7 +981,7 @@ class _OrderedColReduce:
         if const_expr(plan.shape == "split"):
             if (worker == Int32(0)) & active:
                 index = output * partitions + partition
-                for f in cutlass.range_constexpr(trait.nfields):
+                for f in cutlass.range_constexpr(self.nouts):
                     mOuts[f][index] = final[f]
         else:
             projected = trait.project(final, trait.acc(self.R))
@@ -1076,28 +1076,24 @@ def reduce_ordered_col(
             if split:
                 return None
             config = OrderedColConfig(0)
-    op = _OrderedColReduce(
-        trait,
-        plan,
-        R,
-        C,
-        trait.nfields if split else nouts,
-        full_tiles=config.full_tiles,
-        worker_warps=config.worker_warps,
-        tile_columns=config.tile_columns,
-    )
     outs = [
         torch.empty(out_shape, device=x.device, dtype=dtype)
         for dtype in out_dtypes[:nouts]
     ]
     kernel_x = _flat(x)
-    kernel_outs = (
-        [
-            torch.empty(B * C * plan.split[0], device=x.device, dtype=cute2torch[d])
-            for d in trait.fdtypes
-        ]
-        if split
-        else _flat_outs(outs)
+    if split:
+        plan, combine, kernel_outs = split_partials(trait, plan, B * C, x.device)
+    else:
+        combine, kernel_outs = None, _flat_outs(outs)
+    op = _OrderedColReduce(
+        trait,
+        plan,
+        R,
+        C,
+        len(kernel_outs),
+        full_tiles=config.full_tiles,
+        worker_warps=config.worker_warps,
+        tile_columns=config.tile_columns,
     )
     # (rows, partitions, last partition's rows, its warp chunk); looped plans read only
     # partitions = 1, their grid height.
@@ -1123,7 +1119,7 @@ def reduce_ordered_col(
     if split:
         flat_outs = _flat_outs(outs)
         _combine_itree_partials(
-            trait, trait_key, plan, kernel_outs, flat_outs, R, nouts
+            trait, trait_key, combine, kernel_outs, flat_outs, R, nouts
         )
     return tuple(outs)
 
