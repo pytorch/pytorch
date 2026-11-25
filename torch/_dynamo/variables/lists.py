@@ -549,7 +549,7 @@ class BaseListVariable(VariableTracker):
 
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
-        from .dicts import ConstDictVariable
+        from .dicts import ConstDictVariable, DictViewVariable, OrderedDictVariable
         from .sets import (
             DictKeySetVariable,
             FrozensetVariable,
@@ -558,13 +558,19 @@ class BaseListVariable(VariableTracker):
         )
         from .user_defined import UserDefinedObjectVariable
 
+        iterable = args[0]
+        if isinstance(iterable, OrderedDictVariable) or (
+            isinstance(iterable, DictViewVariable) and iterable.is_ordered
+        ):
+            # An ordered key lookup can run user code between appends.
+            iterable = generic_getiter(tx, iterable)
         sz = len(self.items)
-        if istype(args[0], (ListVariable, TupleVariable)):
-            self.items.extend(args[0].items)
-        elif isinstance(args[0], UserDefinedObjectVariable):
-            self.items.extend(unpack_iterable(tx, args[0]))
+        if istype(iterable, (ListVariable, TupleVariable)):
+            self.items.extend(iterable.items)
+        elif isinstance(iterable, UserDefinedObjectVariable):
+            self.items.extend(unpack_iterable(tx, iterable))
         elif isinstance(
-            args[0],
+            iterable,
             (
                 ConstDictVariable,
                 SetVariable,
@@ -573,18 +579,18 @@ class BaseListVariable(VariableTracker):
                 OrderedSetVariable,
             ),
         ):
-            if isinstance(args[0], ConstDictVariable):
-                args[0].install_dict_order_guard(tx)
-            items = [item.vt for item in args[0].items]
+            if isinstance(iterable, ConstDictVariable):
+                iterable.install_dict_order_guard(tx)
+            items = [item.vt for item in iterable.items]
             self.items.extend(items)
-        elif isinstance(args[0], ConstantVariable):
-            items = unpack_iterable(tx, args[0])
+        elif isinstance(iterable, ConstantVariable):
+            items = unpack_iterable(tx, iterable)
             self.items.extend(items)
         else:
             # Use the native append, matching CPython's internal list_extend
             # which bypasses a subclass's overridden append (e.g. immutable_list).
             unpack_and_apply_fn(
-                tx, args[0], lambda item: self.list_append(tx, [item], {})
+                tx, iterable, lambda item: self.list_append(tx, [item], {})
             )
 
         if len(self.items) > sz:
@@ -1861,13 +1867,8 @@ class DequeVariable(BaseListVariable):  # noqa: RVT001
     ) -> VariableTracker | None:
         if not (self.is_mutable() and len(args) > 0):
             return None
-        if kwargs or len(args) != 2:
-            raise_args_mismatch(
-                tx,
-                "insert",
-                "2 args and 0 kwargs",
-                f"{len(args)} args and {len(kwargs)} kwargs",
-            )
+        no_keywords(tx, "deque.insert", kwargs)
+        check_positional(tx, "insert", len(args), 2, 2)
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None and len(self.items) == maxlen:
             raise_observed_exception(
@@ -2897,6 +2898,30 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "rjust")
 
+    def bytearray_strip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "strip")
+
+    def bytearray_lstrip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "lstrip")
+
+    def bytearray_rstrip(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_constant_method(tx, args, kwargs, "rstrip")
+
     def bytearray_reduce(
         self,
         tx: "InstructionTranslatorBase",
@@ -2920,6 +2945,73 @@ class ByteArrayVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker | None:
         return self._bytearray_constant_method(tx, args, kwargs, "expandtabs")
+
+    def bytearray_isalnum(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # The is*() predicates are METH_NOARGS like upper()/lower()/title(),
+        # so they share _bytearray_case_method, which calls the real method
+        # on the tracked contents and returns the resulting bool.
+        return self._bytearray_case_method(tx, "isalnum", args, kwargs)
+
+    def bytearray_isalpha(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isalpha", args, kwargs)
+
+    def bytearray_isascii(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isascii", args, kwargs)
+
+    def bytearray_isdigit(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isdigit", args, kwargs)
+
+    def bytearray_islower(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "islower", args, kwargs)
+
+    def bytearray_isspace(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isspace", args, kwargs)
+
+    def bytearray_istitle(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "istitle", args, kwargs)
+
+    def bytearray_isupper(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        return self._bytearray_case_method(tx, "isupper", args, kwargs)
 
     tp_methods = {
         "__reduce__": Method(bytearray_reduce),
@@ -2952,8 +3044,19 @@ class ByteArrayVariable(VariableTracker):
         "center": Method(bytearray_center),
         "ljust": Method(bytearray_ljust),
         "rjust": Method(bytearray_rjust),
+        "strip": Method(bytearray_strip),
+        "lstrip": Method(bytearray_lstrip),
+        "rstrip": Method(bytearray_rstrip),
         "zfill": Method(bytearray_zfill),
         "expandtabs": Method(bytearray_expandtabs),
+        "isalnum": Method(bytearray_isalnum),
+        "isalpha": Method(bytearray_isalpha),
+        "isascii": Method(bytearray_isascii),
+        "isdigit": Method(bytearray_isdigit),
+        "islower": Method(bytearray_islower),
+        "isspace": Method(bytearray_isspace),
+        "istitle": Method(bytearray_istitle),
+        "isupper": Method(bytearray_isupper),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
