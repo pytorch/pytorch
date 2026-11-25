@@ -1137,6 +1137,10 @@ class TestProfiler(TestCase):
                     )
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(
+        not (IS_LINUX or IS_WINDOWS),
+        "Process names are only supported on Linux and Windows",
+    )
     def test_profiler_process_metadata(self):
         with profile(activities=[ProfilerActivity.CPU]) as prof:
             torch.ones(1)
