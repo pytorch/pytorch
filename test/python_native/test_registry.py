@@ -925,6 +925,27 @@ class TestRegistryRuntime(TestCase):
         self.assertEqual(cond_calls[0], 1)
         self.assertFalse(getattr(self.registry._router_active, "on", False))
 
+    def test_dynamo_fullgraph_preserves_original_operator(self) -> None:
+        def decline(*args: Any, **kwargs: Any) -> bool:
+            return False
+
+        def unexpected(*args: Any, **kwargs: Any) -> None:
+            raise AssertionError("declined implementation executed")
+
+        self.registry.register_op_override(
+            "test_dsl", "aten", "mul.Tensor", "CPU", decline, unexpected
+        )
+        self._install("mul.Tensor", "CPU")
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return torch.mul(a, b)
+
+        self.assertEqual(
+            fn(torch.tensor([2.0, 3.0]), torch.tensor([4.0, 5.0])),
+            torch.tensor([8.0, 15.0]),
+        )
+
     def test_dynamo_shortcut_preserves_cow_fallback(self):
         """COW inputs must keep using the eager fallback path under Dynamo."""
         sentinel_called = [False]

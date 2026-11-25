@@ -558,7 +558,7 @@ def _to_copy_cond(
     if memory_format not in (None, torch.preserve_format, torch.contiguous_format):
         return False
     dst = x.dtype if dtype is None else dtype
-    # Rowvec preserves input gaps; _to_copy allocates contiguous output.
+    # Only contiguous inputs are admitted; preserve_format keeps singleton strides.
     return dst != x.dtype and _conv_serveable(x, dst) and x.is_contiguous()
 
 
