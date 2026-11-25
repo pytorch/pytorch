@@ -2463,6 +2463,53 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    @parametrize("choices", (1, 4))
+    def test_blackwell_mm_reduction_epilogue_benchmarks_more_choices(
+        self, choices: int
+    ):
+        """The fusion benchmark of a reduction epilogue tries up to
+        max_template_reduction_epilogue_benchmarked_choices template choices, not
+        only the fastest: the choice that hosts a reduction best is often not
+        the fastest template alone, e.g. one without epilogue subtiles."""
+        orig_compile = Scheduler.compile_kernel
+        fused_compiles = []
+
+        def compile_kernel(self, nodes, *args, **kwargs):
+            if any(n.is_template() for n in nodes) and any(
+                n.is_reduction() for n in nodes
+            ):
+                fused_compiles.append(nodes)
+            return orig_compile(self, nodes, *args, **kwargs)
+
+        orig_timings = MultiTemplateBuffer.choice_timings
+
+        def choice_timings(self, *args, **kwargs):
+            # Tied templates, so the slower choice is still worth trying.
+            return dict.fromkeys(orig_timings(self, *args, **kwargs), 0.01)
+
+        with (
+            mock.patch.object(Scheduler, "compile_kernel", compile_kernel),
+            mock.patch.object(MultiTemplateBuffer, "choice_timings", choice_timings),
+        ):
+            self._run_reduction(
+                self.ROW_OPS["sum"],
+                1024,
+                128,
+                256,
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                BlackwellGPUGemmConfig(128, 64, 64, 3, 4),
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "triton.max_template_reduction_epilogue_benchmarked_choices": choices,
+                },
+            )
+        # _mm_config offers three choices that fit here.
+        self.assertEqual(len(fused_compiles), min(choices, 3), fused_compiles)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     def test_blackwell_mm_reduction_epilogue_tma_load_input_partial_tile(self):
         """A row pass over a tile narrower than the output (BLOCK_N=64, N=256)
         still TMA-loads a full-size input at the tile's origin. M=1000 leaves a

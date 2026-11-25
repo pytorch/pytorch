@@ -8218,6 +8218,12 @@ class Scheduler:
                 <= config.max_template_fusion_benchmarked_choices
             )
 
+            max_benchmarked_choices = config.max_template_fusion_benchmarked_choices
+            if template_reduction and benchmark_template_fusion:
+                max_benchmarked_choices = max(
+                    max_benchmarked_choices,
+                    config.triton.max_template_reduction_epilogue_benchmarked_choices,
+                )
             ms1, ms2 = float("inf"), float("inf")
             min_choice: ir.ChoiceCaller | None = None
             if not get_choice_timings_async:
@@ -8326,7 +8332,7 @@ class Scheduler:
                 if benchmark_template_fusion and unfused_time >= ms1 + ms2:
                     break
 
-                if template_choices >= config.max_template_fusion_benchmarked_choices:
+                if template_choices >= max_benchmarked_choices:
                     break
 
                 try:
