@@ -137,6 +137,7 @@ used for their results.
     make_graphed_callables
     export_dot
     export_graph_data
+    MemoryPlannedGraph
 ```
 
 ### CUDA graph lifecycle hooks
