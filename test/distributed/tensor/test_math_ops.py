@@ -2138,6 +2138,19 @@ class DistMathOpsTest(DTensorContinuousTestBase):
         self.assertEqual(result.full_tensor(), expected)
 
     @with_comms
+    def test_inter_area_uint8_partial(self):
+        if self.device_type != "cpu":
+            self.skipTest("inter-area is CPU only")
+        mesh = self.build_device_mesh()
+        local = torch.tensor([0, 1], dtype=torch.uint8, device=self.device_type)
+        local = local.reshape(1, 1, 1, 2).repeat(1, 5, 1, 1)
+        partial = DTensor.from_local(local, mesh, [Partial("sum")])
+
+        result = F.interpolate(partial, size=(1, 1), mode="inter-area")
+        expected = F.interpolate(partial.full_tensor(), size=(1, 1), mode="inter-area")
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
     def test_interpolation_upsample_ops(self):
         """Test forward and backward for F.interpolate with DTensor.
 
