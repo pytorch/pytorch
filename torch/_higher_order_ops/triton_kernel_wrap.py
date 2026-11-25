@@ -479,6 +479,8 @@ def generate_ttir(
         if name not in kernel.arg_names and name in options.__dict__:
             kwargs.pop(name)
 
+    # Like Triton's launcher, bind the params the caller left at their defaults
+    kwargs = {**{p.name: p.default for p in kernel.params if p.has_default}, **kwargs}
     if len(kwargs) != len(kernel.arg_names):
         raise ValueError(
             "Incorrect number of arguments passed to kernel: "
