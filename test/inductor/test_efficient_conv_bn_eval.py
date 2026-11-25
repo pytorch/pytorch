@@ -18,6 +18,10 @@ from torch._functorch import config as functorch_config
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import tf32_on_and_off
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 
@@ -94,6 +98,7 @@ class MultiUserConvOp(nn.Module):
         return x
 
 
+@instantiate_parametrized_tests
 class EfficientConvBNEvalTemplate(TestCase):
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
@@ -157,6 +162,58 @@ class EfficientConvBNEvalTemplate(TestCase):
         # Verify result matches eager evaluation
         expected = gm(inp_tensor, mean_tensor, var_tensor)
         self.assertEqual(out, expected)
+
+    @tf32_on_and_off(0.02)
+    @inductor_config.patch(
+        {"efficient_conv_bn_eval_fx_passes": True, "freezing": False}
+    )
+    @parametrize("dim", (1, 2, 3))
+    def test_fx_graph_conv_padding(self, dim):
+        import torch._inductor.fx_passes.efficient_conv_bn_eval
+        from torch._inductor.fx_passes.pre_grad import efficient_conv_bn_eval_pass
+
+        conv_op = getattr(torch.ops.aten, f"conv{dim}d").padding
+        spatial = [3] * dim
+        ones = [1] * dim
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.randn(4, 3, *spatial))
+                self.bias = torch.nn.Parameter(torch.randn(4))
+                self.register_buffer("running_mean", torch.randn(4))
+                self.register_buffer("running_var", torch.rand(4) + 1.0)
+
+            def forward(self, x):
+                conv = conv_op(x, self.weight, self.bias, ones, "same", ones, 1)
+                return torch.ops.aten.batch_norm.default(
+                    conv,
+                    None,
+                    None,
+                    self.running_mean,
+                    self.running_var,
+                    False,
+                    0.1,
+                    1e-5,
+                    torch.backends.cudnn.enabled,
+                )
+
+        device = self.device
+        mod = Model().eval().to(device)
+        x = torch.randn(2, 3, *([16] * dim), device=device)
+        gm = torch.fx.symbolic_trace(mod)
+        with torch.no_grad():
+            expected = gm(x)
+
+        efficient_conv_bn_eval_pass.apply(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [n.target for n in gm.graph.nodes if n.op == "call_function"]
+        self.assertNotIn(conv_op, targets)
+        self.assertNotIn(torch.ops.aten.batch_norm.default, targets)
+        with torch.no_grad():
+            self.assertEqual(gm(x), expected)
 
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
