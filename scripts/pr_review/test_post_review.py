@@ -1294,8 +1294,9 @@ class TestEarlierReviewsAreDecluttered(unittest.TestCase):
     def test_taking_down_a_review_paces_its_deletes(self):
         comments = [comment(50, 5), comment(51, 5), comment(52, 5)]
         gh = FakeGitHub(reviews=[old_review(5)], comments=comments)
-        with mock.patch("post_review._sleep") as sleep, mock.patch.object(
-            post_review, "BACKFILL_PAUSE", 1.0
+        with (
+            mock.patch("post_review._sleep") as sleep,
+            mock.patch.object(post_review, "BACKFILL_PAUSE", 1.0),
         ):
             go(gh)
         self.assertEqual(sorted(deleted(gh)), [50, 51, 52])
