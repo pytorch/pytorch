@@ -3456,25 +3456,29 @@ def use_decompose_k_choice(
         or not get_k_splits(m, n, k)
     ):
         return False
-    if sizevars.statically_known_true(large_k):
+    if not isinstance(k, sympy.Expr) or k.is_number:
+        return sizevars.statically_known_true(large_k)
+    divisible = any(
+        sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0))
+        for s in get_k_splits(m, n, k)
+    )
+    # A dynamic K with a dividing split that is already known to clear the
+    # threshold needs no guard and no leftover MM.
+    if divisible and sizevars.statically_known_true(large_k):
         return True
-    # A backed dynamic K (opt-in) is guarded on the threshold either way, so a
-    # K on the other side recompiles instead of reusing this graph. The
+    # Otherwise a backed dynamic K (opt-in) is guarded on the threshold, so a K
+    # on the other side recompiles instead of reusing this graph. These checks
+    # also apply when large_k is already statically true, since without a
+    # dividing split this enables decomposeK's leftover MM. The
     # threshold_multiple > 1 check only drops Triton mm; keep it for a dynamic K
     # rather than add a second guard.
     if (
         not config.triton.decompose_k_dynamic_k
         or threshold_multiple != 1
-        or not isinstance(k, sympy.Expr)
-        or k.is_number
         or free_unbacked_symbols(large_k)
         or _has_user_bounded_symbol(k)
     ):
         return False
-    divisible = any(
-        sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0))
-        for s in get_k_splits(m, n, k)
-    )
     # Without a dividing split, decomposeK runs the leftover K rows as an extra
     # MM; on B200 that only beat mm from M * N * K ~ 2**33 (hints, no guard).
     m_hint, n_hint, k_hint = (sizevars.optimization_hint(x) for x in (m, n, k))
@@ -3484,17 +3488,22 @@ def use_decompose_k_choice(
 
 
 def _has_user_bounded_symbol(expr: sympy.Expr) -> bool:
-    """Whether a symbol of ``expr`` has a narrowed value range, e.g. from
-    mark_dynamic(min=, max=). Guarding on it could violate the user's range."""
+    """Whether a symbol of ``expr`` carries a user-declared range
+    (StrictMinMaxConstraint, e.g. mark_dynamic(min=, max=)). A guard on it
+    could violate that range. Ranges narrowed only by guards do not count."""
     from torch._inductor.virtualized import V
-    from torch.utils._sympy.numbers import int_oo
 
     shape_env = V.graph.sizevars.shape_env
-    for sym in expr.free_symbols:
-        vr = shape_env.var_to_range.get(sym)
-        if vr is not None and (vr.lower > 2 or vr.upper is not int_oo):
-            return True
-    return False
+    constrained = shape_env.strict_min_max_constrained_symbols
+    if not constrained:
+        return False
+    # A constrained symbol may have been replaced by an equal one, so compare
+    # against the symbols each constrained symbol now resolves to.
+    resolved = OrderedSet[sympy.Symbol]()
+    for sym in constrained:
+        resolved.update(shape_env.replace(sym).free_symbols)
+        resolved.add(sym)
+    return any(sym in resolved for sym in expr.free_symbols)
 
 
 @functools.cache
