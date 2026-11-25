@@ -53,7 +53,10 @@ For more information on the stable ABI, see the
 - `torch/csrc/stable/ops.h` - Stable operator definitions
 - `torch/csrc/stable/tensor.h` - Stable tensor structures
 - `torch/csrc/stable/device.h` - Stable device structures
+- `torch/csrc/stable/generator.h` - Stable random number generator handles
+- `torch/csrc/stable/inference_mode.h` - Thread-local inference mode guard
 - `torch/csrc/stable/accelerator.h` - Accelerator support
+- `torch/csrc/stable/cpu.h` - Typed CPU capability queries
 - `torch/csrc/stable/macros.h` - Stable API macros
 
 ## Stable API Categories
