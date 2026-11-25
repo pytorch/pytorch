@@ -144,6 +144,115 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(f(*inp), nf(*inp2))
         self.assertEqual(inp, inp2)
 
+    def test_input_view_copyback_after_earlier_input_copy(self):
+        def f(x, indices, values, initial):
+            x.copy_(initial)
+            view = x.view_as(x)
+            updated = view.index_put((indices,), values)
+            x.copy_(updated.view_as(x))
+            return x
+
+        inputs = (
+            torch.arange(8, dtype=torch.float32).reshape(2, 4),
+            torch.tensor([0]),
+            torch.full((4,), 10.0),
+            torch.ones(2, 4),
+        )
+        expected = f(*(value.clone() for value in inputs))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        first_copy = next(n for n in gm.graph.nodes if n.target is aten.copy_.default)
+        first_copy.replace_all_uses_with(first_copy.args[0])
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.recompile()
+        self.assertEqual(gm(*(value.clone() for value in inputs)), expected)
+        self.assertTrue(
+            any(n.target is aten.index_put_.default for n in gm.graph.nodes)
+        )
+        self.assertEqual(sum(n.target is aten.copy_.default for n in gm.graph.nodes), 1)
+
+    def test_chained_copybacks_use_current_view_base(self):
+        def f(x, indices, first_values, second_values):
+            first = x.index_put((indices,), first_values)
+            second = first.view_as(x).index_put((indices,), second_values)
+            x.copy_(second.view_as(x))
+            return x
+
+        inputs = (
+            torch.arange(8, dtype=torch.float32).reshape(2, 4),
+            torch.tensor([0]),
+            torch.full((4,), 10.0),
+            torch.full((4,), 20.0),
+        )
+        expected = f(*(value.clone() for value in inputs))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.recompile()
+        self.assertEqual(gm(*(value.clone() for value in inputs)), expected)
+        self.assertEqual(
+            sum(n.target is aten.index_put_.default for n in gm.graph.nodes), 2
+        )
+        self.assertFalse(any(n.target is aten.copy_.default for n in gm.graph.nodes))
+
+    @parametrize("restore_dtype", [False, True])
+    def test_input_view_copyback_dtype(self, restore_dtype):
+        def f(x, indices, values):
+            updated = x.view(torch.int32).index_put((indices,), values)
+            if restore_dtype:
+                updated = updated.view(x.dtype)
+            x.copy_(updated)
+            return x
+
+        inputs = (
+            torch.zeros(4, dtype=torch.float32),
+            torch.tensor([0]),
+            torch.ones(1, dtype=torch.float32).view(torch.int32),
+        )
+        expected = f(*(value.clone() for value in inputs))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(*(value.clone() for value in inputs)), expected)
+        self.assertEqual(
+            sum(n.target is aten.index_put_.default for n in gm.graph.nodes),
+            int(restore_dtype),
+        )
+        self.assertEqual(
+            sum(n.target is aten.copy_.default for n in gm.graph.nodes),
+            int(not restore_dtype),
+        )
+
+    @inductor_config.patch(reinplace_whenever_possible=True)
+    def test_input_overwrite_precedes_view_copyback(self):
+        def f(x, initial, replacement, final):
+            x.copy_(initial)
+            view = x.view(4)
+            _, updated = auto_functionalized(
+                torch.ops._reinplacing.sin.default, x=initial, result=view
+            )
+            x.copy_(replacement)
+            answer = updated.sum()
+            view.copy_(final)
+            return answer
+
+        inputs = (
+            torch.zeros(4),
+            torch.ones(4),
+            torch.full((4,), 5.0),
+            torch.full((4,), 9.0),
+        )
+        expected = f(*(value.clone() for value in inputs))
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        first_copy = next(n for n in gm.graph.nodes if n.target is aten.copy_.default)
+        first_copy.replace_all_uses_with(first_copy.args[0])
+        updater = FakeTensorUpdater(gm)
+        reinplace_inplaceable_ops(
+            updater, gm.graph, rewire_auto_functionalized_outputs=True
+        )
+        decompose_auto_functionalized(gm.graph)
+        gm.recompile()
+        self.assertEqual(gm(*(value.clone() for value in inputs)), expected)
+
     def test_input_copyback_preserves_earlier_result(self):
         def f(x, indices, value, replacement):
             updated = aten.index_put.default(x, [indices], value)
