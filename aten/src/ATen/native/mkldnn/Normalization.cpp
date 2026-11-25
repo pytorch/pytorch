@@ -112,17 +112,17 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
         input.options().device_opt(),
         input.options().pinned_memory_opt());
 
-  auto mean_it = at::native::itensor_from_mkldnn(mean);
-  auto rstd_it = at::native::itensor_from_mkldnn(rstd);
+  auto mean_it = at::native::memory_from_mkldnn(mean);
+  auto rstd_it = at::native::memory_from_mkldnn(rstd);
 
-  auto input_it = at::native::itensor_from_mkldnn(input);
-  auto weight_it = at::native::itensor_from_mkldnn(weight);
-  auto bias_it = at::native::itensor_from_mkldnn(bias);
+  auto input_it = at::native::memory_from_mkldnn(input);
+  auto weight_it = at::native::memory_from_mkldnn(weight);
+  auto bias_it = at::native::memory_from_mkldnn(bias);
 
   auto out_it = inplace ? input_it : mkldnn::MkldnnMemory(input_it.get_desc());
   mkldnn::layer_normalization_forward(input_it, weight_it, bias_it, out_it, mean_it, rstd_it, static_cast<float>(eps));
 
-  auto dst = at::native::new_with_itensor_mkldnn(
+  auto dst = at::native::new_with_mkldnn_memory(
       std::move(out_it),
       optTypeMetaToScalarType(input.options().dtype_opt()),
       input.options().device_opt());
@@ -150,9 +150,9 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
   TORCH_CHECK(weight.defined() && bias.defined(),
              "mkldnn_batch_norm: currently mkldnn only support affine model");
 
-  mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
-  mkldnn::MkldnnMemory w = itensor_from_const_tensor(weight);
-  mkldnn::MkldnnMemory b = itensor_from_const_tensor(bias);
+  mkldnn::MkldnnMemory& x = memory_from_mkldnn(input);
+  mkldnn::MkldnnMemory w = memory_from_const_tensor(weight);
+  mkldnn::MkldnnMemory b = memory_from_const_tensor(bias);
   bool use_running_stat = (running_mean.defined() && running_var.defined());
 
   mkldnn::MkldnnMemory y;
@@ -167,8 +167,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
         x, w, b, y, saved_mean, saved_var, static_cast<float>(eps));
     if (use_running_stat) {
       auto len = x.get_nelems() / w.get_nelems(); // n*h*w
-      mkldnn::MkldnnMemory m = itensor_from_tensor(running_mean);
-      mkldnn::MkldnnMemory v = itensor_from_tensor(running_var);
+      mkldnn::MkldnnMemory m = memory_from_tensor(running_mean);
+      mkldnn::MkldnnMemory v = memory_from_tensor(running_var);
       const std::vector<float> scales_mean{static_cast<float>(1 - momentum),
                                            static_cast<float>(momentum)};
       const std::vector<float> scales_var{static_cast<float>(1 - momentum),
@@ -177,18 +177,18 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
       mkldnn::sum(scales_var, {v, saved_var}, v);
     }
     return std::make_tuple(
-         new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+         new_with_mkldnn_memory(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                  input.options().device_opt()),
-         new_with_itensor_mkldnn(std::move(saved_mean), optTypeMetaToScalarType(weight.options().dtype_opt()),
+         new_with_mkldnn_memory(std::move(saved_mean), optTypeMetaToScalarType(weight.options().dtype_opt()),
                                  weight.options().device_opt()),
-         new_with_itensor_mkldnn(std::move(saved_var), optTypeMetaToScalarType(weight.options().dtype_opt()),
+         new_with_mkldnn_memory(std::move(saved_var), optTypeMetaToScalarType(weight.options().dtype_opt()),
                                  weight.options().device_opt()));
   } else {
     TORCH_CHECK(input.dim() == 4 || input.dim() == 5,
         "mkldnn_batch_norm: currently mkldnn inference only support 2d and 3d batchnorm");
     if (use_running_stat) {
-      mkldnn::MkldnnMemory m = itensor_from_const_tensor(running_mean);
-      mkldnn::MkldnnMemory v = itensor_from_const_tensor(running_var);
+      mkldnn::MkldnnMemory m = memory_from_const_tensor(running_mean);
+      mkldnn::MkldnnMemory v = memory_from_const_tensor(running_var);
       mkldnn::batch_normalization_forward_inference(
           // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           x, m, v, w, b, y, eps);
@@ -197,11 +197,11 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
       TORCH_CHECK(false, "mkldnn_batch_norm: mkldnn inference is not keep running estimates.");
     }
     return std::make_tuple(
-        new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+        new_with_mkldnn_memory(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
                                 input.options().device_opt()),
-        new_with_itensor_mkldnn(mkldnn::MkldnnMemory{}, optTypeMetaToScalarType(weight.options().dtype_opt()),
+        new_with_mkldnn_memory(mkldnn::MkldnnMemory{}, optTypeMetaToScalarType(weight.options().dtype_opt()),
                                 weight.options().device_opt()),
-        new_with_itensor_mkldnn(mkldnn::MkldnnMemory{}, optTypeMetaToScalarType(weight.options().dtype_opt()),
+        new_with_mkldnn_memory(mkldnn::MkldnnMemory{}, optTypeMetaToScalarType(weight.options().dtype_opt()),
                                 weight.options().device_opt()));
   }
 }
@@ -256,11 +256,11 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   const Tensor& save_invstd = save_invstd_opt.value_or(Tensor());
 
   TORCH_CHECK(train, "mkldnn_batch_norm_backward: currently mkldnn only support train model");
-  mkldnn::MkldnnMemory& grady = itensor_from_mkldnn(grad_output);
-  mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
-  mkldnn::MkldnnMemory w = itensor_from_const_tensor(weight);
-  mkldnn::MkldnnMemory& m = itensor_from_mkldnn(save_mean);
-  mkldnn::MkldnnMemory& v = itensor_from_mkldnn(save_invstd);
+  mkldnn::MkldnnMemory& grady = memory_from_mkldnn(grad_output);
+  mkldnn::MkldnnMemory& x = memory_from_mkldnn(input);
+  mkldnn::MkldnnMemory w = memory_from_const_tensor(weight);
+  mkldnn::MkldnnMemory& m = memory_from_mkldnn(save_mean);
+  mkldnn::MkldnnMemory& v = memory_from_mkldnn(save_invstd);
 
   mkldnn::MkldnnMemory gradx, gradw, gradb;
   mkldnn::batch_normalization_backward(
@@ -268,12 +268,12 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
       x, m, v, grady, w, gradx, gradw, gradb, eps);
 
   return std::make_tuple(
-      new_with_itensor_mkldnn(std::move(gradx), optTypeMetaToScalarType(input.options().dtype_opt()),
+      new_with_mkldnn_memory(std::move(gradx), optTypeMetaToScalarType(input.options().dtype_opt()),
                               input.options().device_opt()),
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw),
+      mkldnn_to_dense(new_with_mkldnn_memory(std::move(gradw),
                                               optTypeMetaToScalarType(weight.options().dtype_opt()),
                                               weight.options().device_opt())),
-      mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb),
+      mkldnn_to_dense(new_with_mkldnn_memory(std::move(gradb),
                                               optTypeMetaToScalarType(weight.options().dtype_opt()),
                                               weight.options().device_opt())));
 }
