@@ -4,8 +4,9 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/GroupedMM.h>
 #include <ATen/native/mps/kernels/ScaledMM.h>
-#include <c10/util/TypeCast.h>
+#include <c10/util/safe_conv.h>
 #include <fmt/format.h>
 #include <utility>
 
@@ -13,6 +14,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_scaled_grouped_mm_v2_native.h>
 #include <ATen/ops/_scaled_mm_v2_native.h>
 #endif
 
@@ -25,10 +27,316 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/ScaledMM_metallib.h>
 #endif
 
-const std::array<scaled::ScaleKernelDispatchEntry, 2> scale_kernel_dispatch = {{
+// Whether mat's storage offset and leading stride are multiples of alignment elements, which are bytes for the
+// one-byte types the kernels load as vectors
+bool is_aligned(const Tensor& mat, int64_t leading_stride, int64_t alignment) {
+  return mat.storage_offset() % alignment == 0 && leading_stride % alignment == 0;
+}
+
+const std::array<scaled::ScaleKernelDispatchEntry, 5> scale_kernel_dispatch = {{
     {"tensorwise_tensorwise", scaled::check_tensorwise_recipe, scaled::ScaledGemmImplementation::TENSORWISE_TENSORWISE},
     {"rowwise_rowwise", scaled::check_rowwise_recipe, scaled::ScaledGemmImplementation::ROWWISE_ROWWISE},
+    {"mxfp8_mxfp8", scaled::check_mxfp8_recipe, scaled::ScaledGemmImplementation::MXFP8_MXFP8},
+    {"nvfp4_nvfp4", scaled::check_nvfp4_recipe, scaled::ScaledGemmImplementation::NVFP4_NVFP4},
+    {"nvfp4_nvfp4_single_scale",
+     scaled::check_nvfp4_recipe_single_scale,
+     scaled::ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE},
 }};
+
+// Block-scaled recipes read A row-major and B column-major (both K-contiguous, like cuBLASLt) with unswizzled
+// [rows, K / block] scales; the validator has checked the scale shapes.
+void scaled_mm_blockwise_out(const Tensor& mat_a,
+                             const Tensor& mat_b,
+                             ArrayRef<Tensor> scale_a,
+                             ArrayRef<Tensor> scale_b,
+                             scaled::ScaledGemmImplementation gemm_impl,
+                             const std::optional<Tensor>& bias,
+                             int64_t k,
+                             const Tensor& out) {
+  TORCH_CHECK_VALUE(mat_a.stride(1) == 1 && mat_b.stride(0) == 1,
+                    "MPS block-scaled _scaled_mm_v2 expects a row-major mat_a and a column-major mat_b, got strides ",
+                    mat_a.strides(),
+                    " and ",
+                    mat_b.strides());
+  TORCH_CHECK_TYPE(out.scalar_type() != kFloat8_e4m3fn, "MPS block-scaled _scaled_mm_v2 does not support fp8 output");
+  const bool nvfp4 = gemm_impl != scaled::ScaledGemmImplementation::MXFP8_MXFP8;
+  const bool two_level = gemm_impl == scaled::ScaledGemmImplementation::NVFP4_NVFP4;
+  const auto tensor_scale = [&](ArrayRef<Tensor> scales) {
+    return two_level ? std::make_optional(scales[1]) : std::nullopt;
+  };
+  const ScaledMMParams<> params{
+      .m = c10::safe_conv<uint32_t>(mat_a.size(0), "mat_a.size(0)"),
+      .n = c10::safe_conv<uint32_t>(mat_b.size(1), "mat_b.size(1)"),
+      .k = c10::safe_conv<uint32_t>(k, "K"),
+      .k_blocks = c10::safe_conv<uint32_t>(
+          c10::metal::ceil_div<int64_t>(k, nvfp4 ? scaled_mm_nvfp4_block : scaled_mm_mx_block), "K blocks"),
+      .a_row_stride = mat_a.stride(0),
+      .a_col_stride = mat_a.stride(1),
+      .b_row_stride = mat_b.stride(0),
+      .b_col_stride = mat_b.stride(1),
+      .out_row_stride = out.stride(0),
+      .out_col_stride = out.stride(1),
+      .rowwise = false,
+      .has_tensor_scales = two_level,
+      .has_bias = bias.has_value(),
+      .bias_bfloat16 = bias.has_value() && bias->scalar_type() == kBFloat16,
+  };
+  // Metal 4.1 MPP applies MX block scales natively. It needs dense operands, since it derives the scale plane's row
+  // pitch from the data's, fp8 tensors whose base and row stride are aligned per the MSL spec, and indexes each tile in
+  // int32.
+  const bool native = !nvfp4 && has_metal_4_1() && mat_a.stride(0) == k && mat_b.stride(1) == k &&
+      is_aligned(mat_a, k, scaled_mm_native_fp8_alignment) && is_aligned(mat_b, k, scaled_mm_native_fp8_alignment) &&
+      std::in_range<int32_t>(scaled_mm_native_tile * k);
+  // The few rows kernel reads whole chunks of K with vector loads
+  const bool few_rows = params.m <= scaled_mm_few_rows_max && k % scaled_mm_blockwise_chunk == 0 &&
+      is_aligned(mat_a, mat_a.stride(0), scaled_mm_few_rows_load_bytes) &&
+      is_aligned(mat_b, mat_b.stride(1), scaled_mm_few_rows_load_bytes);
+  // The MPP kernel decodes rows of K with vector loads
+  const bool mpp = has_mpp() && is_aligned(mat_a, mat_a.stride(0), scaled_mm_alignment) &&
+      is_aligned(mat_b, mat_b.stride(1), scaled_mm_alignment);
+  const auto type_str = scalarToMetalTypeString(out.scalar_type());
+  const auto format = nvfp4 ? "nvfp4" : "mxfp8";
+  const auto kernel_name = few_rows ? fmt::format("scaled_mm_few_rows_{}_{}_{}", format, params.m, type_str)
+      : native                      ? fmt::format("scaled_mm_native_mxfp8_{}", type_str)
+                                    : fmt::format("scaled_mm_{}{}_{}", mpp ? "mpp_" : "", format, type_str);
+  const auto tile = native ? scaled_mm_native_tile : mpp ? scaled_mm_blockwise_tile : scaled_mm_tile;
+  const auto groups = few_rows
+      ? MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, scaled_mm_simdgroups), 1, 1)
+      : MTLSizeMake(c10::metal::ceil_div<int64_t>(params.n, tile), c10::metal::ceil_div<int64_t>(params.m, tile), 1);
+  auto pso = lib.getPipelineStateForFunc(kernel_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, kernel_name, {mat_a, mat_b}, stream);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder,
+                  mat_a,
+                  mat_b,
+                  out,
+                  scale_a[0],
+                  scale_b[0],
+                  tensor_scale(scale_a),
+                  tensor_scale(scale_b),
+                  bias,
+                  params);
+      [encoder dispatchThreadgroups:groups threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
+
+const std::array<scaled::ScaleKernelDispatchEntry, 4> scale_grouped_kernel_dispatch = {{
+    {"tensorwise_tensorwise", scaled::check_tensorwise_recipe, scaled::ScaledGemmImplementation::TENSORWISE_TENSORWISE},
+    {"rowwise_rowwise", scaled::check_rowwise_recipe, scaled::ScaledGemmImplementation::ROWWISE_ROWWISE},
+    {"mxfp8_mxfp8", scaled::check_mxfp8_recipe, scaled::ScaledGemmImplementation::MXFP8_MXFP8},
+    {"nvfp4_nvfp4", scaled::check_nvfp4_recipe, scaled::ScaledGemmImplementation::NVFP4_NVFP4},
+}};
+
+// Batch stride of a TensorWise or NVFP4 global scale, which holds one value or one per group
+int64_t scaled_grouped_mm_tensor_scale_stride(const Tensor& scale, int64_t groups, std::string_view name) {
+  TORCH_CHECK_VALUE(scale.numel() == 1 || (scale.dim() == 1 && scale.numel() == groups && scale.is_contiguous()),
+                    name,
+                    " tensor-wise scale must hold one value or a contiguous one per group (",
+                    groups,
+                    "), got shape ",
+                    scale.sizes());
+  return scale.numel() == 1 ? 0 : 1;
+}
+
+// Batch stride of a RowWise scale: mat_a's take one scale per row of A, mat_b's one per column of B. A 2d operand's
+// scales are 1d and span the jagged dim, or for 2d x 2d hold one set per group; a 3d operand's are [groups, rows].
+int64_t scaled_grouped_mm_rowwise_scale_stride(const Tensor& mat,
+                                               const Tensor& scale,
+                                               bool is_a,
+                                               int64_t groups,
+                                               bool jagged_k,
+                                               std::string_view name) {
+  const auto size = mat.size(is_a ? -2 : -1);
+  if (mat.dim() == 2) {
+    const auto expected = jagged_k ? groups * size : size;
+    TORCH_CHECK_VALUE(scale.dim() == 1 && scale.is_contiguous() && scale.numel() == expected,
+                      name,
+                      " must be a contiguous 1D tensor of ",
+                      expected,
+                      " values, got shape ",
+                      scale.sizes());
+    return jagged_k ? size : 0;
+  }
+  TORCH_CHECK_VALUE(scale.dim() == 2 && scale.size(0) == groups && scale.size(1) == size && scale.stride(1) == 1,
+                    name,
+                    " must be a (",
+                    groups,
+                    ", ",
+                    size,
+                    ") tensor contiguous in its last dim, got shape ",
+                    scale.sizes(),
+                    " and strides ",
+                    scale.strides());
+  return scale.stride(0);
+}
+
+// The operand ranks pick the jagged mode: 2d x 3d splits the rows of mat_a, 2d x 2d the shared contraction dim, and
+// 3d x 3d is batched. scale_names name the scales in errors, as the caller may have swapped them.
+void scaled_grouped_mm_out(const Tensor& mat_a,
+                           const Tensor& mat_b,
+                           ArrayRef<Tensor> scale_a,
+                           ArrayRef<Tensor> scale_b,
+                           scaled::ScaledGemmImplementation gemm_impl,
+                           const std::optional<Tensor>& offs,
+                           const Tensor& out,
+                           std::array<std::string_view, 2> scale_names = {"scale_a", "scale_b"}) {
+  using scaled::ScaledGemmImplementation;
+  const bool rowwise = gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE;
+  const bool nvfp4 = gemm_impl == ScaledGemmImplementation::NVFP4_NVFP4;
+  const bool blockwise = nvfp4 || gemm_impl == ScaledGemmImplementation::MXFP8_MXFP8;
+  TORCH_CHECK_NOT_IMPLEMENTED(!blockwise || mat_a.dim() == 2,
+                              "MPS _scaled_grouped_mm_v2 supports MXFP8 and NVFP4 for 2d x 3d and 2d x 2d inputs");
+  if (mat_a.dim() == 3 && mat_b.dim() == 2) {
+    // The columns of mat_b split into groups are the rows of its transpose, so compute the transposed product
+    scaled_grouped_mm_out(mat_b.transpose(-2, -1),
+                          mat_a.transpose(-2, -1),
+                          scale_b,
+                          scale_a,
+                          gemm_impl,
+                          offs,
+                          out.transpose(-2, -1),
+                          {scale_names[1], scale_names[0]});
+    return;
+  }
+  const bool jagged_rows = mat_a.dim() == 2 && mat_b.dim() == 3;
+  const bool jagged_k = mat_a.dim() == 2 && mat_b.dim() == 2;
+  const int64_t groups = offs.has_value() ? offs->numel() : mat_a.size(0);
+  const auto m = mat_a.size(-2);
+  const auto n = mat_b.size(-1);
+  // Float4_e2m1fn_x2 packs two values along K
+  const auto k = nvfp4 ? 2 * mat_a.size(-1) : mat_a.size(-1);
+  TORCH_CHECK_NOT_IMPLEMENTED(std::in_range<int32_t>(m) && std::in_range<int32_t>(n) && std::in_range<int32_t>(k),
+                              "MPS _scaled_grouped_mm_v2 requires m, n and k to fit in int32");
+  if (groups == 0 || out.numel() == 0) {
+    return;
+  }
+  if (k == 0) {
+    out.zero_();
+    return;
+  }
+  const auto batch_stride = [](const Tensor& t) { return t.dim() == 3 ? t.stride(0) : 0; };
+  ScaledGroupedMMParams params{
+      .mm =
+          {
+              .m = static_cast<uint32_t>(m),
+              .n = static_cast<uint32_t>(n),
+              .k = static_cast<uint32_t>(k),
+              .a_row_stride = mat_a.stride(-2),
+              .a_col_stride = mat_a.stride(-1),
+              .b_row_stride = mat_b.stride(-2),
+              .b_col_stride = mat_b.stride(-1),
+              .out_row_stride = out.stride(-2),
+              .out_col_stride = out.stride(-1),
+              .rowwise = rowwise,
+              .has_tensor_scales = gemm_impl != ScaledGemmImplementation::MXFP8_MXFP8,
+          },
+      .groups = c10::safe_conv<uint32_t>(groups, "number of groups"),
+      .mode = jagged_rows ? ScaledGroupedMMMode::rows
+          : jagged_k      ? ScaledGroupedMMMode::k
+                          : ScaledGroupedMMMode::batch,
+      .a_batch_stride = batch_stride(mat_a),
+      .b_batch_stride = batch_stride(mat_b),
+      .out_batch_stride = batch_stride(out),
+  };
+  if (blockwise) {
+    TORCH_CHECK_VALUE(mat_a.stride(-1) == 1 && mat_b.stride(-2) == 1,
+                      "MPS block-scaled _scaled_grouped_mm_v2 expects a row-major mat_a and a column-major mat_b, got "
+                      "strides ",
+                      mat_a.strides(),
+                      " and ",
+                      mat_b.strides());
+    const auto block = nvfp4 ? scaled_mm_nvfp4_block : scaled_mm_mx_block;
+    TORCH_CHECK_VALUE(k % block == 0, "Expected K to be divisible by ", block, ", got ", k);
+    const auto k_blocks = k / block;
+    params.mm.k_blocks = static_cast<uint32_t>(k_blocks);
+    // 2d x 2d splits K, so mat_b's scales span it like mat_a's; groups of K must be whole blocks
+    const auto expected_b = jagged_rows ? std::vector<int64_t>{groups, n, k_blocks} : std::vector<int64_t>{n, k_blocks};
+    TORCH_CHECK_VALUE(scale_a[0].sizes() == IntArrayRef({m, k_blocks}) && scale_a[0].is_contiguous(),
+                      scale_names[0],
+                      " must be a contiguous (",
+                      m,
+                      ", ",
+                      k_blocks,
+                      ") tensor, got shape ",
+                      scale_a[0].sizes());
+    TORCH_CHECK_VALUE(scale_b[0].sizes() == IntArrayRef(expected_b) && scale_b[0].is_contiguous(),
+                      scale_names[1],
+                      " must be a contiguous ",
+                      IntArrayRef(expected_b),
+                      " tensor, got shape ",
+                      scale_b[0].sizes());
+    params.block_scale_b_batch_stride = jagged_rows ? n * k_blocks : 0;
+    if (nvfp4) {
+      params.scale_a_batch_stride = scaled_grouped_mm_tensor_scale_stride(scale_a[1], groups, "scale_a[1]");
+      params.scale_b_batch_stride = scaled_grouped_mm_tensor_scale_stride(scale_b[1], groups, "scale_b[1]");
+    }
+  } else if (rowwise) {
+    params.scale_a_batch_stride =
+        scaled_grouped_mm_rowwise_scale_stride(mat_a, scale_a[0], true, groups, jagged_k, scale_names[0]);
+    params.scale_b_batch_stride =
+        scaled_grouped_mm_rowwise_scale_stride(mat_b, scale_b[0], false, groups, jagged_k, scale_names[1]);
+  } else {
+    params.scale_a_batch_stride = scaled_grouped_mm_tensor_scale_stride(scale_a[0], groups, scale_names[0]);
+    params.scale_b_batch_stride = scaled_grouped_mm_tensor_scale_stride(scale_b[0], groups, scale_names[1]);
+  }
+
+  // The vector-loading kernels need 16-byte aligned rows of A and columns of B in every group
+  const auto aligned = [&](int64_t alignment) {
+    return is_aligned(mat_a, params.mm.a_row_stride, alignment) &&
+        is_aligned(mat_b, params.mm.b_col_stride, alignment) && params.b_batch_stride % alignment == 0;
+  };
+  const bool k_contiguous = params.mm.a_col_stride == 1 && params.mm.b_row_stride == 1;
+  // Decode routes a handful of tokens to top_k experts each, so with no more rows than groups the tiled kernels would
+  // launch mostly empty tiles
+  const bool few_rows = jagged_rows && m <= std::min<int64_t>(kGroupedMMFewRowsMax, groups) && k_contiguous &&
+      (blockwise ? k % scaled_mm_blockwise_chunk == 0 : true) && aligned(scaled_mm_few_rows_load_bytes);
+  // NVFP4 groups of K start at multiples of 8 bytes, short of the MPP kernel's 16-byte loads
+  const bool mpp = has_mpp() && (!blockwise || (aligned(scaled_mm_alignment) && !(nvfp4 && jagged_k)));
+  // As in _scaled_mm, Metal 4.1 multiplies K-contiguous fp8 operands natively, with int32 MPP strides
+  const bool native = !blockwise && !few_rows && k_contiguous && has_metal_4_1() &&
+      std::in_range<int32_t>(params.mm.a_row_stride) && std::in_range<int32_t>(params.mm.b_col_stride);
+  const auto format = blockwise ? (nvfp4 ? "_nvfp4" : "_mxfp8") : "";
+  const auto variant = native ? "_native" : mpp ? "_mpp" : "";
+  const auto kernel_name = few_rows ? fmt::format("scaled_grouped_mm_few_rows{}", format)
+                                    : fmt::format("scaled_grouped_mm{}{}", variant, format);
+  const int64_t tile = native ? scaled_mm_native_tile : blockwise && mpp ? scaled_mm_blockwise_tile : scaled_mm_tile;
+  const auto threadgroups = few_rows ? MTLSizeMake(c10::metal::ceil_div<int64_t>(n, scaled_mm_simdgroups), m, 1)
+                                     : MTLSizeMake(c10::metal::ceil_div<int64_t>(n, tile),
+                                                   c10::metal::ceil_div<int64_t>(m, tile) + (jagged_rows ? groups : 0),
+                                                   jagged_rows ? 1 : groups);
+  const auto global_scale = [&](ArrayRef<Tensor> scales) { return nvfp4 ? std::optional(scales[1]) : std::nullopt; };
+  auto pso = lib.getPipelineStateForFunc(kernel_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, kernel_name, {mat_a, mat_b}, stream);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      if (blockwise) {
+        mtl_setArgs(encoder,
+                    mat_a,
+                    mat_b,
+                    out,
+                    scale_a[0],
+                    scale_b[0],
+                    global_scale(scale_a),
+                    global_scale(scale_b),
+                    offs,
+                    params);
+      } else {
+        mtl_setArgs(encoder, mat_a, mat_b, out, scale_a[0], scale_b[0], offs, params);
+      }
+      [encoder dispatchThreadgroups:threadgroups threadsPerThreadgroup:MTLSizeMake(scaled_mm_threads, 1, 1)];
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+}
 
 } // namespace
 } // namespace mps
@@ -52,10 +360,12 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   const auto m = mat_a.size(0);
   const auto n = mat_b.size(1);
   const auto k = mat_a.size(1);
-  TORCH_CHECK_TYPE(
-      mat_a.scalar_type() == kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3fn matrix got ", mat_a.scalar_type());
-  TORCH_CHECK_TYPE(
-      mat_b.scalar_type() == kFloat8_e4m3fn, "Expected mat_b to be Float8_e4m3fn matrix got ", mat_b.scalar_type());
+  TORCH_CHECK_TYPE(mat_a.scalar_type() == kFloat8_e4m3fn || mat_a.scalar_type() == kFloat4_e2m1fn_x2,
+                   "Expected mat_a to be Float8_e4m3fn or Float4_e2m1fn_x2 matrix got ",
+                   mat_a.scalar_type());
+  TORCH_CHECK_TYPE(mat_b.scalar_type() == kFloat8_e4m3fn || mat_b.scalar_type() == kFloat4_e2m1fn_x2,
+                   "Expected mat_b to be Float8_e4m3fn or Float4_e2m1fn_x2 matrix got ",
+                   mat_b.scalar_type());
   const auto dtype = out.scalar_type();
   TORCH_CHECK_TYPE(dtype == kFloat || dtype == kHalf || dtype == kBFloat16 || dtype == kFloat8_e4m3fn,
                    "MPS _scaled_mm_v2 supports Float, Half, BFloat16 and Float8_e4m3fn outputs, got ",
@@ -72,14 +382,25 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
     TORCH_CHECK_VALUE(swizzle_a_enum[0] == SwizzleType::NO_SWIZZLE && swizzle_b_enum[0] == SwizzleType::NO_SWIZZLE,
                       "MPS does not support swizzle.");
   }
-  const auto gemm_impl = scaled::find_scaled_gemm_impl(
-      scale_kernel_dispatch, mat_a.scalar_type(), recipe_a, scale_a_ref, mat_b.scalar_type(), recipe_b, scale_b_ref);
+  const auto gemm_impl = scaled::find_scaled_gemm_impl(scale_kernel_dispatch,
+                                                       mat_a.scalar_type(),
+                                                       recipe_a,
+                                                       scale_a_ref,
+                                                       swizzle_a_enum,
+                                                       mat_b.scalar_type(),
+                                                       recipe_b,
+                                                       scale_b_ref,
+                                                       swizzle_b_enum);
   TORCH_CHECK_VALUE(
       gemm_impl != scaled::ScaledGemmImplementation::NONE,
-      "MPS _scaled_mm_v2 only supports TensorWise or RowWise scaling with one Float scale per operand, got recipe_a=",
+      "MPS _scaled_mm_v2 supports TensorWise or RowWise scaling with one Float scale per operand, MXFP8 and NVFP4, "
+      "got recipe_a=",
       scale_recipe_a,
       " and recipe_b=",
       scale_recipe_b);
+  const bool blockwise = gemm_impl == scaled::ScaledGemmImplementation::MXFP8_MXFP8 ||
+      gemm_impl == scaled::ScaledGemmImplementation::NVFP4_NVFP4 ||
+      gemm_impl == scaled::ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE;
   const auto& scale_a = scale_a_vec[0];
   const auto& scale_b = scale_b_vec[0];
   const bool rowwise = gemm_impl == scaled::ScaledGemmImplementation::ROWWISE_ROWWISE;
@@ -124,6 +445,13 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   if (out.numel() == 0) {
     return;
   }
+  if (blockwise) {
+    const auto bias_vec = bias.has_value() ? std::make_optional(bias->contiguous().view({n})) : std::nullopt;
+    // Float4_e2m1fn_x2 packs two values along K
+    const auto k_unpacked = mat_a.scalar_type() == kFloat4_e2m1fn_x2 ? 2 * k : k;
+    scaled_mm_blockwise_out(mat_a, mat_b, scale_a_ref, scale_b_ref, gemm_impl, bias_vec, k_unpacked, out);
+    return;
+  }
   TORCH_CHECK_VALUE(k % scaled_mm_alignment == 0 && n % scaled_mm_alignment == 0,
                     "Expected K and N to be divisible by ",
                     scaled_mm_alignment,
@@ -136,7 +464,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       return;
     }
     const auto leading_stride = mat.stride(1) == 1 ? mat.stride(0) : mat.stride(1);
-    TORCH_CHECK_VALUE(mat.storage_offset() % scaled_mm_alignment == 0 && leading_stride % scaled_mm_alignment == 0,
+    TORCH_CHECK_VALUE(is_aligned(mat, leading_stride, scaled_mm_alignment),
                       "Expected ",
                       name,
                       " storage offset and leading stride to be divisible by ",
@@ -150,9 +478,9 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
   check_alignment(mat_b, "mat_b");
   const auto bias_vec = bias.has_value() ? std::make_optional(bias->contiguous().view({n})) : std::nullopt;
   const ScaledMMParams<> params{
-      .m = c10::checked_convert<uint32_t>(m, "m"),
-      .n = c10::checked_convert<uint32_t>(n, "n"),
-      .k = c10::checked_convert<uint32_t>(k, "k"),
+      .m = c10::safe_conv<uint32_t>(m, "mat_a.size(0)"),
+      .n = c10::safe_conv<uint32_t>(n, "mat_b.size(1)"),
+      .k = c10::safe_conv<uint32_t>(k, "mat_a.size(1)"),
       .a_row_stride = mat_a.stride(0),
       .a_col_stride = mat_a.stride(1),
       .b_row_stride = mat_b.stride(0),
@@ -160,6 +488,7 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       .out_row_stride = out.stride(0),
       .out_col_stride = out.stride(1),
       .rowwise = rowwise,
+      .has_tensor_scales = true,
       .has_bias = bias.has_value(),
       .bias_bfloat16 = bias.has_value() && bias->scalar_type() == kBFloat16,
   };
@@ -190,6 +519,63 @@ TORCH_IMPL_FUNC(_scaled_mm_mps_v2_out)
       getMPSProfiler().endProfileKernel(pso, stream);
     }
   });
+}
+
+TORCH_IMPL_FUNC(_scaled_grouped_mm_mps_v2_out)
+(const Tensor& mat_a,
+ const Tensor& mat_b,
+ const at::ITensorListRef& scale_a_list,
+ IntArrayRef scale_recipe_a,
+ IntArrayRef swizzle_a,
+ const at::ITensorListRef& scale_b_list,
+ IntArrayRef scale_recipe_b,
+ IntArrayRef swizzle_b,
+ at::OptionalTensorRef offs,
+ at::OptionalTensorRef bias,
+ std::optional<c10::ScalarType> out_dtype,
+ IntArrayRef contraction_dim,
+ bool use_fast_accum,
+ const Tensor& out) {
+  using namespace mps;
+  std::vector<Tensor> scale_a_vec(scale_a_list.begin(), scale_a_list.end());
+  std::vector<Tensor> scale_b_vec(scale_b_list.begin(), scale_b_list.end());
+  ArrayRef<Tensor> scale_a_ref(scale_a_vec);
+  ArrayRef<Tensor> scale_b_ref(scale_b_vec);
+  auto recipe_a = scaled::convert_int_to_enum<ScalingType>(scale_recipe_a);
+  auto recipe_b = scaled::convert_int_to_enum<ScalingType>(scale_recipe_b);
+  const auto swizzle_a_enum = scaled::convert_int_to_enum<SwizzleType>(swizzle_a);
+  const auto swizzle_b_enum = scaled::convert_int_to_enum<SwizzleType>(swizzle_b);
+  const auto no_swizzle = [](ArrayRef<SwizzleType> swizzle) {
+    return std::all_of(swizzle.begin(), swizzle.end(), [](auto s) { return s == SwizzleType::NO_SWIZZLE; });
+  };
+  TORCH_CHECK_VALUE(no_swizzle(swizzle_a_enum) && no_swizzle(swizzle_b_enum), "MPS does not support swizzle.");
+  const auto gemm_impl = scaled::find_scaled_gemm_impl(scale_grouped_kernel_dispatch,
+                                                       mat_a.scalar_type(),
+                                                       recipe_a,
+                                                       scale_a_ref,
+                                                       swizzle_a_enum,
+                                                       mat_b.scalar_type(),
+                                                       recipe_b,
+                                                       scale_b_ref,
+                                                       swizzle_b_enum);
+  TORCH_CHECK_VALUE(gemm_impl != scaled::ScaledGemmImplementation::NONE &&
+                        (mat_a.scalar_type() == kFloat8_e4m3fn || mat_a.scalar_type() == kFloat4_e2m1fn_x2) &&
+                        mat_a.scalar_type() == mat_b.scalar_type(),
+                    "MPS _scaled_grouped_mm_v2 supports Float8_e4m3fn inputs with TensorWise, RowWise or MXFP8 "
+                    "scaling and Float4_e2m1fn_x2 inputs with NVFP4 scaling, got ",
+                    mat_a.scalar_type(),
+                    " and ",
+                    mat_b.scalar_type(),
+                    " inputs with recipe_a=",
+                    scale_recipe_a,
+                    " and recipe_b=",
+                    scale_recipe_b);
+  TORCH_CHECK_VALUE(out.scalar_type() == kBFloat16,
+                    "MPS _scaled_grouped_mm_v2 only supports BFloat16 output, got ",
+                    out.scalar_type());
+  assert_no_internal_overlap(out);
+  scaled_grouped_mm_out(
+      mat_a, mat_b, scale_a_ref, scale_b_ref, gemm_impl, offs.has_value() ? std::optional(*offs) : std::nullopt, out);
 }
 
 } // namespace at::native
