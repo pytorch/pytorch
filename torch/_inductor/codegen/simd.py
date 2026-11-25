@@ -5525,20 +5525,18 @@ class SIMDScheduling(BaseScheduling):
         """Build a ComboKernel and its sub-kernels from a list of partition nodes."""
         from .triton_combo_kernel import ComboKernel
 
-        kernel = ComboKernel(
-            triton_kernel_cls=self.kernel_type,
+        kernel = self._build_combo_kernel_instance(
+            ComboKernel,
             enable_autotune=enable_autotune,
             mixed_sizes=mixed_sizes,
             per_subkernel_blocks=per_subkernel_blocks,
         )
         for pn in fusion_pns:
             node_info = node_schedule_map[pn]
-            subkernel = ComboKernel.create_triton_kernel(
-                node_info.tiling,
-                features=node_info.features,
-                optimize_mask=not mixed_sizes,
-                triton_kernel_cls=self.kernel_type,
-                tiling_scores=node_info.tiling_scores,
+            subkernel = self._build_combo_sub_kernel(
+                ComboKernel,
+                node_info,
+                mixed_sizes=mixed_sizes,
                 per_subkernel_blocks=per_subkernel_blocks,
             )
             self.process_kernel(
@@ -5547,6 +5545,53 @@ class SIMDScheduling(BaseScheduling):
                 only_gen_src_code,
             )
         return kernel
+
+    def _build_combo_kernel_instance(
+        self,
+        combo_kernel_cls: type,
+        *,
+        enable_autotune: bool,
+        mixed_sizes: bool,
+        per_subkernel_blocks: bool,
+    ) -> Any:
+        """Instantiate the outer ComboKernel.
+
+        Overridable hook: a subclass that needs a different outer kernel class
+        (e.g. a backend-specific ComboKernel subclass) can override this
+        without copying :meth:`_build_combo_kernel`. The default keeps the
+        current behavior of instantiating ``combo_kernel_cls`` directly.
+        """
+        return combo_kernel_cls(
+            triton_kernel_cls=self.kernel_type,
+            enable_autotune=enable_autotune,
+            mixed_sizes=mixed_sizes,
+            per_subkernel_blocks=per_subkernel_blocks,
+        )
+
+    def _build_combo_sub_kernel(
+        self,
+        combo_kernel_cls: type,
+        node_info: NodeInfo,
+        *,
+        mixed_sizes: bool,
+        per_subkernel_blocks: bool,
+    ) -> Any:
+        """Build one sub-kernel for a combo member.
+
+        Overridable hook: a subclass that needs a different per-member kernel
+        class (e.g. to pick a backend-specific sub-kernel for members with
+        dynamic numels or unsupported dtypes) can override this without copying
+        :meth:`_build_combo_kernel`. The default keeps the current behavior of
+        calling ``combo_kernel_cls.create_triton_kernel`` with ``self.kernel_type``.
+        """
+        return combo_kernel_cls.create_triton_kernel(
+            node_info.tiling,
+            features=node_info.features,
+            optimize_mask=not mixed_sizes,
+            triton_kernel_cls=self.kernel_type,
+            tiling_scores=node_info.tiling_scores,
+            per_subkernel_blocks=per_subkernel_blocks,
+        )
 
     @staticmethod
     def _combo_launch_candidates(winners: list[Any]) -> list[Any]:
