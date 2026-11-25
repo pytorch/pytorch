@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
+from functools import cache
 from typing import Any, cast
 
 import torch
@@ -933,47 +934,30 @@ def reinplace_inplaceable_ops_core(
             for written in get_mutated_input_nodes(node)
         )
 
-    result_storage_ids = {}
+    @cache
+    def storage_ids_for_node(node):
+        if "val" not in node.meta:
+            return None
+        storages = FakeTensorUpdater._storage_ids(node.meta["val"])
+        return None if storages is None else frozenset(storages)
 
-    def get_result_storage_ids(node):
-        if node not in result_storage_ids:
-            storages = (
-                FakeTensorUpdater._storage_ids(node.meta["val"])
-                if "val" in node.meta
-                else None
-            )
-            result_storage_ids[node] = (
-                None if storages is None else OrderedSet(storages)
-            )
-        return result_storage_ids[node]
-
-    def get_storage_aliases(results):
-        results = list(results)
-        unknown_roots = any(
-            get_result_storage_ids(result) is None for result in results
-        )
-        protected_storages = OrderedSet(
-            storage
-            for result in results
-            for storage in (get_result_storage_ids(result) or ())
+    def get_storage_aliases(roots):
+        """Find aliases and the containers that can carry them to readers."""
+        pending = list(roots)
+        root_storages = [storage_ids_for_node(root) for root in pending]
+        unknown_roots = any(storages is None for storages in root_storages)
+        protected_storages = frozenset(
+            storage for storages in root_storages for storage in (storages or ())
         )
 
-        def matches_protected_storage(node):
+        def carries_protected_storage(node):
             if unknown_roots:
                 return True
-            storages = get_result_storage_ids(node)
-            return storages is None or any(
-                storage in storages and storage in protected_storages
-                for storage in (
-                    protected_storages
-                    if len(protected_storages) <= len(storages)
-                    else storages
-                )
-            )
+            storages = storage_ids_for_node(node)
+            return storages is None or not protected_storages.isdisjoint(storages)
 
         aliases = OrderedSet()
         seen_storages = OrderedSet()
-        pending = list(results)
         while pending:
             current = pending.pop()
             if current in aliases:
@@ -984,27 +968,25 @@ def reinplace_inplaceable_ops_core(
                 if storage is None or storage in seen_storages:
                     continue
                 seen_storages.add(storage)
-                tensor_aliases = storage_to_nodes[storage]
-                pending.extend(
-                    alias.args[0]
-                    for alias in tensor_aliases
-                    if alias.target is operator.getitem
-                    and isinstance(alias.args[0], torch.fx.Node)
-                    and not isinstance(alias.args[0].meta.get("val"), torch.Tensor)
-                    and matches_protected_storage(alias.args[0])
-                )
-                aliases.update(tensor_aliases)
-                users = (user for alias in tensor_aliases for user in alias.users)
+                related = storage_to_nodes[storage]
+                aliases.update(related)
             else:
-                if (
-                    current.target is operator.getitem
-                    and isinstance(parent := current.args[0], torch.fx.Node)
-                    and not isinstance(parent.meta.get("val"), torch.Tensor)
-                    and matches_protected_storage(parent)
-                ):
-                    pending.append(parent)
-                users = current.users
-            pending.extend(user for user in users if matches_protected_storage(user))
+                related = (current,)
+
+            pending.extend(
+                parent
+                for alias in related
+                if alias.target is operator.getitem
+                and isinstance(parent := alias.args[0], torch.fx.Node)
+                and not isinstance(parent.meta.get("val"), torch.Tensor)
+                and carries_protected_storage(parent)
+            )
+            pending.extend(
+                user
+                for alias in related
+                for user in alias.users
+                if carries_protected_storage(user)
+            )
         return aliases
 
     def result_views_preserve_layout(result, mutated_arg):
@@ -1056,29 +1038,23 @@ def reinplace_inplaceable_ops_core(
         return True
 
     def can_inplace(node, mutated_arg):
-        # ls should be a list of tensors that all shares the same storage.
-        def _overlap(ls) -> bool:
+        def may_overlap(tensors) -> bool:
             try:
-                return len(compute_overlapping_tensors(ls)) != 0
+                return bool(compute_overlapping_tensors(tensors))
             except GuardOnDataDependentSymNode:
-                # If we fail with data dependent error we assume they all overlap.
                 return True
 
         is_tensor_list = isinstance(mutated_arg, (list, tuple))
         mutated_args = mutated_arg if is_tensor_list else [mutated_arg]
-        results_by_arg = {arg: [] for arg in mutated_args}
-        if is_tensor_list:
-            # TODO Using _overlap here causes a several issues.
-            unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
-            if len(unique_storages) != len(mutated_arg):
-                # At least two Tensors in mutated_arg alias each other, so we can't reinplace it.
-                # We can probably do better (that is, reinplace one of them and clone the other)
-                # but that requires more work and mutable List[Tensor] are not that common.
-                return False
+        if is_tensor_list and len(
+            OrderedSet(get_node_storage(arg) for arg in mutated_args)
+        ) != len(mutated_args):
+            return False
 
         for mutated_arg in mutated_args:
-            result_nodes = results_by_arg[mutated_arg]
-            if get_node_storage(mutated_arg) is None:
+            result_nodes = []
+            mutated_storage = get_node_storage(mutated_arg)
+            if mutated_storage is None:
                 return False
 
             tensor = mutated_arg.meta["val"]
@@ -1090,24 +1066,14 @@ def reinplace_inplaceable_ops_core(
             shared_view_nodes = [
                 view
                 for view in get_storage_aliases([mutated_arg])
-                if get_result_storage_ids(view) is None
+                if storage_ids_for_node(view) is None
                 or any(
-                    _overlap([mutated_arg.meta["val"], value])
+                    may_overlap([tensor, value])
                     for value in pytree.tree_leaves(view.meta.get("val"))
                     if isinstance(value, torch.Tensor)
                 )
             ]
 
-            mutated_storage = get_node_storage(mutated_arg)
-            removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
-            result_roots = OrderedSet(result_nodes or ())
-            if mutated_storage in canonicalized_storages and not result_nodes:
-                result_roots.add(node)
-            elif get_node_storage(node) is not None:
-                result_roots.add(node)
-            result_views = get_storage_aliases(result_roots)
-
-            preserved_copyback_views = OrderedSet()
             copy_node = None
             mutated_arg_base = mutated_arg
             if any(
@@ -1122,8 +1088,11 @@ def reinplace_inplaceable_ops_core(
                     key=node_order.__getitem__,
                     default=None,
                 )
-                if copy_node is None or node_order[copy_node] <= node_order[node]:
+                if copy_node is None:
                     return False
+
+            removable_copyback = copy_node_for_reinplaced_arg(node, mutated_arg)
+            overwrite_source_storage = None
             # Direct input mutations and recognized copybacks keep their permission.
             if (
                 copy_node is not None
@@ -1143,6 +1112,24 @@ def reinplace_inplaceable_ops_core(
                 ):
                     return False
 
+                overwrite_source_storage = get_node_storage(copy_node.args[1])
+                # A self-copy or aliased source would preserve the early mutation
+                # instead of restoring the input's required final values.
+                if (
+                    overwrite_source_storage is None
+                    or overwrite_source_storage == mutated_storage
+                ):
+                    return False
+
+            if any_use_of_views_after_node(
+                node,
+                shared_view_nodes,
+                copy_node=copy_node,
+                mutated_arg=mutated_arg_base,
+            ):
+                return False
+
+            if overwrite_source_storage is not None:
                 # Expanded permission for mutable lists requires a result for each input.
                 if not is_tensor_list:
                     if not isinstance(node.meta.get("val"), torch.Tensor) and any(
@@ -1158,31 +1145,13 @@ def reinplace_inplaceable_ops_core(
                             if isinstance(user.meta.get("val"), torch.Tensor)
                         ]
                     )
-                source_storage = get_node_storage(copy_node.args[1])
-                # A self-copy or aliased source would preserve the early mutation
-                # instead of restoring the input's required final values.
-                if source_storage is None or source_storage == mutated_storage:
-                    return False
                 # Untracked outputs could remain live after the overwrite and would
                 # observe different values once reinplacement aliases them to the input.
-                output_storages = FakeTensorUpdater._storage_ids(node.meta["val"])
-                tracked_storages = OrderedSet(
+                output_storages = storage_ids_for_node(node)
+                if output_storages is None or not output_storages.issubset(
                     get_node_storage(result) for result in result_nodes
-                )
-                if output_storages is None or any(
-                    storage not in tracked_storages for storage in output_storages
                 ):
                     return False
-                for result in result_nodes:
-                    views = get_storage_aliases([result])
-                    result_views.update(views)
-                    if source_storage == get_node_storage(result):
-                        # A copy of the result must preserve its view/copy semantics.
-                        if not _is_layout_preserving_view_copy_back(
-                            mutated_arg_base, copy_node.args[1], mutated_arg, result
-                        ):
-                            return False
-                        preserved_copyback_views.update(views)
 
             layout_roots = result_nodes or [node]
             if any(
@@ -1192,6 +1161,30 @@ def reinplace_inplaceable_ops_core(
                 if isinstance(result, torch.Tensor) and torch._C._has_storage(result)
             ):
                 return False
+
+            result_roots = OrderedSet()
+            if (
+                mutated_storage in canonicalized_storages
+                or get_node_storage(node) is not None
+            ):
+                result_roots.add(node)
+            result_roots.update(result_nodes)
+            result_views = OrderedSet()
+            preserved_copyback_views = OrderedSet()
+            for result in result_roots:
+                views = get_storage_aliases([result])
+                result_views.update(views)
+                if (
+                    copy_node is not None
+                    and overwrite_source_storage is not None
+                    and get_node_storage(result) == overwrite_source_storage
+                ):
+                    # The copy reads this result, so the replacement must keep its layout.
+                    if not _is_layout_preserving_view_copy_back(
+                        mutated_arg_base, copy_node.args[1], mutated_arg, result
+                    ):
+                        return False
+                    preserved_copyback_views.update(views)
 
             if result_views:
                 mutations = OrderedSet(
@@ -1233,13 +1226,6 @@ def reinplace_inplaceable_ops_core(
                     ):
                         return False
 
-            if any_use_of_views_after_node(
-                node,
-                shared_view_nodes,
-                copy_node=copy_node,
-                mutated_arg=mutated_arg_base,
-            ):
-                return False
         return True
 
     def copy_node_for_reinplaced_arg(node, mutated_arg):
@@ -1606,7 +1592,7 @@ def reinplace_inplaceable_ops_core(
                 storage_to_nodes[storage].add(updated)
 
     for node in graph.nodes:
-        result_storage_ids.clear()
+        storage_ids_for_node.cache_clear()
         changed_nodes = OrderedSet[torch.fx.Node]()
         replacements: dict[torch.fx.Node, torch.fx.Node] = {}
         if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
