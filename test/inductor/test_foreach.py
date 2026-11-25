@@ -296,9 +296,7 @@ class ForeachTests(TestCase):
             inp.meta["val"] = value
         if indirect_input is not None:
             indirect_input.meta["val"] = torch.ones(2)
-        foreach_mul.meta["val"] = [
-            torch.ones(2) for _ in range(num_inputs)
-        ]
+        foreach_mul.meta["val"] = [torch.ones(2) for _ in range(num_inputs)]
         for index, getitem in getitems.items():
             getitem.meta["val"] = foreach_mul.meta["val"][index]
         for copy_node in copies:
@@ -331,14 +329,14 @@ class ForeachTests(TestCase):
         graph.lint()
 
     def test_fold_foreach_input_mutation_ops_chained(self):
-        graph = self._make_foreach_copy_graph(
-            copied_indices=[0, 1], num_inputs=2
-        )
+        graph = self._make_foreach_copy_graph(copied_indices=[0, 1], num_inputs=2)
         parent = next(
-            iter(graph.find_nodes(
-                op="call_function",
-                target=torch.ops.aten._foreach_mul.Scalar,
-            ))
+            iter(
+                graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.aten._foreach_mul.Scalar,
+                )
+            )
         )
         inputs = list(parent.args[0])
 
@@ -347,15 +345,11 @@ class ForeachTests(TestCase):
                 torch.ops.aten._foreach_mul.Scalar,
                 args=(inputs, 3),
             )
-            producer.meta["val"] = [
-                torch.ones(2) for _ in inputs
-            ]
+            producer.meta["val"] = [torch.ones(2) for _ in inputs]
 
             lanes = []
             for index in range(len(inputs)):
-                lane = graph.call_function(
-                    operator.getitem, args=(producer, index)
-                )
+                lane = graph.call_function(operator.getitem, args=(producer, index))
                 lane.meta["val"] = producer.meta["val"][index]
                 lanes.append(lane)
 
@@ -366,9 +360,7 @@ class ForeachTests(TestCase):
         graph.lint()
 
         self.assertEqual(
-            self._count_nodes(
-                graph, torch.ops.aten._foreach_copy_.default
-            ),
+            self._count_nodes(graph, torch.ops.aten._foreach_copy_.default),
             1,
         )
         self.assertEqual(
@@ -377,13 +369,13 @@ class ForeachTests(TestCase):
         )
 
     def test_fold_foreach_input_mutation_ops_different_streams(self):
-        graph = self._make_foreach_copy_graph(
-            copied_indices=[0, 1], num_inputs=2
+        graph = self._make_foreach_copy_graph(copied_indices=[0, 1], num_inputs=2)
+        copies = list(
+            graph.find_nodes(
+                op="call_function",
+                target=torch.ops.aten.copy_.default,
+            )
         )
-        copies = list(graph.find_nodes(
-            op="call_function",
-            target=torch.ops.aten.copy_.default,
-        ))
         copies[0].meta["custom"] = {"stream": 1}
         copies[1].meta["custom"] = {"stream": 2}
 
@@ -391,9 +383,7 @@ class ForeachTests(TestCase):
         graph.lint()
 
         self.assertEqual(
-            self._count_nodes(
-                graph, torch.ops.aten._foreach_copy_.default
-            ),
+            self._count_nodes(graph, torch.ops.aten._foreach_copy_.default),
             0,
         )
         self.assertEqual(
@@ -418,10 +408,14 @@ class ForeachTests(TestCase):
             copied_indices=[0, 1], num_inputs=2, aliased_inputs=True
         )
 
-        parent = next(iter(graph.find_nodes(
-            op="call_function",
-            target=torch.ops.aten._foreach_mul.Scalar,
-        )))
+        parent = next(
+            iter(
+                graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops.aten._foreach_mul.Scalar,
+                )
+            )
+        )
 
         # Independent producer inputs isolate destination aliasing
         # from cross-lane dependency rejection.
@@ -466,9 +460,7 @@ class ForeachTests(TestCase):
         self.assertEqual(self._count_nodes(graph, torch.ops.aten.copy_.default), 2)
 
     @parametrize("indirect", [False, True])
-    def test_fold_foreach_input_mutation_ops_rejects_cross_lane_reads(
-        self, indirect
-    ):
+    def test_fold_foreach_input_mutation_ops_rejects_cross_lane_reads(self, indirect):
         graph = self._make_foreach_copy_graph(
             copied_indices=[0, 1],
             num_inputs=2,
@@ -504,17 +496,26 @@ class ForeachTests(TestCase):
         b = torch.tensor([5.0, 7.0], device=device)
         expected_a = -b.clone()
         expected_b = -a.clone() * (2 if indirect else 1)
-        result_a, result_b = compiled(a, b)
+        pass_counts, track_fold = self._track_foreach_fold()
+        torch._dynamo.reset()
+        with config.patch({"fx_graph_cache": False}), track_fold:
+            result_a, result_b = compiled(a, b)
+
+        self.assertTrue(pass_counts)
+        self.assertTrue(
+            all(
+                before == after and folded == 0 for before, after, folded in pass_counts
+            ),
+            "Cross-lane dependencies must prevent foreach copy folding",
+        )
         self.assertEqual(result_a, expected_a)
         self.assertEqual(result_b, expected_b)
         self.assertEqual(a, expected_a)
         self.assertEqual(b, expected_b)
 
-
     @requires_gpu
     @parametrize("reader", ("add", "sin"))
     def test_foreach_input_mutation_pending_reader(self, reader):
-
         def fn(a, b, c):
             if reader == "add":
                 c.add_(a)
@@ -523,9 +524,7 @@ class ForeachTests(TestCase):
             torch._foreach_sub_([a, b], 1)
             return a, b, c
 
-        inputs = [
-            torch.randn(1024, device=GPU_TYPE) for _ in range(3)
-        ]
+        inputs = [torch.randn(1024, device=GPU_TYPE) for _ in range(3)]
         reference_inputs = [x.clone() for x in inputs]
 
         expected = fn(*reference_inputs)
@@ -535,8 +534,7 @@ class ForeachTests(TestCase):
             actual = torch.compile(fn, fullgraph=True)(*inputs)
 
         self.assertTrue(
-            any(after < before and folded > 0
-                for before, after, folded in pass_counts),
+            any(after < before and folded > 0 for before, after, folded in pass_counts),
             "Expected foreach copy epilogue folding",
         )
 

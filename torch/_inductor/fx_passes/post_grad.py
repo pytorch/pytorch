@@ -52,9 +52,9 @@ from ..fx_utils import (
     same_tensor_meta,
 )
 from ..kernel.symmetric_mm import quack_symmetric_mm
-from ..lowering import foreach_ops, inplace_foreach_ops
-from ..lowering import lowerings as L
+from ..lowering import foreach_ops, inplace_foreach_ops, lowerings as L
 from ..pattern_matcher import (
+    _execution_context,
     _return_true,
     Arg,
     CallFunction,
@@ -380,7 +380,7 @@ class _ForeachCopyCandidate(NamedTuple):
     parent: torch.fx.Node
     dst: torch.fx.Node
     src: torch.fx.Node
-    index: int
+    lane_index: int
 
 
 def _is_foreach_op(node: torch.fx.Node) -> bool:
@@ -392,10 +392,7 @@ def _is_foreach_op(node: torch.fx.Node) -> bool:
         and not node.target._schema.is_mutable
         and node.target.name().startswith("aten::_foreach_")
         and isinstance(node.meta.get("val"), (list, tuple))
-        and all(
-            isinstance(value, torch.Tensor)
-            for value in node.meta["val"]
-        )
+        and all(isinstance(value, torch.Tensor) for value in node.meta["val"])
     )
 
 
@@ -454,13 +451,8 @@ def _can_fold_foreach_copy_group(
 ) -> bool:
     parent = group[0].parent
 
-    from ..pattern_matcher import _execution_context
-
     context = _execution_context(group[0].copy_node)
-    if any(
-        _execution_context(item.copy_node) != context
-        for item in group[1:]
-    ):
+    if any(_execution_context(item.copy_node) != context for item in group[1:]):
         return False
 
     foreach_input_count = _foreach_input_count(parent)
@@ -468,7 +460,7 @@ def _can_fold_foreach_copy_group(
     # scheduler semantics and must retain their original copy_ nodes.
     if foreach_input_count is None or foreach_input_count != len(group):
         return False
-    if [item.index for item in group] != list(range(foreach_input_count)):
+    if [item.lane_index for item in group] != list(range(foreach_input_count)):
         return False
 
     dsts = [item.dst for item in group]
@@ -515,16 +507,13 @@ def _can_fold_foreach_copy_group(
                 if count is not None and 0 <= index < count:
                     operands = [
                         operand[index]
-                        if isinstance(operand, (list, tuple))
-                        and len(operand) == count
+                        if isinstance(operand, (list, tuple)) and len(operand) == count
                         else operand
                         for operand in producer.args
                     ]
                     return [
                         leaf
-                        for leaf in pytree.tree_leaves(
-                            (operands, producer.kwargs)
-                        )
+                        for leaf in pytree.tree_leaves((operands, producer.kwargs))
                         if isinstance(leaf, torch.fx.Node)
                     ]
 
@@ -594,9 +583,7 @@ def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
     overlapping destinations, and cross-lane (including indirect) reads from
     any destination. Run only after reinplace_inplaceable_ops.
     """
-    if not graph.find_nodes(
-        op="call_function", target=aten.copy_.default
-    ):
+    if not graph.find_nodes(op="call_function", target=aten.copy_.default):
         return
 
     is_foreach_op = functools.cache(_is_foreach_op)
@@ -610,7 +597,9 @@ def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
 
     def flush() -> None:
         nonlocal current_key
-        if len(current_group) > 1 and _can_fold_foreach_copy_group(current_group, is_foreach_op):
+        if len(current_group) > 1 and _can_fold_foreach_copy_group(
+            current_group, is_foreach_op
+        ):
             groups.append(current_group.copy())
         current_group.clear()
         current_key = None
@@ -648,7 +637,6 @@ def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
             for key, value in first_copy.meta.items()
             if key not in ("from_node", "stack_trace")
         )
-        foreach_copy.meta.pop("val", None)
         foreach_copy.meta.pop("tensor_meta", None)
 
         # Track all replaced nodes without overwriting metadata repeatedly.
@@ -666,7 +654,7 @@ def fold_foreach_input_mutation_ops(graph: torch.fx.Graph) -> None:
                 )
             foreach_copy.meta["from_node"] = from_nodes
 
-        # The output is a list, not the tensor described by first_copy.
+        # The in-place foreach copy has no tensor return value.
         foreach_copy.meta["val"] = None
         foreach_copy.meta["original_aten"] = aten._foreach_copy_.default
 

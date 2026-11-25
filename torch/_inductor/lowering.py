@@ -1032,11 +1032,13 @@ def make_foreach_pointwise(
             else:
                 return pw_fn(*args)
 
-        mutation_targets = (
-            inputs[0]
-            if V.graph.current_node.target in inplace_foreach_ops
-            else None
-        )
+        mutation_targets: list[TensorBox] | None = None
+        if V.graph.current_node.target in inplace_foreach_ops:
+            mutation_targets = []
+            for target in inputs[0]:
+                if not isinstance(target, TensorBox):
+                    raise AssertionError("expected TensorBox mutation target")
+                mutation_targets.append(target)
         return foreach_group_loop(
             groups,
             len(a_list_input),
@@ -1063,6 +1065,9 @@ def foreach_group_loop(
         num_outputs: Number of outputs to produce
         apply_fn: Function to apply to each set of args, returns the output
         realize_outputs: Whether to realize outputs for foreach fusion
+        mutation_targets: Optional destinations indexed by output index.
+            Used to preserve pending reads before output realization
+            on backends supporting foreach fusion.
     """
     outputs: list[foreach_node_t | None] = [None] * num_outputs
     for (device, use_foreach), group in groups.items():

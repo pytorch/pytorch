@@ -208,6 +208,8 @@ def get_mutating_use_stack_trace_from_node(
         if stack_trace := use.meta.get("stack_trace"):
             return stack_trace
 
+        # Functionalization's write-back copies may lack a stack trace.
+        # Recover it from the corresponding source when available.
         if use.target is torch.ops.aten._foreach_copy_.default:
             destinations, sources = use.args[:2]
             if isinstance(destinations, (list, tuple)) and isinstance(
