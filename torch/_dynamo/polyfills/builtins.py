@@ -221,7 +221,7 @@ def _expand_format(defer, template, args, kwargs, depth, position):
         value = args[key] if isinstance(key, int) else kwargs[key]
         for is_attr, index in path:
             value = getattr(value, index) if is_attr else value[index]
-        if conv in ("s", "r", "a") and defer(value):
+        if conv in ("s", "r", "a") and defer(value, conv):
             value = ("{!" + conv + "}").format(value)
         elif conv == "s":
             value = str(value)
