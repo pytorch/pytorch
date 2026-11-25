@@ -1539,18 +1539,12 @@ def proxy_call(
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
-    tracer_graph = getattr(proxy_mode.tracer, "graph", None)
-    target_name = (
-        tracer_graph._target_to_str(func.overloadpacket.__name__)
-        if tracer_graph is not None and hasattr(tracer_graph, "_target_to_str")
-        else None
-    )
     proxy_out = proxy_mode.tracer.create_proxy(
         "call_function",
         func,
         proxy_args,
         proxy_kwargs,
-        name=target_name,
+        name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__),
     )
 
     with _enable_thunkify(proxy_mode.tracer):
@@ -3429,8 +3423,7 @@ class _MakefxTracer:
                             include_stride=True,
                             include_device=True,
                         ).src
-                        if hasattr(self.fx_tracer, "graph")
-                        and self.fx_tracer.graph is not None
+                        if getattr(self.fx_tracer, "graph", None) is not None
                         else ""
                     ),
                 )

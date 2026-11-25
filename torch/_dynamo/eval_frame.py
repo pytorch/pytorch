@@ -53,10 +53,6 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
-from torch.utils._python_dispatch import (
-    any_torch_dispatch_mode_on_stack,
-    is_in_any_mode_without_ignore_compile_internals,
-)
 from torch import _guards
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
@@ -475,18 +471,10 @@ def _create_delayed_compile_callback(
 ) -> Callable[..., Any]:
     def callback_fn(*args: Any, **kwargs: Any) -> convert_frame.ConvertFrameReturn:
         frame = args[0]
-        # Check if the frame should be skipped before collecting example inputs.
-        # This prevents Dynamo from erroneously inspecting locals, converting to meta,
-        # and dispatching into active proxy modes for internal PyTorch library or skipfile frames.
-        if (
-            trace_rules.check(frame.f_code, frame=frame)
-            or config.disable
-            or (
-                any_torch_dispatch_mode_on_stack()
-                if config.inline_torch_dispatch_torch_compile
-                else is_in_any_mode_without_ignore_compile_internals()
-            )
-        ):
+        # Check if Dynamo is disabled or if the frame is in Dynamo's skipfiles list.
+        # This prevents Dynamo from inspecting locals, converting to meta, and
+        # triggering proxy tracing on skipfile frames (such as make_fx internals).
+        if config.disable or trace_rules.check(frame.f_code, frame=frame):
             return callback(*args, **kwargs)
 
         example_inputs = _get_or_add_example_inputs(frame)
