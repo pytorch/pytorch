@@ -42,6 +42,7 @@ pub mod ffi {
         fn tensor_version(t: &Tensor) -> i64;
         fn tensor_data_address(t: &Tensor) -> usize;
         fn tensor_span(t: &Tensor, out: &mut TensorSpan);
+        fn tensor_is_cow(t: &Tensor) -> bool;
         fn forward_ad_active() -> bool;
         fn saved_tensor_hooks_active() -> bool;
         fn tensor_matches(

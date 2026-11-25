@@ -5,12 +5,16 @@ is traced at: a region's graph is what ran below autocast, and it is run, and
 lowered, without autocast treating its operators a second time. Of what a
 region keeps of the call it was traced on: none of that call's tensors. And
 of a region's constants, the weights its graph reads: what the region checks
-of them, and a lowering that is bound to them. And of how a call's tensors
-share memory: what is made of a region's graph runs only on calls whose
-tensors overlap as the traced call's did.
+of them, a lowering that is bound to them, and a pass that keeps what it
+derived from them while nothing wrote to them (vm.Unwritten). And of how a
+call's tensors share memory: what is made of a region's graph runs only on
+calls whose tensors overlap as the traced call's did. And of gradients: a
+region with one input is differentiated, and a detach inside a region stops
+the gradient on every list and can be named by a pattern.
 """
 
 import contextlib
+import ctypes
 import functools
 import gc
 import os
@@ -494,13 +498,13 @@ class TestVmConstants(TestCase):
 
         def lower(gm, input_types):
             def bind(consts):
-                where = [torch._C._data_address(c) for c in consts]
+                where = [vm.address(c) for c in consts]
                 log.append(("bind", len(consts)))
 
                 def call(*inputs):
                     log.append(("call", len(inputs)))
                     # Between two binds the constants are where they were.
-                    now = [torch._C._data_address(c) for c in consts]
+                    now = [vm.address(c) for c in consts]
                     if now != where:
                         raise AssertionError("a constant moved and bind was not called")
                     return gm.forward(*inputs, *consts)
@@ -876,6 +880,264 @@ class TestVmSharedMemory(TestCase):
 instantiate_device_type_tests(TestVmSharedMemory, globals())
 
 
+def modes_single(x):
+    # One tensor in, and no weight.
+    h = torch.tanh(x * 2.0)
+    return ((h - 1.0) ** 2).sum() + h.mean()
+
+
+def modes_detaching(device):
+    torch.manual_seed(0)
+    lin = torch.nn.Linear(8, 8).to(device)
+
+    def step(x):
+        lin.zero_grad(set_to_none=True)
+        h = torch.tanh(lin(x))
+        # No gradient goes through the target.
+        target = h.detach().mean(0)
+        loss = ((h - target) ** 2).sum() + (h * target).sum()
+        loss.backward()
+        return loss.detach(), lin.weight.grad.clone()
+
+    return step
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmGradients(TestCase):
+    """What is made of a region's graph differentiates as the program does."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_region_with_one_input_is_differentiated(self, device):
+        # The joint graph of such a region has more inputs than the region.
+        compiled = vm(modes_single, passes=MODES_LISTS["autograd"])
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            a, b = x.clone().requires_grad_(), x.clone().requires_grad_()
+            want, got = modes_single(a), compiled(b)
+            want.backward()
+            got.backward()
+            msg = f"call {call}"
+            self.assertEqual(got, want, atol=1e-05, rtol=1e-04, msg=msg)
+            self.assertEqual(b.grad, a.grad, atol=1e-05, rtol=1e-04, msg=msg)
+        self.assertGreater(region_runs(compiled), 0)
+
+    @parametrize("passes", list(MODES_LISTS))
+    @isolated
+    def test_gradient_stops_at_a_detach(self, device, passes):
+        eager = modes_detaching(device)
+        compiled = vm(modes_detaching(device), passes=MODES_LISTS[passes])
+        exact, close = {"atol": 0, "rtol": 0}, {"atol": 1e-05, "rtol": 1e-04}
+        tolerance = exact if passes == "default" else close
+        for call in range(9):
+            torch.manual_seed(call)
+            x = torch.randn(4, 8, device=device)
+            want, got = eager(x), compiled(x)
+            self.assertEqual(got, want, msg=f"call {call}", **tolerance)
+        self.assertGreater(region_runs(compiled), 0)
+
+    @isolated
+    def test_pattern_with_a_detach_matches(self, device):
+        found = []
+
+        def look(gm, input_types):
+            def pattern(h):
+                return h.detach().mean(0)
+
+            found.append(len(vm.match(gm, pattern)))
+            return gm
+
+        compiled = vm(modes_detaching(device), passes=(*EARLY, look))
+        for call in range(9):
+            compiled(torch.randn(4, 8, device=device))
+        self.assertGreater(region_runs(compiled), 0)
+        self.assertIn(1, found)
+
+
+instantiate_device_type_tests(TestVmGradients, globals())
+
+
+def modes_keeps(log):
+    """A block pass that keeps a copy of each weight, under vm.Unwritten, and
+    computes with the copies: what it derived from the weights' content. It
+    notes when it kept copies and when it could not place the guard."""
+
+    def keeps(gm, input_types):
+        kept = {}
+        placeholders = gm.graph.find_nodes(op="placeholder")
+        for i, (placeholder, t) in enumerate(zip(placeholders, input_types)):
+            if not t.is_const:
+                continue
+            try:
+                vm.guard(gm, placeholder, vm.Unwritten())
+            except vm.CannotGuard:
+                log.append("cannot")
+                continue
+            kept[i] = t.const.detach().clone()
+        if not kept:
+            return gm
+        log.append("kept")
+        run = gm.forward
+
+        def with_copies(*inputs):
+            return run(*[kept.get(i, x) for i, x in enumerate(inputs)])
+
+        return vm.lower_to(gm, with_copies)
+
+    return keeps
+
+
+class ModesWeight(torch.nn.Module):
+    def __init__(self, weight=None):
+        super().__init__()
+        self.w = torch.nn.Parameter(torch.randn(8, 8) if weight is None else weight)
+
+    def forward(self, x):
+        return (torch.mm(x, self.w).tanh() * 2 + 1).cos()
+
+
+def modes_on_storage(p):
+    return torch.empty(0, device=p.device).set_(p.untyped_storage(), 0, p.shape)
+
+
+# Ways of writing to a weight `p` through PyTorch.
+MODES_WRITES = {
+    "in_place": lambda p: p.add_(1),
+    "through_a_view": lambda p: p[0].add_(1),
+    "through_detach": lambda p: p.detach().add_(1),
+    "through_data": lambda p: p.data.add_(1),
+    "through_a_tensor_on_its_storage": lambda p: modes_on_storage(p).add_(1),
+    "data_swapped": lambda p: setattr(p, "data", torch.randn_like(p)),
+    "copied_into": lambda p: p.copy_(torch.randn_like(p)),
+    "under_inference_mode": lambda p: torch.inference_mode()(lambda: p.add_(1))(),
+}
+# Ways of handing out the address of its memory, without a write.
+MODES_EXPORTS = {
+    "data_ptr": lambda p: p.data_ptr(),
+    "numpy": lambda p: p.detach().numpy(),
+    "dlpack": lambda p: torch.from_dlpack(p.detach()),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmUnwritten(TestCase):
+    """vm.Unwritten: what a pass derived from a weight's content stands until
+    something writes to the weight through PyTorch."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def calls(self, device, net, compiled, at_7, n=12):
+        """Calls 0 to n - 1 against eager's; ``at_7(net.w)`` before call 7."""
+        equal = []
+        for call in range(n):
+            x = torch.randn(4, 8, device=device)
+            with torch.no_grad():
+                if call == 7:
+                    at_7(net.w)
+                want, got = net(x), compiled(x)
+            equal.append(bool(torch.equal(got, want)))
+        return equal
+
+    @parametrize("way", list(MODES_WRITES))
+    @isolated
+    def test_write_fails_the_guard(self, device, way):
+        log = []
+        net = ModesWeight().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        equal = self.calls(device, net, compiled, MODES_WRITES[way])
+        self.assertEqual(equal, [True] * 12)
+        # The call after the write was traced again, and there the guard
+        # could not be placed a second time: no copy is kept any more.
+        self.assertEqual(log, ["kept", "cannot"])
+        (row,) = (r for r in vm.regions(compiled) if r["state"] == "region")
+        self.assertEqual((row["variants"], sum(row["misses"].values())), (2, 1))
+
+    @parametrize("way", list(MODES_EXPORTS))
+    @isolated
+    def test_address_handed_out_fails_the_guard(self, device, way):
+        if way != "data_ptr" and torch.device(device).type != "cpu":
+            self.skipTest("NumPy and DLPack share the memory of CPU tensors")
+        log = []
+        net = ModesWeight().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        equal = self.calls(device, net, compiled, MODES_EXPORTS[way])
+        self.assertEqual(equal, [True] * 12)
+        self.assertEqual(log, ["kept", "cannot"])
+
+    @isolated
+    def test_reads_leave_the_guard(self, device):
+        def reads(p):
+            x = torch.randn(4, 8, device=p.device)
+            return p @ p, torch.nn.functional.linear(x, p), p.sum(), p.clone(), p.half()
+
+        log = []
+        net = ModesWeight().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        self.assertEqual(self.calls(device, net, compiled, reads), [True] * 12)
+        self.assertEqual(log, ["kept"])
+        (row,) = (r for r in vm.regions(compiled) if r["state"] == "region")
+        self.assertEqual((row["variants"], row["misses"]), (1, {}))
+
+    @isolated
+    def test_reported_write_places_the_guard_again(self, device):
+        # What compiled code does after it wrote to a tensor: it bumps the
+        # version counter, and nothing asked PyTorch for the memory. The
+        # guard fails, and can be placed anew: the pass derives again.
+        log = []
+        net = ModesWeight().to(device)
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        bump = torch.autograd.graph.increment_version
+        self.assertEqual(self.calls(device, net, compiled, bump), [True] * 12)
+        self.assertEqual(log, ["kept", "kept"])
+
+    @isolated
+    def test_memory_that_is_not_pytorchs_alone_takes_no_guard(self, device):
+        if torch.device(device).type != "cpu":
+            self.skipTest("memory shared with NumPy is CPU memory")
+        # A NumPy array over the weight's memory, made before the pass looks:
+        # a write through it could not be seen, so the guard is not placed.
+        log = []
+        net = ModesWeight()
+        alias = net.w.detach().numpy()
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        equal = self.calls(device, net, compiled, lambda p: alias.fill(1.0))
+        self.assertEqual((equal, log), ([True] * 12, ["cannot"]))
+
+    @isolated
+    def test_documented_limit_write_through_an_address_taken_before(self, device):
+        # THE LIMIT OF vm.Unwritten, shown, not covered: an address that
+        # left PyTorch before the guard was placed. Nothing in PyTorch sees a
+        # write through it (the version counter does not either), the guard
+        # holds, and the region computes with what the pass derived.
+        if torch.device(device).type != "cpu":
+            self.skipTest("a write through a raw address of host memory")
+        log = []
+        net = ModesWeight()
+        address = net.w.data_ptr()
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+
+        def poke(p):
+            ctypes.memset(address, 0, p.numel() * p.element_size())
+
+        equal = self.calls(device, net, compiled, poke)
+        self.assertEqual(log, ["kept"])
+        self.assertEqual(equal, [True] * 7 + [False] * 5)
+
+    def test_guard_goes_on_a_weight_while_the_pass_runs(self, device):
+        gm = torch.fx.symbolic_trace(lambda x, w: x * w + 1)
+        x, w = gm.graph.find_nodes(op="placeholder")
+        gm.meta["vm_const_inputs"] = ["w"]
+        with self.assertRaisesRegex(vm.CannotGuard, "goes on a weight"):
+            vm.guard(gm, x, vm.Unwritten())
+        with self.assertRaisesRegex(vm.CannotGuard, "while the pass runs"):
+            vm.guard(gm, w, vm.Unwritten())
+
+
+instantiate_device_type_tests(TestVmUnwritten, globals())
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 @unittest.skipUnless(torch.cuda.is_available(), "needs CUDA")
 class TestVmCudaGraphs(TestCase):
@@ -922,6 +1184,52 @@ class TestVmCudaGraphs(TestCase):
                 self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
         self.assertEqual(captures, [2, 2])
         self.assertGreater(region_runs(compiled), 0)
+
+    def unwritten(self, during):
+        """Calls of a region whose pass keeps a copy of a CUDA weight under
+        vm.Unwritten; ``during(net)`` runs before call 7. Returns what the
+        pass noted."""
+        log = []
+        net = ModesWeight().to("cuda")
+        compiled = vm(net.forward, passes=(*EARLY, modes_keeps(log)))
+        with torch.no_grad():
+            for call in range(12):
+                x = torch.randn(4, 8, device="cuda")
+                if call == 7:
+                    during(net)
+                want, got = net(x), compiled(x)
+                self.assertEqual(got, want, atol=0, rtol=0, msg=f"call {call}")
+        self.assertGreater(region_runs(compiled), 0)
+        return log
+
+    @isolated
+    def test_capture_of_the_users_own_that_reads_a_guarded_weight(self):
+        # PyTorch refuses a capture that reads a tensor with the guard's mark.
+        # A capture begun from Python clears the marks first: it works as it
+        # does without the VM, and the guard has failed.
+        def capture(net):
+            x = torch.randn(4, 8, device="cuda")
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                y = torch.mm(x, net.w)
+            graph.replay()
+            self.assertEqual(y, torch.mm(x, net.w), atol=0, rtol=0)
+
+        self.assertEqual(self.unwritten(capture), ["kept", "cannot"])
+
+    @isolated
+    def test_capture_that_keeps_the_guards(self):
+        # A lowering whose graph reads what the pass derived, and no guarded
+        # tensor, says so: its capture leaves the guards.
+        def capture(net):
+            x = torch.randn(4, 8, device="cuda")
+            graph = torch.cuda.CUDAGraph()
+            with vm.keep_unwritten(), torch.cuda.graph(graph):
+                y = x * 2
+            graph.replay()
+            self.assertEqual(y, x * 2, atol=0, rtol=0)
+
+        self.assertEqual(self.unwritten(capture), ["kept"])
 
 
 if __name__ == "__main__":

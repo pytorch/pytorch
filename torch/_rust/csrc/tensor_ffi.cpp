@@ -7,6 +7,7 @@
 #include <ATen/core/grad_mode.h>
 #include <c10/core/AutogradState.h>
 #include <c10/core/DefaultDtype.h>
+#include <c10/core/impl/COW.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include "torch_rust/src/bindings/ffi.rs.h"
@@ -232,6 +233,15 @@ std::uintptr_t tensor_data_address(const Tensor& t) noexcept {
   } catch (...) {
     return 0;
   }
+}
+
+bool tensor_is_cow(const Tensor& t) noexcept {
+  const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
+  if (!t.defined() || impl->is_python_dispatch() || !impl->has_storage()) {
+    return false;
+  }
+  return c10::impl::cow::is_cow_data_ptr(
+      impl->unsafe_storage().unsafeGetStorageImpl()->_mutable_data_ptr_no_checks());
 }
 
 bool forward_ad_active() {

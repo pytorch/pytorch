@@ -12,6 +12,7 @@ from typing import Any
 import torch
 import torch.fx
 from torch._subclasses.fake_tensor import is_fake_tensor
+from torch.vm._bound import BoundLowering
 from torch.vm._types import Interval, TensorType, Varies
 
 
@@ -206,7 +207,9 @@ def _trace(
     sys.setprofile(profile)
     try:
         with mode:
-            pg = make_fx(fn)(*fakes)
+            # An explicit table: without one make_fx turns a detach into an
+            # alias, which no graph of a region has.
+            pg = make_fx(fn, decomposition_table={})(*fakes)
     finally:
         sys.setprofile(previous)
     pg.graph.eliminate_dead_code()
@@ -352,35 +355,6 @@ def match(
             )
         )
     return out
-
-
-class BoundLowering:
-    """The call ``lower_to(gm, bind=...)`` puts in a graph. The VM takes
-    ``bind`` from it and calls what that gives with the inputs that are no
-    constants. Called itself, with every input (by ``verify``, by a pass that
-    wraps it), it looks at the constants on each call, as a lowering had to
-    before: it binds again when they are other tensors, or elsewhere, than
-    at its last call."""
-
-    def __init__(self, make: Callable, constants: list[int], inputs: int) -> None:
-        self.make = make
-        self.constants = constants
-        self.rest = [i for i in range(inputs) if i not in set(constants)]
-        # FX names a call by its target's __name__ and __module__.
-        self.__name__ = getattr(make, "__name__", "bound")
-        self.__module__ = getattr(make, "__module__", None) or __name__
-        self._key: list[tuple[int, int]] | None = None
-        self._call: Callable | None = None
-
-    def bind(self, consts: Sequence[torch.Tensor]) -> Callable:
-        return self.make(list(consts))
-
-    def __call__(self, *inputs):
-        consts = [inputs[i] for i in self.constants]
-        key = [(id(c), torch._C._data_address(c)) for c in consts]
-        if self._call is None or key != self._key:
-            self._call, self._key = self.make(consts), key
-        return self._call(*[inputs[i] for i in self.rest])
 
 
 def lower_to(

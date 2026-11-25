@@ -54,6 +54,10 @@ struct TensorSpan;
 // storage is 0 for a tensor with no memory of its own to point at (see
 // tensor_data_address). Nothing is asked of the storage's data.
 void tensor_span(const Tensor& t, TensorSpan& out) noexcept;
+// Whether t's storage is marked copy-on-write. The mark is cleared by the
+// first request for a mutable pointer to the storage, through whichever
+// tensor: torch.vm.Unwritten's "nothing wrote here" (see torch/vm/_guards.py).
+bool tensor_is_cow(const Tensor& t) noexcept;
 // Whether a forward-mode AD level is open (as custom autograd Functions check).
 bool forward_ad_active();
 // Whether saved_tensors_hooks would pack tensors saved for backward.

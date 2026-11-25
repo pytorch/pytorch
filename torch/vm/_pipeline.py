@@ -17,6 +17,7 @@ autograd differentiates the ops they run.
 """
 
 import dataclasses
+import functools
 import logging
 import os
 import warnings
@@ -26,13 +27,8 @@ from typing import Any
 import torch
 import torch.fx
 from torch.vm import _guards
-from torch.vm._graph import (
-    below_autocast,
-    BoundLowering,
-    copy_graph_module,
-    direct,
-    specialize_floats,
-)
+from torch.vm._bound import bind_versions, BoundLowering
+from torch.vm._graph import below_autocast, copy_graph_module, direct, specialize_floats
 from torch.vm._types import exact, TensorType, Type
 
 
@@ -257,13 +253,15 @@ class Pipeline:
         """A compiler for AOT Autograd running ``passes`` on one graph."""
 
         def compile(g, ins):
-            examples = list(ins)
+            # AOT Autograd hands the joint graph's inputs as (primals, tangents).
+            nested = stage == "joint" and all(isinstance(x, (list, tuple)) for x in ins)
+            examples = [x for part in ins for x in part] if nested else list(ins)
             g.meta.update(vm_example_inputs=examples, vm_stage=stage)
             types = [
                 input_types[i]
                 if stage != "backward" and i < len(input_types)
                 else exact(x)
-                for i, x in enumerate(ins)
+                for i, x in enumerate(examples)
             ]
             for p in passes:
                 out = self._apply(p, g, types, ins, report, stage)
@@ -359,35 +357,10 @@ def _dispatch(versions: list[Version]) -> Callable:
         base.hits += 1
         return run_base(*inputs)
 
-    def bind(consts):
-        """``run`` for one region: without its constants, which the versions
-        lowered with ``lower_to(bind=)`` take here and the others are handed
-        on every call."""
-
-        def bound(call):
-            if isinstance(call, BoundLowering):
-                return call.bind(consts)
-            return lambda *inputs: call(*inputs, *consts)
-
-        calls = [(v, bound(call)) for v, call in guarded]
-        call_base = bound(run_base)
-
-        def run(*inputs):
-            for v, call in calls:
-                failed = _guards.failing(v.checks, (*inputs, *consts))
-                if failed is None:
-                    v.hits += 1
-                    return call(*inputs)
-                key = repr(failed[1])
-                v.misses[key] = v.misses.get(key, 0) + 1
-            base.hits += 1
-            return call_base(*inputs)
-
-        return run
-
     # For torch._rust_inductor.trace_region, which binds per region.
     calls = [run_base, *(call for _, call in guarded)]
     if any(isinstance(call, BoundLowering) for call in calls):
+        bind = functools.partial(bind_versions, base, run_base, guarded)
         run.bind = bind  # type: ignore[attr-defined]
     return run
 

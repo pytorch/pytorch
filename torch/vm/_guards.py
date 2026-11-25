@@ -34,6 +34,11 @@ class Check:
         thread's state rather than a value)."""
         raise NotImplementedError
 
+    def place(self, gm: torch.fx.GraphModule, node: torch.fx.Node) -> None:
+        """Called when ``vm.guard`` puts the check on ``node`` of ``gm``, for
+        a check that starts something then; raises ``vm.CannotGuard`` if the
+        check can't be put there."""
+
 
 def _dims(d: int, t: torch.Tensor) -> int | None:
     return d if -t.dim() <= d < t.dim() else None
@@ -268,16 +273,23 @@ class NoSavedTensorHooks(_State):
         return torch._C._autograd._top_saved_tensors_default_hooks(False) is None
 
 
+def address(t: torch.Tensor) -> int:
+    """Where ``t``'s first element is, as ``t.data_ptr()`` gives it, read
+    without asking PyTorch for a writable pointer: ``data_ptr()`` hands the
+    memory out, which ends a ``vm.Unwritten`` on ``t``."""
+    return torch._C._data_address(t) + t.storage_offset() * t.element_size()
+
+
 @dataclasses.dataclass(frozen=True)
 class Aligned(Check):
-    """``t.data_ptr()`` is a multiple of ``n`` bytes."""
+    """``t``'s memory starts at a multiple of ``n`` bytes."""
 
     n: int
     dynamic = True
     rank_uniform = False
 
     def holds(self, t, value_of):
-        return t.data_ptr() % self.n == 0
+        return address(t) % self.n == 0
 
     def __repr__(self):
         return f"Aligned({self.n})"
@@ -325,7 +337,7 @@ class NotOverlapping(Check):
 def _span(t: torch.Tensor) -> tuple[int, int]:
     if t.numel() == 0:
         return (0, 0)
-    start = t.data_ptr()
+    start = address(t)
     last = sum((s - 1) * st for s, st in zip(t.shape, t.stride()) if st > 0)
     return (start, start + (last + 1) * t.element_size())
 
@@ -348,6 +360,7 @@ def guard(
     for c in checks:
         if not isinstance(c, Check):
             raise TypeError(f"vm.guard takes checks (vm.Dtype, vm.Dim, ...); got {c!r}")
+        c.place(gm, node)
     with gm.graph.inserting_after(node):
         g = gm.graph.call_function(guard_node, (node,))
     g.meta["vm_checks"] = checks

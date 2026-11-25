@@ -655,21 +655,6 @@ class _Refused(Exception):
     pass
 
 
-class _Bound:
-    """A region's lowering that took the region's constants once (see
-    torch.vm.lower_to's ``bind``): ``call`` takes the other inputs. The
-    executor calls ``rebind`` before an entry at which the memory of a
-    constant is somewhere else (exec/reads.rs)."""
-
-    def __init__(self, bind: Callable, consts: list[torch.Tensor]) -> None:
-        self.bind = bind
-        self.consts = consts
-        self.call = bind(consts)
-
-    def rebind(self) -> None:
-        self.call = self.bind(self.consts)
-
-
 # Makes autograd.Function.apply raise, before the forward runs, while a region
 # is traced, unless it's _tracing_apply's: the trace would have the forward's
 # ops and lose the backward, and the forward may have effects (torchrec's
@@ -1513,6 +1498,16 @@ def _memo_chains(pro: torch.fx.Graph) -> None:
     pro.lint()
 
 
+def _unwritten(consts):
+    """For each constant under a torch.vm.Unwritten that holds, the version
+    counter it is to keep; None for the others."""
+    if block_pipeline is None:
+        return [None] * len(consts)
+    from torch.vm._unwritten import watched
+
+    return [watched(c) for c in consts]
+
+
 def _const_homes(args, consts):
     """Where a region's constants (the tensors its body read that aren't
     inputs) are kept by what it was given: (dict, key, tensor) for each one
@@ -1712,12 +1707,13 @@ def _compile_vm(name, gm, example, consts, input_types):
     )
     own = (*key, tuple(map(id, consts)))
     for k in (key, own):
-        if k in _compiled:
+        # What a pass kept under torch.vm.Unwritten stands while those guards do.
+        if k in _compiled and _compiled[k][2] == _unwritten(consts):
             stats["reused"] += 1
             return _compiled[k][0]
     compiled, const_read = block_pipeline(name, gm, example + consts, input_types)
     # Keeps the constants alive while their ids key the entry.
-    _compiled[own if const_read else key] = (compiled, consts)
+    _compiled[own if const_read else key] = (compiled, consts, _unwritten(consts))
     stats["compiled"] += 1
     return compiled
 
@@ -2175,7 +2171,7 @@ def trace_region(
         return None
     compiled = _compile(name, gm, example, consts, args, plan, types)
     checked = False
-    bound: _Bound | None = None
+    bound: Any = None
     if reads is not None:
         # A constant the program binds anew (`m.seen = m.seen + y`) is no
         # longer what the body would read: its home is one of the reads,
@@ -2190,9 +2186,11 @@ def trace_region(
         # with the reads. Where every constant is checked, a lowering that
         # asked for it is bound to them, and hears when one's memory moved.
         bind = getattr(compiled, "bind", None)
-        checked = reads.constants(consts) == len(consts)
+        checked = reads.constants(consts, _unwritten(consts)) == len(consts)
         if checked and bind is not None:
-            bound = _Bound(bind, consts)
+            from torch.vm._bound import Binding
+
+            bound = Binding(bind, consts)
             reads.bound(bound.rebind)
     overlap = _overlap(example[:n_tensors], consts, reads, checked)
     record = _traced(

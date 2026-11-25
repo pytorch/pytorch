@@ -848,6 +848,10 @@ struct Constant {
     spec: TensorSpec,
     requires_grad: bool,
     at: Cell<usize>,
+    // For a constant a pass keeps something derived from (torch.vm.Unwritten):
+    // its version counter when the pass looked. The region is entered while
+    // the counter is that and the storage's copy-on-write mark is still set.
+    unwritten: Option<i64>,
 }
 
 // What a region is checked against when it is entered (see the top of the
@@ -979,8 +983,8 @@ impl Reads {
             "a namespace or a container"
         } else if !e.reads.iter().all(|r| r.holds()) {
             "a cell or a slot"
-        } else if !self.constants_hold() {
-            "the shape, dtype, device or requires_grad of a constant"
+        } else if let Some(why) = self.constants_fail() {
+            why
         } else {
             return true;
         };
@@ -990,17 +994,24 @@ impl Reads {
         false
     }
 
-    // Whether each constant has the metadata of the trace. For a lowering
+    // What a constant fails on, if one does: the metadata of the trace, or,
+    // under torch.vm.Unwritten, not having been written to. For a lowering
     // bound to the constants, and for the check of how the region's tensors
     // share memory, also notes whether the data of one is somewhere else
     // than at the last look.
-    unsafe fn constants_hold(&self) -> bool {
+    unsafe fn constants_fail(&self) -> Option<&'static str> {
+        let metadata = "the shape, dtype, device or requires_grad of a constant";
         let overlap = (*self.overlap.get()).as_ref();
         let watch = (*self.rebind.get()).is_some() || overlap.is_some();
         for c in &*self.consts.get() {
-            let Some(t) = tffi::tensor_by_type(c.obj.as_ptr() as usize).as_ref() else { return false };
+            let Some(t) = tffi::tensor_by_type(c.obj.as_ptr() as usize).as_ref() else { return Some(metadata) };
             if t.requires_grad() != c.requires_grad || !tffi::tensor_matches(t, c.spec.dtype, c.spec.device_type, c.spec.device_index, &c.spec.sizes, &c.spec.strides) {
-                return false;
+                return Some(metadata);
+            }
+            if let Some(version) = c.unwritten
+                && (tffi::tensor_version(t) != version || !tffi::tensor_is_cow(t))
+            {
+                return Some("a constant that was to stay unwritten");
             }
             if watch {
                 let at = tffi::tensor_data_address(t);
@@ -1011,7 +1022,7 @@ impl Reads {
                 }
             }
         }
-        true
+        None
     }
 
     // Has the lowering bound anew if a constant's data moved since it was
@@ -1065,17 +1076,19 @@ impl Reads {
 
     /// The tensors the region's graph reads that are none of its arguments
     /// (weights): the region is entered while each has the dtype, device,
-    /// sizes, strides and requires_grad it has now. Returns how many of them
-    /// are checked: all that are plain strided tensors.
-    fn constants(&self, consts: Vec<Bound<'_, PyAny>>) -> usize {
+    /// sizes, strides and requires_grad it has now. ``unwritten`` has, for a
+    /// constant under torch.vm.Unwritten, the version counter it is to keep
+    /// (None for the others). Returns how many of the constants are checked:
+    /// all that are plain strided tensors.
+    fn constants(&self, consts: Vec<Bound<'_, PyAny>>, unwritten: Vec<Option<i64>>) -> usize {
         let list = unsafe { &mut *self.consts.get() };
-        for x in consts {
+        for (x, unwritten) in consts.into_iter().zip(unwritten) {
             let Some(t) = (unsafe { tffi::tensor_by_type(x.as_ptr() as usize).as_ref() }) else { continue };
             let mut m = tffi::TensorMeta::default();
             tffi::tensor_meta(t, &mut m);
             let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: t.sizes().to_vec(), strides: t.strides().to_vec() };
             if tffi::tensor_matches(t, spec.dtype, spec.device_type, spec.device_index, &spec.sizes, &spec.strides) {
-                list.push(Constant { obj: x.unbind(), spec, requires_grad: t.requires_grad(), at: Cell::new(tffi::tensor_data_address(t)) });
+                list.push(Constant { obj: x.unbind(), spec, requires_grad: t.requires_grad(), at: Cell::new(tffi::tensor_data_address(t)), unwritten });
             }
         }
         list.len()

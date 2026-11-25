@@ -84,6 +84,7 @@ from torch.vm._graph import (
     swap,
 )
 from torch.vm._guards import (
+    address,
     Aligned,
     Check,
     Contiguous,
@@ -127,6 +128,7 @@ from torch.vm._types import (
     UnionType,
     Varies,
 )
+from torch.vm._unwritten import keep_unwritten, Unwritten
 
 
 __all__ = [
@@ -180,9 +182,11 @@ __all__ = [
     "TensorType",
     "Type",
     "UnionType",
+    "Unwritten",
     "Value",
     "Varies",
     "VersionInfo",
+    "address",
     "async_ops",
     "compile_now",
     "configure",
@@ -191,6 +195,7 @@ __all__ = [
     "first_backward_user",
     "forward_values_used_in_backward",
     "guard",
+    "keep_unwritten",
     "kind",
     "last_forward_user",
     "load_passes",

@@ -259,6 +259,12 @@ def register_graph_replay_end_hook(
     return _register_global_hook(_global_replay_end_hooks, fn)
 
 
+# Called, in order, before a capture goes live on the stream (the capture-start hooks
+# run with it live): for preparation that must not be captured. Private; empty unless
+# something that needs it registers (torch.vm clears its copy-on-write marks here).
+_before_capture_hooks: list[Callable[[], None]] = []
+
+
 # Graph-destroy hooks receive all graph ids owned by the destroyed capture, after
 # its annotation entries have been removed.
 _global_destroy_hooks: OrderedDict[int, Callable[[set[int]], None]] = OrderedDict()
@@ -632,6 +638,8 @@ class CUDAGraph(_CUDAGraph):
         if self._tracker is not None:
             self._tracker.stop()
             self._tracker = None
+        for prepare in _before_capture_hooks:
+            prepare()
         super().capture_begin(
             pool=_get_pool_id(pool), capture_error_mode=capture_error_mode
         )
