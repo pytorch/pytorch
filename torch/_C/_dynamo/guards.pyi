@@ -503,6 +503,7 @@ def install_storage_overlapping_guard(
 def install_storage_overlap_partition_guard(
     guard_managers: list[GuardManager],
     overlapping_indices: tuple[tuple[int, ...], ...],
+    storage_groups: tuple[tuple[int, ...], ...],
     verbose_code_parts: list[str],
     user_stack: traceback.StackSummary | None,
 ) -> None: ...
@@ -560,4 +561,7 @@ def compute_overlapping_tensors(
 def compute_overlapping_tensor_groups(
     tensors: list[torch.Tensor], symbolic: bool = True
 ) -> list[list[int]]: ...
+
+overlap_sweep_min_bucket_size: int
+
 def set_is_in_mode_without_ignore_compile_internals(value: bool) -> None: ...

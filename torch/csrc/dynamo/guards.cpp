@@ -1581,6 +1581,18 @@ auto last_element_offset(const Tensor& t) {
   return last;
 }
 
+// Below this many tensors in one storage, checking all pairs is cheaper than
+// sorting. It also keeps two-tensor callers (e.g. Inductor reinplacing) on the
+// direct pairwise check. Exposed as overlap_sweep_min_bucket_size for tests.
+constexpr size_t kSweepMinBucketSize = 8;
+
+// Note [Disjoint element ranges never overlap]
+// compute_overlapping_tensor_groups sweeps buckets of kSweepMinBucketSize or
+// more tensors and skips pairs whose [storage_offset, last_element_offset]
+// ranges are disjoint, so tensors_definitely_do_not_overlap must report no
+// overlap for all such pairs. The contiguous shortcut satisfies this because
+// storage_offset + numel == last_element_offset + 1 for a contiguous tensor.
+
 /**
  * Assumption: x and y are known to share a storage, and we are trying to
  * determine if their memory is actually completely disjoint, based on
@@ -1592,13 +1604,7 @@ auto last_element_offset(const Tensor& t) {
  * version introduces a bit of overhead. Such an overhead might end up
  * becoming relevant if it's run enough times.
  *
- * Note [Disjoint element ranges never overlap]
- * For buckets of kSweepMinBucketSize or more tensors,
- * compute_overlapping_tensor_groups skips pairs whose
- * [storage_offset, last_element_offset] ranges are disjoint, so this function
- * must report no overlap for all such pairs. The contiguous shortcut below
- * satisfies this because storage_offset + numel == last_element_offset + 1
- * for a contiguous tensor.
+ * See Note [Disjoint element ranges never overlap].
  */
 template <class Meta>
 bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
@@ -1685,6 +1691,163 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
   return false;
 }
 
+// Union-find over tensor indices, merging tensors that might overlap into
+// connected components.
+class OverlapComponents {
+ public:
+  explicit OverlapComponents(size_t n) : parents_(n) {
+    std::iota(parents_.begin(), parents_.end(), 0);
+  }
+
+  int64_t find(int64_t i) {
+    while (parents_[i] != i) {
+      parents_[i] = parents_[parents_[i]];
+      i = parents_[i];
+    }
+    return i;
+  }
+
+  void merge(int64_t i, int64_t j) {
+    const auto root_i = find(i);
+    const auto root_j = find(j);
+    if (root_i != root_j) {
+      parents_[root_j] = root_i;
+    }
+  }
+
+  // The size of each index's component, indexed by root.
+  std::vector<int64_t> sizes() {
+    std::vector<int64_t> size(parents_.size(), 0);
+    for (const auto i : c10::irange(parents_.size())) {
+      size[find(static_cast<int64_t>(i))]++;
+    }
+    return size;
+  }
+
+ private:
+  std::vector<int64_t> parents_;
+};
+
+/**
+ * Merges the tensors at `bucket`, ascending indices into `tensors` that share
+ * one storage, into `components` when they might overlap.
+ *
+ * Buckets smaller than kSweepMinBucketSize check all pairs. Larger ones sweep:
+ * tensors_definitely_do_not_overlap reports no overlap whenever the
+ * [first, last] element ranges are disjoint, so only pairs with intersecting
+ * ranges need the full check. Sweeping in order of first element finds those
+ * pairs without visiting every pair, and gives the same partition as checking
+ * all pairs. See Note [Disjoint element ranges never overlap].
+ *
+ * With DynamicMeta and unsuppressed guards, swept buckets install a different
+ * set of guards than the pairwise loop: the sweep compares element ranges, and
+ * it skips pairs that are disjoint or already in one group. Like the pairwise
+ * check, it only compares a later tensor's offset with an earlier one's in one
+ * direction, so it never pins two offsets as equal.
+ */
+template <class Meta>
+void merge_overlapping_bucket(
+    const std::vector<Tensor>& tensors,
+    c10::ArrayRef<int64_t> bucket,
+    OverlapComponents& components) {
+  // The pairwise check is called with the later tensor first.
+  const auto merge_if_overlapping = [&](int64_t later, int64_t earlier) {
+    if (!tensors_definitely_do_not_overlap<Meta>(
+            tensors[later], tensors[earlier])) {
+      components.merge(later, earlier);
+    }
+  };
+
+  if (bucket.size() < kSweepMinBucketSize) {
+    for (const auto a : c10::irange(bucket.size())) {
+      for (const auto b : c10::irange(a)) {
+        merge_if_overlapping(bucket[a], bucket[b]);
+      }
+    }
+    return;
+  }
+
+  // A tensor passed more than once overlaps itself, which the pairwise check
+  // decides from is_same without reading metadata (a sparse or unbacked
+  // tensor may not have usable metadata). So merge the copies first and sweep
+  // one of each, reading numel only when there are two distinct tensors and
+  // offsets only when two of them are non-empty.
+  std::vector<std::pair<c10::TensorImpl*, int64_t>> by_impl;
+  by_impl.reserve(bucket.size());
+  for (const auto i : bucket) {
+    by_impl.emplace_back(tensors[i].unsafeGetTensorImpl(), i);
+  }
+  std::sort(by_impl.begin(), by_impl.end());
+  std::vector<int64_t> candidates;
+  for (const auto k : c10::irange(by_impl.size())) {
+    const auto i = by_impl[k].second;
+    if (k > 0 && by_impl[k].first == by_impl[k - 1].first) {
+      merge_if_overlapping(i, by_impl[k - 1].second);
+    } else {
+      candidates.push_back(i);
+    }
+  }
+  std::sort(candidates.begin(), candidates.end());
+  if (candidates.size() >= 2) {
+    candidates.erase(
+        std::remove_if(
+            candidates.begin(),
+            candidates.end(),
+            [&](int64_t i) { return Meta::numel(tensors[i]) == 0; }),
+        candidates.end());
+  }
+  if (candidates.size() < 2) {
+    return;
+  }
+
+  using Int = decltype(Meta::storage_offset(std::declval<const Tensor&>()));
+  struct Range {
+    Int first;
+    Int last;
+    int64_t index;
+  };
+  std::vector<Range> ranges;
+  ranges.reserve(candidates.size());
+  for (const auto i : candidates) {
+    const auto& t = tensors[i];
+    auto first = Meta::storage_offset(t);
+    // For a contiguous tensor, use numel like the pairwise check's contiguous
+    // shortcut does, which reads no strides.
+    auto last = t.is_contiguous() ? first + Meta::numel(t) - 1
+                                  : last_element_offset<Meta>(t);
+    ranges.push_back({std::move(first), std::move(last), i});
+  }
+
+  // Sort by first element, ties by descending index. Like the pairwise check,
+  // only ask whether the later tensor's offset is greater, and never compare
+  // last elements, so no tie-break guard is added.
+  std::sort(ranges.begin(), ranges.end(), [](const Range& a, const Range& b) {
+    if (a.index == b.index) {
+      return false;
+    }
+    return a.index < b.index ? bool(b.first > a.first)
+                             : !bool(a.first > b.first);
+  });
+  std::vector<const Range*> active;
+  for (const auto& range : ranges) {
+    active.erase(
+        std::remove_if(
+            active.begin(),
+            active.end(),
+            [&](const Range* other) { return other->last < range.first; }),
+        active.end());
+    for (const auto* other : active) {
+      // A pair already in one group can't change the partition.
+      if (components.find(range.index) != components.find(other->index)) {
+        merge_if_overlapping(
+            std::max(range.index, other->index),
+            std::min(range.index, other->index));
+      }
+    }
+    active.push_back(&range);
+  }
+}
+
 struct TensorStorageRange {
   int64_t begin;
   int64_t end;
@@ -1735,24 +1898,27 @@ bool try_get_sorted_contiguous_ranges(
 /**
  * Computes connected groups of tensors that might overlap.
  *
- * Tensors are first bucketed by storage, so distinct-storage inputs do not
- * incur pairwise overlap checks. Within each bucket, overlapping tensors are
- * merged into connected components.
+ * Tensors are first bucketed by storage, and tensors on different storages
+ * are never reported as overlapping. Tensors without a storage (e.g. sparse)
+ * share one bucket. Within each bucket, overlapping tensors are merged into
+ * connected components (see merge_overlapping_bucket).
  *
  * So, for example, if tensor 1 overlaps with tensor 2, and tensor 3 with
  * tensor 4, the output contains the groups [1, 2] and [3, 4].
  *
- * The output is canonical because StorageOverlapPartitionChecker compares it
- * with ==: singletons are omitted, each group is ascending, and groups are
- * ordered by their smallest index.
+ * The output is canonical, so partitions can be compared with ==: singletons
+ * are omitted, each group is ascending, and groups are ordered by their
+ * smallest index.
  */
 template <class Meta>
 std::vector<std::vector<int64_t>> compute_overlapping_tensor_groups(
     const std::vector<Tensor>& tensors) {
   const auto n = static_cast<int64_t>(tensors.size());
 
-  // Bucket by storage: sorting by StorageImpl* makes each bucket a contiguous
-  // run, which avoids a hash map and a vector allocation per storage.
+  // Bucket by storage: sorting by (StorageImpl*, index) makes each bucket a
+  // contiguous, ascending run, which avoids a hash map and a vector allocation
+  // per storage. Buckets are visited in order of their smallest index, so that
+  // with DynamicMeta the guards installed don't depend on heap addresses.
   std::vector<std::pair<c10::StorageImpl*, int64_t>> by_storage;
   by_storage.reserve(n);
   for (const auto i : c10::irange(n)) {
@@ -1764,124 +1930,35 @@ std::vector<std::vector<int64_t>> compute_overlapping_tensor_groups(
         i);
   }
   std::sort(by_storage.begin(), by_storage.end());
-
-  std::vector<int64_t> parents(n);
-  std::iota(parents.begin(), parents.end(), 0);
-
-  const auto find = [&](int64_t i) {
-    while (parents[i] != i) {
-      parents[i] = parents[parents[i]];
-      i = parents[i];
+  std::vector<int64_t> order;
+  order.reserve(n);
+  std::vector<std::pair<int64_t, int64_t>> buckets;
+  for (const auto pos : c10::irange(n)) {
+    order.push_back(by_storage[pos].second);
+    if (pos == 0 || by_storage[pos].first != by_storage[pos - 1].first) {
+      buckets.emplace_back(pos, pos);
     }
-    return i;
-  };
+    buckets.back().second++;
+  }
+  std::sort(buckets.begin(), buckets.end(), [&](const auto& a, const auto& b) {
+    return order[a.first] < order[b.first];
+  });
 
-  const auto merge_if_overlapping = [&](int64_t i, int64_t j) {
-    if (!tensors_definitely_do_not_overlap<Meta>(tensors[i], tensors[j])) {
-      const auto root_i = find(i);
-      const auto root_j = find(j);
-      if (root_i != root_j) {
-        parents[root_j] = root_i;
-      }
-    }
-  };
-
-  // Below this bucket size, checking all pairs is cheaper than sorting. It
-  // also keeps two-tensor callers (e.g. Inductor reinplacing) on the direct
-  // pairwise check, so they install the same symbolic guards as before. With
-  // DynamicMeta and unsuppressed guards, swept buckets can install different
-  // and sometimes stronger guards: the sort and the pairwise check compare the
-  // same offsets in opposite directions, which can pin two offsets as equal
-  // where the pairwise loop only recorded <=.
-  constexpr int64_t kSweepMinBucketSize = 8;
-  using Int = decltype(Meta::storage_offset(std::declval<const Tensor&>()));
-  // Per-tensor [first, last] element range, only filled for swept buckets.
-  std::vector<std::pair<Int, Int>> first_last;
-  std::vector<int64_t> nonempty;
-  std::vector<std::pair<c10::TensorImpl*, int64_t>> empty;
-  std::vector<int64_t> active;
-
-  for (int64_t begin = 0; begin < n;) {
-    int64_t end = begin + 1;
-    while (end < n && by_storage[end].first == by_storage[begin].first) {
-      end++;
-    }
-    const auto bucket_size = end - begin;
-    if (bucket_size < kSweepMinBucketSize) {
-      for (const auto i_pos : c10::irange(begin, end)) {
-        for (const auto j_pos : c10::irange(begin, i_pos)) {
-          merge_if_overlapping(
-              by_storage[i_pos].second, by_storage[j_pos].second);
-        }
-      }
-      begin = end;
-      continue;
-    }
-
-    // tensors_definitely_do_not_overlap reports no overlap whenever the
-    // [first, last] element ranges are disjoint, so only pairs with
-    // intersecting ranges need the full check. Sweeping in order of first
-    // element finds those pairs without visiting every pair, and gives the
-    // same partition as checking all pairs.
-    // See Note [Disjoint element ranges never overlap].
-    first_last.resize(n);
-    nonempty.clear();
-    empty.clear();
-    for (const auto pos : c10::irange(begin, end)) {
-      const auto i = by_storage[pos].second;
-      const auto& t = tensors[i];
-      if (Meta::numel(t) == 0) {
-        empty.emplace_back(t.unsafeGetTensorImpl(), i);
-        continue;
-      }
-      first_last[i] = {Meta::storage_offset(t), last_element_offset<Meta>(t)};
-      nonempty.push_back(i);
-    }
-
-    // An empty tensor overlaps nothing, except itself when passed twice. A
-    // repeated non-empty tensor is found by the sweep.
-    std::sort(empty.begin(), empty.end());
-    for (const auto k : c10::irange(1, empty.size())) {
-      if (empty[k].first == empty[k - 1].first) {
-        merge_if_overlapping(empty[k - 1].second, empty[k].second);
-      }
-    }
-
-    std::sort(nonempty.begin(), nonempty.end(), [&](int64_t a, int64_t b) {
-      // Comparing only the first element avoids a symbolic tie-break on the
-      // last element, which the pairwise check never evaluates.
-      return first_last[a].first < first_last[b].first;
-    });
-    active.clear();
-    for (const auto i : nonempty) {
-      const auto& first = first_last[i].first;
-      active.erase(
-          std::remove_if(
-              active.begin(),
-              active.end(),
-              [&](int64_t j) { return first_last[j].second < first; }),
-          active.end());
-      for (const auto j : active) {
-        // A pair already in one group can't change the partition.
-        if (find(i) != find(j)) {
-          merge_if_overlapping(i, j);
-        }
-      }
-      active.push_back(i);
-    }
-    begin = end;
+  OverlapComponents components(n);
+  for (const auto& [begin, end] : buckets) {
+    merge_overlapping_bucket<Meta>(
+        tensors,
+        c10::ArrayRef<int64_t>(order).slice(begin, end - begin),
+        components);
   }
 
   // Visiting tensors in index order keeps each group sorted and orders the
   // groups by their smallest index.
-  std::vector<int64_t> component_size(n, 0);
-  for (const auto i : c10::irange(n)) {
-    component_size[find(i)]++;
-  }
+  const auto component_size = components.sizes();
   std::vector<std::vector<int64_t>> overlapping_groups;
   std::vector<int64_t> group_of_root(n, -1);
   for (const auto i : c10::irange(n)) {
-    const auto root = find(i);
+    const auto root = components.find(i);
     if (component_size[root] < 2) {
       continue;
     }
@@ -1894,6 +1971,8 @@ std::vector<std::vector<int64_t>> compute_overlapping_tensor_groups(
   return overlapping_groups;
 }
 
+// The indices of the tensors that might overlap some other tensor: the union
+// of compute_overlapping_tensor_groups.
 template <class Meta>
 std::unordered_set<int64_t> compute_overlapping_tensors(
     const std::vector<Tensor>& tensors) {
@@ -1910,6 +1989,7 @@ std::unordered_set<int64_t> compute_overlapping_tensors(
  * At this point, `non_overlapping` represents the tensors that should not
  * have overlapping storages. Similarly, `overlapping` represents the tensors
  * that should have overlapping storage in some way (or that we can't be sure).
+ * All of them shared one storage at compile time and must still share one.
  *
  * This function checks whether the assumption above is true or not.
  */
@@ -1921,16 +2001,39 @@ bool check_overlapping(
   tensors.reserve(overlapping.size() + non_overlapping.size());
   tensors.insert(tensors.end(), overlapping.begin(), overlapping.end());
   tensors.insert(tensors.end(), non_overlapping.begin(), non_overlapping.end());
-  // Check what is the current storage overlapping relation.
-  auto indices = compute_overlapping_tensors<StaticMeta>(tensors);
-  // Check that the set of indices of tensors that might overlap is equal to
-  // the indices of the first `overlapping.size()` tensors. That's because
-  // `overlapping` tensors were in the beginning of `tensors` list.
-  auto range = c10::irange(overlapping.size());
-  return indices.size() == overlapping.size() &&
-      std::all_of(range.begin(), range.end(), [&](int64_t i) {
-           return indices.count(i) == 1;
-         });
+  // With overlapping inputs, AOTAutograd's merge_view_inputs rebuilds all of
+  // them, overlapping or not, from one synthetic base. Without, the graph
+  // treats them as independent, which a tensor moved onto another group's
+  // storage might not be. Either way they must still share a storage.
+  if (!tensors.empty()) {
+    const auto* storage = tensors[0]
+                              .unsafeGetTensorImpl()
+                              ->unsafe_storage()
+                              .unsafeGetStorageImpl();
+    for (const auto& t : tensors) {
+      if (t.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl() !=
+          storage) {
+        return false;
+      }
+    }
+  }
+  // This runs on every call of the compiled frame, so with one storage known,
+  // merge the single bucket directly instead of building groups.
+  std::vector<int64_t> bucket(tensors.size());
+  std::iota(bucket.begin(), bucket.end(), 0);
+  OverlapComponents components(tensors.size());
+  merge_overlapping_bucket<StaticMeta>(tensors, bucket, components);
+  // The `overlapping` tensors, which come first, must each overlap some other
+  // tensor, and the rest none.
+  const auto component_size = components.sizes();
+  for (const auto i : c10::irange(tensors.size())) {
+    const bool overlaps =
+        component_size[components.find(static_cast<int64_t>(i))] > 1;
+    if (overlaps != (i < overlapping.size())) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -3375,8 +3478,10 @@ class StorageOverlapPartitionChecker {
  public:
   StorageOverlapPartitionChecker(
       size_t expected_inputs,
-      std::vector<std::vector<int64_t>> expected_partition)
+      std::vector<std::vector<int64_t>> expected_partition,
+      std::vector<std::vector<int64_t>> expected_storage_groups)
       : _expected_partition(std::move(expected_partition)),
+        _expected_storage_groups(std::move(expected_storage_groups)),
         _inputs(expected_inputs, nullptr) {}
 
   void add(PyObject* obj, size_t input_index) {
@@ -3399,6 +3504,10 @@ class StorageOverlapPartitionChecker {
   bool maybe_check() {
     if (_seen < _inputs.size()) {
       return true;
+    }
+
+    if (!storage_groups_unchanged()) {
+      return false;
     }
 
     if (_expected_partition.empty() &&
@@ -3519,7 +3628,34 @@ class StorageOverlapPartitionChecker {
     return true;
   }
 
+  // AOTAutograd rebuilds the views of a storage from one synthetic base, so
+  // inputs that shared a storage at compile time must still share one. A view
+  // moved onto another storage changes the partition only if it overlaps
+  // something there, which the partition check catches.
+  bool storage_groups_unchanged() const {
+    for (const auto& group : _expected_storage_groups) {
+      const c10::StorageImpl* storage = nullptr;
+      for (const auto k : c10::irange(group.size())) {
+        auto* obj = _inputs[group[k]];
+        if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
+          return false;
+        }
+        const auto* impl = THPVariable_Unpack(obj)
+                               .unsafeGetTensorImpl()
+                               ->unsafe_storage()
+                               .unsafeGetStorageImpl();
+        if (k == 0) {
+          storage = impl;
+        } else if (impl != storage) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   std::vector<std::vector<int64_t>> _expected_partition;
+  std::vector<std::vector<int64_t>> _expected_storage_groups;
   std::vector<PyObject*> _inputs;
   size_t _seen{0};
 };
@@ -8336,6 +8472,7 @@ void install_storage_overlapping_guard(
 void install_storage_overlap_partition_guard(
     const py::list& guard_managers,
     const py::object& expected_partition,
+    const py::object& expected_storage_groups,
     const py::object& verbose_code_parts,
     const py::object& user_stack) {
   if (guard_managers.empty()) {
@@ -8345,7 +8482,8 @@ void install_storage_overlap_partition_guard(
   std::shared_ptr<StorageOverlapPartitionChecker> checker =
       std::make_shared<StorageOverlapPartitionChecker>(
           guard_managers.size(),
-          py::cast<std::vector<std::vector<int64_t>>>(expected_partition));
+          py::cast<std::vector<std::vector<int64_t>>>(expected_partition),
+          py::cast<std::vector<std::vector<int64_t>>>(expected_storage_groups));
 
   for (const auto i : c10::irange(guard_managers.size())) {
     auto* guard_manager = py::cast<GuardManager*>(guard_managers[i]);
@@ -8838,6 +8976,12 @@ PyObject* torch_c_dynamo_guards_init() {
       STORAGE_OVERLAPPING,
       RelationalGuard,
       std::shared_ptr<STORAGE_OVERLAPPING>>(py_m, "STORAGE_OVERLAPPING");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      STORAGE_OVERLAP_PARTITION,
+      RelationalGuard,
+      std::shared_ptr<STORAGE_OVERLAP_PARTITION>>(
+      py_m, "STORAGE_OVERLAP_PARTITION");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       SYMBOLIC_SHAPE_GUARD,
@@ -10001,6 +10145,7 @@ PyObject* torch_c_dynamo_guards_init() {
       },
       py::arg("tensors"),
       py::arg("symbolic") = true);
+  py_m.attr("overlap_sweep_min_bucket_size") = kSweepMinBucketSize;
   py_m.def("install_symbolic_shape_guard", install_symbolic_shape_guard);
   py_m.def("profile_guard_manager", profile_guard_manager);
 

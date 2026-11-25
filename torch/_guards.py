@@ -476,7 +476,7 @@ class DuplicateInputs(GuardEnvExpr):
 A class representing storage overlap relations among inputs that aliases the same storage.
 
 Given that a set of tensors alias the same storage, this guard checks whether they actually
-have overlapping storages.
+have overlapping storages, and that they all still share one storage.
 
 While non_overlapping_sources represent input tensors that definitely don't have any storage
 overlapping with any other input, overlapping_sources represent tensors that either:
@@ -488,14 +488,30 @@ overlapping with any other input, overlapping_sources represent tensors that eit
 
 @dataclasses.dataclass(frozen=True)
 class StorageOverlap(GuardEnvExpr):
+    """
+    Only installed when the StorageOverlapPartition guard is turned off (see
+    _use_storage_overlap_partition_guard).
+    """
+
     overlapping_sources: list[Source]
     non_overlapping_sources: list[Source]
 
 
 @dataclasses.dataclass(frozen=True)
 class StorageOverlapPartition(GuardEnvExpr):
+    """
+    Guard that the storage overlap partition of the input tensors at
+    input_sources is unchanged. overlapping_indices lists the groups of
+    overlapping inputs in the form the C++ checker produces and compares with
+    ==: indices into input_sources, singleton groups omitted, each group
+    ascending, groups ordered by their smallest index. storage_groups, in the
+    same form, lists the inputs that shared a storage, which must still each
+    share one.
+    """
+
     input_sources: list[Source]
     overlapping_indices: tuple[tuple[int, ...], ...]
+    storage_groups: tuple[tuple[int, ...], ...]
 
     def __post_init__(self) -> None:
         if len(set(self.input_sources)) != len(self.input_sources):
