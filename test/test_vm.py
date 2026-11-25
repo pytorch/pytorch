@@ -30,6 +30,7 @@ import unittest.mock
 import warnings
 
 import torch
+import torch.nn.functional as F
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -387,6 +388,29 @@ def floats_sign_of_a_key(x, table):
     return floats_work(x, 2.0) * next(iter(table)), str(next(iter(table)))
 
 
+def floats_length_of_a_range(x, t):
+    steps = torch.arange(0, t * 10, 1.0, device=x.device)
+    return floats_work(x, 2.0).sum() * steps.shape[0]
+
+
+def floats_expanded_to_a_range(x, t):
+    steps = torch.arange(0, t * 10, 1.0, device=x.device)
+    return (
+        floats_work(x, 2.0).sum()
+        + torch.ones(1, device=x.device).expand_as(steps).sum()
+    )
+
+
+def floats_scale_of_an_interpolation(x, t):
+    up = F.interpolate(floats_work(x, 2.0)[None, None], scale_factor=t * 4)
+    return up.sum() * up.shape[-1]
+
+
+def floats_filled_in(x, t):
+    filled = torch.full((3,), t, device=x.device) + x.new_full((1,), t)
+    return floats_work(x, 2.0) + filled + torch.full_like(x, t)
+
+
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
 class TestVmFloatArguments(TestCase):
     """A float argument is an input of a region's graph while the function
@@ -648,6 +672,32 @@ class TestVmFloatArguments(TestCase):
         self.assertEqual(
             self.zero_calls(floats_sign_of_a_key, device, lambda t: {t: 1}), []
         )
+
+    def sized_by_value(self, fn, device):
+        # A region per value: a size in it is that value's.
+        (row,) = self.rows(fn, device)
+        values = sorted(v.split(" (float) == ")[1] for v in row["values"])
+        self.assertEqual(
+            (row["variants"], values), (3, ["0.5", "0.75", "1.0"]), msg=str(row)
+        )
+
+    @isolated
+    def test_float_that_decides_the_length_of_a_range(self, device):
+        # torch.arange makes another size for another value: the size the
+        # function reads is then no fact of the region.
+        self.sized_by_value(floats_length_of_a_range, device)
+
+    @isolated
+    def test_float_that_decides_a_size_an_operator_computes_with(self, device):
+        self.sized_by_value(floats_expanded_to_a_range, device)
+
+    @isolated
+    def test_float_that_is_the_scale_of_an_interpolation(self, device):
+        self.sized_by_value(floats_scale_of_an_interpolation, device)
+
+    @isolated
+    def test_float_that_fills_a_tensor_of_a_given_size(self, device):
+        self.in_the_graph(floats_filled_in, device)
 
 
 instantiate_device_type_tests(TestVmFloatArguments, globals())

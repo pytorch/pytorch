@@ -478,12 +478,43 @@ def _floats_in(x, out):
 _VALUES_OUT = (torch.Tensor.tolist, torch.Tensor.numpy, torch.Tensor.__array__)
 
 
+def _sized_by_its_tensors(out, args, kwargs) -> bool:
+    """Whether no size of what a torch call returned (``out``) can depend on
+    a float the call was handed: each tensor it returned has no dimensions,
+    or the broadcast size of the call's tensor arguments, or a size the call
+    was given as a sequence of ints. A region takes every size inside it for
+    what its trace saw, so only a float handed to such a call may be an
+    input of the graph: `x * t`, `torch.clamp(x, min=t)`, `torch.full((3,),
+    t)`, and not `torch.arange(0, t)` or an interpolation by the scale t,
+    whose result has another size for another t."""
+    given = [*args, *kwargs.values()]
+    flat = [x for a in given for x in (a if type(a) in (list, tuple) else (a,))]
+    try:
+        whole = torch.broadcast_shapes(
+            *(x.shape for x in flat if isinstance(x, torch.Tensor))
+        )
+    except RuntimeError:
+        return False
+    sizes = [
+        tuple(a)
+        for a in given
+        if isinstance(a, (list, tuple)) and all(type(i) is int for i in a)
+    ]
+    outs = out if type(out) in (list, tuple) else (out,)
+    return all(
+        o.dim() == 0 or o.shape == whole or tuple(o.shape) in sizes
+        for o in outs
+        if isinstance(o, torch.Tensor)
+    )
+
+
 class _ScalarArgs(TorchFunctionMode):
     """Puts the _Scalars a torch call is given back into the node the call
     traced: the dispatcher hands make_fx new Python floats. The node's float
     args are matched to the call's, in order; when they don't line up (the
-    call traced several nodes, or made a scalar a tensor), the region is
-    specialized on those _Scalars instead."""
+    call traced several nodes, or made a scalar a tensor), or when the size
+    of what the call returned may depend on them (_sized_by_its_tensors),
+    the region is specialized on those _Scalars instead."""
 
     def __init__(self, graph: torch.fx.Graph) -> None:
         super().__init__()
@@ -536,10 +567,15 @@ class _ScalarArgs(TorchFunctionMode):
                 made.append(node)
             node = node.next
         traced = [n for n in made if _floats_in([list(n.args), dict(n.kwargs)], [])]
-        if len(traced) == 1 and [
-            float.__float__(x)
-            for x in _floats_in([list(traced[0].args), dict(traced[0].kwargs)], [])
-        ] == [float.__float__(x) for x in given]:
+        if (
+            len(traced) == 1
+            and [
+                float.__float__(x)
+                for x in _floats_in([list(traced[0].args), dict(traced[0].kwargs)], [])
+            ]
+            == [float.__float__(x) for x in given]
+            and _sized_by_its_tensors(out, args, kwargs)
+        ):
             it = iter(given)
 
             def put_back(a):
