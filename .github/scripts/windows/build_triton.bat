@@ -11,8 +11,4 @@ call .ci/pytorch/windows/internal/install_python.bat
 dir "%VC_INSTALL_PATH%"
 
 call "%VC_INSTALL_PATH%\VC\Auxiliary\Build\vcvarsall.bat" x64
-:: With TRITON_STABLE_ABI, pyconfig.h auto-links python3.lib by name, but
-:: triton's CMake only passes python3XX.lib by full path, so add Python\libs
-:: to the linker search path.
-set "LIB=%CD%\Python\libs;%LIB%"
 %PYTHON_EXEC% .github/scripts/build_triton_wheel.py --device=%BUILD_DEVICE% %RELEASE%
