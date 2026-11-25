@@ -53,6 +53,7 @@ use pyo3::ffi::PyObject;
 use pyo3::prelude::*;
 
 use super::ffi::*;
+use super::overlap::Overlap;
 use crate::bindings::ffi as tffi;
 use crate::cfg::ir::TensorSpec;
 
@@ -860,6 +861,9 @@ pub struct Reads {
     // for a lowering bound to the constants), and whether one did.
     rebind: GilCell<Option<Py<PyAny>>>,
     moved: Cell<bool>,
+    // How the region's tensors share memory, which is told when a constant's
+    // data moved (see exec/overlap.rs).
+    overlap: GilCell<Option<Py<Overlap>>>,
     // Checks left that also drop the entries nothing can change any more.
     sweeps: Cell<u8>,
     misses: Cell<u64>,
@@ -987,10 +991,12 @@ impl Reads {
     }
 
     // Whether each constant has the metadata of the trace. For a lowering
-    // bound to the constants, also notes whether the data of one is
-    // somewhere else than at the last look.
+    // bound to the constants, and for the check of how the region's tensors
+    // share memory, also notes whether the data of one is somewhere else
+    // than at the last look.
     unsafe fn constants_hold(&self) -> bool {
-        let watch = (*self.rebind.get()).is_some();
+        let overlap = (*self.overlap.get()).as_ref();
+        let watch = (*self.rebind.get()).is_some() || overlap.is_some();
         for c in &*self.consts.get() {
             let Some(t) = tffi::tensor_by_type(c.obj.as_ptr() as usize).as_ref() else { return false };
             if t.requires_grad() != c.requires_grad || !tffi::tensor_matches(t, c.spec.dtype, c.spec.device_type, c.spec.device_index, &c.spec.sizes, &c.spec.strides) {
@@ -1001,6 +1007,7 @@ impl Reads {
                 if at != c.at.get() {
                     c.at.set(at);
                     self.moved.set(true);
+                    overlap.iter().for_each(|o| o.get().moved());
                 }
             }
         }
@@ -1085,6 +1092,39 @@ impl Reads {
         }
         unsafe { *self.rebind.get() = Some(rebind.unbind()) };
         self.moved.set(false);
+    }
+
+    /// Which of ``objects``, by place, the traced run read as a value: from a
+    /// namespace, an attribute, an item or a cell, or in a tuple it read so.
+    /// (After ``forget``: what was read from the region's own arguments is
+    /// no such read.)
+    fn values(&self, objects: Vec<Bound<'_, PyAny>>) -> Vec<usize> {
+        // Tuples aren't recorded: what one holds is read with it.
+        unsafe fn reach(o: *mut PyObject, out: &mut HashSet<usize>, depth: u8) {
+            out.insert(o as usize);
+            if depth < 4 && ffi::PyTuple_Check(o) != 0 {
+                for k in 0..ffi::PyTuple_GET_SIZE(o) {
+                    reach(ffi::PyTuple_GET_ITEM(o, k), out, depth + 1);
+                }
+            }
+        }
+        let e = unsafe { &*self.entries.get() };
+        let mut read: HashSet<usize> = HashSet::new();
+        let mut add = |o: &Py<PyAny>| unsafe { reach(o.as_ptr(), &mut read, 0) };
+        for g in &e.groups {
+            g.items.iter().filter_map(|i| i.value.as_ref()).for_each(&mut add);
+            g.whole.iter().flat_map(|w| &w.items).for_each(&mut add);
+        }
+        e.reads.iter().filter_map(|r| r.value.as_ref()).for_each(&mut add);
+        e.classes.iter().flat_map(|c| &c.names).filter_map(|(_, had)| had.as_ref()).for_each(&mut add);
+        (0..objects.len()).filter(|&i| read.contains(&(objects[i].as_ptr() as usize))).collect()
+    }
+
+    /// For the check of how the region's tensors share memory: from now on
+    /// it is told when the data of a constant is not where it was.
+    fn shares(&self, overlap: Py<Overlap>) {
+        overlap.get().moved();
+        unsafe { *self.overlap.get() = Some(overlap) };
     }
 
     /// Drops what was read from these containers and objects: the region
@@ -1194,6 +1234,7 @@ pub fn _region_reads(py: Python<'_>) -> PyResult<(Option<Py<Reads>>, Option<Stri
         consts: GilCell::new(vec![]),
         rebind: GilCell::new(None),
         moved: Cell::new(false),
+        overlap: GilCell::new(None),
         sweeps: Cell::new(2),
         misses: Cell::new(0),
         last: Cell::new(""),

@@ -1504,6 +1504,7 @@ ownership:
       - /test/test_type_hints.py
       - /test/test_typing.py
       - /test/test_vm.py
+      - /test/test_vm_modes.py
       - /test/torch_np/
       - /test/typing/
       - /test/vm_passes/

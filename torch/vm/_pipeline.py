@@ -120,6 +120,8 @@ class Pipeline:
         self.post = [p for i, p in enumerate(block_passes) if positions[i] == 2]
         self.autograd = autograd
         self.partition = partition
+        # With no block pass a region runs its graph as it was traced.
+        self.as_traced = not block_passes and autograd is None
         self.reports: dict[str, Report] = {}
         self.verify = verify or VERIFY
         self.step_begins = [

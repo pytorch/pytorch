@@ -47,6 +47,13 @@ int64_t tensor_version(const Tensor& t);
 // (undefined, not strided, a Python-dispatch tensor). Read without asking
 // for a mutable pointer, so a copy-on-write storage stays one.
 std::uintptr_t tensor_data_address(const Tensor& t) noexcept;
+// Defined by the cxx bridge (src/bindings/ffi.rs).
+struct TensorSpan;
+// The storage t's elements are in, and the bytes of it they span, [low, high)
+// from the storage's start (low == high for a tensor without elements). The
+// storage is 0 for a tensor with no memory of its own to point at (see
+// tensor_data_address). Nothing is asked of the storage's data.
+void tensor_span(const Tensor& t, TensorSpan& out) noexcept;
 // Whether a forward-mode AD level is open (as custom autograd Functions check).
 bool forward_ad_active();
 // Whether saved_tensors_hooks would pack tensors saved for backward.

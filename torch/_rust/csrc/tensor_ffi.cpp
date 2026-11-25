@@ -191,6 +191,36 @@ int64_t tensor_version(const Tensor& t) {
   return t._version();
 }
 
+void tensor_span(const Tensor& t, TensorSpan& out) noexcept {
+  out.storage = 0;
+  out.low = 0;
+  out.high = 0;
+  const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
+  if (!t.defined() || impl->is_python_dispatch() || !impl->has_storage() ||
+      t.layout() != c10::kStrided) {
+    return;
+  }
+  try {
+    const size_t item = impl->itemsize();
+    const size_t low = static_cast<size_t>(impl->storage_offset()) * item;
+    // Where the last element starts, in elements from the first.
+    size_t last = 0;
+    const auto sizes = impl->sizes();
+    const auto strides = impl->strides();
+    for (size_t d = 0; d < sizes.size(); d++) {
+      if (sizes[d] > 0 && strides[d] > 0) {
+        last += static_cast<size_t>(sizes[d] - 1) * static_cast<size_t>(strides[d]);
+      }
+    }
+    out.low = low;
+    out.high = impl->numel() == 0 ? low : low + (last + 1) * item;
+    out.storage = reinterpret_cast<std::uintptr_t>(
+        impl->unsafe_storage().unsafeGetStorageImpl());
+  } catch (...) {
+    out.storage = 0;
+  }
+}
+
 std::uintptr_t tensor_data_address(const Tensor& t) noexcept {
   const c10::TensorImpl* impl = t.unsafeGetTensorImpl();
   if (!t.defined() || impl->is_python_dispatch() || !impl->has_storage() ||

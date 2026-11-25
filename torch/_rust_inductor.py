@@ -1624,6 +1624,29 @@ def _input_types(args, plan, types, consts):
     return out + floats + [_types.exact(c, const=True) for c in consts]
 
 
+def _shares(example, consts):
+    """How the tensors of a traced call share memory, as a key: what is made
+    of its graph is made for that too (see exec/overlap.rs)."""
+    tensors = [t for t in example if isinstance(t, torch.Tensor)]
+    return _rust().Overlap(tensors, consts, True).key()
+
+
+def _overlap(tensors, consts, reads, checked):
+    """A region's check of how its call's tensors share memory (see
+    exec/overlap.rs), or None if it has nothing to check. What block passes
+    make of the graph is for the whole of it; the graph run as traced only
+    for which of its inputs are one tensor, or one the body also read from
+    somewhere. ``checked``: the reads look where every constant's data is."""
+    as_traced = block_pipeline is not None and block_pipeline.as_traced
+    also_read = reads.values(tensors) if reads is not None else []
+    overlap = _rust().Overlap(tensors, consts, not as_traced, also_read)
+    if not overlap.needed:
+        return None
+    if checked and not as_traced:
+        reads.shares(overlap)
+    return overlap
+
+
 def _compile(name, gm, example, consts, args, plan, types):
     from torch._inductor.compile_fx import compile_fx
 
@@ -1632,6 +1655,7 @@ def _compile(name, gm, example, consts, args, plan, types):
             gm.code,
             tuple(_meta(t) for t in example + consts),
             torch.is_grad_enabled(),
+            _shares(example, consts),
         )
         if key not in _compiled:
             _compiled[key] = compile_fx(gm, example + consts)
@@ -1684,6 +1708,7 @@ def _compile_vm(name, gm, example, consts, input_types):
         ),
         torch.is_grad_enabled(),
         autocast_on().raw_repr(),
+        _shares(example, consts),
     )
     own = (*key, tuple(map(id, consts)))
     for k in (key, own):
@@ -2120,11 +2145,12 @@ def trace_region(
     for k in [*gm._parameters, *gm._buffers]:
         if k not in read:
             delattr(gm, k)
-    unread = [
-        i
-        for i, n in enumerate(gm.graph.find_nodes(op="placeholder"))
-        if not n.users and isinstance(n.meta.get("val"), torch.Tensor)
-    ]
+    # Of the inputs that are one tensor the trace, which knows a tensor by its
+    # identity, read the last: the others are that tensor too, not unread.
+    pairs = list(zip(gm.graph.find_nodes(op="placeholder"), example))
+    used = {id(x) for n, x in pairs if n.users}
+    is_tensor = [isinstance(n.meta.get("val"), torch.Tensor) for n, _ in pairs]
+    unread = [i for i, (_, x) in enumerate(pairs) if is_tensor[i] and id(x) not in used]
     ops = [n for n in gm.graph.nodes if n.op == "call_function"]
     if any(n.target in _SKIP_OPS and not (in_vm and _cpu_read(n)) for n in ops):
         stats["refused"] += 1
@@ -2148,6 +2174,7 @@ def trace_region(
             print(f"region {name}: refused: {e}")
         return None
     compiled = _compile(name, gm, example, consts, args, plan, types)
+    checked = False
     bound: _Bound | None = None
     if reads is not None:
         # A constant the program binds anew (`m.seen = m.seen + y`) is no
@@ -2163,9 +2190,11 @@ def trace_region(
         # with the reads. Where every constant is checked, a lowering that
         # asked for it is bound to them, and hears when one's memory moved.
         bind = getattr(compiled, "bind", None)
-        if reads.constants(consts) == len(consts) and bind is not None:
+        checked = reads.constants(consts) == len(consts)
+        if checked and bind is not None:
             bound = _Bound(bind, consts)
             reads.bound(bound.rebind)
+    overlap = _overlap(example[:n_tensors], consts, reads, checked)
     record = _traced(
         name,
         "region",
@@ -2198,6 +2227,8 @@ def trace_region(
             return None
         why = [] if DEBUG else None
         inputs = _inputs(region_args, plan, why)
+        if inputs is not None and overlap is not None and not overlap.holds(inputs):
+            inputs, why = None, ["how its tensors share memory"]
         for i in unread if inputs is not None else ():
             inputs[i] = inputs[i].detach()
         if COUNT:

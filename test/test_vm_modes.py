@@ -5,7 +5,9 @@ is traced at: a region's graph is what ran below autocast, and it is run, and
 lowered, without autocast treating its operators a second time. Of what a
 region keeps of the call it was traced on: none of that call's tensors. And
 of a region's constants, the weights its graph reads: what the region checks
-of them, and a lowering that is bound to them.
+of them, and a lowering that is bound to them. And of how a call's tensors
+share memory: what is made of a region's graph runs only on calls whose
+tensors overlap as the traced call's did.
 """
 
 import contextlib
@@ -649,6 +651,229 @@ class TestVmConstants(TestCase):
 
 
 instantiate_device_type_tests(TestVmConstants, globals())
+
+
+def modes_written(a, b):
+    # Writes one input and then reads the other: what the read sees depends
+    # on whether the two overlap.
+    a.add_(1.0)
+    c = b * 2.0
+    a.mul_(c.sum().tanh())
+    return (a - b).tanh() + c
+
+
+class ModesShared(torch.nn.Module):
+    """A weight in the middle of a larger piece of memory, so that an input
+    can overlap it."""
+
+    def __init__(self, device):
+        super().__init__()
+        self.store = torch.zeros(16, device=device)
+        self.w = torch.nn.Parameter(self.store[4:12], requires_grad=False)
+
+    def forward(self, x):
+        x.add_(1.0)
+        c = self.w * 2.0
+        x.mul_(c.sum().tanh())
+        return (x - self.w).tanh() + c
+
+
+# Put on the test's device by the test.
+MODES_READ = torch.arange(8.0) / 8
+
+
+def modes_reading(x, w):
+    # Reads a global tensor, and is given a tensor that may be that one.
+    a = x * w
+    b = a + MODES_READ.sum()
+    return (b.tanh() - w) * 2.0 + MODES_READ
+
+
+MODES_LISTS = {
+    "default": EARLY,
+    "autograd": (*EARLY, vm.passes.Autograd(), vm.passes.Partition()),
+    "inductor": (*EARLY, vm.passes.Inductor()),
+    "fast": vm.configure(vm.FAST, regions={"at": 3, "observe": 1}, pure_calls=1),
+}
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmSharedMemory(TestCase):
+    """A region whose graph block passes rewrote or lowered runs on calls
+    whose tensors share memory as the traced call's did; another call is
+    traced for itself. Eager's result either way, in the inputs too."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def inputs(self, device, call, apart, overlap, net):
+        # The arguments of a call, and the memory to look at after it.
+        torch.manual_seed(call)
+        base, other = torch.randn(16, device=device), torch.randn(16, device=device)
+        if overlap == "read":
+            return (base[0:8], other[0:8] if apart else MODES_READ), [base]
+        if net is not None:
+            with torch.no_grad():
+                net.store.copy_(torch.arange(16.0, device=device) / 16 + call / 8)
+            if apart:
+                return (base[0:8],), [base, net.store]
+            x = net.store[0:8] if overlap == "partial" else net.w.detach()
+            return (x,), [net.store]
+        if apart:
+            return (base[0:8], other[0:8]), [base, other]
+        if overlap == "same":
+            a = base[0:8]
+            return (a, a), [base]
+        return (base[0:8], base[4:12] if overlap == "partial" else base[0:8]), [base]
+
+    def calls(self, device, passes, overlap, traced, module=None, fn=modes_written):
+        nets = (module(device), module(device)) if module else (None, None)
+        eager = nets[0] if module else fn
+        compiled = vm(nets[1] if module else fn, passes=MODES_LISTS[passes])
+        exact, close = {"atol": 0, "rtol": 0}, {"atol": 1e-05, "rtol": 1e-04}
+        tolerance = exact if passes == "default" else close
+        runs = []
+        # Six calls as the region is traced (on the fourth), five the other
+        # way, four as it was traced again.
+        for call in range(15):
+            apart = (traced == "apart") == (call < 6 or call >= 11)
+            args, memory = self.inputs(device, call, apart, overlap, nets[0])
+            want = [eager(*args), *memory]
+            args, memory = self.inputs(device, call, apart, overlap, nets[1])
+            got = [compiled(*args), *memory]
+            self.assertEqual(got, want, msg=f"call {call}", **tolerance)
+            runs.append(region_runs(compiled))
+        # Regions ran each way.
+        self.assertGreater(runs[5], 0)
+        self.assertGreater(runs[10], runs[6])
+        self.assertGreater(runs[14], runs[10])
+
+    @parametrize("traced", ("apart", "overlapping"))
+    @parametrize("passes", list(MODES_LISTS))
+    @isolated
+    def test_inputs_that_overlap_on_some_calls(self, device, passes, traced):
+        self.calls(device, passes, "partial", traced)
+
+    @parametrize("traced", ("apart", "overlapping"))
+    @parametrize("passes", ("default", "inductor"))
+    @isolated
+    def test_one_tensor_given_twice_on_some_calls(self, device, passes, traced):
+        # Traced when the two are one object, the graph has one input for
+        # both: every list needs them to be one object again.
+        self.calls(device, passes, "same", traced)
+
+    @parametrize("traced", ("apart", "overlapping"))
+    @parametrize("passes", list(MODES_LISTS))
+    @isolated
+    def test_input_over_a_weight_on_some_calls(self, device, passes, traced):
+        self.calls(device, passes, "exact", traced, module=ModesShared)
+
+    @isolated
+    def test_input_that_overlaps_a_weight_in_part(self, device):
+        self.calls(device, "inductor", "partial", "apart", module=ModesShared)
+
+    @parametrize("traced", ("apart", "overlapping"))
+    @parametrize("passes", ("default", "inductor"))
+    @isolated
+    def test_argument_that_is_a_tensor_the_body_reads(self, device, passes, traced):
+        # Traced when the argument is the global tensor, the graph has one
+        # input for the argument and for what the body read.
+        global MODES_READ
+        MODES_READ = MODES_READ.to(device)
+        self.calls(device, passes, "read", traced, fn=modes_reading)
+
+    def relation(self, inputs, consts=(), whole=True, read=()):
+        return torch._rust.Overlap(list(inputs), list(consts), whole, list(read))
+
+    def test_relation_traced_apart(self, device):
+        a, b, w = (torch.zeros(8, device=device) for _ in range(3))
+        r = self.relation([a, b], [w])
+        base = torch.zeros(16, device=device)
+        empty = torch.zeros(0, device=device)
+        for inputs, holds in (
+            ([torch.zeros(8, device=device), torch.zeros(8, device=device)], True),
+            # One storage, and apart in it.
+            ([base[0:8], base[8:16]], True),
+            ([base[0:8], base[0:0]], True),
+            ([a, empty], True),
+            ([base[0:8], base[4:12]], False),
+            ([base[0:8], base[0:8]], False),
+            ([a, a], False),
+            ([a, w], False),
+            ([a, w.detach()], False),
+            ([a, w[2:6]], False),
+        ):
+            self.assertEqual(r.holds(inputs), holds, msg=f"{inputs}")
+
+    def test_relation_traced_overlapping(self, device):
+        base = torch.zeros(16, device=device)
+        r = self.relation([base[0:8], base[4:12]])
+        other = torch.zeros(16, device=device)
+        self.assertTrue(r.holds([other[0:8], other[4:12]]))
+        # What is made of the graph is for where each is in the storage.
+        self.assertFalse(r.holds([other[2:10], other[6:14]]))
+        self.assertFalse(r.holds([other[0:8], other[2:10]]))
+        self.assertFalse(r.holds([other[0:8], base[4:12]]))
+        a = other[0:8]
+        self.assertFalse(r.holds([a, a]))
+        self.assertNotEqual(r.key(), self.relation([base[0:8], other[0:8]]).key())
+        self.assertEqual(r.key(), self.relation([other[0:8], other[4:12]]).key())
+
+    def test_relation_of_elements_that_interleave(self, device):
+        # Spans are compared: two columns count as overlapping, and a call
+        # stands as the trace did when they are the same two columns.
+        m, n = torch.zeros(4, 4, device=device), torch.zeros(4, 4, device=device)
+        r = self.relation([m[:, 0], m[:, 1]])
+        self.assertTrue(r.holds([n[:, 0], n[:, 1]]))
+        self.assertFalse(r.holds([n[:, 0], n[:, 2]]))
+        self.assertFalse(r.holds([n[:, 0], m[:, 1]]))
+
+    def test_relation_traced_with_one_tensor_twice(self, device):
+        a, b = torch.zeros(8, device=device), torch.zeros(8, device=device)
+        for whole in (True, False):
+            r = self.relation([a, a, b], whole=whole)
+            self.assertTrue(r.needed)
+            self.assertTrue(r.holds([b, b, a]))
+            self.assertFalse(r.holds([a, a.detach(), b]), msg=f"whole {whole}")
+            self.assertFalse(r.holds([a, b, b]), msg=f"whole {whole}")
+        # A graph run as traced takes the call's tensors as they come.
+        r = self.relation([a, b], whole=False)
+        self.assertFalse(r.needed)
+        self.assertTrue(r.holds([a, a]))
+
+    def test_relation_of_an_input_the_body_also_read(self, device):
+        a, w = torch.zeros(8, device=device), torch.zeros(8, device=device)
+        for whole in (True, False):
+            r = self.relation([a, w], whole=whole, read=[1])
+            self.assertTrue(r.needed)
+            self.assertTrue(r.holds([torch.zeros(8, device=device), w]))
+            self.assertFalse(r.holds([a, torch.zeros(8, device=device)]))
+
+    def test_documented_limit_memory_that_two_storages_share(self, device):
+        # Memory handed to PyTorch twice is two storages: nothing in PyTorch
+        # knows that they overlap, and the relation goes by storages.
+        if torch.device(device).type != "cpu":
+            self.skipTest("memory from a buffer is the CPU's")
+        memory = bytearray(64)
+        a = torch.frombuffer(memory, dtype=torch.float32)
+        b = torch.frombuffer(memory, dtype=torch.float32)
+        r = self.relation([torch.zeros(16), torch.zeros(16)])
+        self.assertTrue(r.holds([a, b]))
+
+    def test_relation_follows_a_constant_whose_memory_moved(self, device):
+        x, w, v = (torch.zeros(8, device=device) for _ in range(3))
+        base = torch.zeros(16, device=device)
+        r = self.relation([x], [w, v])
+        self.assertTrue(r.holds([base[0:8]]))
+        w.data = base[4:12]
+        self.assertFalse(r.holds([base[0:8]]))
+        self.assertTrue(r.holds([x]))
+        v.data = base[8:16]
+        self.assertFalse(r.holds([x]))
+        v.data = torch.zeros(8, device=device)
+        self.assertTrue(r.holds([x]))
+
+
+instantiate_device_type_tests(TestVmSharedMemory, globals())
 
 
 @unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")

@@ -19,6 +19,14 @@ pub mod ffi {
         sizes: Vec<i64>,
     }
 
+    // See tensor_span in tensor_ffi.h.
+    #[derive(Default)]
+    struct TensorSpan {
+        storage: usize,
+        low: usize,
+        high: usize,
+    }
+
     unsafe extern "C++" {
         include!("torch/_rust/csrc/tensor_ffi.h");
 
@@ -33,6 +41,7 @@ pub mod ffi {
         fn set_grad_mode(on: bool) -> bool;
         fn tensor_version(t: &Tensor) -> i64;
         fn tensor_data_address(t: &Tensor) -> usize;
+        fn tensor_span(t: &Tensor, out: &mut TensorSpan);
         fn forward_ad_active() -> bool;
         fn saved_tensor_hooks_active() -> bool;
         fn tensor_matches(

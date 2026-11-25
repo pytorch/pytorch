@@ -28,6 +28,11 @@ stacks a new version, and a call where they don't hold runs the version
 below. ``vm.explain(fn)`` shows what each pass did to each region, and
 ``vm.versions(fn, block)`` how often each version ran.
 
+What block passes make of a graph runs only on calls whose tensors share
+memory as the traced call's did: the same inputs are one tensor, the same
+ones overlap, at the same places of their storage, and all the others are
+apart. A call that differs is traced for itself.
+
 Without ``passes``, ``torch.vm(fn)`` runs the VM's own passes and compiles
 regions with Inductor. Regions and bypassing cold code are process-wide once
 a function's schedule turns them on: run one function on the VM per process.

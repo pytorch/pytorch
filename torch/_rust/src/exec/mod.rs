@@ -9,6 +9,7 @@ pub mod ffi;
 pub mod graph;
 pub mod joint;
 mod live;
+pub mod overlap;
 pub mod reads;
 pub mod region;
 mod run;
