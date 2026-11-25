@@ -116,6 +116,17 @@ def get_max_tiles(default: int = 2) -> int:
     return max_tiles if max_tiles is not None else default
 
 
+def apply_grid_split_kernel_kwargs(
+    features: SIMDKernelFeatures, kernel_kwargs: dict[str, Any]
+) -> None:
+    """Make a split-as-grid kernel looped and non-cooperative, as SIMDKernel
+    requires. Must run after any choices override of the kernel kwargs."""
+    if (grid_split := features.get_grid_split()) is not None:
+        kernel_kwargs["split_as_grid_reduction"] = grid_split
+        kernel_kwargs["override_cooperative_reduction"] = False
+        kernel_kwargs["override_persistent_reduction"] = False
+
+
 @dataclasses.dataclass
 class IterationRanges:
     """
@@ -829,6 +840,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         override_cooperative_reduction: bool | None = None,
         tiling_scores: dict[str, sympy.Expr] | None = None,
         mix_order_reduction: bool = False,
+        split_as_grid_reduction: int | None = None,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -857,7 +869,15 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             else self.should_use_persistent_reduction()
         )
         self.mix_order_reduction: bool = mix_order_reduction
-        self.no_x_dim = self.want_no_x_dim()
+        self.split_as_grid_reduction = split_as_grid_reduction
+        if split_as_grid_reduction is not None:
+            if self.cooperative_reduction:
+                raise AssertionError(
+                    "split_as_grid_reduction requires a non-cooperative kernel"
+                )
+            if self.persistent_reduction:
+                raise AssertionError("split_as_grid_reduction requires a looped kernel")
+        self.no_x_dim = split_as_grid_reduction is not None or self.want_no_x_dim()
         self.code_hash: str | None = None
         # Info to enable multiple store_output calls for epilogue subtiling
         self.store_output_ctr = itertools.count()
@@ -1002,7 +1022,13 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
         grid_dims = tuple(reversed(pointwise_tensor_dims))
         if no_x_dim:
-            tensor_dims = reduction_dims
+            # `x` becomes a grid-only axis: it keeps its grid dim but has no tensor
+            # dim. Any other pointwise dims keep theirs. For kernels whose only
+            # pointwise dim is `x` this is identical to dropping them all.
+            tensor_dims = (
+                *(dim for dim in pointwise_tensor_dims if dim != "x"),
+                *reduction_dims,
+            )
         elif no_r_dim:
             tensor_dims = pointwise_tensor_dims
         else:
@@ -3385,6 +3411,25 @@ class SIMDScheduling(BaseScheduling):
         _, (numel2, rnumel2) = node2.group
         why = WhyNoFuse(node1, node2)
 
+        grid_splits = (
+            [scheduler.grid_split_factors(node.get_nodes()) for node in (node1, node2)]
+            if config.triton.split_reductions_as_grid
+            else []
+        )
+        if any(split is not None for splits in grid_splits for split in splits):
+            if not (node1.is_reduction() and node2.is_reduction()):
+                why("grid split reduction cannot fuse with pointwise node")
+                return False
+            if grid_splits[0] != grid_splits[1] or len(grid_splits[0]) != 1:
+                why("incompatible grid split factors")
+                return False
+            if not (
+                V.graph.sizevars.statically_known_equals(numel1, numel2)
+                and V.graph.sizevars.statically_known_equals(rnumel1, rnumel2)
+            ):
+                why("grid split reductions must share an iteration space")
+                return False
+
         if (
             config.triton.template_reduction_epilogue
             and node1.is_template()
@@ -4075,9 +4120,9 @@ class SIMDScheduling(BaseScheduling):
         )
         return self.benchmark_codegened_module(PyCodeCache.load(src_code))
 
-    def _tuned_mix_order_split_size(self, kernel_features, initial_split_size, rename):
-        """The split size codegen_mix_order_reduction uses: initial_split_size,
-        autotuned when enabled."""
+    def _tuned_mix_order_kernel(self, kernel_features, initial_split_size, rename):
+        """The kernel codegen_mix_order_reduction emits, at initial_split_size
+        or its autotuned replacement."""
         kernel = self._create_kernel_for_mix_order_reduction(
             kernel_features, initial_split_size
         )
@@ -4105,7 +4150,7 @@ class SIMDScheduling(BaseScheduling):
                 kernel.rsplit_size,
                 8,
             )
-        return kernel.rsplit_size
+        return kernel
 
     def benchmark_mix_order_reduction(self, node) -> tuple[float, str] | None:
         """Time the kernel codegen_mix_order_reduction would emit for node, at
@@ -4119,16 +4164,19 @@ class SIMDScheduling(BaseScheduling):
         if node2_epilogue:
             return None
         snapshot = scheduler._LoopStateSnapshot.create(tuple(node2_reductions))
+        # These kernels are only timed, never emitted.
+        old_kernel_count = metrics.generated_kernel_count
         try:
             _, kernel_features = self._mix_order_kernel_features(
                 node1, node2_reductions, numel, rnumel
             )
             rename = self._mix_order_rename(node2_reductions)
-            split_size = self._tuned_mix_order_split_size(
+            split_size = self._tuned_mix_order_kernel(
                 kernel_features, self._mix_order_split_size(node1, numel), rename
-            )
+            ).rsplit_size
             return self._benchmark_mix_order_kernel(kernel_features, split_size, rename)
         finally:
+            metrics.generated_kernel_count = old_kernel_count
             snapshot.restore()
             for subnode in node2_reductions:
                 # cancel_reduction_split caches the unsplit body.
@@ -4151,11 +4199,8 @@ class SIMDScheduling(BaseScheduling):
         )
         node_schedule = kernel_features.node_schedule
         rename = self._mix_order_rename(node2_reductions)
-        kernel = self._create_kernel_for_mix_order_reduction(
-            kernel_features,
-            self._tuned_mix_order_split_size(
-                kernel_features, initial_split_size, rename
-            ),
+        kernel = self._tuned_mix_order_kernel(
+            kernel_features, initial_split_size, rename
         )
 
         ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
@@ -5534,6 +5579,7 @@ class SIMDScheduling(BaseScheduling):
         self.kernel_type.apply_feature_required_overrides(
             node_info.features, kernel_kwargs
         )
+        apply_grid_split_kernel_kwargs(node_info.features, kernel_kwargs)
         kernel = self.kernel_type(
             node_info.tiling,
             features=node_info.features,
@@ -6798,6 +6844,51 @@ class SIMDScheduling(BaseScheduling):
         return selection.tiling, selection.tiling_scores
 
     @classmethod
+    def _grid_split_tiling(
+        cls,
+        node: scheduler.SchedulerNode,
+        numel: sympy.Expr,
+        reduction_numel: sympy.Expr,
+        split: int,
+    ) -> immutable_dict[str, sympy.Expr]:
+        """Pointwise tiling for a split-as-grid stage-1 kernel.
+
+        Stage-1's ranges are ``[*kept, split]``. Each kept dim gets its own tile so
+        its index stays affine, and the split goes last so it lands on x, which for
+        these kernels carries no tensor dim. Leading kept dims are merged to stay
+        within ``triton.max_tiles``. Falls back to the flat ``[numel // split, split]``
+        tiling whenever the kept dims cannot be laid out that way.
+        """
+        sizevars = V.graph.sizevars
+        if sizevars.statically_known_equals(numel, split):
+            return cls.create_tiling([split], [reduction_numel])
+
+        fallback = cls.create_tiling([numel // split, split], [reduction_numel])
+
+        pointwise_ranges = list(node.get_ranges()[0])
+        if not pointwise_ranges or not sizevars.statically_known_equals(
+            pointwise_ranges[-1], split
+        ):
+            return fallback
+
+        kept = [
+            rng
+            for rng in pointwise_ranges[:-1]
+            if not sizevars.statically_known_equals(rng, 1)
+        ]
+        if not kept:
+            return fallback
+        # x belongs to the split; the remaining tiles go to the kept dims.
+        max_kept_tiles = max(get_max_tiles(default=3) - 1, 1)
+        if len(kept) > max_kept_tiles:
+            merged = len(kept) - max_kept_tiles + 1
+            kept = [sympy_product(kept[:merged]), *kept[merged:]]
+        if not sizevars.statically_known_equals(sympy_product(kept) * split, numel):
+            return fallback
+
+        return cls.create_tiling([*kept, split], [reduction_numel])
+
+    @classmethod
     def select_tiling_with_memory(
         cls,
         node_schedule,
@@ -6830,6 +6921,31 @@ class SIMDScheduling(BaseScheduling):
                     range_r = node_ranges[1]  # (K)
                     tiling = cls.create_tiling(range_y_x, range_r)
                     return _TilingSelection(tiling, None, None)
+
+        # The split takes x, which for these kernels is a grid-only axis with no
+        # tensor dim (SIMDKernel sets no_x_dim for split_as_grid_reduction). The dims
+        # that were not reduced keep their own tiles on y/z, so their index stays
+        # affine; flattening them into one axis would force `yindex // K`, which the
+        # block_ptr matcher rejects unless K is a power of two. The reduction itself
+        # is a single dim, so triton.tile_reductions does not apply.
+        grid_split_nodes = (
+            EnableReduction.filter(node_schedule)
+            if config.triton.split_reductions_as_grid
+            else ()
+        )
+        for node in grid_split_nodes:
+            if not isinstance(node.node, ir.ComputedBuffer):
+                continue
+            split = node.node._grid_split_factor
+            if split is None:
+                continue
+            tiling = cls._grid_split_tiling(node, numel, reduction_numel, split)
+            # Fused stage-1 nodes can order their kept dims differently.
+            if not cls.tiling_is_compatible(
+                node_schedule, numel, reduction_numel, tiling
+            ):
+                tiling = cls.create_tiling([numel // split, split], [reduction_numel])
+            return _TilingSelection(tiling, None, None)
 
         # # TODO: enable by default
         if (
@@ -6982,6 +7098,7 @@ class SIMDScheduling(BaseScheduling):
             if features.indexing_node_schedule is not features.node_schedule:
                 kernel_kwargs["override_cooperative_reduction"] = False
             self.kernel_type.apply_feature_required_overrides(features, kernel_kwargs)
+            apply_grid_split_kernel_kwargs(features, kernel_kwargs)
             kernel = self.kernel_type(
                 tiling,
                 features=features,
