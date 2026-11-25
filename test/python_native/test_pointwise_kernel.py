@@ -180,6 +180,18 @@ class TestPointwiseKernel(TestCase):
 
     @onlyCUDA
     @skipIfNoCuteDSL
+    def test_arange_decline_preserves_cow_output(self, device: str) -> None:
+        from torch._native.ops.pointwise.overrides import _arange_out_cond
+
+        base = torch.full((4,), 7.0, device=device)
+        out = base._lazy_clone()
+        self.assertTrue(torch._C._is_cow_tensor(out))
+        self.assertFalse(_arange_out_cond(0, 4, 0, out=out))
+        self.assertTrue(torch._C._is_cow_tensor(out))
+        self.assertEqual(out, base)
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
     @parametrize("operation", ("logaddexp", "bitwise_left_shift.Tensor"))
     def test_mixed_dtype_adapter(self, device: str, operation: str) -> None:
         from torch._native.ops.pointwise import overrides, table
@@ -232,6 +244,42 @@ class TestPointwiseKernel(TestCase):
         cond = overrides._make_cond(row, variant)
         self.assertFalse(cond(x, y, **kwargs))
         self.assertTrue(cond(x.float(), y.float(), **kwargs))
+
+    @onlyCUDA
+    @skipIfNoCuteDSL
+    @parametrize("api", ("copy_", "_to_copy"))
+    @parametrize(
+        "source_dtype,target_dtype,value",
+        (
+            (torch.float64, torch.float16, 1 + 2**-11 + 2**-40),
+            (torch.float64, torch.bfloat16, 1 + 2**-8 + 2**-40),
+            (torch.int32, torch.bfloat16, 2**24 + 2**16 + 1),
+            (torch.int64, torch.bfloat16, 2**24 + 2**16 + 1),
+            (torch.uint32, torch.bfloat16, 2**24 + 2**16 + 1),
+            (torch.uint64, torch.bfloat16, 2**24 + 2**16 + 1),
+        ),
+    )
+    def test_conversion_matches_aten_rounding(
+        self,
+        device: str,
+        api: str,
+        source_dtype: torch.dtype,
+        target_dtype: torch.dtype,
+        value: float | int,
+    ) -> None:
+        from torch._native.ops.pointwise import overrides
+
+        with torch.backends.python_native.cutedsl.disabled():
+            source = torch.tensor([value], device=device, dtype=source_dtype).repeat(32)
+            expected = source.to(target_dtype)
+        actual = (
+            overrides._to_copy_impl(source, dtype=target_dtype)
+            if api == "_to_copy"
+            else overrides._copy_impl(
+                torch.empty_like(source, dtype=target_dtype), source
+            )
+        )
+        self.assertEqual(actual, expected, atol=0, rtol=0)
 
     @onlyCUDA
     @skipIfNoCuteDSL
