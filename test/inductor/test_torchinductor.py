@@ -12599,6 +12599,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
+    @skip_if_halide
+    @skip_if_pallas
+    def test_index_put_duplicate_indices_single_element(self):
+        def fn(x):
+            x = x * 1
+            x[[0, 0]] += x[[0, 0]]
+            x[[0, 0]] += x[[0, 0]]
+            return x
+
+        for shape in [(1,), (1, 1), (1, 1, 1)]:
+            self.common(fn, (torch.randn(shape),))
+
     @skip_if_pallas
     def test_index_put_duplicate_indices_accumulate(self):
         # accumulate=True is well-defined with duplicate indices.
@@ -14913,6 +14925,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return (
                 aten.roll(a, [-3, 10], [1, 2]),
                 aten.roll(a, [5]),
+                aten.roll(a, [60], [1]),
             )
 
         self.common(
@@ -21935,6 +21948,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x, y = torch.randn(2, 1, 1, 64, 80, device=self.device).unbind(0)
         table = torch.rand(1, 8, 64, 80, device=self.device) * 4
         self.common(fn, (x, y, table), check_lowp=False)
+
+    def test_nonowning_layout_not_inplaced_before_concat_reuse(self):
+        def fn(a, b, w1, w2, w3):
+            n = a.shape[-1]
+            x = a + torch.mm(a.view(1, n), w1).view(1, 1, n)
+            cat_buf = torch.cat([x, b], dim=-1)
+            y = torch.mm(cat_buf.view(1, 2 * n), w2)
+            z = x + y[:, :n].view(1, 1, n)
+            h = torch.mm(z.view(1, n), w3)
+            clobber = torch.relu(h + 10.0)
+            return z + clobber[:, :n].view(1, 1, n)
+
+        a = torch.randn(1, 1, 64, device=self.device)
+        b = torch.randn(1, 1, 64, device=self.device)
+        w1 = torch.randn(64, 64, device=self.device)
+        w2 = torch.randn(128, 64, device=self.device)
+        w3 = torch.randn(64, 128, device=self.device)
+        self.common(fn, (a, b, w1, w2, w3), check_lowp=False)
 
     # end of class CommonTemplate - add new tests here
 
