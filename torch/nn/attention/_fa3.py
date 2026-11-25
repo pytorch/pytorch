@@ -104,6 +104,11 @@ def _fa3_register_kernels() -> Library:
         "CUDA",
     )
     lib.impl(
+        "_flash_attention_forward_no_dropout_inplace.quantized",
+        _fa3_flash_attention_forward_no_dropout_inplace_impl,
+        "CUDA",
+    )
+    lib.impl(
         "_scaled_dot_product_flash_attention",
         _fa3_scaled_dot_product_flash_attention_forward_impl_default,
         "CUDA",
@@ -471,6 +476,9 @@ def _fa3_flash_attention_forward_no_dropout_inplace_impl(
     dropout_p: float,
     is_causal: bool,
     return_debug_mask: bool,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     *,
     scale: float | None = None,
     window_size_left: int = -1,
@@ -491,9 +499,9 @@ def _fa3_flash_attention_forward_no_dropout_inplace_impl(
         dropout_p,
         is_causal,
         return_debug_mask,
-        None,
-        None,
-        None,
+        q_descale,
+        k_descale,
+        v_descale,
         scale=scale,
         window_size_left=window_size_left,
         window_size_right=window_size_right,
