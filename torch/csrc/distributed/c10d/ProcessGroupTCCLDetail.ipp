@@ -1360,121 +1360,117 @@ void TCCLEngine::reduce_scatter(
 }
 
 // point-to-point send / recv
-inline void TCCLEngine::p2p_send(
-    int dst, const char* in, std::size_t nbytes) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      dst >= 0 && dst < size_ && dst != rank_,
-      "TCCL p2p_send: invalid dst ", dst, " (rank ", rank_, ", size ", size_, ").");
+inline void TCCLEngine::P2pStreams::addSend(
+    int peer, const char* ptr, std::size_t bytes, std::size_t tag) {
+  send_[peer].segs.push_back({ptr, nullptr, bytes, tag});
+}
+
+inline void TCCLEngine::P2pStreams::addRecv(
+    int peer, char* ptr, std::size_t bytes, std::size_t tag) {
+  recv_[peer].segs.push_back({nullptr, ptr, bytes, tag});
+}
+
+inline void TCCLEngine::P2pStreams::post(int peer, bool isSend) {
   constexpr int D = kPipelineDepth;
-  std::vector<ibv_wc> wcs(D + 2);
-  // Depth-D pipeline: up to D pieces in flight, double-buffered staging, so the
-  // per-piece memcpy overlaps the wire (PIPELINE=1 ran them serially).
-  std::size_t next_off = 0, done = 0;
-  int inflight = 0;
-  std::size_t slen[D] = {0};
-  auto fill = [&]() {
-    for (int s = 0; s < D; ++s) {
-      if (slen[s] == 0 && next_off < nbytes) {
-        const std::size_t L = std::min(kChunkSize, nbytes - next_off);
-        auto& buf = pipe_send_buffers_[static_cast<std::size_t>(dst) * D + s];
-        std::memcpy(buf.data(), in + next_off, L);
-        slen[s] = L;
-        connections_[dst]->postSend(buf, L, tccl_wr::makeSend(dst, s));
-        next_off += L;
-        ++inflight;
-      }
-    }
-  };
-  fill();
-  auto deadline = std::chrono::steady_clock::now() + timeout_;
-  while (done < nbytes) {
-    int n = connections_[dst]->pollCq(static_cast<int>(wcs.size()), wcs.data());
-    if (n == 0) {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          std::chrono::steady_clock::now() <= deadline,
-          "TCCL p2p_send: timed out after ", timeout_.count(), " ms sending ",
-          done, "/", nbytes, " bytes to peer ", dst,
-          ". The poll bound is the process-group timeout; a persistent stall here "
-          "indicates a dropped UC packet (no hardware retransmission).");
+  Stream& s = isSend ? send_[peer] : recv_[peer];
+  while (s.inflight.size() < static_cast<std::size_t>(D) &&
+         s.next - s.base < s.segs.size()) {
+    const Seg& g = s.segs[s.next - s.base];
+    if (s.next_off == g.bytes) {
+      ++s.next;
+      s.next_off = 0;
       continue;
     }
-    for (int i = 0; i < n; ++i) {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          wcs[i].status == IBV_WC_SUCCESS,
-          "TCCL p2p_send: WC failed status=", static_cast<int>(wcs[i].status),
-          " (peer=", dst, ").");
-      const int s = tccl_wr::slot(wcs[i].wr_id);
-      done += slen[s];
-      slen[s] = 0;
-      --inflight;
+    const std::size_t L = std::min(kChunkSize, g.bytes - s.next_off);
+    const int slot = static_cast<int>(s.chunks % D);
+    const std::size_t idx = static_cast<std::size_t>(peer) * D + slot;
+    if (isSend) {
+      std::memcpy(e_.pipe_send_buffers_[idx].data(), g.src + s.next_off, L);
+      e_.connections_[peer]->postSend(
+          e_.pipe_send_buffers_[idx], L, tccl_wr::makeSend(peer, slot));
+    } else {
+      e_.connections_[peer]->postRecv(
+          e_.pipe_recv_buffers_[idx], L, tccl_wr::makeRecv(peer, slot));
     }
-    fill();
-    deadline = std::chrono::steady_clock::now() + timeout_;
+    s.inflight.push_back({s.next, s.next_off, L, slot});
+    s.next_off += L;
+    ++s.chunks;
   }
 }
 
-inline void TCCLEngine::p2p_recv(
-    int src, char* out, std::size_t nbytes) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      src >= 0 && src < size_ && src != rank_,
-      "TCCL p2p_recv: invalid src ", src, " (rank ", rank_, ", size ", size_, ").");
+inline void TCCLEngine::P2pStreams::retire(
+    Stream& s, std::vector<std::size_t>& done) {
+  while (!s.segs.empty() && s.front_done == s.segs.front().bytes) {
+    done.push_back(s.segs.front().tag);
+    s.segs.pop_front();
+    ++s.base;
+    s.front_done = 0;
+  }
+  // A retired zero-byte segment may not have been reached by post() yet.
+  if (s.next < s.base) {
+    s.next = s.base;
+    s.next_off = 0;
+  }
+}
+
+inline bool TCCLEngine::P2pStreams::poll(
+    std::vector<std::size_t>& done, const char* what) {
   constexpr int D = kPipelineDepth;
-  std::vector<ibv_wc> wcs(D + 2);
-  // Depth-D pipeline: up to D recvs in flight; the copy-out of one piece overlaps
-  // the wire arrival of the next. Per-slot offset recorded so completions (which a
-  // single QP delivers in post order) copy to the right place regardless.
-  std::size_t next_off = 0, done = 0;
-  int inflight = 0;
-  std::size_t soff[D] = {0}, slen[D] = {0};
-  auto fill = [&]() {
-    for (int s = 0; s < D; ++s) {
-      if (slen[s] == 0 && next_off < nbytes) {
-        const std::size_t L = std::min(kChunkSize, nbytes - next_off);
-        auto& buf = pipe_recv_buffers_[static_cast<std::size_t>(src) * D + s];
-        soff[s] = next_off;
-        slen[s] = L;
-        connections_[src]->postRecv(buf, L, tccl_wr::makeRecv(src, s));
-        next_off += L;
-        ++inflight;
-      }
-    }
-  };
-  fill();
-  auto deadline = std::chrono::steady_clock::now() + timeout_;
-  while (done < nbytes) {
-    int n = connections_[src]->pollCq(static_cast<int>(wcs.size()), wcs.data());
-    if (n == 0) {
-      TORCH_CHECK_WITH(
-          DistBackendError,
-          std::chrono::steady_clock::now() <= deadline,
-          "TCCL p2p_recv: timed out after ", timeout_.count(), " ms receiving ",
-          done, "/", nbytes, " bytes from peer ", src,
-          ". The poll bound is the process-group timeout; a persistent stall here "
-          "indicates a dropped UC packet (no hardware retransmission).");
-      continue;
-    }
+  ibv_wc wcs[2 * D + 2];
+  bool progress = false;
+  for (int p = 0; p < e_.size_; ++p) {
+    if (p == e_.rank_) continue;
+    // UC discipline: recv posted before the matching send.
+    post(p, /*isSend=*/false);
+    post(p, /*isSend=*/true);
+    retire(recv_[p], done);
+    retire(send_[p], done);
+    if (send_[p].inflight.empty() && recv_[p].inflight.empty()) continue;
+    const int n = e_.connections_[p]->pollCq(2 * D + 2, wcs);
     for (int i = 0; i < n; ++i) {
       TORCH_CHECK_WITH(
           DistBackendError,
           wcs[i].status == IBV_WC_SUCCESS,
-          "TCCL p2p_recv: WC failed status=", static_cast<int>(wcs[i].status),
-          " (peer=", src, ").");
-      const int s = tccl_wr::slot(wcs[i].wr_id);
-      std::memcpy(
-          out + soff[s],
-          pipe_recv_buffers_[static_cast<std::size_t>(src) * D + s].data(),
-          slen[s]);
-      done += slen[s];
-      slen[s] = 0;
-      --inflight;
+          what, ": WC failed status=",
+          static_cast<int>(wcs[i].status), " (peer=", p, ").");
+      const bool isSend = tccl_wr::isSend(wcs[i].wr_id);
+      Stream& s = isSend ? send_[p] : recv_[p];
+      // A QP completes each direction in post order, and finished segments
+      // were retired, so this chunk belongs to the front segment.
+      TORCH_CHECK_WITH(
+          DistBackendError,
+          !s.inflight.empty() &&
+              s.inflight.front().slot == tccl_wr::slot(wcs[i].wr_id) &&
+              s.inflight.front().seg == s.base,
+          what, ": out-of-order completion (peer=", p, ").");
+      const Chunk c = s.inflight.front();
+      s.inflight.pop_front();
+      if (!isSend) {
+        std::memcpy(
+            s.segs.front().dst + c.off,
+            e_.pipe_recv_buffers_[static_cast<std::size_t>(p) * D + c.slot]
+                .data(),
+            c.len);
+      }
+      s.front_done += c.len;
+      retire(s, done);
+      progress = true;
     }
-    fill();
-    deadline = std::chrono::steady_clock::now() + timeout_;
+    if (n > 0) {
+      post(p, /*isSend=*/false);
+      post(p, /*isSend=*/true);
+    }
   }
+  return progress;
+}
+
+inline bool TCCLEngine::P2pStreams::empty() const {
+  for (int p = 0; p < e_.size_; ++p) {
+    if (!send_[p].segs.empty() || !recv_[p].segs.empty()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // all-to-all (mesh / direct)
@@ -1509,89 +1505,20 @@ inline void TCCLEngine::exchange(
     const std::vector<std::vector<SendSeg>>& sends,
     const std::vector<std::vector<RecvSeg>>& recvs,
     const char* what) {
-  // Per peer and direction: the segment in progress, the bytes of it done, and
-  // the chunk in flight (0 = none).
-  std::vector<std::size_t> s_seg(size_, 0), s_off(size_, 0), s_inflight(size_, 0);
-  std::vector<std::size_t> r_seg(size_, 0), r_off(size_, 0), r_inflight(size_, 0);
-  std::vector<ibv_wc> wcs(8);
-
-  // Step past finished and zero-byte segments; true while any are left.
-  auto send_left = [&](int p) {
-    while (s_seg[p] < sends[p].size() && s_off[p] == sends[p][s_seg[p]].bytes) {
-      ++s_seg[p];
-      s_off[p] = 0;
-    }
-    return s_seg[p] < sends[p].size();
-  };
-  auto recv_left = [&](int p) {
-    while (r_seg[p] < recvs[p].size() && r_off[p] == recvs[p][r_seg[p]].bytes) {
-      ++r_seg[p];
-      r_off[p] = 0;
-    }
-    return r_seg[p] < recvs[p].size();
-  };
-  auto post_recv = [&](int p) {
-    if (p != rank_ && r_inflight[p] == 0 && recv_left(p)) {
-      const RecvSeg& g = recvs[p][r_seg[p]];
-      r_inflight[p] = std::min(kChunkSize, g.bytes - r_off[p]);
-      connections_[p]->postRecv(
-          recv_buffers_[p], r_inflight[p], tccl_wr::makeRecv(p));
-    }
-  };
-  auto post_send = [&](int p) {
-    if (p != rank_ && s_inflight[p] == 0 && send_left(p)) {
-      const SendSeg& g = sends[p][s_seg[p]];
-      s_inflight[p] = std::min(kChunkSize, g.bytes - s_off[p]);
-      std::memcpy(send_buffers_[p].data(), g.ptr + s_off[p], s_inflight[p]);
-      connections_[p]->postSend(
-          send_buffers_[p], s_inflight[p], tccl_wr::makeSend(p));
-    }
-  };
-
-  // UC discipline: recv posted before the matching send, for every peer.
+  P2pStreams streams(*this);
   for (int p = 0; p < size_; ++p) {
     if (p == rank_) continue;
-    post_recv(p);
-    post_send(p);
+    for (const SendSeg& g : sends[p]) {
+      streams.addSend(p, g.ptr, g.bytes, 0);
+    }
+    for (const RecvSeg& g : recvs[p]) {
+      streams.addRecv(p, g.ptr, g.bytes, 0);
+    }
   }
-
-  auto remaining = [&]() {
-    for (int p = 0; p < size_; ++p) {
-      if (p == rank_) continue;
-      if (send_left(p) || recv_left(p)) return true;
-    }
-    return false;
-  };
-
+  std::vector<std::size_t> done;
   auto deadline = std::chrono::steady_clock::now() + timeout_;
-  while (remaining()) {
-    bool progress = false;
-    for (int p = 0; p < size_; ++p) {
-      if (p == rank_) continue;
-      if (s_inflight[p] == 0 && r_inflight[p] == 0) continue;
-      int n = connections_[p]->pollCq(static_cast<int>(wcs.size()), wcs.data());
-      if (n == 0) continue;
-      progress = true;
-      for (int i = 0; i < n; ++i) {
-        TORCH_CHECK_WITH(
-            DistBackendError,
-            wcs[i].status == IBV_WC_SUCCESS,
-            what, ": WC failed status=",
-            static_cast<int>(wcs[i].status), " (peer=", p, ").");
-        if (tccl_wr::isSend(wcs[i].wr_id)) {
-          s_off[p] += s_inflight[p];
-          s_inflight[p] = 0;
-          post_send(p);
-        } else {
-          const RecvSeg& g = recvs[p][r_seg[p]];
-          std::memcpy(g.ptr + r_off[p], recv_buffers_[p].data(), r_inflight[p]);
-          r_off[p] += r_inflight[p];
-          r_inflight[p] = 0;
-          post_recv(p);
-        }
-      }
-    }
-    if (progress) {
+  while (!streams.empty()) {
+    if (streams.poll(done, what)) {
       deadline = std::chrono::steady_clock::now() + timeout_;
     } else {
       TORCH_CHECK_WITH(

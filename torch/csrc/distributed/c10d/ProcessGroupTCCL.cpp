@@ -623,7 +623,11 @@ void ProcessGroupTCCL::runLoop() {
     lock.unlock();
     // Run without holding the queue mutex so the main thread can keep
     // enqueuing follow-on work for the next collective.
-    task();
+    if (task.p2p) {
+      runP2p(std::move(task));
+    } else {
+      task.fn();
+    }
     lock.lock();
   }
 }
@@ -634,16 +638,39 @@ void ProcessGroupTCCL::runLoop() {
 // (non-blocking commitAndContinue keeps the serial queue free so autograd / DDP
 // overlap the RDMA transfer), enqueue a lambda that waits the event and runs
 // `fn` on the worker, return a TCCLWork the caller blocks on via wait().
+std::string ProcessGroupTCCL::refusedMessage() const {
+  return "TCCL: an earlier operation on this process group failed (" +
+      brokenReason_ +
+      "), so the group refuses new work. Destroy it and create a new one.";
+}
+
+void ProcessGroupTCCL::markBroken(const std::exception_ptr& ep) {
+  if (broken_.load()) {
+    return;
+  }
+  try {
+    std::rethrow_exception(ep);
+  } catch (const c10::Error& e) {
+    brokenReason_ = e.what_without_backtrace();
+  } catch (const std::exception& e) {
+    brokenReason_ = e.what();
+  } catch (...) {
+    brokenReason_ = "unknown error";
+  }
+  // Flush whatever the failed operation left posted, so a peer cannot receive
+  // it later.
+  for (auto& connection : connections_) {
+    if (connection) {
+      connection->abort();
+    }
+  }
+  broken_.store(true);
+}
+
 c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueCollective(
     OpType opType,
     std::vector<at::Tensor> outputs,
-    std::function<void()> fn,
-    std::function<void(std::exception_ptr)> onFail) {
-  const auto refused = [this]() {
-    return "TCCL: an earlier operation on this process group failed (" +
-        brokenReason_ +
-        "), so the group refuses new work. Destroy it and create a new one.";
-  };
+    std::function<void()> fn) {
   // A collective would run before the batch's deferred sends and recvs. With no
   // p2p recorded it runs as usual (the coalescing manager's fast path).
   if (coalescing_ && !coalescedOps_.empty()) {
@@ -660,56 +687,160 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueCollective(
     closeCoalescing(ep);
     std::rethrow_exception(ep);
   }
-  TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refused());
+  TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refusedMessage());
   const uint32_t mpsEventId = mpsEventRecord();
   const uint64_t mySeq = ++seq_;
   auto work = c10::make_intrusive<TCCLWork>(opType, mySeq, std::move(outputs));
   {
     std::lock_guard<std::mutex> lock(workMutex_);
-    workQueue_.push_back([this,
-                          mpsEventId,
-                          fn = std::move(fn),
-                          work,
-                          refused,
-                          onFail = std::move(onFail)]() mutable {
-      std::exception_ptr ep;
-      try {
-        // Block only this worker until the GPU flushes writes to the inputs
-        mpsEventWait(mpsEventId);
-        // The group may have broken while this work was queued.
-        TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refused());
-        fn();
-      } catch (...) {
-        ep = std::current_exception();
-        if (!broken_.load()) {
+    workQueue_.push_back(Task{
+        [this, mpsEventId, fn = std::move(fn), work]() mutable {
+          std::exception_ptr ep;
           try {
-            std::rethrow_exception(ep);
-          } catch (const c10::Error& e) {
-            brokenReason_ = e.what_without_backtrace();
-          } catch (const std::exception& e) {
-            brokenReason_ = e.what();
+            // Block only this worker until the GPU flushes writes to the
+            // inputs
+            mpsEventWait(mpsEventId);
+            // The group may have broken while this work was queued.
+            TORCH_CHECK_WITH(
+                DistBackendError, !broken_.load(), refusedMessage());
+            fn();
           } catch (...) {
-            brokenReason_ = "unknown error";
+            ep = std::current_exception();
+            markBroken(ep);
           }
-          // Flush whatever the failed operation left posted, so a peer
-          // cannot receive it later.
-          for (auto& connection : connections_) {
-            if (connection) {
-              connection->abort();
-            }
-          }
-          broken_.store(true);
-        }
-        if (onFail) {
-          onFail(ep);
-        }
-      }
-      // Store any exception and wake threads blocked on Work::wait().
-      work->finishWork(ep);
-    });
+          // Store any exception and wake threads blocked on Work::wait().
+          work->finishWork(ep);
+        },
+        std::nullopt,
+        std::nullopt});
   }
   workCV_.notify_one();
   return work;
+}
+
+c10::intrusive_ptr<Work> ProcessGroupTCCL::enqueueP2p(P2POp op) {
+  TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refusedMessage());
+  auto work = op.work;
+  const uint32_t mpsEventId = mpsEventRecord();
+  {
+    std::lock_guard<std::mutex> lock(workMutex_);
+    workQueue_.push_back(Task{nullptr, std::move(op), mpsEventId});
+  }
+  workCV_.notify_one();
+  return work;
+}
+
+void ProcessGroupTCCL::finishP2p(P2POp& op, const std::exception_ptr& ep) {
+  op.work->finishWork(ep);
+  P2pBatch* batch = op.batch.get();
+  if (batch && batch->work && (ep || --batch->left == 0)) {
+    batch->work->finishWork(ep);
+    batch->work.reset();
+  }
+}
+
+void ProcessGroupTCCL::runP2p(Task first) {
+  TCCLEngine::P2pStreams streams(*engine_);
+  // Admitted ops, indexed by their stream tag. A finished op drops its tensor,
+  // view and Work, and the vectors restart whenever every stream has drained.
+  std::vector<P2POp> ops;
+  std::vector<at::Tensor> views;
+  std::vector<bool> finished;
+  std::deque<Task> pending;
+  pending.push_back(std::move(first));
+  std::vector<std::size_t> done;
+  try {
+    auto deadline = std::chrono::steady_clock::now() + options_->timeout;
+    while (true) {
+      // The p2p ops next in line: a recv queued after a send is posted while
+      // the send waits for its peer.
+      {
+        std::lock_guard<std::mutex> lock(workMutex_);
+        while (!workQueue_.empty() && workQueue_.front().p2p) {
+          pending.push_back(std::move(workQueue_.front()));
+          workQueue_.pop_front();
+        }
+      }
+      // Admit them in queue order once the GPU is done with their tensors.
+      // While others are in flight, a not-yet-ready op waits its turn instead
+      // of blocking them.
+      while (!pending.empty()) {
+        Task& task = pending.front();
+        if (task.mpsEventId) {
+          if (!streams.empty() &&
+              !at::detail::getMPSHooks().queryEvent(*task.mpsEventId)) {
+            break;
+          }
+          mpsEventWait(*task.mpsEventId);
+          task.mpsEventId.reset();
+        }
+        TORCH_CHECK_WITH(DistBackendError, !broken_.load(), refusedMessage());
+        if (streams.empty()) {
+          ops.clear();
+          views.clear();
+          finished.clear();
+        }
+        P2POp& op = *task.p2p;
+        views.push_back(mpsSharedCpuView(op.tensor));
+        const at::Tensor& v = views.back();
+        const auto bytes = static_cast<std::size_t>(v.nbytes());
+        if (op.isSend) {
+          streams.addSend(
+              op.peer,
+              static_cast<const char*>(v.data_ptr()),
+              bytes,
+              ops.size());
+        } else {
+          streams.addRecv(
+              op.peer, static_cast<char*>(v.data_ptr()), bytes, ops.size());
+        }
+        finished.push_back(false);
+        ops.push_back(std::move(op));
+        pending.pop_front();
+        deadline = std::chrono::steady_clock::now() + options_->timeout;
+      }
+      if (streams.empty()) {
+        return; // pending is empty too: admission stops only behind streams
+      }
+      done.clear();
+      // Zero-byte ops complete without traffic, so `done` can fill even when
+      // poll reports no progress.
+      const bool progress = streams.poll(done, "TCCL p2p");
+      for (const std::size_t tag : done) {
+        finished[tag] = true;
+        finishP2p(ops[tag], nullptr);
+        ops[tag] = P2POp{};
+        views[tag] = at::Tensor();
+      }
+      // An op still in `pending` waits for the GPU, which is unbounded as in a
+      // collective's mpsEventWait; the timeout bounds waiting for peers.
+      if (progress || !done.empty() || !pending.empty()) {
+        deadline = std::chrono::steady_clock::now() + options_->timeout;
+      } else {
+        TORCH_CHECK_WITH(
+            DistBackendError,
+            std::chrono::steady_clock::now() <= deadline,
+            "TCCL p2p: timed out after ",
+            options_->timeout.count(),
+            " ms. The poll bound is the process-group timeout; a persistent "
+            "stall indicates a dropped UC packet (no hardware retransmission).");
+      }
+    }
+  } catch (...) {
+    const auto ep = std::current_exception();
+    markBroken(ep);
+    for (std::size_t i = 0; i < ops.size(); ++i) {
+      if (!finished[i]) {
+        finishP2p(ops[i], ep);
+      }
+    }
+    for (auto& task : pending) {
+      if (task.mpsEventId) {
+        at::detail::getMPSHooks().releaseEvent(*task.mpsEventId);
+      }
+      finishP2p(*task.p2p, ep);
+    }
+  }
 }
 
 // allreduce
@@ -1668,21 +1799,12 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::send(
   auto& tensor = tensors[0];
   // Byte movement - any dtype. tag is accepted but not hardware-matched (UC has
   // no tag matching); ordering is the per-peer FIFO of matched send/recv pairs.
+  auto work = c10::make_intrusive<TCCLWork>(OpType::SEND, ++seq_);
   if (coalescing_) {
-    auto work = c10::make_intrusive<TCCLWork>(OpType::SEND, ++seq_);
     coalescedOps_.push_back({/*isSend=*/true, dstRank, tensor, work});
     return work;
   }
-  return enqueueCollective(
-      OpType::SEND,
-      std::vector<at::Tensor>{},
-      [this, tensor, dstRank]() mutable {
-        at::Tensor view = mpsSharedCpuView(tensor);
-        engine_->p2p_send(
-            dstRank,
-            reinterpret_cast<const char*>(view.data_ptr()),
-            static_cast<std::size_t>(view.nbytes()));
-      });
+  return enqueueP2p({/*isSend=*/true, dstRank, tensor, std::move(work)});
 }
 
 c10::intrusive_ptr<Work> ProcessGroupTCCL::recv(
@@ -1696,22 +1818,13 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::recv(
     throw;
   }
   auto& tensor = tensors[0];
+  auto work = c10::make_intrusive<TCCLWork>(
+      OpType::RECV, ++seq_, std::vector<at::Tensor>{tensor});
   if (coalescing_) {
-    auto work = c10::make_intrusive<TCCLWork>(
-        OpType::RECV, ++seq_, std::vector<at::Tensor>{tensor});
     coalescedOps_.push_back({/*isSend=*/false, srcRank, tensor, work});
     return work;
   }
-  return enqueueCollective(
-      OpType::RECV,
-      std::vector<at::Tensor>{tensor},
-      [this, tensor, srcRank]() mutable {
-        at::Tensor view = mpsSharedCpuView(tensor);
-        engine_->p2p_recv(
-            srcRank,
-            reinterpret_cast<char*>(view.data_ptr()),
-            static_cast<std::size_t>(view.nbytes()));
-      });
+  return enqueueP2p({/*isSend=*/false, srcRank, tensor, std::move(work)});
 }
 
 // barrier
@@ -1768,45 +1881,35 @@ c10::intrusive_ptr<Work> ProcessGroupTCCL::endCoalescing() {
     work->finishWork();
     return work;
   }
-  auto failOps = [ops](const std::exception_ptr& ep) {
-    for (const auto& op : ops) {
+  if (broken_.load()) {
+    std::exception_ptr ep;
+    try {
+      TORCH_CHECK_WITH(DistBackendError, false, refusedMessage());
+    } catch (...) {
+      ep = std::current_exception();
+    }
+    for (auto& op : ops) {
       op.work->finishWork(ep);
     }
-  };
-  try {
-    return enqueueCollective(
-        OpType::COALESCED,
-        std::vector<at::Tensor>{},
-        [this, ops]() mutable {
-          // One stream per (peer, direction), in the batch's order: the i-th
-          // send to a peer pairs with that peer's i-th recv from this rank.
-          std::vector<std::vector<TCCLEngine::SendSeg>> sends(size_);
-          std::vector<std::vector<TCCLEngine::RecvSeg>> recvs(size_);
-          std::vector<at::Tensor> views;
-          views.reserve(ops.size());
-          for (const auto& op : ops) {
-            views.push_back(mpsSharedCpuView(op.tensor));
-            const at::Tensor& v = views.back();
-            const auto bytes = static_cast<std::size_t>(v.nbytes());
-            if (op.isSend) {
-              sends[op.peer].push_back(
-                  {static_cast<const char*>(v.data_ptr()), bytes});
-            } else {
-              recvs[op.peer].push_back(
-                  {static_cast<char*>(v.data_ptr()), bytes});
-            }
-          }
-          engine_->exchange(sends, recvs, "TCCL p2p batch");
-          for (auto& op : ops) {
-            op.work->finishWork();
-          }
-        },
-        failOps);
-  } catch (...) {
-    // Refused at enqueue: the batch never runs.
-    failOps(std::current_exception());
-    throw;
+    std::rethrow_exception(ep);
   }
+  // The batch's ops join the worker's p2p streams (runP2p) like plain sends
+  // and recvs, so their order inside the batch does not matter. One MPS event,
+  // waited for by the first op, covers the whole batch.
+  auto work = c10::make_intrusive<TCCLWork>(OpType::COALESCED, ++seq_);
+  auto batch = std::make_shared<P2pBatch>(P2pBatch{ops.size(), work});
+  const uint32_t mpsEventId = mpsEventRecord();
+  {
+    std::lock_guard<std::mutex> lock(workMutex_);
+    std::optional<uint32_t> eid = mpsEventId;
+    for (auto& op : ops) {
+      op.batch = batch;
+      workQueue_.push_back(Task{nullptr, std::move(op), eid});
+      eid.reset();
+    }
+  }
+  workCV_.notify_one();
+  return work;
 }
 
 } // namespace c10d

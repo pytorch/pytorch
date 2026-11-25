@@ -555,10 +555,10 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
                 self._assert(out, math.factorial(ws), dtype)
 
     # ---- send / recv (point-to-point over the per-peer UC QP) -----------------
-    # Byte-copy, any dtype. TCCL's single worker thread runs ops in order, so a
-    # plain send blocks until the peer receives; the plain tests use directed or
-    # sequential patterns, and sends and recvs that must overlap go through
-    # batch_isend_irecv (the batch tests below). No recv-before-send handshake:
+    # Byte-copy, any dtype. The worker runs a send or recv together with the
+    # p2p ops queued right behind it, so isend + irecv in either order, and
+    # batch_isend_irecv, have sends and recvs in flight at once (tests below).
+    # No recv-before-send handshake:
     # the ctor RTS barrier brings the QPs up and the sender's stage-copy gives
     # the receiver a head start to post its recv.
     def test_send_recv_chain(self):
@@ -707,6 +707,96 @@ class ProcessGroupTcclCorrectnessTest(TcclTestBase):
             c10d.recv(got, src=0)
             c10d.send(y, dst=0)
             self.assertEqual(got, x)
+
+    def test_batch_send_then_irecv_both_ranks(self):
+        # Ranks 0 and 1 each send in a batch and only then irecv: the irecv must
+        # not wait for the batch to complete.
+        if self.rank > 1:
+            return
+        peer = 1 - self.rank
+        send = torch.full((1 << 18,), float(self.rank + 1), device=self.device)
+        recv = torch.zeros(1 << 18, device=self.device)
+        works = c10d.batch_isend_irecv([c10d.P2POp(c10d.isend, send, peer)])
+        works.append(c10d.irecv(recv, src=peer))
+        for work in works:
+            work.wait()
+        self.assertEqual(recv, torch.full_like(recv, float(peer + 1)))
+
+    def test_isend_irecv_pair_both_send_first(self):
+        # Ranks 0 and 1 both isend 1 MiB to each other and only then irecv: the
+        # irecv must be posted while the isend waits for its peer.
+        if self.rank > 1:
+            return
+        peer = 1 - self.rank
+        send = torch.full((1 << 18,), float(self.rank + 1), device=self.device)
+        recv = torch.zeros(1 << 18, device=self.device)
+        works = [c10d.isend(send, dst=peer), c10d.irecv(recv, src=peer)]
+        for work in works:
+            work.wait()
+        self.assertEqual(recv, torch.full_like(recv, float(peer + 1)))
+
+    def test_isend_irecv_ring_shift(self):
+        ws, r = self.world_size, self.rank
+        send = torch.full((1 << 18,), float(r), device=self.device)
+        recv = torch.zeros(1 << 18, device=self.device)
+        works = [c10d.isend(send, dst=(r + 1) % ws), c10d.irecv(recv, src=(r - 1) % ws)]
+        for work in works:
+            work.wait()
+        self.assertEqual(recv, torch.full_like(recv, float((r - 1) % ws)))
+
+    def test_isend_irecv_keeps_order_per_peer(self):
+        # Plain ops each way between a pair: same-direction ops match in order.
+        if self.rank > 1:
+            return
+        n, dev = 1 << 17, self.device
+        if self.rank == 0:
+            a, b = torch.full((n,), 1.0, device=dev), torch.full((n,), 2.0, device=dev)
+            c = torch.zeros(n, device=dev)
+            works = [c10d.isend(a, dst=1), c10d.isend(b, dst=1), c10d.irecv(c, src=1)]
+        else:
+            a, b = torch.zeros(n, device=dev), torch.zeros(n, device=dev)
+            c = torch.full((n,), 3.0, device=dev)
+            works = [c10d.isend(c, dst=0), c10d.irecv(a, src=0), c10d.irecv(b, src=0)]
+        for work in works:
+            work.wait()
+        self.assertEqual(a, torch.full_like(a, 1.0))
+        self.assertEqual(b, torch.full_like(b, 2.0))
+        self.assertEqual(c, torch.full_like(c, 3.0))
+
+    def test_isend_irecv_zero_bytes(self):
+        # A zero-element op completes without traffic, alone and between real
+        # transfers, and does not shift the ops around it.
+        if self.rank > 1:
+            return
+        n, dev = 1 << 18, self.device
+        e = torch.zeros(0, device=dev)
+        if self.rank == 0:
+            c10d.send(e, dst=1)
+            a, b = torch.full((n,), 1.0, device=dev), torch.full((n,), 2.0, device=dev)
+            works = [c10d.isend(a, dst=1), c10d.isend(e, dst=1), c10d.isend(b, dst=1)]
+        else:
+            c10d.recv(e, src=0)
+            a, b = torch.zeros(n, device=dev), torch.zeros(n, device=dev)
+            works = [c10d.irecv(a, src=0), c10d.irecv(e, src=0), c10d.irecv(b, src=0)]
+        for work in works:
+            work.wait()
+        self.assertEqual(a, torch.full_like(a, 1.0))
+        self.assertEqual(b, torch.full_like(b, 2.0))
+
+    def test_collective_after_isend_irecv_waits_for_them(self):
+        # A collective queued behind p2p ops runs after them, and the p2p
+        # results are not disturbed by it.
+        ws, r = self.world_size, self.rank
+        send = torch.full((1 << 18,), float(r), device=self.device)
+        recv = torch.zeros(1 << 18, device=self.device)
+        works = [c10d.isend(send, dst=(r + 1) % ws), c10d.irecv(recv, src=(r - 1) % ws)]
+        t = torch.full((1024,), float(r + 1), device=self.device)
+        c10d.all_reduce(t)
+        for work in works:
+            self.assertTrue(work.is_completed())
+            work.wait()
+        self.assertEqual(recv, torch.full_like(recv, float((r - 1) % ws)))
+        self._assert(t, ws * (ws + 1) // 2, torch.float32)
 
     def test_collective_inside_batch_rejects_and_closes_it(self):
         # A collective after recorded sends/recvs would run before them.

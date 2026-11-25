@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -393,21 +394,62 @@ class TCCLEngine {
       std::size_t count_per_rank,
       ReduceOp reduce_op);
 
-  // Point-to-point send: stream `nbytes` from `in` to peer `dst` over its UC
-  // QP, chunked at kChunkSize through the per-peer send buffer (PIPELINE=1, one
-  // chunk in flight).
-  void p2p_send(int dst, const char* in, std::size_t nbytes);
+  // Point-to-point streams, advanced together: every (peer, direction) is an
+  // ordered list of segments, cut into kChunkSize chunks with up to
+  // kPipelineDepth in flight on double-buffered staging, so the copy of one
+  // chunk overlaps the wire of the next. Segments can be added while it runs;
+  // the i-th segment of a stream pairs with the peer's i-th segment in the
+  // other direction. Zero-byte segments complete without traffic.
+  class P2pStreams {
+   public:
+    explicit P2pStreams(TCCLEngine& engine)
+        : e_(engine),
+          send_(static_cast<std::size_t>(engine.size_)),
+          recv_(static_cast<std::size_t>(engine.size_)) {}
+    void addSend(int peer, const char* ptr, std::size_t bytes, std::size_t tag);
+    void addRecv(int peer, char* ptr, std::size_t bytes, std::size_t tag);
+    // Posts what it can, polls every busy peer once, and appends the tags of
+    // the segments that completed to `done`. Returns whether a chunk
+    // completed. Throws DistBackendError on a failed work completion.
+    bool poll(std::vector<std::size_t>& done, const char* what);
+    // True once every segment added so far has completed.
+    bool empty() const;
 
-  // Point-to-point recv: receive `nbytes` from peer `src` into `out`, chunked
-  // through the per-peer recv buffer (PIPELINE=1). Posts the recv before
-  // polling.
-  void p2p_recv(int src, char* out, std::size_t nbytes);
+   private:
+    struct Seg {
+      const char* src; // send
+      char* dst; // recv
+      std::size_t bytes;
+      std::size_t tag;
+    };
+    struct Chunk {
+      std::size_t seg; // absolute segment index
+      std::size_t off;
+      std::size_t len;
+      int slot;
+    };
+    struct Stream {
+      std::deque<Seg> segs; // segs[i] has absolute index base + i
+      std::size_t base = 0;
+      std::size_t next = 0; // absolute index of the segment being posted
+      std::size_t next_off = 0; // bytes of it posted
+      std::size_t front_done = 0; // bytes of segs.front() completed
+      std::deque<Chunk> inflight;
+      std::size_t chunks = 0; // chunks posted; chunk k uses slot k % depth
+    };
+    void post(int peer, bool isSend);
+    static void retire(Stream& s, std::vector<std::size_t>& done);
+
+    TCCLEngine& e_;
+    std::vector<Stream> send_;
+    std::vector<Stream> recv_;
+  };
 
   // Mesh (direct) all-to-all. Slab destined for peer p is [send_base +
   // send_off[p], +send_bytes[p]); slab from peer p lands at [recv_base +
   // recv_off[p], +recv_bytes[p]). Handles equal AND uneven (alltoallv) splits.
-  // Self slot is a local memcpy. Every peer served simultaneously (recv+send in
-  // flight per peer, kChunkSize, PIPELINE=1), recv before send (UC discipline).
+  // Self slot is a local memcpy. Every peer served simultaneously through
+  // P2pStreams, recv before send (UC discipline).
   void all_to_all(
       const char* send_base,
       char* recv_base,
@@ -426,7 +468,7 @@ class TCCLEngine {
     std::size_t bytes;
   };
 
-  // Per-peer exchange, the core of all_to_all and of a batch of p2p ops: sends
+  // Per-peer exchange, the core of all_to_all: sends
   // the segments in sends[p] to, and receives into the segments in recvs[p]
   // from, every peer at once, each list in order. Every (peer, direction)
   // advances on its own, so none waits on another. Zero-byte segments are
