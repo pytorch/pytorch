@@ -498,6 +498,12 @@ use_recursive_dict_tags_for_guards = False
 # useful for regional compilation.
 max_saved_pointers_for_recursive_dict_tags_check = 256
 
+# When a recorded subtree changes but its guards still pass (e.g. an attribute
+# is set and then restored, or a lazily initialized field is filled in once),
+# re-record the subtree up to this many times per tag safe root before
+# disabling the recursive dict tag optimization for that root.
+max_recursive_dict_tag_rerecords = 4
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
