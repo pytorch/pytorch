@@ -295,6 +295,9 @@ def _plain_tree(x) -> bool:
         return all(map(_plain_tree, x))
     if t is dict:
         return all(map(_plain_tree, x.values()))
+    if _made_of(x) is not None:
+        # A float in a cell can't be swapped for the trace: it is a value.
+        return False
     return not _is_tree(x) and (not isinstance(x, float) or t is float or t is _Scalar)
 
 
@@ -496,6 +499,50 @@ def _flatten(x):
     return pytree.tree_flatten(x, is_leaf=lambda y: not _is_tree(y))
 
 
+# The functions being walked (a closure can hold itself).
+_walking: set[int] = set()
+
+
+def _made_of(x):
+    """``(shape, parts)`` of a function that is made of more than its code,
+    None for anything else: a function with a closure or defaults (its
+    defaults, then what its cells hold), a bound method (its function and its
+    self), a ``functools.partial`` (its function, its args, its keyword
+    values). One made anew on every call can't be told by identity, so a
+    region guards it as it guards a container: by the shape, and each part by
+    the rule of its type. A tensor in a cell is then an input of the graph:
+    the region computes with the one this call's closure holds. A function
+    with neither closure nor defaults is what it is, by identity."""
+    t = type(x)
+    if t is types.FunctionType:
+        cells = x.__closure__ or ()
+        defaults = x.__defaults__ or ()
+        named = x.__kwdefaults__ or {}
+        if not (cells or defaults or named) or id(x) in _walking:
+            return None
+        held = []
+        for c in cells:
+            try:
+                held.append(c.cell_contents)
+            except ValueError:
+                # A cell nothing is bound to yet.
+                held.append(NULL)
+        shape = (
+            t,
+            x.__code__,
+            id(x.__globals__),
+            len(defaults),
+            tuple(named),
+            len(cells),
+        )
+        return shape, [*defaults, *named.values(), *held]
+    if t is types.MethodType:
+        return (t,), [x.__func__, x.__self__]
+    if t is functools.partial:
+        return (t, tuple(x.keywords)), [x.func, *x.args, *x.keywords.values()]
+    return None
+
+
 def _walk(x, leaves, shape):
     """Appends x's leaves to `leaves` and its structure to `shape`: as
     _flatten, without pytree for exact lists, tuples and dicts (run on every
@@ -509,6 +556,14 @@ def _walk(x, leaves, shape):
         shape.append((dict, tuple(x)))
         for y in x.values():
             _walk(y, leaves, shape)
+    elif (made := _made_of(x)) is not None:
+        shape.append(made[0])
+        _walking.add(id(x))
+        try:
+            for y in made[1]:
+                _walk(y, leaves, shape)
+        finally:
+            _walking.discard(id(x))
     elif _is_tree(x):
         node = pytree.SUPPORTED_NODES.get(t)
         if node is None:
@@ -824,7 +879,7 @@ def _plan(args, unused, span=False, scalars=False):
             # A str, a device, a dtype: what it is, not which object it is
             # (`tensor.device` is a new object on every read). func checks it.
             plan.append(("equal", type(a), a))
-        elif _is_tree(a):
+        elif _is_tree(a) or _made_of(a) is not None:
             leaves, shape = [], []
             _walk(a, leaves, shape)
             plain = scalars and _plain_tree(a)
@@ -1446,18 +1501,28 @@ def _const_homes(args, consts):
 
 
 def _tree_holders(args, plan):
-    """The containers and pytree nodes inside the args a region reads as
-    trees (with the nodes' own ``__dict__``): what `func` checks by structure
-    and leaf on every call."""
+    """The containers, pytree nodes and functions made of parts (see
+    _made_of; with their cells) inside the args a region reads as trees (with
+    the nodes' own ``__dict__``): what `func` checks by structure and leaf on
+    every call."""
     out = []
+    seen: set[int] = set()
     todo = [a for a, p in zip(args, plan) if p is not None and p[0] == "tree"]
     while todo:
         x = todo.pop()
         t = type(x)
+        if id(x) in seen:
+            continue
+        seen.add(id(x))
         if t is list or t is tuple:
             todo.extend(x)
         elif t is dict:
             todo.extend(x.values())
+        elif (made := _made_of(x)) is not None:
+            # The body reads the cells: the region is handed what they hold.
+            if t is types.FunctionType:
+                out.extend(x.__closure__ or ())
+            todo.extend(made[1])
         elif _is_tree(x):
             node = pytree.SUPPORTED_NODES.get(t)
             attrs = getattr(x, "__dict__", None)
