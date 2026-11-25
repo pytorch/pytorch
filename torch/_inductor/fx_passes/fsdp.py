@@ -195,6 +195,7 @@ def bucket_fsdp_all_gather(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
     mode: BucketMode = "default",
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> None:
     """
     Bucketing pass for SimpleFSDP all_gather ops.
@@ -216,16 +217,18 @@ def bucket_fsdp_all_gather(
         gm,
         bucket_cap_mb_by_bucket_idx,
         filter_wait_node=is_fsdp_all_gather_wait,
+        mutation_deps=mutation_deps,
     )
     if len(ag_buckets) == 0:
         return
-    merge_all_gather(gm, ag_buckets, mode)
+    merge_all_gather(gm, ag_buckets, mode, mutation_deps=mutation_deps)
 
 
 def bucket_fsdp_reduce_scatter(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
     mode: BucketMode = "default",
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> None:
     """
     Bucketing pass for SimpleFSDP reduce_scatter ops.
@@ -253,16 +256,18 @@ def bucket_fsdp_reduce_scatter(
         bucket_cap_mb_by_bucket_idx,
         filter_wait_node=is_fsdp_reduce_scatter_wait,
         mode=rs_bucket_mode,
+        mutation_deps=mutation_deps,
     )
     if len(rs_buckets) == 0:
         return
-    merge_reduce_scatter(gm, rs_buckets, mode)
+    merge_reduce_scatter(gm, rs_buckets, mode, mutation_deps=mutation_deps)
 
 
 def bucket_fsdp_all_reduce(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float] | None = None,
     fsdp_groups: OrderedSet[str] | None = None,
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> None:
     """Bucketing pass for FSDP all_reduce ops.
 
@@ -288,10 +293,17 @@ def bucket_fsdp_all_reduce(
         return _get_group_name(ar_node) in fsdp_groups  # type: ignore[arg-type]
 
     ar_buckets = bucket_all_reduce_by_mb(
-        gm, bucket_cap_mb_by_bucket_idx, filter_wait_node=is_fsdp_all_reduce_wait
+        gm,
+        bucket_cap_mb_by_bucket_idx,
+        filter_wait_node=is_fsdp_all_reduce_wait,
+        mutation_deps=mutation_deps,
     )
     for bucket in ar_buckets:
-        merge_all_reduce_bucket(gm.graph, bucket)
+        merge_all_reduce_bucket(gm.graph, bucket, mutation_deps=mutation_deps)
+    if ar_buckets and mutation_deps is not None:
+        from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+        _stable_topological_sort(gm.graph, mutation_deps)
 
 
 def _get_collective_kwargs(n: fx.Node) -> dict[str, object]:
@@ -469,6 +481,7 @@ def pre_bucket_fsdp_collectives(
     gm: torch.fx.GraphModule,
     mode: BucketMode | None = None,
     bucket_cap_mb: float | None = None,
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> None:
     """Pre-bucket FSDP collectives before overlap scheduling.
 
@@ -521,13 +534,22 @@ def pre_bucket_fsdp_collectives(
 
     resolved_mode: BucketMode = mode or "default"
     bucket_fsdp_all_gather(
-        gm, bucket_cap_mb_by_bucket_idx=bucket_cap_fn, mode=resolved_mode
+        gm,
+        bucket_cap_mb_by_bucket_idx=bucket_cap_fn,
+        mode=resolved_mode,
+        mutation_deps=mutation_deps,
     )
     bucket_fsdp_reduce_scatter(
-        gm, bucket_cap_mb_by_bucket_idx=bucket_cap_fn, mode=resolved_mode
+        gm,
+        bucket_cap_mb_by_bucket_idx=bucket_cap_fn,
+        mode=resolved_mode,
+        mutation_deps=mutation_deps,
     )
     bucket_fsdp_all_reduce(
-        gm, bucket_cap_mb_by_bucket_idx=bucket_cap_fn, fsdp_groups=fsdp_groups
+        gm,
+        bucket_cap_mb_by_bucket_idx=bucket_cap_fn,
+        fsdp_groups=fsdp_groups,
+        mutation_deps=mutation_deps,
     )
 
     ag_count_after = _count_fsdp(_find_all_gathers(gm.graph))

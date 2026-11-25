@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import heapq
-from collections import Counter, defaultdict
+from collections import defaultdict
+from functools import partial
 from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
+from torch._inductor import config
 from torch._inductor.fx_passes.bucketing import (
     _get_collective_node_from_wait,
     _schedulable_wait_node,
@@ -54,6 +56,7 @@ class _BucketPlanReachability:
         self,
         graph_nodes: list[fx.Node],
         endpoints: list[fx.Node],
+        extra_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
     ) -> None:
         self.endpoint_to_idx = {node: i for i, node in enumerate(endpoints)}
         self.endpoint_ancestors = [0] * len(endpoints)
@@ -65,7 +68,10 @@ class _BucketPlanReachability:
         for node_idx, node in enumerate(graph_nodes):
             ancestors = 0
             # All reachable endpoints to a node input transitively apply to this node.
-            for input_node in node.all_input_nodes:
+            inputs = OrderedSet(node.all_input_nodes)
+            if extra_deps is not None:
+                inputs.update(extra_deps.get(node, ()))
+            for input_node in inputs:
                 ancestors |= reachable_endpoints[node_to_idx[input_node]]
             endpoint_idx = self.endpoint_to_idx.get(node)
             if endpoint_idx is not None:
@@ -171,11 +177,14 @@ def _bucket_trace_inputs(
     return inputs
 
 
-def _all_gather_bucket_trace_inputs(coll_node: fx.Node) -> list[fx.Node]:
+def _all_gather_bucket_trace_inputs(
+    coll_node: fx.Node,
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
+) -> list[fx.Node]:
     node_in: object = coll_node.args[0]
     # The dtype conversion is erased by the all-gather bucket trace, so anchor
     # insertion on the tensor that remains as a graph input to the bucket.
-    if has_mergeable_all_gather_convert_dtype(coll_node):
+    if has_mergeable_all_gather_convert_dtype(coll_node, mutation_deps):
         if not isinstance(node_in, fx.Node):
             raise AssertionError(
                 f"expected node input to be a Node, got {type(node_in)}"
@@ -194,7 +203,9 @@ def _all_reduce_bucket_trace_inputs(coll_node: fx.Node) -> list[fx.Node]:
 
 
 def _do_stable_topological_sort_if_needed(
-    graph: fx.Graph, changed_nodes: Iterable[fx.Node]
+    graph: fx.Graph,
+    changed_nodes: Iterable[fx.Node],
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> None:
     """Restore stable topological order if a changed node crosses an edge.
 
@@ -203,13 +214,17 @@ def _do_stable_topological_sort_if_needed(
     backward edge is then incident to ``changed_nodes``.
     """
     node_positions = {n: i for i, n in enumerate(graph.nodes)}
+    if mutation_deps is not None:
+        changed_nodes = OrderedSet((*changed_nodes, *mutation_deps))
     for node in changed_nodes:
         if node not in node_positions:
             continue
         node_pos = node_positions[node]
+        inputs = OrderedSet(node.all_input_nodes)
+        if mutation_deps is not None:
+            inputs.update(mutation_deps.get(node, ()))
         has_late_input = any(
-            inp in node_positions and node_positions[inp] > node_pos
-            for inp in node.all_input_nodes
+            inp in node_positions and node_positions[inp] > node_pos for inp in inputs
         )
         has_early_user = any(
             user in node_positions and node_positions[user] < node_pos
@@ -218,7 +233,8 @@ def _do_stable_topological_sort_if_needed(
         if has_late_input or has_early_user:
             from torch._dynamo.graph_deduplication import _stable_topological_sort
 
-            _stable_topological_sort(graph, {})
+            deps = mutation_deps if mutation_deps is not None else {}
+            _stable_topological_sort(graph, deps)
             return
 
 
@@ -226,17 +242,19 @@ def _move_wait_users_after_latest_inputs(
     graph: fx.Graph,
     replacements: dict[fx.Node, fx.Node],
     replaced_users: dict[fx.Node, list[fx.Node]],
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> None:
     changed_nodes: OrderedSet[fx.Node] = OrderedSet(replacements.values())
     for old_out in replacements:
         changed_nodes.update(replaced_users.get(old_out, ()))
-    _do_stable_topological_sort_if_needed(graph, changed_nodes)
+    _do_stable_topological_sort_if_needed(graph, changed_nodes, mutation_deps)
 
 
 def _move_overlap_nodes(
     graph: fx.Graph,
     overlap_deps: dict[fx.Node, OrderedSet[fx.Node]],
     bucketed_node_types: dict[fx.Node, str],
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> None:
     if not overlap_deps:
         return
@@ -284,7 +302,7 @@ def _move_overlap_nodes(
 
     # Moving only the closed part of a chain can leave a boundary edge pointing
     # backward. Repair once after all requested overlap moves have been applied.
-    _do_stable_topological_sort_if_needed(graph, moved_nodes)
+    _do_stable_topological_sort_if_needed(graph, moved_nodes, mutation_deps)
 
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
@@ -314,7 +332,11 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             ),
             key=lambda node: self.node_idx[node],
         )
-        self._bucket_plan_reachability = _BucketPlanReachability(graph_nodes, endpoints)
+        self._bucket_plan_reachability = _BucketPlanReachability(
+            graph_nodes,
+            endpoints,
+            extra_deps=self.mutation_deps,
+        )
 
     def _bucket_group(
         self, coll_nodes: list[fx.Node]
@@ -335,7 +357,9 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         replaced_users = {wait: list(wait.users) for wait in waits}
 
         if is_all_gather(first):
-            bucket_trace_inputs = _all_gather_bucket_trace_inputs
+            bucket_trace_inputs = partial(
+                _all_gather_bucket_trace_inputs, mutation_deps=self.mutation_deps
+            )
             merge_bucket = merge_all_gather_bucket
             node_type = "bucketed_all_gather"
         elif is_reduce_scatter(first):
@@ -371,6 +395,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             wait_insertion_point=wait_insertion_point,
             insert_before=next_node,
             mode=self.bucket_mode,
+            mutation_deps=self.mutation_deps,
         )
 
         logger.debug(f"bucketing nodes: {coll_nodes} into {new_nodes}")  # noqa: G004
@@ -500,7 +525,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         # Repair after all groups so the full-graph sort runs at most once.
         if replacements:
             _move_wait_users_after_latest_inputs(
-                self.graph, replacements, replaced_users
+                self.graph, replacements, replaced_users, self.mutation_deps
             )
 
     def manual_bucket_collectives(self, nodes: list[fx.Node]) -> None:
@@ -532,6 +557,7 @@ class ManualOverlapScheduler(OverlapScheduler):
         insert_overlap_deps: bool,
         module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
         bucket_mode: BucketMode | None = None,
+        mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
     ):
         # Manual overlap historically used "custom_ops" mode for bucketing
         bucket_mode = bucket_mode or "custom_ops"
@@ -554,6 +580,8 @@ class ManualOverlapScheduler(OverlapScheduler):
             max_memory_increase_gb=None,
             max_memory_increase_ratio=None,
             bucket_mode=bucket_mode,
+            mutation_deps=mutation_deps,
+            prioritize_fusion_regions=config.aten_distributed_optimizations.prioritize_fusion_regions,
         )
         self.module_bucket_plans = module_bucket_plans
         self.nodes_in_subgraph: list[list[fx.Node]] = []
@@ -563,6 +591,7 @@ class ManualOverlapScheduler(OverlapScheduler):
             collective_info=self.collective_info,
             scheduled=OrderedSet(self.graph.nodes),
             bucket_mode=bucket_mode,
+            mutation_deps=self.mutation_deps,
         )
         self.insert_overlap_deps = insert_overlap_deps
 
@@ -635,7 +664,6 @@ class ManualOverlapScheduler(OverlapScheduler):
         overlap_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
 
         # Re-initialize after graph modification in _manual_bucket_collectives
-        self.node_idx = {n: i for i, n in enumerate(self.nodes)}
         self.on_path_ready = []
         self.scheduled = OrderedSet()
         for node in self.nodes:
@@ -697,7 +725,19 @@ class ManualOverlapScheduler(OverlapScheduler):
                 for ag in picked_ag:
                     overlap_deps[last_compute].add(ag)
 
-        _move_overlap_nodes(self.graph, overlap_deps, self.bucketer.bucketed_node_types)
+        if self.mutation_deps is not None:
+            overlap_deps = {
+                n: OrderedSet(
+                    dep for dep in deps if not self.node_ancestors.is_ancestor(n, dep)
+                )
+                for n, deps in overlap_deps.items()
+            }
+        _move_overlap_nodes(
+            self.graph,
+            overlap_deps,
+            self.bucketer.bucketed_node_types,
+            self.mutation_deps,
+        )
         self.graph.lint()
 
         if self.insert_overlap_deps:
@@ -705,7 +745,9 @@ class ManualOverlapScheduler(OverlapScheduler):
                 preserve_node_ordering,
             )
 
-            preserve_node_ordering(self.graph, overlap_deps)
+            preserve_node_ordering(
+                self.graph, overlap_deps, mutation_deps=self.mutation_deps
+            )
 
     def _manual_bucket_collectives(self) -> None:
         """Bucket nodes in each module_bucket from module_bucket_plans."""
@@ -715,16 +757,20 @@ class ManualOverlapScheduler(OverlapScheduler):
 
         self.graph.lint()
         self.nodes = list(self.graph.nodes)
-        self.in_degree = Counter(user for node in self.nodes for user in node.users)
+        self._refresh_dependencies()
+        if self.mutation_deps is not None:
+            self.node_ancestors = self._collect_node_ancestors()
 
     def _schedule(self, node: fx.Node) -> None:
         """Schedule a node."""
         if node in self.scheduled:
             raise AssertionError(f"node already scheduled: {node}")
-        if not all(n in self.scheduled for n in node.all_input_nodes):
+        if not all(
+            n in self.scheduled for n in self._parent_lists[self.node_idx[node]]
+        ):
             raise AssertionError(f"all input nodes must be scheduled before {node}")
         self.scheduled.add(node)
-        for user in node.users:
+        for user in self._user_lists[self.node_idx[node]]:
             self.in_degree[user] -= 1
             if self.in_degree[user] == 0:
                 self._add_to_ready_queue(user)
@@ -759,6 +805,7 @@ def manual_overlap_bucketing(
     insert_overlap_deps: bool = False,
     module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
     bucket_mode: BucketMode | None = None,
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes based on user specifications in module_bucket_plans
     The manual overlapping consists of two steps:
@@ -786,6 +833,7 @@ def manual_overlap_bucketing(
         insert_overlap_deps,
         module_stack_fn,
         bucket_mode=bucket_mode,
+        mutation_deps=mutation_deps,
     ).run()
     overlapped_gm.recompile()
     return overlapped_gm

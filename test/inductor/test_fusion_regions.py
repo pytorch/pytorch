@@ -6,18 +6,26 @@ import unittest
 from unittest.mock import patch
 
 import torch
+import torch.distributed as dist
+import torch.fx as fx
 from torch._inductor import config
+from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.fx_passes import fusion_regions
+from torch._inductor.fx_passes.control_dependencies import get_mutation_dependencies
 from torch._inductor.fx_passes.fusion_regions import (
     build_fusion_regions,
     estimate_fused_node_costs,
 )
-from torch._inductor.fx_passes.overlap_scheduling import gather_node_runtime_estimations
+from torch._inductor.fx_passes.overlap_scheduling import (
+    gather_node_runtime_estimations,
+    OverlapScheduler,
+)
 from torch._inductor.fx_utils import get_storage
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.ops import aten
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -34,6 +42,19 @@ class TestFusionCandidates(InductorTestCase):
     def _make_graph(self, fn, *shapes):
         with FakeTensorMode():
             return make_fx(fn)(*(torch.ones(shape) for shape in shapes))
+
+    def test_mutation_deps_without_distributed(self):
+        def fn(x, y):
+            old = x.sin()
+            x.copy_(y)
+            return old, x
+
+        gm = self._make_graph(fn, (4,), (4,))
+        reader = next(n for n in gm.graph.nodes if n.target is aten.sin.default)
+        writer = next(n for n in gm.graph.nodes if n.target is aten.copy_.default)
+        with patch.object(torch.ops, "_c10d_functional", object()):
+            deps = get_mutation_dependencies(gm)
+        self.assertIn(reader, (deps or {}).get(writer, ()))
 
     @parametrize(
         "kind", ("mm", "bmm", "addmm", "baddbmm", "row_reduction", "horizontal")
@@ -97,6 +118,105 @@ class TestFusionCandidates(InductorTestCase):
         storage = get_storage(buffer.meta["val"])
         self.assertEqual(any(get_storage(t) == storage for t in outputs), prioritize)
         self.assertEqual(custom[cat], 42.0 if prioritize else 0.0)
+
+    @unittest.skipUnless(dist.is_available(), "requires distributed")
+    @parametrize("destination", ("input", "out"))
+    def test_collective_accesses_last_until_wait(self, destination):
+        c10d = torch.ops._c10d_functional
+        graph = fx.Graph()
+        buffer, out, source = [
+            graph.placeholder(n) for n in ("buffer", "out", "source")
+        ]
+        with FakeTensorMode():
+            sizes = (4, 8, 4 if destination == "input" else 8)
+            for node, size in zip((buffer, out, source), sizes):
+                node.meta["val"] = torch.ones(size)
+        collective = graph.call_function(
+            c10d.all_gather_into_tensor_out.default,
+            (buffer, 2, "group"),
+            {"out": out},
+        )
+        collective.meta["val"] = out.meta["val"]
+        wait = graph.call_function(c10d.wait_tensor.default, (collective,))
+        wait.meta["val"] = out.meta["val"]
+        target = buffer if destination == "input" else out
+        writer = graph.call_function(aten.copy_.default, (target, source))
+        writer.meta["val"] = target.meta["val"]
+        graph.output((wait, writer))
+        gm = fx.GraphModule({}, graph)
+        self.assertIn(wait, (get_mutation_dependencies(gm) or {}).get(writer, ()))
+        source.meta.pop("val")
+        self.assertIsNone(get_mutation_dependencies(gm))
+
+
+@unittest.skipUnless(dist.is_available(), "requires distributed operators")
+class TestMutationDependencyLowering(InductorTestCase):
+    @parametrize("kind", ("copy", "out", "foreach", "materializing_view", "getitem"))
+    def test_reordered_mutations_compile(self, device, kind):
+        def fn(buffer, source):
+            alias = buffer.view(4, 4)
+            if kind == "materializing_view":
+                old = buffer.T.reshape(-1)
+            elif kind == "getitem":
+                old = buffer[[0, 1, 2, 3]]
+            else:
+                old = buffer.sin()
+            if kind == "out":
+                torch.add(source, source, out=alias)
+            elif kind == "foreach":
+                torch._foreach_copy_([alias], [source])
+            else:
+                alias.copy_(source)
+            middle = buffer.sum()
+            buffer.copy_(source + 1)
+            return old, middle, alias.sum(), buffer
+
+        with FakeTensorMode():
+            gm = make_fx(fn)(
+                torch.ones(4, 4, device=device), torch.ones(4, 4, device=device)
+            )
+        original_nodes = set(gm.graph.nodes)
+        with (
+            patch.object(
+                OverlapScheduler,
+                "_compute_off_path_score",
+                lambda self, n: -self.node_idx[n],
+            ),
+            patch.object(
+                OverlapScheduler,
+                "_align_compute_nodes_runtime_estimations_across_all_distributed_ranks",
+            ),
+        ):
+            OverlapScheduler(
+                gm,
+                max_in_flight_gb=1.0,
+                max_compute_pre_fetch=1,
+                collective_bucketing=False,
+                insert_overlap_deps=False,
+                compute_overlap_multipler=1.0,
+                max_coll_distance=1,
+                custom_runtime_estimation=lambda node, size: 1.0,
+                prioritize_fusion_regions=True,
+            ).run()
+        self.assertEqual(set(gm.graph.nodes), original_nodes)
+        gm.recompile()
+
+        buffer = torch.ones(4, 4, device=device)
+        source = torch.full((4, 4), 2.0, device=device)
+        expected = fn(buffer.clone(), source)
+        self.assertEqual(gm(buffer.clone(), source), expected)
+        if kind == "out":
+            actual = torch.compile(gm, fullgraph=True)(buffer.clone(), source)
+        else:
+            actual = compile_fx_inner(gm, [buffer, source], is_inference=True)(
+                [buffer.clone(), source]
+            )
+        self.assertEqual(actual, expected)
+
+
+instantiate_device_type_tests(
+    TestMutationDependencyLowering, globals(), only_for=("cpu", GPU_TYPE)
+)
 
 
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

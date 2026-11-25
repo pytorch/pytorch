@@ -8,9 +8,10 @@ operations (e.g., collective_start -> mm -> wait), this pass wraps operations
 with control_deps to make dependencies explicit.
 """
 
-from operator import attrgetter
+from operator import attrgetter, getitem
 from typing import cast
 
+import torch
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
@@ -136,6 +137,8 @@ def preserve_node_ordering(
     graph: fx.Graph,
     additional_deps_map: dict[fx.Node, OrderedSet[fx.Node]],
     verbose: bool = False,
+    *,
+    mutation_deps: dict[fx.Node, OrderedSet[fx.Node]] | None = None,
 ) -> None:
     """
     Preserve node ordering using control_deps HOP with subgraph.
@@ -149,6 +152,8 @@ def preserve_node_ordering(
         graph: The FX graph to modify
         additional_deps_map: Mapping from dependent nodes to their dependencies
         verbose: If True, print debug information
+        mutation_deps: Optional consumer-to-predecessor table for this graph.
+            Keys and predecessors are remapped in place after wrapping.
     """
     if not additional_deps_map:
         return
@@ -224,6 +229,233 @@ def preserve_node_ordering(
 
         # Track the replacement for future dependencies
         replacements[dependent_node] = ordered_node
+
+    if mutation_deps is not None:
+        updated = {
+            replacements.get(n, n): OrderedSet(replacements.get(d, d) for d in deps)
+            for n, deps in mutation_deps.items()
+        }
+        mutation_deps.clear()
+        mutation_deps.update(updated)
+
+
+def _get_subgraph(reference: object) -> fx.GraphModule | None:
+    if (
+        not isinstance(reference, fx.Node)
+        or reference.op != "get_attr"
+        or not isinstance(reference.target, str)
+    ):
+        return None
+    subgraph = reference.graph.owning_module
+    if subgraph is None:
+        return None
+    for name in reference.target.split("."):
+        if not hasattr(subgraph, name):
+            return None
+        subgraph = getattr(subgraph, name)
+    return subgraph if isinstance(subgraph, fx.GraphModule) else None
+
+
+def _node_storages(node: fx.Node) -> OrderedSet[int] | None:
+    from torch._inductor.fx_utils import get_node_storage, get_storage
+
+    if node.meta.get("val") is None:
+        if (
+            isinstance(node.target, torch._ops.OpOverload)
+            and not node.target._schema.returns
+        ):
+            return OrderedSet()
+        if node.target is torch.ops.higher_order.triton_kernel_wrapper_mutation:
+            return OrderedSet()
+        if node.target is control_deps:
+            subgraph = _get_subgraph(node.args[1])
+            if subgraph is None:
+                return None
+            output = next(n for n in subgraph.graph.nodes if n.op == "output")
+            storages: OrderedSet[int] = OrderedSet()
+            for source in pytree.tree_leaves(output.args[0]):
+                if isinstance(source, fx.Node):
+                    source_storages = _node_storages(source)
+                    if source_storages is None:
+                        return None
+                    storages.update(source_storages)
+            return storages
+        if _get_subgraph(node) is not None:
+            return OrderedSet()
+        return None
+    storage = get_node_storage(node)
+    if storage is not None:
+        return OrderedSet([storage])
+    storages: OrderedSet[int] = OrderedSet()
+    for value in pytree.tree_leaves(node.meta["val"]):
+        if isinstance(value, torch.Tensor):
+            if not torch._C._has_storage(value):
+                return None
+            storages.add(get_storage(value))
+    return storages
+
+
+def _get_written_storages(node: fx.Node) -> OrderedSet[int] | None:
+    r"""Find storages written by this node or its wrapped subgraph.
+
+    Return ``None`` when required storage metadata is unavailable, and an
+    empty set when the node has no writes.
+
+    Example::
+        INPUT:
+            x = placeholder()           # storage 1
+            y = placeholder()           # storage 2
+            copied = aten.copy_(x, y)   # storage 1
+            result = output(copied)
+
+            node = copied
+
+        OUTPUT:
+            OrderedSet([1])
+    """
+    from torch._inductor.fx_utils import get_mutated_input_nodes
+
+    storages: OrderedSet[int] = OrderedSet()
+    if node.target is control_deps:
+        subgraph = _get_subgraph(node.args[1])
+        if subgraph is None:
+            return None
+        nested_writes = _graph_storage_writes(subgraph)
+        if nested_writes is None:
+            return None
+        for nested in nested_writes.values():
+            storages.update(nested)
+    for written in get_mutated_input_nodes(node):
+        value = written.meta.get("val")
+        if not any(isinstance(x, torch.Tensor) for x in pytree.tree_leaves(value)):
+            target = (
+                node.args[1]
+                if node.target is torch.ops.higher_order.with_effects
+                else node.target
+            )
+            if (
+                target is torch.ops.higher_order.triton_kernel_wrapper_mutation
+                and isinstance(
+                    value,
+                    (
+                        int,
+                        float,
+                        bool,
+                        complex,
+                        torch.SymInt,
+                        torch.SymFloat,
+                        torch.SymBool,
+                    ),
+                )
+            ):
+                continue
+            return None
+        input_storages = _node_storages(written)
+        if input_storages is None:
+            return None
+        storages.update(input_storages)
+    return storages
+
+
+def _graph_storage_writes(
+    gm: fx.GraphModule,
+) -> dict[fx.Node, OrderedSet[int]] | None:
+    from torch._inductor.fx_passes.bucketing import _get_collective_node_from_wait
+
+    writes: dict[fx.Node, OrderedSet[int]] = {}
+    for node in gm.graph.nodes:
+        storages = _get_written_storages(node)
+        if storages is None:
+            return None
+        collective = _get_collective_node_from_wait(node)
+        if collective is not None:
+            # An out collective's write completes at its wait.
+            storages.update(writes.get(collective, ()))
+        if storages:
+            writes[node] = storages
+    return writes
+
+
+def _storage_reads(node: fx.Node, has_writes: bool) -> OrderedSet[int] | None:
+    from torch._inductor.fx_passes.bucketing import _get_collective_node_from_wait
+    from torch._inductor.fx_passes.fusion_regions import is_view_node
+
+    first = node.args[0] if node.args else None
+    value = first.meta.get("val") if isinstance(first, fx.Node) else first
+    if not has_writes and node.target is getitem and type(value) in (tuple, list, dict):
+        return OrderedSet()
+    reads: OrderedSet[int] = OrderedSet()
+    sources = list(node.all_input_nodes)
+    collective = _get_collective_node_from_wait(node)
+    if collective is not None:
+        # NCCL can access the launch inputs until its wait completes.
+        sources.extend(collective.all_input_nodes)
+    for source in sources:
+        storages = _node_storages(source)
+        if storages is None:
+            return None
+        reads.update(storages)
+    if not has_writes and is_view_node(node):
+        outputs = _node_storages(node)
+        if outputs and outputs <= reads:
+            return OrderedSet()
+    return reads
+
+
+def _mutation_ordering_plan(
+    gm: fx.GraphModule, writes: dict[fx.Node, OrderedSet[int]]
+) -> dict[fx.Node, OrderedSet[fx.Node]] | None:
+    mutated = OrderedSet(s for storages in writes.values() for s in storages)
+    nodes = list(gm.graph.nodes)
+    node_indices = {node: index for index, node in enumerate(nodes)}
+    ancestors: dict[fx.Node, int] = {}
+    last_writer: dict[int, fx.Node] = {}
+    readers: dict[int, OrderedSet[fx.Node]] = {}
+    plan: dict[fx.Node, OrderedSet[fx.Node]] = {}
+    for node in nodes:
+        covered = 0
+        for source in node.all_input_nodes:
+            covered |= ancestors[source] | (1 << node_indices[source])
+        written = writes.get(node, OrderedSet())
+        reads = _storage_reads(node, bool(written))
+        if reads is None:
+            return None
+        reads &= mutated
+        deps: OrderedSet[fx.Node] = OrderedSet()
+        for storage in reads | written:
+            if storage in last_writer:
+                deps.add(last_writer[storage])
+        for storage in written:
+            deps.update(readers.get(storage, ()))
+        for dep in deps:
+            covered |= ancestors[dep]
+        deps = OrderedSet(dep for dep in deps if not (covered >> node_indices[dep]) & 1)
+        ancestors[node] = covered
+        for dep in deps:
+            ancestors[node] |= 1 << node_indices[dep]
+        if deps:
+            plan[node] = deps
+        for storage in reads - written:
+            readers.setdefault(storage, OrderedSet()).add(node)
+        for storage in written:
+            last_writer[storage] = node
+            readers[storage] = OrderedSet()
+    return plan
+
+
+def get_mutation_dependencies(
+    gm: fx.GraphModule,
+) -> dict[fx.Node, OrderedSet[fx.Node]] | None:
+    r"""Collect storage RAW, WAR, and WAW dependencies without changing the graph.
+
+    Return ``None`` when required storage metadata is unavailable.
+    """
+    writes = _graph_storage_writes(gm)
+    if writes is None:
+        return None
+    if not writes:
+        return {}
+    return _mutation_ordering_plan(gm, writes)
 
 
 def _create_subgraph_for_node(

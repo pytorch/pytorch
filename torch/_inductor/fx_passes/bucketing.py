@@ -460,10 +460,10 @@ def is_reduce_scatter_tensor(node: torch.fx.Node) -> bool:
 
 
 def is_wait_tensor(node: torch.fx.Node) -> bool:
-    return (
-        node.op == "call_function"
-        and node.target is torch.ops._c10d_functional.wait_tensor.default
-    )
+    if node.op != "call_function":
+        return False
+    wait_tensor = getattr(torch.ops._c10d_functional, "wait_tensor", None)
+    return wait_tensor is not None and node.target is wait_tensor.default
 
 
 def deduplicate_wait_tensors(
@@ -636,6 +636,7 @@ def greedy_bucket_collective_by_mb(
     filter_node: Callable[[torch.fx.Node], bool],
     node_group_key: Callable[[torch.fx.Node], Any],
     filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Bucketing adjacent collectives with equal node_group_key.
@@ -655,7 +656,10 @@ def greedy_bucket_collective_by_mb(
     # Build forward adjacency list for incremental descendant tracking
     children: dict[torch.fx.Node, list[torch.fx.Node]] = collections.defaultdict(list)
     for node in g.nodes:
-        for inp in node._input_nodes:
+        inputs = OrderedSet(node.all_input_nodes)
+        if mutation_deps is not None:
+            inputs.update(mutation_deps.get(node, ()))
+        for inp in inputs:
             children[inp].append(node)
 
     nodes_groups: list[list[torch.fx.Node]] = []
@@ -733,6 +737,7 @@ def bucket_all_gather_by_mb(
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
     mode: BucketMode | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all all_gather nodes and groups them into buckets,
@@ -763,6 +768,7 @@ def bucket_all_gather_by_mb(
         is_all_gather_into_tensor,
         group_key_fn,
         filter_wait_node,
+        mutation_deps,
     )
 
 
@@ -771,6 +777,7 @@ def bucket_reduce_scatter_by_mb(
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
     mode: BucketMode | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> list[list[torch.fx.Node]]:
     """
     Identifies all reduce_scatter nodes and groups them into buckets,
@@ -798,6 +805,7 @@ def bucket_reduce_scatter_by_mb(
         is_reduce_scatter_tensor,
         _rs_group_key,
         filter_wait_node,
+        mutation_deps,
     )
 
 
@@ -805,6 +813,7 @@ def bucket_all_reduce_by_mb(
     gm: torch.fx.GraphModule,
     bucket_cap_mb_by_bucket_idx: Callable[[int], float],
     filter_wait_node: Callable[[torch.fx.Node], bool] | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> list[list[torch.fx.Node]]:
     return greedy_bucket_collective_by_mb(
         gm,
@@ -812,6 +821,7 @@ def bucket_all_reduce_by_mb(
         is_all_reduce_tensor,
         _ar_group_key,
         filter_wait_node,
+        mutation_deps,
     )
 
 
@@ -1557,6 +1567,7 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
     insert_before_node: torch.fx.Node,
     g_fn_inps: list[torch.fx.Node],
     g_fn_outs: list[torch.fx.Node],
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> tuple[dict[torch.fx.Node, torch.fx.Node], list[torch.fx.Node]]:  # type: ignore[no-untyped-def]
     """
     Helper function that traces :attr:`fn_to_trace` with inputs
@@ -1576,6 +1587,13 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
             inps,
         )
         fn_g = fn_gm.graph
+        trace_deps = None
+        if mutation_deps is not None:
+            from torch._inductor.fx_passes.control_dependencies import (
+                get_mutation_dependencies,
+            )
+
+            trace_deps = get_mutation_dependencies(fn_gm)
         fn_g_ins = fn_g.find_nodes(op="placeholder")
         env = {fn_g_ins[idx]: g_fn_inps[idx] for idx in range(len(g_fn_inps))}
         g_fn_new_outs: list[torch.fx.Node] = []
@@ -1592,6 +1610,9 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
                     g.erase_node(_new_n)
                 else:
                     new_nodes.append(_new_n)  # Track non-output nodes
+                    if mutation_deps is not None and trace_deps is not None:
+                        for dep in trace_deps.get(_n, ()):
+                            mutation_deps.setdefault(_new_n, OrderedSet()).add(env[dep])
 
         replacements = {  # noqa: C416
             orig_out: new_out for orig_out, new_out in zip(g_fn_outs, g_fn_new_outs)
@@ -1605,7 +1626,10 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
         return replacements, new_nodes
 
 
-def has_mergeable_all_gather_convert_dtype(n: torch.fx.Node) -> bool:
+def has_mergeable_all_gather_convert_dtype(
+    n: torch.fx.Node,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
+) -> bool:
     node_in = n.args[0]
     return (
         is_all_gather_into_tensor(n)
@@ -1616,6 +1640,10 @@ def has_mergeable_all_gather_convert_dtype(n: torch.fx.Node) -> bool:
             or node_in.target is torch.ops.aten._to_copy.default
         )
         and len(node_in.users) == 1
+        and (
+            mutation_deps is None
+            or not any(node_in in deps for deps in mutation_deps.values())
+        )
     )
 
 
@@ -1689,6 +1717,8 @@ def process_collective_bucket(
     wait_insertion_point: torch.fx.Node | None = None,
     extra_graph_inps: list[torch.fx.Node] | None = None,
     input_transform: Callable[[torch.fx.Node], torch.fx.Node] | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
+    removed_inputs: OrderedSet[torch.fx.Node] | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     """
     Process a single bucket of collective operation nodes with flexible insertion control.
@@ -1723,7 +1753,7 @@ def process_collective_bucket(
 
         # Handle convert_element_type operations (for all_gather)
         node_in = n.args[0]
-        if has_mergeable_all_gather_convert_dtype(n):
+        if has_mergeable_all_gather_convert_dtype(n, mutation_deps):
             # pyrefly: ignore [bad-argument-type]
             ag_node_to_pre_nodes[n].append(node_in)
             # pyrefly: ignore [missing-attribute]
@@ -1744,6 +1774,13 @@ def process_collective_bucket(
         insert_before = bucket_nodes[-1].next
 
     g_fn_inps = bucket_ins + (extra_graph_inps or [])
+    input_deps: OrderedSet[torch.fx.Node] = OrderedSet()
+    if mutation_deps is not None:
+        for node in bucket_nodes:
+            for source in (node, *ag_node_to_pre_nodes[node]):
+                input_deps.update(mutation_deps.get(source, ()))
+        for node in removed_inputs or ():
+            input_deps.update(mutation_deps.get(node, ()))
 
     # Insert traced function and get replacements + new nodes
     replacements, new_nodes = _insert_fn_trace_before_node(
@@ -1753,6 +1790,7 @@ def process_collective_bucket(
         insert_before,
         g_fn_inps,
         bucket_waits,
+        mutation_deps,
     )
 
     # If requested, move wait nodes and everything after to specified location
@@ -1786,8 +1824,44 @@ def process_collective_bucket(
         # Erase any convert_element_type nodes we tracked
         for pre_node in reversed(ag_node_to_pre_nodes[node]):
             g.erase_node(pre_node)
+    if mutation_deps is None:
+        _sort_bucket_region(g, new_nodes, g_fn_inps)
+    if removed_inputs:
+        _erase_dead_packing_nodes(g, removed_inputs)
 
-    _sort_bucket_region(g, new_nodes, g_fn_inps)
+    if mutation_deps is not None:
+        new_waits = [
+            n for n in new_nodes if _get_collective_node_from_wait(n) is not None
+        ]
+        new_start = _get_collective_node_from_wait(new_waits[0])
+        if new_start is None:
+            raise AssertionError("bucket has no collective start")
+        erased_to_new: dict[torch.fx.Node, torch.fx.Node] = dict.fromkeys(
+            bucket_nodes, new_start
+        )
+        wait_replacements = new_waits
+        if len(new_waits) != len(bucket_waits):
+            wait_replacements = [new_waits[0]] * len(bucket_waits)
+        erased_to_new.update(zip(bucket_waits, wait_replacements))
+        for nodes in ag_node_to_pre_nodes.values():
+            erased_to_new.update(dict.fromkeys(nodes, new_start))
+        for node in removed_inputs or ():
+            if node._erased:
+                erased_to_new[node] = new_start
+        updated_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] = {}
+        for node, deps in mutation_deps.items():
+            replacement = erased_to_new.get(node, node)
+            for dep in deps:
+                dependency = erased_to_new.get(dep, dep)
+                if dependency is not replacement:
+                    updated_deps.setdefault(replacement, OrderedSet()).add(dependency)
+        mutation_deps.clear()
+        mutation_deps.update(updated_deps)
+        for node in new_nodes[: new_nodes.index(new_start)]:
+            for dep in input_deps:
+                dependency = erased_to_new.get(dep, dep)
+                if dependency is not node:
+                    mutation_deps.setdefault(node, OrderedSet()).add(dependency)
 
     return new_nodes, replacements
 
@@ -1798,6 +1872,7 @@ def merge_reduce_scatter_bucket(
     mode: BucketMode | None = None,
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     """Merge a bucket of compatible reduce-scatter nodes."""
     mode = mode or _default_bucket_mode()
@@ -1841,6 +1916,10 @@ def merge_reduce_scatter_bucket(
             match = _match_dim0_padded_cat(rs_input, group_size)
             if match is not None:
                 src, matched_nodes = match
+                if mutation_deps is not None and any(
+                    matched_nodes & deps for deps in mutation_deps.values()
+                ):
+                    continue
                 input_replacements[rs_input] = src
                 unpadded_input_indices.append(index)
                 packing_nodes |= matched_nodes
@@ -1873,7 +1952,7 @@ def merge_reduce_scatter_bucket(
             device,
         )
 
-    result = process_collective_bucket(
+    return process_collective_bucket(
         g,
         rs_nodes,
         rs_merge_fn,
@@ -1890,10 +1969,9 @@ def merge_reduce_scatter_bucket(
             if input_replacements
             else None
         ),
+        mutation_deps=mutation_deps,
+        removed_inputs=packing_nodes,
     )
-    # Replacing padded inputs may leave the split/pad/cat packing chain dead.
-    _erase_dead_packing_nodes(g, packing_nodes)
-    return result
 
 
 def merge_all_reduce_bucket(
@@ -1902,6 +1980,7 @@ def merge_all_reduce_bucket(
     mode: str | None = None,
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     ar0 = ar_nodes[0]
     ar0_val = ar0.meta["val"]
@@ -1949,6 +2028,7 @@ def merge_all_reduce_bucket(
         extra_graph_inps=(
             [group_name] if isinstance(group_name, torch.fx.Node) else None
         ),
+        mutation_deps=mutation_deps,
     )
 
 
@@ -1958,6 +2038,7 @@ def merge_all_gather_bucket(
     mode: BucketMode | None = None,
     insert_before: torch.fx.Node | None = None,
     wait_insertion_point: torch.fx.Node | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     mode = mode or _default_bucket_mode()
     from torch.distributed.distributed_c10d import _resolve_process_group
@@ -2016,6 +2097,7 @@ def merge_all_gather_bucket(
         extra_graph_inps=(
             [group_name] if isinstance(group_name, torch.fx.Node) else None
         ),
+        mutation_deps=mutation_deps,
     )
 
 
@@ -2023,6 +2105,7 @@ def merge_reduce_scatter(
     gm: torch.fx.GraphModule,
     rs_buckets: list[list[torch.fx.Node]],
     mode: BucketMode | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> None:
     """
     Merges specified buckets of reduce_scatter to joint reduce_scatter.
@@ -2041,13 +2124,18 @@ def merge_reduce_scatter(
         g = gm.graph
 
         for rs_nodes in rs_buckets:
-            merge_reduce_scatter_bucket(g, rs_nodes, mode)
+            merge_reduce_scatter_bucket(g, rs_nodes, mode, mutation_deps=mutation_deps)
+        if mutation_deps is not None:
+            from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+            _stable_topological_sort(g, mutation_deps)
 
 
 def merge_all_gather(
     gm: torch.fx.GraphModule,
     ag_buckets: list[list[torch.fx.Node]],
     mode: BucketMode | None = None,
+    mutation_deps: dict[torch.fx.Node, OrderedSet[torch.fx.Node]] | None = None,
 ) -> None:
     """
     Merges specified buckets of all_gather to joint all_gather.
@@ -2066,4 +2154,8 @@ def merge_all_gather(
         g = gm.graph
 
         for ag_nodes in ag_buckets:
-            merge_all_gather_bucket(g, ag_nodes, mode)
+            merge_all_gather_bucket(g, ag_nodes, mode, mutation_deps=mutation_deps)
+        if mutation_deps is not None:
+            from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+            _stable_topological_sort(g, mutation_deps)
