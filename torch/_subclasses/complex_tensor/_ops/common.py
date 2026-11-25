@@ -11,7 +11,7 @@ from torch.types import Number
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
-from .._core import ComplexTensor
+from .._core import ComplexTensor, InterleavedComplexTensor
 
 
 aten = torch.ops.aten
@@ -62,7 +62,7 @@ def is_complex_tensor(obj: Any, /) -> TypeIs[ComplexTensor]:
         >>> is_complex_tensor(ct)
         True
     """
-    return isinstance(obj, ComplexTensor)
+    return isinstance(obj, ComplexTensor | InterleavedComplexTensor)
 
 
 @overload
@@ -150,6 +150,8 @@ DECOMPOSED_OPS: set[OpType] = {
     aten.expand_copy,
     aten.eye,
     aten.full,
+    aten.index_copy,
+    aten.index_fill,
     aten.item,
     aten.ldexp,
     aten.lerp,
@@ -157,9 +159,7 @@ DECOMPOSED_OPS: set[OpType] = {
     aten.logsumexp,
     aten.meshgrid,
     aten.mv,
-    aten.new_empty,
-    aten.new_full,
-    aten.new_ones,
+    aten.norm,
     aten.ones,
     aten.permute_copy,
     aten.randn,
@@ -353,20 +353,86 @@ def register_simple(
     return register_complex(op, impl)
 
 
-def _as_complex_tensor(arg: Tensor | Any) -> Tensor | ComplexTensor | Any:
+def _inductor_impl(
+    op: OpOverload, backward_unsupported: Callable[..., bool] | None
+) -> Callable[..., Any]:
+    out_names = [arg.name for arg in op._schema.arguments if arg.is_out]
+
+    def impl(*args: Any, **kwargs: Any) -> Any:
+        if (
+            backward_unsupported is not None
+            and torch.is_grad_enabled()
+            and any(
+                isinstance(t, ComplexTensor) and t.requires_grad
+                for t in tree_flatten((args, kwargs))[0]
+            )
+            and backward_unsupported(*args, **kwargs)
+        ):
+            raise NotImplementedError(
+                f"The backward of `{op}` writes in-place through views, which don't "
+                f"alias for `{ComplexTensor.__name__}`, so it isn't supported."
+            )
+        outs = [kwargs[name] for name in out_names]
+        args, kwargs = tree_map(_as_interleaved, (args, kwargs))
+        # `__torch_dispatch__` runs with the Conjugate/Negative fallbacks excluded, but
+        # native kernels may create conj/neg views internally and rely on them.
+        with (
+            torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.Conjugate, False),
+            torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.Negative, False),
+        ):
+            ret = op(*args, **kwargs)
+        if not out_names:
+            return tree_map(_as_complex_tensor, ret)
+
+        # `ComplexTensor` destinations were replaced by interleaved temporaries above.
+        for out, name in zip(outs, out_names, strict=True):
+            if out is not (ret := kwargs[name]):
+                if out.shape != ret.shape:
+                    out.resize_(ret.shape)
+                out.copy_(ret)
+        return outs[0] if len(outs) == 1 else tuple(outs)
+
+    func_name = _get_func_name(op)
+    impl.__name__ = func_name
+    impl.__qualname__ = func_name
+
+    return impl
+
+
+def register_inductor(
+    op: OpOverloadPacket, backward_unsupported: Callable[..., bool] | None = None
+) -> Callable[..., Any]:
+    """Run every overload of `op` on interleaved inputs, writing `out=` results back.
+
+    If `backward_unsupported(*args, **kwargs)` is true, raise when grad is needed.
+    """
+    impls = {
+        name: register_force_test(
+            getattr(op, name), _inductor_impl(getattr(op, name), backward_unsupported)
+        )
+        for name in op.overloads()
+    }
+    return impls["default"]
+
+
+def _as_complex_tensor(
+    arg: Tensor | Any, interleaved: bool = False
+) -> Tensor | ComplexTensor | InterleavedComplexTensor | Any:
     """Convert a Tensor with complex dtypes to a ComplexTensor. Pass along other args as-is."""
     if (
-        not isinstance(arg, ComplexTensor)
+        not isinstance(arg, ComplexTensor | InterleavedComplexTensor)
         and isinstance(arg, Tensor)
         and arg.dtype in COMPLEX_TO_REAL
     ):
+        if interleaved:
+            return InterleavedComplexTensor(arg)
         return ComplexTensor.from_interleaved(arg)
     return arg
 
 
 def _as_interleaved(arg: ComplexTensor | Any) -> Tensor | Any:
     """Convert a ComplexTensor to a Tensor with a complex dtype. Pass other arguments as-is."""
-    if isinstance(arg, ComplexTensor):
+    if isinstance(arg, ComplexTensor | InterleavedComplexTensor):
         return arg.as_interleaved()
     return arg
 

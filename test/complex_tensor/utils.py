@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field, fields
-from enum import auto, Enum
+from enum import auto, Flag
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -35,8 +36,9 @@ COMPLEX_DTYPES = set(COMPLEX_TO_REAL)
 BINARY_NONLINEAR_CUDA_TOL = {"rtol": 5e-6, "atol": 2e-5}
 
 
-class Variant(Enum):
+class Variant(Flag):
     Op = auto()
+    OpInterleaved = auto()
     GradCheck = auto()
     Distributed = auto()
 
@@ -57,6 +59,7 @@ def _as_complex_dtensor(arg: torch.Tensor | Any) -> torch.Tensor | Any:
 
 TRANSFORM_FUNCS = {
     Variant.Op: _as_complex_tensor,
+    Variant.OpInterleaved: functools.partial(_as_complex_tensor, interleaved=True),
     Variant.Distributed: _as_complex_dtensor,
 }
 
@@ -74,7 +77,16 @@ class Descriptor:
         if fields1 != fields2:
             return False
 
+        if (
+            self.variant is not None
+            and other.variant is not None
+            and other.variant not in self.variant
+        ):
+            return False
+
         for f in fields1:
+            if f.name == "variant":
+                continue
             f1 = getattr(self, f.name)
             f2 = getattr(other, f.name)
             if f1 is not None and f2 is not None and f1 != f2:
@@ -160,12 +172,12 @@ class TestCase(PytorchTestCase):
     def check_consistency(
         self, device: str, dtype: torch.dtype, op: OpInfo, variant: Variant
     ) -> None:
-        if variant not in {Variant.Op, Variant.Distributed}:
+        if variant not in {Variant.Op, Variant.OpInterleaved, Variant.Distributed}:
             raise AssertionError(
                 f"`check_consistency` called with the wrong `variant`: {variant}"
             )
         desc = Descriptor(
-            op=get_overload_packet_from_name(op.name),
+            op=get_overload_packet_from_name(op.aten_name),
             device_type=torch.device(device).type,
             dtype=dtype,
             variant=variant,
@@ -197,14 +209,28 @@ class TestCase(PytorchTestCase):
 
             self.assertSameResult(expected, actual, **kwargs)
 
-    def check_grad(self, device: str, dtype: torch.dtype, op: OpInfo) -> None:
+    def check_grad(
+        self, device: str, dtype: torch.dtype, op: OpInfo, variant: Variant
+    ) -> None:
+        if variant not in {Variant.Op, Variant.OpInterleaved}:
+            raise AssertionError(
+                f"`check_grad` called with the wrong `variant`: {variant}"
+            )
         desc = Descriptor(
-            op=get_overload_packet_from_name(op.name),
+            op=get_overload_packet_from_name(op.aten_name),
             device_type=torch.device(device).type,
             dtype=dtype,
-            variant=Variant.GradCheck,
+            variant=Variant.GradCheck | variant,
         )
         self.conditional_skip(desc)
+        transform_fn = TRANSFORM_FUNCS[variant]
+
+        def transform(t: Any) -> Any:
+            # `InterleavedComplexTensor` wraps a detached view, so it is a fresh leaf.
+            out = transform_fn(t)
+            if out is not t and t.requires_grad and not out.requires_grad:
+                out.requires_grad_()
+            return out
 
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
 
@@ -214,23 +240,26 @@ class TestCase(PytorchTestCase):
             # `requires_grad` flag.
             args, kwargs = (sample_input.input, *sample_input.args), sample_input.kwargs
             args, kwargs = tree_map(
-                _as_complex_tensor,
+                transform,
                 (args, kwargs),
                 is_leaf=lambda x: isinstance(x, torch.Tensor) and x.dtype.is_complex,
             )
 
+            out_fn = sample_input.output_process_fn_grad
             if isinstance(args[0], torch.Tensor):
                 input_list = list(args)
 
                 def func(*t: torch.Tensor):
-                    return op(*t, **kwargs)
+                    return out_fn(op.gradcheck_wrapper(op, *t, **kwargs))
             else:
                 # For ops like `stack` and `cat`, we need to specify
                 # the list of inputs a bit differently
                 input_list = list(args[0])
 
                 def func(*t: torch.Tensor):
-                    return op(list(t), *args[1:], **kwargs)
+                    return out_fn(
+                        op.gradcheck_wrapper(op, list(t), *args[1:], **kwargs)
+                    )
 
             # Do the actual gradcheck
             self.assertTrue(
@@ -270,15 +299,15 @@ decomposed_op_names = set(map(_get_op_name, DECOMPOSITIONS.keys())) - (
     implemented_op_names | force_test_names
 )
 implemented_op_db = tuple(
-    filter(lambda op: op.name in implemented_op_names, complex_op_db)
+    filter(lambda op: op.aten_name in implemented_op_names, complex_op_db)
 )
-force_test_op_db = tuple(filter(lambda op: op.name in force_test_names, op_db))
+force_test_op_db = tuple(filter(lambda op: op.aten_name in force_test_names, op_db))
 decomposed_op_db = tuple(
     filter(lambda op: op.aten_name in decomposed_op_names, complex_op_db)
 )
 
-tested_op_names = {op.name for op in implemented_op_db} | {
-    op.name for op in force_test_op_db
+tested_op_names = {op.aten_name for op in implemented_op_db} | {
+    op.aten_name for op in force_test_op_db
 }
 non_tested_ops = {
     op for op in COMPLEX_OPS_TABLE if _get_op_name(op) not in tested_op_names
