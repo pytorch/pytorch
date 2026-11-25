@@ -15,6 +15,7 @@ from ..lowering import lowerings, make_pointwise, make_reduction, transform_args
 from ..runtime.runtime_utils import get_max_y_grid
 from ..select_algorithm import (
     autotune_select_algorithm,
+    BlackwellWSTritonTemplate,
     ExternKernelChoice,
     SymbolicGridFn,
     TritonTemplate,
@@ -156,7 +157,7 @@ def blackwell_bmm_grid(*args, cdiv, max, min):
     return (grid_x, 1, 1)
 
 
-blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
+blackwell_ws_persistent_tma_bmm_template = BlackwellWSTritonTemplate(
     name="blackwell_bmm",
     grid=blackwell_bmm_grid,
     source=load_kernel_template("triton_blackwell_ws_persistent_tma_bmm")
