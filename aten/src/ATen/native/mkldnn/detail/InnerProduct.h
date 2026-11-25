@@ -14,7 +14,7 @@ void inner_product_forward(
     const ideep::tensor& weights,
     const ideep::tensor& bias,
     ideep::tensor& dst,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
 
 // Ported from ideep::inner_product_forward::compute (without bias).
@@ -23,7 +23,7 @@ void inner_product_forward(
     const ideep::tensor& src,
     const ideep::tensor& weights,
     ideep::tensor& dst,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
 
 // Ported from ideep::inner_product_forward::compute_binary (with bias).
@@ -34,7 +34,7 @@ void inner_product_forward_binary(
     const ideep::tensor& weights,
     const ideep::tensor& bias,
     ideep::tensor& dst,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
 
 // Ported from ideep::inner_product_forward::compute_binary (without bias).
@@ -44,7 +44,7 @@ void inner_product_forward_binary(
     const ideep::tensor& other,
     const ideep::tensor& weights,
     ideep::tensor& dst,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     dnnl::prop_kind prop_kind = dnnl::prop_kind::forward);
 
 // Ported from ideep::inner_product_forward::expected_weights_desc.
