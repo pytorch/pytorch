@@ -1,5 +1,7 @@
 # Row-reduction launch policy and plan cache for tile.TileReduce. Runtime loops share
-# each kernel across a vector class; narrow rows may use one thread and TMA staging.
+# each kernel across a vector class, except that row_chains splits a one-thread
+# single-field class into up to four plans; narrow rows may use one thread and TMA
+# staging.
 import math
 import os
 import warnings
@@ -887,10 +889,20 @@ def reduce_row_tile(
     unroll: int | None = None,
     use_tma: bool | None = None,
     order: Literal["linear", "inner_tree"] | None = None,
+    ragged_vector: bool = False,
 ) -> tuple[torch.Tensor, ...]:
     """Reduce 2-D `x` rows, returning outputs or raw field partials when `final=False`.
 
-    x's device must be current.
+    x's device must be current. Rows may be pitched. `ragged_vector` asks for aligned wide
+    loads with scalar edges (one kernel per launch class) and rejects empty rows,
+    order="inner_tree" and use_tma=True for every N. Rows of whole 16-byte vectors at a
+    pitch of whole vectors otherwise fall through to normal path selection, taking
+    narrow loads at a misaligned base. Ragged rows need a 16-byte aligned base, which
+    callers must pre-check, and raise ValueError on any other rather than fall back.
+    Other rows need stride(0) to be a multiple of vec_size(N). A ragged row's scalar
+    prefix depends on its start, so identical rows can round differently. use_tma=True
+    also requires threads_per_row=1, a 16-byte aligned base and stride, and a nonempty
+    power-of-two N.
     """
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
@@ -903,6 +915,11 @@ def reduce_row_tile(
     # order="inner_tree" selects the tree here, and it raises rather than use another DAG.
     if order not in (None, "linear", "inner_tree"):
         raise ValueError(f"order must be None, 'linear' or 'inner_tree', got {order!r}")
+    # Rows of whole vectors at a pitch of whole vectors have no edges; normal path
+    # selection folds them with one kernel per vector class.
+    if ragged_vector:
+        vec = tile.ragged_vector_width(N, x.element_size(), order, bool(use_tma))
+        ragged_vector = N % vec != 0 or (M > 1 and x.stride(0) % vec != 0)
     itree = None
     if order == "inner_tree" and final and threads_per_row is None:
         itree = trait_itree_plan(trait, N, M, x.element_size(), device=x.device)
@@ -915,15 +932,25 @@ def reduce_row_tile(
         return _run_itree(trait, trait_key, x, out_dtypes, itree, nouts)
     if M == 1:
         x = x.as_strided((1, N), (N, 1))  # one row's pitch is free
-    if tile.align_bytes(x.stride(0), x.element_size()) < tile.align_bytes(
-        N, x.element_size()
+    # Ragged rows take their edges from each row's own start, so they need only a 16-byte
+    # aligned base; other rows load N's vector width from every row start.
+    full_align = _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT)
+    if ragged_vector and full_align != tile.TRANSFER_ALIGNMENT:
+        raise ValueError(
+            f"ragged vectors require a {tile.TRANSFER_ALIGNMENT}-byte aligned base, "
+            f"got {full_align}-byte alignment"
+        )
+    isz = x.element_size()
+    if not ragged_vector and tile.align_bytes(x.stride(0), isz) < tile.align_bytes(
+        N, isz
     ):
         raise ValueError(f"rows need a pitch of whole vectors, got {N=} {x.stride(0)=}")
-    cfg = row_config(N, x.element_size() * 8)
+    cfg = row_config(N, isz * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
-    # the measured optimum across 4/8/16/32.
+    # the measured optimum across 4/8/16/32. Single-field non-ragged one-thread rows and
+    # TMA ignore it.
     if unroll is None:
-        unroll = 16 if tile.vec_size(N, x.element_size()) == 1 else 4
+        unroll = 16 if not ragged_vector and tile.vec_size(N, isz) == 1 else 4
     threads_per_row = (
         max(WARP, cfg.threads_per_row) if threads_per_row is None else threads_per_row
     )
@@ -935,15 +962,13 @@ def reduce_row_tile(
     threads_per_block -= (
         threads_per_block % threads_per_row
     )  # rows_per_block must be whole
-    isz = x.element_size()
-    tma_base_aligned = (
-        _L.supported_alignment(x, tile.TRANSFER_ALIGNMENT) == tile.TRANSFER_ALIGNMENT
-    )
+    tma_base_aligned = full_align == tile.TRANSFER_ALIGNMENT
     tma_stride_bytes = x.stride(0) * isz
     tma_stride_aligned = tma_stride_bytes % tile.TRANSFER_ALIGNMENT == 0
     if use_tma is None:
         use_tma = (
             threads_per_row == 1
+            and not ragged_vector
             and tma_base_aligned
             and tma_stride_aligned
             and tma_ok(N, isz, M, x.device)
@@ -967,24 +992,27 @@ def reduce_row_tile(
         final=final,
         unroll=unroll,
         use_tma=use_tma,
+        ragged_vector=ragged_vector,
     )
 
     # Final projects nouts; stage 1 stores one raw buffer per field.
     ndst = nouts if final else trait.nfields
     outs = [torch.empty(M, device=x.device, dtype=dt) for dt in out_dtypes[:ndst]]
-    nchunks = Int32(N // op.vec)
-    nwaves = Int32(math.ceil((N // op.vec) / threads_per_row))
+    # fold_row_aligned derives its own groups and waves.
+    nvec = N // op.vec
+    nchunks = None if ragged_vector else Int32(nvec)
+    nwaves = None if ragged_vector else Int32(math.ceil(nvec / threads_per_row))
     # Declare alignment to retain wide loads (worth 3x), narrowed for storage offsets
-    # outside TMA. Runtime folds share a vector class; TMA bakes its box width.
+    # outside TMA and ragged vectors (which align each row's interior themselves).
     align = (
         tile.TRANSFER_ALIGNMENT
-        if use_tma
-        else _L.supported_alignment(x, tile.align_bytes(N, isz))
+        if use_tma or ragged_vector
+        else min(full_align, tile.align_bytes(N, isz))
     )
 
     def _fake():
-        # TMA bakes N; runtime folds share a vector class at any pitch of whole vectors,
-        # so packed and pitched rows run one kernel.
+        # TMA bakes N. Other folds take a runtime pitch, and ragged rows a runtime width
+        # too, so packed and pitched rows of a vector class (or any ragged row) share a kernel.
         if use_tma:
             fake_in = cute.runtime.make_fake_tensor(
                 dt,
@@ -995,6 +1023,8 @@ def reduce_row_tile(
                 ),
                 assumed_align=align,
             )
+        elif ragged_vector:
+            fake_in = _L.fake_rows(dt, _L.sym(), 1, align=align)
         else:
             fake_in = _L.fake_rows(dt, _L.sym(op.vec), op.vec, align=align)
         return _row_args(
