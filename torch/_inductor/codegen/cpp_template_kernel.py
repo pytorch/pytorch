@@ -79,7 +79,7 @@ class CppTemplateKernel(CppKernel):
             s
             for input in inputs.values()
             if input is not None
-            for sym in itertools.chain(input.get_size(), input.get_stride())
+            for sym in itertools.chain(input.get_size(), input.get_stride_hint())
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         )
@@ -92,7 +92,7 @@ class CppTemplateKernel(CppKernel):
         unique_sizevars.update(
             s
             for output in outputs.values()
-            for sym in itertools.chain(output.get_size(), output.get_stride())
+            for sym in itertools.chain(output.get_size(), output.get_stride_hint())
             if isinstance(sym, sympy.Expr)
             for s in sym.free_symbols
         )
@@ -136,7 +136,7 @@ class CppTemplateKernel(CppKernel):
         return cexpr_index(self.rename_indexing(node.get_size()[dim]))
 
     def stride(self, node: ir.Buffer, dim: int) -> str:
-        return cexpr_index(self.rename_indexing(node.get_stride()[dim]))
+        return cexpr_index(self.rename_indexing(node.get_stride_hint()[dim]))
 
     def index(self, node: ir.Buffer, indices: list[Any]) -> str:
         indexer = node.get_layout().as_fixed().make_indexer()
