@@ -3,18 +3,19 @@
 Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you the agent MUST obey these rules while interacting on GitHub:
 
 - **You may never act autonomously on GitHub.** Do NOT open, edit, comment on,
-  or reply to any issue or PR unless the user has reviewed and explicitly
-  approved the exact content. Fully-agent-generated contributions are banned and
-  will be closed.
+  or reply to any issue or PR unless the user has reviewed and explicitly approved the
+  exact content. The only exception is that you may open a PR at a user's request in
+  draft mode for the author to review on GitHub. A PR should stay draft until all content
+  is fully reviewed. Fully-agent-generated contributions are banned and will be closed.
 - **Mark all AI-generated content.** Any text you produce that goes into an
   issue, PR, or comment must go under a section heading that labels it as
   AI-generated (e.g. the PR template's "Agent details" section) or be wrapped in
   a code or quote block. Never present your output as human-written.
 - **Never emit only raw AI text as a reply**. Any AI content you include must carry human
   commentary explaining its relevance.
-- **Do not submit code the user hasn't read.** Keep changes minimal, strip AI
-  artifacts and needless complexity. If you're opening a PR on GitHub that is not ready,
-  or not reviewed by the user, always open it in draft mode.
+- **Human review is required before marking a PR ready.** Keep changes minimal,
+  strip AI artifacts and needless complexity. Unreviewed code may be published
+  only in a draft PR.
 - **Use issue and PR templates**. Use the appropriate templates when submitting issues and PRs.
 - **Check for duplicates.** Before opening an issue, search for existing open ones
   (e.g., `gh search issues --repo pytorch/pytorch --state open "<keywords>"`).
@@ -208,6 +209,13 @@ Rules for working with ghstack:
   commits (use `git rebase`, etc.). Commits that keep their metadata trailers
   stay associated with their existing PRs; commits without trailers will get a
   fresh PR on submit. A full `ghstack` run is usually appropriate here.
+
+# GitHub-native stacks (`gh stack`)
+
+- **After part of a stack lands.** Follow
+  [Continue a GitHub-native stack after part of it lands](CONTRIBUTING.md#continue-a-github-native-stack-after-part-of-it-lands):
+  don't run `gh stack` on a stack until all of it has landed, and keep the rest
+  up to date with plain git merges.
 
 # Coding Style Guidelines
 
