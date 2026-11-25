@@ -50,7 +50,6 @@
 #include <c10/util/irange.h>
 #include <chrono>
 #include <functional>
-#include <limits>
 #include <memory>
 #include <numeric>
 #include <optional>
@@ -1729,21 +1728,23 @@ class OverlapComponents {
 };
 
 /**
- * Merges the tensors at `bucket`, ascending indices into `tensors` that share
- * one storage, into `components` when they might overlap.
+ * For every pair of tensors in `bucket` that might overlap, merges them in
+ * `components`.
  *
- * Buckets smaller than kSweepMinBucketSize check all pairs. Larger ones sweep:
- * tensors_definitely_do_not_overlap reports no overlap whenever the
- * [first, last] element ranges are disjoint, so only pairs with intersecting
- * ranges need the full check. Sweeping in order of first element finds those
- * pairs without visiting every pair, and gives the same partition as checking
- * all pairs. See Note [Disjoint element ranges never overlap].
+ * `bucket` lists indices into `tensors`, in ascending order, of tensors that
+ * share one storage.
  *
- * With DynamicMeta and unsuppressed guards, swept buckets install a different
- * set of guards than the pairwise loop: the sweep compares element ranges, and
- * it skips pairs that are disjoint or already in one group. Like the pairwise
- * check, it only compares a later tensor's offset with an earlier one's in one
- * direction, so it never pins two offsets as equal.
+ * Small buckets (fewer than kSweepMinBucketSize tensors) check every pair.
+ * Larger buckets sort the tensors by first element and sweep, running the
+ * pairwise check only on pairs whose [first, last] element ranges intersect.
+ * Pairs with disjoint ranges can't overlap (see Note [Disjoint element ranges
+ * never overlap]), so the result is the same as checking every pair.
+ *
+ * Under DynamicMeta, if shape guards aren't suppressed, the sweep installs
+ * different guards than checking every pair would: it compares element ranges
+ * and skips disjoint pairs and pairs already in one group. Like the pairwise
+ * check, it only asks whether a later tensor's offset is greater than an
+ * earlier one's, so it never forces two offsets to be equal.
  */
 template <class Meta>
 void merge_overlapping_bucket(
@@ -1767,27 +1768,26 @@ void merge_overlapping_bucket(
     return;
   }
 
-  // A tensor passed more than once overlaps itself, which the pairwise check
-  // decides from is_same without reading metadata (a sparse or unbacked
-  // tensor may not have usable metadata). So merge the copies first and sweep
-  // one of each, reading numel only when there are two distinct tensors and
-  // offsets only when two of them are non-empty.
-  std::vector<std::pair<c10::TensorImpl*, int64_t>> by_impl;
-  by_impl.reserve(bucket.size());
-  for (const auto i : bucket) {
-    by_impl.emplace_back(tensors[i].unsafeGetTensorImpl(), i);
-  }
-  std::sort(by_impl.begin(), by_impl.end());
+  // Mark repeated copies of the same tensor as overlapping and build a list of
+  // distinct candidates. Copies are merged without reading their metadata,
+  // which a sparse or unbacked tensor may not have usable.
+  ska::flat_hash_map<c10::TensorImpl*, int64_t> first_copy;
+  first_copy.reserve(bucket.size());
   std::vector<int64_t> candidates;
-  for (const auto k : c10::irange(by_impl.size())) {
-    const auto i = by_impl[k].second;
-    if (k > 0 && by_impl[k].first == by_impl[k - 1].first) {
-      merge_if_overlapping(i, by_impl[k - 1].second);
-    } else {
+  for (const auto i : bucket) {
+    const auto [it, inserted] =
+        first_copy.emplace(tensors[i].unsafeGetTensorImpl(), i);
+    if (inserted) {
       candidates.push_back(i);
+    } else {
+      components.merge(i, it->second);
     }
   }
-  std::sort(candidates.begin(), candidates.end());
+  // Read numel only with two distinct tensors, and offsets only with two
+  // non-empty ones. An unbacked numel can't be compared with 0, which the
+  // pairwise check also hits with two distinct tensors. Once that's fixed
+  // (https://github.com/pytorch/pytorch/issues/206650), the first
+  // `candidates.size() >= 2` condition can go.
   if (candidates.size() >= 2) {
     candidates.erase(
         std::remove_if(
@@ -1800,10 +1800,10 @@ void merge_overlapping_bucket(
     return;
   }
 
-  using Int = decltype(Meta::storage_offset(std::declval<const Tensor&>()));
+  using Offset = decltype(Meta::storage_offset(std::declval<const Tensor&>()));
   struct Range {
-    Int first;
-    Int last;
+    Offset first;
+    Offset last;
     int64_t index;
   };
   std::vector<Range> ranges;
@@ -1869,6 +1869,7 @@ bool try_get_sorted_contiguous_ranges(
     GetTensor get_tensor,
     c10::SmallVectorImpl<TensorStorageRange>& ranges) {
   ranges.clear();
+  ranges.reserve(size);
   const auto dtype = get_tensor(0).dtype();
   for (const auto i : c10::irange(size)) {
     const auto& tensor = get_tensor(i);
@@ -1879,12 +1880,8 @@ bool try_get_sorted_contiguous_ranges(
     const auto begin = tensor.storage_offset();
     const auto numel = tensor.numel();
     // The pairwise path handles repeated references to an empty tensor.
-    if (numel == 0 || begin < 0 ||
-        numel > std::numeric_limits<int64_t>::max() - begin) {
+    if (numel == 0) {
       return false;
-    }
-    if (i == 0) {
-      ranges.reserve(size);
     }
     ranges.push_back({begin, begin + numel, i});
   }
@@ -1936,9 +1933,11 @@ std::vector<std::vector<int64_t>> compute_overlapping_tensor_groups(
   for (const auto pos : c10::irange(n)) {
     order.push_back(by_storage[pos].second);
     if (pos == 0 || by_storage[pos].first != by_storage[pos - 1].first) {
-      buckets.emplace_back(pos, pos);
+      if (!buckets.empty()) {
+        buckets.back().second = pos;
+      }
+      buckets.emplace_back(pos, n);
     }
-    buckets.back().second++;
   }
   std::sort(buckets.begin(), buckets.end(), [&](const auto& a, const auto& b) {
     return order[a.first] < order[b.first];
@@ -3425,6 +3424,7 @@ std::optional<bool> try_check_disjoint_row_tiles(
     int64_t col_end;
   };
   c10::SmallVector<Tile, 16> tiles;
+  tiles.reserve(size);
   for (const auto i : c10::irange(size)) {
     const auto& tensor = get_tensor(i);
     if (tensor.dim() != 2 || tensor.dtype() != dtype) {
@@ -3438,18 +3438,14 @@ std::optional<bool> try_check_disjoint_row_tiles(
     const auto offset = tensor.storage_offset();
     const auto height = sizes[0];
     const auto width = sizes[1];
-    if (offset < 0 || height <= 0 || width <= 0) {
+    // The pairwise path handles repeated references to an empty tensor.
+    if (height == 0 || width == 0) {
       return std::nullopt;
     }
     const auto row = offset / row_stride;
     const auto col = offset % row_stride;
-    const auto remaining = std::numeric_limits<int64_t>::max() - offset;
-    if (width > row_stride - col || width - 1 > remaining ||
-        height - 1 > (remaining - (width - 1)) / row_stride) {
+    if (width > row_stride - col) {
       return std::nullopt;
-    }
-    if (i == 0) {
-      tiles.reserve(size);
     }
     tiles.push_back({row, row + (height - 1), col, col + width});
   }

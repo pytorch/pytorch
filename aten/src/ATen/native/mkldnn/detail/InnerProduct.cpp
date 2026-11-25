@@ -1,5 +1,6 @@
 #include <ATen/native/mkldnn/detail/InnerProduct.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/mkldnn/detail/PrimitiveCache.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -14,14 +15,15 @@ namespace {
 struct inner_product_forward_params {
   dnnl::inner_product_forward::primitive_desc pd;
   dnnl::inner_product_forward primitive;
-  ideep::attr_t op_attr;
-  ideep::attr_t src_attr;
-  ideep::attr_t weights_attr;
-  ideep::attr_t bias_attr;
+  Attr op_attr;
+  Attr src_attr;
+  Attr weights_attr;
+  Attr bias_attr;
 };
 
 // Ported from ideep::inner_product_forward::get_primitive_desc. On non-aarch64
-// targets the descriptor comes from ideep's primitive cache.
+// targets the descriptor comes from the primitive cache in
+// detail/PrimitiveCache.h.
 #ifdef __aarch64__
 std::pair<
     dnnl::inner_product_forward::primitive_desc,
@@ -32,7 +34,7 @@ get_primitive_desc(
     const ideep::tensor::desc& dst_desc,
     const ideep::tensor::desc& bias_desc = ideep::tensor::desc(),
     const bool with_bias = false,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     const dnnl::prop_kind prop_kind = dnnl::prop_kind::forward) {
   const auto& engine = ideep::engine::cpu_engine();
   dnnl::inner_product_forward::primitive_desc pd;
@@ -52,10 +54,10 @@ dnnl::inner_product_forward::primitive_desc get_primitive_desc(
     const ideep::tensor::desc& dst_desc,
     const ideep::tensor::desc& bias_desc = ideep::tensor::desc(),
     const bool with_bias = false,
-    const ideep::attr_t& attr = ideep::attr_t(),
+    const Attr& attr = Attr(),
     const dnnl::prop_kind prop_kind = dnnl::prop_kind::forward) {
   const auto& engine = ideep::engine::cpu_engine();
-  auto key = ideep::utils::create_key(
+  auto key = utils::create_key(
       prop_kind,
       src_desc,
       weights_desc,
@@ -64,7 +66,7 @@ dnnl::inner_product_forward::primitive_desc get_primitive_desc(
       attr,
       with_bias,
       omp_get_max_threads());
-  return ideep::utils::computation_cache<
+  return utils::computation_cache<
       dnnl::inner_product_forward::primitive_desc>::
       fetch_or_create(key, [&]() {
         if (with_bias) {
@@ -92,11 +94,11 @@ void do_prepare_(
     const ideep::tensor& weights,
     const ideep::tensor& bias,
     ideep::tensor& dst,
-    const ideep::attr_t& attr,
+    const Attr& attr,
     const dnnl::prop_kind prop_kind) {
   ideep::tensor::desc src_desc, weights_desc, bias_desc, dst_desc;
-  ideep::attr_t& op_attr = param.op_attr;
-  ideep::attr_t& src_attr = param.src_attr;
+  Attr& op_attr = param.op_attr;
+  Attr& src_attr = param.src_attr;
   dnnl::memory::data_type dst_data_type;
   auto dst_dims = {src.get_dim(0), weights.get_dim(0)};
 
@@ -358,7 +360,7 @@ void compute_impl(
     const ideep::tensor& weights,
     const ideep::tensor& bias,
     ideep::tensor& dst,
-    const ideep::attr_t& attr,
+    const Attr& attr,
     const dnnl::prop_kind prop_kind) {
   inner_product_forward_params param;
   // workaround: src and weights from caffe2 may have different dims.
@@ -411,7 +413,7 @@ void backward_weights_compute_impl(
   // for forward hint, weights_desc should have same data_type
   // with other input desc, expect for bias_desc
   auto weights_desc = diff_weights_desc;
-  ideep::attr_t op_attr;
+  Attr op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   auto forward_hints = get_primitive_desc(
@@ -507,7 +509,7 @@ void inner_product_forward(
     const ideep::tensor& weights,
     const ideep::tensor& bias,
     ideep::tensor& dst,
-    const ideep::attr_t& attr,
+    const Attr& attr,
     dnnl::prop_kind prop_kind) {
   compute_impl</*with_bias=*/true, reorder_src, reorder_weight>(
       src, weights, bias, dst, attr, prop_kind);
@@ -518,7 +520,7 @@ void inner_product_forward(
     const ideep::tensor& src,
     const ideep::tensor& weights,
     ideep::tensor& dst,
-    const ideep::attr_t& attr,
+    const Attr& attr,
     dnnl::prop_kind prop_kind) {
   static ideep::tensor dummy_bias;
   compute_impl</*with_bias=*/false, reorder_src, reorder_weight>(
@@ -532,7 +534,7 @@ void inner_product_forward_binary(
     const ideep::tensor& weights,
     const ideep::tensor& bias,
     ideep::tensor& dst,
-    const ideep::attr_t& attr,
+    const Attr& attr,
     dnnl::prop_kind prop_kind) {
   inner_product_forward_params param;
   do_prepare_<true, reorder_src, reorder_weight>(
@@ -547,7 +549,7 @@ void inner_product_forward_binary(
     const ideep::tensor& other,
     const ideep::tensor& weights,
     ideep::tensor& dst,
-    const ideep::attr_t& attr,
+    const Attr& attr,
     dnnl::prop_kind prop_kind) {
   static ideep::tensor dummy_bias;
   inner_product_forward_params param;
@@ -620,7 +622,7 @@ void inner_product_backward_data(
   auto diff_src_desc = ideep::tensor::desc(
       diff_src_dims, diff_dst.get_data_type(), dnnl::memory::format_tag::any);
 
-  ideep::attr_t op_attr;
+  Attr op_attr;
   op_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   auto forward_hints = get_primitive_desc(
@@ -703,26 +705,26 @@ template void inner_product_forward<true, true>(
     const ideep::tensor&,
     const ideep::tensor&,
     ideep::tensor&,
-    const ideep::attr_t&,
+    const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward<true, true>(
     const ideep::tensor&,
     const ideep::tensor&,
     ideep::tensor&,
-    const ideep::attr_t&,
+    const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward<false, false>(
     const ideep::tensor&,
     const ideep::tensor&,
     const ideep::tensor&,
     ideep::tensor&,
-    const ideep::attr_t&,
+    const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward<false, false>(
     const ideep::tensor&,
     const ideep::tensor&,
     ideep::tensor&,
-    const ideep::attr_t&,
+    const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward_binary<false, false>(
     const ideep::tensor&,
@@ -730,14 +732,14 @@ template void inner_product_forward_binary<false, false>(
     const ideep::tensor&,
     const ideep::tensor&,
     ideep::tensor&,
-    const ideep::attr_t&,
+    const Attr&,
     dnnl::prop_kind);
 template void inner_product_forward_binary<false, false>(
     const ideep::tensor&,
     const ideep::tensor&,
     const ideep::tensor&,
     ideep::tensor&,
-    const ideep::attr_t&,
+    const Attr&,
     dnnl::prop_kind);
 
 } // namespace at::native::mkldnn
