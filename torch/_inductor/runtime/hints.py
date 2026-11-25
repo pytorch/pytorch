@@ -102,10 +102,27 @@ def native_matmul_persistent_rblock(r0_block: int) -> int:
 
 
 class ReductionHint(Enum):
+    """How a reduction's loads are laid out relative to its reduction dims.
+
+    INNER: the reduction dims are contiguous in memory (e.g. a row sum).
+    OUTER: the reduction dims are outer-strided (e.g. a column sum); such
+        reductions may be split into a partial and a final reduction.
+    OUTER_TINY: an OUTER reduction with very few elements per output.
+    DEFAULT: no layout preference was detected.
+    OUTER_NO_SPLIT: an OUTER reduction that the IR deliberately kept as one
+        pass; it is scheduled like DEFAULT (see is_default_reduction_scheduling).
+    """
+
     INNER = 0
     OUTER = 1
     OUTER_TINY = 2
     DEFAULT = 3
+    OUTER_NO_SPLIT = 4
+
+
+def is_default_reduction_scheduling(hint: ReductionHint) -> bool:
+    """Whether a reduction with ``hint`` gets the DEFAULT schedule."""
+    return hint in (ReductionHint.DEFAULT, ReductionHint.OUTER_NO_SPLIT)
 
 
 class TileHint(Enum):
