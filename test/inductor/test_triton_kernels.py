@@ -2012,7 +2012,7 @@ def forward(self, x_1, output_1):
 
         def lower_scale(*, scale, kwargs):
             x = ir.ExternKernel.realize_input(kwargs["x"])
-            strides.append(tuple(x.get_stride()))
+            strides.append(tuple(x.get_stride_hint()))
             value = lowerings[aten.mul.Tensor](kwargs["x"], scale)
             lowerings[aten.copy_.default](kwargs["out"], value)
             return {}
@@ -2087,7 +2087,7 @@ def forward(self, x_1, output_1):
 
         def lower_triton(**hop_kwargs):
             x = ir.ExternKernel.realize_input(hop_kwargs["kwargs"]["in_ptr0"])
-            strides.append(tuple(x.get_stride()))
+            strides.append(tuple(x.get_stride_hint()))
             return triton_lowering(**hop_kwargs)
 
         def lower_scale(*, scale, kwargs):
