@@ -1331,17 +1331,12 @@ def skip_if_accelerator_not_cuda(fn):
     return wrapper
 
 
-def _require_triton():
-    if not has_triton():
-        raise unittest.SkipTest("triton is required")
-
-
 def _require_multiple_accelerators(device):
     device_type = torch.device(device).type
     if torch.get_device_module(device_type).device_count() < 2:
         raise unittest.SkipTest(f"requires multiple {device_type} devices")
-    if device_type != "mps":
-        _require_triton()
+    if device_type != "mps" and not has_triton():
+        raise unittest.SkipTest("triton is required")
 
 
 def skip_if_halide(fn):
@@ -4245,9 +4240,8 @@ class CommonTemplate:
             self.assertEqual(cfn(x, i), fn(x, i))
 
     @skipCPUIf(True, "requires accelerator Triton")
+    @requires_triton()
     def test_builtins_round_float_ndigits_neg_uses_value_expr(self):
-        _require_triton()
-
         def fn(x, i):
             return x + round(i / 2 * 123.4567, -1)
 
