@@ -4194,34 +4194,315 @@ class DictGuardTests(LoggingTestCase):
         )
 
     @parametrize("present_during_tracing", [True, False])
-    def test_contains_recompilation_message(self, present_during_tracing):
+    @parametrize("operation", ["dict", "keys", "items"])
+    def test_contains_recompilation_message(self, present_during_tracing, operation):
         failures = []
 
         def fn(x, d):
-            if "scale" in d:
+            if operation == "items":
+                contains = ("scale", 1) in d.items()
+            elif operation == "keys":
+                contains = "scale" in d.keys()  # noqa: SIM118
+            else:
+                contains = "scale" in d
+            if contains:
                 return x.sin()
             return x.cos()
 
         compiled_fn = torch._dynamo.optimize(
-            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+            "eager",
+            nopython=True,
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
         )(fn)
         x = torch.tensor(1.0)
-        initial = {"scale": 1} if present_during_tracing else {}
-        changed = {} if present_during_tracing else {"scale": 1}
-        compiled_fn(x, initial)
-        compiled_fn(x, changed)
+        initial_key = "scale" if present_during_tracing else "missing"
+        changed_key = "missing" if present_during_tracing else "scale"
+        initial = self.thetype({initial_key: 1, "other": 0})
+        same_membership = self.thetype(initial, other=2)
+        if operation == "dict":
+            same_membership["added"] = 3
+        changed = self.thetype({changed_key: 1, "other": 2})
+        for mapping in (initial, same_membership):
+            self.assertEqual(compiled_fn(x, mapping), fn(x, mapping))
+        self.assertEqual(failures, [])
+        self.assertEqual(compiled_fn(x, changed), fn(x, changed))
 
         self.assertEqual(len(failures), 1)
-        expectation = "present" if present_during_tracing else "absent"
-        requirement = "contain" if present_during_tracing else "not contain"
         negation = "" if present_during_tracing else "not "
         self.assertIn(
             f"{negation}___dict_contains('scale', d)",
             failures[0],
         )
+        state = "present" if present_during_tracing else "absent"
         self.assertIn(
-            f"(HINT: Dictionary d must {requirement} key 'scale'; "
-            f"Dynamo specialized the compiled code on this key being {expectation}.",
+            f"(HINT: Dictionary d must {negation}contain key 'scale'; "
+            f"Dynamo specialized the compiled code on this key being {state}.)",
+            failures[0],
+        )
+
+    def test_items_contains_value_change(self):
+        failures = []
+
+        def fn(x, d):
+            return x + (("scale", 1) in d.items())
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager",
+            nopython=True,
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(fn)
+        x = torch.ones(1)
+        for mapping in ({"scale": 1}, {"scale": 2}):
+            mapping = self.thetype(mapping)
+            self.assertEqual(compiled_fn(x, mapping), fn(x, mapping))
+        self.assertEqual(len(failures), 1)
+        self.assertIn("d['scale'] == 1", failures[0])
+        self.assertNotIn("___dict_contains", failures[0])
+
+    @parametrize("operation", ["dict", "get"])
+    @parametrize("add_lookup_key", [False, True])
+    def test_contains_object_key_recompilation_hint(self, operation, add_lookup_key):
+        failures = []
+        key = object()
+
+        def fn(x, d):
+            if operation == "get":
+                return x + d.get(key, 2)
+            return x + (key in d)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager",
+            nopython=True,
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(fn)
+        x = torch.ones(1)
+        changed_key = key if add_lookup_key else "unrelated"
+        for mapping in ({"kept": 1}, {"kept": 2}):
+            mapping = self.thetype(mapping)
+            self.assertEqual(compiled_fn(x, mapping), fn(x, mapping))
+        self.assertEqual(failures, [])
+        changed = self.thetype({"kept": 1, changed_key: 1})
+        self.assertEqual(compiled_fn(x, changed), fn(x, changed))
+        self.assertEqual(len(failures), 1)
+        if operation == "get":
+            self.assertIn(
+                ".get(key, default)` traced the default for an absent key", failures[0]
+            )
+        self.assertIn("checks the complete key set", failures[0])
+        self.assertIn(
+            "its runtime source's value may differ from the current trace time value",
+            failures[0],
+        )
+        self.assertIn(
+            "unrelated key changes can also trigger recompilation", failures[0]
+        )
+        self.assertNotIn("None Dynamo", failures[0])
+
+    @parametrize(
+        "mapping_type, operation",
+        [
+            subtest((dict, "getitem"), name="dict_getitem"),
+            subtest((dict, "contains"), name="dict_contains"),
+            subtest((dict, "get"), name="dict_get"),
+            subtest((dict, "get_no_default"), name="dict_get_no_default"),
+            subtest((dict, "pop"), name="dict_pop"),
+            subtest((dict, "pop_no_default"), name="dict_pop_no_default"),
+            subtest((OrderedDict, "pop"), name="ordered_pop"),
+            subtest((dict, "setdefault"), name="dict_setdefault"),
+            subtest((dict, "setdefault_no_default"), name="dict_setdefault_no_default"),
+            subtest((dict, "setitem"), name="dict_setitem"),
+            subtest((OrderedDict, "setitem"), name="ordered_setitem"),
+            subtest((dict, "delitem"), name="dict_delitem"),
+            subtest((OrderedDict, "delitem"), name="ordered_delitem"),
+            subtest((dict, "items"), name="dict_items"),
+            subtest((defaultdict, "getitem"), name="defaultdict_getitem"),
+        ],
+    )
+    def test_nan_key_recompilation_hint(self, mapping_type, operation):
+        failures = []
+
+        def fn(x, d, lookup_key):
+            if operation == "contains":
+                return x + (lookup_key in d)
+            if operation == "items":
+                return x + ((lookup_key, 3) in d.items())
+            if operation == "setitem":
+                d[lookup_key] = 5
+                return x + 1
+            try:
+                if operation == "getitem":
+                    value = d[lookup_key]
+                elif operation == "get":
+                    value = d.get(lookup_key, 5)
+                elif operation == "get_no_default":
+                    value = d.get(lookup_key)
+                elif operation == "pop":
+                    value = d.pop(lookup_key, 5)
+                elif operation == "pop_no_default":
+                    value = d.pop(lookup_key)
+                elif operation == "setdefault":
+                    value = d.setdefault(lookup_key, 5)
+                elif operation == "setdefault_no_default":
+                    value = d.setdefault(lookup_key)
+                else:
+                    del d[lookup_key]
+                    value = 1
+            except KeyError:
+                value = -1
+            return x + (value if value is not None else 0)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        present, absent = float("nan"), float("nan")
+        original = (
+            defaultdict(lambda: 7) if mapping_type is defaultdict else mapping_type()
+        )
+        original[present] = 3
+        x = torch.ones(1)
+        for key in (present, absent):
+            mapping, expected_mapping = original.copy(), original.copy()
+            self.assertEqual(compiled_fn(x, mapping, key), fn(x, expected_mapping, key))
+            self.assertEqual(list(mapping.items()), list(expected_mapping.items()))
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("___check_obj_id(lookup_key,", failures[0])
+        self.assertIn(
+            "requires a recompile: the NaN-containing key changed identity. "
+            "Distinct NaN instances can hash differently because CPython uses "
+            "object identity.",
+            failures[0],
+        )
+
+    @parametrize("operation", ["getitem", "get", "get_default", "pop", "pop_default"])
+    def test_missing_key_recompilation_hint(self, operation):
+        failures = []
+
+        def fn(x, d):
+            try:
+                if operation == "getitem":
+                    value = d["scale"]
+                elif operation == "get":
+                    value = d.get("scale")
+                elif operation == "get_default":
+                    value = d.get("scale", 2)
+                elif operation == "pop":
+                    value = d.pop("scale")
+                else:
+                    value = d.pop("scale", 2)
+            except KeyError:
+                value = 1
+            return x + (value if value is not None else 0)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        for mapping in ({"kept": 1}, {"kept": 1, "scale": 3}):
+            expected_mapping = mapping.copy()
+            expected = fn(x, expected_mapping)
+            self.assertEqual(compiled_fn(x, mapping), expected)
+            self.assertEqual(mapping, expected_mapping)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("not ___dict_contains('scale', d)", failures[0])
+        if operation == "getitem":
+            self.assertIn("[key]` traced KeyError for an absent key", failures[0])
+        elif operation == "get":
+            self.assertIn(".get(key)` traced None for an absent key", failures[0])
+        elif operation == "get_default":
+            self.assertIn(
+                ".get(key, default)` traced the default for an absent key", failures[0]
+            )
+        elif operation == "pop":
+            self.assertIn(
+                ".pop(key)` traced KeyError without removing an entry", failures[0]
+            )
+        else:
+            self.assertIn(
+                ".pop(key, default)` traced the default without removing an entry",
+                failures[0],
+            )
+
+    def test_missing_object_key_recompilation_hint(self):
+        failures = []
+        key = object()
+
+        def fn(x, d):
+            return x + d.get(key, 2)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        self.assertEqual(compiled_fn(x, {"kept": 1}), x + 2)
+        self.assertEqual(compiled_fn(x, {"kept": 1, key: 3}), x + 3)
+        self.assertEqual(len(failures), 1)
+        self.assertIn(
+            ".get(key, default)` traced the default for an absent key", failures[0]
+        )
+
+    @parametrize("mapping_type", [dict, OrderedDict])
+    @parametrize("change", ["added", "removed"])
+    def test_dict_copy_recompile_hint(self, mapping_type, change):
+        failures = []
+
+        def fn(x, d):
+            return x + 1, d.copy()
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        initial = mapping_type({"a": 1, "kept": 2})
+        changed = mapping_type(initial)
+        if change == "added":
+            changed["new"] = 3
+        else:
+            del changed["kept"]
+        for mapping in (initial, changed):
+            expected_mapping = mapping.copy()
+            expected = fn(x, expected_mapping)
+            self.assertEqual(compiled_fn(x, mapping), expected)
+            self.assertEqual(mapping, expected_mapping)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn(
+            "`d.copy()` requires the key-set check to exactly match as the dict "
+            "is captured at trace time.",
+            failures[0],
+        )
+
+    @parametrize("with_default", [False, True])
+    def test_empty_dict_pop_recompile_hint(self, with_default):
+        failures = []
+
+        def fn(x, d):
+            if with_default:
+                value = d.pop("scale", 2)
+            else:
+                try:
+                    value = d.pop("scale")
+                except KeyError:
+                    value = 1
+            return x + value
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        for mapping in ({}, {"scale": 3}):
+            expected_mapping = mapping.copy()
+            expected = fn(x, expected_mapping)
+            self.assertEqual(compiled_fn(x, mapping), expected)
+            self.assertEqual(mapping, expected_mapping)
+
+        self.assertEqual(len(failures), 1)
+        expected_result = "the default" if with_default else "KeyError"
+        self.assertIn(
+            f"`d.pop(key{', default' if with_default else ''})` traced "
+            f"{expected_result} for an empty plain dictionary without hashing "
+            "the key",
             failures[0],
         )
 

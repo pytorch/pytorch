@@ -121,11 +121,18 @@ def _contains_nan(value: Any) -> bool:
     return type(value) in (float, complex) and value != value
 
 
-def _guard_nan_key(key: VariableTracker) -> None:
+def _guard_nan_key(key: VariableTracker, *, site_orig: str | None = None) -> None:
     # CONSTANT_MATCH accepts distinct NaNs, but dictionary lookups depend
     # on their identity, including NaNs nested inside tuple keys.
     if key.source and _contains_nan(_get_literal_key(key)):
-        install_guard(key.make_guard(GuardBuilder.ID_MATCH))
+        install_guard(
+            key.make_guard(GuardBuilder.ID_MATCH),
+            recompile_hint=(
+                f"`{site_orig or key.source.name}` requires a recompile: "
+                "the NaN-containing key changed identity. Distinct NaN instances can "
+                "hash differently because CPython uses object identity."
+            ),
+        )
 
 
 def pydict_check(obj: VariableTracker) -> TypeIs["ConstDictVariable"]:
@@ -463,11 +470,26 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
     def getitem_const_raise_exception_if_absent(
         self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
-        key = self._lookup_key(tx, arg)
+        key = self._lookup_key(
+            tx,
+            arg,
+            site_orig=(
+                f"{self.source.name if self.source else 'dict'}["
+                f"{arg.source.name if arg.source else 'key'}]"
+            ),
+        )
         value = self.items.get(key)
         # The deletion marker is explicit; `isinstance` would realize lazy values.
         if value is None or type(value) is variables.DeletedVariable:
-            self.install_dict_contains_guard(tx, key, key_present=False)
+            self.install_dict_contains_guard(
+                tx,
+                key,
+                key_present=False,
+                recompile_hint=(
+                    f"`{self.source.name if self.source else 'dict'}[key]` traced KeyError "
+                    "for an absent key; a newly present key must return its value instead."
+                ),
+            )
             raise_observed_exception(KeyError, tx, args=[arg])
         return value
 
@@ -509,9 +531,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 original_key.realize()
                 break
 
-    def install_dict_keys_match_guard(self) -> None:
+    def install_dict_keys_match_guard(
+        self, *, recompile_hint: str | None = None
+    ) -> None:
         if self.source and not is_constant_source(self.source):
-            install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            install_guard(
+                self.make_guard(GuardBuilder.DICT_KEYS_MATCH),
+                recompile_hint=recompile_hint,
+            )
 
     def install_dict_order_guard(self, tx: "InstructionTranslatorBase") -> None:
         if self.source and not is_constant_source(self.source):
@@ -524,6 +551,7 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         key: HashableTracker,
         *,
         key_present: bool | None = None,
+        recompile_hint: str | None = None,
     ) -> None:
         # Key guarding - These are the cases to consider
         # 1) The dict has been mutated. In this case, we would have already
@@ -566,20 +594,32 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                         guard_fn,
                         key=arg.as_python_constant(),
                     )
-                )
+                ),
+                recompile_hint=recompile_hint,
             )
         elif arg.source:
             if key_present:
                 self.realize_key_vt(key)
             else:
-                self.install_dict_keys_match_guard()
+                prefix = f"{recompile_hint} " if recompile_hint else ""
+                self.install_dict_keys_match_guard(
+                    recompile_hint=(
+                        f"{prefix}Dynamo checks the complete key set when "
+                        "the key is not present and its runtime source's value may "
+                        "differ from the current trace time value; "
+                        "therefore unrelated key changes can also trigger recompilation. "
+                        "This overguarding may be addressable in dynamo."
+                    )
+                )
 
     def _lookup_key(
         self,
         tx: "InstructionTranslatorBase",
         key: VariableTracker,
+        *,
+        site_orig: str | None = None,
     ) -> HashableTracker:
-        _guard_nan_key(key)
+        _guard_nan_key(key, site_orig=site_orig)
         try:
             return HashableTracker(key)
         except ObservedTypeError:
@@ -615,7 +655,14 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         item: VariableTracker,
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L4657-L4668
-        key = self._lookup_key(tx, item)
+        key = self._lookup_key(
+            tx,
+            item,
+            site_orig=(
+                f"{item.source.name if item.source else 'key'} in "
+                f"{self.source.name if self.source else 'dict'}"
+            ),
+        )
         value = self.items.get(key)
         contains = value is not None and type(value) is not variables.DeletedVariable
         self.install_dict_contains_guard(tx, key, key_present=contains)
@@ -688,7 +735,13 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self.install_dict_keys_match_guard()
+        self.install_dict_keys_match_guard(
+            recompile_hint=(
+                f"`{self.source.name if self.source else 'dict'}.copy()` requires "
+                "the key-set check to exactly match as the dict is captured at "
+                "trace time."
+            )
+        )
         return self._new_dict(self.items.copy())
 
     def dict_get(
@@ -698,10 +751,28 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         check_positional(tx, "get", len(args), 1, 2)
-        key = self._lookup_key(tx, args[0])
+        key = self._lookup_key(
+            tx,
+            args[0],
+            site_orig=(
+                f"{self.source.name if self.source else 'dict'}.get("
+                f"{args[0].source.name if args[0].source else 'key'}"
+                f"{', default' if len(args) == 2 else ''})"
+            ),
+        )
         value = self.items.get(key)
         if value is None or type(value) is variables.DeletedVariable:
-            self.install_dict_contains_guard(tx, key, key_present=False)
+            self.install_dict_contains_guard(
+                tx,
+                key,
+                key_present=False,
+                recompile_hint=(
+                    f"`{self.source.name if self.source else 'dict'}.get("
+                    f"key{', default' if len(args) == 2 else ''})` traced "
+                    f"{'the default' if len(args) == 2 else 'None'} for an absent key; "
+                    "a newly present key must return its value instead."
+                ),
+            )
             if len(args) == 1:
                 # if default is not given, return None
                 return ConstantVariable.create(None)
@@ -719,16 +790,29 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             return None
         check_positional(tx, "pop", len(args), 1, 2)
         if not self.items and not isinstance(self, OrderedDictVariable):
-            self.install_dict_keys_match_guard()
+            self.install_dict_keys_match_guard(
+                recompile_hint=(
+                    f"`{self.source.name if self.source else 'dict'}.pop("
+                    f"key{', default' if len(args) == 2 else ''})` traced "
+                    f"{'the default' if len(args) == 2 else 'KeyError'} for an "
+                    "empty plain dictionary without hashing the key. This "
+                    "overguarding may be addressable in Dynamo."
+                )
+            )
             if len(args) == 1:
                 raise_observed_exception(KeyError, tx, args=[args[0]])
             return args[1]
         # OrderedDict.pop uses PyObject_Hash, including for an empty mapping.
+        site_orig = (
+            f"{self.source.name if self.source else 'dict'}.pop("
+            f"{args[0].source.name if args[0].source else 'key'}"
+            f"{', default' if len(args) == 2 else ''})"
+        )
         if isinstance(self, OrderedDictVariable):
-            _guard_nan_key(args[0])
+            _guard_nan_key(args[0], site_orig=site_orig)
             key = HashableTracker(args[0])
         else:
-            key = self._lookup_key(tx, args[0])
+            key = self._lookup_key(tx, args[0], site_orig=site_orig)
         # A __dict__ deletion marker is already absent; do not record another
         # attribute mutation (which may be forbidden inside a HOP).
         is_proxy = isinstance(self.items, SideEffectsProxyDict)
@@ -751,7 +835,18 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
                 value = self.items.pop(key, None)
         if value is None or type(value) is variables.DeletedVariable:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
-            self.install_dict_contains_guard(tx, key, key_present=False)
+            self.install_dict_contains_guard(
+                tx,
+                key,
+                key_present=False,
+                recompile_hint=(
+                    f"`{self.source.name if self.source else 'dict'}.pop("
+                    f"key{', default' if len(args) == 2 else ''})` traced "
+                    f"{'the default' if len(args) == 2 else 'KeyError'} "
+                    "without removing an entry; encountering this key in the dict "
+                    "requires a recompile to remove the entry and return its value."
+                ),
+            )
             if len(args) == 1:
                 # if default is not given, raise KeyError
                 raise_observed_exception(KeyError, tx, args=[args[0]])
@@ -864,7 +959,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
             generic_setitem(tx, self, args[0], value)
             return value
         self.install_dict_keys_match_guard()
-        key = self._lookup_key(tx, args[0])
+        key = self._lookup_key(
+            tx,
+            args[0],
+            site_orig=(
+                f"{self.source.name if self.source else 'dict'}.setdefault("
+                f"{args[0].source.name if args[0].source else 'key'}"
+                f"{', default' if len(args) == 2 else ''})"
+            ),
+        )
         value = self.items.get(key)
         if value is not None and type(value) is not variables.DeletedVariable:
             return value
@@ -961,11 +1064,16 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
         # value=None signals delete (CPython NULL sentinel).
         self.install_dict_keys_match_guard()
+        site_orig = (
+            f"{self.source.name if self.source else 'dict'}["
+            f"{key.source.name if key.source else 'key'}]"
+        )
+        site_orig = f"del {site_orig}" if value is None else f"{site_orig} = value"
         if isinstance(self, OrderedDictVariable):
-            _guard_nan_key(key)
+            _guard_nan_key(key, site_orig=site_orig)
             hkey = HashableTracker(key)
         else:
-            hkey = self._lookup_key(tx, key)
+            hkey = self._lookup_key(tx, key, site_orig=site_orig)
         tx.output.side_effects.mutation(self)
         if value is None:
             if isinstance(self.items, SideEffectsProxyDict) and hkey not in self.items:
@@ -1363,7 +1471,9 @@ class MappingProxyVariable(VariableTracker):  # noqa: RVT001
 class NNModuleHooksDictVariable(OrderedDictVariable):
     # Special class to avoid adding any guards on the nn module hook ids.
     # nn.Module hook dicts are OrderedDict, so back storage/reconstruct with it.
-    def install_dict_keys_match_guard(self) -> None:
+    def install_dict_keys_match_guard(
+        self, *, recompile_hint: str | None = None
+    ) -> None:
         pass
 
     def install_dict_contains_guard(
@@ -1372,6 +1482,7 @@ class NNModuleHooksDictVariable(OrderedDictVariable):
         key: HashableTracker,
         *,
         key_present: bool | None = None,
+        recompile_hint: str | None = None,
     ) -> None:
         pass
 
@@ -1708,7 +1819,14 @@ class DictItemsVariable(DictViewVariable):
         if not isinstance(item, variables.TupleVariable) or len(item.items) != 2:
             return ConstantVariable.create(False)
         key, val = item.items
-        key_ht = self.dv_dict._lookup_key(tx, key)
+        key_ht = self.dv_dict._lookup_key(
+            tx,
+            key,
+            site_orig=(
+                f"({key.source.name if key.source else 'key'}, value) in "
+                f"{self.dv_dict.source.name if self.dv_dict.source else 'dict'}.items()"
+            ),
+        )
         stored = self.dv_dict.items.get(key_ht)
         present = stored is not None and type(stored) is not variables.DeletedVariable
         self.dv_dict.install_dict_contains_guard(tx, key_ht, key_present=present)
@@ -2029,7 +2147,9 @@ class DunderDictVariable(ConstDictVariable):
 
     # Mutations to __dict__ are tracked through side effects (SideEffectsProxyDict),
     # so we don't need to install guards. Guard installation is overridden to no-op.
-    def install_dict_keys_match_guard(self) -> None:
+    def install_dict_keys_match_guard(
+        self, *, recompile_hint: str | None = None
+    ) -> None:
         pass
 
     def install_dict_contains_guard(
@@ -2038,5 +2158,6 @@ class DunderDictVariable(ConstDictVariable):
         key: HashableTracker,
         *,
         key_present: bool | None = None,
+        recompile_hint: str | None = None,
     ) -> None:
         pass
