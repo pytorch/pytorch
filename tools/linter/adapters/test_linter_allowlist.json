@@ -240,7 +240,6 @@
   "test/dynamo/test_autograd_function.py",
   "test/dynamo/test_backends.py",
   "test/dynamo/test_base_hop.py",
-  "test/dynamo/test_base_output.py",
   "test/dynamo/test_benchmark_runner.py",
   "test/dynamo/test_buffers_override.py",
   "test/dynamo/test_bytearray.py",
