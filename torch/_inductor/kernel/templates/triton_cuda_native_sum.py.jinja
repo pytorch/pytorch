@@ -1,0 +1,27 @@
+{% if FINAL %}
+{{def_kernel("X", "PARTIAL")}}
+{% else %}
+{{def_kernel("X")}}
+    PARTIAL = X
+{% endif %}
+    X = X + INPUT_OFFSET
+    for output in range(tl.program_id(0).to(tl.int64), M, tl.num_programs(0)):
+        cta = tl.program_id(1)
+        value = tl.full((), 0, ACC_TYPE)
+        active = False
+        {% for plan in PLANS %}
+        {% if loop.first %}if{% elif not loop.last %}elif{% else %}else:{% endif %}{% if not loop.last or loop.first %} X.to(tl.uint64) % {{plan[0] * ITEMSIZE}} == 0:{% endif %}
+            active = cta < {{plan[7]}}
+            if active:
+                value = triton_helpers.cuda_native_sum(
+                    X, PARTIAL, output, cta, SHAPE, ISTRIDES, OSTRIDES,
+                    RDIMS, N, M, {{plan[1]}}, {{plan[2]}}, {{plan[3]}}, {{plan[4]}},
+                    {{plan[5]}}, {{plan[6]}}, {{plan[7]}}, MAX_CTAS, FINAL, True, {{plan[8]}})
+        {% endfor %}
+        value = value[None]
+        {% if FINAL %}
+        output_offset = triton_helpers.cuda_native_sum_offset(output, SHAPE, OSTRIDES, RDIMS, {{SHAPE|length}})
+        {{store_output(("output_offset",), "value", "active", indent_width=8, val_shape=("1",))}}
+        {% else %}
+        {{store_output(("output", "cta"), "value", "active", indent_width=8, val_shape=("1",))}}
+        {% endif %}

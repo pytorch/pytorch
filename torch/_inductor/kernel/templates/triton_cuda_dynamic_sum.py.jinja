@@ -1,0 +1,57 @@
+{% if FINAL %}
+{{def_kernel("X", "PARTIAL")}}
+    partial_stride = {{size("PARTIAL", 1, precomputed=True)}}
+    target_leaf = -1
+    cta = 0
+{% else %}
+{{def_kernel("X")}}
+    PARTIAL = X
+    partial_stride = {{size(None, 1, precomputed=True)}}
+{% endif %}
+    programs = {% if FINAL %}1{% else %}tl.full((), {{size(None, 0, precomputed=True)}}, tl.int64) * partial_stride{% endif %}
+    for program in range(tl.program_id(0).to(tl.int64), programs, tl.num_programs(0)):
+        {% if not FINAL %}
+        target_leaf = program // partial_stride
+        cta = program % partial_stride
+        {% endif %}
+        total = {{size("X", 0)}}
+        cursor = tl.full((), 0, tl.int64)
+        leaf = 0
+        value = tl.full((), 0, ACC_TYPE)
+        incoming = tl.full((), 0, ACC_TYPE)
+        active = cta == 0
+        while cursor < total{% if not FINAL %} and leaf <= target_leaf{% endif %}:
+            start = tl.full((), 0, tl.int64)
+            count = total
+            while count > LEAF_LIMIT:
+                half = count // 2
+                if cursor < start + half:
+                    count = half
+                else:
+                    start += half
+                    count -= half
+            if FINAL or leaf == target_leaf:
+                {% for branch in BRANCHES %}
+                {% if loop.first %}if{% else %}elif{% endif %} count >= {{branch[0]}}{% if branch[1] is not none %} and count < {{branch[1]}}{% endif %}:
+                    vpt = tl.cdiv(count, {{branch[2]}})
+                    ctas = tl.where(vpt >= 256, tl.minimum(tl.maximum({{branch[4]}}, tl.cdiv(vpt, 256)), tl.cdiv(vpt, 16)), 1)
+                    active = cta < ctas
+                    if active:
+                        incoming = triton_helpers.cuda_native_sum(
+                            X + start * STRIDE, PARTIAL, leaf, cta, (1,), (STRIDE,), (0,), 1, count, 1,
+                            {{branch[2]}}, 1, {{branch[3]}}, IV, True, False,
+                            ctas, partial_stride, FINAL, True, {{branch[2]}})
+                {% endfor %}
+            {% if FINAL %}
+                value = incoming if leaf == 0 else value + incoming
+            {% else %}
+                value = incoming
+            {% endif %}
+            cursor = start + count
+            leaf += 1
+        value = value[None]
+        {% if FINAL %}
+        {{store_output(("0",), "value", "True", indent_width=8, val_shape=("1",))}}
+        {% else %}
+        {{store_output(("target_leaf", "cta"), "value", "active", indent_width=8, val_shape=("1",))}}
+        {% endif %}

@@ -1,0 +1,226 @@
+# Owner(s): ["oncall: pt2"]
+name: cpp-faketensor-weekly
+
+on:
+  schedule:
+    - cron: '17 8 * * 0'  # Sundays at 08:17 UTC.
+  push:
+    tags:
+      - ciflow/cpp-faketensor/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    if: >-
+      github.repository == 'pytorch/pytorch' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/ciflow/cpp-faketensor/'))
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ""
+      curr_branch: ${{ github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  cpu-build:
+    name: linux-jammy-py3.11-clang21
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
+      build-environment: linux-jammy-py3.11-clang21
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.11-clang21
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "default", shard: 2, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "default", shard: 3, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "default", shard: 4, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "default", shard: 5, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "default", shard: 6, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "default", shard: 7, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "default", shard: 8, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "default", shard: 9, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "default", shard: 10, num_shards: 10, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-16-128", fake_tensor: "cpp" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64", fake_tensor: "cpp" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64", fake_tensor: "cpp" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64", fake_tensor: "cpp" },
+          { config: "dynamo_wrapped", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64", fake_tensor: "cpp" },
+          { config: "dynamo_wrapped", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64", fake_tensor: "cpp" },
+          { config: "dynamo_wrapped", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64", fake_tensor: "cpp" },
+          { config: "dynamo_wrapped", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64", fake_tensor: "cpp" },
+        ]}
+      python-version: "3.11"
+      compiler: clang21
+      cuda-version: cpu
+    secrets: inherit
+
+  cpu-test:
+    name: linux-jammy-py3.11-clang21
+    uses: ./.github/workflows/_linux-test.yml
+    needs: cpu-build
+    with:
+      build-environment: ${{ needs.cpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.cpu-build.outputs.test-matrix }}
+      force-no-td: true
+      force-keep-going: true
+      timeout-minutes: 360
+      # These files run in the inductor_amx config; exclusions affect default only.
+      tests-to-exclude: >-
+        inductor/test_torchinductor
+        inductor/test_torchinductor_opinfo
+        inductor/test_aot_inductor
+        inductor/test_cpu_select_algorithm
+      python-version: "3.11"
+      compiler: clang21
+      cuda-version: cpu
+    secrets: inherit
+
+  cpu-inductor-build:
+    name: linux-jammy-py3.11-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
+      build-environment: linux-jammy-py3.11-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      test-matrix: |
+        { include: [
+          { config: "inductor_amx", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", fake_tensor: "cpp" },
+          { config: "inductor_amx", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", fake_tensor: "cpp" },
+          { config: "inductor_amx", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", fake_tensor: "cpp" },
+          { config: "inductor_amx", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", fake_tensor: "cpp" },
+          { config: "inductor_amx", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", fake_tensor: "cpp" },
+          { config: "inductor_amx", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", fake_tensor: "cpp" },
+          { config: "inductor_amx", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", fake_tensor: "cpp" },
+          { config: "inductor_aoti_fallback", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", fake_tensor: "cpp", unstable: "unstable" },
+          { config: "inductor_aoti_fallback", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", fake_tensor: "cpp", unstable: "unstable" },
+        ]}
+      python-version: "3.11"
+      compiler: gcc11
+    secrets: inherit
+
+  cpu-inductor-test:
+    name: linux-jammy-py3.11-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs: cpu-inductor-build
+    with:
+      build-environment: ${{ needs.cpu-inductor-build.outputs.build-environment }}
+      docker-image: ${{ needs.cpu-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.cpu-inductor-build.outputs.test-matrix }}
+      force-no-td: true
+      force-keep-going: true
+      timeout-minutes: 360
+      python-version: "3.11"
+      compiler: gcc11
+    secrets: inherit
+
+  cuda-build:
+    name: linux-jammy-cuda13.2-py3.11-gcc11
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '7.5 8.9'
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 2, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 3, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 4, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 5, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 6, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 7, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 8, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 9, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 10, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 11, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 12, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 13, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "default", shard: 14, num_shards: 14, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-l4", fake_tensor: "cpp" },
+        ]}
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit
+
+  cuda-test:
+    name: linux-jammy-cuda13.2-py3.11-gcc11
+    uses: ./.github/workflows/_linux-test.yml
+    needs: cuda-build
+    with:
+      build-environment: ${{ needs.cuda-build.outputs.build-environment }}
+      docker-image: ${{ needs.cuda-build.outputs.docker-image }}
+      test-matrix: ${{ needs.cuda-build.outputs.test-matrix }}
+      force-no-td: true
+      force-keep-going: true
+      timeout-minutes: 360
+      # These files run in the inductor config; exclusions affect default only.
+      tests-to-exclude: >-
+        inductor/test_torchinductor
+        inductor/test_torchinductor_opinfo
+        inductor/test_aot_inductor
+        inductor/test_cpu_select_algorithm
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit
+
+  cuda-inductor-build:
+    name: linux-jammy-cuda13.2-py3.11-gcc11-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      lf_runners: "${{ needs.get-label-type.outputs.lf-runners }}"
+      build-environment: linux-jammy-cuda13.2-py3.11-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11-inductor-benchmarks
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '8.6'
+      test-matrix: |
+        { include: [
+          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", fake_tensor: "cpp" },
+          { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g", fake_tensor: "cpp" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-45-167-a10g-4", fake_tensor: "cpp" },
+        ]}
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit
+
+  cuda-inductor-test:
+    name: linux-jammy-cuda13.2-py3.11-gcc11-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs: cuda-inductor-build
+    with:
+      build-environment: ${{ needs.cuda-inductor-build.outputs.build-environment }}
+      docker-image: ${{ needs.cuda-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.cuda-inductor-build.outputs.test-matrix }}
+      force-no-td: true
+      force-keep-going: true
+      timeout-minutes: 360
+      python-version: "3.11"
+      compiler: gcc11
+      cuda-version: "13.2"
+    secrets: inherit

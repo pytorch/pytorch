@@ -34,7 +34,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
 from .ops_handler import DefaultHandler
 from .sizevars import statically_known_true
-from .utils import generate_assert
+from .utils import generate_assert, is_affine_indexing, sympy_product
 from .virtualized import V
 
 
@@ -132,7 +132,7 @@ class SymPyOps:
         return TypedExpr(x.expr - y.expr, result_type)
 
     @staticmethod
-    def mul(x: TypedExpr, y: TypedExpr, *, native_cuda_execution=None) -> TypedExpr:
+    def mul(x: TypedExpr, y: TypedExpr) -> TypedExpr:
         result_type = torch.promote_types(x.dtype, y.dtype)
         return TypedExpr(x.expr * y.expr, result_type)
 
@@ -220,8 +220,13 @@ class IndexPropagation(DefaultHandler):
         inner: Any,
         iter_ranges: dict[sympy.Symbol, sympy.Expr],
         indirect_var_ranges: dict[sympy.Symbol, sympy.Expr],
+        device: torch.device | None = None,
     ) -> None:
         self._inner = inner
+        # the device whose backend decides whether %, // of an index may be
+        # folded into the address (InductorChoices.use_modular_indexing)
+        self.device = device
+        self.iter_ranges = iter_ranges
         self.shape_env = V.graph.sizevars.shape_env
 
         var_to_range = {
@@ -315,9 +320,6 @@ class IndexPropagation(DefaultHandler):
         return IndexPropVar.new_symbolic(new_expr)
 
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
-        # Constant folding must not discard the native multiplication's NaN priority.
-        if name == "mul" and kwargs.get("native_cuda_execution") is not None:
-            return self.fallback(name, args, kwargs)
         if not hasattr(SymPyOps, name):
             return self.fallback(name, args, kwargs)
 
@@ -386,13 +388,21 @@ class IndexPropagation(DefaultHandler):
             can_prove_upper = self.statically_true(expr < size)
             if wrap_neg:
                 expr = wrap_expr(expr)
-            if generate_assert(check):
-                self.fallback(
-                    "check_bounds",
-                    (expr, size),
-                    dict(lower=not can_prove_lower, upper=not can_prove_upper),
-                )
-            return expr
+            if V.choices.use_modular_indexing(
+                self.device,
+                numel=sympy_product(self.iter_ranges.values()),
+                kind="index",
+            ) or is_affine_indexing(expr):
+                if generate_assert(check):
+                    self.fallback(
+                        "check_bounds",
+                        (expr, size),
+                        dict(lower=not can_prove_lower, upper=not can_prove_upper),
+                    )
+                return expr
+            # Keep %, //, abs, clamp and negative wrapping of the index as a
+            # value computation; the load then goes through an indirect
+            # variable so its address stays affine.
 
         indirect_var = self.fallback(
             "indirect_indexing", (index, size, check, wrap_neg), {}

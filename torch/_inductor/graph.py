@@ -40,7 +40,11 @@ from torch._prims_common import (
     compute_required_storage_length,
     make_channels_last_strides_for,
 )
-from torch._subclasses.fake_tensor import is_fake_tensor
+from torch._subclasses.fake_tensor import (
+    CppFakeTensorMode,
+    FakeTensorMode,
+    is_fake_tensor,
+)
 from torch._utils_internal import full_aoti_runtime_assert
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -96,10 +100,13 @@ from .ir import (
     TorchBindObject,
 )
 from .lowering import (
-    _cuda_mul_mutation_destination,
     _cuda_mul_mutation_storage_nodes,
+    _cuda_native_mutation_destination,
+    _cuda_replay_view_path,
+    _cuda_view_copy_destination,
     constrain_to_fake_tensors,
     constrain_to_fx_strides,
+    copy_,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
@@ -122,6 +129,7 @@ from .utils import (
     get_donated_idxs,
     get_sympy_Expr_dtype,
     GraphPartitionMap,
+    GraphPartitionPlan,
     is_same_tensor,
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
@@ -425,6 +433,7 @@ class GraphLowering(torch.fx.Interpreter):
         inputs_to_check: Sequence[int] | None = None,
         fx_wrapper: bool = False,
         get_decomp_fn: Callable[..., dict[Any, Callable[..., Any]]] | None = None,
+        partition_plan: GraphPartitionPlan | None = None,
     ) -> None:
         super().__init__(gm)
         self.get_decomp_fn = get_decomp_fn
@@ -466,10 +475,13 @@ class GraphLowering(torch.fx.Interpreter):
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
         self.graph_inputs: dict[str, TensorBox | TorchBindObject | sympy.Expr] = {}
+        self.negative_buffers: OrderedSet[str] = OrderedSet()
+        self.conjugate_buffers: OrderedSet[str] = OrderedSet()
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         # InputBuffer offsets are relative to input.data_ptr(); explicit FX
         # as_strided storage offsets are relative to the input's storage.
         self.graph_input_storage_offsets: dict[str, Expr] = {}
+        self.inputs_with_negative_as_strided_offset: OrderedSet[str] = OrderedSet()
         self.symbolic_input_sources: dict[
             sympy.Symbol, tuple[str, Literal["size", "stride"], int]
         ] = {}
@@ -610,7 +622,19 @@ class GraphLowering(torch.fx.Interpreter):
         ] = []  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs_reason: str | None = None
+        # An as_strided of a graph input that may read outside the input's own
+        # elements. AOTI's CUDA graphs copy only those, so
+        # aot_inductor.cudagraphs rejects such graphs.
+        self.input_as_strided_node: torch.fx.Node | None = None
         self.kernel_free_cudagraph: bool = False
+        # How this compile is split into partitions, and what for. Without a
+        # plan it follows config.graph_partition, which is patched off during
+        # cpp_wrapper/fx_wrapper/AOT lowering (maybe_disable_graph_partition).
+        self.partition_plan = (
+            GraphPartitionPlan.from_config()
+            if partition_plan is None
+            else partition_plan
+        )
 
         # only keeping one node per device for stack trace purposes
         self.device_node_mapping: dict[torch.device, torch.fx.Node] = {}
@@ -993,7 +1017,11 @@ class GraphLowering(torch.fx.Interpreter):
             return f"{self.name}_{name}"
         return name
 
-    def preserve_input_alignment(self, storage_names: Iterable[str]) -> None:
+    def preserve_input_alignment(
+        self,
+        storage_names: Iterable[str],
+        reason: str = "strict FP64 CUDA multiplication requires original input pointer alignment",
+    ) -> None:
         storage_names = OrderedSet(storage_names)
         input_names = OrderedSet[str]()
         # Dtype-changing views can be aliasing fallback buffers.
@@ -1017,10 +1045,39 @@ class GraphLowering(torch.fx.Interpreter):
                 self.inputs_to_check = [
                     idx
                     for idx in self.inputs_to_check
-                    if self.graph_input_names[idx] not in input_names
+                    # Later placeholders may not have registered their names yet.
+                    if idx >= len(self.graph_input_names)
+                    or self.graph_input_names[idx] not in input_names
                 ]
             # CUDA graph input copies can change the native multiplication's NaN priority.
-            self.disable_cudagraphs_reason = "strict FP64 CUDA multiplication requires original input pointer alignment"
+            self.disable_cudagraphs_reason = reason
+
+    def register_lazy_buffer(self, name: str, example: torch.Tensor) -> None:
+        if (
+            example.device.type == "cuda"
+            and torch.version.hip is None
+            and example.is_conj()
+        ):
+            self.conjugate_buffers.add(name)
+            self.never_reuse_but_free_buffers.add(name)
+        if (
+            example.device.type == "cuda"
+            and torch.version.hip is None
+            and example.is_neg()
+        ):
+            self.negative_buffers.add(name)
+            # Reusing this Tensor object retains its flag on an ordinary output.
+            self.never_reuse_but_free_buffers.add(name)
+
+    def is_negative_buffer(self, name: str) -> bool:
+        if self.scheduler is not None:
+            name = self.scheduler.mutation_real_name.get(name, name)
+        return name in self.negative_buffers
+
+    def is_conjugate_buffer(self, name: str) -> bool:
+        if self.scheduler is not None:
+            name = self.scheduler.mutation_real_name.get(name, name)
+        return name in self.conjugate_buffers
 
     def preserve_subgraph_input_alignment(
         self, subgraph: GraphLowering, operands: Sequence[ir.IRNode]
@@ -1062,6 +1119,7 @@ class GraphLowering(torch.fx.Interpreter):
             is_inference=self.is_inference,
             is_backward=self.is_backward,
             name=self.qualify_name(subgraph_name),
+            partition_plan=GraphPartitionPlan.no_partition(),
         )
 
     def find_nodes_prefer_channels_last(self) -> OrderedSet[Node]:
@@ -1133,15 +1191,19 @@ class GraphLowering(torch.fx.Interpreter):
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
-    def add_device_info(self, device: torch.device) -> None:
+    def add_device_info(self, device: torch.device, *, runs_work: bool = True) -> None:
         self.device_types.add(device.type)
         if device.index is not None:
             self.device_idxs.add(device.index)
-        if V.graph.current_node and device not in self.device_node_mapping:
+        if (
+            runs_work
+            and V.graph.current_node
+            and device not in self.device_node_mapping
+        ):
             self.device_node_mapping[device] = V.graph.current_node
 
     @property
-    def fake_mode(self) -> torch._subclasses.fake_tensor.FakeTensorMode:
+    def fake_mode(self) -> FakeTensorMode | CppFakeTensorMode:
         return V.fake_mode
 
     @property
@@ -1505,6 +1567,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_input_names.append(target)
         self.graph_input_storage_offsets[target] = storage_offset
         self.graph_inputs_original[target] = tensor.data.data  # type: ignore[union-attr]
+        self.register_lazy_buffer(target, example)
+        if self.is_negative_buffer(target) or self.is_conjugate_buffer(target):
+            self.preserve_input_alignment(
+                (target,),
+                reason="lazy tensor bits require original input storage",
+            )
         if self.current_node.users:  # cudagraphs should work with an unused CPU input
             self.add_device_info(example.device)
 
@@ -1636,7 +1704,7 @@ class GraphLowering(torch.fx.Interpreter):
                         old_args, old_kwargs = normalize(old_args, old_kwargs)
 
                         args, kwargs = constrain_to_fake_tensors(
-                            args, kwargs, fake_args, fake_kwargs
+                            args, kwargs, fake_args, fake_kwargs, fx_node=n
                         )
                 else:
                     args, kwargs = layout_constraints(n, *args, **kwargs)
@@ -2148,7 +2216,7 @@ class GraphLowering(torch.fx.Interpreter):
                 fallback_args, fallback_kwargs = self.fetch_args_kwargs_from_env(n)
                 native_destination = None
                 if n in self.cuda_mul_mutation_storage_nodes:
-                    native_destination = _cuda_mul_mutation_destination(n)
+                    native_destination = _cuda_native_mutation_destination(n)
                     if native_destination is not None:
                         from torch.fx.experimental.proxy_tensor import (
                             _is_original_aten_mutation,
@@ -2171,9 +2239,7 @@ class GraphLowering(torch.fx.Interpreter):
                     *fallback_args, **fallback_kwargs
                 )
                 if native_destination is not None and target == n.target:
-                    result = fallback_handler(
-                        aten.copy_.default, add_to_fallback_set=False
-                    )(native_destination[0], result)
+                    result = copy_(native_destination[0], result)
             elif (
                 n.op == "call_function"
                 and isinstance(
@@ -2208,6 +2274,7 @@ class GraphLowering(torch.fx.Interpreter):
                             kwargs,
                             inp_args,
                             inp_kwargs,
+                            fx_node=n,
                         )
                     else:
                         args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
@@ -2218,6 +2285,25 @@ class GraphLowering(torch.fx.Interpreter):
                         f"Unknown layout constraint for {info.dsl} user kernels: "
                         f"{constraint}"
                     )
+            elif (
+                is_call_function
+                and isinstance(n.target, torch._ops.OpOverload)
+                and (recovered := _cuda_view_copy_destination(n)) is not None
+            ):
+                destination, view_path = recovered
+                copy_args, copy_kwargs = self.fetch_args_kwargs_from_env(n)
+                copy_destination = _cuda_replay_view_path(destination, view_path)
+                copy_source = _cuda_replay_view_path(copy_args[0], view_path)
+                if (
+                    copy_destination.get_dtype().is_complex
+                    or copy_source.get_dtype().is_complex
+                ):
+                    ir.InplaceCopyFallback.create(copy_destination, copy_source)
+                else:
+                    copy_(copy_destination, copy_source)
+                result = fallback_handler(n.target, add_to_fallback_set=False)(
+                    destination, *copy_args[1:], **copy_kwargs
+                )
             else:
                 debug("")
                 result = super().run_node(n)
@@ -3370,14 +3456,27 @@ class GraphLowering(torch.fx.Interpreter):
     def get_output_names(self) -> list[str]:
         return self._get_output_names(self.graph_outputs)
 
+    def is_zero_dim_cpu_buffer(self, name: str) -> bool:
+        """Check CPU scalar eligibility, not whether codegen unwraps the buffer.
+
+        GPU consumers must first register intermediate buffers with the
+        scheduler; `should_unwrap_unspec_arg` decides whether to unwrap them.
+        """
+        buffer = self.name_to_buffer.get(name, self.graph_inputs.get(name))
+        return (
+            isinstance(buffer, (ir.Buffer, TensorBox))
+            and get_device_type(buffer) == "cpu"
+            and not isinstance(
+                buffer.get_output_spec(), (ir.NoneLayout, ir.MultiOutputLayout)
+            )
+            and buffer.get_size() == []
+        )
+
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
         return (
-            name in self.graph_inputs
-            and self.graph_inputs[name].get_numel() == 1
-            and len(self.graph_inputs[name].get_size()) == 0
-            and get_device_type(self.graph_inputs[name]) == "cpu"
+            name in self.graph_inputs and self.is_zero_dim_cpu_buffer(name)
         ) or name in self.zero_dim_cpu_tensor_list
 
 
