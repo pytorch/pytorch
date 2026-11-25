@@ -3590,10 +3590,6 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                     and V.graph.sizevars.statically_known_gt(n, 15 * out["BLOCK_N"])
                 ):
                     out["GROUP_M"] = 16
-                # A cluster runs two consecutive tile ids, which must be an M pair
-                # sharing B, so each GROUP_M swizzle group needs an even M count.
-                if "GROUP_M" in out:
-                    out["GROUP_M"] += out["GROUP_M"] % 2
             yield out
 
     @staticmethod

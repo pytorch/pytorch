@@ -3795,7 +3795,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertIsNone(torch.compile(fn, backend="eager")().strerror)
 
-    @unittest.expectedFailure
     def test_property_without_name_no_setter(self):
         class C:
             pass
@@ -6233,6 +6232,106 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    # Reads of an instance __dict__ after an attribute write: these exercise the
+    # mapping view, not the setattr protocol (see test_tp_setattro.py for that).
+
+    def test_dict_getitem_after_attr_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.y = 5
+            return obj.__dict__["y"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_len_and_keys_after_attr_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.y = 5
+            return len(obj.__dict__), sorted(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_contains_after_attr_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.y = 5
+            return "y" in obj.__dict__, "x" in obj.__dict__
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_attr_read_after_dict_write(self):
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            obj = Foo(x)
+            obj.__dict__["y"] = 5
+            return obj.y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_simple_namespace_repr_after_write(self):
+        # SimpleNamespace is backed by its __dict__, so repr() reads it too.
+        def fn(x):
+            ns = types.SimpleNamespace()
+            ns.a = 1
+            return repr(ns), sorted(ns.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_copy_copy_reads_instance_dict(self):
+        # copy.copy does dst.__dict__.update(src.__dict__), so it only sees x if
+        # the write from __init__ is visible in the mapping view.
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x):
+            return copy.copy(Foo(x)).x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_view_on_graph_input_object(self):
+        # Same view, on an object that enters as an input rather than being built
+        # in the region. Each call gets its own object so the eager run does not
+        # pre-populate the one the compiled run sees.
+        class Foo:
+            def __init__(self, x):
+                self.x = x
+
+        def fn(x, obj):
+            obj.y = 5
+            return sorted(obj.__dict__)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x, Foo(x)), opt_fn(x, Foo(x)))
+
     def test_class_object_dunder_dict(self):
         # A class object's __dict__ is a read-only mappingproxy, not an instance
         # dict; both membership (which installs a dict guard) and item read must
@@ -6699,6 +6798,21 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         expected = fn()
         actual = opt_fn()
         self.assertTrue(same(expected, actual))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_captured_arg_closure_after_graph_break(self):
+        # x is an argument and a cell; in the resume function it is a freevar.
+        def fn(x, pe):
+            y = x + 1
+            torch._dynamo.graph_break()
+            pe = (p[:, -x.shape[1] :] * y.sum() for p in pe)
+            return [p + 1 for p in pe]
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.randn(2, 3)
+        pe = (torch.randn(2, 5), torch.randn(2, 5))
+        self.assertEqual(opt_fn(x, pe), fn(x, pe))
         self.assertEqual(cnts.frame_count, 2)
 
     def test_closure_out_of_scope_cell_with_cond(self):
@@ -20152,7 +20266,6 @@ A.last
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
-    @unittest.expectedFailure
     def test_builtin_numeric_unbound_method_constant_fold(self):
         def fn():
             out = [
@@ -20179,6 +20292,16 @@ A.last
             return out
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_type_subclasscheck_non_class_raises_type_error(self):
+        def fn(x):
+            try:
+                return x + 1, type.__subclasscheck__(int, True)
+            except TypeError as exc:
+                return x + 1, str(exc)
+
+        x = torch.tensor(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_builtin_constant_fold_str_conversions(self):
         @torch.compile(backend="eager", fullgraph=True)
