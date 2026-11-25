@@ -115,12 +115,12 @@ Tensor mkldnn_linear(
   const ideep::tensor x = itensor_from_mkldnn(self_reshaped);
   // weight_t can be a mkldnn tensor or dense tensor.
   const Tensor weight = (weight_t.is_mkldnn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
-  auto w = itensor_from_tensor(weight);
+  auto w = itensor_from_const_tensor(weight);
   w.transpose_(0, 1);
 
   ideep::tensor y;
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias.reshape({1, bias.size(0)}));
+    const ideep::tensor b = itensor_from_const_tensor(bias.reshape({1, bias.size(0)}));
     ideep::matmul_forward::compute(x, w, b, y);
   } else {
     ideep::matmul_forward::compute(x, w, y);
@@ -254,9 +254,9 @@ Tensor mkldnn_linear_pointwise(
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias.reshape({1, bias.size(0)}));
+    mkldnn_bias = itensor_from_const_tensor(bias.reshape({1, bias.size(0)}));
   }
-  auto w = itensor_from_tensor(weight_t);
+  auto w = itensor_from_const_tensor(weight_t);
   w.transpose_(0, 1);
 
   ideep::attr_t op_attr = ideep::attr_t();
@@ -360,9 +360,9 @@ Tensor mkldnn_linear_pointwise_binary(
 
   std::optional<ideep::tensor> mkldnn_bias{std::nullopt};
   if (bias.defined()) {
-    mkldnn_bias = itensor_from_tensor(bias.reshape({1, bias.size(0)}));
+    mkldnn_bias = itensor_from_const_tensor(bias.reshape({1, bias.size(0)}));
   }
-  auto w = itensor_from_tensor(weight_t);
+  auto w = itensor_from_const_tensor(weight_t);
   w.transpose_(0, 1);
 
   auto other_desc = mkldnn_other.get_desc();
