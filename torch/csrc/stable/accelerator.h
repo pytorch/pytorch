@@ -87,7 +87,7 @@ class Stream {
         }) {}
 
   StreamId id() const {
-    StreamId stream_id;
+    StreamId stream_id = 0;
     STABLE_TORCH_ERROR_CODE_CHECK(
         aoti_torch_stream_id(stream_.get(), &stream_id));
     return stream_id;
@@ -123,10 +123,39 @@ inline Stream getCurrentStream(DeviceIndex device_index) {
  * Minimum compatible version: PyTorch 2.9.
  */
 inline DeviceIndex getCurrentDeviceIndex() {
-  DeviceIndex device_index;
+  DeviceIndex device_index = 0;
   STABLE_TORCH_ERROR_CODE_CHECK(
       aoti_torch_get_current_device_index(&device_index));
   return device_index;
 }
+
+#ifdef USE_CUDA
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+/**
+ * @brief Gets the current CUDA BLAS handle.
+ *
+ * @param setup Forwarded to at::cuda::getCurrentCUDABlasHandle on 2.16 and
+ * newer targets. Earlier targets require true.
+ * @return A borrowed BLAS handle owned by PyTorch.
+ *
+ * Minimum compatible runtime: PyTorch 2.10.
+ * Build time minimum version: PyTorch 2.16.
+ *
+ * This wrapper is available when USE_CUDA is defined.
+ */
+inline void* getCurrentCUDABlasHandle(bool setup = true) {
+  void* handle = nullptr;
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_16_0
+  STABLE_TORCH_ERROR_CODE_CHECK(
+      torch_get_current_cuda_blas_handle_v2(setup, &handle));
+#elif TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  STD_TORCH_CHECK(
+      setup, "setup=false requires targeting PyTorch 2.16 or newer");
+  STABLE_TORCH_ERROR_CODE_CHECK(torch_get_current_cuda_blas_handle(&handle));
+#endif
+  return handle;
+}
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+#endif // USE_CUDA
 
 HIDDEN_NAMESPACE_END(torch, stable, accelerator)

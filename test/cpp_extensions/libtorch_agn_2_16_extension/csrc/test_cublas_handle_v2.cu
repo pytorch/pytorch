@@ -1,12 +1,10 @@
 #include <cublas_v2.h>
-#include <torch/csrc/stable/c/shim.h>
+#include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/library.h>
 #include <tuple>
 
 std::tuple<void*, void*> my_get_curr_cuda_blas_handle_stream(bool setup) {
-  void* handle;
-  STABLE_TORCH_ERROR_CODE_CHECK(
-      torch_get_current_cuda_blas_handle_v2(setup, &handle));
+  void* handle = torch::stable::accelerator::getCurrentCUDABlasHandle(setup);
   cudaStream_t stream;
   STD_TORCH_CHECK(
       cublasGetStream(static_cast<cublasHandle_t>(handle), &stream) ==
