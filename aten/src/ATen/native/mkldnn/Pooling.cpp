@@ -212,7 +212,7 @@ static Tensor _mkldnn_pooling(
   const auto padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
-  const mkldnn::ITensor& x = itensor_from_mkldnn(input);
+  const mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
   std::vector<int64_t> output_sizes;
 
   auto padding_vec_r = padding_vec;
@@ -269,7 +269,7 @@ static Tensor _mkldnn_pooling(
     aprop_kind = dnnl::prop_kind::forward_inference;
   }
 
-  mkldnn::ITensor y;
+  mkldnn::MkldnnMemory y;
   mkldnn::pooling_forward(
       x,
       {output_sizes.cbegin(), output_sizes.cend()},
@@ -338,10 +338,10 @@ static Tensor _mkldnn_pooling_backward(
     }
   }
 
-  const mkldnn::ITensor& grady = itensor_from_mkldnn(grad_output);
-  const mkldnn::ITensor& y = itensor_from_mkldnn(output);
-  const mkldnn::ITensor& x = itensor_from_mkldnn(input);
-  mkldnn::ITensor gradx;
+  const mkldnn::MkldnnMemory& grady = itensor_from_mkldnn(grad_output);
+  const mkldnn::MkldnnMemory& y = itensor_from_mkldnn(output);
+  const mkldnn::MkldnnMemory& x = itensor_from_mkldnn(input);
+  mkldnn::MkldnnMemory gradx;
   mkldnn::pooling_backward(
       grady,
       y,

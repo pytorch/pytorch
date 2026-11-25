@@ -36,7 +36,7 @@ public:
   }
 };
 
-using IDeepTensorWrapper = IntrusivePtrTargetWrapper<mkldnn::ITensor>;
+using IDeepTensorWrapper = IntrusivePtrTargetWrapper<mkldnn::MkldnnMemory>;
 using IDeepTensorWrapperPtr = c10::intrusive_ptr<IDeepTensorWrapper>;
 using MKLDNNTensorImpl = OpaqueTensorImpl<IDeepTensorWrapperPtr>;
 using MKLDNNTensor = Tensor;
@@ -81,21 +81,21 @@ at::Tensor mkldnn_tensor_from_data_ptr(
     int64_t opaque_metadata_size) {
   std::vector<uint8_t> vector_serialized_md{
       opaque_metadata, opaque_metadata + opaque_metadata_size};
-  mkldnn::ITensor::desc deserialized_ideep_desc;
+  mkldnn::MkldnnMemory::desc deserialized_ideep_desc;
 #if DNNL_PREREQ(3, 4, 1)
   // groups is needed for grouped conv
-  deserialized_ideep_desc = mkldnn::ITensor::desc(vector_serialized_md);
+  deserialized_ideep_desc = mkldnn::MkldnnMemory::desc(vector_serialized_md);
 #else
   TORCH_CHECK(false, "Unexpected oneDNN version to do weight deserialization.");
 #endif
 
-  auto a = mkldnn::ITensor(deserialized_ideep_desc, data_ptr);
+  auto a = mkldnn::MkldnnMemory(deserialized_ideep_desc, data_ptr);
   return at::native::new_with_itensor_mkldnn(std::move(a), dtype, device);
 }
 
-Tensor new_with_itensor_mkldnn(mkldnn::ITensor&& it, std::optional<ScalarType> dtype, std::optional<Device> device) {
-  // NOTE: int32_t dims from ITensor but sizes needs int64_t
-  // TODO: support int64_t dims in ITensor to avoid extra conversion
+Tensor new_with_itensor_mkldnn(mkldnn::MkldnnMemory&& it, std::optional<ScalarType> dtype, std::optional<Device> device) {
+  // NOTE: int32_t dims from MkldnnMemory but sizes needs int64_t
+  // TODO: support int64_t dims in MkldnnMemory to avoid extra conversion
   auto dims = it.get_dims();
   IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
   caffe2::TypeMeta dtype_ = scalarTypeToTypeMeta(dtype_or_default(dtype));
@@ -106,7 +106,7 @@ Tensor new_with_itensor_mkldnn(mkldnn::ITensor&& it, std::optional<ScalarType> d
     std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
-mkldnn::ITensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
+mkldnn::MkldnnMemory& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   TORCH_CHECK(mkldnn_tensor.is_mkldnn(),
              "itensor_from_mkldnn expects MKL-DNN tensor input");
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
@@ -114,7 +114,7 @@ mkldnn::ITensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
 }
 
 int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor) {
-  mkldnn::ITensor t = itensor_from_mkldnn(mkldnn_tensor);
+  mkldnn::MkldnnMemory t = itensor_from_mkldnn(mkldnn_tensor);
   return t.get_desc().get_size();
 }
 
@@ -133,7 +133,7 @@ T* dense_view_data_ptr(const Tensor& tensor, DenseViewAccess access) {
 }
 
 template <typename T>
-mkldnn::ITensor typed_itensor_view_from_dense(
+mkldnn::MkldnnMemory typed_itensor_view_from_dense(
     const Tensor& tensor,
     dnnl::memory::data_type data_type,
     DenseViewAccess access) {
@@ -142,14 +142,14 @@ mkldnn::ITensor typed_itensor_view_from_dense(
 }
 
 template <typename T>
-mkldnn::ITensor typed_itensor_view_from_dense(
+mkldnn::MkldnnMemory typed_itensor_view_from_dense(
     const Tensor& tensor,
-    const mkldnn::ITensor::desc& desc,
+    const mkldnn::MkldnnMemory::desc& desc,
     DenseViewAccess access) {
   return {desc, dense_view_data_ptr<T>(tensor, access)};
 }
 
-mkldnn::ITensor itensor_view_from_dense_impl(
+mkldnn::MkldnnMemory itensor_view_from_dense_impl(
     const Tensor& tensor,
     DenseViewAccess access) {
   TORCH_CHECK(
@@ -184,9 +184,9 @@ mkldnn::ITensor itensor_view_from_dense_impl(
   }
 }
 
-mkldnn::ITensor itensor_view_from_dense_impl(
+mkldnn::MkldnnMemory itensor_view_from_dense_impl(
     const at::Tensor& tensor,
-    const mkldnn::ITensor::desc& desc,
+    const mkldnn::MkldnnMemory::desc& desc,
   DenseViewAccess access) {
   TORCH_CHECK(
       tensor.device().is_cpu(),
@@ -210,32 +210,32 @@ mkldnn::ITensor itensor_view_from_dense_impl(
 
 } // namespace
 
-mkldnn::ITensor itensor_view_from_dense(const Tensor& tensor) {
+mkldnn::MkldnnMemory itensor_view_from_dense(const Tensor& tensor) {
   return itensor_view_from_dense_impl(tensor, DenseViewAccess::Mutable);
 }
 
-mkldnn::ITensor itensor_view_from_const_dense(const Tensor& tensor) {
+mkldnn::MkldnnMemory itensor_view_from_const_dense(const Tensor& tensor) {
   return itensor_view_from_dense_impl(tensor, DenseViewAccess::Const);
 }
 
-mkldnn::ITensor itensor_view_from_dense(
+mkldnn::MkldnnMemory itensor_view_from_dense(
     const at::Tensor& tensor,
-    const mkldnn::ITensor::desc& desc) {
+    const mkldnn::MkldnnMemory::desc& desc) {
   return itensor_view_from_dense_impl(tensor, desc, DenseViewAccess::Mutable);
 }
 
-mkldnn::ITensor itensor_view_from_const_dense(
+mkldnn::MkldnnMemory itensor_view_from_const_dense(
     const at::Tensor& tensor,
-    const mkldnn::ITensor::desc& desc) {
+    const mkldnn::MkldnnMemory::desc& desc) {
   return itensor_view_from_dense_impl(tensor, desc, DenseViewAccess::Const);
 }
 
-// Helper function for getting an ITensor out of an aten Tensor.
+// Helper function for getting an MkldnnMemory out of an aten Tensor.
 // Note in case the aten Tensor is a dense tensor, the returned
-// ITensor is just a view of the storage of the aten dense tensor, so
+// MkldnnMemory is just a view of the storage of the aten dense tensor, so
 // caller needs to make sure the aten dense tensor's lifetime is
-// longer than the ITensor.
-mkldnn::ITensor itensor_from_tensor(const Tensor& tensor) {
+// longer than the MkldnnMemory.
+mkldnn::MkldnnMemory itensor_from_tensor(const Tensor& tensor) {
   if (tensor.is_mkldnn()) {
     return itensor_from_mkldnn(tensor);
   } else {
@@ -243,7 +243,7 @@ mkldnn::ITensor itensor_from_tensor(const Tensor& tensor) {
   }
 }
 
-mkldnn::ITensor itensor_from_const_tensor(const Tensor& tensor) {
+mkldnn::MkldnnMemory itensor_from_const_tensor(const Tensor& tensor) {
   if (tensor.is_mkldnn()) {
     return itensor_from_mkldnn(tensor);
   } else {
