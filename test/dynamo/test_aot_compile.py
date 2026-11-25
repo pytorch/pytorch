@@ -7909,59 +7909,60 @@ from user code:
         (result,) = compiled.compiled_results
         self.assertFalse(result._has_global_guards)
 
-    def _capture_filtered_module(self, module, guard_filter, *args):
+    def _capture_filtered(self, module, guard_filter, *args):
         options = {"guard_filter_fn": guard_filter}
         model = torch.compile(module, backend="eager", fullgraph=True, options=options)
         model._aot_compile([ModelInput(args=args, kwargs={}, contexts=[])])
         (captured,) = model.forward.compiled_results
         return model, load_guards_state(captured._artifacts.guards_state).output_graph
 
-    def _load_filtered_module(self, data, module):
+    def _reload_filtered(self, model, module):
+        data = model._save_aot_compiled_module()
         torch._dynamo.reset()
-        loaded = torch.compile(module, backend="eager", fullgraph=True)
-        loaded._load_aot_compiled_module(data)
-        return loaded
+        return AOTCompiledModel.deserialize(module, data)
 
     @parametrize("retain", [False, True])
-    def test_aot_compile_dictionary_order_metadata_follows_filter(self, retain):
+    @parametrize("inner_type", [dict, set])
+    def test_dictionary_order_follows_filter(self, retain, inner_type):
         class Module(torch.nn.Module):
-            def forward(self, x, mapping):
-                return x + next(iter(mapping.values()))
-
-        kept_nonportable = False
+            def forward(self, x, direct, outer):
+                return x + next(iter(direct)) + len(outer) + next(iter(outer["inner"]))
 
         def guard_filter(entries):
-            nonlocal kept_nonportable
-            kept = [retain or "mapping" not in entry.name for entry in entries]
+            kept = [
+                "['inner']" not in e.name and (retain or "direct" not in e.name)
+                for e in entries
+            ]
             portable = torch.compiler.keep_portable_guards_unsafe(entries)
-            kept_nonportable |= any(keep and not p for keep, p in zip(kept, portable))
+            self.assertTrue(any(k and not p for k, p in zip(kept, portable)))
             return kept
 
-        x, mapping = torch.ones(1), {"a": 2, "b": 3}
-        model, state = self._capture_filtered_module(Module(), guard_filter, x, mapping)
-        self.assertEqual(
-            {source.name for source in state.guard_on_key_order},
-            {"L['mapping']"} if retain else set(),
-        )
-        self.assertTrue(kept_nonportable)
-        if not retain:
-            self.assertNotIn("mapping", state.local_scope)
-        self.assertEqual(model(x, mapping), x + 2)
-        loaded = self._load_filtered_module(model._save_aot_compiled_module(), Module())
-        self.assertEqual(loaded(x, mapping), x + 2)
-        reordered = {"b": 3, "a": 2}
-        if retain:
-            with self.assertRaisesRegex(RuntimeError, "No AOT compiled graph matched"):
-                loaded(x, reordered)
-        else:
-            self.assertEqual(loaded(x, reordered), x + 2)
+        x, direct = torch.ones(1), {2: None, 3: None}
+        nested = {"inner": inner_type({4: None, 5: None})}
+        model, state = self._capture_filtered(Module(), guard_filter, x, direct, nested)
+        expected = {"L['direct']"} if retain else set()
+        if inner_type is dict:
+            expected.add("L['outer']['inner']")
+        self.assertEqual({src.name for src in state.guard_on_key_order}, expected)
+        self.assertEqual("direct" in state.local_scope, retain)
+        reordered = dict(reversed(direct.items()))
+        loaded = self._reload_filtered(model, Module())
+        no_match = "No AOT compiled graph matched"
+        for compiled in (model, loaded):
+            self.assertEqual(compiled(x, direct, nested), x + 7)
+            if retain:
+                with self.assertRaisesRegex(RuntimeError, no_match):
+                    compiled(x, reordered, nested)
+            else:
+                self.assertEqual(compiled(x, reordered, nested), x + 7)
+            if inner_type is dict:
+                with self.assertRaisesRegex(RuntimeError, no_match):
+                    compiled(x, direct, {"inner": {4: None}})
 
     @parametrize(
         "member,bystander", [("mapping", False), ("mapping", True), ("weight", False)]
     )
-    def test_aot_compile_implicit_module_dictionary_order_alias(
-        self, member, bystander
-    ):
+    def test_implicit_module_order_alias(self, member, bystander):
         global AOT_IMPLICIT_ORDER_ROOT
 
         self._hide_leaked_dynamo_globals()
@@ -7985,7 +7986,7 @@ from user code:
             return [e.guard_type in ("HASATTR", "TENSOR_MATCH") for e in entries]
 
         x = torch.ones(1)
-        model, state = self._capture_filtered_module(module, guard_filter, x)
+        model, state = self._capture_filtered(module, guard_filter, x)
         (captured,) = model.forward.compiled_results
         self.assertEqual(
             {source.name for source in state.guard_on_key_order},
@@ -7994,7 +7995,7 @@ from user code:
         self.assertIn("AOT_IMPLICIT_ORDER_ROOT", state.global_scope)
         self.assertEqual(model(x), x + 3)
         changed = Module()
-        loaded = self._load_filtered_module(model._save_aot_compiled_module(), changed)
+        loaded = self._reload_filtered(model, changed)
         self.assertEqual(loaded(x), x + 3)
         if member == "mapping":
             changed.mapping["c"] = 3
@@ -8066,32 +8067,6 @@ from user code:
             self.assertIn("live dictionary key order", "\n".join(logs.output))
             AOT_KEY_ORDER_GLOBAL["a"] = AOT_KEY_ORDER_GLOBAL.pop("a")
             self.assertEqual(fallback(x), expected)
-
-    @parametrize("mapping_type", [dict, set])
-    def test_aot_compile_nested_dictionary_order_metadata(self, mapping_type):
-        class Module(torch.nn.Module):
-            def forward(self, x, mapping):
-                return x + len(mapping) + next(iter(mapping["inner"]))
-
-        def guard_filter(entries):
-            return ["['inner']" not in entry.name for entry in entries]
-
-        mapping = {"inner": mapping_type({2: None, 3: None})}
-        x = torch.ones(1)
-        model, state = self._capture_filtered_module(Module(), guard_filter, x, mapping)
-        self.assertEqual(
-            {source.name for source in state.guard_on_key_order},
-            {"L['mapping']['inner']"} if mapping_type is dict else set(),
-        )
-        invalid = {"inner": mapping_type({2: None})}
-        loaded = self._load_filtered_module(model._save_aot_compiled_module(), Module())
-        for compiled in (model, loaded):
-            self.assertEqual(compiled(x, mapping), x + 3)
-            if mapping_type is dict:
-                with self.assertRaisesRegex(
-                    RuntimeError, "No AOT compiled graph matched"
-                ):
-                    compiled(x, invalid)
 
     def _assert_forward_refused(self, mod, namespace, reason):
         # Both halves of a refusal, each on the artifact that can show it: the
