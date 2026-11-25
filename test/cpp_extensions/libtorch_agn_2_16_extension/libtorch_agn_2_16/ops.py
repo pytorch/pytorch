@@ -89,6 +89,13 @@ def my_cpublas_brgemm_release() -> None:
     torch.ops.libtorch_agn_2_16.my_cpublas_brgemm_release.default()
 
 
+def my_get_curr_cuda_blas_handle_stream(setup: bool) -> tuple[int, int]:
+    """Return the BLAS handle and its bound stream as integer pointer values."""
+    return torch.ops.libtorch_agn_2_16.my_get_curr_cuda_blas_handle_stream.default(
+        setup
+    )
+
+
 def test_stable_torch_warn_once(value) -> None:
     """
     Tests STABLE_TORCH_WARN_ONCE with one call site for negative values and one

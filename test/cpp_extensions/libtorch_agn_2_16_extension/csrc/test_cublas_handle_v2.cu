@@ -5,7 +5,7 @@
 
 std::tuple<void*, void*> my_get_curr_cuda_blas_handle_stream(bool setup) {
   void* handle;
-  TORCH_ERROR_CODE_CHECK(
+  STABLE_TORCH_ERROR_CODE_CHECK(
       torch_get_current_cuda_blas_handle_v2(setup, &handle));
   cudaStream_t stream;
   STD_TORCH_CHECK(
