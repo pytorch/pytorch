@@ -107,6 +107,11 @@ class _DecodeProbe:
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelGeneral(TestCase):
+    def setUp(self):
+        super().setUp()
+        # Reruns share the process, so drop earlier recordings and let every call record.
+        kg._REPLAYS.clear()
+
     @unittest.skipIf(
         torch.cuda.device_count() < 2 or torch.cuda.get_device_capability(1)[0] < 9,
         "requires a second Hopper+ CUDA device",
@@ -1064,10 +1069,6 @@ class TestKernelGeneral(TestCase):
         # Index reduce-all copies a strided input with a torch op, which a replay cannot redo.
         x = torch.randn(1 << 16, device="cuda")[::2]
         trait = lambda: T.ArgMaxOps(acc=cutlass.Float32)  # noqa: E731
-        # Drop entries left by an earlier run in this process so these calls record.
-        names = ("replay_copy", "replay_flat", "replay_seeded")
-        for k in [k for k in kg._REPLAYS if k[0] in names]:
-            kg._REPLAYS.pop(k)
         kg.replay_reduce(trait, "replay_copy", x, None, torch.int32)
         (replay,) = [r for k, r in kg._REPLAYS.items() if k[0] == "replay_copy"]
         self.assertIsNone(replay)
@@ -1086,14 +1087,11 @@ class TestKernelGeneral(TestCase):
         sums = lambda: T.SumOps(acc=cutlass.Float32)  # noqa: E731
         kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
         (seeded,) = [k for k in kg._REPLAYS if k[0] == "replay_seeded"]
-        try:
-            self.assertIsNotNone(kg._REPLAYS.get(seeded))
-            kg._REPLAYS[seeded] = None
-            got = kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
-            self.assertIn(seeded, kg._REPLAYS)
-            self.assertIsNone(kg._REPLAYS.get(seeded))
-        finally:
-            kg._REPLAYS.pop(seeded)
+        self.assertIsNotNone(kg._REPLAYS.get(seeded))
+        kg._REPLAYS[seeded] = None
+        got = kg.replay_reduce(sums, "replay_seeded", y, 1, torch.float32)
+        self.assertIn(seeded, kg._REPLAYS)
+        self.assertIsNone(kg._REPLAYS.get(seeded))
         with torch.backends.python_native.cutedsl.disabled():
             want = y.sum(dim=1)
         self.assertEqual(got, want)
