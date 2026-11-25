@@ -259,6 +259,15 @@ class TestExportJobs(unittest.TestCase):
             )
             self.assertNotIn("--gpu-arch", seen["options"] or "")
 
+    def test_cutedsl_export_refuses_a_32bit_stride(self):
+        # The header declares the stride 64-bit either way, so validate_abi cannot see
+        # it; export reads the fake tensors' SymInt widths, list items included.
+        tc = toolchains.CuteDslToolchain()
+        narrow = types.SimpleNamespace(stride=(types.SimpleNamespace(width=32), 1))
+        b = {"prefix": "p", "fn": None, "fake_args": ([narrow],), "tensor_args": []}
+        with self.assertRaisesRegex(RuntimeError, "32-bit dynamic stride"):
+            tc.export(b, "/tmp")
+
     def test_cutedsl_export_pins_the_host_isa(self):
         # Unpinned, the DSL follows the build machine's CPU, so an AVX512 builder's
         # module loaders SIGILL elsewhere; a declaration's own choice still wins.
@@ -1206,6 +1215,41 @@ class TestLauncherGeneration(unittest.TestCase):
             src,
         )
 
+    def test_tensor_list_marshalling(self):
+        sc = dict(
+            SIDECAR,
+            tensor_args=[
+                {"name": "mX", "dynamic_sizes": [0], "read_only": True},
+                {
+                    "name": "mOuts",
+                    "items": [
+                        {"name": "mOut0", "dynamic_sizes": [0]},
+                        {"name": "mOut1", "dynamic_sizes": [0]},
+                    ],
+                },
+            ],
+        )
+        src = gen_aot_lib.gen_launcher(sc)
+        self.assertIn(
+            "const at::Tensor& mX, const at::Tensor& mOut0, "
+            "const at::Tensor& mOut1, c10::Stream stream",
+            src,
+        )
+        self.assertIn(
+            "fakeop_f32_n1024_k8_TensorList_mOuts_t mOuts_s;\n  mOuts_s.count = 2;",
+            src,
+        )
+        self.assertIn(
+            "mOuts_s.elements[1].dynamic_shapes[0] = "
+            "static_cast<int32_t>(mOut1.size(0));",
+            src,
+        )
+        self.assertIn(
+            "cute_dsl_fakeop_f32_n1024_k8_wrapper("
+            "&fakeop_f32_n1024_k8_module, &mX_s, &mOuts_s,",
+            src,
+        )
+
 
 class TestScalarArgs(unittest.TestCase):
     def test_launcher_forwards_scalars_by_value(self):
@@ -1851,6 +1895,68 @@ class TestAbiValidation(unittest.TestCase):
         # int32 SHAPE slots are expected and handled (explicit cast + size gate);
         # only the stride WIDTH and both slot COUNTS are the subject.
         self._accepts(self._header())
+
+    def test_tensor_list_errors_are_refused(self):
+        p = SIDECAR["prefix"]
+        items = [{"name": "mOut0", "dynamic_sizes": [0]}]
+        listed = [{"name": "mOuts", "items": items}]
+        element = self._struct("mOuts", shapes=1, strides=0)
+
+        def header(*lists):
+            return "#pragma once\n#include <stdint.h>\n" + element + "".join(lists)
+
+        def list_t(elements="", count="  int32_t count;\n"):
+            return f"typedef struct {{\n{elements}{count}}} {p}_TensorList_mOuts_t;\n"
+
+        def elements(bound="1", ctype=f"{p}_Tensor_mOuts_t"):
+            return f"  {ctype} elements[{bound}];\n"
+
+        for bad in ("mOut0", []):
+            with self.subTest(items=bad):
+                bad_args = [{"name": "mOuts", "items": bad}]
+                self._refuses(header(), "not a non-empty list", tensor_args=bad_args)
+        cases = {
+            "no list struct": (header(), "exactly one .* found 0"),
+            "two list structs": (
+                header(list_t(elements()), list_t(elements())),
+                "exactly one .* found 2",
+            ),
+            "no elements": (header(list_t()), "readable elements"),
+            "no count": (header(list_t(elements(), count="")), "readable elements"),
+            "wrong element type": (
+                header(list_t(elements(ctype=f"{p}_Tensor_mX_t"))),
+                f"stores {p}_Tensor_mX_t, expected {p}_Tensor_mOuts_t",
+            ),
+            "non-numeric bound": (
+                header(list_t(elements(bound="N"))),
+                "declares elements\\[N\\]",
+            ),
+            "octal bound": (header(list_t(elements(bound="01"))), "leading zero"),
+            "bound past the items": (
+                header(list_t(elements(bound="2"))),
+                "declares elements\\[2\\], but the sidecar lists 1",
+            ),
+        }
+        for label, (text, pattern) in cases.items():
+            with self.subTest(label):
+                self._refuses(text, pattern, tensor_args=listed)
+
+    def test_tensor_lists_mix_with_tensor_args(self):
+        # Plain tensors beside a list keep their own per-argument checks.
+        p = SIDECAR["prefix"]
+        items = [{"name": "mOut0", "dynamic_sizes": [0]}]
+        mixed = [SIDECAR["tensor_args"][0], {"name": "mOuts", "items": items}]
+        listed = (
+            self._struct("mOuts", shapes=1, strides=0)
+            + f"typedef struct {{\n  {p}_Tensor_mOuts_t elements[1];\n"
+            f"  int32_t count;\n}} {p}_TensorList_mOuts_t;\n"
+        )
+        prelude = "#pragma once\n#include <stdint.h>\n"
+        self._accepts(prelude + self._struct("mX") + listed, tensor_args=mixed)
+        narrow = self._struct("mX", stride_t="int32_t")
+        self._refuses(
+            prelude + narrow + listed, "must be declared 64-bit", tensor_args=mixed
+        )
 
     def test_int32_stride_slots_are_refused(self):
         # aten strides are int64 and the launcher assigns them straight across, so
