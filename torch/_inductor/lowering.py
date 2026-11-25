@@ -4246,6 +4246,13 @@ fallback_batch_norm_update_stats = fallback_handler(
 )
 
 
+@register_lowering(inductor_prims.cudnn_batch_norm_statistics, type_promotion_kind=None)
+def cudnn_batch_norm_statistics(input, running_mean, running_var, momentum, eps):
+    from .kernel.cuda_cudnn_batch_norm import cudnn_bn_statistics
+
+    return cudnn_bn_statistics(input, running_mean, running_var, momentum, eps)
+
+
 @register_lowering(aten.batch_norm_update_stats.default, type_promotion_kind=None)
 def batch_norm_update_stats(input, running_mean, running_var, momentum):
     if (
@@ -4255,7 +4262,7 @@ def batch_norm_update_stats(input, running_mean, running_var, momentum):
         and running_var is None
     ):
         input_node = V.graph.current_node.args[0]
-        assert isinstance(input_node, torch.fx.Node)
+        assert isinstance(input_node, torch.fx.Node)  # noqa: S101
         value = input_node.meta["val"]
         if value.is_neg():
             input = clone(input)
@@ -4280,7 +4287,7 @@ def batch_norm_update_stats(input, running_mean, running_var, momentum):
 
 
 for _batch_norm_op in NATIVE_BATCH_NORM_OPS:
-    assert isinstance(_batch_norm_op, torch._ops.OpOverload)
+    assert isinstance(_batch_norm_op, torch._ops.OpOverload)  # noqa: S101
     make_fallback(
         _batch_norm_op,
         layout_constraint=constrain_to_fx_exact_strides,
@@ -4321,7 +4328,7 @@ def native_batch_norm_backward(
             )
         node = V.graph.current_node
         grad_node, input_node = node.args[:2]
-        assert isinstance(grad_node, torch.fx.Node) and isinstance(
+        assert isinstance(grad_node, torch.fx.Node) and isinstance(  # noqa: S101
             input_node, torch.fx.Node
         )
         value = input_node.meta["val"]
@@ -4362,7 +4369,7 @@ def native_batch_norm_backward(
             )
             if not train and (mean is None or mean.numel() == 0):
                 running_mean_node = node.args[3]
-                assert isinstance(running_mean_node, torch.fx.Node)
+                assert isinstance(running_mean_node, torch.fx.Node)  # noqa: S101
                 mean = running_mean_node.meta["val"].to(dtype)
             weight_node = node.args[2]
             weight_contiguous = weight is None or (
@@ -4423,6 +4430,38 @@ def batch_norm_backward(
     reserve,
 ):
     if config.strict_reduction and is_strict_cuda_triton(input.get_device()):
+        node = V.graph.current_node
+        input_node = node.args[1]
+        assert isinstance(input_node, torch.fx.Node)  # noqa: S101
+        input_value = input_node.meta["val"]
+        weight_value = (
+            node.args[2].meta["val"]
+            if isinstance(node.args[2], torch.fx.Node)
+            else None
+        )
+        running_mean_value = (
+            node.args[3].meta["val"]
+            if isinstance(node.args[3], torch.fx.Node)
+            else None
+        )
+        running_var_value = (
+            node.args[4].meta["val"]
+            if isinstance(node.args[4], torch.fx.Node)
+            else None
+        )
+        backend = torch._C._select_batch_norm_backend(
+            input_value,
+            weight_value,
+            torch.empty(1, device="cpu"),
+            running_mean_value,
+            running_var_value,
+            True,
+            eps,
+        )
+        if backend == torch._C._BatchNormBackend.Cudnn:
+            from .kernel.cuda_cudnn_batch_norm import cudnn_bn_backward
+
+            return cudnn_bn_backward(grad_out, input, weight, save_mean, save_invstd)
         return native_batch_norm_backward(
             grad_out,
             input,

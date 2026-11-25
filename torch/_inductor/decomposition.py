@@ -101,6 +101,7 @@ from torch.fx.traceback import annotate
 
 from . import config, inductor_prims
 from .utils import (
+    cudnn_batch_norm_use_single_read,
     is_bf16x9_matmul,
     is_gpu,
     is_strict_cuda_triton,
@@ -2725,7 +2726,7 @@ NATIVE_BATCH_NORM_OPS = tuple(
 )
 
 
-def _strict_native_batch_norm(decomp_fn, op):
+def _strict_native_batch_norm(decomp_fn, op, *, force_cudnn=False):
     @functools.wraps(decomp_fn)
     def decomposition(*args, **kwargs):
         if config.strict_reduction and any(
@@ -2747,12 +2748,39 @@ def _strict_native_batch_norm(decomp_fn, op):
                 return NotImplemented
             if input.is_neg():
                 input = input.clone()
+            cudnn = force_cudnn
+            if not force_cudnn and op._schema.name in (
+                "aten::_batch_norm_with_update",
+                "aten::_batch_norm_with_update_functional",
+                "aten::_batch_norm_no_update",
+            ):
+                backend = torch._C._select_batch_norm_backend(
+                    input,
+                    values.get("weight"),
+                    values.get("bias"),
+                    values.get("running_mean"),
+                    values.get("running_var"),
+                    training,
+                    values["eps"],
+                )
+                cudnn = backend == torch._C._BatchNormBackend.Cudnn
             dtype = utils.get_computation_dtype(input.dtype)
             shape = [1, input.shape[1], *([1] * (input.ndim - 2))]
             new_running_mean = new_running_var = None
-            save_mean = None
+            save_mean = saved_invstd = var = None
             if training:
-                if input.numel() == 0:
+                if cudnn:
+                    save_mean, saved_invstd, new_running_mean, new_running_var = (
+                        inductor_prims.cudnn_batch_norm_statistics(
+                            input,
+                            values.get("running_mean"),
+                            values.get("running_var"),
+                            values["momentum"],
+                            values["eps"],
+                        )
+                    )
+                    variance = None
+                elif input.numel() == 0:
                     save_mean = torch.zeros(
                         input.shape[1], dtype=dtype, device=input.device
                     )
@@ -2761,14 +2789,17 @@ def _strict_native_batch_norm(decomp_fn, op):
                     save_mean, variance = aten.batch_norm_update_stats.default(
                         input, None, None, 0.0
                     )
-                assert save_mean is not None and variance is not None
-                mean, var = save_mean.reshape(shape), variance.reshape(shape)
+                assert save_mean is not None  # noqa: S101
+                mean = save_mean.reshape(shape)
+                if not cudnn:
+                    assert variance is not None  # noqa: S101
+                    var = variance.reshape(shape)
                 running_mean, running_var = (
                     values.get("running_mean"),
                     values.get("running_var"),
                 )
-                if running_mean is not None:
-                    assert running_var is not None
+                if running_mean is not None and not cudnn:
+                    assert running_var is not None and variance is not None  # noqa: S101
                     momentum = torch.scalar_tensor(
                         values["momentum"], dtype=dtype, device=input.device
                     )
@@ -2793,10 +2824,21 @@ def _strict_native_batch_norm(decomp_fn, op):
                     values["running_mean"],
                     values["running_var"],
                 )
-                assert running_mean is not None and running_var is not None
+                assert running_mean is not None and running_var is not None  # noqa: S101
                 mean = running_mean.to(dtype).reshape(shape)
                 var = running_var.to(dtype).reshape(shape)
-            invstd = torch.rsqrt(var + values["eps"])
+            if training and cudnn:
+                assert saved_invstd is not None  # noqa: S101
+                invstd = saved_invstd.reshape(shape)
+                if (
+                    "functional" not in op._schema.name
+                    and values.get("running_mean") is not None
+                ):
+                    values["running_mean"].copy_(new_running_mean)
+                    values["running_var"].copy_(new_running_var)
+            else:
+                assert var is not None  # noqa: S101
+                invstd = torch.rsqrt(var + values["eps"])
             weight = values.get("weight")
             bias = values.get("bias")
             weight = (
@@ -2809,10 +2851,42 @@ def _strict_native_batch_norm(decomp_fn, op):
                 if bias is None
                 else bias.to(dtype).reshape(shape)
             )
-            scaled = (input.to(dtype) - mean) * weight
-            output = inductor_prims.fma(scaled, invstd, bias).to(input.dtype)
+            from torch._prims_common import suggest_memory_format
+
+            channels_last = (
+                input.dtype != torch.float64 or not training
+            ) and suggest_memory_format(input) in (
+                torch.channels_last,
+                torch.channels_last_3d,
+            )
+            if cudnn and channels_last:
+                factor = invstd * weight
+                offset = (
+                    bias
+                    if training
+                    else inductor_prims.fma(-(weight * mean), invstd, bias)
+                )
+                centered = input.to(dtype) - mean if training else input.to(dtype)
+                output = inductor_prims.fma(centered, factor, offset).to(input.dtype)
+            elif (
+                cudnn
+                and training
+                and cudnn_batch_norm_use_single_read(
+                    input.dtype,
+                    input.shape[0],
+                    math.prod(input.shape[2:]),
+                    input.device,
+                )
+            ):
+                factor = invstd * weight
+                output = inductor_prims.fma(
+                    input.to(dtype), factor, bias - mean * factor
+                ).to(input.dtype)
+            else:
+                scaled = (input.to(dtype) - mean) * weight
+                output = inductor_prims.fma(scaled, invstd, bias).to(input.dtype)
             if training:
-                assert save_mean is not None
+                assert save_mean is not None  # noqa: S101
                 result = (output, save_mean, invstd.reshape(-1))
                 if op._schema.name in (
                     "aten::_batch_norm_with_update",
@@ -2835,6 +2909,24 @@ def _strict_native_batch_norm(decomp_fn, op):
                     )
                 if "functional" in op._schema.name:
                     result += (new_running_mean, new_running_var)
+            elif cudnn:
+                from torch._decomp.decompositions import _get_batch_norm_reserve_tensor
+
+                empty_stats = torch.empty(0, dtype=dtype, device=input.device)
+                result = (
+                    output,
+                    empty_stats,
+                    empty_stats.clone(),
+                    _get_batch_norm_reserve_tensor(
+                        input,
+                        values.get("weight"),
+                        values.get("bias"),
+                        values["running_mean"],
+                        values["running_var"],
+                        values["eps"],
+                        False,
+                    ),
+                )
             else:
                 original = decomp_fn(*args, **kwargs)
                 result = (output, *original[1:])
@@ -2861,6 +2953,25 @@ for _batch_norm_op in NATIVE_BATCH_NORM_OPS:
     decompositions[_batch_norm_op] = _strict_native_batch_norm(
         decompositions[_batch_norm_op], _batch_norm_op
     )
+
+
+@register_decomposition(inductor_prims.cudnn_batch_norm)
+def cudnn_batch_norm(
+    input, weight, bias, running_mean, running_var, training, momentum, eps
+):
+    bias = torch.zeros_like(weight) if bias is None else bias
+    mean = torch.zeros_like(weight) if running_mean is None else running_mean
+    var = torch.ones_like(weight) if running_var is None else running_var
+    op = (
+        aten._batch_norm_with_update_functional.default
+        if training
+        else aten._batch_norm_no_update.default
+    )
+    forward = _strict_native_batch_norm(
+        get_decompositions([op])[op], op, force_cudnn=True
+    )
+    result = forward(input, weight, bias, mean, var, momentum, eps)
+    return result if training else (*result, mean.clone(), var.clone())
 
 
 @functools.cache
