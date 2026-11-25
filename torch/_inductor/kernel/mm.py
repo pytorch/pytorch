@@ -50,6 +50,7 @@ from ..lowering import (
 )
 from ..select_algorithm import (
     autotune_select_algorithm,
+    BlackwellWSTritonTemplate,
     ExternKernelChoice,
     KernelTemplate,
     NoValidChoicesError,
@@ -164,7 +165,7 @@ flydsl_mm_template = FlyDSLTemplate(
     source=load_kernel_template("flydsl_mm"),
 )
 
-blackwell_ws_persistent_tma_mm_template = TritonTemplate(
+blackwell_ws_persistent_tma_mm_template = BlackwellWSTritonTemplate(
     name="blackwell_ws_persistent_tma",
     grid=blackwell_persistent_mm_grid,
     source=load_kernel_template("triton_blackwell_ws_persistent_tma_mm")

@@ -60,6 +60,7 @@ from .codegen.common import (
     IndentedBuffer,
     KernelTemplate,
     OpOverrides,
+    RemovedArg,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
@@ -3688,6 +3689,54 @@ class TritonTemplate(KernelTemplate):
             ),
             hint_override=hint_override,
         )
+
+
+class BlackwellWSTemplateKernel(TritonTemplateKernel):
+    """Kernel for the Blackwell autoWS persistent TMA mm/bmm templates."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._register_extra_template_env_fns(self.smem_operand_ring_first)
+
+    def smem_operand_ring_first(self) -> str:
+        """autoWS loop-header kwarg for large epilogue staging slots."""
+
+        def hook() -> str:
+            from .autows_utils import has_smem_operand_ring_first
+
+            meta = self.meta
+            # Triton builds without the option reject the kwarg outright.
+            if meta.get("TWO_CTAS") or not has_smem_operand_ring_first():
+                return ""
+            buffers = {**self.args.output_buffers, **self.args.inplace_buffers}
+            names = [
+                name for name, arg in buffers.items() if not isinstance(arg, RemovedArg)
+            ] or [self.output_node.get_name()]
+            elem = max(V.graph.get_dtype(name).itemsize for name in names)
+            slot = (meta["BLOCK_M"] // meta.get("DATA_PARTITION_FACTOR", 1)) * (
+                meta["BLOCK_N"] // meta.get("EPILOGUE_SUBTILE", 1)
+            )
+            *batch, m, n = (
+                V.graph.sizevars.optimization_hint(s)
+                for s in self.output_node.get_size()
+            )
+            tiles = (
+                math.prod(batch)
+                * ceildiv(m, meta["BLOCK_M"])
+                * ceildiv(n, meta["BLOCK_N"])
+            )
+            # 16 KB from local testing; 1-CTA only: 2-CTA output staging is
+            # pinned to one copy (fb-triton #3543), so there is nothing to trade.
+            # With at most one tile per SM it measured slower.
+            if slot * elem >= 16384 and tiles > meta["NUM_SMS"]:
+                return "smem_operand_ring_first=True,"
+            return ""
+
+        return self._register_hook("<SMEM_OPERAND_RING_FIRST>", hook)
+
+
+class BlackwellWSTritonTemplate(TritonTemplate):
+    kernel_type: type[Any] = BlackwellWSTemplateKernel
 
 
 class ExternKernelChoice:
