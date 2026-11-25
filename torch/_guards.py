@@ -15,7 +15,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, overload, Self, TYPE_CHECKING, TypeVar
 from typing_extensions import dataclass_transform
 
 import torch
@@ -244,10 +244,20 @@ class SLoc:
             return f"({floc})"
 
 
-class ShapeGuard(NamedTuple):
+class _ShapeGuardFields(NamedTuple):
     expr: sympy.logic.boolalg.Boolean
     sloc: SLoc
-    size_oblivious: bool
+
+
+class ShapeGuard(_ShapeGuardFields):
+    __slots__ = ()
+
+    # Pickles from older versions carry extra trailing fields (e.g. the removed
+    # size_oblivious); accept and drop them so saved ShapeEnvs still load.
+    def __new__(
+        cls, expr: sympy.logic.boolalg.Boolean, sloc: SLoc, *_legacy: object
+    ) -> Self:
+        return super().__new__(cls, expr, sloc)
 
 
 def _guard_payloads_equivalent(a: Any, b: Any) -> bool:
@@ -303,6 +313,7 @@ class Guard:
     # serialize_guards refuses it.
     _unserializable: type | None = None
     _force_dict_keys_match: bool = False
+    recompile_hint: str | None = dataclasses.field(default=None, compare=False)
 
     def __hash__(self) -> int:
         if self._hash is None:
@@ -928,8 +939,8 @@ class InvokeSubgraphReuseEntry:
 
     lifted_capture_sources: frozenset[Source] = frozenset()
 
-    # (SymPy predicate, size_oblivious) from shape guards, finite ranges, and deferred asserts.
-    shape_guards: list[tuple[Any, bool]] = dataclasses.field(default_factory=list)
+    # Predicates from shape guards, finite ranges, and deferred asserts.
+    shape_guards: list[sympy.Basic] = dataclasses.field(default_factory=list)
 
 
 @dataclass
