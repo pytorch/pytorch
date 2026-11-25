@@ -29,6 +29,15 @@
 // program in a row, traced under a key it didn't have and ran no variant,
 // takes no further key, and drops the variants that never ran with all they
 // hold (see Variants::room).
+//
+// A place may also be told apart by something that comes back, while what
+// each variant is traced for does not (the image's number in a batch finds
+// the key, the number of boxes found in that image is a size no later call
+// has): its keys fill up with variants that never run again, each holding
+// what its trace read. So a place where, of the variants that have had
+// SETTLED calls of the program to run again, MIN_SETTLED or more exist and
+// more than three in four never ran, takes no further variant at all and
+// drops those that never ran.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -58,6 +67,10 @@ static CALL: AtomicU64 = AtomicU64::new(0);
 // Calls in a row in which a place traced under a new key and ran nothing,
 // after which it takes no new key.
 const MAX_BARREN: u32 = 3;
+// Calls of the program after which a variant that has not run again counts
+// against its place, and how many such variants a place is judged by.
+const SETTLED: u64 = 32;
+const MIN_SETTLED: usize = 16;
 
 // A call of the program begins (call_with_cfg_execution).
 #[inline]
@@ -125,6 +138,11 @@ pub fn max_keys() -> usize {
 pub fn enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
+
+// How many times a span's trace may give up before the span isn't traced any
+// more. A run that leaves the span by a way no earlier run took says nothing
+// about the runs that don't.
+pub const MAX_GAVE_UP: u32 = 3;
 
 // Whether block b's version (the last, the one traces are made from) should
 // be traced on this run.
@@ -249,6 +267,8 @@ pub struct Variant {
     _held: Vec<Py<PyAny>>,
     // Whether it ever ran.
     ran: AtomicBool,
+    // The call of the program it was traced in.
+    born: u64,
 }
 
 impl Variant {
@@ -318,6 +338,8 @@ struct Table {
     barren: u32,
     // It takes no new key any more (see MAX_BARREN).
     closed: bool,
+    // It takes no variant any more (see SETTLED).
+    shut: bool,
 }
 
 impl Table {
@@ -328,6 +350,22 @@ impl Table {
     fn key(&self, v: &Variant) -> u64 {
         // Every position of `at` is one of v's facts.
         self.at.iter().fold(0, |h, p| mix(h, v.facts.iter().find(|f| f.0 == *p).map_or(0, |f| f.1)))
+    }
+
+    // Drops the variants that never ran. `settled`: because most of those
+    // that had the time never ran again; otherwise because every call brought
+    // a key the place didn't have.
+    unsafe fn drop_unrun(&mut self, settled: bool) {
+        let (kept, dropped): (Vec<_>, Vec<_>) = std::mem::take(&mut self.all).into_iter().partition(|v| v.ran.load(Ordering::Relaxed));
+        self.all = kept;
+        self.index();
+        let py = Python::assume_attached();
+        for v in dropped {
+            // The record of its trace lets go of what the trace read.
+            if let Err(e) = py.import("torch._rust_inductor").and_then(|m| m.call_method1("_dropped", (v.spec.func.clone_ref(py), settled))) {
+                e.write_unraisable(py, None);
+            }
+        }
     }
 
     // Entered: a new call of the program closes the account of the last.
@@ -404,8 +442,14 @@ impl Variants {
         Some(t.all[j].clone())
     }
 
-    // Variant v ran.
+    // Variant v ran. In the call of the program it was traced in it runs
+    // on what its trace ran on (the same objects, which may all be that
+    // call's own: an iterator over that call's tensors): that says nothing
+    // about a later call, and is no run to the place's account.
     pub fn ran(&self, v: &Variant) {
+        if v.born == CALL.load(Ordering::Relaxed) {
+            return;
+        }
         v.ran.store(true, Ordering::Relaxed);
         unsafe { (*self.0.get()).ran = true };
     }
@@ -420,6 +464,17 @@ impl Variants {
     pub unsafe fn room(&self, args: &[*mut PyObject]) -> bool {
         let t = &mut *self.0.get();
         t.enter();
+        if t.shut {
+            return false;
+        }
+        let now = CALL.load(Ordering::Relaxed);
+        let settled = t.all.iter().filter(|v| v.born + SETTLED <= now);
+        let (n, never) = settled.fold((0, 0), |(n, never), v| (n + 1, never + usize::from(!v.ran.load(Ordering::Relaxed))));
+        if n >= MIN_SETTLED && never * 4 > n * 3 {
+            (t.shut, t.closed) = (true, true);
+            t.drop_unrun(true);
+            return false;
+        }
         if t.at.is_empty() {
             // (A closed place whose variants were all dropped has no key
             // positions left, and stays as it is.)
@@ -435,16 +490,7 @@ impl Variants {
             return t.by_key.len() < max_keys();
         }
         t.closed = true;
-        let (kept, dropped): (Vec<_>, Vec<_>) = std::mem::take(&mut t.all).into_iter().partition(|v| v.ran.load(Ordering::Relaxed));
-        t.all = kept;
-        t.index();
-        let py = Python::assume_attached();
-        for v in dropped {
-            // The record of its trace lets go of what the trace read.
-            if let Err(e) = py.import("torch._rust_inductor").and_then(|m| m.call_method1("_dropped", (v.spec.func.clone_ref(py),))) {
-                e.write_unraisable(py, None);
-            }
-        }
+        t.drop_unrun(false);
         false
     }
 
@@ -526,8 +572,9 @@ unsafe fn parse_facts(keys: &[Bound<'_, PyTuple>]) -> PyResult<(Vec<(Pos, u64)>,
 // version's instrs (NULL if not used at all), and `types` their types over
 // the runs observed (see observing); `body` runs it. Ok(None): not worth a
 // region. With `span` (a span's run, which no guard checks first), the region
-// makes all its checks itself.
-pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
+// makes all its checks itself; with `asked` (a span a cfg pass asked for) it
+// is a region however few ops it runs.
+pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: &[u32], span: bool, asked: bool, body: &mut Body<'_>) -> PyResult<Option<Traced>> {
     let py = Python::assume_attached();
     let null = null_sentinel(py)?;
     let items: Vec<Bound<'_, PyAny>> =
@@ -544,7 +591,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
     BODY.set(Some(std::mem::transmute::<*mut Body<'_>, *mut Body<'static>>(body)));
     TRACING.set(true);
     super::reads::begin();
-    let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types)));
+    let r = py.import("torch._rust_inductor").and_then(|m| m.call_method1("trace_region", (name, args, unread.to_vec(), span, types, asked)));
     super::reads::end();
     TRACING.set(false);
     BODY.set(None);
@@ -581,6 +628,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
             facts,
             _held: held,
             ran: AtomicBool::new(false),
+            born: CALL.load(Ordering::Relaxed),
         },
     }))
 }

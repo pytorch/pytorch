@@ -23,6 +23,8 @@ pub struct Found {
     pub live_out: Vec<u32>,
     pub inputs: Vec<(u32, Option<u32>)>,
     pub passed: Vec<u32>,
+    // A cfg pass asked for it.
+    pub asked: bool,
 }
 
 fn read_slot(op: &Op) -> Option<u32> {
@@ -202,10 +204,17 @@ fn made_here(py: Python<'_>, prep: &Prepared, x: ValueId, made: &HashSet<ValueId
 
 // `forced`: spans a cfg pass asked for, (entry, exit), tried first and kept
 // whatever their size; `split`: blocks no span may hold.
-pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>, qualname: &str, forced: &[(BlockId, Option<BlockId>)], split: &HashSet<BlockId>) -> Vec<Found> {
+pub fn find(
+    py: Python<'_>,
+    prep: &Prepared,
+    movable: &HashSet<ValueId>,
+    clones: &HashMap<ValueId, super::SiteClone>,
+    qualname: &str,
+    forced: &[(BlockId, Option<BlockId>)],
+    split: &HashSet<BlockId>,
+) -> Vec<Found> {
     let cfg = &prep.cfg;
     let types = unsafe { &*prep.types.get() };
-    let effects = unsafe { &*prep.effects.get() };
     let body = |b: BlockId| -> &[ValueId] { cfg[b].versions.first().map_or(&[], |v| v.body.as_slice()) };
     // Instrs whose value's type is observed whenever they run.
     let produces = |v: &ValueId| {
@@ -250,10 +259,14 @@ pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>, qualnam
     };
     // Implicit params (an exception, lasti) only come from a raise.
     let explicit_only = |b: BlockId| cfg[b].params.len() == cfg.explicit_params(b).len();
+    // A loop's own entry can't start a span (it is jumped back to), so the
+    // block that enters the loop does: the function's entry too, then.
+    let enters_loop = |e: BlockId| cfg[e].term.successors().iter().any(|h| *h != e && all.iter().any(|p| dominates(&idom, *h, *p) && cfg[*p].term.successors().contains(h)));
     let candidates = forced.iter().map(|(e, x)| (*e, Some(*x))).chain(all.iter().map(|e| (*e, None)));
     for (e, forced_exit) in candidates {
-        // The function's entry only for a span a cfg pass asked for.
-        if used.contains(&e) || (e == ENTRY && forced_exit.is_none()) || never(e) || !explicit_only(e) {
+        // The function's entry only for a span a cfg pass asked for, or to
+        // enter a loop.
+        if used.contains(&e) || (e == ENTRY && forced_exit.is_none() && !enters_loop(e)) || never(e) || !explicit_only(e) {
             if forced_exit.is_some() {
                 why(e, "can't be a span's entry (never run, taking an exception, or in another span)");
             }
@@ -372,8 +385,9 @@ pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>, qualnam
             }
         };
         let seen_blocks = seen_r;
-        // Worth one region: several instrs that ran torch ops or entered frames.
-        let work = seen_blocks.iter().flat_map(|b| body(*b)).filter(|v| effects.get(Site::Instr(**v)).iter().any(|(seq, _)| !seq.is_empty())).count();
+        // Worth one region: several torch ops ran in it, those of the frames
+        // its calls entered included.
+        let work: usize = seen_blocks.iter().flat_map(|b| body(*b)).map(|v| super::site_ops(prep, *v, clones, 0)).sum();
         if forced_exit.is_none() && (work < 4 || seen_blocks.len() < 2) {
             why(e, &format!("too little: {work} ops in {} blocks", seen_blocks.len()));
             continue;
@@ -414,7 +428,7 @@ pub fn find(py: Python<'_>, prep: &Prepared, movable: &HashSet<ValueId>, qualnam
         let passed = passed_on(cfg, &seen_blocks, e, exit);
         why(e, &format!("span to {:?}, {} blocks, {work} ops", exit.map(|x| x.0), seen_blocks.len()));
         used.extend(r.iter().copied());
-        found.push(Found { entry: e, exit, never: r.iter().copied().filter(|b| never(*b)).collect(), live_in, live_out, inputs, passed });
+        found.push(Found { entry: e, exit, never: r.iter().copied().filter(|b| never(*b)).collect(), live_in, live_out, inputs, passed, asked: forced_exit.is_some() });
     }
     found
 }
@@ -605,6 +619,7 @@ pub fn place(cfg: &Cfg, found: Vec<Found>, renumbered: &[Option<BlockId>], qualn
             live_out: f.live_out,
             inputs: f.inputs,
             passed: f.passed,
+            asked: f.asked,
             name: format!("{qualname}:span bb{}", entry.0),
             state: Default::default(),
         });

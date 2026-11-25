@@ -685,6 +685,9 @@ pub struct Span {
     // params; its outputs the live_out locals, then the exit's explicit
     // params (or what it returns).
     pub passed: Vec<u32>,
+    // A cfg pass asked for it (merge_blocks): a region however few ops it
+    // runs.
+    pub asked: bool,
     pub name: String,
     pub state: Arc<SpanState>,
 }
@@ -696,6 +699,9 @@ pub struct SpanState {
     pub regions: crate::exec::region::Variants,
     pub runs: std::sync::atomic::AtomicU32,
     pub off: std::sync::atomic::AtomicBool,
+    // How many of its traces gave up (the traced run left it by a way no
+    // earlier run took): after MAX_GAVE_UP it isn't traced again.
+    pub gave_up: std::sync::atomic::AtomicU32,
     // The types of its args over its runs while observing.
     pub types: std::sync::Mutex<Vec<crate::exec::types::Slot>>,
 }

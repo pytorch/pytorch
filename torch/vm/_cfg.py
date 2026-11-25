@@ -7,8 +7,9 @@ after watching it run: so the CFG carries what the runs recorded at each
 instruction (the torch ops it ran, the Python frames it entered, the types it
 produced, the callee it called) and which instructions may sit in a region.
 
-Analyses: ``blocks``, ``calls()``, ``opaque_calls()`` (calls that end a
-region), ``spans()`` (stretches of blocks the VM will trace as one region),
+Analyses: ``blocks`` (each with its ``succs`` and ``preds``), ``calls()``,
+``opaque_calls()`` (calls that end a region), ``spans()`` (stretches of
+blocks the VM will trace as one region),
 ``loops()``, ``branches()``, ``collectives()``, ``effects(v)``,
 ``type_of(v)``. Edits: ``merge_across(call)`` lets a call sit in a region,
 ``merge_blocks(entry, exit)`` makes a stretch of blocks one region, and
@@ -127,7 +128,14 @@ class Block:
 
     @property
     def succs(self) -> list["Block"]:
+        """The blocks this one goes to: where its terminator jumps or
+        branches, then its exception handlers."""
         return [self._cfg.block(s) for s in self._succs]
+
+    @property
+    def preds(self) -> list["Block"]:
+        """The blocks that go to this one."""
+        return [b for b in self._cfg._blocks.values() if self.id in b._succs]
 
     @property
     def lines(self) -> tuple[int, int]:

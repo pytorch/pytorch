@@ -514,6 +514,10 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
       place can be given up once and be a region on a later call);
     - ``notes``: what the block passes said about it (a pass that raised).
 
+    A block that only computes and was never traced is listed too, with no
+    traces: ``"too small"`` when one torch operation ran in it, ``"refused"``
+    when it stores into something that outlives it (it runs as it is).
+
     A call that keeps the code around it out of a region has ``state``
     ``"not movable"``, ``kind`` ``"call"``, ``where`` (``"QUALNAME line N"``),
     ``function``, ``lines`` and ``why`` (``"... called <built-in function
@@ -580,6 +584,28 @@ def regions(fn: Callable) -> list[dict[str, Any]]:
         row = places.get(name.partition(" #")[0])
         if row is not None:
             row["notes"].extend(report.notes)
+    for name, state, why in rust._cfg_untraced():
+        if name in places:
+            continue
+        function, _, rest = name.partition(":")
+        first, _, last = rest.rpartition(" lines ")[2].partition("-")
+        places[name] = {
+            "where": name,
+            "function": function,
+            "kind": "block",
+            "lines": (int(first), int(last)),
+            "state": state,
+            "why": why,
+            "ops": 0,
+            "inputs": 0,
+            "constants": 0,
+            "variants": 0,
+            "reads": 0,
+            "runs": 0,
+            "misses": {},
+            "traces": [],
+            "notes": [],
+        }
     out = list(places.values())
     for code, line, why in rust._cfg_impure():
         function = code.rpartition("@")[0]

@@ -1868,15 +1868,20 @@ def _keys(args, plan, checks):
     return out
 
 
-def _dropped(func) -> None:
+def _dropped(func, settled: bool = False) -> None:
     """The region whose function is ``func`` was dropped by its place (see
     exec/region.rs's Variants::room): it never ran, and neither did the
     regions traced after it, each for another object or value where the
-    place tells its regions apart. Its trace is no region any more, and what
-    the trace read is let go."""
+    place tells its regions apart; or (``settled``) it never ran again, like
+    most regions of its place that had the time to. Its trace is no region
+    any more, and what the trace read is let go."""
     record = func.record
     record.state = "refused"
-    record.why = "it is found by which object (or value) an argument is, and that was another on every call: its regions never ran, so they were dropped and the place takes no new one"
+    record.why = (
+        "most regions traced at its place never ran again (each call differs in what a region is traced for: a size, an object, a value), so those that never ran were dropped and the place takes no new one"
+        if settled
+        else "it is found by which object (or value) an argument is, and that was another on every call: its regions never ran, so they were dropped and the place takes no new one"
+    )
     record.reads = None
     stats["refused"] += 1
 
@@ -1928,13 +1933,15 @@ def trace_region(
     unused: list[int],
     span: bool = False,
     types: list[Any] | None = None,
+    asked: bool = False,
 ):
     """Runs the block being traced (via torch._rust._region_body) and returns
     (func, outputs, objects, checks, reads, quick checks, keys) for its
     region, or None. A None before
     the body ran leaves running it to the executor. A span's region (`span`)
     makes the checks itself. ``types``: what the VM recorded at each arg over
-    the runs before (see torch.vm.Type)."""
+    the runs before (see torch.vm.Type). ``asked``: a span a cfg pass asked
+    for (``merge_blocks``), a region however few ops it runs."""
     _region_body, _region_reads = _rust()._region_body, _rust()._region_reads
 
     allow = os.environ.get("TORCH_RUST_REGION_ALLOW")
@@ -2126,7 +2133,7 @@ def trace_region(
             print(f"region {name}: refused: reads a tensor's value")
         return None
     n_ops = sum(1 for n in ops if n.target is not operator.getitem)
-    if n_ops < MIN_OPS:
+    if n_ops < MIN_OPS and not asked:
         stats["small"] += 1
         _traced(name, "too small", f"{n_ops} ops, fewer than {MIN_OPS}", ops=n_ops)
         if DEBUG:

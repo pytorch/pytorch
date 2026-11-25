@@ -1276,7 +1276,7 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
     // Generators suspend in their frames, which a region can't replay.
     let spannable = block.is_none() && c.flags & (0x20 | 0x80 | 0x200) == 0;
     let none = HashSet::new();
-    let mut found = if SPANS.load(Ordering::Relaxed) && spannable { spans::find(py, &plan.prep, &movable, &c.qualname, &[], &none) } else { vec![] };
+    let mut found = if SPANS.load(Ordering::Relaxed) && spannable { spans::find(py, &plan.prep, &movable, &current.prep.clones, &c.qualname, &[], &none) } else { vec![] };
     let hook = CFG_HOOK.lock().unwrap().as_ref().map(|h| h.clone_ref(py));
     let mut declared = HashSet::new();
     if let Some(hook) = hook.filter(|_| block.is_none()) {
@@ -1293,7 +1293,7 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
         }
         movable.extend(more);
         if changed && spannable {
-            found = spans::find(py, &plan.prep, &movable, &c.qualname, &forced, &split);
+            found = spans::find(py, &plan.prep, &movable, &current.prep.clones, &c.qualname, &forced, &split);
             if !SPANS.load(Ordering::Relaxed) {
                 let entries: HashSet<BlockId> = forced.iter().map(|(e, _)| *e).collect();
                 found.retain(|f| entries.contains(&f.entry));
@@ -3110,6 +3110,47 @@ fn plain_class(py: Python<'_>, f: &Bound<'_, PyAny>) -> bool {
     let object = py.get_type::<pyo3::types::PyAny>();
     let same = |name: &str| f.getattr(name).is_ok_and(|m| object.getattr(name).is_ok_and(|n| m.is(&n)));
     f.is_instance_of::<pyo3::types::PyType>() && same("__new__") && (same("__init__") || f.getattr("__init__").is_ok_and(|i| i.is_instance_of::<pyo3::types::PyFunction>()))
+}
+
+// The torch ops instr v of `prep` ran on its busiest visit: one per op it
+// ran itself and per frame it entered, and for a frame of its clone the ops
+// that clone's frames ran (at least one).
+pub(crate) fn site_ops(prep: &Prepared, v: ValueId, clones: &HashMap<ValueId, SiteClone>, depth: u32) -> usize {
+    let effects = unsafe { &*prep.effects.get() };
+    let of = |e: &effects::Effect| match e {
+        effects::Effect::Frame { how: effects::How::Direct, .. } if depth < MAX_PURE_DEPTH => clones.get(&v).map_or(1, |cl| ops_ran(&cl.compiled, depth + 1).max(1)),
+        _ => 1,
+    };
+    effects.get(Site::Instr(v)).iter().map(|(seq, _)| seq.iter().map(of).sum::<usize>()).max().unwrap_or(0)
+}
+
+// The torch ops the frames of `c` ran, as its first Plan observed them.
+fn ops_ran(c: &Compiled, depth: u32) -> usize {
+    let first = unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) };
+    let clones = &c.plan().prep.clones;
+    let cfg = &first.prep.cfg;
+    cfg.block_ids().filter_map(|b| cfg[b].versions.first()).flat_map(|ver| ver.body.iter()).map(|v| site_ops(&first.prep, *v, clones, depth)).sum()
+}
+
+// Pure blocks that aren't traced, and why (see Act::region_worthy), as
+// (name, state, why): for torch.vm.regions. Each once.
+static UNTRACED: Mutex<Vec<(String, String, String)>> = Mutex::new(Vec::new());
+
+pub(crate) fn note_untraced(name: String, state: &str, why: String) {
+    if std::env::var("TORCH_RUST_REGION_DEBUG").is_ok_and(|d| d == "2") {
+        eprintln!("region {name}: not traced: {why}");
+    }
+    let mut seen = UNTRACED.lock().unwrap();
+    if seen.len() < MAX_IMPURE && !seen.iter().any(|(n, _, _)| *n == name) {
+        seen.push((name, state.to_string(), why));
+    }
+}
+
+/// The blocks that only compute and still aren't traced into a region, as
+/// (name, state, why): too little work, or a store that outlives the block.
+#[pyfunction]
+pub fn _cfg_untraced() -> Vec<(String, String, String)> {
+    UNTRACED.lock().unwrap().clone()
 }
 
 fn is_call(op: &Op) -> bool {

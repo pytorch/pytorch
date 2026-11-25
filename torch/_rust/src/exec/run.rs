@@ -1346,19 +1346,18 @@ impl Act<'_> {
         }
     }
 
-    // Whether version vi of block b does enough to be worth tracing: at least
-    // two of its instrs ran torch ops (or entered frames, which pure calls
-    // do). Remembered when it doesn't.
+    // What a region of version vi of block b is called.
+    fn block_name(&self, c: &Compiled, b: BlockId, vi: usize) -> String {
+        let lines: Vec<i32> = self.cfg[b].versions[vi].body.iter().map(|v| c.line(self.cfg[*v].origin)).filter(|l| *l > 0).collect();
+        format!("{}:bb{} lines {}-{}", c.qualname, b.0, lines.iter().min().unwrap_or(&0), lines.iter().max().unwrap_or(&0))
+    }
+
+    // Whether version vi of block b does enough to be worth tracing: its
+    // instrs ran at least two torch ops, those of the frames a call entered
+    // included (see site_ops). Remembered when it doesn't, and said.
     unsafe fn region_worthy(&self, b: BlockId, vi: usize) -> bool {
-        let effects = &*self.p.effects.get();
-        let work = self.cfg[b].versions[vi]
-            .body
-            .iter()
-            .filter(|v| {
-                matches!(self.cfg[**v].op, Op::Aten { .. })
-                    || effects.get(crate::cfg::ir::Site::Instr(**v)).iter().any(|(seq, _)| !seq.is_empty())
-            })
-            .count();
+        let ops = |v: &ValueId| if matches!(self.cfg[*v].op, Op::Aten { .. }) { 1 } else { super::site_ops(self.p, *v, &self.p.clones, 0) };
+        let work: usize = self.cfg[b].versions[vi].body.iter().map(ops).sum();
         // A write to something that outlives the block isn't replayed by a
         // region: the version keeps running as it is, so the write is made
         // on every call, with that call's value.
@@ -1366,6 +1365,14 @@ impl Act<'_> {
         let escapes = body.iter().any(|v| super::escaping_write(self.cfg, body, *v));
         if work < 2 || escapes {
             self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+            if let (Some(c), true) = (self.c, work > 0) {
+                let (state, why) = if escapes {
+                    ("refused", "it stores into something that outlives it, so it runs as it is".to_string())
+                } else {
+                    ("too small", format!("{work} op, fewer than 2"))
+                };
+                super::note_untraced(self.block_name(c, b, vi), state, why);
+            }
         }
         work >= 2 && !escapes
     }
@@ -1513,7 +1520,7 @@ impl Act<'_> {
         };
         let types = sp.state.types.lock().unwrap().clone();
         let passed: Vec<u32> = sp.passed.iter().map(|k| sp.inputs.len() as u32 + k).collect();
-        let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, &mut body));
+        let traced = super::outside_executor(|| super::region::trace(&sp.name, args, &types, &passed, true, sp.asked, &mut body));
         for (cell, old) in cells {
             PyCell_Set(cell, old);
             ffi::Py_XDECREF(old);
@@ -1545,7 +1552,11 @@ impl Act<'_> {
                 };
                 eprintln!("region {}: gave up, {at}: {}", sp.name, traced.as_ref().err().map_or("?".into(), |e| e.to_string()));
             }
-            sp.state.off.store(true, std::sync::atomic::Ordering::Relaxed);
+            // Another call may stay on the ways seen: it is traced again, a
+            // few times.
+            if sp.state.gave_up.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1 >= super::region::MAX_GAVE_UP {
+                sp.state.off.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             for (s, o) in sp.live_in.iter().zip(held) {
                 let old = std::mem::replace(&mut *self.local(*s), o);
                 ffi::Py_XDECREF(old);
@@ -1700,14 +1711,13 @@ impl Act<'_> {
             Ok(ver.outputs.iter().map(|o| xincref(this.val(*o))).collect())
         };
         let c = self.c.expect("checked by the caller");
-        let lines: Vec<i32> = ver.body.iter().map(|v| c.line(cfg[*v].origin)).filter(|l| *l > 0).collect();
-        let name = format!("{}:bb{} lines {}-{}", c.qualname, b.0, lines.iter().min().unwrap_or(&0), lines.iter().max().unwrap_or(&0));
+        let name = self.block_name(c, b, vi);
         // What the region needn't check: what the version doesn't read, or only
         // passes on.
         let read: std::collections::HashSet<ValueId> = ver.body.iter().flat_map(|v| cfg[*v].args.iter().copied()).collect();
         let unread: Vec<u32> = (0..ids.len() as u32).filter(|i| unused.contains(i) || !read.contains(&ids[*i as usize])).collect();
         let types = (*self.p.region_types[b.idx()].get()).clone();
-        let traced = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, &mut body));
+        let traced = super::outside_executor(|| super::region::trace(&name, &args, &types, &unread, false, false, &mut body));
         let debug = std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some();
         if failed {
             // The body raised under tracing (which also raises on what only

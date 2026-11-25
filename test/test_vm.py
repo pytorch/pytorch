@@ -1362,6 +1362,150 @@ def reasons_branches(x):
     return y.tanh().cos().exp()
 
 
+def where_inner(x):
+    return (x.sin() + 1).tanh().cos().exp()
+
+
+def where_wrapper(x):
+    return where_inner(x)
+
+
+def where_one(x):
+    return x.sin()
+
+
+def where_small(x, more):
+    y = x.sin()
+    if more:
+        y = y + 1
+    return y
+
+
+def where_asked(cfg: vm.Cfg) -> None:
+    """A cfg pass: all of ``where_small`` is to be one region."""
+    if cfg.qualname == "where_small":
+        cfg.merge_blocks(
+            min((b for b in cfg.blocks if b.seen), key=lambda b: b.id), None
+        )
+
+
+# What where_walks saw: by block, (the blocks it goes to, the blocks that go to it).
+WHERE_EDGES: list = []
+
+
+def where_walks(cfg: vm.Cfg) -> None:
+    """A cfg pass that only looks: the edges of ``where_small``."""
+    if cfg.qualname == "where_small":
+        WHERE_EDGES.append(
+            {
+                b.id: ([s.id for s in b.succs], [p.id for p in b.preds])
+                for b in cfg.blocks
+            }
+        )
+
+
+@unittest.skipUnless(HAS_VM, "needs the torch._rust extension and CPython 3.12")
+class TestVmWhereRegionsStart(TestCase):
+    """A region is where the work is: at the block that enters a loop, at the
+    block whose one call does it, and a place that is too small says so."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @isolated
+    def test_loop_at_the_start_of_a_function_is_one_region(self, device):
+        scales = [1.5, 0.5, 2.0, 0.25]
+        g = vm_early(many_loop)
+        for call in range(9):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(scales, x), many_loop(scales, x), atol=0, rtol=0, msg=f"call {call}"
+            )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_loop" and r["state"] == "region"
+        )
+        # The function's first block enters the loop: the span starts there,
+        # and the four rounds are one region.
+        self.assertEqual(
+            (row["kind"], row["variants"], row["ops"]), ("span", 1, 4 * 5), msg=str(row)
+        )
+        self.assertEqual(row["runs"], 9 - 3 - 1)
+        self.assertEqual(row["misses"], {})
+
+    @isolated
+    def test_block_whose_only_work_is_one_call_has_the_region(self, device):
+        g = vm_early(where_wrapper)
+        for call in range(9):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), where_wrapper(x), atol=0, rtol=0, msg=f"call {call}")
+        (row,) = (r for r in vm.regions(g) if r["state"] == "region")
+        # The wrapper's block runs one call, and the call five operations:
+        # the region is the wrapper's, not one inside the function it calls.
+        self.assertEqual(
+            (row["function"], row["ops"]), ("where_wrapper", 5), msg=str(row)
+        )
+        self.assertEqual(row["runs"], 9 - 3 - 1)
+
+    @isolated
+    def test_block_with_one_operation_is_listed_as_too_small(self, device):
+        g = vm_early(where_one)
+        for call in range(6):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(g(x), where_one(x), atol=0, rtol=0, msg=f"call {call}")
+        (row,) = (r for r in vm.regions(g) if r["function"] == "where_one")
+        self.assertEqual(
+            (row["state"], row["why"], row["traces"]),
+            ("too small", "1 op, fewer than 2", []),
+            msg=str(row),
+        )
+
+    @isolated
+    def test_span_a_pass_asks_for_is_a_region_however_few_operations_it_runs(
+        self, device
+    ):
+        g = vm(where_small, passes=(*EARLY, where_asked))
+        for call in range(9):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(x, True), where_small(x, True), atol=0, rtol=0, msg=f"call {call}"
+            )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "where_small" and r["kind"] == "span"
+        )
+        self.assertEqual((row["state"], row["ops"]), ("region", 2), msg=str(row))
+        self.assertEqual(row["runs"], 9 - 3 - 1)
+
+    @isolated
+    def test_pass_walks_the_blocks_both_ways(self, device):
+        g = vm(where_small, passes=(*EARLY, where_walks))
+        for call in range(5):
+            x = torch.randn(4, 8, device=device)
+            self.assertEqual(
+                g(x, call % 2 == 0),
+                where_small(x, call % 2 == 0),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
+            )
+        self.assertTrue(WHERE_EDGES)
+        edges = WHERE_EDGES[-1]
+        for block, (succs, preds) in edges.items():
+            for s in succs:
+                self.assertIn(block, edges[s][1], msg=str(edges))
+            for p in preds:
+                self.assertIn(block, edges[p][0], msg=str(edges))
+        # The `if` is a block with two ways on.
+        self.assertTrue(
+            any(len(succs) == 2 for succs, _ in edges.values()), msg=str(edges)
+        )
+
+
+instantiate_device_type_tests(TestVmWhereRegionsStart, globals())
+
+
 def plans_scale(x, k):
     return x * k + 1
 
@@ -1542,7 +1686,8 @@ class TestVmRegionReasons(TestCase):
     @isolated
     def test_span_that_is_left_by_another_way(self):
         # The traced call (the fourth) leaves the loop by a block that no
-        # earlier call ran.
+        # earlier call ran: its trace gives up. The next call stays on the
+        # ways seen, and its trace is the region.
         rows = self.rows(
             reasons_leaves,
             torch.randn(8),
@@ -1552,14 +1697,15 @@ class TestVmRegionReasons(TestCase):
         )
         (row,) = (r for r in rows if r["kind"] == "span")
         self.assertEqual((row["function"], row["lines"]), ("reasons_leaves", None))
-        # The loop's first round was traced into a region; the second round
-        # is the one that leaves.
-        self.assertEqual([state for state, _ in row["traces"]], ["region", "gave up"])
+        self.assertEqual(
+            [state for state, _ in row["traces"]], ["gave up", "region"], msg=str(row)
+        )
         self.assertIn(
             "the span left by another way or ran a block never seen run",
-            row["traces"][1][1],
+            row["traces"][0][1],
         )
         self.assertEqual(row["state"], "region")
+        self.assertGreater(row["runs"], 0)
 
     @isolated
     def test_pass_that_raises_is_in_the_notes(self):
@@ -1882,6 +2028,10 @@ def many_shapes(x):
     return (x.sin() + 1).tanh().cos().exp()
 
 
+def many_sizes(x):
+    return ((x.sin() + 1).tanh() * x.cos()).exp().sum()
+
+
 def many_shift(x, n):
     return (x + n).tanh().cos().sin().exp()
 
@@ -1896,16 +2046,22 @@ class TestVmManyRegions(TestCase):
     @isolated
     def test_loop_whose_body_has_a_region_for_each_iteration(self, device):
         scales = [1.5, 0.5, 2.0, 0.25]
-        g = vm_early(many_loop)
+        g = vm_early(many_noted)
         for call in range(9):
             x = torch.randn(4, 8, device=device)
+            seen, expected = [], []
             self.assertEqual(
-                g(scales, x), many_loop(scales, x), atol=0, rtol=0, msg=f"call {call}"
+                g(scales, x, seen),
+                many_noted(scales, x, expected),
+                atol=0,
+                rtol=0,
+                msg=f"call {call}",
             )
+            self.assertEqual(seen, expected, msg=f"call {call}")
         (row,) = (
             r
             for r in vm.regions(g)
-            if r["function"] == "many_loop" and r["state"] == "region"
+            if r["function"] == "many_noted" and r["state"] == "region"
         )
         # One region per value of `i` (it is added in), all of the same
         # block: each iteration runs its own, and the others are passed
@@ -2084,6 +2240,25 @@ class TestVmManyRegions(TestCase):
         self.assertEqual([state for state, _ in row["traces"]], ["refused"] * 3)
 
     @isolated
+    def test_sizes_that_never_come_back_leave_no_regions(self, device):
+        g = vm_early(many_sizes)
+        # Another size on every call: every region is traced for a call that
+        # never comes again (and nothing tells the calls apart before the
+        # regions are asked). Once sixteen of them have had thirty-two calls
+        # to run again and did not, the place drops them and takes no more.
+        for call in range(70):
+            x = torch.randn(8 + call, device=device)
+            self.assertEqual(g(x), many_sizes(x), atol=0, rtol=0, msg=f"call {call}")
+        (row,) = (r for r in vm.regions(g) if r["function"] == "many_sizes")
+        self.assertEqual(
+            (row["state"], row["variants"], row["runs"]),
+            ("refused", 0, 0),
+            msg=str(row),
+        )
+        self.assertIn("never ran again", row["why"])
+        self.assertEqual([state for state, _ in row["traces"]], ["refused"] * 16)
+
+    @isolated
     def test_argument_that_is_another_object_on_every_call_keeps_nothing(self, device):
         w = torch.full((8,), 1.5, device=device)
         g = vm_early(dead_step)
@@ -2092,19 +2267,24 @@ class TestVmManyRegions(TestCase):
             self.assertEqual(
                 g(x, w), dead_step(x, w), atol=0, rtol=0, msg=f"call {call}"
             )
-            if call >= 8:
+            if call >= 12:
                 # Eager frees each call's cache when the call returns; so
-                # does the VM once it has seen that the object it finds the
-                # place's regions by is another on every call.
+                # does the VM once it has seen that the object it finds a
+                # place's regions by is another on every call (two places
+                # in turn here: the block that calls dead_layer, then
+                # dead_layer's own).
                 gc.collect()
                 alive = sum(1 for o in gc.get_objects() if type(o) is DeadCache)
                 self.assertEqual(alive, 0, msg=f"call {call}")
         rows = [r for r in vm.regions(g) if r["kind"] != "call"]
         self.assertEqual([r["where"] for r in rows if r["state"] == "region"], [])
-        (row,) = (r for r in rows if r["why"] and "another on every call" in r["why"])
+        dead = [r for r in rows if r["why"] and "another on every call" in r["why"]]
         self.assertEqual(
-            (row["state"], len(row["traces"])), ("refused", 3), msg=str(row)
+            [(r["state"], len(r["traces"])) for r in dead],
+            [("refused", 3)] * len(dead),
+            msg=str(dead),
         )
+        self.assertIn(len(dead), (1, 2))
 
     @isolated
     def test_loop_with_more_iterations_than_keys_is_bounded_within_one_call(
@@ -2223,8 +2403,17 @@ class TestVmReadsOfItsOwn(TestCase):
         return runs
 
     def region_of(self, g, function):
-        rows = [r for r in vm.regions(g) if r["function"] == function]
-        self.assertEqual([r["why"] for r in rows if r["state"] == "refused"], [])
+        rows = vm.regions(g)
+        self.assertEqual(
+            [
+                r["why"]
+                for r in rows
+                if r["function"] == function and r["state"] == "refused"
+            ],
+            [],
+        )
+        # The function's computation is one region: its own block's, or the
+        # block's of the code whose only work is to call it.
         (row,) = (r for r in rows if r["state"] == "region")
         return row
 
