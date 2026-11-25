@@ -2451,6 +2451,11 @@ def gen_source_files(
             op: m
             for (key, op), m in native_aot_manifests.items()
             if key == dispatch_key
+            or (
+                dispatch_key == DispatchKey.CompositeExplicitAutograd
+                and key == DispatchKey.CUDA
+                and not m.structured
+            )
         }
 
         register_dispatch_key_base_env = {
@@ -3121,7 +3126,11 @@ def main() -> None:
     native_aot_manifests = (
         parse_native_aot_manifests(native_aot_ops_dir) if native_aot_ops_dir else {}
     )
-    validate_native_aot_manifests(native_aot_manifests, grouped_native_functions)
+    validate_native_aot_manifests(
+        native_aot_manifests,
+        grouped_native_functions,
+        backend_indices=backend_indices,
+    )
 
     # NB: It is mandatory to NOT use os.path.join here, as the install directory
     # will eventually be ingested by cmake, which does not respect Windows style

@@ -1,13 +1,21 @@
 # Owner(s): ["module: dsl-native-ops"]
 
 import contextlib
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import torch
 import torch._dynamo.trace_rules as trace_rules
 import torch._native.registry as registry_module
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    set_default_dtype,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class _CowStateWrapperTensor(torch.Tensor):
@@ -120,7 +128,6 @@ class TestRegistry(TestCase):
                 self._original_filter_state[2]
             )
 
-    # Keep essential existing tests
     def test_override_node_dataclass(self):
         """Test _OverrideNode dataclass creation and defaults."""
 
@@ -416,6 +423,7 @@ def _restore_override_libs(registry, saved):
     return bool(clobbered)
 
 
+@instantiate_parametrized_tests
 @skipIfTorchDynamo("Runtime registry tests exercise the dispatcher directly")
 class TestRegistryRuntime(TestCase):
     """End-to-end runtime tests that exercise the real dispatcher.
@@ -503,6 +511,221 @@ class TestRegistryRuntime(TestCase):
             dispatch_key,
             self.registry._graphs[(lib_symbol, op_symbol, dispatch_key)],
         )
+
+    @parametrize("sparse_first", (False, True))
+    def test_compile_routers_preserve_other_dispatch_keys(
+        self, sparse_first: bool
+    ) -> None:
+        op = torch.ops.aten.neg.default
+        dense = torch.tensor([-2.0, 3.0])
+        sparse = dense.to_sparse()
+        inputs = {"CPU": dense, "SparseCPU": sparse}
+        for key in ("SparseCPU", "CPU") if sparse_first else ("CPU", "SparseCPU"):
+            tensor = inputs[key]
+            kernel = torch.library.get_kernel("aten::neg", key)
+            keyset = torch._C._dispatch_keys(tensor)
+            factor = 2 if key == "CPU" else 3
+
+            def impl(
+                x: torch.Tensor,
+                *,
+                _kernel: Any = kernel,
+                _keyset: Any = keyset,
+                _factor: int = factor,
+            ) -> torch.Tensor:
+                return _kernel.call_boxed(_keyset, x) * _factor
+
+            self.registry.register_op_override(
+                "compile_dispatch_keys",
+                "aten",
+                "neg",
+                key,
+                None,
+                impl,
+                unconditional_override=True,
+            )
+            self._install("neg", key)
+
+        def routed(x: torch.Tensor) -> torch.Tensor:
+            result = self.registry.native_decomp_table(overrides_only=True)[op](x)
+            return op(x) if result is NotImplemented else result
+
+        self.assertEqual(routed(dense), torch.tensor([4.0, -6.0]))
+        self.assertEqual(routed(sparse).to_dense(), torch.tensor([6.0, -9.0]))
+        graph = self.registry._graphs[("aten", "neg", "SparseCPU")]
+        self.registry._graphs[("aten", "neg", "SparseCPU")] = []
+        self._install("neg", "SparseCPU")
+        self.assertEqual(routed(dense), torch.tensor([4.0, -6.0]))
+        self.assertEqual(routed(sparse).to_dense(), torch.tensor([2.0, -3.0]))
+        self.registry._graphs[("aten", "neg", "SparseCPU")] = graph
+        self._install("neg", "SparseCPU")
+        self.assertEqual(routed(sparse).to_dense(), torch.tensor([6.0, -9.0]))
+
+    @parametrize("from_python_kernel", (False, True))
+    def test_boxed_scalar_inputs_do_not_allow_numerical_tensor_results(
+        self, from_python_kernel: bool
+    ) -> None:
+        with torch.library._scoped_library("prims", "FRAGMENT") as library:
+            library.define("_native_boxed_result_test(Tensor x) -> Tensor")
+
+            def impl(x: torch.Tensor | float) -> torch.Tensor | float:
+                return torch.as_tensor(x) if float(x) == 1.0 else 2.0
+
+            library.impl("_native_boxed_result_test", impl, "CPU")
+            kernel = torch.library.get_kernel("prims::_native_boxed_result_test", "CPU")
+            keyset = torch._C._dispatch_keys(torch.empty(()))
+            call = (
+                kernel._call_boxed_from_python_kernel
+                if from_python_kernel
+                else kernel.call_boxed
+            )
+            self.assertEqual(call(keyset, 1.0), torch.tensor(1.0))
+            with self.assertRaisesRegex((TypeError, RuntimeError), "Tensor"):
+                call(keyset, 2.0)
+            native = torch.library.get_kernel("aten::eq.Tensor", "CPU")
+            with self.assertRaisesRegex(
+                RuntimeError, "Expected a value of type 'Tensor'"
+            ):
+                native.call_boxed(keyset, torch.ones(3), 1.0)
+
+    @parametrize("route", ("eager", "compile"))
+    def test_scalar_router_preserves_dimensional_promotion(self, route: str) -> None:
+        x = torch.tensor([16777217], dtype=torch.int64)
+        y = 0.5
+        keyset = torch._C._dispatch_keys(x)
+        native = torch.library.get_kernel("aten::add.Tensor", "CPU")
+        expected = -native.call_boxed(keyset, x, y)
+
+        def impl(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+            return -native.call_boxed(keyset, left, right)
+
+        self.registry.register_op_override(
+            "scalar_tiers",
+            "aten",
+            "add.Tensor",
+            "CPU",
+            None,
+            impl,
+            unconditional_override=True,
+        )
+        self._install("add.Tensor", "CPU")
+        if route == "compile":
+            actual = self.registry.native_decomp_table()[torch.ops.aten.add.Tensor](
+                x, y
+            )
+        else:
+            router = torch.library.get_kernel("aten::add.Tensor", "CPU")
+            actual = router.call_boxed(keyset, x, y)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @parametrize("dtype,value", ((torch.float16, 2049), (torch.bfloat16, 257)))
+    def test_weak_scalar_narrow_default_matches_native(
+        self, dtype: torch.dtype, value: int
+    ) -> None:
+        with set_default_dtype(dtype):
+            x = torch.tensor([value], dtype=torch.int64)
+            scalar = 0.5
+            keyset = torch._C._dispatch_keys(x)
+            native = torch.library.get_kernel("aten::add.Tensor", "CPU")
+            expected = native.call_boxed(keyset, x, scalar)
+
+            def impl(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+                return native.call_boxed(keyset, left, right)
+
+            self.registry.register_op_override(
+                "weak_scalar_narrow",
+                "aten",
+                "add.Tensor",
+                "CPU",
+                None,
+                impl,
+                unconditional_override=True,
+            )
+            self._install("add.Tensor", "CPU")
+            router = torch.library.get_kernel("aten::add.Tensor", "CPU")
+            actual = router.call_boxed(keyset, x, scalar)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @parametrize("out_int32", (False, True))
+    @parametrize("scalar", (False, True))
+    def test_registered_index_result_dtype(self, out_int32: bool, scalar: bool) -> None:
+        sequence = torch.tensor([1, 3, 5], dtype=torch.int64)
+        value = 2 if scalar else torch.tensor(2)
+        op_name = "searchsorted.Scalar" if scalar else "searchsorted.Tensor"
+        keys = torch._C._dispatch_keys(sequence)
+        native = torch.library.get_kernel(f"aten::{op_name}", "CPU")
+        expected = native.call_boxed(keys, sequence, value, out_int32=out_int32)
+
+        def impl(
+            sequence: torch.Tensor, value: torch.Tensor | int, **kwargs: Any
+        ) -> torch.Tensor:
+            return native.call_boxed(keys, sequence, value, **kwargs)
+
+        name = "scalar_result_policy_test"
+        self.registry.register_op_override(
+            name,
+            "aten",
+            op_name,
+            "CPU",
+            None,
+            impl,
+            unconditional_override=True,
+        )
+        self._install(op_name, "CPU")
+        router = torch.library.get_kernel(f"aten::{op_name}", "CPU")
+        actual = router.call_boxed(keys, sequence, value, out_int32=out_int32)
+        self.assertEqual(actual, expected)
+
+    @parametrize("dtype", (torch.int64, torch.float32, torch.float64))
+    @parametrize("value", (5.0, 1e-100, 5.0 + 0.0j))
+    def test_scalar_division_computation_policy(
+        self, dtype: torch.dtype, value: float | complex
+    ) -> None:
+        with set_default_dtype(torch.float32):
+            x = torch.tensor([16777217, 0], dtype=dtype)
+            keys = torch._C._dispatch_keys(x)
+            native = torch.library.get_kernel("aten::div.Tensor", "CPU")
+            expected = native.call_boxed(keys, x, value)
+
+            def impl(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+                return native.call_boxed(keys, left, right)
+
+            self.registry.register_op_override(
+                "division_policy",
+                "aten",
+                "div.Tensor",
+                "CPU",
+                None,
+                impl,
+                unconditional_override=True,
+            )
+            self._install("div.Tensor", "CPU")
+            router = torch.library.get_kernel("aten::div.Tensor", "CPU")
+            actual = router.call_boxed(keys, x, value)
+            self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    def test_scalar_router_cleanup_restores_native(self) -> None:
+        x = torch.tensor([16777217], dtype=torch.int64)
+        expected = torch.add(x, 0.5)
+        keyset = torch._C._dispatch_keys(x)
+        native = torch.library.get_kernel("aten::add.Tensor", "CPU")
+        inner = TestRegistryRuntime("runTest")
+        inner.setUp()
+        try:
+            inner.registry.register_op_override(
+                "scalar_cleanup",
+                "aten",
+                "add.Tensor",
+                "CPU",
+                None,
+                lambda left, right: -native.call_boxed(keyset, left, right),
+                unconditional_override=True,
+            )
+            inner._install("add.Tensor", "CPU")
+            self.assertEqual(torch.add(x, 0.5), -expected)
+        finally:
+            inner.tearDown()
+        self.assertEqual(torch.add(x, 0.5), expected)
 
     def test_teardown_restores_the_fallback_of_a_replaced_override(self):
         """An override installed over one that is already there must not
@@ -1323,7 +1546,9 @@ class TestRegistryNonAtenNamespace(TestCase):
         self.registry._native_decomp_overrides.update(self._saved_decomp_overrides)
 
         self.assertEqual(dict(self.registry._native_decomp_overrides), before)
-        self.assertNotIn(self.op, self.registry._native_decomp_overrides)
+        self.assertNotIn(
+            self.op, self.registry.native_decomp_table(overrides_only=True)
+        )
 
     def _register_both(self):
         self._register(lambda *a, **k: True, lambda x: torch.full_like(x, 99.0))
