@@ -152,7 +152,7 @@ void initDeviceStreamState(DeviceIndex device) {
           c10::xpu::asyncHandler,
           properties[p]));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-      if (C10_UNLIKELY(interp)) {
+      if (interp) [[unlikely]] {
         (*interp)->trace_gpu_stream_creation(
             c10::kXPU, reinterpret_cast<uintptr_t>(stream.get()));
       }
@@ -212,7 +212,7 @@ XPUStream XPUStreamForId(DeviceIndex device_index, StreamId stream_id) {
 int XPUStream::priority() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
-  if (C10_UNLIKELY(st == StreamIdType::EXT)) {
+  if (st == StreamIdType::EXT) [[unlikely]] {
     // Query external stream priority
     using namespace sycl::ext::oneapi::property;
     if (queue().has_property<queue::priority_normal>()) {
@@ -237,6 +237,7 @@ sycl::queue& XPUStream::queue() const {
   StreamIdType st = streamIdType(stream_id);
   StreamIdIndex si = streamIdIndex(stream_id);
   switch (st) {
+    case StreamIdType::LOW:
     case StreamIdType::NORMAL:
     case StreamIdType::HIGH:
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -386,9 +387,8 @@ void syncStreamsOnDevice(DeviceIndex device) {
   }
   check_device_index(device);
 
-// TODO: drop the legacy fallback below once a driver supporting
-// `ext_oneapi_device_wait` is widely deployed across all supported platforms.
-#if SYCL_COMPILER_VERSION >= 20260100
+  // TODO: drop the legacy fallback below once a driver supporting
+  // `ext_oneapi_device_wait` is widely deployed across all supported platforms.
   const auto& raw_device = c10::xpu::get_raw_device(device);
   bool use_device_wide_wait =
       raw_device.has(sycl::aspect::ext_oneapi_device_wait);
@@ -398,10 +398,6 @@ void syncStreamsOnDevice(DeviceIndex device) {
   use_device_wide_wait &=
       raw_device.get_info<syclex::info::device::architecture>() >=
       syclex::architecture::intel_gpu_bmg_g21;
-#endif
-
-#else
-  constexpr bool use_device_wide_wait = false;
 #endif
 
   if (use_device_wide_wait) {
@@ -417,7 +413,7 @@ void syncStreamsOnDevice(DeviceIndex device) {
       }
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
-    if (C10_UNLIKELY(interp)) {
+    if (interp) [[unlikely]] {
       (*interp)->trace_gpu_device_synchronization(c10::kXPU);
     }
   }
