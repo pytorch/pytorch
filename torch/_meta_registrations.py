@@ -6899,6 +6899,22 @@ def meta__scaled_dot_product_efficient_attention(
     is_causal: bool = False,
     scale: float | None = None,
 ):
+    # See Note [Seed and Offset]:
+    seed = torch.empty((), dtype=torch.long, device="meta")
+    offset = torch.empty((), dtype=torch.long, device="meta")
+
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+
+    if (maybe_get_fake_device(query) or query.device).type == "mps":
+        # The Metal kernels broadcast batch dims and write an unpadded logsumexp.
+        batch_shape = torch.broadcast_shapes(
+            *(t.shape[:-3] for t in (query, key, value))
+        )
+        rows = (*batch_shape, *query.shape[-3:-1])
+        lse_rows = rows if compute_log_sumexp else (*rows[:-1], 0)
+        out = query.new_empty((*rows, value.size(-1)))
+        return out, query.new_empty(lse_rows, dtype=torch.float), seed, offset
+
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
@@ -6926,10 +6942,6 @@ def meta__scaled_dot_product_efficient_attention(
 
     res = res.transpose(1, 2)
 
-    # See Note [Seed and Offset]:
-    seed = torch.empty((), dtype=torch.long, device="meta")
-    offset = torch.empty((), dtype=torch.long, device="meta")
-
     return res, logsum_exp, seed, offset
 
 
@@ -6953,6 +6965,14 @@ def meta__scaled_dot_product_efficient_backward(
     is_causal: bool = False,
     scale: float | None = None,
 ):
+    from torch._subclasses.fake_tensor import maybe_get_fake_device
+
+    if (maybe_get_fake_device(query) or query.device).type == "mps":
+        return tuple(
+            t.new_empty(t.shape) if t is not None and needed else None
+            for t, needed in zip((query, key, value, attn_bias), grad_input_mask)
+        )
+
     batch_size = query.size(0)
     num_heads_q = query.size(1)
     num_heads_k = key.size(1)
