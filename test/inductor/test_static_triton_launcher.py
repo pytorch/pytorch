@@ -48,6 +48,8 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    skipCUDAIf,
+    skipCUDAIfRocm,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -56,19 +58,14 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
-from torch.utils._triton import (
-    has_triton_cuda_tma_device,
-    has_triton_for_device,
-)
+from torch.utils._triton import has_triton_cuda_tma_device, has_triton_for_device
 
 
-_orig_getitem = getattr(
-    JITFunction, "__getitem__", None
-)  # saved for XPU monkey-patch in setUp/tearDown
+if HAS_XPU_AND_TRITON:
+    _orig_getitem = JITFunction.__getitem__
 
 
 def _patched_getitem(self, grid):
@@ -863,7 +860,7 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         scalar = float.fromhex("0x1.0020000000001p+0")
         arg0 = torch.zeros(1, dtype=torch.float64, device=device)
         compiled_kernel = floats[(1,)](arg0, scalar, 1.0, 1.0)
-        launcher = self._make_launcher(compiled_kernel)
+        launcher = self._make_launcher(compiled_kernel, device)
         self.assertEqual(
             arg0,
             torch.tensor([3.0 + 2**-10], dtype=torch.float64, device=device),
@@ -879,11 +876,8 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         with self.assertRaisesRegex(OverflowError, "too large to pack"):
             launcher.run(1, 1, 1, stream, new_arg0, 65520.0, 0.0, 0.0)
 
-    @skipIfRocm
-    @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and not SM80OrLater,
-        "uses bfloat16 which requires SM >= 80 or XPU",
-    )
+    @skipCUDAIfRocm
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_bfloat16_scalar(self, device):
         @triton.jit
         def bfloat16(arg0, arg1: tl.bfloat16, arg2: tl.float32, arg3: tl.float64):
@@ -896,10 +890,8 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         scalar = float.fromhex("0x1.018p+0")
         arg0 = torch.zeros(1, dtype=torch.float64, device=device)
         compiled_kernel = bfloat16[(1,)](arg0, scalar, 1.0, 1.0)
-        launcher = self._make_launcher(compiled_kernel)
-        self.assertEqual(
-            arg0, torch.tensor([3.0], dtype=torch.float64, device=device)
-        )
+        launcher = self._make_launcher(compiled_kernel, device)
+        self.assertEqual(arg0, torch.tensor([3.0], dtype=torch.float64, device=device))
         self.assertEqual(launcher.arg_tys, "Oyfd")
 
         new_arg0 = torch.zeros(1, dtype=torch.float64, device=device)
@@ -1055,7 +1047,6 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
 
-
     def test_too_high_shared_mem(self, device):
         @triton.jit
         def simple_kernel(arg0, arg1):
@@ -1072,7 +1063,7 @@ class TestStaticTritonLauncher(StaticLauncherTestMixin, TestCase):
         self.assertRaisesRegex(
             torch.OutOfMemoryError,
             r"out of resource: simple_kernel Required: 99999999 Hardware limit:\s*\d+",
-            lambda: self._make_launcher(compiled_kernel),
+            lambda: self._make_launcher(compiled_kernel, device),
         )
 
     def test_kernel_empty_tensor(self, device):
@@ -1174,9 +1165,18 @@ class TestStaticTritonLauncherCudaOversized(StaticLauncherTestMixin, TestCase):
 
     hw_classification = HardwareClassification.CUDA
 
-    @unittest.skipIf(not has_triton_for_device("cuda"), "requires triton on cuda")
+    def setUp(self):
+        # PYTORCH_TESTING_DEVICE_FOR_CUSTOM re-adds matching device bases
+        # after only_for is applied, so this class can still get a
+        # PrivateUse1 variant; its tests exercise CUDA launcher limits.
+        if self.device_type != "cuda":
+            self.skipTest("CUDA-only oversized shared memory limits")
+        if not has_triton_for_device(self.device_type):
+            self.skipTest(f"requires Triton on {self.device_type}")
+        super().setUp()
+
     @skipIfRocm
-    def test_oversized_shared_mem(self):
+    def test_oversized_shared_mem(self, device):
         # Triton compiles against the oversized limit, so the static launcher
         # must load kernels between the opt-in and oversized limits too.
         opt_in, _ = _oversized_shared_mem_limits()
@@ -1187,21 +1187,20 @@ class TestStaticTritonLauncherCudaOversized(StaticLauncherTestMixin, TestCase):
             y = arg1
             tl.store(arg0, x + y)
 
-        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         arg1 = 5
         compiled_kernel = simple_kernel[(1,)](arg0, arg1)
         compiled_kernel.shared = opt_in + 16384
-        launcher = self._make_launcher(compiled_kernel)
-        new_arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
-        device_interface = get_interface_for_device(GPU_TYPE)
+        launcher = self._make_launcher(compiled_kernel, device)
+        new_arg0 = torch.zeros(1, dtype=torch.int32, device=device)
+        device_interface = get_interface_for_device(torch.device(device).type)
         stream = device_interface.get_raw_stream(device_interface.current_device())
         launcher.slow_launch_kernel = True
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
 
-    @unittest.skipIf(not has_triton_for_device("cuda"), "requires triton on cuda")
     @skipIfRocm
-    def test_too_high_oversized_shared_mem(self):
+    def test_too_high_oversized_shared_mem(self, device):
         # Above the oversized limit the static launcher must still refuse the
         # kernel. This is a separate test because Triton returns the cached
         # CompiledKernel on a second launch, and _make_launcher cannot reuse it.
@@ -1213,14 +1212,14 @@ class TestStaticTritonLauncherCudaOversized(StaticLauncherTestMixin, TestCase):
             y = arg1
             tl.store(arg0, x + y)
 
-        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        arg0 = torch.zeros(1, dtype=torch.int32, device=device)
         compiled_kernel = simple_kernel[(1,)](arg0, 5)
         compiled_kernel.shared = oversized + 4
         self.assertRaisesRegex(
             RuntimeError,
             f"out of resource: simple_kernel Required: {oversized + 4} "
             rf"Hardware limit:\s*{oversized}",
-            lambda: self._make_launcher(compiled_kernel),
+            lambda: self._make_launcher(compiled_kernel, device),
         )
 
 
@@ -1417,11 +1416,6 @@ class TestStaticTritonLauncherXpuOnly(StaticLauncherTestMixin, TestCase):
                 (arg0,),
                 stream,
             )
-
-
-instantiate_device_type_tests(
-    TestStaticTritonLauncherXpuOnly, globals(), only_for="xpu", allow_xpu=True
-)
 
 
 class _StaticTritonCompileResultMixin:
@@ -2242,10 +2236,14 @@ instantiate_device_type_tests(
 instantiate_device_type_tests(
     TestCudaStaticTritonCompileResult, globals(), only_for=("cuda",)
 )
-
-
 instantiate_device_type_tests(
     TestStaticTritonLauncher, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestStaticTritonLauncherCudaOversized, globals(), only_for=("cuda",)
+)
+instantiate_device_type_tests(
+    TestStaticTritonLauncherXpuOnly, globals(), only_for="xpu", allow_xpu=True
 )
 
 
