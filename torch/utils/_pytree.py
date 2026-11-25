@@ -2161,6 +2161,10 @@ def treespec_dumps(treespec: TreeSpec, protocol: int | None = None) -> str:
 
 @functools.lru_cache
 def treespec_loads(serialized: str) -> TreeSpec:
+    return _treespec_loads(serialized)
+
+
+def _treespec_loads(serialized: str) -> TreeSpec:
     protocol, json_schema = json.loads(serialized)
 
     if protocol in _SUPPORTED_PROTOCOLS:

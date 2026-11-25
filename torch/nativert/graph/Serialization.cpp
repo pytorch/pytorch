@@ -751,6 +751,8 @@ Constant constantToValue(
     }
     case torch::_export::Argument::Tag::AS_STRING_TO_ARGUMENT:
       return None();
+    case torch::_export::Argument::Tag::AS_FLAT_APPLY_SPEC:
+      TORCH_CHECK(false, "flat_apply calls are not supported yet");
     default:
       TORCH_CHECK(false, "Got unknown json argument");
   }

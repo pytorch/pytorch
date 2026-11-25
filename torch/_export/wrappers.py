@@ -234,6 +234,24 @@ def _is_init(fn: object) -> bool:
     return callable(fn) and fn.__name__ == "__init__"
 
 
+_ALLOWED_IN_PRE_DISPATCH_GRAPH = "_allowed_in_pre_dispatch_graph"
+
+
+def _mark_allowed_in_pre_dispatch_graph(fn: Callable[..., Any]) -> None:
+    setattr(fn, _ALLOWED_IN_PRE_DISPATCH_GRAPH, True)
+
+
+def _is_allowed_in_pre_dispatch_graph(fn: object) -> bool:
+    """
+    Whether one of the decorators below marked ``fn``. torch.export.save and
+    torch.export.load accept a tensor subclass or autograd function by name only
+    if a method in its class hierarchy is marked, because export only records
+    those. The mark is read with inspect.getattr_static and compared with True
+    by identity, so reading it runs no code of ``fn``.
+    """
+    return inspect.getattr_static(fn, _ALLOWED_IN_PRE_DISPATCH_GRAPH, False) is True
+
+
 def mark_subclass_constructor_exportable_experimental(
     constructor_subclass: Callable[_P, None],
 ) -> Callable[_P, None]:
@@ -256,6 +274,10 @@ def mark_subclass_constructor_exportable_experimental(
         @mark_subclass_constructor_exportable_experimental
         def __init__(self, elem, ...):
             # ...
+
+    torch.export.save and torch.export.load accept the subclass only if this
+    decorator marked an __init__ in its class hierarchy. A decorator on top of
+    it has to keep the mark, for example with functools.wraps.
     """
     if not _is_init(constructor_subclass):
         raise RuntimeError(
@@ -307,6 +329,7 @@ def mark_subclass_constructor_exportable_experimental(
         )
         return
 
+    _mark_allowed_in_pre_dispatch_graph(wrapper)
     return wrapper
 
 
@@ -326,6 +349,9 @@ def allow_in_pre_dispatch_graph(func: Callable[_P, _R]) -> Callable[_P, _R]:
         def apply(cls, *args, **kwargs):
             return super(MyCoolCustomAutogradFunc, cls).apply(*args, **kwargs)
 
+    torch.export.save and torch.export.load accept the autograd function only if
+    this decorator marked an apply in its class hierarchy. A decorator on top of
+    it has to keep the mark, for example with functools.wraps.
     """
     if _is_init(func):
         # pyrefly: ignore[bad-return, bad-argument-type]  # TODO _is_init(func) implies func returns None
@@ -396,4 +422,5 @@ def allow_in_pre_dispatch_graph(func: Callable[_P, _R]) -> Callable[_P, _R]:
         )
         return out
 
+    _mark_allowed_in_pre_dispatch_graph(wrapper)
     return wrapper
