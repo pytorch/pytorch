@@ -267,7 +267,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
 
     def as_python_constant(self) -> dict[Any, Any]:
         # Keys may still be lazy, and an empty input is constant: guard before materializing.
-        self.install_dict_keys_match_guard()
+        self.install_dict_keys_match_guard(
+            recompile_hint=(
+                "This guard was installed by internal Dynamo tracing. Please "
+                "see the user stack trace to find the traced user call "
+                "resulting in this guard installation. Dynamo materialized the "
+                "dictionary as a Python constant; a new key could otherwise be "
+                "omitted from the constant or reconstructed dictionary."
+            )
+        )
         return {
             k.vt.as_python_constant(): v.as_python_constant()
             for k, v in self.items.items()
@@ -291,7 +299,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
 
     def keys_as_python_constant(self) -> dict[Any, VariableTracker]:
-        self.install_dict_keys_match_guard()
+        self.install_dict_keys_match_guard(
+            recompile_hint=(
+                "This guard was installed by internal Dynamo tracing. Please "
+                "see the user stack trace to find the traced user call "
+                "resulting in this guard installation. Dynamo materialized "
+                "this dictionary's keys to select the entries handled by "
+                "compiled code; a new key would be missed."
+            )
+        )
         return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self) -> type:
@@ -535,6 +551,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         self, *, recompile_hint: str | None = None
     ) -> None:
         if self.source and not is_constant_source(self.source):
+            if recompile_hint is None:
+                recompile_hint = (
+                    "This guard was installed by internal Dynamo tracing. "
+                    "Please see the user stack trace to find the traced user "
+                    "call resulting in this guard installation. Dynamo recorded "
+                    "the dictionary's complete key set rather than rediscovering "
+                    "keys on each call; a new key could otherwise be omitted "
+                    "from a result or mutation replay."
+                )
             install_guard(
                 self.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 recompile_hint=recompile_hint,
@@ -1093,7 +1118,15 @@ class ConstDictVariable(VariableTracker):  # noqa: RVT001
         return VariableTracker.build(tx, len(self.items))
 
     def clone(self, **kwargs: Any) -> VariableTracker:
-        self.install_dict_keys_match_guard()
+        self.install_dict_keys_match_guard(
+            recompile_hint=(
+                "This guard was installed by internal Dynamo tracing. Please "
+                "see the user stack trace to find the traced user call "
+                "resulting in this guard installation. An internal dict clone "
+                "uses traced keys to build the cloned dict in a compiled call; "
+                "new keys would be missed without this guard."
+            )
+        )
         return super().clone(**kwargs)
 
     def is_hashable(self) -> bool:

@@ -24,8 +24,10 @@ import torch.fx as fx
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.exc import UncapturedHigherOrderOpError, Unsupported
+from torch._dynamo.source import LocalSource
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
+from torch._dynamo.variables import dicts as dicts_variables
 from torch._dynamo.variables.lazy import LazyVariableTracker
 from torch.fx.experimental.proxy_tensor import _ModuleStackTracer
 from torch.testing._internal.common_utils import (
@@ -4440,6 +4442,85 @@ class DictGuardTests(LoggingTestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn(
             ".get(key, default)` traced the default for an absent key", failures[0]
+        )
+
+    @parametrize("operation", ["kwdefaults", "length"])
+    def test_complete_mapping_snapshot_recompile_hint(self, operation):
+        failures = []
+
+        def kwdefaults_fn(x, d):
+            def inner(*, a=1):
+                return a
+
+            inner.__kwdefaults__ = d
+            return x + inner()
+
+        def length_fn(x, d):
+            return x + len(d)
+
+        fn = kwdefaults_fn if operation == "kwdefaults" else length_fn
+        compiled_fn = torch._dynamo.optimize(
+            "eager",
+            nopython=True,
+            guard_fail_fn=lambda failure: failures.append(failure.reason),
+        )(fn)
+        x = torch.ones(1)
+        for mapping in ({"a": 2}, {"a": 2, "unused": 3}):
+            expected = fn(x, mapping.copy())
+            self.assertEqual(compiled_fn(x, mapping), expected)
+
+        self.assertEqual(len(failures), 1)
+        if operation == "kwdefaults":
+            self.assertIn(
+                "This guard was installed by internal Dynamo tracing. Please "
+                "see the user stack trace to find the traced user call "
+                "resulting in this guard installation. Dynamo materialized the "
+                "dictionary as a Python constant; a new key could otherwise be "
+                "omitted from the constant or reconstructed dictionary.",
+                failures[0],
+            )
+        else:
+            self.assertIn(
+                "This guard was installed by internal Dynamo tracing. "
+                "Please see the user stack trace to find the traced user "
+                "call resulting in this guard installation. Dynamo recorded "
+                "the dictionary's complete key set rather than rediscovering "
+                "keys on each call; a new key could otherwise be omitted "
+                "from a result or mutation replay.",
+                failures[0],
+            )
+
+    def test_complete_mapping_snapshot_hint_arguments(self):
+        value = dicts_variables.ConstDictVariable({}, source=LocalSource("d"))
+        hints = []
+
+        def fake_install_guard(*guards, recompile_hint=None):
+            hints.append(recompile_hint)
+
+        with patch.object(dicts_variables, "install_guard", fake_install_guard):
+            value.as_python_constant()
+            value.keys_as_python_constant()
+            value.clone()
+
+        self.assertEqual(
+            hints,
+            [
+                "This guard was installed by internal Dynamo tracing. Please "
+                "see the user stack trace to find the traced user call "
+                "resulting in this guard installation. Dynamo materialized the "
+                "dictionary as a Python constant; a new key could otherwise be "
+                "omitted from the constant or reconstructed dictionary.",
+                "This guard was installed by internal Dynamo tracing. Please "
+                "see the user stack trace to find the traced user call "
+                "resulting in this guard installation. Dynamo materialized "
+                "this dictionary's keys to select the entries handled by "
+                "compiled code; a new key would be missed.",
+                "This guard was installed by internal Dynamo tracing. Please "
+                "see the user stack trace to find the traced user call "
+                "resulting in this guard installation. An internal dict clone "
+                "uses traced keys to build the cloned dict in a compiled call; "
+                "new keys would be missed without this guard.",
+            ],
         )
 
     @parametrize("mapping_type", [dict, OrderedDict])
