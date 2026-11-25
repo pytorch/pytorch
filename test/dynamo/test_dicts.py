@@ -4225,6 +4225,148 @@ class DictGuardTests(LoggingTestCase):
             failures[0],
         )
 
+    @parametrize(
+        "mapping_type, operation",
+        [
+            subtest((dict, "getitem"), name="dict_getitem"),
+            subtest((dict, "contains"), name="dict_contains"),
+            subtest((dict, "get"), name="dict_get"),
+            subtest((dict, "get_no_default"), name="dict_get_no_default"),
+            subtest((dict, "pop"), name="dict_pop"),
+            subtest((dict, "pop_no_default"), name="dict_pop_no_default"),
+            subtest((OrderedDict, "pop"), name="ordered_pop"),
+            subtest((dict, "setdefault"), name="dict_setdefault"),
+            subtest((dict, "setdefault_no_default"), name="dict_setdefault_no_default"),
+            subtest((dict, "setitem"), name="dict_setitem"),
+            subtest((OrderedDict, "setitem"), name="ordered_setitem"),
+            subtest((dict, "delitem"), name="dict_delitem"),
+            subtest((OrderedDict, "delitem"), name="ordered_delitem"),
+            subtest((dict, "items"), name="dict_items"),
+            subtest((defaultdict, "getitem"), name="defaultdict_getitem"),
+        ],
+    )
+    def test_nan_key_recompilation_hint(self, mapping_type, operation):
+        failures = []
+
+        def fn(x, d, lookup_key):
+            if operation == "contains":
+                return x + (lookup_key in d)
+            if operation == "items":
+                return x + ((lookup_key, 3) in d.items())
+            if operation == "setitem":
+                d[lookup_key] = 5
+                return x + 1
+            try:
+                if operation == "getitem":
+                    value = d[lookup_key]
+                elif operation == "get":
+                    value = d.get(lookup_key, 5)
+                elif operation == "get_no_default":
+                    value = d.get(lookup_key)
+                elif operation == "pop":
+                    value = d.pop(lookup_key, 5)
+                elif operation == "pop_no_default":
+                    value = d.pop(lookup_key)
+                elif operation == "setdefault":
+                    value = d.setdefault(lookup_key, 5)
+                elif operation == "setdefault_no_default":
+                    value = d.setdefault(lookup_key)
+                else:
+                    del d[lookup_key]
+                    value = 1
+            except KeyError:
+                value = -1
+            return x + (value if value is not None else 0)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        present, absent = float("nan"), float("nan")
+        original = (
+            defaultdict(lambda: 7) if mapping_type is defaultdict else mapping_type()
+        )
+        original[present] = 3
+        x = torch.ones(1)
+        for key in (present, absent):
+            mapping, expected_mapping = original.copy(), original.copy()
+            self.assertEqual(compiled_fn(x, mapping, key), fn(x, expected_mapping, key))
+            self.assertEqual(list(mapping.items()), list(expected_mapping.items()))
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("___check_obj_id(lookup_key,", failures[0])
+        self.assertIn(
+            "requires a recompile: the NaN-containing key changed identity. Distinct NaN instances can hash differently because CPython uses object identity.",
+            failures[0],
+        )
+
+    @parametrize("operation", ["getitem", "get", "get_default", "pop", "pop_default"])
+    def test_missing_key_recompilation_hint(self, operation):
+        failures = []
+
+        def fn(x, d):
+            try:
+                if operation == "getitem":
+                    value = d["scale"]
+                elif operation == "get":
+                    value = d.get("scale")
+                elif operation == "get_default":
+                    value = d.get("scale", 2)
+                elif operation == "pop":
+                    value = d.pop("scale")
+                else:
+                    value = d.pop("scale", 2)
+            except KeyError:
+                value = 1
+            return x + (value if value is not None else 0)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        for mapping in ({"kept": 1}, {"kept": 1, "scale": 3}):
+            expected_mapping = mapping.copy()
+            expected = fn(x, expected_mapping)
+            self.assertEqual(compiled_fn(x, mapping), expected)
+            self.assertEqual(mapping, expected_mapping)
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("not ___dict_contains('scale', d)", failures[0])
+        if operation == "getitem":
+            self.assertIn("[key]` traced KeyError for an absent key", failures[0])
+        elif operation == "get":
+            self.assertIn(".get(key)` traced None for an absent key", failures[0])
+        elif operation == "get_default":
+            self.assertIn(
+                ".get(key, default)` traced the default for an absent key", failures[0]
+            )
+        elif operation == "pop":
+            self.assertIn(
+                ".pop(key)` traced KeyError without removing an entry", failures[0]
+            )
+        else:
+            self.assertIn(
+                ".pop(key, default)` traced the default without removing an entry",
+                failures[0],
+            )
+
+    def test_missing_object_key_recompilation_hint(self):
+        failures = []
+        key = object()
+
+        def fn(x, d):
+            return x + d.get(key, 2)
+
+        compiled_fn = torch._dynamo.optimize(
+            "eager", guard_fail_fn=lambda failure: failures.append(failure.reason)
+        )(fn)
+        x = torch.ones(1)
+        self.assertEqual(compiled_fn(x, {"kept": 1}), x + 2)
+        self.assertEqual(compiled_fn(x, {"kept": 1, key: 3}), x + 3)
+        self.assertEqual(len(failures), 1)
+        self.assertIn(
+            ".get(key, default)` traced the default for an absent key", failures[0]
+        )
+
     @make_logging_test(recompiles=True)
     def test_cmp_or(self, records):
         @torch.compile(backend="eager", fullgraph=True)
