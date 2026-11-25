@@ -3773,6 +3773,8 @@ class GuardManager {
     _max_saved_pointers_for_recursive_dict_tags_check =
         config_module.attr("max_saved_pointers_for_recursive_dict_tags_check")
             .cast<uint64_t>();
+    _max_recursive_dict_tag_rerecords =
+        config_module.attr("max_recursive_dict_tag_rerecords").cast<uint64_t>();
   }
 
   GuardManager(const GuardManager& m) = delete;
@@ -3906,6 +3908,40 @@ class GuardManager {
   void disable_recursive_dict_tag_optimization(DictToGuardManagersMap& map) {
     unwatch_all_saved_dict_pointers(map);
     _disable_dict_tag_matching = true;
+  }
+
+  // A recorded subtree changed (a dict tag moved, a watched dict was mutated
+  // or a list snapshot differs), but the guard itself may still pass. Drop
+  // everything recorded for this root so the next check records afresh, up
+  // to max_recursive_dict_tag_rerecords times; after that, disable. One-off
+  // mutations (lazy init, a setting flipped once) then don't cost the fast
+  // path for the rest of the run, while an attribute that changes every call
+  // still ends up disabled.
+  void rerecord_or_disable_recursive_dict_tag_optimization() {
+    dict_to_guard_managers.withLock([&](DictToGuardManagersMap& map) {
+      rerecord_or_disable_recursive_dict_tag_optimization(map);
+    });
+  }
+
+  // Caller must hold dict_to_guard_managers lock.
+  void rerecord_or_disable_recursive_dict_tag_optimization(
+      DictToGuardManagersMap& map) {
+    if (_disable_dict_tag_matching) {
+      return;
+    }
+    if (_num_recursive_dict_tag_rerecords >=
+        _max_recursive_dict_tag_rerecords) {
+      disable_recursive_dict_tag_optimization(map);
+      return;
+    }
+    _num_recursive_dict_tag_rerecords++;
+    unwatch_all_saved_dict_pointers(map);
+    _dict_pointers.clear();
+    _tensor_pointers.clear();
+    _tensor_metadata_pointers.clear();
+    _dict_tag_guards.clear();
+    _list_snapshots.clear();
+    _dict_callback_installed = false;
   }
 
  public:
@@ -4202,9 +4238,9 @@ class GuardManager {
               return false;
             }
           }
-          // Something changed, very likely the dict tag checking will fail in
-          // future. So disable the recursive tag matching.
-          _disable_dict_tag_matching = true;
+          // Something changed. Re-record on a later call, or disable the
+          // recursive tag matching if this root keeps changing.
+          rerecord_or_disable_recursive_dict_tag_optimization();
         } else if (
             _dict_pointers.size() ==
             _max_saved_pointers_for_recursive_dict_tags_check) {
@@ -4674,6 +4710,8 @@ class GuardManager {
   bool _is_immutable = false;
   uint64_t _dict_tag{0};
   uint64_t _max_saved_pointers_for_recursive_dict_tags_check = 0;
+  uint64_t _max_recursive_dict_tag_rerecords = 0;
+  uint64_t _num_recursive_dict_tag_rerecords = 0;
 
   // tag safe markers
   bool _is_tag_safe = false;
@@ -5478,7 +5516,8 @@ static int dict_recursive_tag_watch_callback(
         auto guard_managers = it->second;
         for (auto& guard_manager : guard_managers) {
           if (guard_manager) {
-            guard_manager->disable_recursive_dict_tag_optimization(map);
+            guard_manager->rerecord_or_disable_recursive_dict_tag_optimization(
+                map);
           }
         }
       }

@@ -2176,6 +2176,94 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
         with install_guard_manager_testing_hook(hook_test):
             opt_fn(x)
 
+    def test_rerecord_after_mutation_then_disable(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 4
+
+            def forward(self, x):
+                return x + self.a
+
+        mod = Mod()
+        x = torch.randn(4, 4)
+
+        def fn(x):
+            return mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook_test(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_mgr = builder.get_guard_manager_from_source(LocalSource("mod"))
+            self.assertTrue(mod_mgr.is_tag_safe_root())
+            for _ in range(3):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            # Each change-and-restore keeps the guard passing and re-records
+            # the subtree, until the re-record budget (2) is spent.
+            for _ in range(2):
+                mod.a = 5
+                mod.a = 4
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+                self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            mod.a = 5
+            mod.a = 4
+            self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertTrue(mod_mgr.is_recursive_dict_tag_matching_disabled())
+            # A real change still fails the guard.
+            mod.a = 5
+            self.assertFalse(guard_wrapper.check({"mod": mod, "x": x}))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with torch._dynamo.config.patch(max_recursive_dict_tag_rerecords=2):
+            with install_guard_manager_testing_hook(hook_test):
+                opt_fn(x)
+
+    def test_rerecord_detects_mutation_after_rerecord(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 4
+                self.dims = [4, 4]
+
+            def forward(self, x):
+                return x.reshape(self.dims[0], self.dims[1]) + self.a
+
+        mod = Mod()
+        x = torch.randn(16)
+
+        def fn(x):
+            return mod(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook_test(guard_wrapper, f_locals, builder):
+            from torch._dynamo.source import LocalSource
+
+            mod_mgr = builder.get_guard_manager_from_source(LocalSource("mod"))
+            for _ in range(3):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            mod.a = 5
+            mod.a = 4
+            # Re-recorded; the new recording must still catch later mutations.
+            for _ in range(3):
+                self.assertTrue(guard_wrapper.check({"mod": mod, "x": x}))
+            self.assertFalse(mod_mgr.is_recursive_dict_tag_matching_disabled())
+            mod.dims[0] = 2
+            self.assertFalse(guard_wrapper.check({"mod": mod, "x": x}))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook_test):
+            opt_fn(x)
+
     def test_list_in_place_mutation_fails_guard(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -2304,8 +2392,9 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
             self.assertTrue(mod_mgr.is_recursive_dict_tag_matching_disabled())
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with install_guard_manager_testing_hook(disable_on_dict_tag_match_failure):
-            opt_fn(x)
+        with torch._dynamo.config.patch(max_recursive_dict_tag_rerecords=0):
+            with install_guard_manager_testing_hook(disable_on_dict_tag_match_failure):
+                opt_fn(x)
 
         # Test that max size limit breach disables the dict tag optimization
         torch.compiler.reset()
