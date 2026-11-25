@@ -1341,6 +1341,8 @@ class TestBlackwellTMALoadFusion(TestCase):
                     "max_autotune_gemm_backends": "TRITON",
                     "triton.enable_persistent_tma_matmul": True,
                     "triton.enable_tma_load_for_template_epilogue": True,
+                    "triton.enable_template_tma_store": False,
+                    "triton.enable_host_side_tma": False,
                     "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
                 }
             ):
@@ -1351,7 +1353,8 @@ class TestBlackwellTMALoadFusion(TestCase):
                     _HEURISTIC_CACHE[key].mm_configs = configs
         torch.testing.assert_close(actual, fn(bias, x, W), atol=1e-1, rtol=1e-1)
         self.assertIn("TWO_CTAS", code[0])
-        self.assertEqual("tma_descriptor" in code[0], K > 64, code[0])
+        loads = re.search(r"tma_descriptor\d+\.load\(\[", code[0]) is not None
+        self.assertEqual(loads, K > 64, code[0])
 
     @staticmethod
     @contextlib.contextmanager
