@@ -807,10 +807,6 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
             install_no_tensor_aliasing_guard(managers, ["x", "y"], [], None)
         elif kind == "overlap":
             install_storage_overlapping_guard(managers, [], [], None)
-        elif kind == "partition":
-            guards.install_storage_overlap_partition_guard(
-                managers, ((0, 1),), [], None
-            )
         else:
             signature = ctypes.CFUNCTYPE(
                 ctypes.c_int8,
@@ -825,7 +821,7 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
             )
         return root, managers, values, invalid, callback_ref
 
-    @parametrize("kind", ["alias", "no_alias", "overlap", "partition", "symbolic"])
+    @parametrize("kind", ["alias", "no_alias", "overlap", "symbolic"])
     def test_legacy_relational_clone_reentry(self, kind):
         root, managers, values, invalid, _ = self._legacy_clone_case(kind)
         clone = root.clone_manager(lambda manager: True)
@@ -846,7 +842,7 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(clone.check_verbose(invalid).result)
         self.assertTrue(clone.check(values))
 
-    @parametrize("kind", ["alias", "no_alias", "overlap", "partition", "symbolic"])
+    @parametrize("kind", ["alias", "no_alias", "overlap", "symbolic"])
     def test_legacy_relational_clone_filter_and_lifetime(self, kind):
         root, managers, values, invalid, callback_ref = self._legacy_clone_case(kind)
         clone = root.clone_manager(lambda manager: True)
@@ -899,8 +895,7 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(root.check(values))
         self.assertFalse(root.check({**values, "b": values["a"]}))
 
-    @parametrize("partition", [False, True])
-    def test_storage_overlap_diff_participant_closure(self, partition):
+    def test_storage_overlap_diff_participant_closure(self):
         from torch._dynamo.guards import GuardManagerWrapper
 
         storage = torch.randn(6)
@@ -910,12 +905,7 @@ class RelationalAliasGuardTests(torch._dynamo.test_case.TestCase):
             root.dict_getitem_manager(name, name, value, default_mgr_enum)
             for name, value in values.items()
         ]
-        if partition:
-            guards.install_storage_overlap_partition_guard(
-                managers, ((0, 1),), [], None
-            )
-        else:
-            install_storage_overlapping_guard(managers[:2], managers[2:], [], None)
+        install_storage_overlapping_guard(managers[:2], managers[2:], [], None)
         wrapper = GuardManagerWrapper(root)
         wrapper.diff_guard_sources.add("a")
         wrapper.prepare_diff_guard_manager()
@@ -2008,94 +1998,6 @@ user_stack=None)
         self.assertFalse(d_a_mgr.is_tag_safe())
         self.assertTrue(guards_manager.check({"x": overlapping, "d": d}))
         self.assertFalse(guards_manager.check({"x": non_overlapping, "d": d}))
-
-    def _make_disjoint_storage_partition_guard(self, values):
-        root = RootGuardManager()
-        manager = root.framelocals_manager(("x", 0), "x", values, default_mgr_enum)
-        children = [
-            manager.tuple_getitem_manager(i, f"x[{i}]", t, default_mgr_enum)
-            for i, t in enumerate(values)
-        ]
-        label = ["disjoint storage partition"]
-        guards.install_storage_overlap_partition_guard(children, (), label, None)
-        return root
-
-    def test_disjoint_storage_partition_uses_live_metadata(self):
-        backing = torch.empty(36)
-        buffers = backing.split(4)
-        columns = torch.empty(2, 8)
-        strided = (columns[:, :4], columns[:, 4:])
-        empty_base = torch.empty(1)
-        empty = (empty_base[:0], empty_base[:0])
-        values = buffers + strided + empty
-
-        root = self._make_disjoint_storage_partition_guard(values)
-        scope = {"x": values}
-        self.assertTrue(root.check(scope))
-
-        # Rebind an existing view to overlapping bytes in the same storage.
-        view = buffers[-1]
-        view.set_(backing.untyped_storage(), 2, view.shape, view.stride())
-        self.assertFalse(root.check(scope))
-        view.set_(backing.untyped_storage(), 32, view.shape, view.stride())
-        self.assertTrue(root.check(scope))
-
-        overlapping_columns = (strided[0], columns[:, 2:6])
-        self.assertFalse(root.check({"x": buffers + overlapping_columns + empty}))
-        self.assertFalse(root.check({"x": buffers + strided + (empty[0], empty[0])}))
-        self.assertTrue(root.check(scope))
-
-        class_checks = 0
-
-        class NonTensor:
-            @property
-            def __class__(self):
-                nonlocal class_checks
-                class_checks += 1
-                return type(self)
-
-        value = NonTensor()
-        self.assertTrue(root.check({"x": values[:-1] + (value,)}))
-        self.assertEqual(class_checks, 1)
-
-    def test_disjoint_storage_partition_diff_guard(self):
-        storage = torch.empty(24)
-        views = storage.split(2)
-        root = self._make_disjoint_storage_partition_guard(views)
-        wrapper = torch._dynamo.guards.GuardManagerWrapper(root)
-        wrapper.diff_guard_sources.add("x[0]")
-        wrapper.prepare_diff_guard_manager()
-        self.assertTrue(wrapper.diff_guard_root.check({"x": views}))
-        self.assertFalse(
-            wrapper.diff_guard_root.check({"x": (*views[:-1], storage[1:3])})
-        )
-
-    def test_disjoint_storage_partition_tiled_views(self):
-        backing = torch.empty(16, 16)
-        tiles = tuple(
-            backing[row : row + height, col : col + width]
-            for row in (0, 4, 8, 12)
-            for col, height, width in ((0, 4, 3), (4, 3, 4), (10, 3, 2))
-        )
-        root = self._make_disjoint_storage_partition_guard(tiles)
-        self.assertTrue(root.check({"x": tiles[::-1]}))
-
-        # A staggered tile still falls in disjoint columns. It must pass even
-        # when the row-band check cannot prove the tiles are disjoint.
-        staggered = tiles[:2] + (backing[1:4, 10:12],) + tiles[3:]
-        self.assertTrue(root.check({"x": staggered}))
-
-        overlapping = tiles[:2] + (backing[:3, 1:3],) + tiles[3:]
-        self.assertFalse(root.check({"x": overlapping}))
-
-        # Overlap across different starting rows needs the pairwise check.
-        crossing = tiles[:2] + (backing[2:4, 2:6],) + tiles[3:]
-        self.assertFalse(root.check({"x": crossing}))
-
-        # This view starts in one storage row and overlaps the next.
-        wrapped = backing.as_strided((1, 2), (16, 1), 15)
-        wrapping = (wrapped, backing[1:2, :1], tiles[2][:1]) + tiles[3:]
-        self.assertFalse(root.check({"x": wrapping}))
 
     def test_globals(self):
         global global_pair, Pair
