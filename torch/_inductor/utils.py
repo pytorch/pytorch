@@ -3458,20 +3458,40 @@ def use_decompose_k_choice(
         return False
     if sizevars.statically_known_true(large_k):
         return True
-    # A backed dynamic K is decided on its hint, using splits that divide every K,
-    # and guarded so a later K below the threshold recompiles. The
-    # threshold_multiple > 1 check only drops Triton mm; keep it for a dynamic K
-    # rather than add a second guard.
-    if not isinstance(k, sympy.Expr) or k.is_number or free_unbacked_symbols(large_k):
+    # A backed dynamic K (opt-in) uses splits that divide every K and is guarded
+    # on the threshold either way, so a K on the other side recompiles instead
+    # of reusing this graph. The threshold_multiple > 1 check only drops Triton
+    # mm; keep it for a dynamic K rather than add a second guard.
+    if (
+        not config.triton.decompose_k_dynamic_k
+        or threshold_multiple != 1
+        or not isinstance(k, sympy.Expr)
+        or k.is_number
+        or free_unbacked_symbols(large_k)
+        or _has_user_bounded_symbol(k)
+    ):
         return False
-    m_hint, n_hint, k_hint = (sizevars.optimization_hint(x) for x in (m, n, k))
     divisible = any(
         sizevars.statically_known_true(sympy.Eq(sympy.Mod(k, s), 0))
         for s in get_k_splits(m, n, k)
     )
-    if not divisible or k_hint < decompose_k_threshold * max(m_hint, n_hint):
+    if not divisible:
         return False
-    return threshold_multiple == 1 and sizevars.guard_or_false(large_k)
+    return sizevars.guard_or_false(large_k)
+
+
+def _has_user_bounded_symbol(expr: sympy.Expr) -> bool:
+    """Whether a symbol of ``expr`` has a narrowed value range, e.g. from
+    mark_dynamic(min=, max=). Guarding on it could violate the user's range."""
+    from torch._inductor.virtualized import V
+    from torch.utils._sympy.numbers import int_oo
+
+    shape_env = V.graph.sizevars.shape_env
+    for sym in expr.free_symbols:
+        vr = shape_env.var_to_range.get(sym)
+        if vr is not None and (vr.lower > 2 or vr.upper is not int_oo):
+            return True
+    return False
 
 
 @functools.cache
