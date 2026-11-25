@@ -596,7 +596,13 @@ class TestInstantiationErrors(TestCase):
         overrides = {"module_normal": [DecorateInfo(unittest.skip("skip"))]}
         # Back to the state before the first setUpClass(), when device_type is
         # still "privateuse1" while the first variant is being parametrized.
-        with mock.patch.object(PrivateUse1TestBase, "device_type", "privateuse1"):
+        # Keep skipped test under PYTORCH_TEST_OMIT_SKIPPED=1 to assert skip mark.
+        with (
+            mock.patch.object(PrivateUse1TestBase, "device_type", "privateuse1"),
+            mock.patch(
+                "torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False
+            ),
+        ):
             scope = self._instantiate(TestFirstVariant, module_overrides=overrides)
         (device_cls,) = scope.values()
         (name,) = [n for n in dir(device_cls) if n.startswith("test_first")]
@@ -609,7 +615,13 @@ class TestInstantiationErrors(TestCase):
                 pass
 
         overrides = {"op_normal": [DecorateInfo(unittest.skip("skip"))]}
-        with mock.patch.object(PrivateUse1TestBase, "device_type", "privateuse1"):
+        # Keep skipped test under PYTORCH_TEST_OMIT_SKIPPED=1 to assert skip mark.
+        with (
+            mock.patch.object(PrivateUse1TestBase, "device_type", "privateuse1"),
+            mock.patch(
+                "torch.testing._internal.common_utils.OMIT_SKIPPED_TESTS", False
+            ),
+        ):
             scope = self._instantiate(TestFirstVariant, op_overrides=overrides)
         (device_cls,) = scope.values()
         (name,) = [n for n in dir(device_cls) if n.startswith("test_first")]
