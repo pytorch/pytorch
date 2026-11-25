@@ -1989,9 +1989,10 @@ avoid_32bit_indexing_guards: bool = False
 # heuristics (tiling, size_hints, from which its autotuning configs are generated, ...)
 # see sizes past int32 (codegen/simd.py _int64_kernel_hint_overrides). If the example
 # inputs already exceed int32, only the 64-bit kernel is built, as without this flag.
-# So far covers Triton pointwise and reduction kernels from the main SIMD codegen
-# path; other kernels keep the default behavior (see avoid_32bit_indexing_guards).
-# Skips are logged at debug level (TORCH_LOGS="+inductor").
+# So far covers Triton pointwise, reduction and combo (foreach) kernels, except combo
+# kernels with combo_kernel_per_subkernel_blocks; other kernels keep the default
+# behavior (see avoid_32bit_indexing_guards). Skips are logged at debug level
+# (TORCH_LOGS="+inductor").
 dual_index_dtype_kernels: bool = False
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
