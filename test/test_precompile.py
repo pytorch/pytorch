@@ -7504,6 +7504,127 @@ class TestTritonRuntimeCacheTransportDevice(TestCase):
                 },
             )
 
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @onlyAccelerator
+    @parametrize("device_index", (0, None))
+    @parametrize("explicit_cache", (False, True))
+    def test_strict_hydration_restores_kernel_where_autotuner_loads_it(
+        self, device, device_index, explicit_cache
+    ):
+        from pathlib import Path
+
+        from torch._inductor.runtime.cache_dir_utils import triton_cache_dir
+        from torch._inductor.runtime.triton_heuristics import _resolve_load_device
+        from torch._inductor.triton_bundler import (
+            TritonBundle,
+            TritonBundler,
+            TritonKernelArtifact,
+            TritonKernelArtifacts,
+        )
+        from torch._inductor.utils import GPU_KERNEL_BIN_EXTS
+
+        device_type = torch.device(device).type
+        backend = "hip" if device_type == "cuda" and torch.version.hip else device_type
+        kernel = "kernel" + GPU_KERNEL_BIN_EXTS[backend]
+        group = json.dumps({"child_paths": {kernel: f"[REPLACE]/{kernel}"}}).encode()
+        bundle = TritonBundle(
+            [
+                TritonKernelArtifacts(
+                    "kernel-key",
+                    device_index,
+                    [
+                        TritonKernelArtifact(kernel, b"compiled-kernel"),
+                        TritonKernelArtifact("__grp__kernel.json", group),
+                    ],
+                )
+            ],
+            [],
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": directory}),
+            torch._inductor.config.patch(
+                bundle_triton_into_fx_graph_cache=True,
+                use_static_triton_launcher=False,
+            ),
+            torch.compiler.precompile.no_compilation(),
+        ):
+            if explicit_cache:
+                os.environ["TRITON_CACHE_DIR"] = str(Path(directory) / "explicit")
+            else:
+                os.environ.pop("TRITON_CACHE_DIR", None)
+            TritonBundler.read_and_emit(bundle)
+            resolved = _resolve_load_device(device_index, device_type)
+            basedir = Path(triton_cache_dir(resolved))
+            if not explicit_cache:
+                expected = device_index
+                if expected is None:
+                    expected = torch.get_device_module(device).current_device()
+                self.assertEqual(basedir, Path(directory) / "triton" / str(expected))
+            kernel_dir = basedir / "kernel-key"
+            self.assertEqual((kernel_dir / kernel).read_bytes(), b"compiled-kernel")
+            child_paths = json.loads((kernel_dir / "__grp__kernel.json").read_text())
+            self.assertEqual(
+                child_paths["child_paths"],
+                {kernel: str(kernel_dir / kernel)},
+            )
+            TritonBundler.read_and_emit(bundle)
+            (kernel_dir / kernel).unlink()
+            with self.assertRaisesRegex(
+                RuntimeError, "incomplete or incompatible Triton kernel file"
+            ):
+                TritonBundler.read_and_emit(bundle)
+
+    @skipIfCrossRef
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @onlyAccelerator
+    def test_capture_user_stream_region(self, device):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+        from torch._inductor.utils import fresh_cache
+
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(_producer_triton_cache(pathlib.Path(directory, "triton")))
+        blocks = []
+        run_block = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def spy(self):
+            blocks.append(self.kernel_autotune_calls.getvalue())
+            return run_block(self)
+
+        x = torch.randn(1024, device=device)
+        with (
+            fresh_cache(),
+            mock.patch.object(
+                PythonWrapperCodegen, "generate_and_run_autotune_block", spy
+            ),
+        ):
+            source, cache = _capture_files(
+                self, _user_stream_fn, [(x,)], backend="inductor"
+            )
+        self.assertIn("raw_stream = get_raw_stream(", "".join(blocks))
+        runnable = torch.compiler.precompile.load(source, cache)
+        with torch.no_grad():
+            out = runnable(x)
+        torch.testing.assert_close(out, _user_stream_fn(x))
+
+    @skipIfCrossRef
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @onlyAccelerator
+    @parametrize("tracer", ["dynamo", "make_fx"])
+    def test_strict_replay_with_multi_kernel(self, device, tracer):
+        if torch.device(device).type == "xpu" and tracer == "dynamo":
+            self.skipTest("XPU strict replay finds incompatible Triton kernel metadata")
+        outs = _capture_and_replay(
+            self,
+            _MULTI_KERNEL_MODULE,
+            _MULTI_KERNEL_DRIVER,
+            "multi-kernel phase ok",
+            tracer,
+            device=device,
+        )
+        warning = "overrides triton.multi_kernel=1 to 0"
+        self.assertIn(warning, outs["capture"].stderr)
+
 
 instantiate_device_type_tests(
     TestTritonRuntimeCacheTransportDevice, globals(), allow_xpu=True
@@ -8011,6 +8132,7 @@ import os
 import sys
 
 phase, directory, module = sys.argv[1:4]
+device = sys.argv[-1]
 os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.join(directory, phase, "inductor")
 # Neither phase sets TRITON_CACHE_DIR or TRITON_CACHE_AUTOTUNING: capture and
 # load pick Triton's cache directory and autotuning cache themselves.
@@ -8031,9 +8153,9 @@ torch._inductor.config.use_static_cuda_launcher = True
 
 
 def inputs(seed, requires_grad=False):
-    g = torch.Generator(device="cuda").manual_seed(seed)
-    x = torch.randn(64, 128, device="cuda", generator=g, requires_grad=requires_grad)
-    w = torch.randn(128, 32, device="cuda", generator=g, requires_grad=requires_grad)
+    g = torch.Generator(device=device).manual_seed(seed)
+    x = torch.randn(64, 128, device=device, generator=g, requires_grad=requires_grad)
+    w = torch.randn(128, 32, device=device, generator=g, requires_grad=requires_grad)
     return x, w
 
 
@@ -8196,12 +8318,36 @@ def _multi_kernel_hints_gemm(a, b):
     return (a @ b).relu()
 
 
+def _capture_and_replay(
+    test, module_source, driver, marker, *extra_args, device="cuda"
+):
+    from torch.compiler._runtime_cache import _triton_runtime_cache
+
+    if _triton_runtime_cache() is None:
+        test.skipTest("requires a Triton with cache and autotuning knobs")
+    with tempfile.TemporaryDirectory() as directory:
+        module = f"precompile_runtime_{uuid.uuid4().hex}"
+        with open(os.path.join(directory, module + ".py"), "w") as f:
+            f.write(module_source)
+        outs = {}
+        for phase in ("capture", "replay"):
+            cmd = [sys.executable, "-c", driver, phase, directory, module]
+            out = subprocess.run(
+                [*cmd, *extra_args, device], capture_output=True, text=True, timeout=900
+            )
+            test.assertEqual(out.returncode, 0, out.stderr)
+            test.assertIn(f"{marker}: {phase}", out.stdout)
+            outs[phase] = out
+        return outs
+
+
 def _user_stream_fn(x):
-    s = torch.cuda.Stream()
-    s.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(s):
+    device_module = torch.xpu if x.device.type == "xpu" else torch.cuda
+    s = device_module.Stream()
+    s.wait_stream(device_module.current_stream())
+    with device_module.stream(s):
         y = x * 3
-    torch.cuda.current_stream().wait_stream(s)
+    device_module.current_stream().wait_stream(s)
     return x * 2 + y
 
 
@@ -9820,143 +9966,22 @@ class TestPrecompileRuntimeCache(TestCase):
         with _replace_module("triton", None):
             self.assertIsNone(_runtime_cache._triton_runtime_cache())
 
-    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
-    @parametrize("device", (0, None))
-    @parametrize("explicit_cache", (False, True))
-    def test_strict_hydration_restores_kernel_where_autotuner_loads_it(
-        self, device, explicit_cache
-    ):
-        from pathlib import Path
-
-        from torch._inductor.runtime.cache_dir_utils import triton_cache_dir
-        from torch._inductor.runtime.triton_heuristics import _resolve_load_device
-        from torch._inductor.triton_bundler import (
-            TritonBundle,
-            TritonBundler,
-            TritonKernelArtifact,
-            TritonKernelArtifacts,
-        )
-
-        bundle = TritonBundle(
-            [
-                TritonKernelArtifacts(
-                    "kernel-key",
-                    device,
-                    [
-                        TritonKernelArtifact("kernel.cubin", b"compiled-kernel"),
-                        TritonKernelArtifact(
-                            "__grp__kernel.json",
-                            b'{"child_paths": {"kernel.cubin": "[REPLACE]/kernel.cubin"}}',
-                        ),
-                    ],
-                )
-            ],
-            [],
-        )
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": directory}),
-            torch._inductor.config.patch(
-                bundle_triton_into_fx_graph_cache=True,
-                use_static_triton_launcher=False,
-            ),
-            torch.compiler.precompile.no_compilation(),
-        ):
-            if explicit_cache:
-                os.environ["TRITON_CACHE_DIR"] = str(Path(directory) / "explicit")
-            else:
-                os.environ.pop("TRITON_CACHE_DIR", None)
-            TritonBundler.read_and_emit(bundle)
-            # CachingAutotuner.__init__ and reload_cubin_path resolve the kernel
-            # directory this way, so a None (compile_on_one_rank) device must land
-            # under the current device rather than triton/None.
-            basedir = Path(triton_cache_dir(_resolve_load_device(device, "cuda")))
-            if not explicit_cache:
-                expected = torch.cuda.current_device() if device is None else device
-                self.assertEqual(basedir, Path(directory) / "triton" / str(expected))
-            kernel_dir = basedir / "kernel-key"
-            self.assertEqual(
-                (kernel_dir / "kernel.cubin").read_bytes(), b"compiled-kernel"
-            )
-            self.assertEqual(
-                json.loads((kernel_dir / "__grp__kernel.json").read_text())[
-                    "child_paths"
-                ],
-                {"kernel.cubin": str(kernel_dir / "kernel.cubin")},
-            )
-            TritonBundler.read_and_emit(bundle)
-            (kernel_dir / "kernel.cubin").unlink()
-            with self.assertRaisesRegex(
-                RuntimeError, "incomplete or incompatible Triton kernel file"
-            ):
-                TritonBundler.read_and_emit(bundle)
-
-    def _capture_and_replay(self, module_source, driver, marker, *extra_args):
-        from torch.compiler._runtime_cache import _triton_runtime_cache
-
-        if _triton_runtime_cache() is None:
-            self.skipTest("requires a Triton with cache and autotuning knobs")
-        with tempfile.TemporaryDirectory() as directory:
-            module = f"precompile_runtime_{uuid.uuid4().hex}"
-            with open(os.path.join(directory, module + ".py"), "w") as f:
-                f.write(module_source)
-            outs = {}
-            for phase in ("capture", "replay"):
-                cmd = [sys.executable, "-c", driver, phase, directory, module]
-                out = subprocess.run(
-                    [*cmd, *extra_args], capture_output=True, text=True, timeout=900
-                )
-                self.assertEqual(out.returncode, 0, out.stderr)
-                self.assertIn(f"{marker}: {phase}", out.stdout)
-                outs[phase] = out
-            return outs
-
     @skipIfCrossRef
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     def test_strict_replay_in_fresh_process(self):
-        self._capture_and_replay(
-            _RUNTIME_CACHE_MODULE, _RUNTIME_CACHE_DRIVER, "runtime cache phase ok"
+        _capture_and_replay(
+            self, _RUNTIME_CACHE_MODULE, _RUNTIME_CACHE_DRIVER, "runtime cache phase ok"
         )
 
     @skipIfCrossRef
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     def test_strict_replay_of_a_never_run_backward(self):
-        self._capture_and_replay(
+        _capture_and_replay(
+            self,
             _NEVER_RUN_BACKWARD_MODULE,
             _NEVER_RUN_BACKWARD_DRIVER,
             "never-run backward phase ok",
         )
-
-    @skipIfCrossRef
-    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
-    def test_capture_user_stream_region(self):
-        # The capture forces triton.autotune_at_compile_time, whose autotune block
-        # needs raw_stream defined for a kernel inside a user stream context.
-        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-        from torch._inductor.utils import fresh_cache
-
-        blocks = []
-        run_block = PythonWrapperCodegen.generate_and_run_autotune_block
-
-        def spy(self):
-            blocks.append(self.kernel_autotune_calls.getvalue())
-            return run_block(self)
-
-        x = torch.randn(1024, device="cuda")
-        with (
-            fresh_cache(),
-            mock.patch.object(
-                PythonWrapperCodegen, "generate_and_run_autotune_block", spy
-            ),
-        ):
-            source, cache = _capture_files(
-                self, _user_stream_fn, [(x,)], backend="inductor"
-            )
-        self.assertIn("raw_stream = get_raw_stream(", "".join(blocks))
-        runnable = torch.compiler.precompile.load(source, cache)
-        with torch.no_grad():
-            out = runnable(x)
-        torch.testing.assert_close(out, _user_stream_fn(x))
 
     @skipIfCrossRef
     @unittest.skipUnless(TEST_CUDA and IS_BIG_GPU, "requires Triton GEMM templates")
@@ -10005,16 +10030,6 @@ class TestPrecompileRuntimeCache(TestCase):
             out = torch.compiler.precompile.load(source, cache)(a, b)
         self.assertTrue(dispatched, "the artifact ran no SizeHintMultiKernelCall")
         torch.testing.assert_close(out, gemm(a, b))
-
-    @skipIfCrossRef
-    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
-    @parametrize("tracer", ["dynamo", "make_fx"])
-    def test_strict_replay_with_multi_kernel(self, tracer):
-        outs = self._capture_and_replay(
-            _MULTI_KERNEL_MODULE, _MULTI_KERNEL_DRIVER, "multi-kernel phase ok", tracer
-        )
-        warning = "overrides triton.multi_kernel=1 to 0"
-        self.assertIn(warning, outs["capture"].stderr)
 
 
 _CUSTOM_OP_MODULE = """
