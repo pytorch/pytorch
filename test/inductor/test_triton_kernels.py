@@ -1954,7 +1954,7 @@ def forward(self, x_1, output_1):
         # What UserKernelHOPInfo.get_mutated_tensors is documented to be passed. With
         # caches on, a graph compiled before would not be lowered again.
         from torch._inductor.ir import IRNode
-        from torch._subclasses.fake_tensor import FakeTensor
+        from torch._subclasses.fake_tensor import is_fake_tensor
 
         info = get_user_kernel_hop_info(triton_kernel_wrapper_mutation)
         calls = []
@@ -1976,7 +1976,7 @@ def forward(self, x_1, output_1):
             self.assertEqual(torch.compile(f)(x, y), x + y)
         ((hop_kwargs, kernel_kwargs),) = calls
         self.assertIsInstance(hop_kwargs["kwargs"]["in_ptr0"], IRNode)
-        self.assertIsInstance(kernel_kwargs["in_ptr0"], FakeTensor)
+        self.assertTrue(is_fake_tensor(kernel_kwargs["in_ptr0"]))
 
     @common_utils.parametrize(
         "scale_layout", ["needs_fixed_stride_order", "flexible_layout"]
@@ -2477,6 +2477,30 @@ def forward(self, x_1, output_1):
         t = torch.rand(5, device=GPU_TYPE)
         compiled_func = torch.compile(call_triton, backend=backend, fullgraph=True)
         self.assertEqual(2 * t, compiled_func(t))
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager"])
+    def test_triton_kernel_in_place_omitted_default_arg(self, backend):
+        @triton.jit
+        def scale_kernel(
+            out_ptr,
+            in_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            SCALE: "tl.constexpr" = 2.0,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x * SCALE, mask=mask)
+
+        def f(x):
+            scale_kernel[(1,)](x, x, x.numel(), BLOCK_SIZE=16)
+            return x
+
+        t = torch.rand(5, device=GPU_TYPE)
+        expected = 2 * t
+        self.assertEqual(expected, torch.compile(f, backend=backend, fullgraph=True)(t))
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -6275,6 +6299,29 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
+            {},
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
+    def test_omitted_default_arg():
+        @triton.jit
+        def scale_kernel(
+            out_ptr,
+            in_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            SCALE: "tl.constexpr" = 2.0,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x * SCALE, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            scale_kernel,
+            {"out_ptr": t, "in_ptr": t, "n_elements": 4, "BLOCK_SIZE": 4},
             {},
             ["out_ptr"],
         )

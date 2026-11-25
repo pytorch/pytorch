@@ -119,7 +119,7 @@ if typing.TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
-    from torch._subclasses import FakeTensorMode
+    from torch._subclasses.fake_tensor import CppFakeTensorMode, FakeTensorMode
 
 
 try:
@@ -2822,25 +2822,50 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
 
 
 @contextmanager
-def preserve_rng_state() -> Generator[None, None, None]:
+def preserve_rng_state(
+    device_type: str | None = None, device_index: int | None = None
+) -> Generator[None, None, None]:
+    """Preserve CPU and accelerator RNG state across the context.
+
+    With no device type, retain the existing CUDA/XPU behavior. When a device
+    type is provided, preserve only that accelerator's RNG state.
+    The device module must accept ``device_index`` in ``get_rng_state`` and
+    ``set_rng_state``.
+    """
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes
+    device_module = None
+    device_rng_state = None
+    device: str | int | None = None
     with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        if torch.xpu.is_available():
-            xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
+        if device_type is None:
+            if torch.cuda.is_available():
+                cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+            if torch.xpu.is_available():
+                xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
+        else:
+            device_module = torch.get_device_module(device_type)
+            if device_module.is_available():
+                device = device_type if device_index is None else device_index
+                device_rng_state = torch.clone(device_module.get_rng_state(device))
     try:
         yield
     finally:
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
-            if torch.xpu.is_available():
-                torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
+            if device_type is None:
+                if torch.cuda.is_available():
+                    torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+                if torch.xpu.is_available():
+                    torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
+            elif (
+                device_module is not None
+                and device_rng_state is not None
+                and device is not None
+            ):
+                device_module.set_rng_state(device_rng_state, device)
 
 
 def is_jit_model(
@@ -3237,6 +3262,9 @@ deque_methods = {
 }
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
+int_methods = {method for method in int.__dict__.values() if callable(method)}
+float_methods = {method for method in float.__dict__.values() if callable(method)}
+complex_methods = {method for method in complex.__dict__.values() if callable(method)}
 
 # EnumType is the metaclass for Enum classes
 enum_type_methods = {
@@ -3266,7 +3294,7 @@ def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
         # GC time) on that same dict mid-iteration, which a live view would turn
         # into "dictionary changed size during iteration".
         return list(obj.items())
-    elif isinstance(obj, OrderedDict):
+    elif issubclass(type(obj), OrderedDict):
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
@@ -3502,6 +3530,18 @@ def check_positional(
         )
 
 
+def check_num_args(
+    tx: InstructionTranslatorBase, args: list[VariableTracker], n: int
+) -> None:
+    # Mirrors CPython check_num_args (Objects/typeobject.c), used by the
+    # slot wrappers (wrap_binaryfunc, wrap_delitem, ...).
+    from torch._dynamo.exc import raise_type_error
+
+    if len(args) != n:
+        s = "" if n == 1 else "s"
+        raise_type_error(tx, f"expected {n} argument{s}, got {len(args)}")
+
+
 def no_positional(
     tx: InstructionTranslatorBase, funcname: str, args: list[VariableTracker]
 ) -> None:
@@ -3674,7 +3714,7 @@ def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
 
 
 def deepcopy_to_fake_tensor(
-    obj: Any, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    obj: Any, fake_mode: FakeTensorMode | CppFakeTensorMode
 ) -> Any:
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
@@ -4155,7 +4195,9 @@ def get_fake_values_from_nodes(
     return torch.fx.node.map_arg(nodes, visit)
 
 
-def get_concrete_sizes_from_symints(msg: str, fake_mode: FakeTensorMode | None) -> str:
+def get_concrete_sizes_from_symints(
+    msg: str, fake_mode: FakeTensorMode | CppFakeTensorMode | None
+) -> str:
     """
     Replace symbolic size expressions (like 's0', 's94') in error messages
     with their concrete runtime values for better readability.
@@ -5765,7 +5807,7 @@ def has_torch_function(vt: VariableTracker) -> bool:
 
 # see note [Tensor Fakification and Symbol Caching]
 def to_fake_tensor(
-    t: torch.Tensor, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+    t: torch.Tensor, fake_mode: FakeTensorMode | CppFakeTensorMode
 ) -> Any:
     symbolic_context = None
     source = None
@@ -6077,12 +6119,18 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     return tensor_dict
 
 
-def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
-    return torch._C.Stream(*args, **kwargs)
+def build_stream(
+    args: tuple[Any],
+    kwargs: dict[Any, Any],
+    stream_cls: type[torch.Stream] = torch.Stream,
+) -> torch.Stream:
+    return stream_cls(*args, **kwargs)
 
 
-def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
-    return torch._C.Event(*args, **kwargs)
+def build_event(
+    args: tuple[Any], kwargs: dict[Any, Any], event_cls: type[torch.Event] = torch.Event
+) -> torch.Event:
+    return event_cls(*args, **kwargs)
 
 
 class FrameState(enum.Enum):

@@ -358,16 +358,56 @@ def in_namespace(
     return False
 
 
+def _get_pointwise_device(
+    inputs: Sequence[IRNode], override_device: torch.device | None = None
+) -> torch.device:
+    if override_device is not None:
+        return override_device
+    for arg in inputs:
+        device = arg.get_device()
+        if device is not None and is_gpu(device.type):
+            return device
+    device = inputs[0].get_device()
+    if device is None:
+        raise AssertionError("Pointwise inputs must have a device")
+    return device
+
+
 def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """Prepare CPU scalar operands for pointwise codegen on another device.
+
+    Inlining an expression over non-scalar CPU storage would pass a CPU pointer
+    to Triton. Realized zero-dimensional CPU buffers can instead be registered
+    by the scheduler and unwrapped by `should_unwrap_unspec_arg`. Immutable
+    tensor constants are already safe: codegen loads a copy on the kernel's device.
     """
-    Copy cpu scalar if doesn't not match with given `device`
-    """
-    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
-        x.get_size()
-    ):
+    cur_device = x.get_device()
+    if not isinstance(x.data, ir.ReinterpretView):
+        if (
+            cur_device is not None
+            and cur_device.type == "cpu"
+            and device.type != "cpu"
+            and len(x.get_size()) == 0
+            and not ir.is_storage_and_layout(x)
+            and any(
+                (
+                    name not in V.graph.constants
+                    or V.graph.allocated_constant_name.get(name, name)
+                    in V.graph.mutated_named_buffers
+                )
+                and not V.graph.is_zero_dim_cpu_buffer(name)
+                for name in x.get_read_names()
+            )
+        ):
+            if isinstance(x.data, ir.StorageBox):
+                x.realize()
+            else:
+                # Preserve the scalar view's shape, not its backing buffer's.
+                return ir.ExternKernel.copy_input(x)
+        return x
+    if has_free_unbacked_symbols(x.get_size()):
         return x
     size = V.graph.sizevars.guarding_hints_or_throw(x.get_size())
-    cur_device = x.get_device()
     if (
         cur_device is not None
         and cur_device.type == "cpu"
@@ -412,9 +452,9 @@ def transform_args(
                 type_promotion_kind=type_promotion_kind,  # type: ignore[arg-type]
             )
 
-        device = (
-            args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
-        ).get_device()
+        device = _get_pointwise_device(
+            [args[i] for i in args_indices] + [kwargs[k] for k in kwargs_indices]
+        )
 
         for i in args_indices:
             args[i] = maybe_copy_cpu_scalar(args[i], device)
@@ -923,18 +963,7 @@ def make_pointwise(
                     return ops.to_dtype(downcast, dtype)
                 return out
 
-        if not override_device:
-            device = None
-            for i in inputs:
-                # pyrefly: ignore [missing-attribute]
-                if is_gpu(i.get_device().type):
-                    device = i.get_device()
-                    break
-            if not device:
-                device = inputs[0].get_device()
-
-        # pyrefly: ignore [unbound-name]
-        device = override_device or device
+        device = _get_pointwise_device(inputs, override_device)
 
         return Pointwise.create(
             device=device,  # type: ignore[arg-type]
@@ -1615,6 +1644,15 @@ def repeat(x, repeats):
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
         return clone(expand(x, new_size))
+    if not V.choices.use_modular_indexing(
+        x.get_device(), numel=sympy_product(new_size), kind="repeat"
+    ):
+        # Interleave [r0, n0, r1, n1, ...] so the merge of each pair is handled
+        # by View.create, which realizes the expanded copy instead of indexing
+        # the input with ModularIndexing.
+        expand_size = [s for pair in zip(repeats, old_size) for s in pair]
+        unit_size = [s for n in old_size for s in (1, n)]
+        return view(expand(view(x, unit_size), expand_size), new_size)
 
     x_loader: Callable[[Any], Any]
 
@@ -1902,6 +1940,7 @@ def as_strided(
     *,
     storage_offset_relative_to_input_storage=True,
 ):
+    """Lower aten.as_strided to a ReinterpretView of ``x``'s underlying storage."""
     explicit_storage_offset = (
         storage_offset is not None and storage_offset_relative_to_input_storage
     )
@@ -1935,6 +1974,12 @@ def as_strided(
             storage_offset
             - V.graph.graph_input_storage_offsets.get(storage_data.get_name(), 0)
         )
+        if torch.version.hip is not None and not V.graph.sizevars.statically_known_geq(
+            storage_offset, 0
+        ):
+            # Unlike padding's masked negative indices, this rebase can access
+            # storage before the incoming pointer, even inside a masked load.
+            V.graph.inputs_with_negative_as_strided_offset.add(storage_data.get_name())
     new_layout = ir.FixedLayout(
         new_device if new_device else old_layout.device,
         new_dtype if new_dtype else old_layout.dtype,
@@ -2954,9 +2999,14 @@ def fallback_handler(kernel, add_to_fallback_set=True):
         def wrap_tensors(x):
             return x.wrap_for_lowering() if isinstance(x, ir.IRNode) else x
 
-        return pytree.tree_map(
-            wrap_tensors, ir.FallbackKernel.create(kernel, *args, **kwargs)
-        )
+        out = ir.FallbackKernel.create(kernel, *args, **kwargs)
+        # The reinplace pass replaces the out-of-place overload with its
+        # in-place equivalent, which returns () but retains the original
+        # operator.getitem users. Return the mutated input list to preserve
+        # the expected outputs for these reinplaced foreach ops.
+        if kernel in inplace_foreach_ops:
+            return list(args[0])
+        return pytree.tree_map(wrap_tensors, out)
 
     # This lets us detect that a lowering is a fallback handler.
     handler._is_fallback_handler = True  # type: ignore[attr-defined]
@@ -4038,9 +4088,7 @@ if torch.mtia._is_compiled():
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
-
-# 2) Medium
-make_fallback(aten._trilinear)
+make_fallback(aten._upsample_inter_area2d.default)  # CPU only
 
 
 # 3) Difficult
@@ -4080,7 +4128,6 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 
 # 4) Backwards (try py_impl'ing them) when fwd is written as a decomp
 make_fallback(aten.max_pool3d_with_indices_backward)
-make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(
@@ -4481,6 +4528,48 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
         V.graph.sizevars.check_equals(actual, expected)
     src = expand(src, src_size)
     src_loader = src.make_loader()
+
+    if (
+        step != 1
+        and V.graph.sizevars.statically_known_multiple_of(dim_size, step)
+        and not V.choices.use_modular_indexing(
+            x.get_device(), numel=sympy_product(x.get_size()), kind="slice_scatter"
+        )
+    ):
+        # Iterate [..., dim_size // step, step, ...] so the scattered position
+        # j * step + r and the src index j are linear, realize that, and
+        # reinterpret the contiguous result in x's shape (inlining the merge
+        # would bring FloorDiv(i, step) back).
+        first, offset = FloorDiv(start, step), ModularIndexing(start, 1, step)
+
+        def split_inner_fn(idx):
+            j, r = idx[dim], idx[dim + 1]
+            pos = j * step + r
+            index_expr = functools.partial(ops.index_expr, dtype=torch.int64)
+            mask = [ops.eq(index_expr(r), index_expr(offset))]
+            if start != 0:
+                mask.append(ops.ge(index_expr(j), index_expr(first)))
+            if end != dim_size:
+                mask.append(ops.lt(index_expr(pos), index_expr(sympy.expand(end))))
+            mask = functools.reduce(ops.and_, mask)
+            src_idx = [*idx[:dim], j - first, *idx[dim + 2 :]]
+            src_val = ops.masked(
+                mask, lambda: src_loader(src_idx), 0 if is_integer_type(x) else 0.0
+            )
+            return ops.where(
+                mask, src_val, x_loader([*idx[:dim], pos, *idx[dim + 2 :]])
+            )
+
+        split_size = list(x.get_size())
+        split_size[dim : dim + 1] = [FloorDiv(dim_size, step), step]
+        out = Pointwise.create(
+            device=x.get_device(),
+            dtype=x.get_dtype(),
+            inner_fn=split_inner_fn,
+            ranges=split_size,
+        )
+        out.realize()
+        return view(out, list(x.get_size()))
 
     def inner_fn(idx):
         if start == 0 and end == dim_size and step == 1:
@@ -5214,10 +5303,10 @@ def index_put_fallback(self, indices, values, accumulate):
 
     # Check if any index is a boolean tensor - if so, mark as cudagraph-unsafe
     # because boolean indices trigger .nonzero() during CUDA graph capture
-    # When graph_partition is enabled, skip - partitioning handles this
+    # Skip when partitioning splits off cudagraph-unsafe ops: it handles this.
     fx_node = V.graph.current_node
     if (
-        not config.graph_partition
+        not V.graph.partition_plan.cudagraphs_per_partition
         and fx_node is not None
         and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
     ):
@@ -6522,6 +6611,14 @@ def pad_adaptive_loader(x, pad_val=0.0):
     return load
 
 
+def _adaptive_pooling_start_index(index, out_dim, inp_dim):
+    return FloorDiv(index * inp_dim, out_dim)
+
+
+def _adaptive_pooling_end_index(index, out_dim, inp_dim):
+    return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+
+
 def compute_indices_adaptive_pooling(start_index, end_index, h_in, w_in, h_out, w_out):
     h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
     h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
@@ -6676,15 +6773,9 @@ def _adaptive_avg_pool2d(x, output_size):
     h_kernel_max = V.graph.sizevars.guard_int(h_kernel_max)
     w_kernel_max = V.graph.sizevars.guard_int(w_kernel_max)
 
-    def start_index(index, out_dim, inp_dim):
-        return FloorDiv((index * inp_dim), out_dim)
-
-    def end_index(index, out_dim, inp_dim):
-        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
-
     fn_sum = _adaptive_pooling_fn(
-        start_index=start_index,
-        end_index=end_index,
+        start_index=_adaptive_pooling_start_index,
+        end_index=_adaptive_pooling_end_index,
         kernel_maxes=[h_kernel_max, w_kernel_max],
         in_sizes=[h_in, w_in],
         out_sizes=[h_out, w_out],
@@ -6706,6 +6797,124 @@ def _adaptive_avg_pool2d(x, output_size):
     )
     # TODO: should we force these to be realized?
     return rv
+
+
+fallback_adaptive_avg_pool2d_backward = fallback_handler(
+    aten._adaptive_avg_pool2d_backward.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten._adaptive_avg_pool2d_backward, type_promotion_kind=None)
+def _adaptive_avg_pool2d_backward(grad_output, x):
+    if not isinstance(grad_output, TensorBox):
+        raise AssertionError("expected: isinstance(grad_output, TensorBox)")
+    if not isinstance(x, TensorBox):
+        raise AssertionError("expected: isinstance(x, TensorBox)")
+    if len(x.get_size()) not in (3, 4):
+        raise AssertionError("expected: len(x.get_size()) in (3, 4)")
+
+    grad_output.realize_hint()
+
+    *_, height, width = x.get_size()
+    *_, pooled_height, pooled_width = grad_output.get_size()
+    new_size = list(x.get_size())
+    dtype = x.get_dtype()
+
+    if x.get_numel() == 0:
+        return empty(new_size, dtype=dtype, device=grad_output.get_device())
+
+    h_window_size = ceildiv(pooled_height + height - 1, height)
+    w_window_size = ceildiv(pooled_width + width - 1, width)
+    if V.graph.sizevars.statically_known_multiple_of(height, pooled_height):
+        h_window_size = 1
+    elif V.graph.sizevars.statically_known_multiple_of(pooled_height, height):
+        h_window_size = pooled_height // height
+    if V.graph.sizevars.statically_known_multiple_of(width, pooled_width):
+        w_window_size = 1
+    elif V.graph.sizevars.statically_known_multiple_of(pooled_width, width):
+        w_window_size = pooled_width // width
+
+    window_size = h_window_size * w_window_size
+    if V.graph.sizevars.guard_or_true(sympy.Gt(window_size, 25)):
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        args, _ = require_dense(None, grad_output, x)
+        return fallback_adaptive_avg_pool2d_backward(*args)
+
+    # Only the unrolled overlap bounds need to be specialized.
+    h_window_size = V.graph.sizevars.guard_int(h_window_size)
+    w_window_size = V.graph.sizevars.guard_int(w_window_size)
+    grad_loader = grad_output.make_loader()
+
+    def round_to_input_dtype(value):
+        if dtype == torch.float16:
+            value = ops.to_dtype(value, dtype, use_compute_types=False)
+            value = ops.to_dtype(value, dtype)
+        return value
+
+    def fn(idx):
+        *prefix, h, w = idx
+        # Invert the forward bounds to find pooled indices covering this pixel.
+        pooled_h_start = _adaptive_pooling_start_index(h, height, pooled_height)
+        pooled_w_start = _adaptive_pooling_start_index(w, width, pooled_width)
+        pooled_h_end = ops.index_expr(
+            _adaptive_pooling_end_index(h, height, pooled_height),
+            torch.int64,
+        )
+        pooled_w_end = ops.index_expr(
+            _adaptive_pooling_end_index(w, width, pooled_width),
+            torch.int64,
+        )
+        gradient = None
+
+        for h_offset in range(h_window_size):
+            for w_offset in range(w_window_size):
+                pooled_h_expr = pooled_h_start + h_offset
+                pooled_w_expr = pooled_w_start + w_offset
+                pooled_h = ops.index_expr(pooled_h_expr, torch.int64)
+                pooled_w = ops.index_expr(pooled_w_expr, torch.int64)
+                mask = ops.and_(
+                    ops.lt(pooled_h, pooled_h_end), ops.lt(pooled_w, pooled_w_end)
+                )
+                grad_value = ops.masked(
+                    mask,
+                    lambda: grad_loader([*prefix, pooled_h_expr, pooled_w_expr]),
+                    0.0,
+                )
+
+                region_h = ops.index_expr(
+                    _adaptive_pooling_end_index(pooled_h_expr, pooled_height, height)
+                    - _adaptive_pooling_start_index(
+                        pooled_h_expr, pooled_height, height
+                    ),
+                    torch.int64,
+                )
+                region_w = ops.index_expr(
+                    _adaptive_pooling_end_index(pooled_w_expr, pooled_width, width)
+                    - _adaptive_pooling_start_index(pooled_w_expr, pooled_width, width),
+                    torch.int64,
+                )
+                # Eager rounds each division and accumulation to the input dtype.
+                contribution = round_to_input_dtype(
+                    ops.truediv(grad_value, round_to_input_dtype(region_h))
+                )
+                contribution = round_to_input_dtype(
+                    ops.truediv(contribution, round_to_input_dtype(region_w))
+                )
+                if gradient is None:
+                    gradient = contribution
+                else:
+                    gradient = round_to_input_dtype(ops.add(gradient, contribution))
+
+        if gradient is None:
+            raise AssertionError("expected: gradient is not None")
+        return gradient
+
+    return Pointwise.create(
+        device=grad_output.get_device(),
+        dtype=dtype,
+        inner_fn=fn,
+        ranges=new_size,
+    )
 
 
 fallback_adaptive_max_pool2d = fallback_handler(
@@ -6752,15 +6961,9 @@ def adaptive_max_pool2d(x, output_size):
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
         return fallback_adaptive_max_pool2d(x, output_size)
 
-    def start_index(index, out_dim, inp_dim):
-        return FloorDiv((index * inp_dim), out_dim)
-
-    def end_index(index, out_dim, inp_dim):
-        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
-
     inner_func_max_val = _adaptive_pooling_fn(
-        start_index=start_index,
-        end_index=end_index,
+        start_index=_adaptive_pooling_start_index,
+        end_index=_adaptive_pooling_end_index,
         kernel_maxes=[h_kernel_max, w_kernel_max],
         in_sizes=[h_in, w_in],
         out_sizes=[h_out, w_out],
@@ -6768,8 +6971,8 @@ def adaptive_max_pool2d(x, output_size):
     )
 
     inner_func_max_idx = _adaptive_pooling_fn_with_idx(
-        start_index=start_index,
-        end_index=end_index,
+        start_index=_adaptive_pooling_start_index,
+        end_index=_adaptive_pooling_end_index,
         kernel_maxes=[h_kernel_max, w_kernel_max],
         in_sizes=[h_in, w_in],
         out_sizes=[h_out, w_out],
@@ -9604,9 +9807,9 @@ def switch(index, branches, operands) -> list[ir.TensorBox | ir.ShapeAsConstantB
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
-    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
-    # we run into memory cleanup issue
-    if not config.graph_partition and any(
+    # Skip when partitioning splits off cudagraph-unsafe ops: it handles control
+    # flow.
+    if not V.graph.partition_plan.cudagraphs_per_partition and any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):

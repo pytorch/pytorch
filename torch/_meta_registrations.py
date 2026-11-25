@@ -2754,7 +2754,7 @@ def _compute_reduction_shape(self, dims, keepdim):
 # when running meta kernels. Here, access the "fake device" of FakeTensor if it
 # exists so meta kernels which have diverge per device will be more
 # accurate when run with FakeTensors
-def device_hint(tensor) -> "str":
+def device_hint(tensor, default: str = "cuda") -> "str":
     fake_device = torch._subclasses.fake_tensor.maybe_get_fake_device(tensor)
     if fake_device is not None:
         return fake_device.type
@@ -2765,7 +2765,12 @@ def device_hint(tensor) -> "str":
     ):
         return tensor.device.type
     else:
-        return "cuda"  # default to cuda
+        return default
+
+
+def current_accelerator_hint() -> str:
+    acc = torch.accelerator.current_accelerator()
+    return acc.type if acc is not None else "cuda"
 
 
 def calc_conv_nd_return_shape(
@@ -3795,13 +3800,13 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
                       size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
         )
     torch._check_value(
+        self.ndim == 3 or self.ndim == 4,
+        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
+    )
+    torch._check_value(
         self.ndim == ndim,
         lambda: f"adaptive_avg_pool2d_backward(): Expected dimensions {self.ndim} "
         f"for `grad_output` but got dimensions {ndim}",
-    )
-    torch._check_value(
-        ndim == 3 or ndim == 4,
-        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
     )
     for i in range(ndim - 2):
         torch._check_value(
@@ -3812,6 +3817,10 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
     torch._check_value(
         self.dtype == grad_out.dtype,
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
+    )
+    torch._check_not_implemented(
+        self.dtype in [torch.float32, torch.float64, torch.float16, torch.bfloat16],
+        lambda: f"adaptive_avg_pool2d_backward not implemented for '{self.dtype}'",
     )
     memory_format = torch.contiguous_format
     if is_channels_last(self):
@@ -6574,8 +6583,9 @@ def meta__scaled_dot_product_flash_attention(
     # are going to use cudagraphs or not, so we return meta tensors here
     # it's possible we'll need to have some special handling in inductor for sdpa
     # See [Note] BC breaking change to flash seed/offset
-    if torch.version.hip and torch.cuda.is_available() or device_hint(query) == "xpu":
-        # Maintain old path on AMD
+    device = device_hint(query, default=current_accelerator_hint())
+    if (torch.version.hip and torch.cuda.is_available()) or device == "xpu":
+        # Maintain old path on AMD and XPU
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
@@ -7084,8 +7094,9 @@ def meta__flash_attention_forward(
     # See Note [Seed and Offset]
     # See [Note] BC breaking change to flash seed/offset
     seed, offset = None, None
-    if torch.version.hip and torch.cuda.is_available():
-        # Maintain old path on AMD
+    device = device_hint(query, default=current_accelerator_hint())
+    if (torch.version.hip and torch.cuda.is_available()) or device == "xpu":
+        # Maintain old path on AMD and XPU
         seed = torch.empty((), dtype=torch.long, device="meta")
         offset = torch.empty((), dtype=torch.long, device="meta")
     else:
@@ -7208,6 +7219,7 @@ def meta__flash_attention_backward(
     scale: float | None = None,
     window_size_left: int | None = None,
     window_size_right: int | None = None,
+    grad_logsumexp: Tensor | None = None,
 ):
     grad_query = torch.empty_like(query)
     grad_key = torch.empty_like(key)
@@ -8556,10 +8568,14 @@ def meta_histc(input, bins=100, min=0, max=0):
 @register_meta(
     [
         aten._upsample_bilinear2d_aa.default,
+        aten._upsample_bilinear2d_aa.out,
         aten._upsample_bicubic2d_aa.default,
+        aten._upsample_bicubic2d_aa.out,
         aten._upsample_lanczos2d_aa.default,
+        aten._upsample_lanczos2d_aa.out,
     ]
 )
+@out_wrapper(exact_dtype=True, preserve_memory_format=True)
 def meta_upsample_bimode2d_aa(
     input,
     output_size,
@@ -8575,7 +8591,7 @@ def meta_upsample_bimode2d_aa(
         lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.size()}",
     )
     return input.new_empty(full_output_size).to(
-        memory_format=utils.suggest_memory_format(input)
+        memory_format=utils.upsample_output_memory_format(input)
     )
 
 
@@ -8609,6 +8625,43 @@ but got grad_output_size({i}) = {grad_output.size(i)}""",
         )
     return grad_output.new_empty(input_size).to(
         memory_format=utils.suggest_memory_format(grad_output)
+    )
+
+
+@register_meta([aten._upsample_inter_area2d.default, aten._upsample_inter_area2d.out])
+@out_wrapper(exact_dtype=True, preserve_memory_format=True)
+def meta_upsample_inter_area2d(input, output_size, scales_h=None, scales_w=None):
+    full_output_size = upsample_common_check(
+        input.size(), output_size, num_spatial_dims=2
+    )
+    for axis, in_size, out_size, scale in zip(
+        ("height", "width"), input.shape[2:], output_size, (scales_h, scales_w)
+    ):
+        if scale is None or scale <= 0:
+            continue
+        scaled_size = in_size * scale
+        expected_size = None
+        if math.isfinite(scale) and (
+            not isinstance(scaled_size, utils.FloatWithoutSymFloat)
+            or math.isfinite(scaled_size)
+        ):
+            # Use the same symbolic expression as upsample_compute_output_size.
+            expected_size = (
+                in_size * int(scale)
+                if int(scale) == scale
+                else torch.sym_int(scaled_size)
+            )
+        torch._check(
+            expected_size == out_size,
+            lambda: f"_upsample_inter_area2d: the output size must be floor(input size * scale) for {axis}, "
+            f"but got input size {in_size}, output size {out_size} and scale {scale}",
+        )
+    torch._check(
+        input.numel() != 0 or all(size > 0 for size in input.shape[1:]),
+        lambda: f"Non-empty 4D data tensor expected but got a tensor with sizes {input.shape}",
+    )
+    return input.new_empty(full_output_size).to(
+        memory_format=utils.suggest_memory_format(input)
     )
 
 
@@ -8925,13 +8978,11 @@ def _create_grouped_mm_output_tensor(mat1, mat2, offs, out_dtype):
 
     out_dtype = out_dtype or mat1.dtype
 
-    if torch.version.cuda or device_hint(mat1) == "mps":
+    # Match grouped_mm_output_is_tma_padded in C++, which pads on CPU-only builds too.
+    if not torch.version.hip and device_hint(mat1) != "xpu":
         alignment = 16 // out_dtype.itemsize
         size_padded = (out_size[-1] + alignment - 1) // alignment * alignment
-        if mat1_is_2d == mat2_is_2d:
-            out_stride = [out_size[1] * size_padded, size_padded, 1]
-        else:
-            out_stride = [size_padded, 1]
+        out_stride = make_contiguous_strides_for([*out_size[:-1], size_padded])
         out = torch.empty_strided(
             out_size, out_stride, dtype=out_dtype, device=mat1.device
         )
@@ -9178,7 +9229,7 @@ def _meta_grouped_mm_common(
 
 
 @register_meta(aten._grouped_mm)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_grouped_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -9754,7 +9805,16 @@ def _register_static_shape_decomps(ops: Iterable[torch._ops.OperatorBase]) -> No
             )
 
 
+def _register_cpp_meta_supports_symint_ops() -> None:
+    for op in cpp_meta_supports_symint_ops:
+        schema = op._schema
+        torch._C._fake_dispatch_register_cpp_meta_supports_symint(
+            schema.name, schema.overload_name
+        )
+
+
 activate_meta()
 # Initial decorators run before their function names are bound in the module.
 _register_static_shape_decomps(decomposition_table)
 torch._decomp._static_shape_decomps_initialized = True
+_register_cpp_meta_supports_symint_ops()

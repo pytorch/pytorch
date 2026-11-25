@@ -13,9 +13,10 @@ import torch
 import torch._inductor.ir as ir
 from torch._inductor import config as inductor_config
 from torch._inductor.codegen.mps import MetalKernel
+from torch._inductor.codegen.simd import SIMDScheduling
 from torch._inductor.exc import InductorError
 from torch._inductor.select_algorithm import PartialRender
-from torch._inductor.utils import Placeholder, run_and_get_code
+from torch._inductor.utils import Placeholder, run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_mps_types_and
@@ -41,6 +42,25 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     CommonTemplate,
     TestCase,
 )
+
+
+FORCED_GRID_STRIDE = 512
+
+
+@contextlib.contextmanager
+def force_grid_stride():
+    # Exercise grid-stride loops on small inputs: shrink the grid, and disable
+    # 32-bit indexing, whose guards would otherwise keep every range in the grid
+    with (
+        patch.object(MetalKernel, "max_grid_size", 1000),
+        patch.object(MetalKernel, "grid_stride", FORCED_GRID_STRIDE),
+        patch.object(
+            SIMDScheduling,
+            "can_use_32bit_indexing",
+            staticmethod(lambda numel, buffers: False),
+        ),
+    ):
+        yield
 
 
 # TODO: Remove this file.
@@ -378,6 +398,77 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def check_grid_stride(self, fn, *args, dynamic=False, loops=1):
+        with force_grid_stride():
+            torch._dynamo.reset()
+            compiled = torch.compile(fn, dynamic=dynamic)
+            out, codes = run_and_get_code(compiled, *args)
+        self.assertEqual(out, fn(*args))
+        code = "\n".join(codes)
+        self.assertEqual(code.count(f"+= {FORCED_GRID_STRIDE})"), loops)
+        return compiled, code
+
+    @parametrize("dynamic", [False, True])
+    def test_grid_stride_pointwise(self, dynamic):
+        x = torch.arange(20011, dtype=torch.float32, device=self.device)
+        self.check_grid_stride(lambda t: t * 2 + 1, x, dynamic=dynamic)
+
+    def test_grid_stride_multi_axis(self):
+        z = torch.randn(1200, 1500, device=self.device)
+        self.check_grid_stride(lambda t: t.t().contiguous(), z, loops=2)
+
+    @parametrize("op", ["sum", "amax", "argmax", "any", "var"])
+    @parametrize("rnumel", [8, 64, 2048])
+    def test_grid_stride_reduction(self, op, rnumel):
+        # rnumel covers serial, single-threadgroup and looped reductions
+        x = torch.rand(1500, rnumel, device=self.device)
+        if op == "any":
+            x = x > 0.99
+        _, code = self.check_grid_stride(lambda t: getattr(t, op)(-1), x)
+        # Barriers must run uniformly across a threadgroup, which only parallel
+        # reductions guarantee under the loop; they also need one per iteration
+        # so the next row does not overwrite threadgroup memory still being read.
+        if rnumel < MetalKernel.simd_group_size:
+            self.assertNotIn("threadgroup_barrier", code)
+        else:
+            self.assertIn("threadgroup_barrier", code)
+
+    def test_grid_stride_dynamic_reduction(self):
+        x = torch.rand(1500, 64, device=self.device)
+        self.check_grid_stride(lambda t: t.sum(-1), x, dynamic=True)
+
+    def test_grid_stride_error_buffer(self):
+        # Indirect loads report out-of-bounds indices through an error buffer,
+        # including one that a thread only reaches on a later loop iteration
+        idx = torch.arange(0, 10007, 7, device=self.device)
+        src = torch.arange(10007, dtype=torch.float32, device=self.device)
+        compiled, _ = self.check_grid_stride(lambda s, i: s[i] * 3, src, idx)
+        idx[FORCED_GRID_STRIDE + 100] = 20000
+        with (
+            force_grid_stride(),
+            self.assertRaisesRegex(RuntimeError, "Index 20000 out of range"),
+        ):
+            compiled(src, idx)
+            torch.mps.synchronize()
+
+    @parametrize("dynamic,use_32bit", [(False, True), (False, False), (True, True)])
+    def test_no_grid_stride_when_grid_fits(self, dynamic, use_32bit):
+        # Ranges known to fit the grid keep one thread per element. 32-bit
+        # indexing guards dynamic sizes into the grid; dynamic int64-indexed
+        # kernels are the one case that loops without needing to.
+        x = torch.arange(10007, dtype=torch.float32, device=self.device)
+        with patch.object(
+            SIMDScheduling,
+            "can_use_32bit_indexing",
+            staticmethod(lambda numel, buffers: use_32bit),
+        ):
+            torch._dynamo.reset()
+            out, codes = run_and_get_code(
+                torch.compile(lambda t: t * 2 + 1, dynamic=dynamic), x
+            )
+        self.assertEqual(out, x * 2 + 1)
+        self.assertIn("uint xindex [[thread_position_in_grid]]", "\n".join(codes))
+
     def test_argmax_bf16(self):
         def fn(x):
             return x.argmax(-1)
@@ -510,6 +601,32 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    @parametrize("dynamic", [False, True])
+    @parametrize("case", ["limit", "scalars", "reduction", "indirect", "two_kernels"])
+    def test_argument_buffers(self, case, dynamic):
+        # https://github.com/pytorch/pytorch/issues/201864
+        n = MetalKernel.max_buffer_args
+        x = make_tensor(33, 65, device=self.device, dtype=torch.float32)
+        ys = make_tensor(n, 65, 33, device=self.device, dtype=torch.float32).mT.unbind()
+        m = make_tensor(65, 65, device=self.device, dtype=torch.float32)
+        cpu_scalars = [torch.tensor(i / 7, dtype=torch.float64) for i in range(n)]
+        idx = torch.arange(33, device=self.device).flip(0)
+        fn, args = {
+            "limit": (lambda x, *ys: sum(ys, x), [x, *ys[: n - 2]]),
+            "scalars": (lambda x, *ys: sum(ys, x), [x, *cpu_scalars]),
+            "reduction": (lambda x, *ys: sum(ys, x).amax(dim=0), [x, *ys]),
+            "indirect": (lambda i, x, *ys: sum(ys, x[i]), [idx, x, *ys[: n - 3]]),
+            "two_kernels": (lambda x, m, *ys: sum(ys, sum(ys, x) @ m), [x, m, *ys]),
+        }[case]
+        result, (code,) = run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
+        self.assertEqual(result, fn(*args))
+        kernels = 2 if case == "two_kernels" else 1
+        packed = dynamic or case != "limit"
+        self.assertEqual(code.count("kernel void "), kernels)
+        self.assertEqual(code.count("_buffers& buffers"), kernels * packed)
+        self.assertEqual("constant long* int_args" in code, packed and dynamic)
+        self.assertEqual(f"error_buf_idx={1 + dynamic}" in code, case == "indirect")
+
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
 
@@ -534,8 +651,23 @@ class MPSBasicTests(TestCase):
 
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
+@instantiate_parametrized_tests
 class MPSBasicTestsAOTI(TestCase):
     hw_classification = HardwareClassification.MPS
+
+    @parametrize("over_cap", [False, True])
+    def test_many_buffer_args(self, over_cap):
+        class M(torch.nn.Module):
+            def forward(self, x, *weights):
+                return sum(weights, x)
+
+        n = MetalKernel.max_buffer_args - 3 + over_cap
+        dims = {0: torch.export.Dim("h"), 1: torch.export.Dim("w")}
+        x = make_tensor(33, 65, device="mps", dtype=torch.float32)
+        weights = make_tensor(n, 65, 33, device="mps", dtype=torch.float32).mT.unbind()
+        shapes = (dims, (dims,) * n)
+        _, code = run_and_get_cpp_code(self.check_model, M(), (x, *weights), shapes)
+        self.assertEqual(code.count("kernel void "), 1 + over_cap)
 
     def check_model(self, m, inp, dynamic_shapes=None):
         res2 = m(*inp)
@@ -571,6 +703,23 @@ class MPSBasicTestsAOTI(TestCase):
             src_code = cpp.read()
             # Verify metal::precise::tanh is used (not clamped version)
             FileCheck().check("metal::precise::tanh").run(src_code)
+
+    def test_grid_stride(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x * 2 + 1
+
+        inp = (torch.arange(20011, dtype=torch.float32, device="mps"),)
+        dynamic = ({0: torch.export.Dim("n")},)
+        for dynamic_shapes, bound in [(None, "20011"), (dynamic, "xnumel")]:
+            with force_grid_stride():
+                self.check_model(Model(), inp, dynamic_shapes=dynamic_shapes)
+                package_path = torch._export.aot_compile(
+                    Model(), inp, dynamic_shapes=dynamic_shapes
+                )
+            with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+                loop = f"xindex < {bound}; xindex += {FORCED_GRID_STRIDE})"
+                self.assertEqual(cpp.read().count(loop), 1)
 
     def test_fallback_mps(self):
         class M(torch.nn.Module):
