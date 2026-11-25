@@ -357,29 +357,27 @@ _BLOCKWISE_1X32 = torch.nn.functional.ScalingType.BlockWise1x32.value
 _TENSORWISE = torch.nn.functional.ScalingType.TensorWise.value
 _SWIZZLE_32_4_4 = torch.nn.functional.SwizzleType.SWIZZLE_32_4_4.value
 _NO_SWIZZLE = torch.nn.functional.SwizzleType.NO_SWIZZLE.value
-# (Per-operand scale recipe, data dtype) -> (QuACK format, required swizzles,
+# Per-operand scale recipe -> (QuACK format, required swizzles, data dtype,
 # block-scale dtype). Both operands must use the same entry.
 QUACK_BLOCKSCALED_RECIPES: dict[
-    tuple[tuple[int, ...], torch.dtype], tuple[str, tuple[int, ...], torch.dtype]
+    tuple[int, ...], tuple[str, tuple[int, ...], torch.dtype, torch.dtype]
 ] = {
-    ((_BLOCKWISE_1X32,), torch.float8_e4m3fn): (
+    (_BLOCKWISE_1X32,): (
         "mxfp8_e4m3",
         (_SWIZZLE_32_4_4,),
+        torch.float8_e4m3fn,
         torch.float8_e8m0fnu,
     ),
-    ((_BLOCKWISE_1X32,), torch.float6_e2m3fn_x4): (
-        "mxfp6_e2m3_packed",
-        (_SWIZZLE_32_4_4,),
-        torch.float8_e8m0fnu,
-    ),
-    ((_BLOCKWISE_1X16,), torch.float4_e2m1fn_x2): (
+    (_BLOCKWISE_1X16,): (
         "nvfp4",
         (_SWIZZLE_32_4_4,),
+        torch.float4_e2m1fn_x2,
         torch.float8_e4m3fn,
     ),
-    ((_BLOCKWISE_1X16, _TENSORWISE), torch.float4_e2m1fn_x2): (
+    (_BLOCKWISE_1X16, _TENSORWISE): (
         "nvfp4",
         (_SWIZZLE_32_4_4, _NO_SWIZZLE),
+        torch.float4_e2m1fn_x2,
         torch.float8_e4m3fn,
     ),
 }
@@ -397,30 +395,22 @@ def validate_scaled_mm(
 ) -> str:
     """Validate the fused scaled-mm operands and return their shared QuACK format."""
     recipe = tuple(recipe_a)
-    contract = QUACK_BLOCKSCALED_RECIPES.get((recipe, mat_a.dtype))
+    contract = QUACK_BLOCKSCALED_RECIPES.get(recipe)
     if contract is None or tuple(recipe_b) != recipe:
         raise NotImplementedError(
-            "FlexGEMM scaled-mm requires matching BlockWise1x32 MXFP8/MXFP6 or "
-            "BlockWise1x16 NVFP4 recipes, with optional NVFP4 TensorWise global scales; "
-            f"got {mat_a.dtype} data with recipe {recipe}"
+            "FlexGEMM scaled-mm requires matching BlockWise1x32 MXFP8 or "
+            "BlockWise1x16 NVFP4 recipes, with optional NVFP4 TensorWise global scales"
         )
-    format_name, swizzles, scale_dtype = contract
-    data_dtype = mat_a.dtype
+    format_name, swizzles, data_dtype, scale_dtype = contract
     if (
         tuple(swizzle_a) != swizzles
         or tuple(swizzle_b) != swizzles
         or len(scale_a) != len(recipe)
         or len(scale_b) != len(recipe)
     ):
-
-        def names(swizzles: Sequence[int]) -> list[str]:
-            return [torch.nn.functional.SwizzleType(s).name for s in swizzles]
-
         raise NotImplementedError(
             "FlexGEMM scaled-mm requires one SWIZZLE_32_4_4 block scale per operand "
-            "and optional unswizzled NVFP4 TensorWise scales; got swizzles "
-            f"{names(swizzle_a)} and {names(swizzle_b)} with {len(scale_a)} and "
-            f"{len(scale_b)} scales"
+            "and optional unswizzled NVFP4 TensorWise scales"
         )
     if (mat_a.dtype, mat_b.dtype, scale_a[0].dtype, scale_b[0].dtype) != (
         data_dtype,
@@ -431,14 +421,6 @@ def validate_scaled_mm(
         raise NotImplementedError(
             f"FlexGEMM {format_name} scaled-mm requires "
             f"{data_dtype} data and {scale_dtype} scales"
-        )
-    # Packed fp6 elements group 4 values along K, so only K-major operands exist.
-    if data_dtype is torch.float6_e2m3fn_x4 and (
-        mat_a.stride(-1) != 1 or mat_b.stride(-2) != 1
-    ):
-        raise NotImplementedError(
-            "FlexGEMM MXFP6 scaled-mm requires K-major operands: A as [M, K/4] with "
-            "stride(-1) == 1 and B as the .t() of an [N, K/4] tensor"
         )
     for scale in (*scale_a[1:], *scale_b[1:]):
         if scale.dtype is not torch.float32 or tuple(scale.shape) not in (
