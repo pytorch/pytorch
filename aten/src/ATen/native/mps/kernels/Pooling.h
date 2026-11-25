@@ -4,6 +4,10 @@
 // Tile of outputs computed by each thread of max_pool2d_s1_nchw
 C10_METAL_CONSTEXPR int32_t max_pool2d_s1_tile_cols = 8;
 C10_METAL_CONSTEXPR int32_t max_pool2d_s1_tile_rows = 2;
+// Tile of outputs computed by each thread of avg_pool2d_dense
+C10_METAL_CONSTEXPR int32_t avg_pool2d_tile_rows = 2;
+C10_METAL_CONSTEXPR int32_t avg_pool2d_s1_tile_cols = 8;
+C10_METAL_CONSTEXPR int32_t avg_pool2d_s1_max_kw = avg_pool2d_s1_tile_cols - 1;
 // grad_input columns computed by each thread of avg_pool2d_backward
 C10_METAL_CONSTEXPR int32_t pool2d_backward_tile_cols = 4;
 
