@@ -48,7 +48,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
 from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, RDNA3OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
-    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_CK_GEMMS, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION, \
+    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_CK_GEMM, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION, \
     PLATFORM_SUPPORTS_CUBLASLT_GROUPED_GEMM
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
@@ -12070,7 +12070,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
         self.assertEqual(out_ref, out2.cpu())
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_CK_GEMMS,
+        not PLATFORM_SUPPORTS_CK_GEMM,
         "CK GEMM is not supported on this platform",
     )
     @skipCUDAIfNotRocm
@@ -12088,7 +12088,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
         self.assertEqual(ck_out, cpu_out)
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_CK_GEMMS,
+        not PLATFORM_SUPPORTS_CK_GEMM,
         "CK GEMM is not supported on this platform",
     )
     @skipCUDAIfNotRocm
@@ -12114,7 +12114,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
             self.assertEqual(ck_out, cpu_out)
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_CK_GEMMS,
+        not PLATFORM_SUPPORTS_CK_GEMM,
         "CK GEMM is not supported on this platform",
     )
     @skipCUDAIfNotRocm
@@ -12133,7 +12133,7 @@ class TestLinalgCudaOnly(_TestLinalgMixin, TestCase):
                 self.assertEqual(out, expected.to(dtype))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_CK_GEMMS,
+        not PLATFORM_SUPPORTS_CK_GEMM,
         "CK GEMM is not supported on this platform",
     )
     @skipCUDAIfNotRocm
