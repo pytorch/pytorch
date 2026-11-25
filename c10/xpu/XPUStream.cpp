@@ -387,9 +387,8 @@ void syncStreamsOnDevice(DeviceIndex device) {
   }
   check_device_index(device);
 
-// TODO: drop the legacy fallback below once a driver supporting
-// `ext_oneapi_device_wait` is widely deployed across all supported platforms.
-#if SYCL_COMPILER_VERSION >= 20260100
+  // TODO: drop the legacy fallback below once a driver supporting
+  // `ext_oneapi_device_wait` is widely deployed across all supported platforms.
   const auto& raw_device = c10::xpu::get_raw_device(device);
   bool use_device_wide_wait =
       raw_device.has(sycl::aspect::ext_oneapi_device_wait);
@@ -399,10 +398,6 @@ void syncStreamsOnDevice(DeviceIndex device) {
   use_device_wide_wait &=
       raw_device.get_info<syclex::info::device::architecture>() >=
       syclex::architecture::intel_gpu_bmg_g21;
-#endif
-
-#else
-  constexpr bool use_device_wide_wait = false;
 #endif
 
   if (use_device_wide_wait) {

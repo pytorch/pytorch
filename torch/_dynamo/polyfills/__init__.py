@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib
 import sys as py_sys
 import types
-from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ge, gt, le, lt, ne

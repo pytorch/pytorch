@@ -320,9 +320,9 @@ class _AllowEmptyGraphsConvertFrame(ConvertFrame):
 def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[bool]:
     """
     Drop every guard ``CheckFunctionManager.serialize_guards`` would refuse for
-    its type or a derived type, and keep everything else.
+    its type or a derived type, except deepcopy memo identities, which fail at save time.
 
-    The refused types are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: the
+    The types considered here are ``UNSUPPORTED_SERIALIZATION_GUARD_TYPES``: the
     identity guards ID_MATCH, FUNCTION_MATCH, MODULE_MATCH, NN_MODULE,
     CLASS_MATCH and CLOSURE_MATCH (a function by its ``__code__`` id), plus
     DICT_VERSION and WEAKREF_ALIVE. An ID_MATCH, FUNCTION_MATCH, MODULE_MATCH or
@@ -1955,6 +1955,7 @@ class PrecompileSession(Generic[_P, _R]):
         self._keep_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
         self._drop_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
         self._risky_drop_frames: dict[tuple[str, str], set[tuple[str, str, int]]] = {}
+        self._nonportable_class_drops: set[tuple[tuple[str, str, int], str]] = set()
         # (co_name, co_filename, co_firstlineno) -> one fact set per compilation
         self._guard_sets: dict[tuple[str, str, int], list[frozenset[_GuardFact]]] = {}
         self._capture_errors: list[str] = []
@@ -2013,6 +2014,12 @@ class PrecompileSession(Generic[_P, _R]):
                     self._keep_frames.setdefault(slot, set()).add(key)
                 else:
                     self._drop_frames.setdefault(slot, set()).add(key)
+                    if (
+                        not by_default
+                        and entry.guard_type == "CLASS_MATCH"
+                        and entry.has_value
+                    ):
+                        self._nonportable_class_drops.add((key, slot[1]))
                     rendered = " ; ".join(_render_code(entry.code_parts))
                     if rendered:
                         self._dropped_guard_code.setdefault(slot, rendered)
@@ -2234,13 +2241,15 @@ class PrecompileSession(Generic[_P, _R]):
                 f"refuses this whatever require_complete says."
             )
         if require_no_risky_drops and summary.risky_dropped_guards:
-            mro_advice = (
-                "Keep mutable MRO bases and classes returned by assume_constant_result "
-                "importable under stable qualified names, with module-level metaclasses."
-                if any(
-                    ".__mro__[" in name or name.endswith(".__mro__")
-                    for _, name in summary.risky_dropped_guards
-                )
+            nonportable_classes = {
+                ("CLASS_MATCH", name)
+                for frame, name in self._nonportable_class_drops
+                if frame not in eager
+            }
+            class_advice = (
+                "Keep guarded classes, including mutable MRO bases and classes reached through "
+                "assume_constant_result, importable under stable qualified names, with module-level metaclasses."
+                if not nonportable_classes.isdisjoint(summary.risky_dropped_guards)
                 else ""
             )
             raise PackageError(
@@ -2253,7 +2262,7 @@ class PrecompileSession(Generic[_P, _R]):
                     f"can silently select the wrong graph instead of recompiling. Make the "
                     f"value reachable through a serializable guard, pin both machines to "
                     f"the same value, or pass require_no_risky_drops=False to accept the "
-                    f"risk explicitly. {mro_advice}"
+                    f"risk explicitly. {class_advice}"
                 ).rstrip()
             )
         if require_complete:
