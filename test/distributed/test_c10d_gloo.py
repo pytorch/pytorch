@@ -3586,9 +3586,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         )
         self.assertEqual(second._get_backend(cpu).options.global_ranks_in_group, parity)
 
-        # Gloo's connecting side returns from split_group before its peer has
-        # finished the handshake; closing the children then fails the peer's connect.
-        c10d.barrier()
         c10d.destroy_process_group()
 
     @requires_gloo()
