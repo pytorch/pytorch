@@ -7352,19 +7352,31 @@ class TestSDPAXpuOnly(NNTestCase):
     hw_classification = HardwareClassification.XPU
 
     @parametrize("type", ["dense"])
+    @parametrize("dropout", [0.0, 0.7])
     @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.half])
     @skipIfTorchDynamo()
-    def test_fused_sdp_choice_xpu(self, device, type: str, dtype: torch.dtype):
+    @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
+    def test_fused_sdp_choice_xpu(self, device, type: str, dropout: float, dtype: torch.dtype):
         # Migrate from test_fused_sdp_choice_cpu
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype)
         size = SdpaShape(2, 8, 128, 64)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
         if dtype not in [torch.float32, torch.bfloat16, torch.float16]:
-            if torch._fused_sdp_choice(q, k, v) != SDPBackend.MATH.value:
-                raise AssertionError("expected MATH backend")
+            # only MATH support FP64
+            expected = SDPBackend.MATH
+        elif dropout == 0.0:
+            # OVERRIDEABLE does not support dropout
+            expected = SDPBackend.OVERRIDEABLE
+        elif dtype in [torch.bfloat16, torch.float16]:
+            # FLASH_ATTENTION only supports bf16/fp16
+            expected = SDPBackend.FLASH_ATTENTION
         else:
-            if torch._fused_sdp_choice(q, k, v) != SDPBackend.OVERRIDEABLE.value:
-                raise AssertionError("expected OVERRIDEABLE backend")
+            expected = SDPBackend.MATH
+        self.assertEqual(
+            torch._fused_sdp_choice(q, k, v, dropout_p=dropout),
+            expected.value,
+            f"expected {expected.name} backend",
+        )
 
     def test_fused_inputs_dim_3_xpu(self, device):
         size = (2, 3, 8)
