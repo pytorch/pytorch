@@ -3,16 +3,20 @@ from __future__ import annotations
 import gzip
 import inspect
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import requests
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from tools.stats import upload_stats_lib
 from tools.stats.upload_metrics import add_global_metric, emit_metric, global_metrics
 from tools.stats.upload_stats_lib import get_s3_resource, remove_nan_inf
 
@@ -277,6 +281,48 @@ class TestUploadStats(unittest.TestCase):
                 unclean,
                 f"Expected {unclean} when input is {unclean}, got {unclean_output}",
             )
+
+
+def _response(status: int, headers: dict[str, str] | None = None) -> requests.Response:
+    response = requests.Response()
+    response.status_code = status
+    response.headers.update(headers or {})
+    return response
+
+
+class TestGithubGet(unittest.TestCase):
+    def _get(self, *responses: requests.Response) -> tuple[int, list[float]]:
+        """The final status and the sleeps, at time 1000."""
+        with (
+            mock.patch.dict(os.environ, {"GITHUB_TOKEN": "token"}),
+            mock.patch.object(requests, "get", side_effect=responses),
+            mock.patch.object(upload_stats_lib.time, "time", return_value=1000),
+            mock.patch.object(upload_stats_lib.time, "sleep") as sleep,
+        ):
+            response = upload_stats_lib._github_get("url")
+        return response.status_code, [call.args[0] for call in sleep.call_args_list]
+
+    def test_waits_for_a_used_up_quota_to_reset(self) -> None:
+        used_up = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1060"}
+        result = self._get(_response(403, used_up), _response(200))
+        self.assertEqual(result, (200, [65]))
+
+    def test_waits_once(self) -> None:
+        used_up = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1060"}
+        result = self._get(_response(403, used_up), _response(403, used_up))
+        self.assertEqual(result, (403, [65]))
+
+    def test_other_errors_return_at_once(self) -> None:
+        forbidden = {"X-RateLimit-Remaining": "4999"}
+        self.assertEqual(self._get(_response(403, forbidden)), (403, []))
+
+    def test_ignores_a_malformed_reset(self) -> None:
+        malformed = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "soon"}
+        self.assertEqual(self._get(_response(403, malformed)), (403, []))
+
+    def test_ignores_a_reset_past_the_deadline(self) -> None:
+        bogus = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "9999999999"}
+        self.assertEqual(self._get(_response(403, bogus)), (403, []))
 
 
 if __name__ == "__main__":

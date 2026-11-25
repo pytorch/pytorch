@@ -471,12 +471,18 @@ void addmm_out_sparse_csr(
         return;
       }
       if (result.layout() == kSparseCsc) {
+        auto result_t = result.transpose(-2, -1);
         addmm_sparse_result(
           mat2.transpose(-2, -1),
           mat1.transpose(-2, -1),
           beta,
           alpha,
-          result.transpose(-2, -1));
+          result_t);
+        static_cast<SparseCsrTensorImpl*>(result.unsafeGetTensorImpl())->set_member_tensors(
+            result_t.crow_indices(),
+            result_t.col_indices(),
+            result_t.values(),
+            result.sizes());
         return;
       }
     }

@@ -5,15 +5,20 @@ name: Auto PR Triage
 # that plan. Separate calls can observe different moments, later changes are
 # ignored for this run, and stale effects are bounded and recoverable.
 
+# Every PR is triaged once it is open and ready for review. A PR that already
+# has an outcome label or `no automated triage` is a no-op that skips the LLM.
+# To triage again, remove the outcome labels, then add or re-add `bot-retriage`.
+# `open source` still starts a run until torchci re-runs triage through
+# `bot-retriage`; drop it from the conditions below after that.
 on:
   pull_request_target:
-    types: [labeled, ready_for_review]
+    types: [opened, reopened, ready_for_review, labeled]
 
 # GitHub keeps one pending run per group, so a burst of label events would let
-# an unrelated label's run replace the pending `open source` run and then skip.
+# an unrelated label's run replace the pending entry run and then skip.
 # Only entry events share the per-PR group.
 concurrency:
-  group: auto-pr-triage-${{ github.event.pull_request.number }}-${{ ((github.event.action == 'labeled' && github.event.label.name == 'open source') || github.event.action == 'ready_for_review') && 'entry' || github.run_id }}
+  group: auto-pr-triage-${{ github.event.pull_request.number }}-${{ (github.event.action != 'labeled' || github.event.label.name == 'bot-retriage' || github.event.label.name == 'open source') && 'entry' || github.run_id }}
   cancel-in-progress: false
 
 env:
@@ -27,16 +32,14 @@ jobs:
       github.repository_owner == 'pytorch' &&
       github.event.pull_request.state == 'open' &&
       !github.event.pull_request.draft &&
-      ((github.event.action == 'labeled' &&
-        github.event.label.name == 'open source') ||
-       (github.event.action == 'ready_for_review' &&
-        contains(github.event.pull_request.labels.*.name, 'open source')))
+      (github.event.action != 'labeled' ||
+       github.event.label.name == 'bot-retriage' ||
+       github.event.label.name == 'open source')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: bedrock
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
-      should-run: ${{ steps.history.outputs.should-run }}
       action-plan-json: ${{ steps.auto-pr-triage.outputs.action-plan-json }}
     permissions:
       contents: read
@@ -50,70 +53,7 @@ jobs:
           [[ "$AUTO_PR_TRIAGE_MODE" == "shadow" || "$AUTO_PR_TRIAGE_MODE" == "live" ]] || exit 1
           echo "mode=$AUTO_PR_TRIAGE_MODE" >> "$GITHUB_OUTPUT"
 
-      - name: Admit the label event or the first ready event after it
-        id: history
-        env:
-          EVENT_ACTION: ${{ github.event.action }}
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || exit 1
-          [[ "$EVENT_ACTION" == "labeled" || "$EVENT_ACTION" == "ready_for_review" ]] || exit 1
-          HISTORY="$(
-            # GraphQL variables must remain literal for gh to bind with -F.
-            # shellcheck disable=SC2016
-            gh api graphql \
-              -F owner="${REPOSITORY%%/*}" \
-              -F name="${REPOSITORY#*/}" \
-              -F number="$PR_NUMBER" \
-              -f query='query($owner: String!, $name: String!, $number: Int!) {
-                repository(owner: $owner, name: $name) {
-                  pullRequest(number: $number) {
-                    timelineItems(
-                      last: 100
-                      itemTypes: [LABELED_EVENT, READY_FOR_REVIEW_EVENT]
-                    ) {
-                      nodes {
-                        __typename
-                        ... on LabeledEvent { label { name } }
-                      }
-                      pageInfo { hasPreviousPage }
-                    }
-                  }
-                }
-              }'
-          )"
-          HISTORY_TRUNCATED="$(
-            jq -r '.data.repository.pullRequest.timelineItems.pageInfo.hasPreviousPage' <<<"$HISTORY"
-          )"
-          LATEST_LABEL_INDEX="$(
-            jq '[.data.repository.pullRequest.timelineItems.nodes | to_entries[] | select(.value.__typename == "LabeledEvent" and .value.label.name == "open source") | .key] | max // -1' <<<"$HISTORY"
-          )"
-          READY_EVENT_COUNT="$(
-            jq --argjson label_index "$LATEST_LABEL_INDEX" '[.data.repository.pullRequest.timelineItems.nodes | to_entries[] | select(.key > $label_index and .value.__typename == "ReadyForReviewEvent")] | length' <<<"$HISTORY"
-          )"
-          [[ "$HISTORY_TRUNCATED" == "true" || "$HISTORY_TRUNCATED" == "false" ]] || exit 1
-          [[ "$LATEST_LABEL_INDEX" =~ ^-?[0-9]+$ ]] || exit 1
-          [[ "$READY_EVENT_COUNT" =~ ^[0-9]+$ ]] || exit 1
-          # Adding `open source` needs triage permission, so every such event
-          # is a deliberate request to triage; a PR that already has an outcome
-          # label or `no automated triage` is a no-op. To triage again, remove
-          # those labels, then remove and re-add `open source`.
-          if [[ "$EVENT_ACTION" == "labeled" ]]; then
-            echo "should-run=true" >> "$GITHUB_OUTPUT"
-          elif [[ "$HISTORY_TRUNCATED" == "true" ]]; then
-            echo "should-run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping Auto PR Triage because entry-event history exceeds 100 matching events."
-          elif [[ "$EVENT_ACTION" == "ready_for_review" && "$LATEST_LABEL_INDEX" -ge 0 && "$READY_EVENT_COUNT" == "1" ]]; then
-            echo "should-run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "should-run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping repeated or ineligible $EVENT_ACTION event for $REPOSITORY#$PR_NUMBER."
-          fi
-
       - name: Set Auto PR Triage artifact directory
-        if: steps.history.outputs.should-run == 'true'
         id: paths
         env:
           OUTPUT_DIR: ${{ runner.temp }}/auto-pr-triage-${{ github.run_id }}-${{ github.run_attempt }}
@@ -121,15 +61,13 @@ jobs:
           mkdir -p "$OUTPUT_DIR"
           echo "output-dir=$OUTPUT_DIR" >> "$GITHUB_OUTPUT"
 
-      - if: steps.history.outputs.should-run == 'true'
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 1
           persist-credentials: false
           ref: ${{ github.sha }}
 
       - name: Analyze PR ownership
-        if: steps.history.outputs.should-run == 'true'
         id: auto-pr-triage
         uses: ./.github/actions/auto-pr-triage
         with:
@@ -145,9 +83,7 @@ jobs:
       # with no tools or credential access. The full Claude transcript
       # (execution.json) is uploaded only when the analysis action fails.
       - name: Upload human-review result
-        if: >-
-          steps.history.outputs.should-run == 'true' &&
-          steps.auto-pr-triage.outcome == 'success'
+        if: steps.auto-pr-triage.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: auto-pr-triage-human-review-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
@@ -165,7 +101,6 @@ jobs:
       - name: Upload Auto PR Triage failure diagnostics
         if: >-
           always() &&
-          steps.history.outputs.should-run == 'true' &&
           steps.auto-pr-triage.outcome != 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -187,7 +122,6 @@ jobs:
     if: >-
       needs.analyze.result == 'success' &&
       needs.analyze.outputs.mode == 'live' &&
-      needs.analyze.outputs.should-run == 'true' &&
       needs.analyze.outputs.action-plan-json != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -225,7 +159,6 @@ jobs:
       (needs.analyze.result == 'failure' ||
        needs.apply.result == 'failure' ||
        (needs.analyze.result == 'success' &&
-        needs.analyze.outputs.should-run == 'true' &&
         needs.apply.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 2
