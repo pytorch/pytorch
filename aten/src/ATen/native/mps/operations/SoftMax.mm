@@ -113,12 +113,9 @@ static void softmax_mps_impl(const std::string& kernel,
       uint64_t(1), std::min(strided_target_groups / col_groups, dim_size / (strided_min_elems_per_thread * tg_y)));
   const auto strided_chunk_size = ceil_div(dim_size, strided_chunks);
   const bool use_strided_split = !use_row_kernel && !use_split && strided_chunks > 1;
-  // the 2D kernel spends rows this short in its tree reductions; one thread per
-  // row is faster once there are enough rows to fill the GPU
-  constexpr uint64_t serial_max_dim = 64;
-  constexpr uint64_t serial_min_rows = 8192;
   // the serial kernel only implements the forward ops, which have no aux input
-  const bool use_serial = !contiguous_rows && !aux && dim_size <= serial_max_dim && num_rows >= serial_min_rows;
+  const bool use_serial =
+      !contiguous_rows && !aux && dim_size <= kSoftmaxSerialMaxDim && num_rows >= kSoftmaxSerialMinRows;
   SoftmaxParams<uint64_t> params{.dim_size = dim_size,
                                  .num_rows = num_rows,
                                  .inner_size = inner_size,

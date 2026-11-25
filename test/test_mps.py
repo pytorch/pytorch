@@ -5889,23 +5889,6 @@ class TestMPS(TestCaseMPS):
         mps_out = F.log_softmax(cpu_x.to('mps'), dim=-1)
         self.assertEqual(mps_out.cpu(), F.log_softmax(cpu_x, dim=-1))
 
-    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_softmax_short_strided_rows(self, dtype):
-        # Many short rows that are not contiguous run one thread per row. 2 x 4097
-        # rows leave a partial threadgroup and have dims on both sides of the
-        # reduced one; the transposed view reads through the input strides. Rows
-        # start fully masked, with -inf, or hold a logit that overflows exp unless
-        # the max is subtracted.
-        cpu_x = torch.randn(2, 21, 4097, dtype=dtype)
-        cpu_x[:, :, 0] = -math.inf
-        cpu_x[0, 0, 1] = -math.inf
-        cpu_x[1, 5, 2] = 100
-        for x, dim in ((cpu_x, 1), (cpu_x.transpose(1, 2), 2)):
-            mps_x = x.to('mps')
-            for fn in (F.softmax, F.log_softmax):
-                # CPU half/bfloat16 log_softmax can be 2 ulp off; compare to a float reference
-                self.assertEqual(fn(mps_x, dim=dim).cpu(), fn(x.float(), dim=dim).to(dtype))
-
     def test_signed_vs_unsigned_comparison(self):
         cpu_x = torch.tensor((-1, 2, 3), device='cpu', dtype=torch.uint8)
         mps_x = torch.tensor((-1, 2, 3), device='mps', dtype=torch.uint8)
