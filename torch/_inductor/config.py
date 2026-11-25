@@ -1973,9 +1973,10 @@ wrap_inductor_compiled_regions: bool = False
 assume_aligned_inputs: bool = False
 
 # assume_32bit_indexing means that we assume 32-bit indexing is always safe; we always
-# use 32-bit indices regardless of tensor sizes. If assume_32bit_indexing contradicts
-# with example inputs we throw. This is useful when all dynamic shapes are unbacked and
-# you know you only operate with 32-bit sizes.
+# use 32-bit indices regardless of tensor sizes, except in kernels whose fused index
+# expressions provably overflow int32, which use 64-bit indices. If
+# assume_32bit_indexing contradicts with example inputs we throw. This is useful when
+# all dynamic shapes are unbacked and you know you only operate with 32-bit sizes.
 assume_32bit_indexing: bool = False
 
 # By default, when a dynamic size cannot be proven to fit in int32, inductor reads its
@@ -1996,6 +1997,9 @@ avoid_32bit_indexing_guards: bool = False
 # So far covers Triton reduction kernels from the main SIMD codegen path; other kernels
 # keep the default behavior (see avoid_32bit_indexing_guards). Skips are logged at
 # debug level (TORCH_LOGS="+inductor").
+# Takes precedence over avoid_32bit_indexing_guards for the kernels it covers;
+# assume_32bit_indexing takes precedence over it. Not applied with the cpp or FX
+# wrapper or triton.autotune_at_compile_time.
 dual_index_dtype_kernels: bool = False
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
