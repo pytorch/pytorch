@@ -1774,8 +1774,40 @@ def many_packed(pair):
     return (x * y + 1).tanh().cos().sin()
 
 
-def many_apply(layer, x):
-    return (x * layer.weight).tanh().cos().sin() + x
+def many_stack(layers, x, seen):
+    for layer in layers:
+        x = (x * layer.weight).tanh().cos().sin() + x
+        # A write to a list the caller holds: the loop is no region as a
+        # whole, its body's computation is one per layer.
+        seen.append(1)
+    return x
+
+
+def many_methods(layers, x, seen):
+    for layer in layers:
+        # `layer.scaled` is another method object on every read.
+        x = many_method(layer.scaled, x)
+        seen.append(1)
+    return x
+
+
+class DeadCache:
+    def __init__(self, n, device):
+        self.keys = torch.zeros(n, device=device)
+
+
+def dead_layer(x, cache, w):
+    y = (x * w).tanh().cos().sin() + x
+    return y + cache.keys.mean()
+
+
+def dead_step(x, w):
+    # Made on every call and gone when it returns, as a model makes the
+    # cache of one forward.
+    cache = DeadCache(1 << 16, x.device)
+    # A call that is in no region: the cache is made before the region.
+    time.perf_counter()
+    return dead_layer(x, cache, w)
 
 
 def many_noted(scales, x, seen):
@@ -1830,84 +1862,77 @@ class TestVmManyRegions(TestCase):
     @isolated
     def test_eighty_layer_and_shape_combinations_at_one_place(self, device):
         layers = [ManyLayer(k).to(device) for k in range(20)]
-        g = vm_early(many_apply)
-        calls = 0
+        g = vm_early(many_stack)
         with torch.no_grad():
-            for step in range(4 * 3):
-                x = torch.randn(2 + step % 4, 8, device=device)
-                for k, layer in enumerate(layers):
-                    self.assertEqual(
-                        g(layer, x),
-                        many_apply(layer, x),
-                        atol=0,
-                        rtol=0,
-                        msg=f"step {step}, layer {k}",
-                    )
-                    calls += 1
+            for call in range(3 + 4 * 3):
+                x = torch.randn(2 + call % 4, 8, device=device)
+                seen, expected = [], []
+                self.assertEqual(
+                    g(layers, x, seen),
+                    many_stack(layers, x, expected),
+                    atol=0,
+                    rtol=0,
+                    msg=f"call {call}",
+                )
+                self.assertEqual(seen, expected, msg=f"call {call}")
         (row,) = (
             r
             for r in vm.regions(g)
-            if r["function"] == "many_apply" and r["state"] == "region"
+            if r["function"] == "many_stack" and r["state"] == "region"
         )
-        # One place, a region for every layer and input size; every call
-        # after the three before regions start either traces one or runs
-        # one.
+        # One place (the loop's body), a region for every layer and input
+        # size, and from the call after its trace on each of them runs.
         self.assertEqual(row["variants"], 20 * 4)
-        self.assertEqual(row["runs"], calls - 3 - 20 * 4)
+        self.assertEqual(row["runs"], 20 * 4 * 2)
         self.assertEqual(row["misses"], {})
 
     @isolated
     def test_region_is_found_by_which_object_an_argument_is(self, device):
         layers = [ManyLayer(k).to(device) for k in range(12)]
-        g = vm_early(many_apply)
+        g = vm_early(many_stack)
         with torch.no_grad():
-            for step in range(5):
+            for call in range(6):
                 x = torch.randn(4, 8, device=device)
-                for k, layer in enumerate(layers):
-                    self.assertEqual(
-                        g(layer, x),
-                        many_apply(layer, x),
-                        atol=0,
-                        rtol=0,
-                        msg=f"step {step}, layer {k}",
-                    )
+                seen, expected = [], []
+                self.assertEqual(
+                    g(layers, x, seen),
+                    many_stack(layers, x, expected),
+                    atol=0,
+                    rtol=0,
+                    msg=f"call {call}",
+                )
         (row,) = (
             r
             for r in vm.regions(g)
-            if r["function"] == "many_apply" and r["state"] == "region"
+            if r["function"] == "many_stack" and r["state"] == "region"
         )
         self.assertEqual(row["variants"], 12)
-        self.assertEqual(row["runs"], 5 * 12 - 3 - 12)
+        self.assertEqual(row["runs"], 12 * 2)
         self.assertEqual(row["misses"], {})
-        # Twelve regions at one place, found by the layer: only the first,
-        # while it was the only one, was asked for another layer's call.
-        self.assertLessEqual(torch._rust._cfg_region_passed_over(), 1)
+        # Twelve regions at one place, found by the layer: none was asked
+        # for another layer's round.
+        self.assertEqual(torch._rust._cfg_region_passed_over(), 0)
 
     @isolated
     def test_region_is_found_by_what_a_bound_method_is_bound_to(self, device):
         layers = [ManyLayer(k).to(device) for k in range(12)]
-        g = vm(many_method, passes=vm.configure(EARLY, pure_calls=4))
+        g = vm(many_methods, passes=vm.configure(EARLY, pure_calls=4))
         with torch.no_grad():
-            for step in range(6):
+            for call in range(7):
                 x = torch.randn(4, 8, device=device)
-                for k, layer in enumerate(layers):
-                    # `layer.scaled` is another method object on every read.
-                    self.assertEqual(
-                        g(layer.scaled, x),
-                        many_method(layer.scaled, x),
-                        atol=0,
-                        rtol=0,
-                        msg=f"step {step}, layer {k}",
-                    )
-        (row,) = (
-            r
-            for r in vm.regions(g)
-            if r["function"] == "many_method" and r["state"] == "region"
-        )
+                seen, expected = [], []
+                self.assertEqual(
+                    g(layers, x, seen),
+                    many_methods(layers, x, expected),
+                    atol=0,
+                    rtol=0,
+                    msg=f"call {call}",
+                )
+        (row,) = (r for r in vm.regions(g) if r["state"] == "region")
         self.assertEqual(row["variants"], 12)
-        self.assertGreaterEqual(row["runs"], 4 * 12)
+        self.assertEqual(row["runs"], 12 * 3)
         # A region per layer, found by the layer the method is bound to:
-        # none is entered for another layer's call and turns it down, and
+        # none is entered for another layer's round and turns it down, and
         # only the first, while it was the only one, was asked for one.
         self.assertEqual(row["misses"], {})
         self.assertLessEqual(torch._rust._cfg_region_passed_over(), 1)
@@ -1954,41 +1979,73 @@ class TestVmManyRegions(TestCase):
         self.assertGreater(torch._rust._cfg_region_passed_over(), 0)
 
     @isolated
-    def test_place_whose_inputs_keep_changing_is_bounded(self, device):
+    def test_place_whose_sizes_keep_changing_stops_at_the_bound_of_its_key(
+        self, device
+    ):
         import torch._rust_inductor as ri
 
         ri.COUNT = True
-        g = vm(
-            many_shift, passes=vm.configure(EARLY, regions={"variants": 2, "keys": 3})
-        )
-
-        def variants():
-            return sum(
-                r["variants"]
-                for r in vm.regions(g)
-                if r["function"] == "many_shift" and r["state"] == "region"
+        g = vm(many_shift, passes=vm.configure(EARLY, regions={"variants": 2}))
+        # Another input size on every call, under one key (the int).
+        for call in range(9):
+            x = torch.randn(2 + call, 8, device=device)
+            self.assertEqual(
+                g(x, 5), many_shift(x, 5), atol=0, rtol=0, msg=f"call {call}"
             )
+        (row,) = (
+            r
+            for r in vm.regions(g)
+            if r["function"] == "many_shift" and r["state"] == "region"
+        )
+        self.assertEqual(row["variants"], 2)
+        # The regions it has still run.
+        before = region_runs()
+        x = torch.randn(2 + 3, 8, device=device)
+        self.assertEqual(g(x, 5), many_shift(x, 5), atol=0, rtol=0)
+        self.assertGreater(region_runs(), before)
 
-        # Another int on every call: a key each, up to `keys`.
+    @isolated
+    def test_argument_that_is_another_value_on_every_call_gets_no_region(self, device):
+        g = vm_early(many_shift)
+        # Another int on every call: each trace is for a key that never comes
+        # again. After three such calls in a row the place takes no new key
+        # and drops the regions that never ran.
         for call in range(12):
             x = torch.randn(4, 8, device=device)
             self.assertEqual(
                 g(x, call), many_shift(x, call), atol=0, rtol=0, msg=f"call {call}"
             )
-        self.assertEqual(variants(), 3)
-        # Another input size on every call, with an int that has a region:
-        # up to `variants` under that key.
-        for call in range(6):
-            x = torch.randn(5 + call, 8, device=device)
+        (row,) = (r for r in vm.regions(g) if r["function"] == "many_shift")
+        self.assertEqual(
+            (row["state"], row["variants"], row["runs"]),
+            ("refused", 0, 0),
+            msg=str(row),
+        )
+        self.assertIn("another on every call", row["why"])
+        self.assertEqual([state for state, _ in row["traces"]], ["refused"] * 3)
+
+    @isolated
+    def test_argument_that_is_another_object_on_every_call_keeps_nothing(self, device):
+        w = torch.full((8,), 1.5, device=device)
+        g = vm_early(dead_step)
+        for call in range(40):
+            x = torch.randn(4, 8, device=device)
             self.assertEqual(
-                g(x, 5), many_shift(x, 5), atol=0, rtol=0, msg=f"size {call}"
+                g(x, w), dead_step(x, w), atol=0, rtol=0, msg=f"call {call}"
             )
-        self.assertEqual(variants(), 3 + 1)
-        # The regions it has still run.
-        before = region_runs()
-        x = torch.randn(4, 8, device=device)
-        self.assertEqual(g(x, 4), many_shift(x, 4), atol=0, rtol=0)
-        self.assertGreater(region_runs(), before)
+            if call >= 8:
+                # Eager frees each call's cache when the call returns; so
+                # does the VM once it has seen that the object it finds the
+                # place's regions by is another on every call.
+                gc.collect()
+                alive = sum(1 for o in gc.get_objects() if type(o) is DeadCache)
+                self.assertEqual(alive, 0, msg=f"call {call}")
+        rows = [r for r in vm.regions(g) if r["kind"] != "call"]
+        self.assertEqual([r["where"] for r in rows if r["state"] == "region"], [])
+        (row,) = (r for r in rows if r["why"] and "another on every call" in r["why"])
+        self.assertEqual(
+            (row["state"], len(row["traces"])), ("refused", 3), msg=str(row)
+        )
 
     @isolated
     def test_loop_with_more_iterations_than_keys_is_bounded_within_one_call(

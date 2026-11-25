@@ -21,9 +21,18 @@
 // is, the value of an int), they are found by that key instead of being
 // asked in turn. A place holds up to max_regions() variants per key and up
 // to max_keys() keys.
+//
+// A key whose object lives for one call (a cache object the caller makes on
+// every call, pinned by identity) gives a variant that can never run again,
+// and a place that is given such an object would trace one on every call and
+// keep each call's object alive. So a place that, MAX_BARREN calls of the
+// program in a row, traced under a key it didn't have and ran no variant,
+// takes no further key, and drops the variants that never ran with all they
+// hold (see Variants::room).
 
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use pyo3::ffi;
@@ -43,6 +52,18 @@ static MAX_KEYS: AtomicUsize = AtomicUsize::new(64);
 // Variants asked at a place's entry that their own checks of the args turned
 // down (see _cfg_region_passed_over).
 static PASSED_OVER: AtomicU64 = AtomicU64::new(0);
+// How many times the program entered the executor from outside (see
+// next_call): what "a call" is to a place.
+static CALL: AtomicU64 = AtomicU64::new(0);
+// Calls in a row in which a place traced under a new key and ran nothing,
+// after which it takes no new key.
+const MAX_BARREN: u32 = 3;
+
+// A call of the program begins (call_with_cfg_execution).
+#[inline]
+pub fn next_call() {
+    CALL.fetch_add(1, Ordering::Relaxed);
+}
 static CHECK_READS: AtomicBool = AtomicBool::new(true);
 
 /// Whether a region is entered only while what its trace read is as it was
@@ -226,6 +247,8 @@ pub struct Variant {
     facts: Vec<(Pos, u64)>,
     // The objects of the facts: an atom that is an address stays theirs.
     _held: Vec<Py<PyAny>>,
+    // Whether it ever ran.
+    ran: AtomicBool,
 }
 
 impl Variant {
@@ -279,14 +302,22 @@ unsafe fn atom_at(args: &[*mut PyObject], (i, j): Pos) -> u64 {
 
 #[derive(Default)]
 struct Table {
-    // In the order they were traced. Never removed: a variant lives as long
-    // as its place.
-    all: Vec<Box<Variant>>,
+    // In the order they were traced.
+    all: Vec<Arc<Variant>>,
     // The key's positions: those every variant has a fact for.
     at: Vec<Pos>,
     // By key (the facts at `at`, hashed): indices into `all`, in order.
     // Empty while `at` is.
     by_key: HashMap<u64, Vec<u32>>,
+    // The call (CALL) it was last entered in, and what happened in it: a
+    // variant ran, a variant was traced under a key it didn't have.
+    call: u64,
+    ran: bool,
+    new_key: bool,
+    // Calls in a row, up to the last, with a new key and no run.
+    barren: u32,
+    // It takes no new key any more (see MAX_BARREN).
+    closed: bool,
 }
 
 impl Table {
@@ -297,6 +328,35 @@ impl Table {
     fn key(&self, v: &Variant) -> u64 {
         // Every position of `at` is one of v's facts.
         self.at.iter().fold(0, |h, p| mix(h, v.facts.iter().find(|f| f.0 == *p).map_or(0, |f| f.1)))
+    }
+
+    // Entered: a new call of the program closes the account of the last.
+    fn enter(&mut self) {
+        let now = CALL.load(Ordering::Relaxed);
+        if now != self.call {
+            if self.ran {
+                self.barren = 0;
+            } else if self.new_key {
+                self.barren += 1;
+            }
+            (self.call, self.ran, self.new_key) = (now, false, false);
+        }
+    }
+
+    // The keys of the variants, anew: the positions every one of them has a
+    // fact for, and each variant under its key.
+    fn index(&mut self) {
+        self.at = match self.all.first() {
+            Some(first) => first.facts.iter().map(|f| f.0).filter(|p| self.all.iter().all(|v| v.facts.iter().any(|f| f.0 == *p))).collect(),
+            None => vec![],
+        };
+        self.by_key.clear();
+        if !self.at.is_empty() {
+            for j in 0..self.all.len() {
+                let k = self.key(&self.all[j]);
+                self.by_key.entry(k).or_default().push(j as u32);
+            }
+        }
     }
 }
 
@@ -326,8 +386,11 @@ impl Variants {
     // The i-th variant to ask for a call with these args (the newest first):
     // with a key, only those under the call's (computed once, into `key`).
     // One variant alone is asked without a key.
-    pub unsafe fn candidate(&self, args: &[*mut PyObject], key: &mut Option<u64>, i: usize) -> Option<&Variant> {
-        let t = &*self.0.get();
+    pub unsafe fn candidate(&self, args: &[*mut PyObject], key: &mut Option<u64>, i: usize) -> Option<Arc<Variant>> {
+        let t = &mut *self.0.get();
+        if i == 0 {
+            t.enter();
+        }
         let n = t.all.len();
         let j = if n <= 1 || t.at.is_empty() {
             n.checked_sub(i + 1)?
@@ -336,28 +399,59 @@ impl Variants {
             let under = t.by_key.get(&k)?;
             under[under.len().checked_sub(i + 1)?] as usize
         };
-        // Boxed and never removed: it outlives the borrow of the table (which
-        // a trace made under the call may add to).
-        Some(&*(&*t.all[j] as *const Variant))
+        // Shared: it outlives the borrow of the table, which a trace made
+        // under the call may add to and a closing place takes from.
+        Some(t.all[j].clone())
+    }
+
+    // Variant v ran.
+    pub fn ran(&self, v: &Variant) {
+        v.ran.store(true, Ordering::Relaxed);
+        unsafe { (*self.0.get()).ran = true };
     }
 
     // Whether the place may get another variant for a call with these args:
     // its key has fewer than max_regions(), and is one of at most max_keys().
+    // A key the place doesn't have is turned away once the place has been
+    // given new keys for MAX_BARREN calls in a row without any of its
+    // variants running (the key is an object or a value that is another on
+    // every call): the place is closed to new keys, and the variants that
+    // never ran are dropped (torch._rust_inductor._dropped says so of each).
     pub unsafe fn room(&self, args: &[*mut PyObject]) -> bool {
-        let t = &*self.0.get();
+        let t = &mut *self.0.get();
+        t.enter();
         if t.at.is_empty() {
-            return t.all.len() < max_regions();
+            // (A closed place whose variants were all dropped has no key
+            // positions left, and stays as it is.)
+            return !t.closed && t.all.len() < max_regions();
         }
-        match t.by_key.get(&t.key_of(args)) {
-            Some(under) => under.len() < max_regions(),
-            None => t.by_key.len() < max_keys(),
+        if let Some(under) = t.by_key.get(&t.key_of(args)) {
+            return under.len() < max_regions();
         }
+        if t.closed {
+            return false;
+        }
+        if t.barren < MAX_BARREN {
+            return t.by_key.len() < max_keys();
+        }
+        t.closed = true;
+        let (kept, dropped): (Vec<_>, Vec<_>) = std::mem::take(&mut t.all).into_iter().partition(|v| v.ran.load(Ordering::Relaxed));
+        t.all = kept;
+        t.index();
+        let py = Python::assume_attached();
+        for v in dropped {
+            // The record of its trace lets go of what the trace read.
+            if let Err(e) = py.import("torch._rust_inductor").and_then(|m| m.call_method1("_dropped", (v.spec.func.clone_ref(py),))) {
+                e.write_unraisable(py, None);
+            }
+        }
+        false
     }
 
     pub fn push(&self, v: Variant) {
         let t = unsafe { &mut *self.0.get() };
         let at: Vec<Pos> = if t.all.is_empty() { v.facts.iter().map(|f| f.0).collect() } else { t.at.iter().copied().filter(|p| v.facts.iter().any(|f| f.0 == *p)).collect() };
-        t.all.push(Box::new(v));
+        t.all.push(Arc::new(v));
         if at != t.at {
             // A variant without one of the positions: the keys are of those
             // left.
@@ -370,7 +464,13 @@ impl Variants {
         let from = if t.by_key.is_empty() { 0 } else { t.all.len() - 1 };
         for j in from..t.all.len() {
             let k = t.key(&t.all[j]);
-            t.by_key.entry(k).or_default().push(j as u32);
+            let under = t.by_key.entry(k).or_default();
+            under.push(j as u32);
+            // The newest is the first under its key: a key the place didn't
+            // have.
+            if j + 1 == t.all.len() && under.len() == 1 {
+                t.new_key = true;
+            }
         }
     }
 }
@@ -480,6 +580,7 @@ pub unsafe fn trace(name: &str, args: &[*mut PyObject], types: &[Slot], unread: 
             },
             facts,
             _held: held,
+            ran: AtomicBool::new(false),
         },
     }))
 }
