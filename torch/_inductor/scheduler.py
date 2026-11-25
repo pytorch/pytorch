@@ -74,7 +74,11 @@ from .ir import (
 )
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
-from .runtime.hints import DeviceProperties, ReductionHint
+from .runtime.hints import (
+    DeviceProperties,
+    is_default_reduction_scheduling,
+    ReductionHint,
+)
 from .runtime.runtime_utils import green_text, is_power_of_2, red_text
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -318,6 +322,10 @@ class MixOrderReduction:
     """
 
     @staticmethod
+    def supports_contiguous_reduction_hint(hint: ReductionHint) -> bool:
+        return hint == ReductionHint.INNER or is_default_reduction_scheduling(hint)
+
+    @staticmethod
     def _split_origins(
         node: BaseSchedulerNode,
     ) -> OrderedSet[tuple[sympy.Expr, sympy.Expr]] | None:
@@ -558,10 +566,8 @@ class MixOrderReduction:
 
         # Make sure a persistent reduction will be generated
         if any(
-            subnode.node.data.reduction_hint  # type: ignore[union-attr]
-            not in (
-                ReductionHint.INNER,
-                ReductionHint.DEFAULT,
+            not cls.supports_contiguous_reduction_hint(
+                subnode.node.data.reduction_hint  # type: ignore[union-attr]
             )
             for subnode in contiguous_node.get_nodes()
             if subnode.is_reduction()

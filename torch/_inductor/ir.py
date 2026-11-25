@@ -110,7 +110,11 @@ from .fx_utils import get_node_storage
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
-from .runtime.hints import DeviceProperties, ReductionHint
+from .runtime.hints import (
+    DeviceProperties,
+    is_default_reduction_scheduling,
+    ReductionHint,
+)
 from .sizevars import is_range_bound
 from .utils import (
     argsort,
@@ -1430,6 +1434,19 @@ def get_reduction_combine_fn(
         raise NotImplementedError(f"unknown reduction_type={reduction_type}")
 
 
+class _ReductionReads(NamedTuple):
+    """What Reduction.num_splits learns from a reduction's reads."""
+
+    # indices of the full-size reads, or else of the broadcast reduction reads
+    indices: Sequence[Expr]
+    # whether deciding an input's layout changed its stride
+    changed: bool
+    # dtypes of those reads (collected only for the large-output OUTER plan)
+    source_dtypes: list[torch.dtype]
+    # whether a read indexes some but not all output dims plus a reduction dim
+    has_partial_output_broadcast_read: bool
+
+
 class AlignedSplit(NamedTuple):
     """
     A split of a multi-dim reduction at a dim boundary
@@ -1512,6 +1529,10 @@ def grid_split_chunk(extent: _IntLike, split: _IntLike) -> Expr:
 class Reduction(Loops):
     r"""IR node representing a reduction over one or more iteration dimensions."""
 
+    EXPERIMENTAL_LARGE_OUTPUT_OUTER_MAX_WORKSPACE_BYTES: ClassVar[int] = (
+        128 * 1024 * 1024
+    )
+
     reduction_ranges: Sequence[_IntLike]
     reduction_type: ReductionType
     # self.dtype represents the dst dtype
@@ -1583,6 +1604,82 @@ class Reduction(Loops):
             reduction_hint=ReductionHint.DEFAULT,
             strict_reduction_multirow=self.strict_reduction_multirow,
             strict_reduction_rblock=self.strict_reduction_rblock,
+        )
+
+    @staticmethod
+    def _experimental_large_output_outer_split_factor(
+        reduction_numel_hint: int,
+        numel_hint: int,
+        num_sm: int,
+    ) -> int:
+        """Choose one bounded split for the experimental large-output OUTER plan.
+
+        The measured first-stage schedule uses XBLOCK=128, R0_BLOCK=8, and one
+        warp. Targeting 28 one-warp CTAs per SM and rounding down to an eight-way
+        split quantum reproduces the useful measured split band without a split
+        sweep. The result is also bounded by FP32 workspace traffic and capacity.
+        """
+        first_stage_xblock = 128
+        target_ctas_per_sm = 28
+        split_quantum = 8
+        min_splits = 16
+        max_splits = 64
+        xblocks = (numel_hint + first_stage_xblock - 1) // first_stage_xblock
+        target_splits = (target_ctas_per_sm * num_sm) // max(xblocks, 1)
+        target_splits = (target_splits // split_quantum) * split_quantum
+
+        # Writing and rereading S FP32 partials costs 8*S*X bytes. Relative to
+        # the BF16 input's 2*R*X bytes, S <= R/64 keeps this below 6.25%.
+        traffic_limited_splits = reduction_numel_hint // 64
+        workspace_limited_splits = (
+            Reduction.EXPERIMENTAL_LARGE_OUTPUT_OUTER_MAX_WORKSPACE_BYTES
+            // (4 * max(numel_hint, 1))
+        )
+        legal_max = min(max_splits, traffic_limited_splits, workspace_limited_splits)
+        legal_max = (legal_max // split_quantum) * split_quantum
+        if legal_max < min_splits:
+            return 1
+
+        return max(min_splits, min(target_splits, legal_max))
+
+    @staticmethod
+    def _should_use_experimental_large_output_outer_plan(
+        reduction_numel_hint: int,
+        numel_hint: int,
+        split: int,
+    ) -> bool:
+        """Whether a split of ``split`` beats the one-pass plan for this shape.
+
+        The normal one-pass Blackwell plan uses R0_BLOCK=64. Runtime-matched
+        production sweeps show a sharp schedule cliff when a deep leading
+        reduction has a tail at that granularity, while aligned depths favor
+        the one-pass plan. Output tails and shallow reductions stay on the
+        one-pass path; the split and workspace bounds come from
+        _experimental_large_output_outer_split_factor.
+        """
+        return (
+            reduction_numel_hint >= 4096
+            and reduction_numel_hint % 64 != 0
+            and numel_hint >= 8192
+            and numel_hint % 128 == 0
+            and split > 1
+        )
+
+    @staticmethod
+    def _is_experimental_large_output_outer_producer_profitable(
+        num_ops: int,
+        nontrivial_read_count: int,
+        has_partial_output_broadcast_read: bool,
+    ) -> bool:
+        """Whether the fused producer is heavy enough to pay for a split.
+
+        Structural OUTER pays for a workspace and a final reduction, so it is
+        used only for fused producers with enough work and read pressure to
+        amortize that cost, including partially broadcast reduction reads,
+        whose one-pass access pattern is particularly inefficient.
+        """
+        return num_ops >= 8 and (
+            nontrivial_read_count >= 4 or has_partial_output_broadcast_read
         )
 
     @staticmethod
@@ -1692,10 +1789,40 @@ class Reduction(Loops):
                         # use reduction_sizes of this node or its dependent nodes directly.
                         return ReductionHint.INNER, -1
             return ReductionHint.INNER, split
-        if (
-            reduction_numel_hint <= min_elements_per_thread
-            or numel_hint >= num_sm * 2 * 32
-        ):
+        if reduction_numel_hint <= min_elements_per_thread:
+            return ReductionHint.DEFAULT, 1
+
+        large_output = numel_hint >= num_sm * 2 * 32
+        preserve_large_outer_hint = (
+            config.max_autotune
+            and reduction_type == "sum"
+            and src_dtype in (torch.float16, torch.bfloat16, torch.float32)
+            and dst_dtype == torch.float32
+            and device.type == "cuda"
+            and torch.version.hip is None
+            and props.major is not None
+            and props.major >= 10
+            and reduction_numel_hint >= 2048
+            and (
+                _is_static(reduction_numel)
+                or V.graph.sizevars.statically_known_equals(
+                    reduction_numel, reduction_numel_hint
+                )
+            )
+            and (
+                _is_static(numel)
+                or V.graph.sizevars.statically_known_equals(numel, numel_hint)
+            )
+        )
+        split_large_outer = (
+            preserve_large_outer_hint
+            and should_split
+            and config.triton.enable_experimental_large_output_outer_reductions
+            and not config.deterministic
+            and not config.batch_invariant
+            and not torch.are_deterministic_algorithms_enabled()
+        )
+        if large_output and not preserve_large_outer_hint:
             return ReductionHint.DEFAULT, 1
 
         r = Reduction(
@@ -1709,7 +1836,7 @@ class Reduction(Loops):
             reduction_hint=ReductionHint.DEFAULT,
         )
 
-        def get_read_indices(r: Reduction) -> tuple[Sequence[Expr], bool]:
+        def get_read_indices(r: Reduction) -> _ReductionReads:
             device = r.get_device()
             if device is None:
                 raise AssertionError("Expected device is not None")
@@ -1733,16 +1860,23 @@ class Reduction(Loops):
                 for var in read_writes.range_vars
                 if isinstance(var, Expr) and not isinstance(var, sympy.Number)
             ]
-            (_, reduction_vars), _ = dependencies.index_vars_squeeze(
+            (pointwise_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
                 r.get_size(), r.get_reduction_size()
             )
+            pointwise_vars = [
+                var
+                for var in pointwise_vars
+                if isinstance(var, Expr) and not isinstance(var, sympy.Number)
+            ]
             reduction_vars = [
                 var
                 for var in reduction_vars
                 if isinstance(var, Expr) and not isinstance(var, sympy.Number)
             ]
-            indices = []
-            broadcasted_reduction_indices = []
+            indices: list[Expr] = []
+            broadcasted_reduction_indices: list[Expr] = []
+            source_dtypes: list[torch.dtype] = []
+            has_partial_output_broadcast_read = False
             changed = False
             for md in sorted(read_writes.reads, key=lambda x: x.name):
                 free_symbols = md.index.free_symbols
@@ -1753,22 +1887,43 @@ class Reduction(Loops):
                 is_broadcasted_reduction_read = not is_full_size_read and any(
                     var in free_symbols for var in reduction_vars
                 )
+                has_any_pointwise_var = any(
+                    var in free_symbols for var in pointwise_vars
+                )
+                has_all_pointwise_vars = all(
+                    var in free_symbols for var in pointwise_vars
+                )
+                has_partial_output_broadcast_read |= (
+                    has_any_pointwise_var
+                    and not has_all_pointwise_vars
+                    and any(var in free_symbols for var in reduction_vars)
+                )
                 if is_full_size_read:
                     indices.append(md.index)
                 elif is_broadcasted_reduction_read:
                     broadcasted_reduction_indices.append(md.index)
                 if is_full_size_read or is_broadcasted_reduction_read:
+                    if split_large_outer:
+                        source_dtypes.append(V.graph.get_dtype(md.name))
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
                         original_stride = getattr(buf.layout, "stride", None)
                         buf.decide_layout()
                         if getattr(buf.layout, "stride", None) != original_stride:
                             changed = True
-            return indices or broadcasted_reduction_indices, changed
+            return _ReductionReads(
+                indices or broadcasted_reduction_indices,
+                changed,
+                source_dtypes,
+                has_partial_output_broadcast_read,
+            )
 
-        indices, changed = get_read_indices(r)
-        if changed:
-            indices, _ = get_read_indices(r)
+        reads = get_read_indices(r)
+        if reads.changed:
+            reads = get_read_indices(r)
+        indices = reads.indices
+        source_dtypes = reads.source_dtypes
+        has_partial_output_broadcast_read = reads.has_partial_output_broadcast_read
 
         if len(indices) == 0:
             # TODO determine splits when all inputs are broadcast
@@ -1802,10 +1957,38 @@ class Reduction(Loops):
             else:
                 num_inner += 1
         if num_inner > num_outer:
+            if large_output:
+                return ReductionHint.DEFAULT, 1
             return ReductionHint.INNER, inner_reduction_splits(
                 reduction_numel_hint, numel_hint
             )
         else:
+            if large_output:
+                producer_profitable = False
+                if split_large_outer:
+                    opcount = r.inner_fn_opcount()
+                    producer_profitable = Reduction._is_experimental_large_output_outer_producer_profitable(
+                        opcount.num_ops,
+                        opcount.nontrivial_read_count,
+                        has_partial_output_broadcast_read,
+                    )
+                if (
+                    split_large_outer
+                    and torch.bfloat16 in source_dtypes
+                    and all(
+                        dtype in (torch.bfloat16, torch.float32)
+                        for dtype in source_dtypes
+                    )
+                    and producer_profitable
+                ):
+                    split = Reduction._experimental_large_output_outer_split_factor(
+                        reduction_numel_hint, numel_hint, num_sm
+                    )
+                    if Reduction._should_use_experimental_large_output_outer_plan(
+                        reduction_numel_hint, numel_hint, split
+                    ):
+                        return ReductionHint.OUTER, split
+                return ReductionHint.OUTER_NO_SPLIT, 1
             return ReductionHint.OUTER, outer_reduction_splits(
                 reduction_numel_hint, numel_hint
             )
@@ -1933,9 +2116,9 @@ class Reduction(Loops):
         strict_split = None
         strict_reduction_multirow = False
         strict_reduction_rblock = None
-        if strict_reduction and reduction_hint in (
-            ReductionHint.DEFAULT,
-            ReductionHint.INNER,
+        if strict_reduction and (
+            reduction_hint == ReductionHint.INNER
+            or is_default_reduction_scheduling(reduction_hint)
         ):
             num_outputs = sympy_product(ranges)
             if V.graph.sizevars.all_unbacked_explicitly_hinted(
