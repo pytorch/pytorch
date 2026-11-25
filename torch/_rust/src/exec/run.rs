@@ -1072,6 +1072,25 @@ impl Act<'_> {
             let code = &self.p.code[b.idx()][vi];
             let fast = self.rec.is_null();
             let mut i = first;
+            if first == 0
+                && super::region::enabled()
+                && vi + 1 == blk.versions.len()
+                && blk.versions.len() <= super::region::MAX_REGIONS
+                && blk.origin.is_some()
+                && self.c.is_some()
+                && super::region::due(&self.p.region_runs[b.idx()], &self.p.region_off[b.idx()])
+                && self.region_worthy(b, vi)
+            {
+                match self.region_trace(b, vi) {
+                    None => i = code.steps.len(),
+                    Some(Next::Step) => {}
+                    Some(Next::Block(h)) => {
+                        b = h;
+                        continue 'blocks;
+                    }
+                    Some(Next::Done(outcome)) => return outcome,
+                }
+            }
             while i < code.steps.len() {
                 // Steps' kill ranges are within `kills`, and instrs index
                 // values within `vals`.
@@ -1136,6 +1155,99 @@ impl Act<'_> {
                 Err(outcome) => return outcome,
             }
         }
+    }
+
+    // Whether version vi of block b does enough to be worth tracing: at least
+    // two of its instrs ran torch ops (or entered frames, which pure calls
+    // do). Remembered when it doesn't.
+    unsafe fn region_worthy(&self, b: BlockId, vi: usize) -> bool {
+        let effects = &*self.p.effects.get();
+        let work = self.cfg[b].versions[vi]
+            .body
+            .iter()
+            .filter(|v| {
+                matches!(self.cfg[**v].op, Op::Aten { .. })
+                    || effects.get(crate::cfg::ir::Site::Instr(**v)).iter().any(|(seq, _)| !seq.is_empty())
+            })
+            .count();
+        if work < 2 {
+            self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        work >= 2
+    }
+
+    // Traces this run of version vi of block b into a region (see
+    // region.rs), its inputs already read. None: the body ran, its values are
+    // set as run_blocks' steps would leave them. Some(Next::Step): it didn't
+    // run (run it as usual); otherwise where its raise went.
+    unsafe fn region_trace(&mut self, b: BlockId, vi: usize) -> Option<Next> {
+        let cfg = self.cfg;
+        let blk = &cfg[b];
+        let ver = &blk.versions[vi];
+        let code = &self.p.code[b.idx()][vi];
+        let ids: Vec<ValueId> = blk.params.iter().chain(&ver.inputs).copied().collect();
+        let args: Vec<*mut PyObject> = ids.iter().map(|x| self.val(*x)).collect();
+        // Params the version doesn't use, already dropped by select().
+        let entry_kill = &self.p.live.versions[b.idx()][vi].entry_kill;
+        let unused: Vec<u32> = ids.iter().enumerate().filter(|(_, x)| entry_kill.contains(x)).map(|(i, _)| i as u32).collect();
+        let mut failed: Option<(usize, Exc)> = None;
+        let mut ran = false;
+        let this = self as *mut Self;
+        let mut body = |objs: &[*mut PyObject]| -> Result<Vec<*mut PyObject>, ()> {
+            let this = &mut *this;
+            ran = true;
+            for (i, (x, o)) in ids.iter().zip(objs).enumerate() {
+                if !unused.contains(&(i as u32)) {
+                    this.set(*x, xincref(*o));
+                }
+            }
+            for (i, step) in code.steps.iter().enumerate() {
+                let v = step.v;
+                this.set_instr(cfg[v].origin as c_int);
+                if let Err(how) = this.exec(v, &cfg[v]) {
+                    failed = Some((i, how));
+                    return Err(());
+                }
+                this.drop_all(&code.kills[step.kill.0 as usize..step.kill.1 as usize]);
+            }
+            Ok(ver.outputs.iter().map(|o| xincref(this.val(*o))).collect())
+        };
+        let c = self.c.expect("checked by the caller");
+        let name = format!("{}:bb{}", c.qualname, b.0);
+        let traced = super::outside_executor(|| super::region::trace(&name, &args, &unused, &mut body));
+        let py = pyo3::Python::assume_attached();
+        if let Some((i, how)) = failed {
+            // The body raised: let the exception go where it went.
+            self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Err(e) = traced {
+                e.restore(py);
+            }
+            return Some(match self.unwind(b, vi, i, how) {
+                Unwound::Block(h) => Next::Block(h),
+                Unwound::Outer(k, args) => Next::Done(Outcome::Outer(k, args)),
+                Unwound::Propagate => Next::Done(Outcome::Error),
+            });
+        }
+        let debug = std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some();
+        match traced {
+            Ok(Some(t)) if ran => {
+                if let Err(e) = super::add_region(c, self.p as *const Prepared as usize, b, vi, t) {
+                    if debug {
+                        eprintln!("region {name}: not added: {e}");
+                    }
+                    self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            Ok(_) => self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed),
+            Err(e) => {
+                if debug {
+                    eprintln!("region {name}: trace failed: {e}");
+                }
+                self.p.region_off[b.idx()].store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        self.p.region_runs[b.idx()].store(0, std::sync::atomic::Ordering::Relaxed);
+        if ran { None } else { Some(Next::Step) }
     }
 
     // Runs body[i] of version `vi` of block b (step) and drops `kills`.
@@ -1326,6 +1438,16 @@ impl Act<'_> {
                         e.restore(pyo3::Python::assume_attached());
                         return Err(Exc::Error);
                     }
+                }
+            }
+            Op::Region(r) => {
+                let args: Vec<*mut PyObject> = ins.args.iter().map(|a| self.val(*a)).collect();
+                match super::region::call(&self.cfg.regions[*r as usize], &args) {
+                    Ok(outs) => {
+                        self.distribute(v, &outs);
+                        return Ok(());
+                    }
+                    Err(()) => return Err(Exc::Error),
                 }
             }
             Op::Compare(k) => check(ffi::PyObject_RichCompare(a(0), a(1), *k as c_int))?,

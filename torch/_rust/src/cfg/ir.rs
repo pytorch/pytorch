@@ -151,6 +151,10 @@ pub enum Op {
     // block output to its Project: the forward of a pure block, with its own
     // autograd node (see exec/autograd.rs).
     Autograd(u32),
+    // Calls Cfg::regions[i]'s compiled graph on the tensors among its args
+    // (the block's params, then its version's inputs), handing each block
+    // output to its Project (see exec/region.rs).
+    Region(u32),
     Removed,
 }
 
@@ -199,7 +203,8 @@ impl Op {
             | Op::LoadFromDictOrDeref { .. }
             | Op::Aten { .. }
             | Op::Expect(_)
-            | Op::Autograd(_) => true,
+            | Op::Autograd(_)
+            | Op::Region(_) => true,
             Op::Bytecode { opcode, .. } => opcodes::generic_can_raise(*opcode),
         }
     }
@@ -645,6 +650,39 @@ pub struct Cfg {
     pub const_pins: Vec<u32>,
     // What Op::Autograd instrs run.
     pub trainings: Vec<Arc<Training>>,
+    // What Op::Region instrs run.
+    pub regions: Vec<Arc<RegionSpec>>,
+}
+
+// A pure block's version traced into an aten graph and compiled (see
+// exec/region.rs). `func` takes a list of the tensors at `tensor_args` (by
+// position among the Op::Region's args) and returns the graph's outputs;
+// each block output is built as `outputs` says.
+pub struct RegionSpec {
+    pub func: pyo3::Py<pyo3::PyAny>,
+    pub tensor_args: Vec<u32>,
+    pub outputs: Vec<RegionOut>,
+    // What RegionOut::Obj indexes.
+    pub objects: Vec<pyo3::Py<pyo3::PyAny>>,
+    pub name: String,
+}
+
+impl std::fmt::Debug for RegionSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RegionSpec({}, {} tensor args, {} outputs)", self.name, self.tensor_args.len(), self.outputs.len())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum RegionOut {
+    // The Op::Region's arg at this position.
+    Arg(u32),
+    // The graph's output at this position.
+    Out(u32),
+    Obj(u32),
+    Tuple(Vec<RegionOut>),
+    List(Vec<RegionOut>),
+    Null,
 }
 
 // A pure block's forward and backward, split from its joint graph (see
@@ -730,6 +768,7 @@ impl Cfg {
             pins: vec![],
             const_pins: vec![],
             trainings: vec![],
+            regions: vec![],
         }
     }
 
@@ -1116,6 +1155,7 @@ impl<'a> Printer<'a> {
             Op::Pinned(i) => format!("Pinned {}", self.pin(*i)),
             Op::Expect(c) => format!("Expect {}", self.check("_", c)),
             Op::Autograd(i) => format!("Autograd t{i}"),
+            Op::Region(i) => format!("Region r{i} {:?}", self.cfg.regions.get(*i as usize)),
             Op::Removed => "Removed".into(),
         }
     }

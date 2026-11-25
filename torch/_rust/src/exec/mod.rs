@@ -9,6 +9,7 @@ pub mod ffi;
 pub mod graph;
 pub mod joint;
 mod live;
+pub mod region;
 mod run;
 pub mod torch_ops;
 mod trampoline;
@@ -124,6 +125,10 @@ pub struct Prepared {
     pub autograd_why: Box<[ffi::GilCell<Option<String>>]>,
     // Cfg::trainings, prepared.
     pub trainings: Vec<Arc<autograd::TrainingPrep>>,
+    // By block: how many times its last version ran since it was last
+    // traced into a region, and whether it can't be (see region.rs).
+    pub region_runs: Box<[AtomicU32]>,
+    pub region_off: Box<[AtomicBool]>,
     // Whether running it records (see run.rs's recording): until every block
     // of the Cfg has been offered to the optimizer, which reads nothing
     // recorded after that. Optimized versions never record, and origins always
@@ -271,6 +276,8 @@ impl Prepared {
             autograd,
             autograd_why: (0..cfg_blocks).map(|_| ffi::GilCell::new(None)).collect(),
             trainings,
+            region_runs: (0..cfg_blocks).map(|_| AtomicU32::new(0)).collect(),
+            region_off: (0..cfg_blocks).map(|_| AtomicBool::new(false)).collect(),
             record: true,
             // The pins the previous Cfg already had (pins are only added).
             pins: Python::attach(|py| prev.map_or(vec![], |p| p.pins.iter().map(|o| o.clone_ref(py)).collect())),
@@ -407,6 +414,21 @@ pub struct Compiled {
     pub flags: u32,
     pub consts: Py<PyTuple>,
     pub names: Py<PyTuple>,
+    pub qualname: String,
+}
+
+// Every Compiled made (codes' own and clones), for whole-process reports
+// (see _cfg_region_stats).
+static REGISTRY: Mutex<Vec<std::sync::Weak<Compiled>>> = Mutex::new(Vec::new());
+
+pub(crate) fn register(c: &Arc<Compiled>) {
+    REGISTRY.lock().unwrap().push(Arc::downgrade(c));
+}
+
+pub(crate) fn registered() -> Vec<Arc<Compiled>> {
+    let mut reg = REGISTRY.lock().unwrap();
+    reg.retain(|w| w.strong_count() > 0);
+    reg.iter().filter_map(|w| w.upgrade()).collect()
 }
 
 impl Compiled {
@@ -426,6 +448,7 @@ impl Compiled {
             flags: code.getattr("co_flags")?.extract()?,
             consts,
             names,
+            qualname: code.getattr("co_qualname")?.extract()?,
         })
     }
 
@@ -452,7 +475,14 @@ pub fn _set_cfg_outline(mode: Option<&str>) -> PyResult<()> {
 // since its first optimization, enough for clones nested MAX_CLONE_DEPTH
 // deep to have been made and to have observed.
 static ELIDE: AtomicBool = AtomicBool::new(false);
-const ELIDE_AFTER: u32 = 10;
+static ELIDE_AFTER: AtomicU32 = AtomicU32::new(10);
+
+/// How many returns after its first optimization a code with clones is
+/// optimized again (with elision or regions on).
+#[pyfunction]
+pub fn _set_cfg_reoptimize_after(n: u32) {
+    ELIDE_AFTER.store(n.max(1), Ordering::Relaxed);
+}
 
 /// Elide calls of Python functions when optimizing, from what their clones
 /// observed (see cfg/inline.rs).
@@ -525,7 +555,9 @@ unsafe fn compiled<'a>(code: *mut pyo3::ffi::PyObject) -> Lookup<'a> {
         let code_obj = Bound::from_borrowed_ptr(py, code);
         match Compiled::new(&code_obj) {
             Ok(c) => {
-                let p = Arc::into_raw(Arc::new(c));
+                let c = Arc::new(c);
+                register(&c);
+                let p = Arc::into_raw(c);
                 if PyUnstable_Code_SetExtra(code, index, p as *mut c_void) < 0 {
                     drop(Arc::from_raw(p));
                     return Lookup::Error;
@@ -615,8 +647,8 @@ unsafe extern "C" fn eval_frame(
             if let Err(e) = optimize(py, c, None) {
                 e.write_unraisable(py, None);
             }
-        } else if ELIDE.load(Ordering::Relaxed)
-            && c.returns.fetch_add(1, Ordering::Relaxed) + 1 == ELIDE_AFTER
+        } else if (ELIDE.load(Ordering::Relaxed) || region::enabled() || PURE_CALLS.load(Ordering::Relaxed))
+            && c.returns.fetch_add(1, Ordering::Relaxed) + 1 == ELIDE_AFTER.load(Ordering::Relaxed)
             && !c.plan().prep.clones.is_empty()
         {
             // By now its clones (and theirs) have been optimized and have
@@ -684,6 +716,37 @@ impl Drop for ExecGuard {
         drop(installed);
         ACTIVE.set(ACTIVE.get() - 1);
     }
+}
+
+/// For every block version of every Cfg the executor runs (codes' own and
+/// clones, current Plans only) that the optimizer made (blocks with an
+/// origin): (qualname, clone depth, block, version, aten
+/// ops, pinned calls, other calls, Autograd ops, body length).
+#[pyfunction]
+pub fn _cfg_region_stats() -> Vec<(String, u32, u32, u32, u32, u32, u32, u32, u32)> {
+    let mut out = vec![];
+    for c in registered() {
+        let cfg = &c.plan().prep.cfg;
+        for (b, blk) in cfg.blocks.iter().enumerate() {
+            if blk.origin.is_none() {
+                continue;
+            }
+            for (vi, ver) in blk.versions.iter().enumerate() {
+                let (mut aten, mut pinned, mut calls, mut ag) = (0, 0, 0, 0);
+                for v in &ver.body {
+                    match &cfg[*v].op {
+                        Op::Aten { .. } => aten += 1,
+                        Op::Pinned(_) => pinned += 1,
+                        Op::Call { .. } => calls += 1,
+                        Op::Autograd(_) | Op::Region(_) => ag += 1,
+                        _ => {}
+                    }
+                }
+                out.push((c.qualname.clone(), c.depth, b as u32, vi as u32, aten, pinned, calls, ag, ver.body.len() as u32));
+            }
+        }
+    }
+    out
 }
 
 /// The CFG the executor runs for `code` (a code object, or a function via
@@ -780,6 +843,27 @@ fn optimize(py: Python<'_>, c: &Compiled, block: Option<BlockId>) -> PyResult<()
     outside_executor(|| optimize_now(py, c, block, false))
 }
 
+/// Optimize every code the executor ran (and every clone) again, from what
+/// they observed (see _reoptimize). Returns how many were.
+#[pyfunction]
+pub fn _reoptimize_all(py: Python<'_>) -> usize {
+    let mut n = 0;
+    for c in registered() {
+        if !c.auto_optimized.load(Ordering::Relaxed) {
+            continue;
+        }
+        match outside_executor(|| optimize_now(py, &c, None, true)) {
+            Ok(()) => n += 1,
+            Err(e) => {
+                if std::env::var_os("TORCH_RUST_REGION_DEBUG").is_some() {
+                    eprintln!("reoptimize {}: {e}", c.qualname);
+                }
+            }
+        }
+    }
+    n
+}
+
 /// Optimize every block of the CFG the executor runs for `code` again, from
 /// its unoptimized CFG, with everything observed so far (see reoptimize).
 #[pyfunction]
@@ -818,7 +902,7 @@ fn optimize_now(py: Python<'_>, c: &Compiled, block: Option<BlockId>, again: boo
         Some(b) => vec![b],
         None => plan.prep.cfg.block_ids().collect(),
     };
-    let (mut movable, aten, pinnable, nulls) = observed_ops(py, &plan.prep, &blocks);
+    let (mut movable, aten, pinnable, nulls) = observed_ops(py, &plan.prep, &blocks, Some(&current.prep.clones));
     let mut cfg = (*plan.prep.cfg).clone();
     let (mut objects, mut calls) = (HashMap::new(), HashMap::new());
     for (v, (f, call)) in pinnable {
@@ -895,7 +979,9 @@ fn new_clones(py: Python<'_>, c: &Compiled, plan: &Plan, current: &Plan) -> Hash
             continue;
         }
         clone.depth = c.depth + 1;
-        out.insert(*v, SiteClone { code: code.unbind(), compiled: Arc::new(clone) });
+        let clone = Arc::new(clone);
+        register(&clone);
+        out.insert(*v, SiteClone { code: code.unbind(), compiled: clone });
     }
     out
 }
@@ -1055,7 +1141,7 @@ impl Elisions<'_> {
         let base = unsafe { &*(&*clone.compiled.plans.lock().unwrap()[0] as *const Plan) };
         let bprep = &base.prep;
         let blocks: Vec<BlockId> = bprep.cfg.block_ids().collect();
-        let (movable, aten, pinnable, nulls) = observed_ops(py, bprep, &blocks);
+        let (movable, aten, pinnable, nulls) = observed_ops(py, bprep, &blocks, None);
         let (btypes, beffects) = unsafe { (&*bprep.types.get(), &*bprep.effects.get()) };
         // Reads that ran no Python code and no torch op when observed (an
         // instance's attribute, a dict lookup): fine to copy in, since the
@@ -1276,6 +1362,125 @@ pub(crate) fn no_training(c: &Compiled, prep: usize, b: BlockId, why: String) {
     }
 }
 
+// Gives block b of code's Cfg a region version (see region.rs) in front of
+// its others, made from a trace of version `vi`, if the Cfg is still the one
+// whose Prepared is at `prep`.
+pub(crate) fn add_region(c: &Compiled, prep: usize, b: BlockId, vi: usize, traced: region::Traced) -> PyResult<()> {
+    let plan = c.plan();
+    if &plan.prep as *const Prepared as usize != prep {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err("the CFG changed since the block ran"));
+    }
+    let mut cfg = (*plan.prep.cfg).clone();
+    let mut pins: Vec<Py<PyAny>> = vec![];
+    let handler = region_handler(&cfg, b, vi).map_err(pyo3::exceptions::PyNotImplementedError::new_err)?;
+    let blk = &cfg[b];
+    let from = &blk.versions[vi];
+    let mut guard = from.guard.clone();
+    let inputs = from.inputs.clone();
+    let args: Vec<ValueId> = blk.params.iter().chain(&inputs).copied().collect();
+    let origin = from.body.first().map_or(0, |v| cfg[*v].origin);
+    Python::attach(|py| -> PyResult<()> {
+        for t in &traced.checks {
+            let check = parse_check(t.bind(py), &args, &mut cfg, &mut pins)?;
+            guard.checks.push(check);
+        }
+        Ok(())
+    })?;
+    let n = traced.spec.outputs.len();
+    cfg.regions.push(Arc::new(traced.spec));
+    let v = cfg.add(Op::Region(cfg.regions.len() as u32 - 1), args, origin);
+    let outputs: Vec<ValueId> = (0..n).map(|k| cfg.add(Op::Project(k as u32), vec![v], origin)).collect();
+    let mut body = vec![v];
+    body.extend(outputs.iter().copied());
+    let unwind = match handler {
+        crate::cfg::ir::Handler::Propagate => vec![],
+        handler => vec![crate::cfg::ir::UnwindSegment { from: 0, handler }],
+    };
+    cfg[b].versions.insert(0, crate::cfg::ir::Version { guard, body, outputs, unwind, inputs });
+    crate::cfg::verify::verify(&cfg).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("CFG verification failed: {e}")))?;
+    swap_plan(c, plan, plan, cfg, plan.prep.record, pins, HashMap::new(), |_| {})?;
+    let new = &c.plan().prep;
+    for (i, flag) in plan.prep.region_off.iter().enumerate() {
+        new.region_off[i].store(flag.load(Ordering::Relaxed), Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+// Where a raise in a region version of block b (made from version vi) goes:
+// the one handler vi's ops raise into, taking only what the block was given.
+// A landing block that only stores pending locals and re-raises out of the
+// frame counts as propagating (a region's raise leaves those locals stale).
+fn region_handler(cfg: &Cfg, b: BlockId, vi: usize) -> Result<crate::cfg::ir::Handler, String> {
+    use crate::cfg::ir::{Handler, TermUnwind};
+    let blk = &cfg[b];
+    let from = &blk.versions[vi];
+    let landing = |k: usize| {
+        let h = &cfg[blk.handlers[k]];
+        h.versions.len() == 1
+            && h.versions[0].body.iter().all(|v| matches!(cfg[*v].op, Op::StoreLocal { .. }))
+            && matches!(&h.term, Terminator::Reraise { unwind: TermUnwind::Propagate, .. })
+    };
+    let given = |args: &[ValueId]| args.iter().all(|a| blk.params.contains(a) || from.inputs.contains(a) || a.is_reserved());
+    let mut out: Option<Handler> = None;
+    for seg in &from.unwind {
+        let h = match &seg.handler {
+            Handler::Propagate => Handler::Propagate,
+            Handler::Block(k, _) if landing(*k) => Handler::Propagate,
+            Handler::Block(_, args) | Handler::Outer(_, args) if given(args) => seg.handler.clone(),
+            _ => return Err("it raises into a handler taking values it made".into()),
+        };
+        match &out {
+            Some(o) if *o != h => return Err(format!("its ops raise into several handlers: {o:?} and {h:?}")),
+            _ => out = Some(h),
+        }
+    }
+    Ok(out.unwrap_or(Handler::Propagate))
+}
+
+// A guard check given from Python as a tuple: (kind, position among `args`
+// (or a value for global checks), ...). See _add_block_checks.
+fn parse_check(t: &Bound<'_, PyTuple>, args: &[ValueId], cfg: &mut Cfg, pins: &mut Vec<Py<PyAny>>) -> PyResult<(Option<ValueId>, Check)> {
+    let bad = || pyo3::exceptions::PyValueError::new_err(format!("bad check {t}"));
+    let kind: String = t.get_item(0)?.extract()?;
+    let arg = || -> PyResult<Option<ValueId>> {
+        let i: usize = t.get_item(1)?.extract()?;
+        args.get(i).copied().map(Some).ok_or_else(bad)
+    };
+    Ok(match kind.as_str() {
+        "grad_enabled" => (None, Check::GradEnabled(t.get_item(1)?.extract()?)),
+        "no_torch_function_mode" => (None, Check::NoTorchFunctionMode),
+        "no_forward_ad" => (None, Check::NoForwardAD),
+        "no_saved_tensor_hooks" => (None, Check::NoSavedTensorHooks),
+        "requires_grad" => (arg()?, Check::RequiresGrad(t.get_item(2)?.extract()?)),
+        "plain_tensor" => (arg()?, Check::PlainTensor),
+        "null" => (arg()?, Check::Null),
+        "tensor" => {
+            let x = t.get_item(2)?;
+            let tensor: &crate::bindings::ffi::Tensor = x.extract()?;
+            let mut m = crate::bindings::ffi::TensorMeta::default();
+            crate::bindings::ffi::tensor_meta(tensor, &mut m);
+            let spec = TensorSpec { dtype: m.dtype, device_type: m.device_type, device_index: m.device_index, sizes: tensor.sizes().to_vec(), strides: tensor.strides().to_vec() };
+            (arg()?, Check::TensorMeta(Box::new(spec)))
+        }
+        "value" => (arg()?, Check::Value(lit(&t.get_item(2)?).ok_or_else(bad)?)),
+        "ints" => (arg()?, Check::Ints(t.get_item(2)?.extract()?, t.get_item(3)?.extract()?)),
+        "is" => {
+            let obj = t.get_item(2)?;
+            let k = match pins.iter().position(|p| p.is(&obj)) {
+                Some(k) => (cfg.pins.len() - pins.len() + k) as u32,
+                None => {
+                    let name = obj.get_type().name().map_or("?".into(), |n| n.to_string());
+                    cfg.pins.push(crate::cfg::ir::Pin { name, path: None });
+                    pins.push(obj.unbind());
+                    cfg.pins.len() as u32 - 1
+                }
+            };
+            (arg()?, Check::Is(k))
+        }
+        _ => return Err(bad()),
+    })
+}
+
 /// For coverage reports: what became of each pure block of the CFG the
 /// executor runs for `code` with autograd on, as (block, guard misses,
 /// status). The status is "trained" (it has a training version), "eligible"
@@ -1412,6 +1617,7 @@ fn observed_ops(
     py: Python<'_>,
     prep: &Prepared,
     blocks: &[BlockId],
+    clones: Option<&HashMap<ValueId, SiteClone>>,
 ) -> (
     HashSet<ValueId>,
     HashMap<ValueId, crate::cfg::optimize::AtenOp>,
@@ -1457,6 +1663,7 @@ fn observed_ops(
             }
         }
         let bodies = in_range().flat_map(|b| cfg[*b].versions.first());
+        let mut memo = HashMap::new();
         for v in bodies.flat_map(|ver| &ver.body) {
             let ins = &cfg[*v];
             let arg = |a: &ValueId| match types[a.idx()].ty.as_ref().and_then(Ty::kinds) {
@@ -1475,7 +1682,13 @@ fn observed_ops(
                 let site = Site::Instr(*v);
                 !effects.varies(site) && effects.get(site).iter().all(|(seq, _)| !seq.iter().any(|e| matches!(e, effects::Effect::Frame { .. })))
             };
-            let ok = match &ins.op {
+            // With pure calls on: a site whose every visit ran only torch ops
+            // and frames of pure callees (see pure_site) is movable whatever
+            // it is, as long as it writes nothing itself.
+            let pure = clones.filter(|_| PURE_CALLS.load(Ordering::Relaxed)).is_some_and(|clones| {
+                ins.op.can_raise() && pure_site(py, prep, *v, clones, &mut memo)
+            });
+            let ok = pure || match &ins.op {
                 Op::LoadLocal { .. }
                 | Op::LoadLocalChecked { .. }
                 | Op::StoreLocal { .. }
@@ -1564,6 +1777,207 @@ fn observed_ops(
         }
     }
     (out, aten, pinnable, nulls)
+}
+
+// Whether optimizing treats calls (and attribute reads, subscripts, ...)
+// whose callees were only ever seen running torch ops (see pure_compiled) as
+// movable, so pure blocks span them; their runs are what regions trace.
+static PURE_CALLS: AtomicBool = AtomicBool::new(false);
+
+/// Treat calls of pure Python code as movable when optimizing (see
+/// pure_compiled), so pure blocks (and regions) span them.
+#[pyfunction]
+pub fn _set_cfg_pure_calls(on: bool) {
+    PURE_CALLS.store(on, Ordering::Relaxed);
+}
+
+// Torch ops a pure callee mustn't run: they read a tensor's value into
+// Python (so the path taken may depend on it), or are collectives.
+fn impure_op(op: &str) -> bool {
+    matches!(
+        op,
+        "aten::_local_scalar_dense" | "aten::is_nonzero" | "aten::item" | "aten::equal" | "aten::allclose" | "aten::_assert_async" | "aten::_assert_async.msg"
+    ) || op.starts_with("c10d::")
+        || op.starts_with("_c10d_functional::")
+        || op.starts_with("aten::_local_scalar_dense")
+        || op.starts_with("aten::is_nonzero")
+}
+
+fn writes(op: &Op) -> bool {
+    match op {
+        Op::StoreAttr(_) | Op::StoreDeref { .. } | Op::DeleteDeref { .. } => true,
+        Op::Bytecode { opcode, .. } => matches!(
+            *opcode,
+            opcodes::STORE_GLOBAL | opcodes::DELETE_GLOBAL | opcodes::STORE_SUBSCR | opcodes::DELETE_SUBSCR | opcodes::DELETE_ATTR | opcodes::STORE_NAME | opcodes::DELETE_NAME | opcodes::STORE_SLICE
+        ),
+        _ => false,
+    }
+}
+
+const MAX_PURE_DEPTH: u32 = 24;
+
+// Builtins and methods of builtin types that only compute a result from
+// their args (no state of their own or anyone else's changes), by address.
+fn pure_builtins() -> &'static HashSet<usize> {
+    static SET: OnceLock<HashSet<usize>> = OnceLock::new();
+    SET.get_or_init(|| {
+        Python::attach(|py| {
+            let mut set = HashSet::new();
+            let code = c"
+import builtins, torch, math, operator
+out = [getattr(builtins, n) for n in (
+    'len', 'isinstance', 'issubclass', 'getattr', 'hasattr', 'type', 'tuple', 'list', 'dict', 'set',
+    'frozenset', 'int', 'float', 'bool', 'str', 'min', 'max', 'abs', 'sum', 'range', 'zip', 'enumerate',
+    'reversed', 'sorted', 'map', 'filter', 'any', 'all', 'iter', 'id', 'hash', 'divmod', 'round',
+    'repr', 'callable', 'slice', 'pow')]
+out += [dict.get, dict.items, dict.keys, dict.values, dict.__getitem__, dict.__contains__, dict.copy,
+        list.__getitem__, list.copy, list.index, list.count, tuple.index, tuple.count,
+        str.format, str.join, str.split, str.startswith, str.endswith, str.replace, str.lower,
+        str.upper, str.strip, str.rsplit, str.partition, str.rpartition]
+out += [getattr(math, n) for n in ('sqrt', 'log', 'exp', 'ceil', 'floor', 'prod', 'isfinite', 'isnan', 'log2', 'pow')]
+out += [getattr(operator, n) for n in ('getitem', 'add', 'mul', 'sub', 'truediv', 'floordiv', 'index', 'neg')]
+out += [torch.is_tensor, torch.is_floating_point, torch.is_grad_enabled, torch.is_autocast_enabled,
+        torch.get_default_dtype, torch.Size, torch.device, torch._C._get_tracing_state,
+        torch.Tensor.size, torch.Tensor.dim, torch.Tensor.numel, torch.Tensor.stride,
+        torch.Tensor.is_contiguous, torch.Tensor.element_size, torch.Tensor.get_device]
+";
+            let globals = pyo3::types::PyDict::new(py);
+            if py.run(code, Some(&globals), None).is_ok()
+                && let Ok(Some(out)) = globals.get_item("out")
+                && let Ok(items) = out.try_iter()
+            {
+                for x in items.flatten() {
+                    set.insert(x.as_ptr() as usize);
+                }
+            }
+            set
+        })
+    })
+}
+
+// Whether instr v of `prep`'s Cfg, as observed, only computed (Err: why
+// not): it writes nothing, every visit ran only torch ops pure code may run
+// and frames of its pure clone, and a call that entered no frame and ran no
+// torch op called a pure builtin or an in-graph torch function. memo: by
+// Compiled address.
+fn pure_instr(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<ValueId, SiteClone>, depth: u32, memo: &mut HashMap<usize, Result<(), String>>) -> Result<(), String> {
+    let ins = &prep.cfg[v];
+    let here = || format!("%{} {:?}", v.0, ins.op);
+    // In a callee (depth > 0), its own cells die with its frame.
+    let own_cell = |slot: u32| {
+        let nfree = prep.cfg.instrs.iter().find_map(|i| if let Op::CopyFreeVars(n) = i.op { Some(n as usize) } else { None }).unwrap_or(0);
+        (slot as usize) < prep.cfg.slot_names.len() - nfree
+    };
+    let local = depth > 0 && matches!(ins.op, Op::StoreDeref { slot } | Op::DeleteDeref { slot } if own_cell(slot));
+    if writes(&ins.op) && !local {
+        return Err(format!("{} writes", here()));
+    }
+    if let Op::Bytecode { opcode, .. } = ins.op
+        && matches!(
+            opcode,
+            opcodes::BEFORE_WITH | opcodes::BEFORE_ASYNC_WITH | opcodes::WITH_EXCEPT_START | opcodes::SETUP_ANNOTATIONS | opcodes::IMPORT_NAME | opcodes::LOAD_BUILD_CLASS | opcodes::CALL_INTRINSIC_1 | opcodes::CALL_INTRINSIC_2
+        )
+    {
+        return Err(format!("{} isn't pure", here()));
+    }
+    if matches!(ins.op, Op::Yield | Op::Send | Op::MakeFunction(_) | Op::Region(_) | Op::Autograd(_)) {
+        return Err(format!("{} isn't pure", here()));
+    }
+    if !ins.op.can_raise() {
+        return Ok(());
+    }
+    let effects = unsafe { &*prep.effects.get() };
+    let (mut frames, mut torch_ops) = (false, false);
+    for (seq, _) in effects.get(Site::Instr(v)) {
+        for e in seq {
+            match e {
+                effects::Effect::TorchOp { op, .. } if impure_op(op) => return Err(format!("{} ran {op}", here())),
+                effects::Effect::TorchOp { .. } => torch_ops = true,
+                effects::Effect::Frame { how: effects::How::Direct, .. } => frames = true,
+                effects::Effect::Frame { func, .. } => return Err(format!("{} entered {func} indirectly", here())),
+            }
+        }
+    }
+    if frames {
+        return match clones.get(&v) {
+            Some(cl) => pure_compiled(py, &cl.compiled, depth + 1, memo).map_err(|e| format!("{} -> {}: {e}", here(), cl.compiled.qualname)),
+            None => Err(format!("{} entered a frame but has no clone", here())),
+        };
+    }
+    let is_call = matches!(ins.op, Op::Call { .. }) || matches!(ins.op, Op::Bytecode { opcode: opcodes::CALL_FUNCTION_EX, .. });
+    if !is_call || torch_ops {
+        return Ok(());
+    }
+    let callees = unsafe { &*prep.callees.get() };
+    let Some(f) = callees.get(&v).and_then(|c| c.get(py)) else {
+        let ran = unsafe { &*prep.types.get() }.get(v.idx()).is_some_and(|t| t.ty.is_some());
+        let what = match callees.get(&v) {
+            None if !ran => "never ran",
+            None => "no callee recorded",
+            Some(effects::Callee::Many) => "several callees",
+            Some(_) => "a callee that's gone",
+        };
+        return Err(format!("{} called something unknown ({what})", here()));
+    };
+    if pure_builtins().contains(&(f.as_ptr() as usize)) || is_in_graph(&f) {
+        Ok(())
+    } else {
+        Err(format!("{} called {}", here(), f.repr().map_or("?".into(), |r| r.to_string())))
+    }
+}
+
+// Whether a site of the caller (instr v of `prep`) is pure (see pure_instr).
+fn pure_site(py: Python<'_>, prep: &Prepared, v: ValueId, clones: &HashMap<ValueId, SiteClone>, memo: &mut HashMap<usize, Result<(), String>>) -> bool {
+    match pure_instr(py, prep, v, clones, 0, memo) {
+        Ok(()) => true,
+        Err(why) => {
+            if std::env::var_os("TORCH_RUST_PURE_DEBUG").is_some() && !effects_empty(prep, v) {
+                eprintln!("impure: {why}");
+            }
+            false
+        }
+    }
+}
+
+fn effects_empty(prep: &Prepared, v: ValueId) -> bool {
+    unsafe { &*prep.effects.get() }.get(Site::Instr(v)).iter().all(|(seq, _)| seq.is_empty())
+}
+
+// Whether the code a Compiled runs (a clone: one call site's frames) was only
+// seen computing (see pure_instr): every instr of the blocks it ran.
+fn pure_compiled(py: Python<'_>, c: &Compiled, depth: u32, memo: &mut HashMap<usize, Result<(), String>>) -> Result<(), String> {
+    let key = c as *const Compiled as usize;
+    if let Some(r) = memo.get(&key) {
+        return r.clone();
+    }
+    if depth > MAX_PURE_DEPTH {
+        return Err("too deep".into());
+    }
+    if c.flags & GENERATOR_FLAGS != 0 {
+        return Err("a generator".into());
+    }
+    // Assume pure while looking (recursion through the same Compiled).
+    memo.insert(key, Ok(()));
+    let first = unsafe { &*(&*c.plans.lock().unwrap()[0] as *const Plan) };
+    let clones = &c.plan().prep.clones;
+    let prep = &first.prep;
+    let cfg = &prep.cfg;
+    let types = unsafe { &*prep.types.get() };
+    let effects = unsafe { &*prep.effects.get() };
+    let ran = |v: &ValueId| types.get(v.idx()).is_some_and(|t| t.ty.is_some());
+    let r = cfg.block_ids().try_for_each(|b| {
+        let blk = &cfg[b];
+        let body = blk.versions.first().map_or(&[][..], |ver| &ver.body[..]);
+        let entered = b == crate::cfg::ir::ENTRY || blk.params.iter().any(ran) || body.iter().any(ran);
+        if !entered {
+            return Ok(());
+        }
+        body.iter().try_for_each(|v| pure_instr(py, prep, *v, clones, depth, memo))?;
+        let ok = effects.get(Site::Block(b)).iter().all(|(seq, _)| seq.iter().all(|e| matches!(e, effects::Effect::TorchOp { op, .. } if !impure_op(op))));
+        if ok { Ok(()) } else { Err(format!("bb{} has effects", b.0)) }
+    });
+    memo.insert(key, r.clone());
+    r
 }
 
 // Whether Python function `f` ran its torch ops in its own frame, entering

@@ -195,13 +195,26 @@ impl Callee {
 
 // `callable`: what the instr called, or (via Call or Getattr) the function
 // its type runs for it.
+// Whether `owner` (a builtin's self) is a pybind11 function record, which
+// pybind11 binds its functions to.
+unsafe fn pybind11_record(owner: *mut PyObject) -> bool {
+    let name = std::ffi::CStr::from_ptr((*ffi::Py_TYPE(owner)).tp_name);
+    name.to_bytes().windows(31).any(|w| w == b"pybind11_detail_function_record")
+}
+
 pub unsafe fn record_callee(table: &GilCell<Callees>, v: ValueId, callable: *mut PyObject, via: Via) {
     let f = tr_bound_function(callable);
     let weak = if ffi::PyFunction_Check(f) != 0 || ffi::PyType_Check(f) != 0 {
         true
     } else if ffi::PyCFunction_Check(f) != 0 {
         let owner = ffi::PyCFunction_GET_SELF(f);
-        if !(owner.is_null() || ffi::PyModule_Check(owner) != 0 || ffi::PyType_Check(owner) != 0) {
+        // A capsule: a pybind11 function's record.
+        if !(owner.is_null() || ffi::PyModule_Check(owner) != 0 || ffi::PyType_Check(owner) != 0 || ffi::PyCapsule_CheckExact(owner) != 0 || pybind11_record(owner)) {
+            if std::env::var_os("TORCH_RUST_CALLEE_DEBUG").is_some() {
+                let py = Python::assume_attached();
+                let o = Bound::from_borrowed_ptr(py, owner);
+                eprintln!("callee: builtin bound to a {}", o.get_type().name().map_or("?".into(), |n| n.to_string()));
+            }
             return;
         }
         true
@@ -217,6 +230,9 @@ pub unsafe fn record_callee(table: &GilCell<Callees>, v: ValueId, callable: *mut
         false
     };
     let py = Python::assume_attached();
+    if std::env::var_os("TORCH_RUST_CALLEE_DEBUG").is_some() {
+        eprintln!("callee: %{} {}", v.0, Bound::from_borrowed_ptr(py, f).repr().map_or("?".into(), |r| r.to_string()));
+    }
     let table = &mut *table.get();
     match table.get(&v) {
         Some(Callee::Many) => {}

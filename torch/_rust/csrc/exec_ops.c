@@ -1652,6 +1652,10 @@ int tr_generic(_PyInterpreterFrame* f, int opcode, int oparg, PyObject* const* i
       }
       return 0;
     case IMPORT_NAME:
+#ifdef EAGER_IMPORT_NAME
+    // Meta's lazy-imports CPython: the decoder maps both to the eager import.
+    case EAGER_IMPORT_NAME:
+#endif
       // (level, fromlist -- res)
       out[0] = import_name(f, co_name(f, oparg), in[1], in[0]);
       return out[0] ? 0 : -1;
