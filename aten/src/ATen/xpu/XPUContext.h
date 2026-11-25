@@ -54,18 +54,9 @@ template <auto* KernelFn>
   auto& context = c10::xpu::get_device_context();
   auto& device = c10::xpu::get_raw_device(device_index);
   namespace syclex = sycl::ext::oneapi::experimental;
-#if SYCL_COMPILER_VERSION < 20260100
-  auto bundle =
-      syclex::get_kernel_bundle<KernelFn, sycl::bundle_state::executable>(
-          context);
-  sycl::kernel kernel = bundle.template ext_oneapi_get_kernel<KernelFn>();
-  return kernel.get_info<sycl::info::kernel_device_specific::work_group_size>(
-      device);
-#else
   return syclex::get_kernel_info<
       KernelFn,
       sycl::info::kernel_device_specific::work_group_size>(context, device);
-#endif
 }
 
 // Returns the maximum number of workitems that are permitted in a subgroup.
