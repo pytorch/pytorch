@@ -8,10 +8,11 @@ import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
 from torch.utils._config_module import (
     Config,
+    deprecated_alias_fields_from,
     get_tristate_env,
-    inherit_fields_from,
     install_config_module,
 )
+from torch.utils._triton import triton_compile_iq_enabled
 
 
 if TYPE_CHECKING:
@@ -71,7 +72,19 @@ def lite_mode_default(lite_value: bool, default: bool) -> bool:
 def static_cuda_launcher_default() -> bool:
     STATIC_CUDA_LAUNCHER_VERSION = 2
 
-    if "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
+    if triton_compile_iq_enabled():
+        # fbtriton's compile_iq collect/apply hooks run in Triton's launcher, which the static
+        # launcher bypasses.
+        if os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1":
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "Ignoring TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER=1: TRITON_COMPILE_IQ_COLLECT "
+                "and TRITON_COMPILE_IQ_APPLY require Triton's launcher."
+            )
+        return False
+    elif "TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER" in os.environ:
         return os.environ.get("TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER") == "1"
     elif is_fbcode():
         version = torch._utils_internal.justknobs_getval_int(
@@ -278,6 +291,10 @@ pick_loop_orders = True
 # reuse a kernel input as the output
 inplace_buffers = True
 
+# Ignore fusion profitability for view scatters in the post-grad FX reinplace pass.
+# All-reduce retains its layout and symmetric-memory guards.
+reinplace_whenever_possible = False
+
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = lite_mode_default(False, True)
 
@@ -383,7 +400,6 @@ batch_fusion = True
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
 # batch fusion options:
 # batch_linear
-# batch_linear_lhs
 # cat_linear
 # batch_layernorm
 # batch_tanh
@@ -484,6 +500,8 @@ reorder_prefetch_limit: int | None = None
 # enable operator reordering for peak memory optimization
 reorder_for_peak_memory = lite_mode_default(False, True)
 reorder_for_peak_memory_debug = False
+# reject a reorder_for_peak_memory candidate that changes the input order of collectives and waits
+reorder_for_peak_memory_preserve_collective_order = False
 
 # In some cases, when all the nodes that can be scheduled are quite large,
 # it is beneficial to switch the scheduling strategy. So instead of using
@@ -572,11 +590,34 @@ use_torch_profiler_benchmarker: bool = Config(
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
-# enable slow autotuning passes to select pointwise/reductions algorithms
+# enable slow autotuning passes to select pointwise algorithms. Until
+# max_autotune_reduction stops defaulting to None, this also covers reductions.
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+
+# Widen the configs tried for reduction, persistent reduction and split
+# reduction kernels. None follows max_autotune_pointwise. max_autotune=True
+# enables both regardless.
+# TODO: once no callers rely on max_autotune_pointwise also covering reductions
+# (they set max_autotune_reduction=True instead), default this to False and
+# remove the None fallback, so that max_autotune_pointwise covers only pointwise
+# kernels.
+max_autotune_reduction: bool | None = get_tristate_env(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_REDUCTION"
+)
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+# Minimum number of streaming multiprocessors a GPU needs for max_autotune_gemm
+# to consider the Triton GEMM templates. Autotuning them costs compile time
+# that only pays off on larger GPUs, so small ones fall back to ATen. None
+# keeps the per-device default (68 for CUDA, 16 for XPU); lower it for GPUs
+# such as Jetson (16-20 SMs) where the autotuned kernels still win.
+max_autotune_gemm_min_sms: int | None = (
+    int(os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_MIN_SMS"])
+    if "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_MIN_SMS" in os.environ
+    else None
+)
 
 # When True, autotuning is spread across real kernel invocations instead of
 # blocking on the first call. Each run() call executes one config and records
@@ -585,6 +626,9 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 incremental_autotune: bool | None = get_tristate_env(
     "TORCHINDUCTOR_INCREMENTAL_AUTOTUNE", default=False
 )
+# Extend the default kernel allowlist when incremental autotuning is enabled.
+# An explicit TORCHINDUCTOR_INCREMENTAL_AUTOTUNE_INCLUDE still takes precedence.
+incremental_autotune_reduction = False
 # Per-state dispatch budget for incremental autotuning; 0 disables the cap.
 # A torch.compile option overrides this default for every generated kernel.
 incremental_autotune_max_dispatches = int(
@@ -694,7 +738,7 @@ multi_kernel_hints: list[int] = []
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
-# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM100-SM109 only).
+# CUTEDSL: CuteDSL templates for Blackwell GPUs (NVidia SM 10.x and 11.x only).
 # FLYDSL: FlyDSL templates for ROCm GPUs (experimental).
 # NVGEMM: NVIDIA Universal GEMM via cutlass.operators (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
@@ -859,6 +903,26 @@ max_autotune_subproc_terminate_timeout_seconds = 0.0
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
+# should_reinplace_scatter() controls whether a chain of scatter ops in the fxgraph is
+# functionalized (scatter chain) or mutate in-place (mutation).
+# Functionalized scatter usually can be fused into a single kernel, but each threadblock
+# must bear of cost of wastefully loading all the input pointers for each scatter dim, while
+# mutate in-place usually results in many smaller inductor kernels, but does not have the
+# loading issue.
+# Therefore, when you have a long chain of scatter ops, it is usually beneficial to use the
+# mutate in-place form as the increased kernel launch cost is lower than wasted memory load
+# cost. When you have a short chain of scatter ops, it is usually beneficial to use the
+# functionalized form.
+#
+# This configuration value changes the chain length threshold. At a scatter chain length larger
+# than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD, inductor will actively switches to
+# mutate in-place (non-fused) form to avoid wastefully loading kernel inputs.
+# At a scatter chain length lower than TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD or when
+# TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD < 0, the original form is used.
+reinplace_scatter_chain_threshold = int(
+    os.environ.get("TORCHINDUCTOR_REINPLACE_SCATTER_CHAIN_THRESHOLD", "-1")
+)
+
 # Number of benchmark runs for collective operations
 collective_benchmark_nruns = int(
     os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "50")
@@ -967,6 +1031,28 @@ keep_output_stride = os.environ.get("TORCHINDUCTOR_KEEP_OUTPUT_STRIDE", "1") == 
 # their stride order. Exact matching can introduce additional copy kernels.
 strict_output_strides = False
 
+# Keep load/store indices affine in the loop variables, as the scheduler's
+# memory dependencies see them: no ModularIndexing, FloorDiv, Min/Max/Abs/Where
+# of loop variables and no products of them (the Triton backend still splits
+# its flat block index with // and %). Views that merge dims are realized (a
+# copy, unless the producer's layout is still flexible) instead of being
+# inlined, split reductions split at a dim boundary, repeat, roll and strided
+# slice_scatter are lowered without modular arithmetic, a loop reindexing
+# during fusion is undone when it leaves a non-affine index, and non-affine
+# index arithmetic (%, //, abs, clamp) stays a value computation behind an
+# indirect variable. The indirect variable does not remove the %, //: it is
+# computed as a value and the load becomes a data-dependent gather, like
+# aten.index or an embedding lookup. That helps a backend that lowers direct
+# loads only from affine addresses but has a gather path (MTIA); it is not
+# faster elsewhere. Best effort: adaptive pooling and
+# upsample_nearest2d_backward with non-divisible sizes, split reductions over
+# symbolic ranges and a strided slice_scatter whose dim is not provably a
+# multiple of the step still produce modular addresses. Helps backends with
+# restricted memory addressing at the cost of extra buffers and copies. Each of
+# these choices is made by InductorChoices.use_modular_indexing, which follows
+# this option by default and can be overridden through V.set_choices_handler.
+avoid_modular_indexing = os.environ.get("TORCHINDUCTOR_AVOID_MODULAR_INDEXING") == "1"
+
 # Enabling this will let compiler print warning messages if a generated triton
 # kernel has inputs with mixed layouts.  This is helpful for perf debugging
 # since kernel with mixed layout inputs may run much slower then one whose inputs
@@ -977,6 +1063,9 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
+# Broadcasts at least this wide also apply realize_reads_threshold to the
+# broadcast producer, which is otherwise recomputed for every broadcast element
+realize_broadcast_reuse_threshold = 64
 _realize_opcount_threshold_default = 30
 realize_opcount_threshold: int | None = None
 realize_opusers_threshold = 5
@@ -1007,6 +1096,9 @@ delay_realize_cheap_outputs: bool = Config(
 fallback_random = False
 
 # align random/dropout as eager mode(aten) behavior, maintaining fused possibility and faster gpu kernel
+# TODO: Currently only aligned, contiguous fp32/fp16/bf16 dropout approximately matches
+# eager. Not yet handled: fp64 or misaligned/non-dense dropout, torch.rand values (and
+# fp64 offsets), randn/randint/bernoulli/uniform_, and multi-round Halide kernels.
 align_random_eager = False
 
 # Use tl.rand4x/randn4x for 1D CUDA Triton random. Disabled pending
@@ -1142,6 +1234,15 @@ max_pointwise_cat_inputs = 8
 # force concat to be generated as a pointwise op with masked loads
 force_pointwise_cat = False
 
+# Lower a cat input that is all of an already-laid-out computed buffer through
+# ConcatKernel, so its copy can fuse into the producer instead of being re-read
+# by a pointwise cat. Off by default: profitability depends on the destination
+# layout (a permuted destination makes the fused stores uncoalesced).
+# TODO: map out profitability and remove this flag. A stack's size-1 views
+# freeze such buffers, which should not happen; once they don't, this rule is
+# rarely needed.
+cat_fuse_computed_input_copies = False
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
@@ -1160,7 +1261,8 @@ conv_1x1_as_mm = False
 split_reductions = os.getenv("TORCHINDUCTOR_SPLIT_REDUCTIONS", "1") == "1"
 
 # A deterministic mode that skips any on device benchmarking in Inductor
-# if we know they affect numerics.  WARNING: Expect perf hit in this mode.
+# if we know they affect numerics, and turns off Triton's FMA contraction
+# (see triton.enable_fp_fusion).  WARNING: Expect perf hit in this mode.
 deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 
 # Batch-invariant mode: stable per-sample compiled kernel across batch sizes. Implies deterministic.
@@ -1714,11 +1816,12 @@ keep_static_cubin_raw: bool = (
     os.environ.get("TORCHINDUCTOR_KEEP_STATIC_CUBIN_RAW", "0") == "1"
 )
 
-# Use _FastCudaLauncher (vectorcall C extension) instead of
-# StaticallyLaunchedCudaKernel.run for the CachingAutotuner fast path.
+# Use _FastCudaLauncher / _FastXpuLauncher (vectorcall C extension) instead of
+# StaticallyLaunchedTritonKernel.run for the CachingAutotuner fast path.
 # Pre-binds kernel metadata at first launch and uses THPVariable_Unpack +
-# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple, cuPointerGetAttribute,
-# and cuCtxGetCurrent.
+# tensor.data_ptr() in C++ to bypass PyArg_ParseTuple and, per pointer
+# argument, cuPointerGetAttribute and cuCtxGetCurrent on CUDA, or
+# zeMemGetAllocProperties and the context lookup it needs on XPU.
 use_fast_triton_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_USE_FAST_TRITON_LAUNCHER", "1") == "1"
 )
@@ -1973,11 +2076,27 @@ class cpp:
     # set to torch.get_num_threads()
     threads = -1
 
+    # Decompose output-only FP32 aten._scaled_dot_product_flash_attention_for_cpu
+    # into Inductor ops; eligibility is in fx_passes/post_grad.py and numerics (incl.
+    # a NaN difference from native) in Note [CPU flash attention accumulation order].
+    # No size heuristic, so benchmark the model before enabling.
+    enable_cpu_flash_attention_decomposition: bool = False
+
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
     no_redundant_loops = (
         os.environ.get("TORCHINDUCTOR_CPP_NO_REDUNDANT_LOOPS", "1") == "1"
     )
+
+    # On AVX2, reduce float vector lanes with a shuffle tree (simd_vec_reduce_all
+    # in cpp_prefix.h) instead of at::vec::vec_reduce_all, whose tree path is
+    # GCC-only. Changes the rounding of horizontal float sums.
+    simd_horizontal_reduction: bool = False
+
+    # Compute vectorized float exp with Vectorized<float>::exp_u20, an inline
+    # polynomial accurate to within 2 ULP. The CPU flash attention kernel uses
+    # exp_u20 for its softmax.
+    vec_exp_u20: bool = False
 
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
@@ -1997,6 +2116,17 @@ class cpp:
     # uses the platform default. Set to "" to suppress the architecture flag.
     march: str | None = os.environ.get("TORCHINDUCTOR_CPP_MARCH")
 
+    # Linux only, ignored on other platforms: extra flags passed verbatim to
+    # every C++ compiler command, e.g. ["-mllvm", "-enable-misched=false"].
+    extra_cflags: list[str] = []
+
+    # Linux only, ignored on other platforms: extra flags passed verbatim to the
+    # C++ compiler commands that link. These go to the compiler, which runs the
+    # linker, so linker options need the -Wl, prefix. With
+    # aot_inductor.enable_lto, machine code is generated at link time, so code
+    # generation flags go here, e.g. ["-Wl,-mllvm,-enable-misched=false"].
+    extra_ldflags: list[str] = []
+
     # Allow kernel performance profiling via PyTorch profiler
     enable_kernel_profile = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
@@ -2010,6 +2140,17 @@ class cpp:
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
     weight_prepack = os.environ.get("TORCHINDUCTOR_CPP_WEIGHT_PREPACK", "1") == "1"
+
+    # Emit scalar sqrt / rsqrt as sqrt_without_errno (cpp_prefix.h), a square root
+    # without the errno update that -fmath-errno keeps (the non-Windows build), so
+    # the compiler can optimize it like other arithmetic. sqrt results are
+    # unchanged; with enable_unsafe_math_opt_flag, 1 / sqrt(x) may become a
+    # reciprocal-sqrt estimate, which changes rsqrt results in the last bits.
+    # Where the SSE2 path isn't compiled in (see cpp_prefix.h) this is std::sqrt.
+    # Off by default because of that numerics change.
+    sqrt_without_errno = (
+        os.environ.get("TORCHINDUCTOR_CPP_SQRT_WITHOUT_ERRNO", "0") == "1"
+    )
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
@@ -2097,6 +2238,15 @@ class cpp:
 
     force_inline_kernel = (
         os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_KERNEL", "0") == "1"
+    )
+
+    # Always inline the Welford helpers in cpp_prefix.h (welford_combine and
+    # welford_vec_reduce_all), which the compiler can otherwise leave as calls in
+    # Welford reduction loops. Code size can grow. The arithmetic is the same, but
+    # with enable_unsafe_math_opt_flag or FP contraction the compiler can optimize
+    # across the inlined code, which can change results in the last bits.
+    force_inline_welford = (
+        os.environ.get("TORCHINDUCTOR_CPP_FORCE_INLINE_WELFORD", "0") == "1"
     )
 
     # Use static constexpr or static const for int array
@@ -2300,8 +2450,7 @@ class triton:
     # limit tiling dimensions
     #   - max_tiles=1 disables tiling
     #   - max_tiles=2
-    #   - max_tiles=3 is experimental and may have bugs
-    # higher values are unsupported
+    #   - max_tiles > 3 is experimental and may have bugs
 
     #  We use a max of 3 if coalesce_tiling_analysis is True, and 2 otherwise.
     #  Note - coalesce_tiling_analysis does not yet apply to dynamic shapes.
@@ -2314,6 +2463,13 @@ class triton:
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
     autotune_pointwise = True
+
+    # Let Triton contract multiply-adds in Inductor's generated kernels into FMAs.
+    # Which multiply-adds become FMAs can depend on the block size, so disable this
+    # for results that do not depend on the configs autotuning picks.
+    # Deterministic mode and emulate_precision_casts also disable it. Explicit FMAs
+    # (tl.fma, e.g. in triton_helpers) are kept either way.
+    enable_fp_fusion = os.environ.get("TORCHINDUCTOR_ENABLE_FP_FUSION", "1") == "1"
 
     # max autotune gemm with cublasLt
     autotune_cublasLt = True
@@ -2399,6 +2555,15 @@ class triton:
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
     force_cooperative_reductions = False
+
+    # Lower a split reduction as an extra grid dim rather than reshaping the
+    # reduction axis, so stage-1 loads stay block_ptr-eligible. Requires
+    # split_reductions. Applies only to reductions with a single non-unit reduction
+    # dim that are not strict; Welford, online softmax and other multi-output
+    # reductions, and reductions taking the aligned split, keep the classic lowering.
+    split_reductions_as_grid = (
+        os.environ.get("TORCHINDUCTOR_SPLIT_REDUCTIONS_AS_GRID", "0") == "1"
+    )
 
     # Lower/upper bounds between two-step variance and Welford variance for
     # non-split CUDA Triton half/bfloat16 reductions. Mid-sized reductions use
@@ -2550,6 +2715,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Skip decompose_k splits whose chunk (K // split) exceeds this: fp32 accumulation
+    # error in each partial grows with the chunk length. 0 disables. Not applied when
+    # K is symbolic.
+    decompose_k_max_k_per_split = int(
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_MAX_K_PER_SPLIT", "16384")
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
@@ -2619,6 +2791,18 @@ class triton:
     )
 
     dynamic_disable_pipelining = True
+
+    # Experimental. Applies only on compute capability 10.0 (B200, GB200), not
+    # on sm103 or sm110. It changes the config of non-persistent OUTER
+    # reductions that have an x size hint of 65536 or more, one dynamic
+    # dimension, and 3 or more loads: XBLOCK=64, R0_BLOCK=8, num_warps=2
+    # instead of R0_BLOCK=1. Without max-autotune this is the only config for
+    # these kernels, so the autotuner cannot fall back to the old one. It stays
+    # off until benchmarks on more models show no regressions; then it becomes
+    # the default or is removed.
+    sm100_outer_reduction_r0_block_8: bool = (
+        os.environ.get("TORCHINDUCTOR_SM100_OUTER_REDUCTION_R0_BLOCK_8", "0") == "1"
+    )
 
 
 class aot_inductor:
@@ -2698,6 +2882,11 @@ class aot_inductor:
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 
+    # Fail the compile unless AOTI's CUDA graph runtime can capture and correctly
+    # replay the whole model, so it can run through
+    # AOTInductorModelContainerRunWithLazyCudaGraphs.
+    cudagraphs: bool = False
+
     # flag to force weight to be appended to the shared library and mapped by the runtime
     # rather than embedded into the data section. Needed to support 1B+ parameter models
     force_mmap_weights: bool = False
@@ -2761,7 +2950,7 @@ class aot_inductor:
     # but performance for that interface may be degraded.
     use_minimal_arrayref_interface: bool = False
 
-    # Set to True if we want to use Pytorch's CUDACachingAllocator for weight management
+    # Set to True to allocate weights with PyTorch's caching allocator (CUDA and XPU)
     weight_use_caching_allocator: bool = (
         os.environ.get("AOT_INDUCTOR_WEIGHT_USE_CACHING_ALLOCATOR", "0") == "1"
     )
@@ -2860,14 +3049,15 @@ class cutlass:
     # Whether to use fast math.
     use_fast_math = False
 
-    # Path to the CUTLASS repo root directory.
+    # Path to the CUTLASS repo root directory (SYCL-TLA on XPU).
     # The default path only works under PyTorch local development environment.
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
             os.path.join(
                 os.path.dirname(torch.__file__),
-                "../third_party/cutlass/",
+                "../third_party",
+                "sycl-tla" if torch.xpu._is_compiled() else "cutlass",
             ),
         )
     )
@@ -2977,7 +3167,7 @@ class cutlass:
     enable_caching_codegen: bool = True
 
 
-@inherit_fields_from(cutlass)
+@deprecated_alias_fields_from(cutlass)
 class cuda(cutlass):
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
@@ -3010,7 +3200,7 @@ class cuda(cutlass):
     autotune_tunableop_dynamic_dims_wildcard: bool = False
 
 
-@inherit_fields_from(cutlass)
+@deprecated_alias_fields_from(cutlass)
 class xpu(cutlass):
     # Xe arch to use for SYCL kernel compilation.
     # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
@@ -3022,10 +3212,10 @@ class xpu(cutlass):
     # Path to Intel OneAPI.
     oneapi_root: str | None = None
 
-    cutlass_dir = os.path.realpath(os.environ.get("TORCHINDUCTOR_CUTLASS_DIR", ""))
-
 
 class rocm:
+    """ROCm-specific inductor configuration (arch list, CK, origami, etc.)."""
+
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
     # If empty, the `native` arch is used
     arch: list[str] = []
@@ -3096,24 +3286,33 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
-    # Enable origami GEMM autotuning on Triton templates (ROCm only).
+    # Enable Origami analytical config selection for Triton templates (ROCm only).
     #
-    # When True, the rocm-origami pip package is consulted at GEMM compile time
-    # to pre-select a top-K of Triton configs from the DEFAULT search space,
-    # reducing autotuning cost while keeping runtime within ~5% of full
-    # max_autotune. Read once at config import from TORCHINDUCTOR_ORIGAMI;
-    # toggling at runtime via config.patch has no effect because the rocm-origami
-    # module import is cached at heuristics/template/triton.py load time.
+    # When True, the rocm-origami pip package is consulted at compile time to
+    # pre-select Triton configs from the DEFAULT GEMM and FlexAttention search
+    # spaces, reducing autotuning cost while retaining near-exhaustive runtime.
+    # Read once at config import from TORCHINDUCTOR_ORIGAMI; on unless that is
+    # set to something other than "1".
     #
-    # Active only when all of these hold:
+    # config.patch behaviour:
+    #   patching to False  -- disables origami at call time (_origami_enabled()).
+    #   patching to True   -- no effect; the rocm-origami import is cached at
+    #                         heuristics/template/triton.py load time and cannot
+    #                         be re-triggered by a runtime patch.
+    #
+    # The package is loaded only when all of these hold:
     #   - IS_ROCM (torch.version.hip is not None)
     #   - config.max_autotune
     #   - config.rocm.origami (this knob)
-    #   - config.max_autotune_gemm_search_space == "DEFAULT"
     #   - rocm-origami is installed (else the import gate sets it inert)
-    #   - ROCm version < 10.0 (origami not supported on 10.0+)
-    # Outside DEFAULT (e.g. EXHAUSTIVE) origami is silently bypassed with a
-    # one-time warning; the regular config generator runs instead.
+    # Each consumer has additional gates. GEMM requires its DEFAULT search space
+    # and warns when EXHAUSTIVE bypasses it. FlexAttention currently requires its
+    # DEFAULT search space, the stock config lookup, and a static, dense,
+    # contiguous forward problem on a target listed in _ORIGAMI_FLEX_TARGETS
+    # (currently gfx950) within that target's measured shape domain: equal QK/V
+    # head dims, no K/V batch broadcast, Q/K/V sharing one fp16/bf16 dtype, no
+    # user-pinned tuning kernel_options, and a score_mod that reads no captured
+    # buffers. Every other case retains the regular config generator.
     #
     # Side-effect: when this is True, choices._need_to_fix_layout() returns True
     # so flexible layouts are disabled. Origami's grid/workgroup mappings depend
@@ -3279,6 +3478,13 @@ class trace:
         os.environ.get("TORCH_COMPILE_DEBUG_EXTEND", "0") == "1"
     )
 
+    # Emit a zero-length profiler event "inductor_provenance:<kernel>:<debug_handle>"
+    # before each Python wrapper kernel launch that has a provenance debug handle,
+    # so kernels in any profiler trace can be joined to the provenance artifacts.
+    provenance_profiler_markers = (
+        os.environ.get("TORCHINDUCTOR_PROVENANCE_PROFILER_MARKERS", "0") == "1"
+    )
+
     # Maximum number of trace events to process in profiler timeline post-processing.
     # If the trace exceeds this limit, provenance tracking will be skipped to avoid OOM.
     # Set to 0 to disable this protection.
@@ -3328,9 +3534,7 @@ _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
-    "cuda.cutlass_dir",
     "cutlass.cutlass_dir",
-    "xpu.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",
@@ -3411,6 +3615,14 @@ class test_configs:
     runtime_triton_dtype_assert = False
     runtime_triton_shape_assert = False
     static_cpp_dtype_assert = False
+
+    # Raise when a scheduler node's load/store index is not affine in the loop
+    # variables (contains ModularIndexing, FloorDiv, Min/Max/Abs/Where or a
+    # product of loop variables). Used together with avoid_modular_indexing to
+    # find the places that still generate such indexing.
+    raise_on_modular_indexing = (
+        os.environ.get("TORCHINDUCTOR_RAISE_ON_MODULAR_INDEXING") == "1"
+    )
 
     # regex to control the set of considered autotuning
     # choices (aka configs) by name and / or description
@@ -3495,7 +3707,11 @@ emulate_precision_casts: bool = (
 # Targeted variant of emulate_precision_casts for saved low-precision outputs.
 # When a low-precision pointwise result is saved for backward and also used by
 # later forward math, this inserts a downcast-upcast at the saved value so
-# forward and backward consume the same precision.
+# forward and backward consume the same precision.  It also gates the
+# downcast-upcast that lowerings emit when they split one user-visible
+# low-precision op into several nodes (e.g. peeling the bias off a
+# convolution), so a fused consumer sees the op's declared output precision
+# whether or not the output is saved.
 emulate_precision_casts_on_saved_tensors: bool = (
     os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS_ON_SAVED_TENSORS", "1") == "1"
 )

@@ -473,6 +473,9 @@ class Sigmoid(Module):
 
     .. image:: ../scripts/activation_images/Sigmoid.png
 
+    :func:`torch.sigmoid`, :meth:`torch.Tensor.sigmoid`, :func:`torch.nn.functional.sigmoid`,
+    and :func:`torch.special.expit` compute the same element-wise function.
+
     Examples::
 
         >>> m = nn.Sigmoid()

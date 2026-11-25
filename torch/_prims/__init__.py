@@ -1356,7 +1356,6 @@ def _broadcast_in_dim_meta(
             original_idx = original_idx + 1
         else:
             if guard_or_true(shape[idx] != 1):
-                # consistent with previous use of guard_size_oblivious
                 new_strides.append(0)
             elif original_idx == a.ndim:
                 new_strides.append(1)
@@ -2856,6 +2855,11 @@ def _uniform_meta(
     stride: ShapeType,
     generator: torch.Generator | None = None,
 ) -> TensorLikeType:
+    torch._check_not_implemented(
+        dtype in (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+        or dtype.is_complex,
+        lambda: f'"check_uniform_bounds" not implemented for {dtype}',
+    )
     return TensorMeta(shape=shape, strides=stride, dtype=dtype, device=device)
 
 
