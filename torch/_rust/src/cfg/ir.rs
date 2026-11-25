@@ -650,8 +650,8 @@ pub struct Cfg {
     pub const_pins: Vec<u32>,
     // What Op::Autograd instrs run.
     pub trainings: Vec<Arc<Training>>,
-    // What Op::Region instrs run.
-    pub regions: Vec<Arc<RegionSpec>>,
+    // What Op::Region instrs run: the regions of their blocks.
+    pub regions: Vec<Arc<Place>>,
     // Stretches of blocks traced into one region together (see Span).
     pub spans: Vec<Span>,
 }
@@ -689,11 +689,11 @@ pub struct Span {
     pub state: Arc<SpanState>,
 }
 
-// A span's regions (tried in order), and when to trace another. Shared by
-// every Cfg made from the one the span was found in.
+// A span's regions, and when to trace another. Shared by every Cfg made from
+// the one the span was found in.
 #[derive(Default)]
 pub struct SpanState {
-    pub regions: std::sync::Mutex<Vec<Arc<RegionSpec>>>,
+    pub regions: crate::exec::region::Variants,
     pub runs: std::sync::atomic::AtomicU32,
     pub off: std::sync::atomic::AtomicBool,
     // The types of its args over its runs while observing.
@@ -702,14 +702,29 @@ pub struct SpanState {
 
 impl std::fmt::Debug for SpanState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SpanState({} regions)", self.regions.lock().unwrap().len())
+        write!(f, "SpanState({} regions)", self.regions.len())
     }
 }
 
-// A pure block's version traced into an aten graph and compiled (see
-// exec/region.rs). `func` takes a list of the Op::Region's args and returns
-// the graph's outputs (None: its checks failed); each block output is built
-// as `outputs` says.
+// The regions of a block (see exec/region.rs): what its Op::Region runs is
+// the variant whose checks hold of the instr's args. Each gives the block's
+// `outputs` outputs.
+pub struct Place {
+    pub name: String,
+    pub outputs: usize,
+    pub variants: crate::exec::region::Variants,
+}
+
+impl std::fmt::Debug for Place {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Place({}, {:?}, {} outputs)", self.name, self.variants, self.outputs)
+    }
+}
+
+// A pure block's version (or a span) traced into an aten graph and compiled
+// (see exec/region.rs). `func` takes a list of the place's args and returns
+// the graph's outputs (None: its checks failed); each output of the place is
+// built as `outputs` says.
 pub struct RegionSpec {
     pub func: pyo3::Py<pyo3::PyAny>,
     pub outputs: Vec<RegionOut>,
@@ -720,8 +735,8 @@ pub struct RegionSpec {
     // before `func` is called.
     pub reads: Option<pyo3::Py<crate::exec::reads::Reads>>,
     // Checks of the args that `func` makes too, asked before the reads and
-    // before `func`: the regions of a place's other states are passed over
-    // by them (see exec/region.rs).
+    // before `func`: the regions of a place's other states under the same
+    // key are passed over by them (see exec/region.rs).
     pub quick: Vec<crate::exec::region::Quick>,
 }
 

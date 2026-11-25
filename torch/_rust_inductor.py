@@ -1750,6 +1750,37 @@ def _quick(args, plan, own_checks):
     return out
 
 
+def _keys(args, plan, checks):
+    """What the checks of a region's args pin to one object or to one small
+    value, as (arg, item or None, what): an arg checked by identity, an int,
+    bool, None or str arg checked by value, and the items of an exact tuple
+    or list arg that are leaves checked that way. A place with many regions
+    (one per layer of a loop) finds the one for a call by these (see
+    exec/region.rs's Variants) instead of asking each. Every entry is implied
+    by a check the region makes anyway (the guard's, a quick one, func's), so
+    a call that differs in one is a call the region would turn down."""
+    simple = (int, bool, str, type(None))
+    out: list[tuple[int, int | None, Any]] = []
+    for c in checks:
+        if c[0] == "is" or (c[0] == "value" and type(c[2]) in simple):
+            out.append((c[1], None, c[2]))
+    for i, (a, p) in enumerate(zip(args, plan)):
+        if p is None:
+            continue
+        if p[0] == "equal" and p[1] is str:
+            out.append((i, None, a))
+        elif p[0] == "tree" and type(a) in (tuple, list):
+            for j, x in enumerate(a):
+                if type(x) in simple or (
+                    type(x) not in (list, tuple, dict)
+                    and _made_of(x) is None
+                    and not _is_tree(x)
+                    and _leaf_check(x, "")[0] is _IS
+                ):
+                    out.append((i, j, x))
+    return out
+
+
 def _span_holds(checks, args) -> bool:
     for kind, i, want in checks:
         if kind == "grad_enabled":
@@ -1799,7 +1830,8 @@ def trace_region(
     types: list[Any] | None = None,
 ):
     """Runs the block being traced (via torch._rust._region_body) and returns
-    (func, outputs, objects, checks) for its region, or None. A None before
+    (func, outputs, objects, checks, reads, quick checks, keys) for its
+    region, or None. A None before
     the body ran leaves running it to the executor. A span's region (`span`)
     makes the checks itself. ``types``: what the VM recorded at each arg over
     the runs before (see torch.vm.Type)."""
@@ -2053,4 +2085,5 @@ def trace_region(
         return compiled(*inputs, *consts)
 
     quick = _quick(args, plan, own_checks)
-    return func, result["outputs"], result["objects"], checks, reads, quick
+    keys = _keys(args, plan, checks)
+    return func, result["outputs"], result["objects"], checks, reads, quick, keys

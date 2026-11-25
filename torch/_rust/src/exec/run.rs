@@ -1147,13 +1147,14 @@ impl Act<'_> {
                 },
             };
             let mut i = first;
-            // A region version whose own checks (in Python) fail runs the
-            // next version whose guard holds (another variant, or at last the
-            // version they were traced from, whose guard theirs imply); one
-            // that would run in a trace runs that last version.
+            // The region version runs the variant of its place that is for
+            // this call. With none (or in a trace, which wouldn't see a
+            // region's ops) the next version whose guard holds runs: the
+            // version the variants were traced from, whose guard is the
+            // region version's, if it comes next.
             while first == 0 && let Some(&head) = blk.versions[vi].body.first() && let Op::Region(r) = self.cfg[head].op {
                 let args: Vec<*mut PyObject> = self.cfg[head].args.iter().map(|a| self.val(*a)).collect();
-                let called = if super::region::tracing() { Ok(None) } else { super::region::call(&self.cfg.regions[r as usize], &args) };
+                let called = if super::region::tracing() { Ok(None) } else { self.place_call(&self.cfg.regions[r as usize].variants, &args) };
                 match called {
                     Ok(Some(outs)) => {
                         if std::env::var_os("TORCH_RUST_REGION_CHECK").is_some() {
@@ -1166,7 +1167,7 @@ impl Act<'_> {
                         i = 1;
                         break;
                     }
-                    Ok(None) if super::region::tracing() => {
+                    Ok(None) if super::region::tracing() || vi + 2 == blk.versions.len() => {
                         vi = blk.versions.len() - 1;
                         self.drop_all(&self.p.live.versions[b.idx()][vi].entry_kill);
                         break;
@@ -1192,7 +1193,8 @@ impl Act<'_> {
                     self.region_observe(b, vi);
                 }
                 if super::region::enabled()
-                    && blk.versions.len() <= super::region::max_regions()
+                    && !self.p.region_off[b.idx()].load(std::sync::atomic::Ordering::Relaxed)
+                    && self.region_room(b, vi)
                     && super::region::due(&self.p.region_runs[b.idx()], &self.p.region_off[b.idx()])
                     && self.region_worthy(b, vi)
                     && self.region_trace(b, vi)
@@ -1264,6 +1266,43 @@ impl Act<'_> {
                 Err(outcome) => return outcome,
             }
         }
+    }
+
+    // Runs the variant of a place that is for a call with these args (the
+    // place's args, borrowed): the first of those to ask (see
+    // region::Variants) whose own checks hold and whose region takes the
+    // call. As region::call: None if there is none.
+    unsafe fn place_call(&self, variants: &super::region::Variants, args: &[*mut PyObject]) -> Result<Option<Vec<*mut PyObject>>, ()> {
+        let mut key = None;
+        let mut i = 0;
+        while let Some(v) = variants.candidate(args, &mut key, i) {
+            i += 1;
+            let own = v.checks.iter().all(|c| match c {
+                super::region::Own::Is(k, o) => args[*k as usize] == o.as_ptr(),
+                super::region::Own::Check(k, c) => self.check(c, k.map_or(std::ptr::null_mut(), |k| args[k as usize])),
+            });
+            if !own {
+                super::region::passed_over();
+                continue;
+            }
+            match super::region::call(&v.spec, args) {
+                Ok(None) => {}
+                r => return r,
+            }
+        }
+        Ok(None)
+    }
+
+    // Whether block b, about to run its last version vi, may be traced into
+    // another region: its place (as it is now: this frame's Cfg may be from
+    // before the place had regions) has room for this run's key.
+    unsafe fn region_room(&self, b: BlockId, vi: usize) -> bool {
+        let Some(c) = self.c else { return false };
+        let cfg = super::region_cfg(c, self.p as *const Prepared as usize).unwrap_or(self.cfg);
+        let Some(place) = super::place_of(cfg, b) else { return true };
+        let blk = &self.cfg[b];
+        let args: Vec<*mut PyObject> = blk.params.iter().chain(&blk.versions[vi].inputs).map(|x| self.val(*x)).collect();
+        place.variants.room(&args)
     }
 
     // Debugging (TORCH_RUST_REGION_CHECK): runs the version region r was
@@ -1341,19 +1380,12 @@ impl Act<'_> {
             return None;
         }
         let args = self.span_args(sp)?;
-        let regions: Vec<Arc<RegionSpec>> = sp.state.regions.lock().unwrap().clone();
-        let mut called = None;
-        for spec in &regions {
-            match super::region::call(spec, &args) {
-                Ok(None) => {}
-                r => {
-                    called = Some(r);
-                    break;
-                }
-            }
-        }
+        let called = match self.place_call(&sp.state.regions, &args) {
+            Ok(None) => None,
+            r => Some(r),
+        };
         let traced = match called {
-            None if regions.len() < super::region::max_regions() && !sp.state.off.load(std::sync::atomic::Ordering::Relaxed) => {
+            None if !sp.state.off.load(std::sync::atomic::Ordering::Relaxed) && sp.state.regions.room(&args) => {
                 if super::region::observing() {
                     super::region::observe(&mut sp.state.types.lock().unwrap(), &args);
                 }
@@ -1543,7 +1575,7 @@ impl Act<'_> {
             other => other,
         };
         match traced {
-            Ok(Some(t)) => sp.state.regions.lock().unwrap().push(Arc::new(t.spec)),
+            Ok(Some(t)) => sp.state.regions.push(t.variant),
             Ok(None) => sp.state.off.store(true, std::sync::atomic::Ordering::Relaxed),
             Err(e) => {
                 if debug {

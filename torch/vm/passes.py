@@ -111,12 +111,20 @@ class Spans(_Builtin):
 class Regions(_Builtin):
     """Records the types of each pure block's (and span's) inputs over the
     ``observe`` calls before call ``at``, then from call ``at`` traces each
-    into a graph, runs the block passes on it and swaps the result in; up to
-    ``variants`` per block, one per input specialization."""
+    into a graph, runs the block passes on it and swaps the result in: a
+    region for each state the place is traced in (a variant).
 
-    variants: int = 64
+    A place whose variants differ by which object an argument is, or by the
+    value of an int (the body of a loop over layers, a method called on each
+    of them), keeps them by that key and finds the one for a call without
+    asking the others. It holds up to ``variants`` per key, one per input
+    specialization, and up to ``keys`` keys; a place without such a key holds
+    ``variants``. Past either bound the code runs as it is."""
+
+    variants: int = 16
     at: int = 24
     observe: int = 4
+    keys: int = 128
 
 
 @dataclasses.dataclass(frozen=True)
