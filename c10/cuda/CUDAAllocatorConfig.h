@@ -9,6 +9,7 @@
 #include <c10/util/flat_hash_map.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -20,6 +21,14 @@ enum class Expandable_Segments_Handle_Type : int {
   UNSPECIFIED = 0,
   POSIX_FD = 1,
   FABRIC_HANDLE = 2,
+};
+
+// Placement policy for large-pool requests served from expandable segments.
+// BEST_FIT hands out the smallest free block that fits; FIRST_FIT hands out the
+// lowest-address one, for requests below first_fit_max_size().
+enum class LargeBlockPlacement : uint8_t {
+  BEST_FIT = 0,
+  FIRST_FIT = 1,
 };
 
 // A per-segment virtual-address reserve size, expressed either as a fraction of
@@ -142,6 +151,16 @@ class C10_CUDA_API CUDAAllocatorConfig {
     self.m_expandable_segments_reserve_by_class.emplace(reserve_class, spec);
   }
 
+  static LargeBlockPlacement large_block_placement() {
+    return instance().m_large_block_placement;
+  }
+
+  // Requests of at least this many bytes keep best-fit placement even when
+  // large_block_placement is first_fit.
+  static size_t first_fit_max_size() {
+    return instance().m_first_fit_max_size;
+  }
+
   // When enabled, throws OOM error before calling cudaMalloc if the allocation
   // would likely fail due to insufficient memory. This provides early failure
   // with clear error messages instead of letting cudaMalloc fail.
@@ -249,7 +268,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
         "pinned_free_catch_all",
         "throw_on_cudamalloc_oom",
         "expandable_segments_reserve",
-        "expandable_segments_reserve_by_class"};
+        "expandable_segments_reserve_by_class",
+        "large_block_placement",
+        "first_fit_max_size_mb"};
     return keys;
   }
 
@@ -283,6 +304,12 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parseThrowOnCudaMallocOom(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  size_t parseLargeBlockPlacement(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
+  size_t parseFirstFitMaxSize(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
   size_t parseExpandableSegmentsReserve(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
@@ -305,6 +332,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   // When true, throw OOM error before calling cudaMalloc if allocation would
   // fail
   std::atomic<bool> m_throw_on_cudamalloc_oom{false};
+  std::atomic<LargeBlockPlacement> m_large_block_placement{
+      LargeBlockPlacement::BEST_FIT};
+  std::atomic<size_t> m_first_fit_max_size{size_t{1024} << 20};
   // Per-stream expandable-segment reserve config. Parsed once at init (like the
   // rest of PYTORCH_CUDA_ALLOC_CONF); read on the segment-creation path.
   // Default reserve, applied to untagged streams and to classes with no

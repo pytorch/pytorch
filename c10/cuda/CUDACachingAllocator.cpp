@@ -4254,6 +4254,32 @@ class DeviceCachingAllocator {
     }
   }
 
+  // Takes the lowest-address free block of the request's stream that fits,
+  // applying the same max_split_size checks as the best-fit path.
+  bool try_get_first_fit_block(AllocParams& p) {
+    BlockPool& pool = *p.pool;
+    const size_t max_split = AcceleratorAllocatorConfig::max_split_size();
+    const size_t max_rounding =
+        AcceleratorAllocatorConfig::max_non_split_rounding_size();
+    Block first_in_stream(p.device(), p.stream(), 0);
+    for (auto it = pool.blocks_by_addr.lower_bound(&first_in_stream);
+         it != pool.blocks_by_addr.end() && (*it)->stream == p.stream();
+         ++it) {
+      Block* block = *it;
+      if (!block->expandable_segment_ || block->size < p.size()) {
+        continue;
+      }
+      if (p.size() < max_split ? block->size >= max_split
+                               : block->size >= p.size() + max_rounding) {
+        continue;
+      }
+      p.block = block;
+      pool.erase_from_blocks(block);
+      return true;
+    }
+    return false;
+  }
+
   bool get_free_block(AllocParams& p) {
     BlockPool& pool = *p.pool;
 
@@ -4266,6 +4292,16 @@ class DeviceCachingAllocator {
     auto it = pool.blocks.lower_bound(&p.search_key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream())
       return false;
+
+    if (CUDAAllocatorConfig::large_block_placement() ==
+            LargeBlockPlacement::FIRST_FIT &&
+        p.is_expandable_segments_active && !pool.is_small &&
+        !pool.owner_PrivatePool &&
+        p.size() < CUDAAllocatorConfig::first_fit_max_size()) [[unlikely]] {
+      if (try_get_first_fit_block(p)) {
+        return true;
+      }
+    }
 
     if ((*it)->expandable_segment_) {
       if (p.is_expandable_segments_active) {
