@@ -2680,6 +2680,26 @@ class _CUDAGraph:
     def end_capture_to_conditional_node(self): ...
     def set_conditional_handle_for_current_node(self, scalar_cuda_pred_tensor): ...
 
+# Defined in torch/csrc/cuda/MemoryPlanner.cpp
+class _cuda_PlanningProblem:
+    def __init__(
+        self,
+        size: list[_int],
+        alloc_time: list[_int],
+        free_time: list[_int],
+        alloc_nodes_ptr: list[_int],
+        alloc_nodes: list[_int],
+        free_nodes_ptr: list[_int],
+        free_nodes: list[_int],
+        num_nodes: _int,
+        edges: list[_int],
+    ) -> None: ...
+    def plan(self) -> tuple[str, _int, list[_int]]: ...
+    def validate(self, offsets: list[_int]) -> _int: ...
+    def conflict(self, i: _int, j: _int) -> _bool: ...
+    @property
+    def num_allocations(self) -> _int: ...
+
 # Defined in torch/csrc/cuda/MemPool.cpp
 class _MemPool:
     def __init__(
