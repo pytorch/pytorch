@@ -476,31 +476,43 @@ class CaptureRoutingAllocator final : public CUDAPluggableAllocator {
         "'");
     native_.store(current);
     route_ = Route{std::move(allocator), *capture, device};
-    active_.store(true, std::memory_order_relaxed);
   }
-  // Idempotent. Returns whether another capture began or ended while the
-  // capture's allocations were routed.
-  bool disarm() {
+  // Idempotent.
+  void disarm() {
     std::optional<Route> released; // dropped after the lock: may run Python
     std::lock_guard<std::mutex> lock(mutex_);
-    active_.store(false, std::memory_order_relaxed);
     released = std::move(route_);
     route_.reset();
     // a scope still open is older than the next routed capture
     scopes_.clear();
-    return other_capture_.exchange(false);
   }
 
   c10::DataPtr allocate(size_t size) override {
-    if (auto c = claimant(size)) {
-      void* ptr = allocFrom(*c, size);
-      return {
-          ptr,
-          new Owned{std::move(c->allocator), ptr},
-          &deleteOwned,
-          c10::Device(c10::DeviceType::CUDA, c->device)};
+    const c10::DeviceIndex device = c10::cuda::current_device();
+    const cudaStream_t stream =
+        c10::cuda::getCurrentCUDAStream(device).stream();
+    auto allocator = claimant(size, device, stream);
+    if (!allocator) {
+      return native()->allocate(size);
     }
-    return native()->allocate(size);
+    void* ptr = nullptr;
+    {
+      // as for the caching allocator's own segments during a capture
+      // (cudaMallocMaybeCapturing): the allocator may cudaMalloc
+      c10::cuda::CUDAStreamCaptureModeGuard mode{cudaStreamCaptureModeRelaxed};
+      ptr = allocator->raw_alloc_with_stream(size, stream);
+    }
+    TORCH_CHECK_WITH(
+        OutOfMemoryError,
+        ptr != nullptr,
+        "CUDA out of memory: the CUDA graph allocator returned null for ",
+        size,
+        " bytes");
+    return {
+        ptr,
+        new Owned{std::move(allocator), ptr},
+        &deleteOwned,
+        c10::Device(c10::DeviceType::CUDA, device)};
   }
   void recordStream(const c10::DataPtr& ptr, c10::cuda::CUDAStream stream)
       override {
@@ -540,24 +552,10 @@ class CaptureRoutingAllocator final : public CUDAPluggableAllocator {
       }
     }
   }
-  // These reach this allocator only when another capture (e.g. a conditional
-  // node's body) begins or ends while it is current: CUDAGraphMemory sends the
-  // registration-aware hooks only to the native allocator. Not supported
-  // while routing: handed on, so that the caching allocator's count of
-  // captures stays balanced, and reported when routing ends (raising here
-  // would leave the capture half begun).
-  void markCaptureBegin(c10::DeviceIndex device) override {
-    other_capture_.store(true);
-    native()->markCaptureBegin(device);
-  }
-  void markCaptureEnd(c10::DeviceIndex device) override {
-    other_capture_.store(true);
-    native()->markCaptureEnd(device);
-  }
-
   // The caching allocator's, for the calls that occur during a capture: raw
   // allocations (and their deleter), MemPools made or released inside it,
-  // device-to-device copies and peer access, statistics, and the backend name.
+  // MemPool options, device-to-device copies and peer access,
+  // statistics, and the backend name.
 #define TO_NATIVE(ret, name, params, args) \
   ret name params override {               \
     return native()->name args;            \
@@ -585,6 +583,16 @@ class CaptureRoutingAllocator final : public CUDAPluggableAllocator {
   TO_NATIVE(
       void,
       releasePool,
+      (c10::DeviceIndex device, MempoolId_t mempool_id),
+      (device, mempool_id))
+  TO_NATIVE(
+      void,
+      setUseOnOOM,
+      (c10::DeviceIndex device, MempoolId_t mempool_id, bool use_on_oom),
+      (device, mempool_id, use_on_oom))
+  TO_NATIVE(
+      void,
+      setNoSplit,
       (c10::DeviceIndex device, MempoolId_t mempool_id),
       (device, mempool_id))
   TO_NATIVE(
@@ -622,71 +630,39 @@ class CaptureRoutingAllocator final : public CUDAPluggableAllocator {
     MempoolId_t pool;
     std::function<bool(cudaStream_t)> filter;
   };
-  struct Claimed {
-    std::shared_ptr<CCA::CUDAAllocator> allocator;
-    c10::DeviceIndex device;
-    cudaStream_t stream;
-  };
-
   CCA::CUDAAllocator* native() const {
     return native_.load(std::memory_order_relaxed);
   }
 
   // The routed-to allocator, if the caching allocator would place an
-  // allocation of `size` on the current stream of the current device into the
-  // pool of the routed capture: no newer pool scope takes it, and the stream
-  // is capturing into that capture (the capture's own scope filter).
-  std::optional<Claimed> claimant(size_t size) {
-    if (C10_LIKELY(!active_.load(std::memory_order_relaxed)) || size == 0) {
-      return std::nullopt;
+  // allocation of `size` on `stream` of `device` into the pool of the routed
+  // capture: no newer pool scope takes it, and the stream is capturing into
+  // that capture (the capture's own scope filter). Otherwise null.
+  std::shared_ptr<CCA::CUDAAllocator> claimant(
+      size_t size,
+      c10::DeviceIndex device,
+      cudaStream_t stream) {
+    if (size == 0) {
+      return nullptr;
     }
-    const c10::DeviceIndex device = c10::cuda::current_device();
-    const cudaStream_t s = c10::cuda::getCurrentCUDAStream(device).stream();
     std::lock_guard<std::mutex> lock(mutex_);
     if (!route_ || route_->device != device) {
-      return std::nullopt;
+      return nullptr;
     }
     for (auto it = scopes_.rbegin(); it != scopes_.rend(); ++it) {
-      if (it->device == device && it->filter(s)) {
-        return std::nullopt;
+      if (it->device == device && it->filter(stream)) {
+        return nullptr;
       }
     }
-    const auto capture = c10::cuda::captureIdMayInitCtx(s);
+    const auto capture = c10::cuda::captureIdMayInitCtx(stream);
     if (!capture.has_value() || *capture != route_->capture) {
-      return std::nullopt;
+      return nullptr;
     }
-    return Claimed{route_->allocator, device, s};
-  }
-
-  static void* allocFrom(const Claimed& c, size_t size) {
-    void* ptr = nullptr;
-    {
-      // as for the caching allocator's own segments during a capture
-      // (cudaMallocMaybeCapturing): the allocator may cudaMalloc
-      c10::cuda::CUDAStreamCaptureModeGuard mode{cudaStreamCaptureModeRelaxed};
-      ptr = c.allocator->raw_alloc_with_stream(size, c.stream);
-    }
-    TORCH_CHECK_WITH(
-        OutOfMemoryError,
-        ptr != nullptr,
-        "CUDA out of memory: the CUDA graph allocator returned null for ",
-        size,
-        " bytes");
-    if (C10_UNLIKELY(reinterpret_cast<uintptr_t>(ptr) % 256 != 0)) {
-      c.allocator->raw_delete(ptr);
-      TORCH_CHECK(
-          false,
-          "The CUDA graph allocator returned ",
-          ptr,
-          ", which is not aligned to 256 bytes");
-    }
-    return ptr;
+    return route_->allocator;
   }
 
   // the caching allocator, which this allocator replaces
   std::atomic<CCA::CUDAAllocator*> native_{nullptr};
-  std::atomic<bool> active_{false};
-  std::atomic<bool> other_capture_{false};
   std::mutex mutex_;
   std::optional<Route> route_;
   std::vector<Scope> scopes_;
@@ -711,8 +687,8 @@ armCaptureRouting(
       &routing, [](c10::cuda::CUDACachingAllocator::CUDAAllocator*) {});
 }
 
-bool disarmCaptureRouting() {
-  return captureRouting().disarm();
+void disarmCaptureRouting() {
+  captureRouting().disarm();
 }
 
 } // namespace torch::cuda::CUDAPluggableAllocator
