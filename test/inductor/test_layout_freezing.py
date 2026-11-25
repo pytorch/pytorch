@@ -17,6 +17,7 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED,
     onlyAccelerator,
 )
 from torch.testing._internal.common_utils import (
@@ -106,6 +107,33 @@ class TestLayoutFreezing(TestCase):
         self.assertIsNone(view.maybe_get_stride_hint())
         self.assertIsNone(ir.TensorBox(view).maybe_get_stride_hint())
 
+    @parametrize("layout", ["flexible", "contiguous", "padded"])
+    def test_flex_cpu_layout_requirement_does_not_copy(self, layout):
+        from torch._inductor.kernel.flex.common import contiguous_last_dim
+
+        buf = self._flexible_buffer((8, 16))
+        if layout == "padded":
+            buf.get_layout().stride = [32, 1]
+        if layout != "flexible":
+            buf.freeze_layout()
+        x = ir.TensorBox.create(buf)
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            self.assertIs(contiguous_last_dim(x), x)
+        self.assertIsInstance(buf.get_layout(), ir.FixedLayout)
+        self.assertEqual(x.get_stride(), [32, 1] if layout == "padded" else [16, 1])
+
+    def test_flex_cpu_preserves_outer_stride_order(self):
+        from torch._inductor.kernel.flex.common import contiguous_last_dim
+
+        buf = self._flexible_buffer((2, 3, 4, 16))
+        strides = [192, 16, 48, 1]
+        buf.get_layout().stride = strides
+        x = ir.TensorBox.create(buf)
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            self.assertIs(contiguous_last_dim(x), x)
+        self.assertIsInstance(buf.get_layout(), ir.FixedLayout)
+        self.assertEqual(x.get_stride(), strides)
+
     @parametrize("strides", [[16, 1], [1, 8]])
     def test_significant_strides_keep_layout_flexible(self, strides):
         buf = ir.ComputedBuffer(
@@ -184,6 +212,44 @@ class TestLayoutFreezing(TestCase):
                 self.assertEqual(layout.stride, strides)
             else:
                 self.assertIsInstance(buf.get_layout(), ir.FixedLayout)
+
+
+@instantiate_parametrized_tests
+class TestLayoutFreezingCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    @unittest.skipIf(not IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED, "Requires AVX2")
+    @parametrize("input_index", [0, 1, 2])
+    def test_flex_attention_strided_last_dim(self, input_index):
+        from torch.nn.attention.flex_attention import flex_attention
+
+        device = "cpu"
+
+        args = [torch.randn(1, 2, 32, 16, device=device) for _ in range(3)]
+        args[input_index] = torch.randn(1, 2, 32, 32, device=device)[..., ::2]
+        expected = torch.nn.functional.scaled_dot_product_attention(*args)
+        actual = torch.compile(flex_attention, fullgraph=True)(*args)
+        self.assertEqual(actual, expected)
+
+    @unittest.skipIf(not IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED, "Requires AVX2")
+    @parametrize("input_index", [0, 1, 2])
+    def test_flex_attention_computed_transpose(self, input_index):
+        from torch.nn.attention.flex_attention import flex_attention
+
+        device = "cpu"
+
+        def fn(x, q, k, v):
+            args = [q, k, v]
+            args[input_index] = x.sin().transpose(-1, -2)
+            return flex_attention(*args)
+
+        x = torch.randn(1, 2, 16, 32, device=device)
+        q, k, v = [torch.randn(1, 2, 32, 16, device=device) for _ in range(3)]
+        args = [q, k, v]
+        args[input_index] = x.sin().transpose(-1, -2)
+        expected = torch.nn.functional.scaled_dot_product_attention(*args)
+        actual = torch.compile(fn, fullgraph=True)(x, q, k, v)
+        self.assertEqual(actual, expected)
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
