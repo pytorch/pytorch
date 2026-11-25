@@ -399,16 +399,16 @@ createCustomAllocator(
   return allocator;
 }
 
-// Any time, including after the current allocator has been used. Memory stays
-// with the allocator that made it (the caching allocator's is freed by it
-// whichever allocator is current; a CUDAPluggableAllocator's through the
-// current pluggable allocator, custom_raw_deleter, so it must not outlive a
-// change away from it). Storages keep a pointer to the allocator that made
-// them, so an allocator that has been current must stay alive. While it is
-// current, the new allocator gets every allocator call in the process: after
-// memory has been allocated, it should hand the calls it does not handle to
-// the one it replaces. Only the calls the program actually makes need
-// handling; the others can stay unsupported.
+// Any time, including after memory has been allocated. A
+// CUDAPluggableAllocator's memory is freed through whichever pluggable
+// allocator is current (custom_raw_deleter). So:
+// - A pluggable allocator may receive frees of memory allocated before it
+//   became current.
+// - Memory it allocates may be freed after it is swapped away. To work around
+//   this, return a deleter that frees to itself instead of the current
+//   allocator.
+// - An allocator should not be deleted while storages it made are alive; they
+//   keep a pointer to it.
 void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator) {
