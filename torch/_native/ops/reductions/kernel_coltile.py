@@ -26,6 +26,7 @@ from . import tile
 from .kernel_general import (
     _combine_itree_partials,
     _flat,
+    _flat_outs,
     _INT32_LIMIT,
     _launch,
     ReduceBlock,
@@ -551,7 +552,7 @@ def reduce_ordered_col(
             for d in trait.fdtypes
         ]
         if split
-        else [out.reshape(-1) for out in outs]
+        else _flat_outs(outs)
     )
     args = (Int64(x.storage_offset()), Int32(B * C), Int32(C), _stream(device))
     key = (
@@ -573,7 +574,7 @@ def reduce_ordered_col(
         _L.read_only(kernel_x), kernel_outs, *args
     )
     if split:
-        flat_outs = [out.reshape(-1) for out in outs]
+        flat_outs = _flat_outs(outs)
         _combine_itree_partials(
             trait, trait_key, plan, kernel_outs, flat_outs, R, nouts
         )
